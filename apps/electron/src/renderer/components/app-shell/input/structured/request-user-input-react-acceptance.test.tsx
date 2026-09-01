@@ -122,7 +122,6 @@ describe('request_user_input React-mounted acceptance', () => {
   })
 
   afterEach(async () => {
-    sm.stopSessionMcpHost()
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.clear()
     const queue = (sm as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
     for (const id of seededSessionIds) {

@@ -268,8 +268,7 @@ validate_app_bundle() {
   fi
   if [ "$require_run_helpers" = "true" ]; then
     for required in \
-      "$app_root/resources/pi-agent-server/index.js" \
-      "$app_root/resources/session-mcp-server/index.js"; do
+      "$app_root/resources/pi-agent-server/index.js"; do
       if [ ! -e "$required" ]; then
         echo "$label is missing required run helper: $required" >&2
         return 1

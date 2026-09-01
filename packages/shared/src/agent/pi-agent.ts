@@ -262,8 +262,6 @@ export class PiAgent extends BaseAgent {
   // so that connection-test and other failures can surface what the subprocess
   // actually said, instead of a bare "timed out" with no context.
   private stderrBuffer: string[] = [];
-  /** Line assembly buffer for session MCP lifecycle stderr scanning. */
-  private stderrLineBuffer = '';
   private stderrBufferBytes = 0;
   private static readonly STDERR_BUFFER_MAX_BYTES = 8 * 1024;
 
@@ -559,17 +557,6 @@ export class PiAgent extends BaseAgent {
     child.stderr?.on('data', (data: Buffer) => {
       const text = data.toString();
       this.recordStderr(text);
-      // SESSION MCP LIFECYCLE LINES: complete
-      // stderr lines are routed through the shared parser — a
-      // `question_requested` callback lands in the SessionManager durable
-      // handoff chain (onQuestionRequested), everything else is ignored.
-      this.stderrLineBuffer += text;
-      let newlineIndex: number;
-      while ((newlineIndex = this.stderrLineBuffer.indexOf('\n')) >= 0) {
-        const line = this.stderrLineBuffer.slice(0, newlineIndex).trim();
-        this.stderrLineBuffer = this.stderrLineBuffer.slice(newlineIndex + 1);
-        if (line) this.handleSessionMcpStderrLine(line);
-      }
       const trimmed = text.trim();
       if (trimmed) {
         this.debug(`[subprocess stderr] ${trimmed}`);

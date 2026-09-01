@@ -496,8 +496,6 @@ export class ClaudeAgent extends BaseAgent {
   private pinnedIncludeCoAuthoredBy: boolean | null = null;
   // Track if preference drift notification has been shown this session
   private preferencesDriftNotified: boolean = false;
-  /** Line assembly buffer for session MCP lifecycle stderr scanning. */
-  private stderrLineRemainder = '';
   // Captured stderr from SDK subprocess (for error diagnostics when process exits with code 1)
   private lastStderrOutput: string[] = [];
   /** Pending steer message — injected via additionalContext on next PreToolUse */
@@ -1070,17 +1068,6 @@ export class ClaudeAgent extends BaseAgent {
           this.lastStderrOutput.push(data);
           if (this.lastStderrOutput.length > 20) {
             this.lastStderrOutput.shift();
-          }
-          // SESSION MCP LIFECYCLE LINES:
-          // route complete stderr lines through the shared parser so a
-          // `question_requested` callback from a spawned session MCP server
-          // lands in the durable handoff chain.
-          this.stderrLineRemainder += data;
-          let newlineIndex: number;
-          while ((newlineIndex = this.stderrLineRemainder.indexOf('\n')) >= 0) {
-            const line = this.stderrLineRemainder.slice(0, newlineIndex).trim();
-            this.stderrLineRemainder = this.stderrLineRemainder.slice(newlineIndex + 1);
-            if (line) this.handleSessionMcpStderrLine(line);
           }
         },
         // Thinking config is provider-aware:

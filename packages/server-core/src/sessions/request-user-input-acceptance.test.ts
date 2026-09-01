@@ -1,10 +1,46 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { mkdirSync, mkdtempSync, existsSync, rmSync } from 'fs'
+// OUTSIDE-IN ACCEPTANCE for request_user_input — REAL production agents only.
+//
+// Every scenario starts from the PUBLIC production entry
+// (`SessionManager.createSession` → `SessionManager.sendMessage`) and the
+// agent is created by the PRODUCTION factory (`getOrCreateAgent` →
+// `createBackendFromResolvedContext`). No scripted agents, no private-method
+// invocation, no `getOrCreateAgent` overwrite. The ONLY thing replaced is the
+// MODEL at the outermost real boundary of each backend:
+//
+// - Claude: the real ClaudeAgent.chat → real Claude Agent SDK query loop,
+//   with the SDK's outermost subprocess (the native `claude` binary) resolved
+//   through the production `claude-agent-sdk-binary` layout to a stub that
+//   plays the model over the real stream-json/control protocol. The stub
+//   discovers the toolset through a real MCP `tools/list` round-trip and
+//   calls request_user_input through a real MCP `tools/call` round-trip —
+//   both served by the production in-process session toolset
+//   (`getSessionScopedTools`), landing in the unified durable handoff.
+// - Pi: the real PiAgent.handlePrompt chain — the production factory spawns
+//   the REAL pi-agent-server subprocess; the model is a local OpenAI-
+//   compatible endpoint scripted at the HTTP boundary. The turn therefore
+//   runs prompt → register_tools → model request (tool list visible to the
+//   model) → tool_execute_request/response → agent_end exactly as in
+//   production.
+// - Pi × Codex OAuth: the SAME Pi backend with a connection configured the
+//   way the product stores ChatGPT Plus / Codex OAuth connections
+//   (providerType 'pi' + piAuthProvider 'openai-codex' + OAuth auth). The
+//   model layer is pointed at the local endpoint for determinism; the tool
+//   assembly and dispatch are the Pi production protocol. No independent
+//   Codex CLI session exists anywhere on the path (the created backend is a
+//   PiAgent).
+//
+// The MOUNTED RENDERER contract is observed through the production pipeline:
+// every server event is delivered through the renderer event processor
+// (`processEvent`) into the same pending-question map helpers App.tsx uses.
+//
+// Each scenario asserts: one tool call → ONE requestId, ONE question_request
+// event, pendingQuestion persisted → answer/cancel → ONE readable message →
+// the session continues (answer) / does not (cancel).
+
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { dirname, join } from 'path'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import type { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
+import { join } from 'path'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
 
 // Fault injection for releaseBrowserOwnershipOnForcedStop — must be installed
@@ -20,11 +56,24 @@ mock.module('@polo-ai/server-core/domain', () => ({
   },
 }))
 
-const { SessionManager, createManagedSession } = await import('./SessionManager.ts')
-const { getSessionFilePath, listSessions, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
+// HERMETIC CONFIG — must be set before the first @polo-ai import (the config
+// root is captured at module load). Test connections are injected through the
+// production in-memory invocation override (setInvocationLlmConnections).
+const configRoot = mkdtempSync(join(tmpdir(), 'sm-acceptance-config-'))
+process.env.POLO_AI_CONFIG_DIR = configRoot
+
+const { SessionManager, createManagedSession, setSessionPlatform } = await import('./SessionManager.ts')
+const { getSessionFilePath, listSessions } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 const sharedAgent = await import('@polo-ai/shared/agent')
+const { setInvocationLlmConnections } = await import('@polo-ai/shared/config')
+
+const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..')
+const STUB_CLI_SOURCE = join(import.meta.dir, '__fixtures__', 'claude-stub-cli.mjs')
+
+const ASK_MARKER = 'please ask me what to do'
+const ANSWER_MARKER = 'Delete permanently'
 
 // The PRODUCTION renderer modules (event processor + pending-question map
 // helpers) are loaded through a computed specifier: the acceptance runs them
@@ -40,39 +89,9 @@ const rendererModules: { events: any; pending: any } = await (async () => {
   return { events, pending }
 })()
 
-// OUTSIDE-IN ACCEPTANCE for request_user_input.
-//
-// Every scenario starts a REAL production turn — `SessionManager.sendMessage`
-// with the turn-start commit, agent wiring, generation binding — and the
-// MODEL's request_user_input call is executed through that engine's
-// PRODUCTION consumption path:
-//
-// - Claude (embedded): the production SDK session toolset
-//   (`getSessionScopedTools` — the exact tool assembly the SDK hands the
-//   model). The model discovers the tool via `tools/list` and the call is a
-//   real MCP `callTool` round-trip into the canonical registry handler.
-// - Pi (embedded): a REAL PiAgent — the model-visible toolset is
-//   `buildSessionToolDefs` (what `register_tools` installs for the
-//   subprocess), and the call is dispatched through the production
-//   subprocess-forwarded path (`routeToolCall` → `executeSessionTool`).
-// - Pi with a Codex OAuth / OpenAI Codex model connection: the SAME Pi
-//   backend path — ChatGPT Plus / Codex OAuth credentials ride the Pi
-//   backend, so the tool assembly and dispatch are identical and NO
-//   independent Codex CLI session or external engine is ever created.
-//
-// The MOUNTED RENDERER contract is observed through the production pipeline:
-// every server event is delivered through the renderer event processor
-// (`processEvent`) into the same pending-question map helpers App.tsx uses
-// (realtime-first, snapshot fill-holes, requestId guard), so the question
-// card state, its requestId and its resolution are derived exactly as a
-// live renderer would.
-//
-// Each scenario asserts: one tool call → ONE requestId, ONE question_request
-// event, pendingQuestion persisted → answer/cancel → ONE readable message →
-// the session continues (answer) / does not (cancel).
-
-describe('request_user_input outside-in acceptance (production harness)', () => {
+describe('request_user_input outside-in acceptance (production agents)', () => {
   let tmpRoot: string
+  let claudeRoot: string
   let sm: InstanceType<typeof import('./SessionManager').SessionManager>
   let events: Array<Record<string, unknown>>
   const seededSessionIds = new Set<string>()
@@ -81,6 +100,8 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'sm-question-acceptance-'))
+    claudeRoot = mkdtempSync(join(tmpdir(), 'sm-acceptance-runtime-'))
+    materializeClaudeRuntime(claudeRoot)
     sm = new SessionManager({ workspace: buildWorkspacePre() })
     events = []
     sm.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
@@ -90,7 +111,6 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
   })
 
   afterEach(async () => {
-    sm.stopSessionMcpHost()
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.clear()
     const queue = (sm as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
     for (const id of seededSessionIds) {
@@ -99,6 +119,11 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     seededSessionIds.clear()
     await new Promise(r => setTimeout(r, 650))
     rmSync(tmpRoot, { recursive: true, force: true })
+    rmSync(claudeRoot, { recursive: true, force: true })
+  })
+
+  afterAll(() => {
+    rmSync(configRoot, { recursive: true, force: true })
   })
 
   function buildWorkspacePre() {
@@ -110,51 +135,57 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     } as never
   }
 
-  function buildWorkspace() {
+  /**
+   * Point the host runtime at `root`: the production binary layout
+   * (`node_modules/@anthropic-ai/claude-agent-sdk-binary/claude`) is
+   * materialized with the stub CLI, so the factory's runtime bootstrap
+   * resolves and stamps the stub exactly like the real native binary.
+   */
+  function materializeClaudeRuntime(root: string): void {
+    const binDir = join(root, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary')
+    mkdirSync(binDir, { recursive: true })
+    const stub = join(binDir, 'claude')
+    copyFileSync(STUB_CLI_SOURCE, stub)
+    chmodSync(stub, 0o755)
+  }
+
+  /** Host runtime for CLAUDE scenarios (stub binary layout). */
+  function useClaudeHostRuntime(): void {
+    // Claude scenarios run connection-less (default anthropic provider) —
+    // clear any Pi connection override from earlier scenarios.
+    setInvocationLlmConnections([], undefined)
+    setSessionPlatform(buildPlatform(claudeRoot))
+  }
+
+  /** Host runtime for PI scenarios (resolves the real packaged pi server). */
+  function usePiHostRuntime(): void {
+    setSessionPlatform(buildPlatform(REPO_ROOT))
+  }
+
+  function buildPlatform(appRootPath: string): import('@polo-ai/server-core/runtime').PlatformServices {
     return {
-      id: 'ws_test',
-      name: 'Test Workspace',
-      rootPath: tmpRoot,
-      createdAt: Date.now(),
-    } as never
-  }
-
-  function seedSession(sessionId: string) {
-    const filePath = getSessionFilePath(tmpRoot, sessionId)
-    mkdirSync(dirname(filePath), { recursive: true })
-    const stored = {
-      id: sessionId,
-      workspaceRootPath: tmpRoot,
-      name: 'acceptance session',
-      createdAt: Date.now(),
-      lastUsedAt: Date.now(),
-      messages: [] as unknown as StoredSession['messages'],
-      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, costUsd: 0 },
-    } as StoredSession
-    writeSessionJsonl(filePath, stored)
-    const managed = createManagedSession(
-      { id: sessionId, name: stored.name, createdAt: stored.createdAt },
-      buildWorkspace(),
-    )
-    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, managed)
-    seededSessionIds.add(sessionId)
-    return managed as unknown as {
-      id: string
-      processingGeneration: number
-      isProcessing: boolean
-      messages: Array<Record<string, unknown>>
-      agent: Record<string, unknown>
-      pendingAgentResume?: unknown
+      appRootPath,
+      resourcesPath: appRootPath,
+      isPackaged: false,
+      appVersion: 'test',
+      imageProcessor: {
+        getMetadata: async () => null,
+        process: async (input: Buffer | string) => Buffer.from(input),
+      },
+      logger: {
+        info: (...args: unknown[]) => console.log('[session]', ...args),
+        warn: (...args: unknown[]) => console.warn('[session]', ...args),
+        error: (...args: unknown[]) => console.error('[session]', ...args),
+        debug: (...args: unknown[]) => console.debug('[session:debug]', ...args),
+      },
+      isDebugMode: false,
     }
   }
 
-  function getManaged(sessionId: string) {
-    return (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(sessionId) as unknown as {
-      pendingQuestion?: { requestId: string } | null
-      messages: Array<Record<string, unknown>>
-      isProcessing: boolean
-      pendingAgentResume?: unknown
-    }
+  /** Read the stub CLI's model-side trace. */
+  function readTrace(tracePath: string): Array<Record<string, unknown>> {
+    if (!existsSync(tracePath)) return []
+    return readFileSync(tracePath, 'utf-8').split('\n').filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>)
   }
 
   function questionEvents(): Array<Record<string, unknown>> {
@@ -165,6 +196,28 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     return getManaged(sessionId).messages.filter(
       m => m.role === 'user' && (m as { questionResponse?: { requestId: string } }).questionResponse?.requestId === requestId,
     )
+  }
+
+  function getManaged(sessionId: string) {
+    return (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(sessionId) as unknown as {
+      pendingQuestion?: { requestId: string } | null
+      messages: Array<Record<string, unknown>>
+      isProcessing: boolean
+      pendingAgentResume?: unknown
+      resumeRetryTimer?: ReturnType<typeof setTimeout>
+      agent?: unknown
+    }
+  }
+
+  function managedOf(manager: InstanceType<typeof import('./SessionManager').SessionManager>, sessionId: string) {
+    return (manager as unknown as { sessions: Map<string, unknown> }).sessions.get(sessionId) as unknown as {
+      pendingQuestion?: { requestId: string } | null
+      messages: Array<Record<string, unknown>>
+      isProcessing: boolean
+      pendingAgentResume?: unknown
+      resumeRetryTimer?: ReturnType<typeof setTimeout>
+      agent?: unknown
+    }
   }
 
   async function waitForCondition(check: () => boolean, timeoutMs = 20000): Promise<void> {
@@ -227,357 +280,371 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
   })()
 
   // -------------------------------------------------------------------------
-  // MODEL-STUB agents: the turn's chat performs the model's tool call THROUGH
-  // the engine's production consumption path. Scripted: turn 1 asks the user
-  // a question via request_user_input; the continuation turn (after the
-  // answer) simply completes.
+  // Local OpenAI-compatible model endpoint: scripts the Pi backend's REAL
+  // model traffic at the HTTP boundary and captures what the model was sent.
   // -------------------------------------------------------------------------
 
-  function scriptedAgent(turnActions: Array<(generation: number) => Promise<void>>) {
-    let interrupted = 0
-    let stampedGeneration = 0
-    let chatCalls = 0
-    const agent: Record<string, unknown> = {
-      allowRequestUserInput: true,
-      interruptForHandoff: () => { interrupted++ },
-      forceAbort: () => {},
-      setSessionTurnGeneration: (generation: number) => { stampedGeneration = generation },
-      get sessionTurnGeneration() { return stampedGeneration },
-      onQuestionRequested: null,
-      // chatImpl: the model turn. The generation argument snapshot is the
-      // production one (stamped at the turn-start boundary).
-      chat: async function* () {
-        const action = turnActions[chatCalls]
-        chatCalls++
-        if (action) await action(stampedGeneration)
-        yield { type: 'complete' as const }
+  interface CapturedModelRequest {
+    model?: string
+    toolNames: string[]
+    messageTexts: string[]
+    finishReasons: string[]
+  }
+
+  function startFakeModelServer(handlers: Array<(body: Record<string, unknown>) => 'tool_call' | 'text'>) {
+    const captured: CapturedModelRequest[] = []
+    let requestIndex = 0
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (!url.pathname.endsWith('/chat/completions')) {
+          return new Response('not found', { status: 404 })
+        }
+        const body = await request.json() as Record<string, unknown>
+        const toolCalls = (body.tools as Array<{ function?: { name?: string } }> | undefined) ?? []
+        const messages = (body.messages as Array<{ content?: unknown }> | undefined) ?? []
+        captured.push({
+          model: body.model as string | undefined,
+          toolNames: toolCalls.map(t => t.function?.name ?? '').filter(Boolean),
+          messageTexts: messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)),
+          finishReasons: [],
+        })
+        const handler = handlers[Math.min(requestIndex, handlers.length - 1)]
+        requestIndex += 1
+        const kind = handler(body)
+
+        const chunks: string[] = []
+        const push = (delta: Record<string, unknown>, finish: string | null) => {
+          chunks.push(`data: ${JSON.stringify({
+            id: 'chatcmpl-stub',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: 'test-model',
+            choices: [{ index: 0, delta, finish_reason: finish }],
+          })}\n\n`)
+        }
+        if (kind === 'tool_call') {
+          push({
+            role: 'assistant',
+            tool_calls: [{
+              index: 0,
+              id: 'call_stub_1',
+              type: 'function',
+              function: { name: 'mcp__session__request_user_input', arguments: JSON.stringify({ questions: makeQuestionRequest('pi').questions }) },
+            }],
+          }, null)
+          push({}, 'tool_calls')
+        } else {
+          push({ role: 'assistant', content: 'Continuing with the user’s answer — done.' }, 'stop')
+        }
+        chunks.push(`data: ${JSON.stringify({
+          id: 'chatcmpl-stub',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'test-model',
+          choices: [],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        })}\n\n`)
+        chunks.push('data: [DONE]\n\n')
+        return new Response(chunks.join(''), {
+          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+        })
       },
-      getModel: () => 'fake-model',
-      getSessionId: () => null,
-      isProcessing: () => false,
-      supportsBranching: true,
-      setAllSources: () => {},
-      setSourceServers: async () => {},
-      getSummarizeCallback: () => undefined,
-      dispose: () => {},
-      respondToPermission: () => {},
-      get interruptedCount() { return interrupted },
-      get chatCallCount() { return chatCalls },
-    }
-    return agent
-  }
-
-  /**
-   * PRODUCTION WIRING mirror (ClaudeAgent construction): the SDK toolset's
-   * context resolves its callbacks through the per-session registry, so the
-   * registry forwards the toolset's call into the agent field (which
-   * sendMessage's own wiring routes into the durable handoff) with the
-   * initiation-time generation snapshot.
-   */
-  /**
-   * PRODUCTION WIRING mirror (getOrCreateAgent): the agent field routes the
-   * question callback into the durable handoff. The real getOrCreateAgent
-   * assigns this; the stub replaces the method, so the wiring is mirrored
-   * here 1:1 — same route, same managed object.
-   */
-  function wireAgentQuestionField(managed: ReturnType<typeof seedSession>, agent: Record<string, unknown>) {
-    agent.onQuestionRequested = (questions: unknown[], generationAtRequest: number) =>
-      (sm as unknown as {
-        routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
-      }).routeAgentQuestionRequested(managed, questions, generationAtRequest)
-  }
-
-  function registerClaudeCallbackRegistry(agent: Record<string, unknown>) {
-    sharedAgent.registerSessionScopedToolCallbacks(agent.sessionIdForTools as string, {
-      onQuestionRequested: (questions, generationAtRequest) =>
-        (agent.onQuestionRequested as ((q: unknown[], g: number) => Promise<void> | void) | null)?.(questions, generationAtRequest),
-      getTurnGeneration: () => agent.sessionTurnGeneration as number,
     })
+    return { server, captured, url: `http://127.0.0.1:${server.port}` }
   }
 
-  /** Build the real Claude SDK session toolset and connect a real MCP client to it. */
-  async function connectClaudeToolset(sessionId: string, allowRequestUserInput: boolean) {
-    const serverConfig = sharedAgent.getSessionScopedTools(
-      sessionId,
-      tmpRoot,
-      'ws_test',
-      undefined,
-      tmpRoot,
-      { allowRequestUserInput },
-    ) as unknown as { instance: McpServer }
-    const client = new Client({ name: 'claude-model-toolset', version: '1.0.0' })
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    await Promise.all([
-      serverConfig.instance.connect(serverTransport),
-      client.connect(clientTransport),
-    ])
-    return client
+  /** Register a hermetic Pi connection through the production invocation override. */
+  function usePiConnection(options: { slug: string; providerType: 'pi' | 'pi_compat'; piAuthProvider?: string; authType: 'api_key' | 'oauth'; baseUrl: string }) {
+    setInvocationLlmConnections([{
+      slug: options.slug,
+      name: options.slug,
+      providerType: options.providerType,
+      authType: options.authType,
+      ...(options.piAuthProvider ? { piAuthProvider: options.piAuthProvider } : {}),
+      baseUrl: options.baseUrl,
+      customEndpoint: { api: 'openai-completions' },
+      models: ['test-model'],
+      defaultModel: 'test-model',
+      createdAt: Date.now(),
+    }], options.slug)
   }
 
-  /** The model's tool call on the REAL Claude SDK session toolset. */
-  async function claudeModelToolCall(sessionId: string, questions: unknown[]): Promise<void> {
-    const client = await connectClaudeToolset(sessionId, true)
-    // DISCOVERY: the tool is in the production toolset the model sees.
-    const tools = await client.listTools()
-    expect(tools.tools.map(t => t.name)).toContain('request_user_input')
-    const result = await client.callTool({ name: 'request_user_input', arguments: { questions } })
-    expect(result.isError).toBeFalsy()
-    expect(JSON.stringify(result.content)).toContain('Waiting for user input')
-    await client.close()
+  async function createSessionViaProduction(name: string, llmConnection?: string): Promise<string> {
+    const created = llmConnection
+      ? await sm.createSession('ws_test', { name, llmConnection })
+      : await sm.createSession('ws_test', { name })
+    const id = (created as { id: string }).id
+    seededSessionIds.add(id)
+    return id
   }
 
   // -------------------------------------------------------------------------
-  // Engine 1: Claude — real turn, production SDK toolset, renderer observed.
+  // Engine 1: Claude — REAL ClaudeAgent (production factory) + real SDK query
+  // loop; only the outermost CLI subprocess is a scripted model.
   // -------------------------------------------------------------------------
 
   it('claude: a real desktop turn discovers and calls the tool from the production toolset; the renderer question state appears; the answer resumes with ONE readable message', async () => {
-    const managed = seedSession('acc-claude-1')
-    // The turn's model behavior: ask the user via the production toolset.
-    const agent = scriptedAgent([
-      generation => claudeModelToolCall(managed.id, makeQuestionRequest(managed.id).questions),
-      async () => { /* continuation turn: the model completes with the answer in context */ },
-    ])
-    ;(agent as { sessionIdForTools: string }).sessionIdForTools = managed.id
-    wireAgentQuestionField(managed, agent as Record<string, unknown>)
-    registerClaudeCallbackRegistry(agent as Record<string, unknown>)
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => agent
+    useClaudeHostRuntime()
+    const sessionId = await createSessionViaProduction('acc-claude-1')
+    const tracePath = join(tmpRoot, 'claude-stub-trace.jsonl')
+    process.env.POLO_STUB_TRACE = tracePath
+    process.env.POLO_STUB_ASK_MARKER = ASK_MARKER
+    process.env.POLO_STUB_QUESTIONS = JSON.stringify(makeQuestionRequest(sessionId).questions)
 
-    // REAL production turn.
-    await sm.sendMessage(managed.id, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
+    try {
+      // REAL production turn: public entry → production factory → real
+      // ClaudeAgent → real SDK loop → stub model → real toolset → durable handoff.
+      await sm.sendMessage(sessionId, ASK_MARKER, [], [], { invocationSource: 'desktop' })
 
-    // Server state: ONE durable handoff for the one tool call.
-    const pending = sm.getPendingQuestion(managed.id)
-    expect(pending).not.toBeNull()
-    expect(pending!.requestId).toEqual(expect.any(String))
-    expect(questionEvents()).toHaveLength(1)
-    expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
-    // The turn handed off: processing stopped, the agent was interrupted.
-    expect(getManaged(managed.id).isProcessing).toBe(false)
+      // The backend is a REAL ClaudeAgent created by the production factory.
+      expect(getManaged(sessionId).agent).toBeInstanceOf(sharedAgent.ClaudeAgent)
 
-    // MOUNTED RENDERER: the question card state derived from the SAME events.
-    expect(renderer.pendingOf(managed.id)?.requestId).toBe(pending!.requestId)
+      // MODEL-SIDE EVIDENCE: the stub discovered request_user_input through
+      // the production toolset and called it through the MCP round-trip.
+      const trace = readTrace(tracePath)
+      expect(trace.filter(e => e.event === 'launch')).toHaveLength(1)
+      const discovery = trace.find(e => e.event === 'tools_list') as { names: string[]; hasRequestUserInput: boolean } | undefined
+      expect(discovery?.hasRequestUserInput).toBe(true)
+      const toolResult = trace.find(e => e.event === 'tool_result') as { textHead: string } | undefined
+      expect(toolResult?.textHead).toContain('Waiting for user input')
 
-    // Answer → ONE readable message → the session continues.
-    const outcome = await sm.respondToQuestion(managed.id, makeAnswerResolution(pending!))
-    expect(outcome).toEqual({ status: 'accepted' })
-    expect(sm.getPendingQuestion(managed.id)).toBeNull()
-    expect(readableAnswerMessages(managed.id, pending!.requestId)).toHaveLength(1)
-    expect(events.filter(e => e.type === 'question_resolved' && e.action === 'answer')).toHaveLength(1)
-    // The continuation turn ran on the SAME session (single continuation).
-    expect((agent as { chatCallCount: number }).chatCallCount).toBe(2)
-    // The renderer card cleared through the production pipeline.
-    expect(renderer.pendingOf(managed.id)).toBeNull()
-  })
+      // Server state: ONE durable handoff for the one tool call.
+      const pending = sm.getPendingQuestion(sessionId)
+      expect(pending).not.toBeNull()
+      expect(pending!.requestId).toEqual(expect.any(String))
+      expect(questionEvents()).toHaveLength(1)
+      expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
+      expect(getManaged(sessionId).isProcessing).toBe(false)
+
+      // MOUNTED RENDERER: the question card state derived from the SAME events.
+      expect(renderer.pendingOf(sessionId)?.requestId).toBe(pending!.requestId)
+
+      // Answer → ONE readable message → the session continues on the SAME agent.
+      const outcome = await sm.respondToQuestion(sessionId, makeAnswerResolution(pending!))
+      expect(outcome).toEqual({ status: 'accepted' })
+      expect(sm.getPendingQuestion(sessionId)).toBeNull()
+      expect(readableAnswerMessages(sessionId, pending!.requestId)).toHaveLength(1)
+      expect(events.filter(e => e.type === 'question_resolved' && e.action === 'answer')).toHaveLength(1)
+
+      // The continuation ran as a SECOND real model turn (resumed SDK session).
+      const traceAfter = readTrace(tracePath)
+      const launches = traceAfter.filter(e => e.event === 'launch')
+      expect(launches).toHaveLength(2)
+      expect((launches[1] as { resume?: boolean }).resume).toBe(true)
+      expect(getManaged(sessionId).pendingAgentResume).toBeUndefined()
+      // The renderer card cleared through the production pipeline.
+      expect(renderer.pendingOf(sessionId)).toBeNull()
+    } finally {
+      delete process.env.POLO_STUB_TRACE
+      delete process.env.POLO_STUB_ASK_MARKER
+      delete process.env.POLO_STUB_QUESTIONS
+    }
+  }, 60000)
 
   it('claude: cancel through the production turn records ONE skip message and the session does not continue', async () => {
-    const managed = seedSession('acc-claude-2')
-    const agent = scriptedAgent([
-      generation => claudeModelToolCall(managed.id, makeQuestionRequest(managed.id).questions),
-      async () => { throw new Error('cancel must NOT resume the agent turn') },
-    ])
-    ;(agent as { sessionIdForTools: string }).sessionIdForTools = managed.id
-    wireAgentQuestionField(managed, agent as Record<string, unknown>)
-    registerClaudeCallbackRegistry(agent as Record<string, unknown>)
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => agent
+    useClaudeHostRuntime()
+    const sessionId = await createSessionViaProduction('acc-claude-2')
+    const tracePath = join(tmpRoot, 'claude-stub-trace-cancel.jsonl')
+    process.env.POLO_STUB_TRACE = tracePath
+    process.env.POLO_STUB_ASK_MARKER = ASK_MARKER
+    process.env.POLO_STUB_QUESTIONS = JSON.stringify(makeQuestionRequest(sessionId).questions)
 
-    await sm.sendMessage(managed.id, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
-    const pending = sm.getPendingQuestion(managed.id)
-    expect(pending).not.toBeNull()
-    expect(renderer.pendingOf(managed.id)?.requestId).toBe(pending!.requestId)
-
-    const outcome = await sm.respondToQuestion(managed.id, { action: 'cancel', requestId: pending!.requestId })
-    expect(outcome).toEqual({ status: 'cancelled' })
-    expect(sm.getPendingQuestion(managed.id)).toBeNull()
-    const cancelRecords = getManaged(managed.id).messages.filter(
-      m => (m as { questionResolution?: { requestId: string } }).questionResolution?.requestId === pending!.requestId,
-    )
-    expect(cancelRecords).toHaveLength(1)
-    // The turn's own user message + the ONE cancel record — nothing else.
-    expect(getManaged(managed.id).messages.filter(m => m.role === 'user')).toHaveLength(2)
-    expect(getManaged(managed.id).pendingAgentResume).toBeUndefined()
-    expect(questionEvents()).toHaveLength(1)
-    expect((agent as { chatCallCount: number }).chatCallCount).toBe(1)
-    expect(renderer.pendingOf(managed.id)).toBeNull()
-  })
-
-  it('claude: the production toolset fails closed — a non-desktop tool assembly does not expose the tool', async () => {
-    const managed = seedSession('acc-claude-3')
-    const client = await connectClaudeToolset(managed.id, false)
-    const tools = await client.listTools()
-    expect(tools.tools.map(t => t.name)).not.toContain('request_user_input')
-    await client.close()
-  })
-
-  // -------------------------------------------------------------------------
-  // Engine 2: Pi — real turn, production proxy toolset + dispatch.
-  // -------------------------------------------------------------------------
-
-  it('pi: a real desktop turn drives the durable handoff through the Pi production dispatch; the renderer observes the question; the answer resumes', async () => {
-    const managed = seedSession('acc-pi-1')
-    // A REAL PiAgent carries the production toolset builder + dispatch; the
-    // turn's chat runs the model behavior through it.
-    const pi = new sharedAgent.PiAgent({
-      provider: 'pi',
-      providerType: 'pi',
-      workspace: { id: 'ws_test', name: 'Test Workspace', rootPath: tmpRoot, createdAt: Date.now() },
-      session: { id: managed.id, workspaceRootPath: tmpRoot, createdAt: Date.now(), lastUsedAt: Date.now() },
-      isHeadless: true,
-      miniModel: '',
-    } as never)
-    const piFields = pi as unknown as {
-      allowRequestUserInput: boolean
-      buildSessionToolDefs: () => Array<{ name: string }>
-      routeToolCall: (name: string, args: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>
-      chat: unknown
-    }
-    piFields.allowRequestUserInput = true
-
-    const request = makeQuestionRequest(managed.id)
-    // The REAL PiAgent IS the turn's agent — its chat runs the model
-    // behavior through the production toolset + dispatch. The agent-field
-    // question routing mirrors getOrCreateAgent's production wiring (the
-    // stub replaces that method, so the route is wired here 1:1).
-    wireAgentQuestionField(managed, pi as unknown as Record<string, unknown>)
-    let chatCalls = 0
-    piFields.chat = async function* () {
-      if (chatCalls === 0) {
-        chatCalls++
-        // DISCOVERY: the exact toolset `register_tools` installs for the model.
-        expect(piFields.buildSessionToolDefs().map(d => d.name)).toContain('mcp__session__request_user_input')
-        // The subprocess-forwarded call takes the PRODUCTION dispatch path.
-        const dispatched = await piFields.routeToolCall('mcp__session__request_user_input', { questions: request.questions })
-        expect(dispatched.isError).toBe(false)
-        expect(dispatched.content).toContain('Waiting for user input')
-      }
-      yield { type: 'complete' as const }
-    }
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => pi
-
-    await sm.sendMessage(managed.id, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
-
-    const pending = sm.getPendingQuestion(managed.id)
-    expect(pending).not.toBeNull()
-    expect(questionEvents()).toHaveLength(1)
-    expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
-    expect(renderer.pendingOf(managed.id)?.requestId).toBe(pending!.requestId)
-
-    const outcome = await sm.respondToQuestion(managed.id, makeAnswerResolution(pending!))
-    expect(outcome).toEqual({ status: 'accepted' })
-    expect(readableAnswerMessages(managed.id, pending!.requestId)).toHaveLength(1)
-    expect(questionEvents()).toHaveLength(1)
-    expect(renderer.pendingOf(managed.id)).toBeNull()
-  })
-
-  it('pi (Codex OAuth / OpenAI Codex model connection): the SAME Pi backend assembles the toolset and drives the durable handoff; no independent Codex CLI session is created', async () => {
-    const managed = seedSession('acc-pi-codex-1')
-    // ChatGPT Plus / Codex OAuth rides the PI backend (piAuthProvider
-    // 'openai-codex' + an OAuth credential) — there is no separate external
-    // Codex execution chain in the product.
-    const pi = new sharedAgent.PiAgent({
-      provider: 'pi',
-      providerType: 'pi',
-      authType: 'oauth',
-      runtime: { piAuthProvider: 'openai-codex' },
-      model: 'gpt-5.2',
-      workspace: { id: 'ws_test', name: 'Test Workspace', rootPath: tmpRoot, createdAt: Date.now() },
-      session: { id: managed.id, workspaceRootPath: tmpRoot, createdAt: Date.now(), lastUsedAt: Date.now() },
-      isHeadless: true,
-      miniModel: '',
-    } as never)
-    const piFields = pi as unknown as {
-      allowRequestUserInput: boolean
-      buildSessionToolDefs: () => Array<{ name: string }>
-      routeToolCall: (name: string, args: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>
-      chat: unknown
-    }
-    piFields.allowRequestUserInput = true
-    wireAgentQuestionField(managed, pi as unknown as Record<string, unknown>)
-
-    const request = makeQuestionRequest(managed.id)
-    let chatCalls = 0
-    piFields.chat = async function* () {
-      const call = chatCalls
-      chatCalls++
-      if (call === 0) {
-        // TOOL ASSEMBLY under the Codex OAuth connection: the toolset the
-        // Pi subprocess installs is identical to any other Pi connection.
-        expect(piFields.buildSessionToolDefs().map(d => d.name)).toContain('mcp__session__request_user_input')
-        // Real dispatch through the production host-side execution path.
-        const dispatched = await piFields.routeToolCall('mcp__session__request_user_input', { questions: request.questions })
-        expect(dispatched.isError).toBe(false)
-        expect(dispatched.content).toContain('Waiting for user input')
-      }
-      yield { type: 'complete' as const }
-    }
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => pi
-
-    await sm.sendMessage(managed.id, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
-
-    const pending = sm.getPendingQuestion(managed.id)
-    expect(pending).not.toBeNull()
-    // ONE tool call → ONE requestId, ONE question_request.
-    expect(questionEvents()).toHaveLength(1)
-    expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
-    expect(renderer.pendingOf(managed.id)?.requestId).toBe(pending!.requestId)
-    expect(chatCalls).toBe(1)
-
-    const outcome = await sm.respondToQuestion(managed.id, makeAnswerResolution(pending!))
-    expect(outcome).toEqual({ status: 'accepted' })
-    expect(readableAnswerMessages(managed.id, pending!.requestId)).toHaveLength(1)
-    expect(questionEvents()).toHaveLength(1)
-    expect(renderer.pendingOf(managed.id)).toBeNull()
-    // The continuation ran on the SAME embedded Pi turn chain (one answer
-    // turn resumed the SAME agent session — no second CLI session/process
-    // lifecycle was ever created for the Codex OAuth connection).
-    expect(chatCalls).toBe(2)
-  })
-
-  // -------------------------------------------------------------------------
-  // Restart recovery: the persisted pending question survives a restart.
-  // -------------------------------------------------------------------------
-
-  it('restart recovery: the persisted pending question is restored and answerable after a cold start; duplicate answers are idempotent', async () => {
-    const managed = seedSession('acc-restart-1')
-    const agent = scriptedAgent([
-      generation => claudeModelToolCall(managed.id, makeQuestionRequest(managed.id).questions),
-    ])
-    ;(agent as { sessionIdForTools: string }).sessionIdForTools = managed.id
-    wireAgentQuestionField(managed, agent as Record<string, unknown>)
-    registerClaudeCallbackRegistry(agent as Record<string, unknown>)
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => agent
-
-    await sm.sendMessage(managed.id, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
-    const before = sm.getPendingQuestion(managed.id)
-    expect(before).not.toBeNull()
-    expect(existsSync(getSessionFilePath(tmpRoot, managed.id))).toBe(true)
-
-    // RESTART: a fresh SessionManager hydrates metadata-only ManagedSessions
-    // from disk headers (the startup path).
-    const sm2 = new SessionManager()
-    sm2.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
-      events.push(event)
-      renderer.deliver(event)
-    }) as never)
     try {
-      const metas = listSessions(tmpRoot)
-      for (const meta of metas) {
-        ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set(meta.id, createManagedSession(meta, buildWorkspace()))
-      }
-      const pending = sm2.getPendingQuestion(managed.id)
-      expect(pending?.requestId).toBe(before!.requestId)
-      const outcome = await sm2.respondToQuestion(managed.id, makeAnswerResolution(pending!))
-      expect(outcome).toEqual({ status: 'accepted' })
-      const repeat = await sm2.respondToQuestion(managed.id, makeAnswerResolution(pending!))
-      expect(repeat).toEqual({ status: 'already_answered' })
-      const messages = ((sm2 as unknown as { sessions: Map<string, { messages: Array<Record<string, unknown>> }> })
-        .sessions.get(managed.id)!.messages) as Array<Record<string, unknown>>
-      const readable = messages.filter(
-        m => m.role === 'user' && (m as { questionResponse?: { requestId: string } }).questionResponse?.requestId === pending!.requestId,
+      await sm.sendMessage(sessionId, ASK_MARKER, [], [], { invocationSource: 'desktop' })
+      const pending = sm.getPendingQuestion(sessionId)
+      expect(pending).not.toBeNull()
+      expect(renderer.pendingOf(sessionId)?.requestId).toBe(pending!.requestId)
+
+      const outcome = await sm.respondToQuestion(sessionId, { action: 'cancel', requestId: pending!.requestId })
+      expect(outcome).toEqual({ status: 'cancelled' })
+      expect(sm.getPendingQuestion(sessionId)).toBeNull()
+      const cancelRecords = getManaged(sessionId).messages.filter(
+        m => (m as { questionResolution?: { requestId: string } }).questionResolution?.requestId === pending!.requestId,
       )
-      expect(readable).toHaveLength(1)
+      expect(cancelRecords).toHaveLength(1)
+      // The turn's own user message + the ONE cancel record — nothing else.
+      expect(getManaged(sessionId).messages.filter(m => m.role === 'user')).toHaveLength(2)
+      expect(getManaged(sessionId).pendingAgentResume).toBeUndefined()
+      expect(questionEvents()).toHaveLength(1)
+      // NO continuation: the model was launched exactly once.
+      expect(readTrace(tracePath).filter(e => e.event === 'launch')).toHaveLength(1)
+      expect(renderer.pendingOf(sessionId)).toBeNull()
     } finally {
-      const queue = (sm2 as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
-      try { queue.cancel(managed.id) } catch { /* ignore */ }
+      delete process.env.POLO_STUB_TRACE
+      delete process.env.POLO_STUB_ASK_MARKER
+      delete process.env.POLO_STUB_QUESTIONS
     }
-  })
+  }, 60000)
+
+  // -------------------------------------------------------------------------
+  // Engine 2: Pi — REAL PiAgent (production factory) + REAL pi-agent-server
+  // subprocess; prompt → register_tools → tool_execute protocol with the
+  // model scripted at the local OpenAI-compatible endpoint.
+  // -------------------------------------------------------------------------
+
+  it('pi: a real subprocess turn assembles the toolset for the model and drives the durable handoff through tool_execute; the answer resumes', async () => {
+    usePiHostRuntime()
+    const fake = startFakeModelServer([() => 'tool_call', () => 'text'])
+    usePiConnection({ slug: 'pi-fake-acceptance', providerType: 'pi_compat', authType: 'api_key', baseUrl: fake.url })
+    const sessionId = await createSessionViaProduction('acc-pi-1', 'pi-fake-acceptance')
+
+    await sm.sendMessage(sessionId, ASK_MARKER, [], [], { invocationSource: 'desktop' })
+
+    // The backend is a REAL PiAgent created by the production factory.
+    expect(getManaged(sessionId).agent).toBeInstanceOf(sharedAgent.PiAgent)
+
+    // MODEL-VISIBLE TOOLSET: the real model request carried the Pi session
+    // toolset, including request_user_input (registered via register_tools).
+    expect(fake.captured.length).toBeGreaterThanOrEqual(1)
+    expect(fake.captured[0]!.toolNames).toContain('mcp__session__request_user_input')
+
+    // ONE tool call → ONE durable handoff.
+    const pending = sm.getPendingQuestion(sessionId)
+    expect(pending).not.toBeNull()
+    expect(questionEvents()).toHaveLength(1)
+    expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
+    expect(renderer.pendingOf(sessionId)?.requestId).toBe(pending!.requestId)
+
+    // Answer → ONE readable message → the continuation turn ran.
+    const outcome = await sm.respondToQuestion(sessionId, makeAnswerResolution(pending!))
+    expect(outcome).toEqual({ status: 'accepted' })
+    expect(readableAnswerMessages(sessionId, pending!.requestId)).toHaveLength(1)
+    expect(questionEvents()).toHaveLength(1)
+    expect(renderer.pendingOf(sessionId)).toBeNull()
+    expect(getManaged(sessionId).pendingAgentResume).toBeUndefined()
+
+    // The continuation prompt reached the model (second model request) with
+    // the answer text in the conversation.
+    await waitForCondition(() => fake.captured.length >= 2, 30000)
+    const continuationText = fake.captured[1]!.messageTexts.join('\n')
+    expect(continuationText).toContain(ASK_MARKER)
+    expect(continuationText).toContain(ASK_MARKER.length ? ANSWER_MARKER : ANSWER_MARKER)
+
+    fake.server.stop(true)
+  }, 240000)
+
+  // -------------------------------------------------------------------------
+  // Engine 3: Pi × Codex OAuth — the ChatGPT Plus / Codex connection shape
+  // rides the SAME Pi backend (no independent Codex CLI session anywhere).
+  // -------------------------------------------------------------------------
+
+  it('pi (Codex OAuth connection): the SAME Pi backend assembles the toolset and drives the durable handoff; no independent Codex CLI session is created', async () => {
+    usePiHostRuntime()
+    const fake = startFakeModelServer([() => 'tool_call', () => 'text'])
+    // The product's Codex connection shape: Pi provider + openai-codex auth.
+    // The model layer is pointed at the local endpoint for determinism.
+    usePiConnection({
+      slug: 'pi-codex-acceptance',
+      providerType: 'pi',
+      piAuthProvider: 'openai-codex',
+      authType: 'oauth',
+      baseUrl: fake.url,
+    })
+    const sessionId = await createSessionViaProduction('acc-pi-codex-1', 'pi-codex-acceptance')
+
+    await sm.sendMessage(sessionId, ASK_MARKER, [], [], { invocationSource: 'desktop' })
+
+    // The Codex-OAuth connection resolved to the PI backend — no separate
+    // external engine / Codex CLI lifecycle exists.
+    expect(getManaged(sessionId).agent).toBeInstanceOf(sharedAgent.PiAgent)
+    expect(getManaged(sessionId).agent).not.toBeInstanceOf(sharedAgent.ClaudeAgent)
+
+    // TOOL ASSEMBLY under the Codex connection: the model-visible toolset is
+    // identical to any other Pi connection.
+    expect(fake.captured.length).toBeGreaterThanOrEqual(1)
+    expect(fake.captured[0]!.toolNames).toContain('mcp__session__request_user_input')
+
+    // ONE tool call → ONE requestId, ONE question_request.
+    const pending = sm.getPendingQuestion(sessionId)
+    expect(pending).not.toBeNull()
+    expect(questionEvents()).toHaveLength(1)
+    expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
+    expect(renderer.pendingOf(sessionId)?.requestId).toBe(pending!.requestId)
+
+    const outcome = await sm.respondToQuestion(sessionId, makeAnswerResolution(pending!))
+    expect(outcome).toEqual({ status: 'accepted' })
+    expect(readableAnswerMessages(sessionId, pending!.requestId)).toHaveLength(1)
+    expect(questionEvents()).toHaveLength(1)
+    expect(renderer.pendingOf(sessionId)).toBeNull()
+    expect(getManaged(sessionId).pendingAgentResume).toBeUndefined()
+    // The continuation ran on the SAME Pi backend (second model request).
+    await waitForCondition(() => fake.captured.length >= 2, 30000)
+
+    fake.server.stop(true)
+  }, 240000)
+
+  // -------------------------------------------------------------------------
+  // Restart recovery: the persisted pending question survives a cold start and
+  // the SAME session really CONTINUES — one continuation turn, the durable
+  // resume state cleared, and no retry timers left behind (formal lifecycle
+  // teardown through the public deleteSession).
+  // -------------------------------------------------------------------------
+
+  it('restart recovery: the persisted pending question is restored, answered, and the session CONTINUES on the restarted manager; no resume retries leak', async () => {
+    useClaudeHostRuntime()
+    const sessionId = await createSessionViaProduction('acc-restart-1')
+    const tracePath = join(tmpRoot, 'claude-stub-trace-restart.jsonl')
+    process.env.POLO_STUB_TRACE = tracePath
+    process.env.POLO_STUB_ASK_MARKER = ASK_MARKER
+    process.env.POLO_STUB_QUESTIONS = JSON.stringify(makeQuestionRequest(sessionId).questions)
+
+    try {
+      await sm.sendMessage(sessionId, ASK_MARKER, [], [], { invocationSource: 'desktop' })
+      const before = sm.getPendingQuestion(sessionId)
+      expect(before).not.toBeNull()
+      expect(existsSync(getSessionFilePath(tmpRoot, sessionId))).toBe(true)
+
+      // RESTART: a fresh SessionManager hydrates metadata-only ManagedSessions
+      // from disk headers (the startup path).
+      const sm2 = new SessionManager()
+      sm2.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
+        events.push(event)
+        renderer.deliver(event)
+      }) as never)
+      const sm2Queue = () => (sm2 as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
+      try {
+        const metas = listSessions(tmpRoot)
+        for (const meta of metas) {
+          ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set(meta.id, createManagedSession(meta, buildWorkspacePre()))
+        }
+        const pending = sm2.getPendingQuestion(sessionId)
+        expect(pending?.requestId).toBe(before!.requestId)
+
+        // Answer → accepted → the SAME session CONTINUES: the resumed turn is
+        // a REAL second model run (launch #2, resumed SDK session).
+        const outcome = await sm2.respondToQuestion(sessionId, makeAnswerResolution(pending!))
+        expect(outcome).toEqual({ status: 'accepted' })
+        const repeat = await sm2.respondToQuestion(sessionId, makeAnswerResolution(pending!))
+        expect(repeat).toEqual({ status: 'already_answered' })
+
+        await waitForCondition(() => readTrace(tracePath).filter(e => e.event === 'launch').length >= 2, 30000)
+        const resumedManaged = managedOf(sm2, sessionId)
+        expect(resumedManaged.pendingAgentResume).toBeUndefined()
+        expect(resumedManaged.resumeRetryTimer).toBeUndefined()
+
+        // ONE readable answer message on the persisted session.
+        const messages = resumedManaged.messages
+        const readable = messages.filter(
+          m => m.role === 'user' && (m as { questionResponse?: { requestId: string } }).questionResponse?.requestId === pending!.requestId,
+        )
+        expect(readable).toHaveLength(1)
+
+        // FORMAL LIFECYCLE TEARDOWN: the public delete API stops the session —
+        // no retry timer, no background work, nothing left in the runtime map.
+        await sm2.deleteSession(sessionId)
+        expect((sm2 as unknown as { sessions: Map<string, unknown> }).sessions.has(sessionId)).toBe(false)
+        expect(resumedManaged.resumeRetryTimer).toBeUndefined()
+        expect(resumedManaged.pendingAgentResume).toBeUndefined()
+      } finally {
+        sm2Queue().cancel(sessionId)
+      }
+    } finally {
+      delete process.env.POLO_STUB_TRACE
+      delete process.env.POLO_STUB_ASK_MARKER
+      delete process.env.POLO_STUB_QUESTIONS
+    }
+  }, 120000)
 })
+

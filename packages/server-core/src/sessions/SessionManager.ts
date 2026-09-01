@@ -8,7 +8,6 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
@@ -1295,6 +1294,12 @@ export class SessionManager implements ISessionManager {
    * readiness, never clobbers it.
    */
   private sessionMcpHostReady: Promise<number> | null = null
+  /**
+   * Monotonic candidate-start id: binds every startSessionMcpHost attempt so
+   * only the latest attempt may reconverge readiness on failure (a stale
+   * failure must never touch a newer candidate's publication).
+   */
+  private sessionMcpHostAttempt = 0
   /**
    * Single-flight startup guard: a port-less re-entry joins the in-flight
    * start instead of racing a second listener (the host object only exists
@@ -4355,12 +4360,9 @@ export class SessionManager implements ISessionManager {
       // locked commit validates that closure snapshot, never the CURRENT
       // generation at late execution time.
       managed.agent.setSessionTurnGeneration(managed.processingGeneration)
-      // AGENT TOOL-SET WIRING: the model's
-      // request_user_input tool call reaches the durable handoff through the
-      // session MCP HOST CLIENT when one is running for this session — the
-      // full stdio loop (client → session-mcp-server → callback POST →
-      // SessionManager durable handoff) — and through the in-process durable
-      // path otherwise.
+      // AGENT TOOL-SET WIRING: the embedded engine's request_user_input tool
+      // call reaches the durable handoff DIRECTLY through the agent's
+      // onQuestionRequested field — one owner/channel per engine.
       managed.agent.onQuestionRequested = (questions, generationAtRequest) =>
         this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
 
@@ -7425,14 +7427,12 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * PRODUCTION durable-handoff entry for the session MCP callback protocol:
-   * the session MCP server subprocess POSTs its `question_requested`
-   * callback to the host's callback router, which routes here. Same durable
-   * semantics as the in-process chain: pendingQuestion persist +
-   * question_request event + handoff, awaited by the caller so the remote
-   * tool result settles only at the durable boundary.
+   * Durable handoff for the host's callback route: same durable semantics as
+   * the in-process chain (pendingQuestion persist + question_request event +
+   * handoff), awaited by the HTTP handler so a remote tool result settles
+   * only at the durable boundary.
    */
-  async handleSessionMcpQuestionRequested(
+  private handleSessionMcpCallbackPayload(
     sessionId: string,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
     generationAtRequest: number,
@@ -7442,6 +7442,84 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found (session_missing)`)
     }
     return this.handleQuestionRequested(managed, questions, generationAtRequest)
+  }
+
+  /**
+   * The host's ONLY HTTP route — POST /request-user-input → the durable
+   * handoff. Gates (enforced before the SessionManager is touched):
+   * POST-only (405), exact path (404), exact application/json media type
+   * (415) — a state-changing loopback route must never parse a cross-origin
+   * text/plain body — and strict payload validation.
+   */
+  private sessionMcpCallbackHandler(): (request: Request) => Promise<Response> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return async (request: any): Promise<Response> => {
+      if (request.method !== 'POST') {
+        return new Response('Method not allowed', {
+          status: 405,
+          headers: { Allow: 'POST' },
+        });
+      }
+      const url = typeof request.url === 'string' ? request.url : '';
+      if (new URL(url, 'http://localhost').pathname !== '/request-user-input') {
+        return new Response('Not found', { status: 404 });
+      }
+      const contentType = typeof request.headers?.get === 'function'
+        ? (request.headers.get('content-type') ?? '')
+        : '';
+      if (!/^application\/json\s*(?:;.*)?$/i.test(contentType.trim())) {
+        return new Response(JSON.stringify({ error: 'Unsupported Media Type: expected application/json' }), {
+          status: 415,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        body = null;
+      }
+      const payload = body as Partial<{
+        sessionId: string;
+        questions: Array<Record<string, unknown>>;
+        generationAtRequest: number;
+      }> | null;
+      if (
+        !payload ||
+        typeof payload.sessionId !== 'string' ||
+        !Array.isArray(payload.questions) ||
+        typeof payload.generationAtRequest !== 'number'
+      ) {
+        return new Response(JSON.stringify({ error: 'Malformed request-user-input callback payload' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      try {
+        await this.handleSessionMcpCallbackPayload(
+          payload.sessionId,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          payload.questions as any,
+          payload.generationAtRequest,
+        );
+        return new Response(JSON.stringify({ status: 'accepted' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/session_missing/.test(message)) {
+          return new Response(JSON.stringify({ status: 'session_missing' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ error: message }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    };
   }
 
   // ===========================================================================
@@ -7461,9 +7539,14 @@ export class SessionManager implements ISessionManager {
    *   or the healthy host; only an explicit callbackPort forces a candidate
    *   start (port-conflict semantics: an occupied port rejects with
    *   EADDRINUSE instead of silently reusing the existing host).
-   * - HEALTHY-INCUMBENT PRESERVATION: a failed candidate start never clobbers
-   *   the healthy incumbent's readiness — consumers keep seeing the working
-   *   host after the candidate rejects.
+   * - HEALTHY-INCUMBENT PRESERVATION (attempt-bound publication): every
+   *   candidate start carries a monotonic attempt id. A SUCCESS publishes
+   *   readiness only while its host is still the live one (identity-bound);
+   *   a FAILURE reconverges readiness to the CURRENT live host — resolved —
+   *   and only when it is still the latest attempt (a newer in-flight
+   *   candidate owns the publication right). A failed candidate can never
+   *   leave a rejected readiness pointing at a healthy host, no matter how
+   *   concurrent candidates interleave.
    */
   async startSessionMcpHost(options: {
     serverEntryPath: string
@@ -7474,19 +7557,38 @@ export class SessionManager implements ISessionManager {
       if (this.sessionMcpHostStart) return this.sessionMcpHostStart
       if (this.sessionMcpHost) return Promise.resolve(this.sessionMcpHost.callbackPort)
     }
-    const incumbentHost = this.sessionMcpHost
-    const incumbentReady = this.sessionMcpHostReady
-    const start = this.startSessionMcpHostInner(options).catch(error => {
-      if (this.sessionMcpHost === incumbentHost && incumbentReady) {
-        this.sessionMcpHostReady = incumbentReady
-      }
-      throw error
-    })
-    this.sessionMcpHostStart = start
-    this.sessionMcpHostReady = start
-    return start.finally(() => {
-      if (this.sessionMcpHostStart === start) this.sessionMcpHostStart = null
-    })
+    const attempt = ++this.sessionMcpHostAttempt
+    // FIRST-HOST GATE: with no live host there is nothing whose readiness
+    // must be preserved — consumers gate on the in-flight start itself.
+    const isFirstStart = !options.callbackPort && !this.sessionMcpHost
+    const start = this.startSessionMcpHostInner(options)
+    if (isFirstStart) {
+      this.sessionMcpHostStart = start
+      this.sessionMcpHostReady = start
+    }
+    return start.then(
+      port => {
+        // Publish only while THIS attempt's host is the live one — a
+        // concurrently started newer candidate keeps the publication right.
+        if (this.sessionMcpHost?.callbackPort === port) {
+          this.sessionMcpHostReady = Promise.resolve(port)
+        }
+        if (this.sessionMcpHostStart === start) this.sessionMcpHostStart = null
+        return port
+      },
+      error => {
+        if (attempt === this.sessionMcpHostAttempt) {
+          // Latest attempt failed: converge readiness to the CURRENT live
+          // host (resolved), or clear it when none — never a rejected
+          // readiness over a healthy host.
+          this.sessionMcpHostReady = this.sessionMcpHost
+            ? Promise.resolve(this.sessionMcpHost.callbackPort)
+            : null
+          if (this.sessionMcpHostStart === start) this.sessionMcpHostStart = null
+        }
+        throw error
+      },
+    )
   }
 
   private async startSessionMcpHostInner(options: {
@@ -7494,13 +7596,13 @@ export class SessionManager implements ISessionManager {
     nodeRuntimePath?: string
     callbackPort?: number
   }): Promise<number> {
-    const handler = createSessionMcpCallbackHandler(this)
+    const handler = this.sessionMcpCallbackHandler()
     // SINGLE LISTENER TECHNOLOGY: a node:http server bound to 127.0.0.1 —
     // the Electron main process is a NODE runtime, so the host must not
     // depend on a Bun-only API. The listener adapts IncomingMessage /
-    // ServerResponse to the web-standard Request the callback router
-    // expects, with the same 1 MiB body limit (413) and deterministic
-    // listen-error rejection as before.
+    // ServerResponse to the web-standard Request the handler expects, with
+    // the same 1 MiB body limit (413) and deterministic listen-error
+    // rejection as before.
     const server = await this.startNodeHttpHost(handler, options.callbackPort ?? 0)
     const callbackPort: number = server.port
     const previous = this.sessionMcpHost

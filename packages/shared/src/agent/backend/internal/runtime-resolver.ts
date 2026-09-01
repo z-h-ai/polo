@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import type { BackendHostRuntimeContext } from '../types.ts';
 import { setPathToClaudeCodeExecutable } from '../../options.ts';
-import { buildSessionMcpServerArgs, type SessionMcpSpawnOptions } from '@polo-ai/session-tools-core';
 
 /**
  * When set, the resolver walks further up from the .app bundle to find SDK,
@@ -27,20 +26,6 @@ export interface ResolvedBackendRuntimePaths {
    * doesn't accept `--preload`.
    */
   interceptorBundlePath?: string;
-  sessionServerPath?: string;
-  /**
-   * PRODUCTION per-turn spawn-spec builder for the packaged session MCP
-   * server: hosts/drivers call this with
-   * the TURN's capability + generation to get the complete spawn spec
-   * (command + args) for the resolved packaged server. Built via
-   * `buildSessionMcpServerInvocation`. Null when the packaged server is not
-   * available in this runtime.
-   */
-  buildSessionMcpServerInvocation?:
-    | ((options: SessionMcpSpawnOptions) => {
-        command: string;
-        args: string[];
-      } | null);
   bridgeServerPath?: string;
   piServerPath?: string;
   nodeRuntimePath?: string;
@@ -244,13 +229,6 @@ export function resolveBackendRuntimePaths(hostRuntime: BackendHostRuntimeContex
   return {
     claudeCliPath: resolveClaudeBinaryPath(hostRuntime),
     interceptorBundlePath: resolveInterceptorBundlePath(hostRuntime),
-    sessionServerPath: resolveServerPath(hostRuntime, 'session-mcp-server'),
-    // PRODUCTION consumption of the per-turn invocation builder: the
-    // resolved runtime carries the spawn-spec builder bound to THIS runtime's
-    // packaged server + node binary; hosts and drivers spawn the session MCP
-    // server through it.
-    buildSessionMcpServerInvocation: (options) =>
-      buildSessionMcpServerInvocation(hostRuntime, options),
     bridgeServerPath: resolveServerPath(hostRuntime, 'bridge-mcp-server'),
     piServerPath: resolveServerPath(hostRuntime, 'pi-agent-server'),
     nodeRuntimePath: hostRuntime.nodeRuntimePath || bundledRuntimePath || process.execPath,
@@ -288,27 +266,4 @@ export function applyAnthropicRuntimeBootstrap(
   } else if (strict) {
     throw new Error('Claude Agent SDK native binary not found. The app package may be corrupted.');
   }
-}
-
-/**
- * PRODUCTION SPAWN SPEC for the session MCP server subprocess (the
- * Codex/external-harness path).
- *
- * Composes the resolved packaged-server path + node runtime with the
- * per-turn request_user_input capability and generation (via
- * `buildSessionMcpServerArgs`). The host spawns `command` with `args` for
- * EVERY turn; desktop turns carry the capability flag + generation, all
- * other sources omit them (fail closed). Returns null when the packaged
- * server is not available in this runtime.
- */
-export function buildSessionMcpServerInvocation(
-  hostRuntime: BackendHostRuntimeContext,
-  options: SessionMcpSpawnOptions,
-): { command: string; args: string[] } | null {
-  const paths = resolveBackendRuntimePaths(hostRuntime);
-  if (!paths.sessionServerPath) return null;
-  return {
-    command: paths.nodeRuntimePath ?? process.execPath,
-    args: [paths.sessionServerPath, ...buildSessionMcpServerArgs(options)],
-  };
 }

@@ -1025,55 +1025,21 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-gap'))).toBe(false)
   })
 
-  // ---- the session MCP/Codex callback chain
-  // lands in the SAME durable handoff — a parsed question_requested stderr
-  // message drives handleQuestionRequested (persist + broadcast + handoff).
+  // ---- the host's ONLY HTTP route — POST /request-user-input → the durable
+  // handoff — through the REAL listening host: accepted delivery,
+  // session_missing, unknown path, wrong method, malformed payload.
 
-  it('a session MCP question_requested callback drives the durable handoff (persist + question_request)', async () => {
-    patchPrivateFlush()
-    const managed = seedSession('f-mcp-cb', { isProcessing: true, withAgent: true }) as unknown as { processingGeneration: number }
-    const { parseSessionMcpCallbackLine, isQuestionRequestedCallback } = await import('@polo-ai/shared/agent')
-
-    // Simulate the session MCP server's stderr line for THIS turn's tool call.
-    const payload = {
-      __callback__: 'question_requested',
-      sessionId: 'f-mcp-cb',
-      questions: makeQuestionRequest('f-mcp-cb').questions,
-      generationAtRequest: managed.processingGeneration,
-    }
-    const parsed = parseSessionMcpCallbackLine(`__CALLBACK__${JSON.stringify(payload)}`)
-    expect(isQuestionRequestedCallback(parsed!)).toBe(true)
-    if (!isQuestionRequestedCallback(parsed!)) return
-
-    // The host routes the parsed callback into the durable handoff.
-    await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
-      .handleQuestionRequested(managed, parsed.questions as never, parsed.generationAtRequest)
-
-    // Durable: pending question authoritative + renderer notified.
-    expect(sm.getPendingQuestion('f-mcp-cb')).not.toBeNull()
-    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
-    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-mcp-cb'), 'utf-8').split('\n')[0])
-    expect(header.hasPendingQuestion).toBe(true)
-  })
-
-  // ---- the PRODUCTION callback router — the
-  // host HTTP route that the session MCP server POSTs to — lands in the same
-  // durable handoff and answers with the protocol result.
-
-  it('the session MCP callback router routes /request-user-input into the durable handoff (accepted + session_missing)', async () => {
-    const { createSessionMcpCallbackHandler } = await import('./session-mcp-callback-router.ts')
-    const handler = createSessionMcpCallbackHandler(sm)
-    const managed = seedSession('f-mcp-cb-2', { isProcessing: true, withAgent: true }) as unknown as { processingGeneration: number }
+  it('the session MCP host route drives the durable handoff (accepted + session_missing + gates)', async () => {
+    seedSession('f-mcp-cb', { isProcessing: true, withAgent: true })
+    seedSession('f-mcp-cb-2', { isProcessing: true, withAgent: true })
+    const managed = getManaged('f-mcp-cb-2') as unknown as { processingGeneration: number }
     const request = makeQuestionRequest('f-mcp-cb-2')
 
-    const server = Bun.serve({
-      port: 0,
-      fetch: req => handler(req),
-    })
+    const port = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })
     try {
       // ACCEPTED: the payload routes into the durable handoff.
       const accepted = await fetch(
-        `http://localhost:${server.port}/request-user-input`,
+        `http://127.0.0.1:${port}/request-user-input`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1091,7 +1057,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
       // SESSION_MISSING: a payload for an unknown session degrades honestly.
       const missing = await fetch(
-        `http://localhost:${server.port}/request-user-input`,
+        `http://127.0.0.1:${port}/request-user-input`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1106,10 +1072,28 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       expect(await missing.json()).toEqual({ status: 'session_missing' })
 
       // Unknown paths are not routed.
-      const notFound = await fetch(`http://localhost:${server.port}/other`, { method: 'POST' })
+      const notFound = await fetch(`http://127.0.0.1:${port}/other`, { method: 'POST' })
       expect(notFound.status).toBe(404)
+
+      // Only the declared POST is allowed.
+      const methodGate = await fetch(`http://127.0.0.1:${port}/request-user-input`, { method: 'GET' })
+      expect(methodGate.status).toBe(405)
+      expect(methodGate.headers.get('Allow')).toBe('POST')
+
+      // A malformed body is an honest 400, never a handoff.
+      const malformed = await fetch(
+        `http://127.0.0.1:${port}/request-user-input`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: 'f-mcp-cb-2' }),
+        },
+      )
+      expect(malformed.status).toBe(400)
+      expect(((await malformed.json()) as { error: string }).error).toContain('Malformed')
+      expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
     } finally {
-      server.stop(true)
+      sm.stopSessionMcpHost()
     }
   })
 
@@ -1231,6 +1215,80 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ status: 'accepted' })
     sm.stopSessionMcpHost()
+  })
+
+  it('concurrent explicit candidates: one success + one deterministic failure converge live host and readiness to the SAME port', async () => {
+    // Independent long-lived blocker: its port is NEVER freed during the
+    // scenario, so the failing candidate fails deterministically regardless
+    // of interleaving (the incumbent's port may legitimately be freed by the
+    // successful replacement's dispose). Binds 127.0.0.1 like the host.
+    const blocker = (await import('node:http')).createServer(() => {})
+    const blockedPort = await new Promise<number>((resolve, reject) => {
+      blocker.once('error', reject)
+      blocker.listen(0, '127.0.0.1', () => {
+        blocker.off('error', reject)
+        resolve((blocker.address() as { port: number }).port)
+      })
+    })
+    try {
+      const freePort = await (async () => {
+        const probe = (await import('node:http')).createServer(() => {})
+        const port = await new Promise<number>((resolve, reject) => {
+          probe.once('error', reject)
+          probe.listen(0, '127.0.0.1', () => {
+            probe.off('error', reject)
+            resolve((probe.address() as { port: number }).port)
+          })
+        })
+        await new Promise<void>(resolve => probe.close(() => resolve()))
+        return port
+      })()
+
+      const incumbentPort = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })
+      expect(incumbentPort).toBeGreaterThan(0)
+
+      // TWO OVERLAPPING EXPLICIT CANDIDATES: one replaces the incumbent
+      // (fresh free port), one port-conflicts (blocked port) — launched in
+      // the same tick so both are in flight together. Settlement handlers
+      // attach synchronously so neither rejection is ever unhandled.
+      const replacement = sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), callbackPort: freePort })
+      const failing = sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), callbackPort: blockedPort })
+      const replacementOutcome = replacement.then(
+        port => ({ ok: true as const, port }),
+        error => ({ ok: false as const, error }),
+      )
+      const failingOutcome = failing.then(
+        port => ({ ok: true as const, port }),
+        error => ({ ok: false as const, error }),
+      )
+
+      await expect(replacementOutcome.then(o => (o.ok ? o.port : Promise.reject(o.error)))).resolves.toBe(freePort)
+      await expect(failingOutcome.then(o => (o.ok ? Promise.resolve(o) : Promise.reject(o.error)))).rejects.toThrow()
+
+      // LIVE HOST ↔ READINESS CONVERGENCE: the live host is the successful
+      // replacement, and every readiness view resolves to the SAME port —
+      // a failed candidate must never leave a rejected readiness over a
+      // healthy host.
+      const live = (sm as unknown as { sessionMcpHost: { callbackPort: number } | null }).sessionMcpHost
+      expect(live?.callbackPort).toBe(freePort)
+      const ready = (sm as unknown as { sessionMcpHostReady: Promise<number> | null }).sessionMcpHostReady
+      expect(ready).not.toBeNull()
+      await expect(ready).resolves.toBe(freePort)
+      // The public port-less re-entry resolves to the live host too.
+      await expect(sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })).resolves.toBe(freePort)
+
+      // The converged host actually serves.
+      seedSession('f-candidate-serve', {})
+      const response = await fetch(`http://127.0.0.1:${freePort}/request-user-input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'f-candidate-serve', questions: makeQuestionRequest('f-candidate-serve').questions, generationAtRequest: 0 }),
+      })
+      expect(response.status).toBe(200)
+    } finally {
+      blocker.close()
+      sm.stopSessionMcpHost()
+    }
   })
 
   // ---- The host listener is a node:http server (the Electron main process

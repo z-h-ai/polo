@@ -19,7 +19,6 @@ import {
   copyPiAgentServer,
   copyRipgrep,
   copySDK,
-  copySessionServer,
   downloadBun,
   downloadUv,
   getPlatformKey,
@@ -189,19 +188,13 @@ export function stagePlatformRuntimeHelpers(
     rootDir: resolve(options.rootDir),
     electronDir: resolve(options.electronDir),
   }
-  const sessionOutput = join(config.rootDir, 'packages', 'session-mcp-server', 'dist', 'index.js')
   const piOutput = join(config.rootDir, 'packages', 'pi-agent-server', 'dist', 'index.js')
-  if (!existsSync(sessionOutput) || !existsSync(piOutput)) {
+  if (!existsSync(piOutput)) {
     buildMcpServers(config)
   }
-  copySessionServer(config)
   copyPiAgentServer(config)
-  for (const path of [
-    join(config.electronDir, 'resources', 'session-mcp-server', 'index.js'),
-    join(config.electronDir, 'resources', 'pi-agent-server', 'index.js'),
-  ]) {
-    if (!existsSync(path)) throw new Error(`Platform helper staging missed ${path}`)
-  }
+  const stagedPiServer = join(config.electronDir, 'resources', 'pi-agent-server', 'index.js')
+  if (!existsSync(stagedPiServer)) throw new Error(`Platform helper staging missed ${stagedPiServer}`)
 }
 
 if (import.meta.main) {

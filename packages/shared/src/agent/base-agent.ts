@@ -44,7 +44,6 @@ import type {
   RecoveryMessage,
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
-import { parseSessionMcpCallbackLine, isQuestionRequestedCallback } from './core/session-lifecycle.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
 import { parseRequestUserInputArgs, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import type { Workspace } from '../config/storage.ts';
@@ -460,12 +459,10 @@ export abstract class BaseAgent implements AgentBackend {
    *
    * WHY THIS IS ON BaseAgent:
    * -------------------------
-   * Session-scoped tools (SubmitPlan, source_oauth_trigger, etc.) run in an
-   * EXTERNAL MCP server subprocess (packages/session-mcp-server). That subprocess
-   * has its own process memory, so when it calls getSessionScopedToolCallbacks(),
-   * the callback registry is empty — it was populated in THIS process, not the subprocess.
-   *
-   * Instead, PiAgent detects session MCP tool completions from its own event
+   * Pi executes its session-scoped tools HOST-SIDE, but completions are
+   * detected from the subprocess event stream (the subprocess has its own
+   * process memory, so the callback registry populated in THIS process is
+   * not visible there). PiAgent detects the completions from its own event
    * stream and calls THIS shared method to fire the appropriate callback.
    *
    * ClaudeAgent doesn't need this — its session-scoped tools run in-process
@@ -477,39 +474,6 @@ export abstract class BaseAgent implements AgentBackend {
    * - Auth tools → this.onAuthRequest(authRequest)
    *   → Electron shows auth dialog, calls interruptForHandoff(AuthRequest)
    */
-  /**
-   * Consume one stderr line emitted by the session MCP server subprocess.
-   *
-   * Hosts embedding this agent pipe the subprocess's stderr lines here. A
-   * `question_requested` line is routed into the SAME durable handoff chain
-   * the in-process paths use — {@link onQuestionRequested} with the
-   * initiation-time generation snapshot — whose resolution (answered /
-   * cancelled / stale) settles the awaiting tool result on the server side.
-   * Plan/auth callbacks are routed likewise.
-   *
-   * @returns true when the line was a recognized lifecycle callback.
-   */
-  handleSessionMcpStderrLine(line: string): boolean {
-    const message = parseSessionMcpCallbackLine(line);
-    if (!message) return false;
-    if (isQuestionRequestedCallback(message)) {
-      void this.onQuestionRequested?.(
-        message.questions as unknown as Parameters<NonNullable<typeof this.onQuestionRequested>>[0],
-        message.generationAtRequest,
-      );
-      return true;
-    }
-    if (message.__callback__ === 'plan_submitted') {
-      this.onPlanSubmitted?.(message.planPath);
-      return true;
-    }
-    if (message.__callback__ === 'auth_request') {
-      this.onAuthRequest?.(message.request as never);
-      return true;
-    }
-    return false;
-  }
-
   protected handleSessionMcpToolCompletion(
     toolName: string,
     args: Record<string, unknown>

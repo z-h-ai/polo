@@ -101,15 +101,10 @@ export {
   SessionLifecycleManager,
   createSessionLifecycleManager,
 } from './session-lifecycle.ts';
-export {
-  parseSessionMcpCallbackLine,
-  isQuestionRequestedCallback,
-} from './session-lifecycle.ts';
 // The spawn spec lives in the dependency-free leaf module in
-// session-tools-core — the single definition shared with the server package.
+// session-tools-core — the single definition of the per-turn spawn contract.
 export { buildSessionMcpServerArgs } from '@polo-ai/session-tools-core';
 export type { SessionMcpSpawnOptions } from '@polo-ai/session-tools-core';
-export type { SessionMcpCallbackMessage } from './session-lifecycle.ts';
 
 // Usage Tracker
 export {

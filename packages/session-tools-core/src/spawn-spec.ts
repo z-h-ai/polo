@@ -2,14 +2,13 @@
  * Session MCP server spawn spec — dependency-free leaf module.
  *
  * This is the SINGLE definition of the per-turn spawn contract for the
- * session MCP server subprocess (the external Codex/harness path). It lives
- * in session-tools-core because both sides of the contract already depend on
- * that package and it must stay import-light: the session-mcp-server
- * production bundle is a single light file, and a barrel re-export here once
- * pulled the whole agent graph + koffi `.node` assets into the outdir,
- * breaking `electron:build`. This module imports NOTHING.
+ * session MCP server subprocess. It lives in session-tools-core because
+ * every consumer of the contract already depends on that package and it must
+ * stay import-light: a barrel re-export here once pulled the whole agent
+ * graph + koffi `.node` assets into the session server's outdir, breaking
+ * `electron:build`. This module imports NOTHING.
  *
- * The harness spawns ONE server instance per turn and passes the turn's
+ * A spawner starts ONE server instance per turn and passes the turn's
  * request_user_input capability and processing generation as EXPLICIT
  * construct arguments — never ambient global state.
  */
