@@ -3,6 +3,7 @@
  */
 
 import { $ } from 'bun';
+import { piAgentServerBuildArgs } from './pi-build-args.ts';
 import { execFileSync, execSync } from 'child_process';
 import {
   existsSync,
@@ -824,18 +825,7 @@ export function buildMcpServers(config: BuildConfig): void {
     mkdirSync(join(piDir, 'dist'), { recursive: true });
     execFileSync(
       process.execPath,
-      [
-        'build',
-        join(piDir, 'src', 'index.ts'),
-        '--outdir',
-        join(piDir, 'dist'),
-        '--target',
-        'bun',
-        '--format',
-        'esm',
-        '--external',
-        'koffi',
-      ],
+      piAgentServerBuildArgs(join(piDir, 'src', 'index.ts'), join(piDir, 'dist')),
       { cwd: rootDir, stdio: 'inherit' }
     );
     if (!existsSync(piOut)) {

@@ -186,43 +186,4 @@ describe('request_user_input callback generation binding (immutable closure)', (
       unregisterSessionScopedToolCallbacks(sessionId)
     }
   })
-
-  // PATH 5 — legacy BaseAgent fire-and-forget completion: the field is read
-  // at the completion boundary (that path's initiation point) and the value
-  // is bound into the invocation — a later bump cannot change it.
-  it('legacy fire-and-forget completion binds the generation at the completion boundary', async () => {
-    const { BaseAgent } = await import('../base-agent.ts')
-    class LegacyStubAgent extends BaseAgent {
-      protected backendName = 'legacy-stub';
-      // eslint-disable-next-line require-yield
-      protected async *chatImpl(): AsyncGenerator<never> { return }
-      abort(): Promise<void> { return Promise.resolve() }
-      forceAbort(): void {}
-      isProcessing(): boolean { return false }
-      respondToPermission(): void {}
-      runMiniCompletion(): Promise<string | null> { return Promise.resolve(null) }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      queryLlm(request: any): Promise<any> { void request; return Promise.resolve({} as never) }
-    }
-
-    const agent = new LegacyStubAgent(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createMockBackendConfig({ provider: 'anthropic' as any, model: 'test-model', isHeadless: true, workspace: createMockWorkspace({ rootPath: '/tmp/legacy-bind' }) }) as any,
-      'test-model',
-    )
-
-    const delivered: Array<number | undefined> = []
-    agent.onQuestionRequested = (_questions, generationAtRequest) => {
-      delivered.push(generationAtRequest)
-    }
-
-    agent.setSessionTurnGeneration(7)
-    void agent['handleSessionMcpToolCompletion']('request_user_input', { questions: validQuestions() })
-    // A newer turn re-stamps BEFORE the fire-and-forget callback flushes.
-    agent.setSessionTurnGeneration(8)
-    await new Promise(resolve => setTimeout(resolve, 10))
-
-    // The bound value is the completion-boundary 7 — never the bumped 8.
-    expect(delivered).toEqual([7])
-  })
 })

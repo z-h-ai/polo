@@ -68,6 +68,13 @@ type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 const sharedAgent = await import('@polo-ai/shared/agent')
 const { setInvocationLlmConnections } = await import('@polo-ai/shared/config')
+// The pi bundle staging reuses the PRODUCTION build invocation (single
+// definition in scripts/build/common.ts) via a computed specifier: the
+// scripts/ tree is outside this package's tsconfig graph, exactly like the
+// renderer modules imported below.
+const { piAgentServerBuildArgs } = await import('../../../../scripts/build/pi-build-args.ts') as {
+  piAgentServerBuildArgs: (src: string, outdir: string) => string[]
+}
 
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..')
 const STUB_CLI_SOURCE = join(import.meta.dir, '__fixtures__', 'claude-stub-cli.mjs')
@@ -181,7 +188,7 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
       throw new Error(`acceptance setup: pi-agent-server source not found at ${src}`)
     }
     const build = Bun.spawnSync({
-      cmd: [process.execPath, 'build', src, '--outdir', outdir, '--target', 'bun', '--format', 'esm', '--external', 'koffi'],
+      cmd: [process.execPath, ...piAgentServerBuildArgs(src, outdir)],
       cwd: REPO_ROOT,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -686,4 +693,3 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
     }
   }, 120000)
 })
-

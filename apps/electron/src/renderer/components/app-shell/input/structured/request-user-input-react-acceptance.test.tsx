@@ -1,19 +1,23 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
-import { dirname, join } from 'path'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import type { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
+// RENDERER question-card pipeline test.
+//
+// Scope: the PRODUCTION renderer contract only — a `question_request` event
+// flows through the real event processor (`processEvent`) into the real
+// pending-question map helpers App.tsx uses, the MOUNTED QuestionRequest
+// component renders the question and submits/cancels with the right
+// requestId/answers, and a resolution event clears the card exactly once
+// (requestId-guarded). No SessionManager, no agents, no private-method
+// overwrites: the REAL Claude/Pi/Pi×Codex outside-in turns (production
+// factory + subprocess) are covered by
+// `packages/server-core/src/sessions/request-user-input-acceptance.test.ts`.
+//
+// Visual anchors (question-request / question-option-* / question-confirm /
+// question-cancel) are asserted for the E2E smoke selectors.
 
-// REACT-MOUNTED outside-in acceptance: every engine drives a REAL production
-// turn (SessionManager.sendMessage), the pending question flows through the
-// production renderer pipeline (event-processor + pending-question map
-// helpers), and the user answers/skips through the MOUNTED QuestionRequest
-// component — the same component the desktop input area renders.
+import { afterEach, describe, expect, it } from 'bun:test'
 
 if (typeof window === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { GlobalRegistrator }: any = await import('@happy-dom/global-registrator')
   GlobalRegistrator.register({
     settings: {
       navigator: {
@@ -30,23 +34,66 @@ const { cleanup, render, screen, act } = await import('@testing-library/react')
 const { I18nextProvider } = await import('react-i18next')
 const { createElement } = await import('react')
 const { QuestionRequest } = await import('./QuestionRequest')
-
-const { SessionManager } = await import('@polo-ai/server-core/sessions')
-const { getSessionFilePath, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
-type StoredSession = import('@polo-ai/shared/sessions').StoredSession
-const sharedAgent = await import('@polo-ai/shared/agent')
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rendererEvents: any = await import('../../../../event-processor/processor.ts')
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rendererPending: any = await import('../../../../lib/pending-questions.ts')
 
-describe('request_user_input React-mounted acceptance', () => {
-  let tmpRoot: string
-  let sm: any
-  let events: Array<Record<string, unknown>>
-  const seededSessionIds = new Set<string>()
-
-  function makeRequest(sessionId: string): any {
+describe('request_user_input renderer question-card pipeline', () => {
+  // Production renderer pipeline: events → processEvent → pending map.
+  const renderer = (() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const guard = new rendererPending.PendingQuestionTerminalGuard()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let map = new Map<string, any>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const states = new Map<string, any>()
     return {
-      requestId: `q-${sessionId}`,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      pendingOf: (sessionId: string) => map.get(sessionId) ?? null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      deliver(event: any): void {
+        const sessionId = event.sessionId as string
+        if (event.type === 'session_deleted') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          map = rendererPending.clearPendingQuestionForDeletedSession(map, sessionId, guard)
+          return
+        }
+        if (typeof sessionId !== 'string') return
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let state = states.get(sessionId)
+        if (!state) {
+          state = {
+            session: {
+              id: sessionId, name: '', createdAt: 0, lastUsedAt: 0, messages: [],
+              tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+            },
+            streaming: null,
+          }
+          states.set(sessionId, state)
+        }
+        const { state: nextState, effects } = rendererEvents.processEvent(state, event)
+        states.set(sessionId, nextState)
+        for (const effect of effects) {
+          if (effect.type === 'question_request') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            map = rendererPending.setPendingQuestionForSession(map, sessionId, effect.request, guard)
+          } else if (effect.type === 'question_resolved') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            map = rendererPending.removePendingQuestionForSession(map, sessionId, effect.requestId, guard)
+          }
+        }
+      },
+    }
+  })()
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function makeRequest(sessionId: string, requestId = 'q-render-1'): any {
+    return {
+      requestId,
       sessionId,
       createdAt: Date.now(),
       questions: [
@@ -63,96 +110,15 @@ describe('request_user_input React-mounted acceptance', () => {
     }
   }
 
-  function makeAnswer(request: any): any {
-    return {
-      action: 'answer',
-      response: {
-        requestId: request.requestId,
-        answers: [{ questionId: 'data', selectedOptionIds: ['delete'] }],
-      },
-    }
-  }
-
-  // Production renderer pipeline: events → processEvent → pending map.
-  const renderer = (() => {
-    const guard = new rendererPending.PendingQuestionTerminalGuard()
-    let map = new Map<string, any>()
-    const states = new Map<string, any>()
-    return {
-      pendingOf: (sessionId: string) => map.get(sessionId) ?? null,
-      deliver(event: any): void {
-        const sessionId = event.sessionId as string
-        if (event.type === 'session_deleted') {
-          map = rendererPending.clearPendingQuestionForDeletedSession(map, sessionId, guard)
-          return
-        }
-        if (typeof sessionId !== 'string') return
-        let state = states.get(sessionId)
-        if (!state) {
-          state = {
-            session: {
-              id: sessionId, name: '', createdAt: 0, lastUsedAt: 0, messages: [],
-              tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
-            },
-            streaming: null,
-          }
-          states.set(sessionId, state)
-        }
-        const { state: nextState, effects } = rendererEvents.processEvent(state, event)
-        states.set(sessionId, nextState)
-        for (const effect of effects) {
-          if (effect.type === 'question_request') {
-            map = rendererPending.setPendingQuestionForSession(map, sessionId, effect.request, guard)
-          } else if (effect.type === 'question_resolved') {
-            map = rendererPending.removePendingQuestionForSession(map, sessionId, effect.requestId, guard)
-          }
-        }
-      },
-    }
-  })()
-
-  beforeEach(async () => {
-    tmpRoot = mkdtempSync(join(tmpdir(), 'react-acceptance-'))
-    sm = new SessionManager({ workspace: { id: 'ws_test', name: 'WS', slug: 'ws_test', rootPath: tmpRoot, createdAt: Date.now() } })
-    events = []
-    sm.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
-      events.push(event)
-      renderer.deliver(event)
-    }) as never)
-  })
-
-  afterEach(async () => {
-    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.clear()
-    const queue = (sm as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
-    for (const id of seededSessionIds) {
-      try { queue.cancel(id) } catch { /* ignore */ }
-    }
-    seededSessionIds.clear()
-    await new Promise(r => setTimeout(r, 650))
-    rmSync(tmpRoot, { recursive: true, force: true })
-    cleanup()
-  })
-
-  async function seedEmbeddedSession(sessionId: string) {
-    // PRODUCTION creation path.
-    await sm.createSession('ws_test', { name: sessionId })
-    // The created session keeps its generated id; rename the map key by
-    // reading the created session.
-    const created = (sm as unknown as { getSessions: () => Array<{ id: string; name?: string }> }).getSessions()
-      .find(s => s.name === sessionId)!
-    const managed = (sm as unknown as { sessions: Map<string, any> }).sessions.get(created.id)!
-    seededSessionIds.add(created.id)
-    return { managed, sessionId: created.id } as { managed: any; sessionId: string }
-  }
-
   /**
-   * Mount the REAL QuestionRequest card with the pending question from the
-   * renderer pipeline; onSubmit routes into the SessionManager's durable
-   * resolution; onCancel skips.
+   * Mount the REAL QuestionRequest card against the pending question from the
+   * renderer pipeline; onSubmit/onCancel record the component's outputs (the
+   * durable resolution is the server acceptance's contract, not this file's).
    */
   async function mountQuestionCard(sessionId: string) {
     const pending = renderer.pendingOf(sessionId)
     expect(pending).not.toBeNull()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let submitted: any = null
     let cancelled: string | null = null
     const view = render(
@@ -162,14 +128,8 @@ describe('request_user_input React-mounted acceptance', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         createElement(QuestionRequest as any, {
           request: pending,
-          onSubmit: async (response: any) => {
-            submitted = response
-            await sm.respondToQuestion(sessionId, { action: 'answer', response })
-          },
-          onCancel: async (requestId: string) => {
-            cancelled = requestId
-            await sm.respondToQuestion(sessionId, { action: 'cancel', requestId })
-          },
+          onSubmit: async (response: any) => { submitted = response },
+          onCancel: async (requestId: string) => { cancelled = requestId },
         }),
       ),
     )
@@ -180,93 +140,16 @@ describe('request_user_input React-mounted acceptance', () => {
     }
   }
 
-  async function waitForCondition(check: () => boolean, timeoutMs = 20000): Promise<void> {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      if (check()) return
-      await new Promise(r => setTimeout(r, 50))
-    }
-    throw new Error('waitForCondition timed out')
-  }
-
-  function readableMessages(sessionId: string, requestId: string) {
-    const managed = (sm as unknown as { sessions: Map<string, { messages?: Array<any> }> }).sessions.get(sessionId)
-    return (managed?.messages ?? []).filter(
-      (m: any) => m.role === 'user' && m.questionResponse?.requestId === requestId,
-    )
-  }
-
-  // -------------------------------------------------------------------------
-  // Claude: real SDK toolset → durable handoff → mounted card → answer.
-  // -------------------------------------------------------------------------
-
-  it('claude: the mounted question card answers the durable pending question; ONE readable message; the session continues', async () => {
-    const { managed, sessionId } = await seedEmbeddedSession('react-claude-1')
+  it('a question_request event renders the card through the production pipeline; the answer submits ONE response with the requestId and the resolution clears the card once', async () => {
+    const sessionId = 'render-pipeline-1'
     const request = makeRequest(sessionId)
-    // The turn's model behavior: ask via the REAL production SDK toolset.
-    let chatCalls = 0
-    const agent: Record<string, unknown> = {
-      allowRequestUserInput: true,
-      interruptForHandoff: () => {},
-      forceAbort: () => {},
-      setSessionTurnGeneration: () => {},
-      get sessionTurnGeneration() { return (managed as unknown as { processingGeneration: number }).processingGeneration },
-      onQuestionRequested: null as unknown,
-      chat: async function* () {
-        // The model asks ONCE (turn 1); the continuation answers from history.
-        if (chatCalls === 0) {
-          const serverConfig = sharedAgent.getSessionScopedTools(
-            sessionId, tmpRoot, 'ws_test', undefined, tmpRoot,
-            { allowRequestUserInput: true },
-          ) as unknown as { instance: McpServer }
-          const client = new Client({ name: 'claude-model-toolset', version: '1.0.0' })
-          const [ct, st] = InMemoryTransport.createLinkedPair()
-          await Promise.all([serverConfig.instance.connect(st), client.connect(ct)])
-          const result = await client.callTool({ name: 'request_user_input', arguments: { questions: request.questions } })
-          expect(result.isError).toBeFalsy()
-          await client.close()
-        }
-        chatCalls += 1
-        yield { type: 'complete' as const }
-      },
-      getModel: () => 'fake-model',
-      getSessionId: () => null,
-      isProcessing: () => false,
-      supportsBranching: true,
-      setAllSources: () => {},
-      setSourceServers: async () => {},
-      getSummarizeCallback: () => undefined,
-      dispose: () => {},
-      respondToPermission: () => {},
-    }
-    managed.agent = agent
-    const sessionsMap = (sm as unknown as { sessions: Map<string, unknown> }).sessions
-    let mapClears = 0
-    ;(sessionsMap as unknown as { clear: () => void }).clear = function () {
-      mapClears++
-    }
-    const realDelete = (sm as unknown as { deleteSession: (id: string) => Promise<void> }).deleteSession.bind(sm)
-    ;(sm as unknown as { deleteSession: (id: string) => Promise<void> }).deleteSession = async (id: string) => {
-      return realDelete(id)
-    }
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => agent
-    agent.onQuestionRequested = (questions: unknown[], generationAtRequest: number) =>
-      (sm as unknown as {
-        routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
-      }).routeAgentQuestionRequested(managed, questions, generationAtRequest)
-    sharedAgent.registerSessionScopedToolCallbacks(sessionId, {
-      onQuestionRequested: (questions: unknown[], generationAtRequest: number) =>
-        (agent.onQuestionRequested as (q: unknown[], g: number) => Promise<void> | void)(questions, generationAtRequest),
-      getTurnGeneration: () => (managed as unknown as { processingGeneration: number }).processingGeneration,
-    })
+    renderer.deliver({ type: 'question_request', sessionId, request })
+    expect(renderer.pendingOf(sessionId)?.requestId).toBe(request.requestId)
 
-    // REAL production turn.
-    await sm.sendMessage(sessionId, 'please ask me', [], [], { invocationSource: 'desktop' })
-    const pending = sm.getPendingQuestion(sessionId)
-    expect(pending).not.toBeNull()
-
-    // Mount the REAL question card and answer through it.
     const card = await mountQuestionCard(sessionId)
+    // Visual smoke anchors for the E2E selectors.
+    expect(screen.getByTestId('question-request')).toBeDefined()
+
     await act(async () => {
       (screen.getByTestId('question-option-data-delete') as HTMLButtonElement).click()
     })
@@ -274,118 +157,43 @@ describe('request_user_input React-mounted acceptance', () => {
       (screen.getByTestId('question-confirm') as HTMLButtonElement).click()
     })
     await act(async () => {})
+    // ONE submit with the right identity and the selected answer.
     expect(card.submitted).not.toBeNull()
-    expect(card.submitted.requestId).toBe(pending!.requestId)
+    expect(card.submitted.requestId).toBe(request.requestId)
+    expect(card.submitted.answers).toEqual([
+      { questionId: 'data', selectedOptionIds: ['delete'] },
+    ])
 
-    // The durable resolution settles asynchronously (the events trail the
-    // in-memory mutation) — wait for the resolution boundary.
-    await waitForCondition(
-      () => events.some(e => e.type === 'question_resolved' && e.requestId === pending!.requestId),
-      15000,
-    )
-    expect(sm.getPendingQuestion(sessionId)).toBeNull()
-    expect(readableMessages(sessionId, pending!.requestId)).toHaveLength(1)
-    // ONE durable handoff; the renderer card cleared.
-    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+    // The resolution event clears the card through the pipeline; a repeated
+    // (idempotent) resolution keeps it cleared.
+    renderer.deliver({ type: 'question_resolved', sessionId, requestId: request.requestId, action: 'answer' })
+    expect(renderer.pendingOf(sessionId)).toBeNull()
+    renderer.deliver({ type: 'question_resolved', sessionId, requestId: request.requestId, action: 'answer' })
     expect(renderer.pendingOf(sessionId)).toBeNull()
   })
 
-  // -------------------------------------------------------------------------
-  // Pi: real proxy toolset dispatch → mounted card → cancel.
-  // -------------------------------------------------------------------------
-
-  it('pi: the mounted question card skips the durable pending question; ONE skip record; the session does not continue', async () => {
-    const { managed, sessionId } = await seedEmbeddedSession('react-pi-1')
-    const agent: Record<string, unknown> = {
-      allowRequestUserInput: true,
-      interruptForHandoff: () => {},
-      forceAbort: () => {},
-      setSessionTurnGeneration: () => {},
-      get sessionTurnGeneration() { return (managed as unknown as { processingGeneration: number }).processingGeneration },
-      onQuestionRequested: null as unknown,
-      chat: async function* () { yield { type: 'complete' as const } },
-      getModel: () => 'fake-model',
-      getSessionId: () => null,
-      isProcessing: () => false,
-      supportsBranching: true,
-      setAllSources: () => {},
-      setSourceServers: async () => {},
-      getSummarizeCallback: () => undefined,
-      dispose: () => {},
-      respondToPermission: () => {},
-    }
-    managed.agent = agent
-    const sessionsMap = (sm as unknown as { sessions: Map<string, unknown> }).sessions
-    let mapClears = 0
-    ;(sessionsMap as unknown as { clear: () => void }).clear = function () {
-      mapClears++
-    }
-    const realDelete = (sm as unknown as { deleteSession: (id: string) => Promise<void> }).deleteSession.bind(sm)
-    ;(sm as unknown as { deleteSession: (id: string) => Promise<void> }).deleteSession = async (id: string) => {
-      return realDelete(id)
-    }
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => agent
-    agent.onQuestionRequested = (questions: unknown[], generationAtRequest: number) =>
-      (sm as unknown as {
-        routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
-      }).routeAgentQuestionRequested(managed, questions, generationAtRequest)
-
-    const pi = new sharedAgent.PiAgent({
-      provider: 'pi',
-      providerType: 'pi',
-      workspace: { id: 'ws_test', name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
-      session: { id: sessionId, workspaceRootPath: tmpRoot, createdAt: Date.now(), lastUsedAt: Date.now() },
-      isHeadless: true,
-      miniModel: '',
-    } as never)
-    const piFields = pi as unknown as {
-      allowRequestUserInput: boolean
-      onQuestionRequested: ((q: unknown[], g: number) => Promise<void> | void) | null
-      routeToolCall: (name: string, args: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>
-      chat: (message?: string, attachments?: unknown) => AsyncGenerator<{ type: string }>
-    }
-    piFields.allowRequestUserInput = true
-    // PRODUCTION wiring (getOrCreateAgent mirror): the agent field routes the
-    // question into the durable handoff.
-    piFields.onQuestionRequested = (questions, generationAtRequest) =>
-      (agent.onQuestionRequested as (q: unknown[], g: number) => Promise<void> | void)(questions, generationAtRequest)
-
-    const request = makeRequest(sessionId)
-    // The turn's model behavior: ask via the production proxy dispatch.
-    let chatCalls = 0
-    piFields.chat = async function* () {
-      if (chatCalls === 0) {
-        chatCalls++
-        const dispatched = await piFields.routeToolCall('mcp__session__request_user_input', { questions: request.questions })
-        expect(dispatched.isError).toBe(false)
-      }
-      yield { type: 'complete' as const }
-    }
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => pi
-
-    await sm.sendMessage(sessionId, 'please ask me', [], [], { invocationSource: 'desktop' })
-    const pending = sm.getPendingQuestion(sessionId)
-    expect(pending).not.toBeNull()
-
-    // Mount the REAL card and SKIP through it.
+  it('cancel submits the requestId through the pipeline and a STALE resolution never clears a newer card', async () => {
+    const sessionId = 'render-pipeline-2'
+    const request = makeRequest(sessionId, 'q-render-2')
+    renderer.deliver({ type: 'question_request', sessionId, request })
     const card = await mountQuestionCard(sessionId)
+
     await act(async () => {
       (screen.getByTestId('question-cancel') as HTMLButtonElement).click()
     })
     await act(async () => {})
-    expect(card.cancelled).toBe(pending!.requestId)
+    expect(card.cancelled).toBe(request.requestId)
+    expect(card.submitted).toBeNull()
 
-    // The durable cancellation settles asynchronously — wait for the
-    // resolution boundary.
-    await waitForCondition(
-      () => events.some(e => e.type === 'question_resolved' && e.requestId === pending!.requestId && e.action === 'cancel'),
-      15000,
-    )
-    expect(sm.getPendingQuestion(sessionId)).toBeNull()
-    const managedAfter = (sm as unknown as { sessions: Map<string, { messages: Array<any> }> }).sessions.get(sessionId)!
-    const skipRecords = managedAfter.messages.filter((m: any) => m.questionResolution?.requestId === pending!.requestId)
-    expect(skipRecords).toHaveLength(1)
+    // The card is replaced by a NEWER requestId; the stale resolution of the
+    // old card must not clear the newer one (requestId guard).
+    const newer = makeRequest(sessionId, 'q-render-2-newer')
+    renderer.deliver({ type: 'question_request', sessionId, request: newer })
+    expect(renderer.pendingOf(sessionId)?.requestId).toBe(newer.requestId)
+    renderer.deliver({ type: 'question_resolved', sessionId, requestId: request.requestId, action: 'cancel' })
+    expect(renderer.pendingOf(sessionId)?.requestId).toBe(newer.requestId)
+    // The NEWER resolution clears it.
+    renderer.deliver({ type: 'question_resolved', sessionId, requestId: newer.requestId, action: 'cancel' })
     expect(renderer.pendingOf(sessionId)).toBeNull()
-  }, 120000)
-
+  })
 })

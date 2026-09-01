@@ -1158,11 +1158,6 @@ export class PiAgent extends BaseAgent {
         });
         break;
 
-      case 'session_tool_completed':
-        // Session MCP tool completed -- fire callbacks (SubmitPlan, auth, etc.)
-        this.handleSessionToolCompleted(msg);
-        break;
-
       case 'mini_completion_result':
         // Response to a mini_completion request
         this.handleMiniCompletionResult(msg);
@@ -1324,12 +1319,6 @@ export class PiAgent extends BaseAgent {
     let adaptedEvent = event;
 
     if (eventType === 'tool_execution_start') {
-      const toolName = event.toolName as string;
-      if (toolName?.startsWith('session__') || toolName?.startsWith('mcp__session__')) {
-        // Session tool tracking is handled by the subprocess; it sends
-        // session_tool_completed events when appropriate.
-      }
-
       // Deterministic metadata bridge: if subprocess event lacks toolMetadata,
       // inject metadata captured from pre_tool_use_request before stripping.
       const toolCallId = event.toolCallId as string | undefined;
@@ -1345,7 +1334,7 @@ export class PiAgent extends BaseAgent {
               source: 'interceptor',
             },
           };
-          this.debug(`Injected pre-tool metadata for ${toolName} (${toolCallId}) from bridge cache`);
+          this.debug(`Injected pre-tool metadata for ${toolCallId} from bridge cache`);
         }
       }
     }
@@ -1849,23 +1838,6 @@ export class PiAgent extends BaseAgent {
     }
   }
 
-
-
-  /**
-   * Handle session_tool_completed from subprocess.
-   *
-   * NOTE: For proxy-executed session tools, callbacks (onPlanSubmitted, etc.)
-   * are already fired by executeSessionTool() via the SessionToolContext.
-   * The subprocess sends this event because handleSessionEvent() detects the
-   * mcp__session__ prefix, but we intentionally skip handleSessionMcpToolCompletion()
-   * here to avoid double-firing callbacks.
-   */
-  private handleSessionToolCompleted(msg: Record<string, unknown>): void {
-    const toolName = msg.toolName as string;
-    const isError = msg.isError as boolean;
-    this.debug(`Session tool completed: ${toolName} (isError=${isError})`);
-    // Callbacks already handled by executeSessionTool() — no-op.
-  }
 
   /**
    * Handle mini_completion_result from subprocess.

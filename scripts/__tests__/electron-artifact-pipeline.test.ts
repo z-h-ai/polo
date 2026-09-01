@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const root = join(import.meta.dir, '..', '..')
@@ -18,12 +19,17 @@ describe('Electron final artifact validation pipeline', () => {
     expect(dockerfile).toContain('packages/pi-agent-server/src/index.ts')
 
     const unixValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
-    expect(unixValidator).not.toContain('session-mcp-server')
+    // The shell validator mentions the sidecar ONLY inside its removal
+    // check — never as a staged or required artifact path.
+    expect((unixValidator.match(/session-mcp-server/g) ?? []).length).toBe(3)
+    expect(unixValidator).toContain('still contains the removed session-mcp-server sidecar')
+    expect(unixValidator).not.toContain('resources/session-mcp-server/index.js')
     expect(unixValidator).toContain('resources/pi-agent-server/index.js')
 
     const windowsValidator = read('apps/electron/scripts/validate-final-artifacts.ps1')
-    expect(windowsValidator).not.toContain('session-mcp-server')
     expect(windowsValidator).not.toContain('sessionServerPath')
+    expect(windowsValidator).not.toContain('resources\\session-mcp-server\\index.js')
+    expect(windowsValidator).toContain('removed session-mcp-server sidecar')
     expect(windowsValidator).toContain('pi-agent-server')
 
     const builderManifest = read('apps/electron/electron-builder.yml')
@@ -506,5 +512,38 @@ describe('Electron final artifact validation pipeline', () => {
       expect(source).toContain('astral-sh-release')
     }
     expect(afterPack).toContain('linux-terminal-integration.sh')
+  })
+
+  // STAGING-LEVEL REGRESSION (POO-53 round 3): the resource copies are
+  // overwrite-only, so a pre-removal leftover of the removed session MCP
+  // sidecar must be PRUNED by the staging entry itself — both in the source
+  // resources/ tree and in dist/resources/ — while the Pi subprocess bundle
+  // survives. Static script-text scans cannot catch a stale artifact; this
+  // exercises the real staging function against a planted sentinel.
+  it('resource staging prunes a stale session-mcp-server sidecar from source and dist and keeps the pi bundle', async () => {
+    const { stageResources } = await import(join(root, 'apps', 'electron', 'scripts', 'copy-assets.ts'))
+    const electronDir = mkdtempSync(join(tmpdir(), 'polo-resource-staging-'))
+    try {
+      // Plant the leftover: an old sidecar in BOTH the source staging tree
+      // and dist, next to the live Pi bundle.
+      const sidecarSrc = join(electronDir, 'resources', 'session-mcp-server')
+      const sidecarDist = join(electronDir, 'dist', 'resources', 'session-mcp-server')
+      const piSrc = join(electronDir, 'resources', 'pi-agent-server')
+      mkdirSync(sidecarSrc, { recursive: true })
+      mkdirSync(sidecarDist, { recursive: true })
+      mkdirSync(piSrc, { recursive: true })
+      writeFileSync(join(sidecarSrc, 'index.js'), 'stale sidecar sentinel')
+      writeFileSync(join(sidecarDist, 'index.js'), 'stale sidecar sentinel')
+      writeFileSync(join(piSrc, 'index.js'), 'pi bundle sentinel')
+      writeFileSync(join(electronDir, 'resources', 'config-defaults.json'), '{}')
+
+      stageResources(electronDir)
+
+      expect(existsSync(sidecarSrc)).toBe(false)
+      expect(existsSync(sidecarDist)).toBe(false)
+      expect(existsSync(join(electronDir, 'dist', 'resources', 'pi-agent-server', 'index.js'))).toBe(true)
+    } finally {
+      rmSync(electronDir, { recursive: true, force: true })
+    }
   })
 })

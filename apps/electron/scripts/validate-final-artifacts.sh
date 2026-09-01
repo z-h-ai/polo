@@ -275,6 +275,10 @@ validate_app_bundle() {
       fi
     done
   fi
+  if [ -e "$app_root/resources/session-mcp-server" ]; then
+    echo "$label still contains the removed session-mcp-server sidecar: $app_root/resources/session-mcp-server" >&2
+    return 1
+  fi
 
   (
     cd "$TEMP_ROOT/clean-cwd"

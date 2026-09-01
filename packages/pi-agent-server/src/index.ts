@@ -183,7 +183,6 @@ interface OutboundPreToolUseReq {
   input: Record<string, unknown>;
 }
 interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
-interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
   type: 'llm_query_result';
@@ -226,7 +225,6 @@ type OutboundMessage =
   | OutboundEvent
   | OutboundPreToolUseReq
   | OutboundToolExecReq
-  | OutboundSessionToolCompleted
   | OutboundMiniResult
   | OutboundLlmQueryResult
   | OutboundEnsureSessionReadyResult
@@ -256,7 +254,6 @@ const pendingPreToolUse = new Map<string, { resolve: (response: { action: string
 const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
 
 // Pending session MCP tool calls for completion detection
-const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
 
 // Proxy tool definitions from main process — session tools are REPLACED
 // wholesale per registration (per-turn capability bits like request_user_input
@@ -1226,36 +1223,14 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     }
   }
 
-  // Detect session MCP tool completions + enrich tool starts with canonical metadata
+  // Enrich session tool starts with canonical metadata
   if (event.type === 'tool_execution_start') {
-    const toolName = event.toolName;
-    if (toolName.startsWith('session__') || toolName.startsWith('mcp__session__')) {
-      const mcpToolName = toolName.replace(/^(mcp__session__|session__)/, '');
-      pendingSessionToolCalls.set(event.toolCallId, {
-        toolName: mcpToolName,
-        arguments: (event.args ?? {}) as Record<string, unknown>,
-      });
-    }
-
     const toolMetadata = extractToolExecutionMetadata((event.args ?? {}) as Record<string, unknown>);
     if (toolMetadata) {
       forwardedEvent = {
         ...event,
         toolMetadata,
       };
-    }
-  }
-
-  if (event.type === 'tool_execution_end') {
-    const pending = pendingSessionToolCalls.get(event.toolCallId);
-    if (pending) {
-      pendingSessionToolCalls.delete(event.toolCallId);
-      send({
-        type: 'session_tool_completed',
-        toolName: pending.toolName,
-        args: pending.arguments,
-        isError: !!event.isError,
-      });
     }
   }
 

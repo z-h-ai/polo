@@ -292,6 +292,10 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
             }
         }
     }
+    $removedSidecar = Join-Path $appRoot "resources\session-mcp-server"
+    if (Test-Path -LiteralPath $removedSidecar) {
+        throw "Installed NSIS container still contains the removed session-mcp-server sidecar: $removedSidecar"
+    }
 
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
