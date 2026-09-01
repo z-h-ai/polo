@@ -117,8 +117,6 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
   RPC_CHANNELS.sessions.RESPOND_TO_QUESTION,
-  RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN,
-  RPC_CHANNELS.sessions.CREATE_EXTERNAL_ENGINE_SESSION,
   RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
@@ -190,13 +188,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return session
   })
 
-  // Create a new session. FAIL-CLOSED on the external-engine registration:
-  // a generic create can never grant it — `externalEngine` is stripped here
-  // and only the dedicated CREATE_EXTERNAL_ENGINE_SESSION path grants it.
+  // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('rpc.createSession', { workspaceId })
-    const { externalEngine: _untrustedExternalEngine, ...trustedOptions } = options ?? {}
-    const session = await sessionManager.createSession(workspaceId, trustedOptions)
+    const session = await sessionManager.createSession(workspaceId, options)
     end()
     return session
   })
@@ -322,19 +317,6 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Returns the QuestionResolutionResult contract that drives the UI cleanup.
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION, async (_ctx, sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution) => {
     return sessionManager.respondToQuestion(sessionId, resolution)
-  })
-
-  // External-engine drivers report model turn completion here (the owned
-  // sidecar is disposed and the processing-stopped boundary runs).
-  server.handle(RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN, async (_ctx, sessionId: string, expectedGeneration?: number) => {
-    await sessionManager.completeExternalEngineTurn(sessionId, expectedGeneration)
-    return { ok: true }
-  })
-
-  // PRODUCTION entry for creating an externally driven session (the external
-  // Codex harness owns the model; the driver owns the single sidecar).
-  server.handle(RPC_CHANNELS.sessions.CREATE_EXTERNAL_ENGINE_SESSION, async (_ctx, workspaceId: string, options?: { name?: string }) => {
-    return sessionManager.createExternalEngineSession(workspaceId, options)
   })
 
   // Locate the Edit Popover session that still owns an active pending

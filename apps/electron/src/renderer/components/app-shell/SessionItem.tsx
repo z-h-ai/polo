@@ -201,6 +201,7 @@ export function SessionItem({
       title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
       titleClassName={cn("text-[13px]", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={previewText}
+      subtitleTestId={isCompactMode ? "session-row-expanded" : undefined}
       titleSuffix={
         hasMessagingBinding ? (
           <div className="flex items-center gap-1">

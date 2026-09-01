@@ -24,7 +24,6 @@ export const CHANNEL_MAP = {
   getSessionMessages: invoke(RPC_CHANNELS.sessions.GET_MESSAGES),
   createSession: invoke(RPC_CHANNELS.sessions.CREATE),
   createEditPopoverSession: invoke(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION),
-  createExternalEngineSession: invoke(RPC_CHANNELS.sessions.CREATE_EXTERNAL_ENGINE_SESSION),
   deleteSession: invoke(RPC_CHANNELS.sessions.DELETE),
   sendMessage: invoke(RPC_CHANNELS.sessions.SEND_MESSAGE),
   cancelProcessing: invoke(RPC_CHANNELS.sessions.CANCEL),

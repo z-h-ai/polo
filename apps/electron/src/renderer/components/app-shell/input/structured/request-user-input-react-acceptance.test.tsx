@@ -31,14 +31,7 @@ const { I18nextProvider } = await import('react-i18next')
 const { createElement } = await import('react')
 const { QuestionRequest } = await import('./QuestionRequest')
 
-const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..', '..', '..', '..', '..')
-const HARNESS_MODEL_SCRIPT = join(REPO_ROOT, 'packages', 'server-core', 'src', 'sessions', '__fixtures__', 'codex-model-harness.mjs')
-
 const { SessionManager } = await import('@polo-ai/server-core/sessions')
-// structured/ → input → app-shell → components → renderer → src → electron → apps → repo root
-const adapterModuleUrl = new URL('../../../../../../../../packages/server-core/src/sessions/external-engine-model-adapter.ts', import.meta.url).href
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { createCodexSessionModelTurn }: any = await import(adapterModuleUrl)
 const { getSessionFilePath, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const sharedAgent = await import('@polo-ai/shared/agent')
@@ -396,60 +389,4 @@ describe('request_user_input React-mounted acceptance', () => {
     expect(renderer.pendingOf(sessionId)).toBeNull()
   }, 120000)
 
-  // -------------------------------------------------------------------------
-  // External Codex: production driver turn → mounted card → answer → the
-  // driver's continuation turn completes on the SAME session.
-  // -------------------------------------------------------------------------
-
-  it('external codex: the driver runs the model turn; the mounted card answers; the session continues via a NEW driver turn', async () => {
-    const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
-    await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-    const created = await sm.createSession('ws_test', { externalEngine: true, name: 'react-codex-1' })
-    const sessionId = created.id
-    seededSessionIds.add(sessionId)
-
-    const request = makeRequest(sessionId)
-    // The harness records each model session's prompt — the observable launch
-    // sequence (one line per model process).
-    const promptLog = join(tmpRoot, 'model-prompts.log')
-    const promptsSeen = () => (existsSync(promptLog) ? readFileSync(promptLog, 'utf-8').split('\n').filter(Boolean).map(l => JSON.parse(l) as string) : [])
-    const modelAdapter = createCodexSessionModelTurn({
-      resolveCodexCommand: () => ({
-        command: process.execPath,
-        // Harness contract: argv[2] = the request_user_input arguments; the
-        // turn prompt is appended LAST and decides the model's behavior
-        // (the ask prompt → request_user_input; the answer prompt → done).
-        args: [HARNESS_MODEL_SCRIPT, JSON.stringify({ questions: request.questions })],
-        env: { POLO_HARNESS_PROMPT_LOG: promptLog },
-      }),
-    })
-    sm.setExternalEngineModelAdapter(modelAdapter)
-
-    // PRODUCTION turn launch.
-    await sm.sendMessage(sessionId, 'please ask me', [], [], { invocationSource: 'desktop' })
-    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 20000)
-    const pending = sm.getPendingQuestion(sessionId)!
-
-    // Mount the REAL card and answer through it.
-    const card = await mountQuestionCard(sessionId)
-    await act(async () => {
-      (screen.getByTestId('question-option-data-delete') as HTMLButtonElement).click()
-    })
-    await act(async () => {
-      (screen.getByTestId('question-confirm') as HTMLButtonElement).click()
-    })
-    await act(async () => {})
-    expect(card.submitted).not.toBeNull()
-
-    // The resume launches a NEW driver turn whose prompt IS the answer; it
-    // completes through the production boundary.
-    await waitForCondition(() => promptsSeen().length >= 2, 15000)
-    expect(promptsSeen()[1]).toContain('Delete permanently')
-    await waitForCondition(() => {
-      const m = (sm as unknown as { sessions: Map<string, { isProcessing: boolean }> }).sessions.get(sessionId)!
-      return m.isProcessing === false
-    }, 15000)
-    expect(readableMessages(sessionId, pending.requestId)).toHaveLength(1)
-    expect(renderer.pendingOf(sessionId)).toBeNull()
-  }, 120000)
 })

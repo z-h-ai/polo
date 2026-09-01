@@ -2,9 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
-// Repo root (this file: packages/server-core/src/sessions/) — used to point
-// the spawned session MCP server at its SOURCE entry (bun executes TS).
-const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..')
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
 
 // Fault injection for releaseBrowserOwnershipOnForcedStop — must be installed
@@ -57,7 +54,6 @@ const { SessionManager, createManagedSession, computeRequestUserInputEligibility
 const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
-const { createCodexSessionModelTurn } = await import('./external-engine-model-adapter.ts')
 
 
 // Fault-injection and lifecycle coverage for request_user_input:
@@ -199,22 +195,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       turnStartReserved?: boolean
       agent?: { interruptedCount?: number }
     }
-  }
-
-  /**
-   * Seed a session registered for external-engine consumption — the flag is
-   * persisted on the DISK header (the production createSession path writes
-   * it there), so hydration restores it like any real external session.
-   */
-  function seedExternalSession(sessionId: string) {
-    const managed = seedSession(sessionId, {}) as unknown as { externalToolset: boolean; processingGeneration: number }
-    const headerPath = getSessionFilePath(tmpRoot, sessionId)
-    const stored = JSON.parse(readFileSync(headerPath, 'utf-8').split('\n')[0]) as Record<string, unknown>
-    stored.externalToolset = true
-    stored.messages = stored.messages ?? []
-    writeSessionJsonl(headerPath, stored as never)
-    managed.externalToolset = true
-    return managed
   }
 
   function patchPrivateFlush() {
@@ -1133,12 +1113,11 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   })
 
-  // ---- Ownership: the per-turn sidecar is the EXTERNAL engine's channel
-  // (gated to externally registered sessions); the EMBEDDED agent wiring goes
-  // DIRECT to the durable handoff and never runs a sidecar — one
-  // owner/channel per engine, no stdio/HTTP callback loop, no double delivery.
+  // ---- Ownership: the EMBEDDED agent wiring (Claude/Pi) goes DIRECT to the
+  // durable handoff — one owner/channel per engine, no sidecar, no
+  // stdio/HTTP callback loop, no double delivery.
 
-  it('embedded sessions spawn NO per-turn sidecar and their agent wiring goes DIRECT to the durable handoff (single channel)', async () => {
+  it('embedded agent wiring goes DIRECT to the durable handoff (single channel)', async () => {
     patchPrivateFlush()
     const managed = seedSession('f-wire-1', {}) as unknown as { processingGeneration: number }
     // A fully functional fake agent runs the turn; the question field is
@@ -1151,13 +1130,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       }).routeAgentQuestionRequested(managed, questions, generation)
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => fake
 
-    const entryPath = join(import.meta.dir, '..', '..', '..', '..', 'packages', 'session-mcp-server', 'src', 'index.ts')
-    await sm.startSessionMcpHost({ serverEntryPath: entryPath, nodeRuntimePath: process.execPath })
-
-    // An embedded session is NOT registered for external consumption: the
-    // config surface fails closed and no sidecar channel exists — the
-    // in-process registry is its single owner/channel, structurally.
-    expect(await sm.getSessionExternalModelToolset('f-wire-1', 'desktop', managed.processingGeneration)).toBeNull()
     await sm.sendMessage('f-wire-1', 'turn one', [], [], { invocationSource: 'desktop' })
 
     // The model calls the tool — the embedded wiring lands DIRECTLY in the
@@ -1261,77 +1233,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   })
 
-  // ---- the PRODUCTION host — a listening
-  // localhost callback server + per-turn server spawns driven from the
-  // sendMessage capability boundary. desktop→messaging→desktop capability
-  // switching is expressed in the spawned args; ONE tool call produces ONE
-  // durable handoff (the stderr delivery mirror is gone).
-
-  it('session MCP host: desktop→messaging→desktop per-turn config switching and single-delivery durable handoff', async () => {
-    patchPrivateFlush()
-    const managed = seedExternalSession('f-host-1') as unknown as { processingGeneration: number }
-    // (getOrCreateAgent stays stubbed — the async title generation probe
-    // must not build a real backend.)
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
-
-    // REAL server entry: the production driver launches and owns it as the
-    // turn's sidecar, so the entry must be a live MCP server.
-    const entry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
-    const hostPort = await sm.startSessionMcpHost({ serverEntryPath: entry, nodeRuntimePath: process.execPath })
-    expect(hostPort).toBeGreaterThan(0)
-
-    // TURN 1 — desktop: capability ON. sendMessage IS the external turn
-    // launch; the config is provisioned once for the turn's generation.
-    await sm.sendMessage('f-host-1', 'turn one', [], [], { invocationSource: 'desktop' })
-    const gen1 = managed.processingGeneration
-    const config1 = await sm.getSessionExternalModelToolset('f-host-1', 'desktop', gen1)
-    expect(config1).not.toBeNull()
-    expect(config1!.args).toContain('--allow-request-user-input')
-    expect(config1!.args[config1!.args.indexOf('--turn-generation') + 1]!).toBe(String(gen1))
-    expect(config1!.args[config1!.args.indexOf('--callback-port') + 1]!).toBe(String(hostPort))
-    // Idempotent within the turn — one logical channel provisioning.
-    expect(await sm.getSessionExternalModelToolset('f-host-1', 'desktop', gen1)).toBe(config1)
-    // The driver reports turn completion before the next turn launches.
-    await sm.completeExternalEngineTurn('f-host-1')
-
-    // TURN 2 — messaging: capability OFF (fail closed, args switched).
-    await sm.sendMessage('f-host-1', 'turn two', [], [], { invocationSource: 'messaging' })
-    const gen2 = managed.processingGeneration
-    const config2 = await sm.getSessionExternalModelToolset('f-host-1', 'messaging', gen2)
-    expect(config2).not.toBeNull()
-    expect(config2!.args).not.toContain('--allow-request-user-input')
-    expect(config2!.args[config2!.args.indexOf('--turn-generation') + 1]!).toBe(String(gen2))
-    await sm.completeExternalEngineTurn('f-host-1')
-
-    // TURN 3 — desktop again: capability back ON.
-    await sm.sendMessage('f-host-1', 'turn three', [], [], { invocationSource: 'desktop' })
-    const gen3 = managed.processingGeneration
-    const config3 = await sm.getSessionExternalModelToolset('f-host-1', 'desktop', gen3)
-    expect(config3!.args).toContain('--allow-request-user-input')
-
-    // SINGLE DELIVERY: one tool call (one POST to the host route) → exactly
-    // one durable handoff: one pending requestId, one question_request event.
-    const request = makeQuestionRequest('f-host-1')
-    const response = await fetch(`http://127.0.0.1:${hostPort}/request-user-input`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'f-host-1',
-        questions: request.questions,
-        generationAtRequest: gen3,
-      }),
-    })
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ status: 'accepted' })
-
-    const pending = sm.getPendingQuestion('f-host-1')
-    expect(pending).not.toBeNull()
-    // Exactly ONE durable handoff for the single tool call.
-    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
-
-    sm.stopSessionMcpHost()
-  })
-
   // ---- The host listener is a node:http server (the Electron main process
   // is a NODE runtime) — a real POST round-trip through the ONLY host path.
 
@@ -1360,86 +1261,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     sm.stopSessionMcpHost()
   })
-
-  // ---- the SPAWN-CONFIG↔EXTERNAL-HARNESS↔
-  // STDIO↔TOOL↔CALLBACK↔DURABLE-HANDOFF closed loop, cross-process: the
-  // harness builds its model MCP config from the PRODUCTION config surface
-  // (getSessionExternalModelToolset) and its tool call reaches the durable
-  // handoff through its own stdio connection to the spawned server.
-
-  it('cross-process loop: the externally registered session runs the MODEL (harness process over the driver proxy) into the durable handoff (ONE requestId)', async () => {
-    const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
-
-    await sm.startSessionMcpHost({
-      serverEntryPath: serverEntry,
-      nodeRuntimePath: process.execPath,
-    })
-    // PRODUCTION registration + turn launch + MODEL: the production adapter
-    // starts the harness (model process), which natively discovers
-    // request_user_input via tools/list over the driver-mediated proxy and
-    // calls it — proxy → sidecar → HTTP → durable handoff.
-    seedExternalSession('f-mcp-loop')
-    const request = makeQuestionRequest('f-mcp-loop')
-    ;(sm as unknown as { setExternalEngineModelAdapter: (m: unknown) => void }).setExternalEngineModelAdapter(
-      createCodexSessionModelTurn({
-        resolveCodexCommand: () => ({
-          command: process.execPath,
-          args: [join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs'), JSON.stringify({ questions: request.questions })],
-        }),
-      }),
-    )
-    patchPrivateFlush()
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
-    await sm.sendMessage('f-mcp-loop', 'please ask me', [], [], { invocationSource: 'desktop' })
-
-    // The model turn runs concurrently (harness boots, discovers the toolset
-    // natively, calls the tool) — wait for its durable handoff.
-    await waitForCondition(() => sm.getPendingQuestion('f-mcp-loop') !== null, 45000)
-
-    const pending = sm.getPendingQuestion('f-mcp-loop')
-    expect(pending).not.toBeNull()
-    expect(pending?.requestId).toEqual(expect.any(String))
-    // ONE tool call → exactly ONE durable handoff (single delivery).
-    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
-
-    // Terminal: answering settles the question.
-    await sm.respondToQuestion('f-mcp-loop', makeAnswerResolution(pending!))
-    expect(sm.getPendingQuestion('f-mcp-loop')).toBeNull()
-
-    sm.stopSessionMcpHost()
-  }, 60000)
-
-  it('cross-process fail-closed: a messaging turn serves a driver toolset without request_user_input', async () => {
-    seedExternalSession('f-mcp-nd')
-    patchPrivateFlush()
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
-    const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
-
-    await sm.startSessionMcpHost({
-      serverEntryPath: serverEntry,
-      nodeRuntimePath: process.execPath,
-    })
-    // FAIL-CLOSED PROBE: the messaging model process must not see the tool,
-    // and a forced call for it must be rejected by the sidecar (exit marker).
-    const failClosedMarker = join(tmpRoot, 'messaging-fail-closed.marker')
-    ;(sm as unknown as { setExternalEngineModelAdapter: (m: unknown) => void }).setExternalEngineModelAdapter(
-      createCodexSessionModelTurn({
-        resolveCodexCommand: () => ({
-          command: process.execPath,
-          args: [join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs'), '{}'],
-          env: { POLO_HARNESS_FORCE_TOOL: 'request_user_input', POLO_HARNESS_EXIT_MARKER: failClosedMarker },
-        }),
-      }),
-    )
-    await sm.sendMessage('f-mcp-nd', 'messaging turn', [], [], { invocationSource: 'messaging' })
-    await waitForCondition(() => existsSync(failClosedMarker), 30000)
-    expect(readFileSync(failClosedMarker, 'utf-8')).toBe('force-call-rejected')
-    await waitForCondition(() => !getManaged('f-mcp-nd').isProcessing, 30000)
-
-    expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
-    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
-    sm.stopSessionMcpHost()
-  }, 60000)
 
   // ---- chat-start reservation: a delete whose declaration lands after the
   // chat-start gate WAITS for the reserved query to become genuinely

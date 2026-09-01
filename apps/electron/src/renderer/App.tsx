@@ -1567,19 +1567,6 @@ export default function App() {
     return session
   }, [addSession, syncSessionOptionsFromSession])
 
-  // Dedicated, trusted creation path for an externally driven session
-  // (`engine=codex` deep links): the server registers the session for the
-  // external single-owner turn path. The generic handleCreateSession above
-  // can never grant that registration.
-  const handleCreateExternalEngineSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createExternalEngineSession(workspaceId, options)
-    // Add to per-session atom and metadata map (no sessionsAtom)
-    addSession(session)
-    syncSessionOptionsFromSession(session)
-
-    return session
-  }, [addSession, syncSessionOptionsFromSession])
-
   // Dedicated, trusted creation path for the Edit Popover session: the server
   // stamps the 'edit-popover' origin + owner identity. The generic
   // handleCreateSession above can never grant that origin.
@@ -2479,7 +2466,6 @@ export default function App() {
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
-    onCreateExternalEngineSession: handleCreateExternalEngineSession,
     onCreateEditPopoverSession: handleCreateEditPopoverSession,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
@@ -2821,7 +2807,6 @@ export default function App() {
                   workspaceSlug={windowWorkspaceSlug}
                   onSwitchWorkspaceBySlug={handleSwitchWorkspaceBySlug}
                   onCreateSession={handleCreateSession}
-                  onCreateExternalEngineSession={handleCreateExternalEngineSession}
                   onInputChange={handleInputChange}
                   getDraft={getDraft}
                   onAutoDeleteEmptySession={handleAutoDeleteEmptySession}

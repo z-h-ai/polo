@@ -8,12 +8,8 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
-import { ExternalEngineSessionDriver } from './external-engine-driver.ts'
-import { type ExternalEngineModelTurn } from './external-engine-model-adapter.ts'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, buildSessionMcpServerArgs } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -924,30 +920,6 @@ interface ManagedSession {
   // delete/stop can cancel it (a stale closure must never fire events or
   // restart turns for a removed session).
   resumeRetryTimer?: ReturnType<typeof setTimeout>
-  /**
-   * EXTERNAL-ENGINE registration: the session's model turn is driven by an
-   * external harness (e.g. Codex CLI) whose model-visible toolset is the
-   * per-turn session MCP server. Registered sessions never run an embedded
-   * agent: sendMessage provisions the harness's per-turn model MCP config
-   * and hands the turn over — the external driver is the sidecar's SINGLE
-   * owner (it spawns and manages that process). Embedded Claude/Pi sessions
-   * keep the in-process registry as their SINGLE owner/channel and never run
-   * a second, dead channel.
-   */
-  externalToolset?: boolean
-  /**
-   * The per-turn model MCP config provisioned for the CURRENT generation
-   * (idempotent within the turn — the harness and its toolset are one
-   * logical channel per turn).
-   */
-  externalToolsetConfig?: { generation: number; config: { command: string; args: string[]; callbackPort: number } }
-  /**
-   * The ACTIVE production driver for the current turn: it OWNS the session's
-   * single sidecar process (launched from the per-turn config) and runs the
-   * model turn. One live driver per turn; disposed at turn end and by
-   * session teardown.
-   */
-  externalEngineDriver?: { generation: number; driver: import('./external-engine-driver.ts').ExternalEngineSessionDriver }
 
   /**
    * IRREVOCABLE CHAT-START RESERVATION (embedded turns): created in the SAME
@@ -1313,17 +1285,14 @@ export class SessionManager implements ISessionManager {
   /**
    * Session MCP host — PRODUCTION wiring. Started per runtime: mounts the
    * ONLY ack route (POST /request-user-input → SessionManager durable
-   * handoff) on a listening localhost server and carries the per-turn spawn
-   * parameters. When null, the session MCP production path is dormant and
-   * zero behavior changes for Claude/Pi.
+   * handoff) on a listening localhost server. When null, the session MCP
+   * production path is dormant and zero behavior changes for Claude/Pi.
    */
   /**
    * Readiness gate: resolves with the callback port when the host listener
    * is actually listening; rejects when startup failed (bootstrap degrades).
-   * The per-turn spawn path awaits this deterministically — a first turn
-   * that arrives before the listener is up WAITS, and a failed startup skips
-   * the session MCP path deterministically. A failed CANDIDATE startup
-   * restores the still-healthy incumbent's readiness, never clobbers it.
+   * A failed CANDIDATE startup restores the still-healthy incumbent's
+   * readiness, never clobbers it.
    */
   private sessionMcpHostReady: Promise<number> | null = null
   /**
@@ -2657,8 +2626,6 @@ export class SessionManager implements ISessionManager {
       // Sync transferred session summary state from disk
       managed.transferredSessionSummary = storedSession.transferredSessionSummary
       managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
-      // EXTERNAL-ENGINE registration survives restarts (persisted header field).
-      managed.externalToolset = storedSession.externalToolset
       // Restore the authoritative pending question (survives restarts).
       // A stale request that was resolved while the server was down is pruned:
       // if a resolution record already exists on disk, the pending copy is dropped.
@@ -2692,12 +2659,6 @@ export class SessionManager implements ISessionManager {
         }
       } else {
         managed.pendingAgentResume = undefined
-      }
-      // EXTERNAL-ENGINE registration survives restarts (persisted header
-      // field): the hydrated session keeps walking the external
-      // single-owner/channel turn path.
-      if (managed.externalToolset) {
-        sessionLog.info(`Restored external-engine registration for session ${managed.id} from disk`)
       }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
@@ -2742,30 +2703,6 @@ export class SessionManager implements ISessionManager {
     return workspace ? this.sessionStorage.getSessionsRoot(workspace.rootPath) : null
   }
 
-  /**
-   * Whether externally driven sessions may be created in this runtime.
-   * Enabled by default (production-reachable); a deployment opts out
-   * explicitly with POLO_EXTERNAL_ENGINES=0|false|off.
-   */
-  static isExternalEngineEnabled(): boolean {
-    const flag = process.env.POLO_EXTERNAL_ENGINES?.trim().toLowerCase()
-    return flag !== '0' && flag !== 'false' && flag !== 'off'
-  }
-
-  /**
-   * PRODUCTION entry for creating an externally driven session (the external
-   * Codex harness owns the model): creation registers the session for the
-   * external single-owner/channel turn path. SERVER-SIDE GATE: creation is
-   * authoritative here, so a disabled runtime refuses deterministically
-   * instead of registering a session whose every turn would degrade.
-   */
-  async createExternalEngineSession(workspaceId: string, options?: { name?: string }): Promise<Session> {
-    if (!SessionManager.isExternalEngineEnabled()) {
-      throw new Error('External engines are disabled in this runtime (POLO_EXTERNAL_ENGINES)')
-    }
-    return this.createSession(workspaceId, { ...options, externalEngine: true })
-  }
-
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
     const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) {
@@ -2785,7 +2722,6 @@ export class SessionManager implements ISessionManager {
     // Get new session defaults from workspace config (with global fallback)
     // Options.permissionMode overrides the workspace default (used by EditPopover for auto-execute)
     const workspaceRootPath = workspace.rootPath
-    const externalEngine = options?.externalEngine === true
     const wsConfig = loadWorkspaceConfig(workspaceRootPath)
     const globalDefaults = loadConfigDefaults()
 
@@ -3144,17 +3080,6 @@ export class SessionManager implements ISessionManager {
       branchSeedApplied: validatedBranch ? validatedBranch.branchContextStrategy === 'sdk-fork' : undefined,
       messagesLoaded: !isBranch,  // Branched sessions: lazy-load messages from JSONL
     })
-    // EXTERNAL-ENGINE registration (creation path): the session's model turns
-    // are driven by an external harness consuming the per-turn session MCP
-    // server as its model toolset. Persisted in the session's FIRST durable
-    // header write so a cold start before any message still hydrates as
-    // externally driven.
-    if (externalEngine) {
-      this.provisionExternalEngineRegistration(managed)
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-    }
-
     // Eagerly load messages for branched sessions so the renderer gets the full
     // conversation immediately (needed for scroll-to-bottom on panel open)
     if (isBranch) {
@@ -5918,8 +5843,6 @@ export class SessionManager implements ISessionManager {
    */
   private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
     const sessionId = managed.id
-    // EXTERNAL ENGINE: kill the driver's owned sidecar immediately.
-    void this.disposeExternalEngineDriver(managed)
 
     // Immediately disarm any answer→resume retry — synchronously, BEFORE the
     // abort wait / share-revoke window. The identity guard
@@ -6490,110 +6413,6 @@ export class SessionManager implements ISessionManager {
 
     // Start perf span for entire sendMessage flow
     const sendSpan = perf.span('session.sendMessage', { sessionId })
-
-    // EXTERNAL-ENGINE TURN LAUNCH: an externally driven session has no
-    // embedded agent — the model runs in the external harness, and the
-    // PRODUCTION DRIVER below owns the turn's single sidecar: it launches
-    // the session MCP server process from the per-turn config and exposes
-    // the model-visible toolset. The turn boundary (message commit +
-    // generation + processing state) is already committed above. Any armed
-    // answer→resume recovery is durably settled here: the continuation is
-    // the driver's responsibility from this point on.
-    if (managed.externalToolset) {
-      try {
-        const config = await this.getSessionExternalModelToolset(sessionId, invocationSource, myGeneration)
-        // CONTINUATION CONTEXT (captured before the durable resume clears):
-        // a resumed external model session is a NEW process with no memory of
-        // the paused turn — an answer-only prompt would leave it guessing what
-        // "yes, delete them" refers to.
-        const resumeQuestionContext = managed.pendingAgentResume?.questionContext
-        const modelPrompt = resumeQuestionContext
-          ? [
-              'You asked the user via request_user_input:',
-              JSON.stringify(resumeQuestionContext),
-              '',
-              'The user answered:',
-              message,
-              '',
-              'Continue the original task using that answer.',
-            ].join('\n')
-          : message
-        if (managed.pendingAgentResume) {
-          await this.clearPendingAgentResume(managed, 'external engine turn launched — continuation owned by the driver')
-        }
-        // OWNERSHIP HANDOFF (answer continuation): the previous turn's driver
-        // is closed and cleared BEFORE the new one launches — its sidecar
-        // stayed alive only until the model consumed the previous tool
-        // result; exactly one live sidecar exists at any moment.
-        await this.disposeExternalEngineDriver(managed)
-        // HAND THE CONFIG TO THE DRIVER: it launches and owns the turn's
-        // ONLY sidecar process. No host/config → deterministic degrade: the
-        // turn runs without a session MCP channel (the durable handoff is
-        // still reachable for embedded routes, and the driver stays null).
-        if (config) {
-          const driver = await ExternalEngineSessionDriver.launch(config)
-          // CAS (identity + generation): a delete that declared while the
-          // sidecar handshake ran must not be left with a just-launched
-          // orphan process — dispose it and converge as deleted.
-          if (this.sessions.get(sessionId) !== managed || managed.questionLifecycleTombstone) {
-            await driver.dispose()
-            sendSpan.mark('external-turn.converged-deleted')
-            sessionLog.info(`sendMessage: external turn for session ${sessionId} converged as deleted after sidecar launch`)
-            return
-          }
-          managed.externalEngineDriver = { generation: myGeneration, driver }
-          sendSpan.mark('external-turn.launched')
-          sessionLog.info(`External engine turn launched for session ${sessionId} (generation ${myGeneration}) — sidecar owned by the driver`)
-          // PRODUCTION MODEL TURN: hand the prompt + owned toolset to the
-          // registered model layer; the model consumes tool results at the
-          // durable boundary (a question handoff pauses the turn). The
-          // completion closure carries THIS turn's generation + driver
-          // identity — a stale completion (the turn was superseded/replaced)
-          // is an idempotent no-op and can never dispose a newer turn's
-          // sidecar or stop its processing.
-          const model = this.externalEngineModel
-          if (model) {
-            // The model layer receives the REAL per-turn session MCP config
-            // (this driver's owned sidecar) — it registers the session tools
-            // natively into the actual model session/toolset, so the model
-            // discovers the request_user_input JSON schema directly.
-            void model
-              .start({
-                sessionId,
-                prompt: modelPrompt,
-                sessionMcpConfig: config,
-                listTools: () => driver.listTools(),
-                callTool: (name, args) => driver.callTool(name, args),
-              })
-              .then(async () => {
-                await this.completeExternalEngineTurnFor(sessionId, { generation: myGeneration, driver })
-              })
-              .catch(async (turnError: unknown) => {
-                sessionLog.error(`External engine model turn failed for session ${sessionId}:`, turnError)
-                await this.completeExternalEngineTurnFor(sessionId, { generation: myGeneration, driver }, 'error', turnError)
-              })
-          } else {
-            // No model layer registered — deterministic degrade: the turn
-            // ends immediately (the message is durably persisted).
-            sendSpan.mark('external-turn.no-model')
-            sessionLog.warn(`No external engine model adapter registered — ending turn for session ${sessionId} (message persisted)`)
-            await this.completeExternalEngineTurn(sessionId)
-          }
-        } else {
-          sendSpan.mark('external-turn.degraded')
-          sessionLog.info(`External engine turn degraded for session ${sessionId} (generation ${myGeneration}) — no session MCP host/config`)
-        }
-      } catch (prepError) {
-        sendSpan.mark('external-turn.failed')
-        sessionLog.error(`External engine turn launch failed for session ${sessionId}:`, prepError)
-        if (managed.isProcessing && managed.processingGeneration === myGeneration) {
-          await this.onProcessingStopped(sessionId, 'error')
-        }
-        throw prepError
-      }
-      sendSpan.end()
-      return
-    }
 
     const workspaceRootPath = managed.workspace.rootPath
     const enabledSlugs = managed.enabledSourceSlugs ?? []
@@ -7201,9 +7020,6 @@ export class SessionManager implements ISessionManager {
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
-    // EXTERNAL ENGINE: the driver's owned sidecar lives for exactly one
-    // turn — dispose it here (one live sidecar per turn, driver-owned).
-    void this.disposeExternalEngineDriver(managed)
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
 
@@ -7609,28 +7425,14 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * PRODUCTION HTTP surface for the session MCP callback protocol: wraps
-   * `createSessionMcpCallbackHandler` so a host callback server mounts the
-   * route with one call. Enforces the POST-only method gate (405 otherwise)
-   * and routes valid payloads into the durable handoff.
-   */
-  handleSessionMcpCallbackRequest(request: {
-    method?: string;
-    url?: string;
-    json(): Promise<unknown>;
-  }): Promise<Response> {
-    return createSessionMcpCallbackHandler(this)(request)
-  }
-
-  /**
-   * PRODUCTION durable-handoff entry for EXTERNAL hosts: the session MCP
-   * server (Codex/external-harness path) POSTs its `question_requested`
+   * PRODUCTION durable-handoff entry for the session MCP callback protocol:
+   * the session MCP server subprocess POSTs its `question_requested`
    * callback to the host's callback router, which routes here. Same durable
    * semantics as the in-process chain: pendingQuestion persist +
    * question_request event + handoff, awaited by the caller so the remote
    * tool result settles only at the durable boundary.
    */
-  async handleExternalQuestionRequested(
+  async handleSessionMcpQuestionRequested(
     sessionId: string,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
     generationAtRequest: number,
@@ -7648,16 +7450,13 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Start the session MCP host: mounts the ONLY ack route
-   * (POST /request-user-input → {@link handleSessionMcpCallbackRequest} →
-   * durable handoff) on a listening localhost server. The per-turn sidecar
-   * process is launched and owned by the external engine driver, which
-   * receives its config from the sendMessage turn-launch path
-   * ({@link getSessionExternalModelToolset}).
+   * (POST /request-user-input → durable handoff) on a listening localhost
+   * server.
    *
    * - READINESS GATE: the returned promise resolves only when the listener
    *   is actually listening (and rejects deterministically on startup
-   *   failure) — the per-turn spawn path awaits this before touching the
-   *   host.
+   *   failure) — the bootstrap degrades without crashing, and the readiness
+   *   state never silently flips back to "ready".
    * - SINGLE-FLIGHT START: a port-less re-entry joins an in-flight startup
    *   or the healthy host; only an explicit callbackPort forces a candidate
    *   start (port-conflict semantics: an occupied port rejects with
@@ -7808,8 +7607,7 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  /** Stop the host: kills the listener and every driver-owned sidecar —
-   * the drivers' toolset route dies with the host. */
+  /** Stop the host: kills the listener (the callback route dies with it). */
   stopSessionMcpHost(): void {
     const host = this.sessionMcpHost
     if (!host) return
@@ -7817,216 +7615,15 @@ export class SessionManager implements ISessionManager {
     this.sessionMcpHost = null
     this.sessionMcpHostReady = null
     this.sessionMcpHostStart = null
-    // EXTERNAL ENGINE: the drivers' sidecars served their toolset through
-    // this host — without the callback route they are dead weight. Dispose
-    // every live driver so no orphan sidecar process survives host teardown.
-    for (const managed of this.sessions.values()) {
-      void this.disposeExternalEngineDriver(managed)
-    }
     sessionLog.info('Session MCP host stopped')
-  }
-
-  /**
-   * Build THIS turn's session MCP server spawn spec. PRODUCTION consumption
-   * of the shared spawn-spec builder with the reviewer-mandated parameters:
-   * the current sessionId, the host's callback port, the capability DERIVED
-   * FROM THE INVOCATION SOURCE (desktop-only eligibility matrix) and the
-   * caller's IMMUTABLE processingGeneration snapshot.
-   */
-  buildSessionMcpServerForTurnArgs(
-    sessionId: string,
-    invocationSource: InvocationSource,
-    processingGeneration: number,
-  ): { spec: { command: string; args: string[] }; allowRequestUserInput: boolean } | null {
-    const host = this.sessionMcpHost
-    if (!host) return null
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return null
-    const allowRequestUserInput = computeRequestUserInputEligibility(
-      invocationSource,
-      managed.hidden,
-      managed.systemPromptPreset === 'mini',
-      managed.origin,
-    )
-    const spec = {
-      command: host.nodeRuntimePath ?? process.execPath,
-      args: [
-        host.serverEntryPath,
-        ...buildSessionMcpServerArgs({
-          sessionId,
-          workspaceRootPath: managed.workspace.rootPath,
-          plansFolderPath: this.sessionStorage.getPlansPath(managed.workspace.rootPath, sessionId),
-          callbackPort: String(host.callbackPort),
-          allowRequestUserInput,
-          turnGeneration: processingGeneration,
-        }),
-      ],
-    }
-    return { spec, allowRequestUserInput }
-  }
-
-  /**
-   * Register a session as EXTERNALLY driven at CREATION time: its model turns
-   * run in an external harness (e.g. Codex CLI) whose model-visible toolset
-   * is the per-turn session MCP server. The external driver is the sidecar's
-   * SINGLE owner — it spawns and manages that process from the config this
-   * host hands out ({@link getSessionExternalModelToolset}); the host never
-   * runs a second, un-consumed copy.
-   */
-  private provisionExternalEngineRegistration(managed: ManagedSession): void {
-    managed.externalToolset = true
-    sessionLog.info(`Session ${managed.id} registered for external-engine consumption (per-turn session MCP sidecar enabled)`)
-  }
-
-  /**
-   * The REAL per-turn model MCP config for an external-engine session — what
-   * the harness (e.g. Codex CLI) puts into its session/model MCP setup:
-   * spawn `command` with `args` (session binding, host callback port, the
-   * turn's capability derived from the invocation source, and the immutable
-   * turn generation) so the model's toolset contains request_user_input
-   * exactly when the turn is desktop-eligible.
-   *
-   * SINGLE CHANNEL: the config is provisioned once per turn (cached on the
-   * session by generation) and the harness is its only consumer — the host
-   * never spawns its own copy of the sidecar. Awaits the host readiness
-   * gate; null when no host exists, the session is gone, or the session was
-   * never registered as externally driven (fail closed for embedded
-   * sessions — their toolset never routes through a sidecar).
-   */
-  async getSessionExternalModelToolset(
-    sessionId: string,
-    invocationSource: InvocationSource,
-    processingGeneration: number,
-  ): Promise<{ command: string; args: string[]; callbackPort: number } | null> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed?.externalToolset) return null
-    const host = await this.awaitSessionMcpHost()
-    if (!host) return null
-    const cached = managed.externalToolsetConfig
-    if (cached && cached.generation === processingGeneration) return cached.config
-    const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
-    if (!built) return null
-    const config = { command: built.spec.command, args: built.spec.args, callbackPort: host.callbackPort }
-    managed.externalToolsetConfig = { generation: processingGeneration, config }
-    sessionLog.info(`Provisioned external model toolset for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
-    return config
-  }
-
-  /** Dispose the session's active external-engine driver (owned sidecar). */
-  private async disposeExternalEngineDriver(managed: ManagedSession): Promise<void> {
-    const active = managed.externalEngineDriver
-    if (!active) return
-    managed.externalEngineDriver = undefined
-    await active.driver.dispose().catch(() => {})
-  }
-
-  /**
-   * PRODUCTION completion hook for an externally driven turn (generation +
-   * driver identity bound): settles ONLY when the session identity, the
-   * processing generation, AND the live driver slot all still match the
-   * completing turn. A stale completion (the answer already launched
-   * generation N+1 with its own driver) is an idempotent no-op — it can
-   * never dispose a newer turn's sidecar or stop its processing.
-   */
-  private async completeExternalEngineTurnFor(
-    sessionId: string,
-    turn: { generation: number; driver: import('./external-engine-driver.ts').ExternalEngineSessionDriver },
-    status: 'complete' | 'error' = 'complete',
-    error?: unknown,
-  ): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    // Session identity + generation + driver slot must ALL still be this
-    // turn's; anything else is a stale completion.
-    if (!managed || this.sessions.get(sessionId) !== managed) return
-    if (!managed.externalToolset) return
-    if (managed.processingGeneration !== turn.generation) return
-    const active = managed.externalEngineDriver
-    if (!active || active.generation !== turn.generation || active.driver !== turn.driver) return
-    if (status === 'error') {
-      sessionLog.error(`External engine model turn failed for session ${sessionId} (generation ${turn.generation}):`, error)
-    }
-    // PAUSED (question handoff): the model asked a question and consumed its
-    // result — the turn stays paused for the answer, and the driver's
-    // sidecar stays owned by THIS turn until the answer's resume replaces
-    // it. Completing here would strand the pending question.
-    if (managed.pendingQuestion) return
-    await this.disposeExternalEngineDriver(managed)
-    await this.onProcessingStopped(sessionId, status)
-  }
-
-  /**
-   * RPC/ISessionManager completion entry: settles the CURRENT external
-   * engine turn. Pass `expectedGeneration` to make the completion
-   * generation-bound (a stale report for an older turn is an idempotent
-   * no-op).
-   */
-  async completeExternalEngineTurn(sessionId: string, expectedGeneration?: number): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return
-    if (!managed.externalToolset) return
-    if (expectedGeneration !== undefined && managed.processingGeneration !== expectedGeneration) {
-      sessionLog.info(`External engine turn completion for session ${sessionId} is stale (generation ${expectedGeneration} vs active ${managed.processingGeneration}) — ignored`)
-      return
-    }
-    if (!managed.isProcessing) {
-      // PAUSED (question handoff): keep the driver's sidecar for the answer
-      // resume — completing here would strand the pending question.
-      return
-    }
-    await this.disposeExternalEngineDriver(managed)
-    await this.onProcessingStopped(sessionId, 'complete')
-  }
-
-  /**
-   * PRODUCTION DIAGNOSTIC: the OS process id of the session's current
-   * driver-owned sidecar (ops/logging evidence that exactly one sidecar
-   * process serves this turn). Null when no external driver is active.
-   */
-  getExternalEngineDriverPid(sessionId: string): number | null {
-    const managed = this.sessions.get(sessionId)
-    if (!managed?.externalToolset) return null
-    return managed.externalEngineDriver?.driver.pid ?? null
-  }
-
-
-  /**
-   * Register the MODEL layer for externally driven sessions (the
-   * credentials/LLM integration a real Codex-style harness wires at
-   * bootstrap). The driver invokes it once per external turn with the turn's
-   * prompt and the model-visible toolset served by the driver-owned sidecar.
-   */
-  setExternalEngineModelAdapter(model: ExternalEngineModelTurn): void {
-    this.externalEngineModel = model
-    sessionLog.info('External engine model adapter registered')
-  }
-
-  private externalEngineModel: ExternalEngineModelTurn | null = null
-
-  /**
-   * Resolve the session MCP host AFTER its startup promise settles. Returns
-   * null when the host was never started or its startup failed — the spawn
-   * path then skips the session MCP tool deterministically. A failed
-   * CANDIDATE startup falls back to the still-healthy incumbent host.
-   */
-  private async awaitSessionMcpHost(): Promise<SessionManager['sessionMcpHost']> {
-    const ready = this.sessionMcpHostReady
-    if (!ready) return null
-    try {
-      await ready
-    } catch {
-      return this.sessionMcpHost
-    }
-    return this.sessionMcpHost
   }
 
   /**
    * PRODUCTION agent tool-set routing: the embedded engines (Claude SDK
    * in-process toolset, Pi host-side proxy execution) reach the durable
-   * handoff DIRECTLY — one owner/channel per engine. The EXTERNAL engine's
-   * tool call travels its own channel — driver-owned sidecar → stdio →
-   * HTTP POST → callback router → this same durable handoff. An embedded
-   * call therefore never loops through a sidecar, and a single tool call
-   * can never produce two durable handoffs.
+   * handoff DIRECTLY — one owner/channel per engine. An embedded call never
+   * loops through a sidecar or a second callback chain, so a single tool
+   * call can never produce two durable handoffs.
    */
   private routeAgentQuestionRequested(
     managed: ManagedSession,
@@ -8163,11 +7760,10 @@ export class SessionManager implements ISessionManager {
       request,
     }, managed.workspace.id)
 
-    // 4. Handoff — the turn pauses until the user answers or skips. External
-    // sessions have no embedded agent, but the turn is THEIRS (the external
-    // driver's model is waiting on the tool result) — the processing-stopped
-    // boundary applies equally.
-    if (managed.isProcessing && (managed.agent || managed.externalToolset)) {
+    // 4. Handoff — the turn pauses until the user answers or skips: the
+    // processing-stopped boundary applies (the embedded agent is interrupted
+    // for the handoff and the answer path owns the continuation).
+    if (managed.isProcessing && managed.agent) {
       sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
       managed.agent?.interruptForHandoff(AbortReason.QuestionRequested)
       this.setProcessing(managed, false)
@@ -8460,12 +8056,6 @@ export class SessionManager implements ISessionManager {
         this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId),
       )
 
-      if (outcome.result.status === 'cancelled' && managed.externalToolset) {
-        // The question lifecycle ended WITHOUT a resume — the cancelled
-        // turn's driver sidecar is disposed with it (no continuation).
-        await this.disposeExternalEngineDriver(managed)
-      }
-
       if (outcome.resume) {
         // Resume the agent OUTSIDE the question-state lock: the resumed turn
         // can run for minutes (and may itself ask follow-up questions, which
@@ -8616,10 +8206,6 @@ export class SessionManager implements ISessionManager {
         // DEFAULT IS INTERNAL — fail closed for
         // legacy/malformed persisted states without a persisted source.
         invocationSource: pending.invocationSource ?? 'internal',
-        // The asked questions travel with the durable resume: an external
-        // model session restarted for the answer has no memory of the paused
-        // turn, so the continuation prompt must carry what was asked.
-        questionContext: (pending as { questions?: unknown }).questions,
       }
 
       this.persistSession(managed)

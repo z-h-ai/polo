@@ -200,7 +200,7 @@ describe('validateRequestUserInputArgs (cross-field rules)', () => {
     expect(multi).toHaveLength(0);
   });
 
-  // Review fix round 2, issue 2: the exclusive FIELD is forbidden on
+  // The exclusive FIELD is forbidden on
   // single-select questions — presence, not truthiness. An explicit
   // `exclusive: false` is still a declaration and must be rejected, including
   // through the full parse path the tool handler uses.

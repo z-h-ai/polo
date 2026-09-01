@@ -31,7 +31,7 @@ describe('session MCP callback router HTTP adversarial', () => {
   it('rejects PUT / DELETE / GET with 405 + Allow and never calls the SessionManager', async () => {
     let smCalls = 0
     const sm = {
-      handleExternalQuestionRequested: async () => {
+      handleSessionMcpQuestionRequested: async () => {
         smCalls++
         return Promise.resolve()
       },
@@ -59,7 +59,7 @@ describe('session MCP callback router HTTP adversarial', () => {
   it('accepts the declared POST with a valid payload (control)', async () => {
     let smCalls = 0
     const sm = {
-      handleExternalQuestionRequested: async () => {
+      handleSessionMcpQuestionRequested: async () => {
         smCalls++
       },
     }
@@ -78,7 +78,7 @@ describe('session MCP callback router HTTP adversarial', () => {
   it('rejects a non-JSON Content-Type with 415 BEFORE reading the body — the SessionManager is never called', async () => {
     let smCalls = 0
     const sm = {
-      handleExternalQuestionRequested: async () => {
+      handleSessionMcpQuestionRequested: async () => {
         smCalls++
       },
     }
@@ -106,7 +106,7 @@ describe('session MCP callback router HTTP adversarial', () => {
   it('accepts application/json with optional parameters (charset) and rejects +json sub-type suffixes', async () => {
     let smCalls = 0
     const sm = {
-      handleExternalQuestionRequested: async () => {
+      handleSessionMcpQuestionRequested: async () => {
         smCalls++
       },
     }

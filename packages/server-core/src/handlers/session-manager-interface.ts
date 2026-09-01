@@ -126,23 +126,12 @@ export interface ISessionManager {
   getPendingQuestion(sessionId: string): QuestionRequest | null
   respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
   /**
-   * PRODUCTION completion hook for an externally driven session (Codex
-   * harness / external CLI driver): disposes the turn's owned sidecar and
-   * runs the processing-stopped boundary.
+   * Durable handoff entry for the session MCP callback protocol (the session
+   * MCP server subprocess): routes a parsed `question_requested` callback
+   * into the same persist + question_request + handoff chain as the
+   * in-process paths.
    */
-  completeExternalEngineTurn(sessionId: string, expectedGeneration?: number): Promise<void>
-  /**
-   * PRODUCTION entry for creating an externally driven session (external
-   * Codex harness): the returned session walks the external
-   * single-owner/channel turn path.
-   */
-  createExternalEngineSession(workspaceId: string, options?: { name?: string }): Promise<import('@polo-ai/shared/protocol').Session>
-  /**
-   * Durable handoff entry for EXTERNAL hosts (session MCP server / Codex):
-   * routes a parsed `question_requested` callback into the same persist +
-   * question_request + handoff chain as the in-process paths.
-   */
-  handleExternalQuestionRequested(
+  handleSessionMcpQuestionRequested(
     sessionId: string,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
     generationAtRequest: number,

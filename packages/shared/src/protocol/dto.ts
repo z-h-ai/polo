@@ -162,13 +162,6 @@ export interface CreateSessionOptions {
   sessionStatus?: SessionStatus
   labels?: string[]
   isFlagged?: boolean
-  /**
-   * EXTERNAL-ENGINE registration: the session's model turns are driven by an
-   * external harness (e.g. Codex CLI) consuming the per-turn session MCP
-   * server as its model toolset. External sessions never run an embedded
-   * agent; the driver owns the sidecar process (single owner/channel).
-   */
-  externalEngine?: boolean
   enabledSourceSlugs?: string[]
   /**
    * Message ID to branch from. This is a hard context cutoff:

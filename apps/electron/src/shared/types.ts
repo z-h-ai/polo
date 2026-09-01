@@ -429,13 +429,6 @@ export interface ElectronAPI {
     workspaceId: string,
     options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
   ): Promise<Session>
-  /**
-   * Dedicated, trusted creation path for an externally driven session (the
-   * external Codex harness owns the model turn). The generic createSession
-   * can never grant that registration — the server strips `externalEngine`
-   * from the generic create options.
-   */
-  createExternalEngineSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>

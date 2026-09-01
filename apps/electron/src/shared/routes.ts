@@ -44,11 +44,8 @@ export const routes = {
      * @param send - If true and input is provided, immediately sends the message
      * @param status - Optional status/todo-state ID to apply to the new session
      * @param label - Optional label ID to apply to the new session
-     * @param engine - Optional engine selection; 'codex' creates an externally
-     *   driven session through the dedicated trusted creation path (absent =
-     *   the default embedded engine, so existing deep links are unchanged)
      */
-    newSession: (params?: { input?: string; name?: string; send?: boolean; status?: string; label?: string; engine?: string }) =>
+    newSession: (params?: { input?: string; name?: string; send?: boolean; status?: string; label?: string }) =>
       `action/new-session${toQueryString(params ? { ...params, send: params.send ? 'true' : undefined } : undefined)}` as const,
 
     /** Send a message to a protocol-owned session. */

@@ -7,7 +7,7 @@
  * its terminal state (persisted + broadcast + handoff, or an explicit
  * rejection). This router is the host-side consumer of that contract:
  * it routes the payload into the SessionManager's durable handoff
- * (`handleExternalQuestionRequested`) and answers with the protocol result.
+ * (`handleSessionMcpQuestionRequested`) and answers with the protocol result.
  */
 
 import type { ISessionManager } from '@polo-ai/server-core/handlers';
@@ -43,7 +43,7 @@ export async function handleSessionMcpRequestUserInputCallback(
     return { error: 'Malformed request-user-input callback payload' };
   }
   try {
-    await sessionManager.handleExternalQuestionRequested(
+    await sessionManager.handleSessionMcpQuestionRequested(
       payload.sessionId,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       payload.questions as any,
