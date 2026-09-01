@@ -357,17 +357,23 @@ export class CredentialManager {
   /** Get admin access/refresh tokens. */
   /**
    * Discriminative admin-credential presence inspection for startup
-   * restore. `absent` requires every backend to confirm the credential does
-   * not exist; any backend that reports the credential exists but cannot be
-   * read, decrypted or validated yields `unreadable_or_invalid` so callers
-   * fail closed instead of degrading to signed-out.
+   * restore. `absent` requires every backend to support the inspection AND
+   * confirm the credential does not exist; any backend that reports the
+   * credential exists but cannot be read, decrypted or validated — or a
+   * backend that cannot confirm presence at all — yields
+   * `unreadable_or_invalid` so callers fail closed instead of degrading to
+   * signed-out.
    */
   async inspectAdminCredentialPresence(): Promise<CredentialPresenceStatus> {
     await this.ensureInitialized();
     let sawUnreadable = false;
     let sawUnreadableReason = 'one or more credential backends could not be read';
+    let sawUnsupported = false;
     for (const backend of this.backends) {
-      if (!backend.inspectCredentialPresence) continue;
+      if (!backend.inspectCredentialPresence) {
+        sawUnsupported = true;
+        continue;
+      }
       const result = await backend.inspectCredentialPresence({ type: 'admin_token' });
       if (result.status === 'found') return result;
       if (result.status === 'unreadable_or_invalid') {
@@ -375,9 +381,16 @@ export class CredentialManager {
         sawUnreadableReason = result.reason;
       }
     }
-    return sawUnreadable
-      ? { status: 'unreadable_or_invalid', reason: sawUnreadableReason }
-      : { status: 'absent' };
+    if (sawUnreadable) {
+      return { status: 'unreadable_or_invalid', reason: sawUnreadableReason };
+    }
+    if (sawUnsupported) {
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'presence cannot be confirmed for all credential backends',
+      };
+    }
+    return { status: 'absent' };
   }
 
   async getAdminTokens(): Promise<{

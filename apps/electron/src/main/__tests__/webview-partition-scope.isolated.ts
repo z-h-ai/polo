@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -467,6 +467,15 @@ describe('ProductSpace webview partition policy wiring', () => {
 
 
 describe('startup credential restore → webview attach gate (integration)', () => {
+  afterAll(() => {
+    try {
+      rmSync(credentialStoreRoot, { recursive: true, force: true })
+    } catch {
+      // Best-effort cleanup of the temp credential store.
+    }
+    delete process.env.POLO_AI_SHARED_CREDENTIALS_DIR
+  })
+
   const storeFile = join(credentialStoreRoot, 'credentials.enc')
   const adminHandlersDeps = {
     sessionManager: {},
@@ -539,7 +548,125 @@ describe('startup credential restore → webview attach gate (integration)', () 
     expect(preventScoped).toHaveBeenCalledTimes(1)
   })
 
-  it('a confirmed-empty store commits signed_out and keeps the browser-pane partition', async () => {
+  it('keeps the gate unknown when the credential directory denies access', async () => {
+    // A real, valid store exists — but the directory denies traversal
+    // (EACCES). existsSync() would report false; the inspect path must
+    // classify this as unreadable instead of absent.
+    const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+    await getCredentialManager().setAdminTokens({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    })
+    const { chmodSync } = await import('node:fs')
+    chmodSync(credentialStoreRoot, 0o000)
+    try {
+      const { registerAdminHandlers } = await import('@polo-ai/server-core/handlers/rpc/admin')
+      const { whenInitialSyncTrustedProductSpaceAccountRestored } = await import(
+        '@polo-ai/server-core/handlers/rpc/admin'
+      )
+      registerAdminHandlers(
+        { handle() {}, push() {}, async invokeClient() { return null } } as never,
+        adminHandlersDeps,
+      )
+      await whenInitialSyncTrustedProductSpaceAccountRestored()
+
+      expect(getSyncTrustedProductSpaceAccountState()).toEqual({ status: 'unknown' })
+
+      installWebviewSecurityHandlers()
+      const window = makeHostWindow(7)
+      webviewCreatedListener!({}, window)
+
+      const preventPane = mock(() => {})
+      ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+        'will-attach-webview',
+        { preventDefault: preventPane },
+        { partition: 'persist:browser-pane' },
+        { src: 'https://app.example' },
+      )
+      expect(preventPane).toHaveBeenCalledTimes(1)
+
+      const preventScoped = mock(() => {})
+      ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+        'will-attach-webview',
+        { preventDefault: preventScoped },
+        { partition: tabAppPartitionForScope({ accountId: 'account-a', productSpaceId: 'space-a', workspaceId: 'ws-7' }) },
+        { src: 'https://app.example' },
+      )
+      expect(preventScoped).toHaveBeenCalledTimes(1)
+    } finally {
+      chmodSync(credentialStoreRoot, 0o755)
+    }
+  })
+
+  it('keeps the gate unknown when the stored admin token entry has malformed field types', async () => {
+    // The store decrypts and parses, but the admin_token entry carries a
+    // string expiresAt — an invalid, not absent, credential.
+    const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+    await getCredentialManager().set({
+      type: 'admin_token',
+    }, {
+      type: 'admin_token',
+      value: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: 'not-a-number' as unknown as number,
+      userId: 'account-a',
+      username: 'account-a',
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    const { registerAdminHandlers } = await import('@polo-ai/server-core/handlers/rpc/admin')
+    const { whenInitialSyncTrustedProductSpaceAccountRestored } = await import(
+      '@polo-ai/server-core/handlers/rpc/admin'
+    )
+    registerAdminHandlers(
+      { handle() {}, push() {}, async invokeClient() { return null } } as never,
+      adminHandlersDeps,
+    )
+    await whenInitialSyncTrustedProductSpaceAccountRestored()
+
+    expect(getSyncTrustedProductSpaceAccountState()).toEqual({ status: 'unknown' })
+
+    installWebviewSecurityHandlers()
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates the decrypted store schema before trusting it', async () => {
+    const { isCredentialStoreShape } = await import('@polo-ai/shared/credentials')
+
+    expect(typeof isCredentialStoreShape).toBe('function')
+    expect(isCredentialStoreShape({
+      version: 1,
+      credentials: { admin_token: { value: 'v' } },
+      metadata: { createdAt: 1, updatedAt: 2 },
+    })).toBe(true)
+    // Wrong version, array credentials container, missing metadata, and
+    // non-object payloads are all rejected instead of asserted.
+    expect(validate(false)).toBe(false)
+    expect(validate({ version: 2, credentials: {}, metadata: { createdAt: 1, updatedAt: 2 } })).toBe(false)
+    expect(validate({ version: 1, credentials: [], metadata: { createdAt: 1, updatedAt: 2 } })).toBe(false)
+    expect(validate({ version: 1, credentials: {} })).toBe(false)
+    expect(validate(null)).toBe(false)
+    expect(validate('store')).toBe(false)
+
+    function validate(value: unknown): boolean {
+      return isCredentialStoreShape(value)
+    }
+  })
+
+    it('a confirmed-empty store commits signed_out and keeps the browser-pane partition', async () => {
     // No credentials.enc at all: the restore explicitly confirms signed-out.
     const { registerAdminHandlers } = await import('@polo-ai/server-core/handlers/rpc/admin')
     const { whenInitialSyncTrustedProductSpaceAccountRestored } = await import(
