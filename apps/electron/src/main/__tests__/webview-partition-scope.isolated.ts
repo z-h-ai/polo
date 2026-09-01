@@ -59,9 +59,16 @@ const {
   setWebviewScopeResolver,
 } = await import('../webview-security')
 const {
+  revokeRuntimeProductSpaceFence,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId, getSyncTrustedProductSpaceAccountId } = await import(
+  '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+)
+const { getRuntimeActiveProductSpace } = await import(
+  '@polo-ai/server-core/runtime/product-space-executions'
+)
 
 const trustedAccount = 'account-a'
 const fenceSpace = 'space-a'
@@ -110,6 +117,9 @@ describe('ProductSpace webview partition policy wiring', () => {
     sessions.clear()
     webviewCreatedListener = null
     __resetWebviewSecurityForTests()
+    // Production wiring: the Admin session is authenticated for the account
+    // (sync mirror) and the fence is committed and bound to it.
+    setSyncTrustedProductSpaceAccountId(trustedAccount)
     setRuntimeActiveProductSpaceAccount(trustedAccount)
     setRuntimeActiveProductSpace(fenceSpace)
   })
@@ -193,9 +203,11 @@ describe('ProductSpace webview partition policy wiring', () => {
     webviewCreatedListener!({}, window)
     const oldPartition = hostPartition(window)
 
-    // Account replacement: the fence is now bound to account B on space B.
+    // Account replacement: the fence is now bound to account B on space B,
+    // and the replacement login committed B into the authenticated mirror.
     setRuntimeActiveProductSpaceAccount('account-b')
     setRuntimeActiveProductSpace('space-b')
+    setSyncTrustedProductSpaceAccountId('account-b')
     const newPartition = tabAppPartitionForScope({
       accountId: 'account-b',
       productSpaceId: 'space-b',
@@ -227,8 +239,10 @@ describe('ProductSpace webview partition policy wiring', () => {
     setWebviewScopeResolver({
       getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
     })
+    // A genuinely signed-out window: no authenticated Admin session and no
+    // committed fence.
+    setSyncTrustedProductSpaceAccountId(null)
     setRuntimeActiveProductSpace(null)
-    setRuntimeActiveProductSpaceAccount(null)
     installWebviewSecurityHandlers()
 
     const window = makeHostWindow(7)
@@ -292,12 +306,50 @@ describe('ProductSpace webview partition policy wiring', () => {
     expect(preventScoped).toHaveBeenCalledTimes(1)
   })
 
+  it('prevents every partition after a real fence revoke while the session stays authenticated', async () => {
+    // The production revoke sequence: the fence is revoked (which also
+    // clears the fence account) while the Admin session remains
+    // authenticated for account-a. This is NOT local-account mode — the
+    // shared browser-pane partition must be refused.
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    installWebviewSecurityHandlers()
+
+    await revokeRuntimeProductSpaceFence()
+    expect(getSyncTrustedProductSpaceAccountId()).toBe(trustedAccount)
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
+
+    const preventScoped = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventScoped },
+      { partition: tabAppPartitionForScope({ accountId: trustedAccount, productSpaceId: fenceSpace, workspaceId: 'ws-7' }) },
+      { src: 'https://app.example' },
+    )
+    expect(preventScoped).toHaveBeenCalledTimes(1)
+  })
+
   it('prevents every partition when signed in but the fence is missing', () => {
     setWebviewScopeResolver({
       getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
     })
+    // Contract-blocked / pre-bootstrap state: the fence is gone while the
+    // authenticated session mirror still names the account.
+    setSyncTrustedProductSpaceAccountId(trustedAccount)
     setRuntimeActiveProductSpace(null)
-    setRuntimeActiveProductSpaceAccount(trustedAccount)
     installWebviewSecurityHandlers()
 
     const window = makeHostWindow(7)

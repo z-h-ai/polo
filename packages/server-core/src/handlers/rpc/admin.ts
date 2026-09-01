@@ -72,6 +72,7 @@ import {
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
+  setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
   type TrustedProductSpaceListSnapshot,
@@ -293,6 +294,11 @@ class AdminSessionCoordinator {
   }
 
   createSnapshot(tokens: StoredAdminTokens): AdminSessionSnapshot {
+    // Every authenticated-session snapshot (login commit, startup restore,
+    // validate/refresh capture) refreshes the synchronous authenticated-
+    // account mirror consumed by sync gates such as the webview attach
+    // check; session endings clear it explicitly.
+    setSyncTrustedProductSpaceAccountId(tokens.userId)
     return {
       generation: this.generation,
       tokens: { ...tokens },
@@ -2326,7 +2332,12 @@ async function endAdminSession(
     },
   )
   const didEnd = ended.applied && ended.value === true
-  if (didEnd) invalidateAllCreatorArtifactCaches()
+  if (didEnd) {
+    // The Admin credentials are gone: the synchronous authenticated-account
+    // mirror drops to signed-out (a replacement login re-commits it).
+    setSyncTrustedProductSpaceAccountId(null)
+    invalidateAllCreatorArtifactCaches()
+  }
   return didEnd
 }
 

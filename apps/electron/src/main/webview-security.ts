@@ -11,6 +11,7 @@ import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
 } from '@polo-ai/server-core/runtime/product-space-executions'
+import { getSyncTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
 
 const allow = new Set([
   'fullscreen',
@@ -52,13 +53,20 @@ export function __resetWebviewSecurityForTests(): void {
 /**
  * The attach-time trust decision for one host window:
  *
- * - `scoped`: a committed fence bound to the trusted account AND a resolved
- *   Workspace — the guest must use exactly the derived partition.
- * - `local-account`: genuinely signed out (no Admin account AND no committed
- *   fence) — only the shared browser-pane partition is acceptable.
- * - `closed`: any partial state (signed in without a fence, a fence without
- *   a Workspace mapping, …) — NO partition is acceptable; the webview is
- *   prevented unconditionally.
+ * - `scoped`: a committed fence bound to the authenticated account AND a
+ *   resolved Workspace — the guest must use exactly the derived partition.
+ * - `local-account`: genuinely signed out — no authenticated Admin session
+ *   AND no committed fence — only the shared browser-pane partition is
+ *   acceptable.
+ * - `closed`: any partial state — authenticated but no fence (contract
+ *   blocked, logout's revoke step, startup re-bootstrap: revoking the fence
+ *   clears the fence account while the Admin session lives on), a fence
+ *   bound to another account, or a missing Workspace mapping — NO partition
+ *   is acceptable; the webview is prevented unconditionally.
+ *
+ * The authenticated account comes from a lifecycle-maintained synchronous
+ * mirror (Admin session commits/ends), NOT from the runtime fence, which a
+ * revoke clears together with the fence.
  */
 type TabAppAttachDecision =
   | { mode: 'scoped'; partition: string; accountId: string; productSpaceId: string; workspaceId: string }
@@ -68,14 +76,17 @@ type TabAppAttachDecision =
 function decideTabAppAttach(
   hostWebContentsId: number,
 ): TabAppAttachDecision {
-  const accountId = getRuntimeActiveProductSpaceAccount()
+  const authenticatedAccountId = getSyncTrustedProductSpaceAccountId()
+  const fenceAccountId = getRuntimeActiveProductSpaceAccount()
   const productSpaceId = getRuntimeActiveProductSpace()
-  if (!accountId && !productSpaceId) {
-    return { mode: 'local-account' }
+  if (!authenticatedAccountId) {
+    // Signed out: a leftover fence would be unowned runtime state — fail
+    // closed; otherwise the pre-ProductSpace local-account window.
+    return productSpaceId ? { mode: 'closed' } : { mode: 'local-account' }
   }
-  if (!accountId || !productSpaceId) {
-    // Signed in without a committed fence (contract-blocked, mid-revoke,
-    // pre-bootstrap) — fail closed.
+  if (!productSpaceId || fenceAccountId !== authenticatedAccountId) {
+    // Authenticated but the ProductSpace scope is gone, mid-rebuild, or
+    // bound to a replaced account — fail closed.
     return { mode: 'closed' }
   }
   const workspaceId = trustedWebviewScopeResolver.getWorkspaceForWebContentsId?.(hostWebContentsId)
@@ -86,8 +97,8 @@ function decideTabAppAttach(
   }
   return {
     mode: 'scoped',
-    partition: tabAppPartitionForScope({ accountId, productSpaceId, workspaceId }),
-    accountId,
+    partition: tabAppPartitionForScope({ accountId: authenticatedAccountId, productSpaceId, workspaceId }),
+    accountId: authenticatedAccountId,
     productSpaceId,
     workspaceId,
   }
