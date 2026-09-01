@@ -55,23 +55,48 @@ export async function fetchTrustedProductSpaceList(): Promise<TrustedProductSpac
 }
 
 /**
- * A synchronous, Main-trusted mirror of the currently authenticated Admin
- * account, maintained by the Admin session lifecycle — set when a login
- * commits its tokens, cleared when an ended session deletes them. It is
- * deliberately independent of the runtime fence: revoking the fence (contract
- * loss, logout's revoke step, startup re-bootstrap) clears the fence AND the
- * fence account while the Admin session stays authenticated, so consumers
- * that must decide synchronously — the webview attach gate — can
- * distinguish a genuinely signed-out window from a signed-in one whose
- * ProductSpace scope is momentarily gone. Fail-closed by construction: when
- * unsure, callers treat "authenticated" as present.
+ * A synchronous, Main-trusted mirror of the authenticated Admin account,
+ * maintained by the Admin session lifecycle — set when a login commits its
+ * tokens or a startup credential restore resolves, cleared when an ended
+ * session deletes them. It is deliberately independent of the runtime
+ * fence: revoking the fence (contract loss, logout's revoke step, startup
+ * re-bootstrap) clears the fence AND the fence account while the Admin
+ * session stays authenticated, so consumers that must decide synchronously
+ * — the webview attach gate — can distinguish a genuinely signed-out
+ * window from a signed-in one whose ProductSpace scope is momentarily gone.
+ *
+ * The mirror starts in `unknown`: process start has not yet read the
+ * persisted credentials, so neither "signed in" nor "signed out" is known.
+ * Sync gates must treat `unknown` as fail-closed. The first trusted
+ * credential restore (or a login) moves it to `authenticated` / `signed_out`.
  */
-let syncAuthenticatedAccountId: string | null = null
+export type SyncTrustedProductSpaceAccountState =
+  | { status: 'unknown' }
+  | { status: 'signed_out' }
+  | { status: 'authenticated'; accountId: string }
 
+let syncAccountState: SyncTrustedProductSpaceAccountState = { status: 'unknown' }
+
+export function setSyncTrustedProductSpaceAccountState(
+  state: SyncTrustedProductSpaceAccountState,
+): void {
+  syncAccountState = state
+}
+
+/**
+ * Commits a resolved account: a non-null id is `authenticated`, null is the
+ * explicitly confirmed `signed_out` (never `unknown`).
+ */
 export function setSyncTrustedProductSpaceAccountId(accountId: string | null): void {
-  syncAuthenticatedAccountId = accountId
+  syncAccountState = accountId
+    ? { status: 'authenticated', accountId }
+    : { status: 'signed_out' }
+}
+
+export function getSyncTrustedProductSpaceAccountState(): SyncTrustedProductSpaceAccountState {
+  return syncAccountState
 }
 
 export function getSyncTrustedProductSpaceAccountId(): string | null {
-  return syncAuthenticatedAccountId
+  return syncAccountState.status === 'authenticated' ? syncAccountState.accountId : null
 }

@@ -461,6 +461,19 @@ function staleAdminValidationResult(): {
   }
 }
 
+let initialSyncAccountRestorePromise: Promise<void> | null = null
+
+/**
+ * Resolves once the synchronous authenticated-account mirror has been
+ * committed from the persisted Admin credentials (authenticated or the
+ * explicitly confirmed signed_out). Electron main awaits this BEFORE
+ * creating the first window so the webview attach gate never has to decide
+ * on the fail-closed `unknown` state in practice.
+ */
+export function whenInitialSyncTrustedProductSpaceAccountRestored(): Promise<void> {
+  return initialSyncAccountRestorePromise ?? Promise.resolve()
+}
+
 export function registerAdminHandlers(
   server: RpcServer,
   deps: HandlerDeps,
@@ -579,6 +592,34 @@ export function registerAdminHandlers(
   const sessions = new AdminSessionCoordinator(
     closeCatalogAuthorizationForAccount,
   )
+
+  // One-shot trusted credential restore for the synchronous authenticated-
+  // account mirror: reads the persisted Admin credentials once and commits
+  // either `authenticated(accountId)` or the explicitly confirmed
+  // `signed_out`. Main awaits this before creating the first window so the
+  // webview attach gate never decides on the fail-closed `unknown` state in
+  // practice; until it resolves the gate refuses every partition.
+  let initialSyncAccountRestore: Promise<void> | null = null
+  const captureInitialSyncTrustedProductSpaceAccount = (): Promise<void> => {
+    initialSyncAccountRestore ??= (async () => {
+      try {
+        const adminUrl = requireAdminUrl()
+        const manager = getCredentialManager()
+        const snapshot = await sessions.capture(manager)
+        setSyncTrustedProductSpaceAccountId(snapshot?.tokens.userId ?? null)
+      } catch (error) {
+        deps.platform.logger.warn(
+          '[Admin] initial ProductSpace account restore failed; the sync gate stays fail-closed:',
+          error instanceof Error ? error.message : String(error),
+        )
+        // Deliberately NOT committed to signed_out: an unreadable credential
+        // store is `unknown`, and the sync gate refuses everything.
+      }
+    })()
+    initialSyncAccountRestorePromise = initialSyncAccountRestore
+    return initialSyncAccountRestore
+  }
+  void captureInitialSyncTrustedProductSpaceAccount()
 
   // The ProductSpace runtime derives the account from this trusted session
   // snapshot instead of trusting RPC arguments. Registered by the admin

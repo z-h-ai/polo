@@ -11,7 +11,7 @@ import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
 } from '@polo-ai/server-core/runtime/product-space-executions'
-import { getSyncTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import { getSyncTrustedProductSpaceAccountState } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
 
 const allow = new Set([
   'fullscreen',
@@ -76,12 +76,24 @@ type TabAppAttachDecision =
 function decideTabAppAttach(
   hostWebContentsId: number,
 ): TabAppAttachDecision {
-  const authenticatedAccountId = getSyncTrustedProductSpaceAccountId()
+  // The lifecycle-maintained mirror is tri-state: `unknown` means the
+  // persisted credentials have not been read yet (process start before the
+  // initial restore) — neither signed in nor signed out is known, so the
+  // decision is fail-closed. Main awaits the initial restore before creating
+  // the first window, so `unknown` is a transient strictly-narrower state.
+  const accountState = getSyncTrustedProductSpaceAccountState()
+  if (accountState.status === 'unknown') {
+    return { mode: 'closed' }
+  }
+  const authenticatedAccountId = accountState.status === 'authenticated'
+    ? accountState.accountId
+    : null
   const fenceAccountId = getRuntimeActiveProductSpaceAccount()
   const productSpaceId = getRuntimeActiveProductSpace()
   if (!authenticatedAccountId) {
-    // Signed out: a leftover fence would be unowned runtime state — fail
-    // closed; otherwise the pre-ProductSpace local-account window.
+    // Confirmed signed out: a leftover fence would be unowned runtime
+    // state — fail closed; otherwise the pre-ProductSpace local-account
+    // window.
     return productSpaceId ? { mode: 'closed' } : { mode: 'local-account' }
   }
   if (!productSpaceId || fenceAccountId !== authenticatedAccountId) {

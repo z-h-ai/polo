@@ -63,7 +63,12 @@ const {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
-const { setSyncTrustedProductSpaceAccountId, getSyncTrustedProductSpaceAccountId } = await import(
+const {
+  setSyncTrustedProductSpaceAccountId,
+  setSyncTrustedProductSpaceAccountState,
+  getSyncTrustedProductSpaceAccountId,
+  getSyncTrustedProductSpaceAccountState,
+} = await import(
   '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
 )
 const { getRuntimeActiveProductSpace } = await import(
@@ -362,6 +367,68 @@ describe('ProductSpace webview partition policy wiring', () => {
       { src: 'https://app.example' },
     )
     expect(preventPane).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks every partition while the initial credential restore has not completed', () => {
+    // Startup sequence regression: a persisted Admin session exists on
+    // disk, but the first trusted capture has not completed yet — the sync
+    // mirror is `unknown`. Neither the shared browser-pane partition nor a
+    // guessed scoped partition may load.
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    setSyncTrustedProductSpaceAccountState({ status: 'unknown' })
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(null)
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
+
+    const preventScoped = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventScoped },
+      { partition: tabAppPartitionForScope({ accountId: trustedAccount, productSpaceId: fenceSpace, workspaceId: 'ws-7' }) },
+      { src: 'https://app.example' },
+    )
+    expect(preventScoped).toHaveBeenCalledTimes(1)
+    expect(getSyncTrustedProductSpaceAccountState().status).toBe('unknown')
+  })
+
+  it('allows the browser-pane partition once the restore confirms no session', () => {
+    // Startup sequence regression: the initial capture completed and
+    // explicitly found no persisted session — the confirmed signed-out
+    // local-account window keeps its shared partition.
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    setSyncTrustedProductSpaceAccountState({ status: 'signed_out' })
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(null)
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    expect(getSyncTrustedProductSpaceAccountState().status).toBe('signed_out')
+
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).not.toHaveBeenCalled()
   })
 
   it('clears the superseded legacy partition once the scoped gate first engages', () => {
