@@ -14,6 +14,7 @@ import {
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../handlers/rpc/trusted-product-space-account'
+import { resetAssistantStartReservationsForTests } from './assistant-executions'
 
 const trustedAccountId = 'account-trusted'
 const otherAccountId = 'account-other'
@@ -46,6 +47,7 @@ function sessionManagerStub() {
 
 beforeEach(() => {
   resetProductSpaceExecutionRegistryForTests()
+  resetAssistantStartReservationsForTests()
   setRuntimeActiveProductSpace(organizationA)
   setRuntimeActiveProductSpaceAccount(trustedAccountId)
   setSyncTrustedProductSpaceAccountId(trustedAccountId)
@@ -164,6 +166,26 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
     )
     expect(registered!.scope.accountId as string).toBe(otherAccountId)
     expect(registered!.kind).toBe('assistant_session')
+  })
+
+  it('the transition epoch brackets account resolution (R31-1)', async () => {
+    // Gated provider: the capture resolves the account, the transition
+    // begins BEFORE the post-await epoch re-read, and the capture must
+    // refuse instead of presenting the new epoch as if fresh.
+    let releaseProvider!: () => void
+    const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve(trustedAccountId) })
+    setTrustedProductSpaceAccountProvider(() => gatedProvider)
+    const { captureTrustedStartGate } = await import('./trusted-start-gate')
+    const capture = captureTrustedStartGate()
+    await new Promise(resolve => setTimeout(resolve, 25))
+    beginAccountTransition()
+    releaseProvider()
+    expect(await capture).toBeNull()
+
+    // A clean capture without an interleaved transition still works.
+    const gate = await captureTrustedStartGate()
+    expect(gate).not.toBeNull()
+    expect(gate!.accountId).toBe(trustedAccountId)
   })
 
   it('production replacement order — cleanup before revoke refuses the queued start with no orphan (R30-A)', async () => {

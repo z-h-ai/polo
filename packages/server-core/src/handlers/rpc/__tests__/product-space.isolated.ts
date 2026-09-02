@@ -1224,12 +1224,17 @@ describe('two-phase switch transaction', () => {
     expect(stoppedA.success).toBe(false)
     expect(stoppedA.errorCode).toBe('SWITCH_SUPERSEDED')
 
-    // B carries through STOP and COMMIT.
+    // R31-6: stale A's finalization released only its own activity claim —
+    // B's switch activity stays owned by B through STOP and COMMIT.
+    expect(isSwitchInProgress()).toBe(true)
     expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, preparedB.token))
       .toMatchObject({ success: true })
+    expect(isSwitchInProgress()).toBe(true)
     const committedB = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, preparedB.token, personalId)
     expect(committedB.success).toBe(true)
     expect(getRuntimeActive()).toBe(personalId)
+    // B's commit consumed the pending transaction and every claim is gone.
+    expect(isSwitchInProgress()).toBe(false)
   })
 })
 

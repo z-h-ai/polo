@@ -159,6 +159,7 @@ export function resetProductSpaceExecutionRegistryForTests(): void {
   registry.clear()
   lastCommittedSwitch = null
   prepareIntentSequence = 0
+  switchActivityClaims.clear()
 }
 
 /**
@@ -405,16 +406,26 @@ export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T>
  * between prepare and the stop phase — every path that could move an
  * execution into running/preparing must refuse to start. A live (non-
  * expired) pending transaction keeps this true even between RPCs.
+ *
+ * R31-6: the in-flight half is OWNER-controlled. Each PREPARE/STOP claims
+ * switch activity under its own identity (prepare intent id / one-time
+ * token) and releases exactly its own claim — an unconditional release from
+ * a stale operation can never clear a newer operation's active gate.
  */
-let switchInProgress = false
+const switchActivityClaims = new Map<string, true>()
 
-export function setSwitchInProgress(inProgress: boolean): void {
-  switchInProgress = inProgress
+export function acquireSwitchActivityClaim(owner: string): void {
+  switchActivityClaims.set(owner, true)
+}
+
+export function releaseSwitchActivityClaim(owner: string): void {
+  switchActivityClaims.delete(owner)
 }
 
 export function isSwitchInProgress(): boolean {
+  if (switchActivityClaims.size > 0) return true
   const pending = getPendingSwitchTransaction()
   // A cancelled transaction is a tombstone kept only so the stop phase can
   // report SWITCH_CANCELLED — it must not keep blocking new starts.
-  return switchInProgress || (pending !== null && !pending.cancelled)
+  return pending !== null && !pending.cancelled
 }

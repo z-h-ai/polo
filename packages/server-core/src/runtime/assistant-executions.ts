@@ -44,6 +44,13 @@ export interface AssistantStartReservation {
   productSpaceId: string
   gate: TrustedStartGate
   cancelled: boolean
+  /**
+   * Registration version (R31-3): monotonic per executionId. Every
+   * registration adopts a new version, and confirm/release operations CAS
+   * on it — a stale reservation can never confirm, unregister or release a
+   * newer send's execution.
+   */
+  registrationVersion: number
 }
 
 /**
@@ -52,6 +59,9 @@ export interface AssistantStartReservation {
  * the map never accumulates stale records.
  */
 const liveStartReservations = new Map<string, AssistantStartReservation>()
+
+/** Latest registration version per executionId (R31-3 ownership CAS). */
+const sessionRegistrationVersions = new Map<string, number>()
 
 interface AssistantExecutionSessionManager {
   getSessions(): Array<{ id: string; isProcessing: boolean }>
@@ -85,12 +95,19 @@ export async function registerAssistantExecutionForSend(input: {
     // unregistered.
     throw new Error('EXECUTION_REGISTRATION_REFUSED')
   }
+  // R31-3: every registration adopts a new ownership version for the
+  // session; the registry entry's closures resolve THIS version's live
+  // reservation dynamically, so a second/concurrent send fully owns its own
+  // reservation and no stale closure can cancel it.
+  const registrationVersion = (sessionRegistrationVersions.get(input.sessionId) ?? 0) + 1
+  sessionRegistrationVersions.set(input.sessionId, registrationVersion)
   const reservation: AssistantStartReservation = {
     executionId: input.sessionId,
     accountId: gate.accountId,
     productSpaceId: input.productSpaceId,
     gate,
     cancelled: false,
+    registrationVersion,
   }
   await withSwitchLock(async () => {
     const fence = getRuntimeActiveProductSpace()
@@ -110,17 +127,16 @@ export async function registerAssistantExecutionForSend(input: {
     }
     const existing = getRegisteredProductSpaceExecution(input.sessionId)
     if (
-      existing
-      && existing.scope.productSpaceId === input.productSpaceId
-      && existing.scope.accountId === gate.accountId
+      !existing
+      || existing.scope.productSpaceId !== input.productSpaceId
+      || existing.scope.accountId !== gate.accountId
     ) {
-      // Already bound to the same immutable scope — adopt a fresh
-      // reservation for this send.
-      liveStartReservations.set(input.sessionId, reservation)
-      return
+      // (Re)bind the immutable scope; the closures resolve the CURRENT live
+      // reservation dynamically (R31-3), so adopting a new reservation never
+      // leaves the registry bound to a stale one.
+      const execution = buildAssistantExecution(input, gate.accountId)
+      registerProductSpaceExecution(execution)
     }
-    const execution = buildAssistantExecution(input, gate.accountId, reservation)
-    registerProductSpaceExecution(execution)
     liveStartReservations.set(input.sessionId, reservation)
   })
   return reservation
@@ -135,7 +151,6 @@ function buildAssistantExecution(
     name: string
   },
   accountId: string,
-  reservation: AssistantStartReservation,
 ): RegisteredProductSpaceExecution {
   return {
     scope: {
@@ -150,23 +165,23 @@ function buildAssistantExecution(
     name: input.name,
     ref: input.sessionId,
     isActive: () => {
-      // A live start reservation keeps the execution active through the
-      // whole bootstrap so account cleanup and switch stops always see it —
-      // the bootstrapping send can never be treated as a terminal record.
+      // R31-3: the closure resolves the CURRENT operation-owned reservation
+      // dynamically — a second/concurrent send's reservation is the one
+      // that keeps the execution active through its bootstrap, and a stale
+      // reservation can never mask it.
       const live = liveStartReservations.get(input.sessionId)
-      if (live === reservation && !reservation.cancelled) return true
+      if (live && !live.cancelled) return true
       const session = input.sessionManager
         .getSessions()
         .find(candidate => candidate.id === input.sessionId)
       return Boolean(session?.isProcessing)
     },
     stop: async () => {
-      // Cancelling the reservation refuses any later transition to
-      // processing; cancelProcessing is a safe no-op while still
-      // bootstrapping.
-      if (liveStartReservations.get(input.sessionId) === reservation) {
-        reservation.cancelled = true
-      }
+      // Cancelling the CURRENT live reservation refuses any later transition
+      // to processing for whichever send owns it now (R31-3);
+      // cancelProcessing is a safe no-op while still bootstrapping.
+      const live = liveStartReservations.get(input.sessionId)
+      if (live) live.cancelled = true
       await input.sessionManager.cancelProcessing(input.sessionId, true)
       const deadline = Date.now() + ASSISTANT_STOP_DRAIN_TIMEOUT_MS
       while (Date.now() < deadline) {
@@ -195,8 +210,17 @@ export function confirmAssistantStartProcessing(input: {
   sessionId: string
   reservation: AssistantStartReservation
 }): boolean {
+  // R31-3 CAS: the SAME live reservation AND the same registered execution
+  // (still present, still this registration version) — cleanup must never
+  // be able to unregister the execution and then let a stale send confirm.
   const live = liveStartReservations.get(input.sessionId)
-  if (live !== input.reservation || live.cancelled) {
+  const registered = getRegisteredProductSpaceExecution(input.sessionId)
+  if (
+    live !== input.reservation
+    || live.cancelled
+    || !registered
+    || sessionRegistrationVersions.get(input.sessionId) !== input.reservation.registrationVersion
+  ) {
     cancelAssistantStartReservation(input.reservation)
     return false
   }
@@ -206,6 +230,7 @@ export function confirmAssistantStartProcessing(input: {
   ) {
     cancelAssistantStartReservation(input.reservation)
     unregisterProductSpaceExecution(input.sessionId)
+    sessionRegistrationVersions.delete(input.sessionId)
     return false
   }
   // Settled: from here the execution's liveness is `isProcessing`.
@@ -219,4 +244,37 @@ export function cancelAssistantStartReservation(reservation: AssistantStartReser
   reservation.cancelled = true
   const live = liveStartReservations.get(reservation.executionId)
   if (live === reservation) liveStartReservations.delete(reservation.executionId)
+}
+
+/**
+ * Ownership-aware release (R31-4): cancels the reservation and unregisters
+ * the execution ONLY when the reservation still owns the session's latest
+ * registration version. A newer send's registration is never touched.
+ */
+export function releaseAssistantStartExecution(reservation: AssistantStartReservation): void {
+  cancelAssistantStartReservation(reservation)
+  releaseAssistantStartExecutionVersion(reservation.executionId, reservation.registrationVersion)
+}
+
+/**
+ * Version-CAS release for paths that no longer hold the reservation object
+ * (post-confirm failures): unregisters the execution only when
+ * `registrationVersion` is still the session's latest registration.
+ */
+export function releaseAssistantStartExecutionVersion(
+  executionId: string,
+  registrationVersion: number | null | undefined,
+): void {
+  if (registrationVersion === null || registrationVersion === undefined) return
+  if (sessionRegistrationVersions.get(executionId) !== registrationVersion) return
+  if (getRegisteredProductSpaceExecution(executionId)) {
+    unregisterProductSpaceExecution(executionId)
+  }
+  sessionRegistrationVersions.delete(executionId)
+}
+
+/** Test reset: clears all live reservations and ownership versions. */
+export function resetAssistantStartReservationsForTests(): void {
+  liveStartReservations.clear()
+  sessionRegistrationVersions.clear()
 }

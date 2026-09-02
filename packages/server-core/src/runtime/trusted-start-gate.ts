@@ -29,12 +29,19 @@ export interface TrustedStartGate {
 }
 
 export async function captureTrustedStartGate(): Promise<TrustedStartGate | null> {
+  // The transition epoch must BRACKET account resolution (R31): read it
+  // before and after the awaited resolution — a transition that began in
+  // between makes the capture stale, and the capture refuses (fail-closed)
+  // instead of presenting the new epoch as if it were fresh.
+  const transitionEpochBefore = getAccountTransitionEpoch()
   const accountId = await resolveTrustedProductSpaceAccountId()
   if (!accountId) return null
+  const transitionEpochAfter = getAccountTransitionEpoch()
+  if (transitionEpochAfter !== transitionEpochBefore) return null
   return {
     accountId,
     accountGeneration: getTrustedAccountGeneration(),
-    transitionEpoch: getAccountTransitionEpoch(),
+    transitionEpoch: transitionEpochAfter,
   }
 }
 

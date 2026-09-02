@@ -17,6 +17,7 @@ import {
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../handlers/rpc/trusted-product-space-account.ts'
+import { resetAssistantStartReservationsForTests } from '../runtime/assistant-executions.ts'
 
 // R30-B: the Assistant start reservation must survive — or be invalidated
 // by — an account replacement regardless of whether the replacement lands
@@ -35,6 +36,7 @@ describe('assistant start reservation versus account replacement (R30-B)', () =>
     tmpRoot = mkdtempSync(join(tmpdir(), 'sm-reservation-'))
     sm = new SessionManager()
     resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
     setTrustedProductSpaceAccountProvider(async () => accountId)
     setSyncTrustedProductSpaceAccountId(accountId)
     setRuntimeActiveProductSpace(personalId)
@@ -153,6 +155,29 @@ describe('assistant start reservation versus account replacement (R30-B)', () =>
     expect(registeredAssistantRecords()).toBe(0)
   })
 
+  /** Gates the FIRST flushSession of one session into a REJECTION: the send
+   * fails inside its bootstrap persistence (R31-4). */
+  function rejectFirstFlush(sessionId: string): void {
+    const real = (sm as unknown as { sessionStorage: SessionStorage }).sessionStorage
+    let rejectedCount = 0
+    const storage = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'flush') {
+          return (id: string) => {
+            if (id === sessionId && rejectedCount === 0) {
+              rejectedCount += 1
+              return Promise.reject(new Error('disk full'))
+            }
+            return real.flush(id)
+          }
+        }
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+      },
+    })
+    ;(sm as unknown as { sessionStorage: SessionStorage }).sessionStorage = storage
+  }
+
   it('replacement after the transition to processing stops the processing session and unregisters it', async () => {
     const managed = buildSession('reservation-after')
     // No flush gating: the send runs to setProcessing and then fails during
@@ -176,4 +201,107 @@ describe('assistant start reservation versus account replacement (R30-B)', () =>
     expect(managed.isProcessing).toBe(false)
     expect(registeredAssistantRecords()).toBe(0)
   }, 20000)
+
+  it('a sequential second send owns the reservation; the parked first send can neither consume nor unregister it (R31-3)', async () => {
+    const managed = buildSession('ownership-seq')
+    // Gate BOTH flushes: A parks on flush #1, B parks on flush #2 — both
+    // live with their own reservations (v1, v2).
+    let releaseA!: () => void
+    let releaseB!: () => void
+    const gatedA = new Promise<void>(resolve => { releaseA = () => resolve() })
+    const gatedB = new Promise<void>(resolve => { releaseB = () => resolve() })
+    const real = (sm as unknown as { sessionStorage: SessionStorage }).sessionStorage
+    let flushCalls = 0
+    const storage = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'flush') {
+          return (id: string) => {
+            flushCalls += 1
+            if (flushCalls === 1) return gatedA
+            if (flushCalls === 2) return gatedB
+            return real.flush(id)
+          }
+        }
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+      },
+    })
+    ;(sm as unknown as { sessionStorage: SessionStorage }).sessionStorage = storage
+
+    const firstSend = sm.sendMessage('ownership-seq', 'first')
+    firstSend.catch(() => {})
+    for (let i = 0; i < 300 && flushCalls < 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    const secondSend = sm.sendMessage('ownership-seq', 'second')
+    secondSend.catch(() => {})
+    for (let i = 0; i < 300 && flushCalls < 2; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    // Both sends are parked, each owning its own reservation.
+    expect(registeredAssistantRecords()).toBe(1)
+
+    // A resumes first: its CAS must fail (v1 ≠ v2) WITHOUT unregistering
+    // B's owned execution.
+    releaseA()
+    await expect(firstSend).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
+    expect(registeredAssistantRecords()).toBe(1)
+
+    // B then resumes, confirms its own reservation and fails at (harness)
+    // agent bootstrap — releasing ITS OWN execution only.
+    releaseB()
+    await expect(secondSend).rejects.toThrow()
+    expect(registeredAssistantRecords()).toBe(0)
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  it('a flush persistence rejection releases the reservation and a retry starts clean (R31-4)', async () => {
+    const managed = buildSession('flush-reject')
+    rejectFirstFlush('flush-reject')
+
+    await expect(sm.sendMessage('flush-reject', 'hello')).rejects.toThrow('disk full')
+    // The pre-confirm throw released the reservation and unregistered the
+    // owned execution — no permanently active record remains.
+    expect(registeredAssistantRecords()).toBe(0)
+    expect(managed.isProcessing).toBe(false)
+
+    // The retry starts clean: it re-registers and proceeds to the (harness)
+    // agent-bootstrap failure with no residue from the failed attempt.
+    const retry = sm.sendMessage('flush-reject', 'hello again')
+    let retryError: unknown
+    retry.catch(e => { retryError = e })
+    for (let i = 0; i < 300 && !managed.isProcessing; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+      if (retryError) { console.log('[dbg retry] rejected early with:', (retryError as Error)?.message); break }
+      if (i % 10 === 0) console.log('[dbg retry] i=', i, 'processing=', managed.isProcessing, 'registered=', listRegisteredProductSpaceExecutions().length)
+    }
+    console.log('[dbg retry] after poll: processing=', managed.isProcessing, 'registered=', listRegisteredProductSpaceExecutions().length, 'error=', (retryError as Error)?.message)
+    await expect(retry).rejects.toThrow()
+    expect(managed.isProcessing).toBe(false)
+    expect(registeredAssistantRecords()).toBe(0)
+  })
+
+  it('a post-confirm/agent-bootstrap failure clears processing and releases the execution; a retry stays clean (R31-5)', async () => {
+    const managed = buildSession('agent-fail')
+    // No platform in this harness: agent creation fails right after the
+    // transition to processing. The generation counter proves the send
+    // reached the post-confirm transition.
+    const generationBefore = managed.processingGeneration
+
+    const first = sm.sendMessage('agent-fail', 'one')
+    first.catch(() => {})
+    await expect(first).rejects.toThrow()
+    expect(managed.processingGeneration).toBeGreaterThan(generationBefore)
+    // The extended lifecycle cleared processing and released the execution.
+    expect(managed.isProcessing).toBe(false)
+    expect(registeredAssistantRecords()).toBe(0)
+
+    // The retry registers cleanly and fails identically — no corruption.
+    const second = sm.sendMessage('agent-fail', 'two')
+    second.catch(() => {})
+    await expect(second).rejects.toThrow()
+    expect(managed.processingGeneration).toBeGreaterThan(generationBefore + 1)
+    expect(managed.isProcessing).toBe(false)
+    expect(registeredAssistantRecords()).toBe(0)
+  })
 })

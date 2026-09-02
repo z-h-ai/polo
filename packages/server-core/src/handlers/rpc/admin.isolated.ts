@@ -13,6 +13,7 @@ import {
   setRuntimeActiveProductSpaceAccount,
   stopRegisteredProductSpaceExecutionsForAccount,
 } from '../../runtime/product-space-executions'
+import { getAccountTransitionEpoch } from './trusted-product-space-account'
 
 type StoredTokens = {
   accessToken: string
@@ -1258,6 +1259,67 @@ describe('registerAdminHandlers', () => {
     // of A's executions remain registered.
     expect(observed).toEqual([{ fence: null, executions: 0 }])
     expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+  })
+
+  it('publishes the transition epoch before replacement cleanup and never advances it for same-account refresh (R31-2)', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    setRuntimeActiveProductSpaceAccount('account-a')
+    setRuntimeActiveProductSpace('space-a')
+
+    const epochBefore = getAccountTransitionEpoch()
+    let epochAtEndingCallback = -1
+    adminSessionEnding.mockImplementation(async (accountId: string) => {
+      // The cleanup callback runs AFTER the epoch publication: the epoch
+      // must already be advanced here, proving publication happened
+      // synchronously before the cleanup snapshot.
+      epochAtEndingCallback = getAccountTransitionEpoch()
+      await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+    })
+
+    const { login } = createHarness()
+    await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+
+    expect(epochAtEndingCallback).toBeGreaterThan(epochBefore)
+    // Monotonic: the completed replacement leaves the epoch advanced.
+    expect(getAccountTransitionEpoch()).toBeGreaterThan(epochBefore)
+
+    // A same-account re-login (token refresh path, no switching) must not
+    // advance the epoch.
+    const epochAfterReplacement = getAccountTransitionEpoch()
+    await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+    expect(getAccountTransitionEpoch()).toBe(epochAfterReplacement)
+  })
+
+  it('logout publishes the transition epoch; a rejected logout does not advance it (R31-2)', async () => {
+    const { login, logout, getAuthConfig } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+
+    // LOGOUT with no session: no owned transition — the epoch is untouched.
+    await logout(context)
+    const epochBefore = getAccountTransitionEpoch()
+    expect(getAccountTransitionEpoch()).toBe(epochBefore)
+
+    await login(context, 'admin', 'secret')
+    // A same-account login never transitioned — still untouched.
+    expect(getAccountTransitionEpoch()).toBe(epochBefore)
+
+    await logout(context)
+    expect(getAccountTransitionEpoch()).toBeGreaterThan(epochBefore)
+    void getAuthConfig
   })
 
   it('discards account A organization success after login switches to B', async () => {

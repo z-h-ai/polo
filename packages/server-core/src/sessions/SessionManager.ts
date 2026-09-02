@@ -31,6 +31,8 @@ import {
   registerAssistantExecutionForSend,
   cancelAssistantStartReservation,
   confirmAssistantStartProcessing,
+  releaseAssistantStartExecution,
+  releaseAssistantStartExecutionVersion,
   type AssistantStartReservation,
 } from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
@@ -5635,8 +5637,12 @@ export class SessionManager implements ISessionManager {
     // contract (never bound, e.g. CLI runtimes) carry no space semantics and
     // keep their legacy behavior. The returned start reservation keeps the
     // execution active for account cleanup through the whole bootstrap and
-    // gates the atomic transition to processing below.
+    // gates the atomic transition to processing below. From successful
+    // acquisition until the transition (or an owned release) the whole
+    // lifecycle is exception-safe (R31-4): every pre-confirm throw cancels
+    // THIS send's reservation and unregisters only its owned execution.
     let startReservation: AssistantStartReservation | null = null
+    let ownedStartVersion: number | null = null
     if (managed.productSpaceId) {
       startReservation = await registerAssistantExecutionForSend({
         sessionManager: this,
@@ -5645,16 +5651,15 @@ export class SessionManager implements ISessionManager {
         productSpaceId: managed.productSpaceId,
         name: managed.name || sessionId,
       })
+      ownedStartVersion = startReservation.registrationVersion
     }
-    // Every path that ends without starting processing must release the
-    // live reservation — the execution record stays as the session's
-    // lifecycle record, but bootstrap can never be mistaken for activity.
-    const releaseStartReservation = (): void => {
+    const releaseOwnedStart = (): void => {
       if (startReservation) {
-        cancelAssistantStartReservation(startReservation)
+        releaseAssistantStartExecution(startReservation)
         startReservation = null
       }
     }
+    try {
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
@@ -5663,7 +5668,7 @@ export class SessionManager implements ISessionManager {
     // whichever arrives first), subsequent matching calls within the deadline drop.
     if (claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
-      releaseStartReservation()
+      releaseOwnedStart()
       return
     }
 
@@ -5746,7 +5751,7 @@ export class SessionManager implements ISessionManager {
       onAck?.(userMessage.id)
       // This send ends here (queued for replay); the steered path continues
       // into the in-flight turn owned by the earlier send.
-      releaseStartReservation()
+      releaseOwnedStart()
       return
     }
 
@@ -5864,8 +5869,16 @@ export class SessionManager implements ISessionManager {
       })
       startReservation = null
       if (!confirmed) {
+        releaseAssistantStartExecutionVersion(sessionId, ownedStartVersion)
         throw new Error('EXECUTION_REGISTRATION_REFUSED')
       }
+    }
+    } catch (error) {
+      // R31-4: every pre-confirm throw releases THIS send's reservation and
+      // unregisters only its owned execution — a retry starts clean, and a
+      // newer send's registration is never touched (version CAS).
+      releaseOwnedStart()
+      throw error
     }
 
     managed.lastMessageAt = Date.now()
@@ -5897,6 +5910,14 @@ export class SessionManager implements ISessionManager {
     // Start perf span for entire sendMessage flow
     const sendSpan = perf.span('session.sendMessage', { sessionId })
 
+    // R31-5: the lifecycle state machine spans from the transition to
+    // processing through ACTUAL agent/chat start — every post-confirm/
+    // pre-chat failure clears this generation's processing state and
+    // releases its owned execution instead of leaving isProcessing=true
+    // with a live registry record. (Chat-loop errors keep their historical
+    // handling in the inner handler below.)
+    try {
+
     const workspaceRootPath = managed.workspace.rootPath
     const enabledSlugs = managed.enabledSourceSlugs ?? []
     const hasSources = enabledSlugs.length > 0
@@ -5921,7 +5942,7 @@ export class SessionManager implements ISessionManager {
 
     // Get or create the agent (lazy loading). Its internal cold-session build at
     // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.config in-memory).
+    // ensureFreshToken mirrors the disk write to source.disk in-memory).
     const agent = await this.getOrCreateAgent(managed)
     sendSpan.mark('agent.ready')
 
@@ -6186,6 +6207,22 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
         this.onProcessingStopped(sessionId, 'interrupted')
       }
+    }
+    } catch (error) {
+      // R31-5: only PRE-CHAT failures reach here — the inner handler owns
+      // chat-loop errors. A post-confirm/pre-agent failure must clear THIS
+      // generation's processing state, release its owned execution (version
+      // CAS protects a newer send) and close the span before propagating.
+      releaseAssistantStartExecutionVersion(sessionId, ownedStartVersion)
+      sendSpan.mark('agent.error')
+      sendSpan.end()
+      if (managed.processingGeneration === myGeneration) {
+        sessionLog.error('Error during pre-agent send bootstrap:', error)
+        this.onProcessingStopped(sessionId, 'error')
+      } else {
+        sessionLog.warn('Pre-agent send failure superseded by a newer send; releasing owned execution only')
+      }
+      throw error
     }
   }
 

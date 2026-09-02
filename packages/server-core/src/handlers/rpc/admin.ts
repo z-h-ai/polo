@@ -351,6 +351,12 @@ class AdminSessionCoordinator {
       const ending = this.createSnapshot(current!)
       this.endingSession = ending
       this.closeAuthorizationForEnding(current!.userId)
+      // R31: the lock-free account-transition epoch is published inside the
+      // successful transition-ownership section — after the current-session
+      // CAS matched, before getOrStartAccountCleanup can snapshot
+      // executions. Rejected/non-owner transitions never advance it, and it
+      // is monotonic (never reset) for failed/aborted owned transitions.
+      beginAccountTransition()
       const cleanup = this.getOrStartAccountCleanup(
         current!.userId,
         ending.generation,
@@ -2360,10 +2366,9 @@ async function endAdminSession(
   )
   if (!transition) return false
   const { session: ending, cleanup } = transition
-
-  // Logout begins an account transition too: advance the lock-free epoch so
-  // in-flight execution starts fail closed before the ending cleanup runs.
-  beginAccountTransition()
+  // R31: the transition epoch was already published inside beginEnding's
+  // ownership section — synchronously before its cleanup could snapshot
+  // executions. Publication at the caller would be too late.
 
   // Catalog authorization and the host lifecycle fence are already active.
   // Slow remote/process cleanup stays outside the lock so a replacement login

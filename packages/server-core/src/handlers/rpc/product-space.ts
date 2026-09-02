@@ -26,6 +26,7 @@ import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
   EXECUTION_STOP_POLL_INTERVAL_MS,
+  acquireSwitchActivityClaim,
   claimSwitchPrepareIntent,
   getLastCommittedSwitch,
   getLatestSwitchPrepareIntent,
@@ -37,13 +38,13 @@ import {
   isRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
+  releaseSwitchActivityClaim,
   revokeRuntimeProductSpaceFence,
   setLastCommittedSwitch,
   setPendingSwitchTransaction,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
-  setSwitchInProgress,
   stopAllRegisteredProductSpaceExecutions,
   stopRegisteredExecutionsOnce,
   withSwitchLock,
@@ -440,8 +441,8 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       // pending transaction, so two prepares finishing out of order can
       // never let the older one overwrite the newer one's token.
       const prepareIntent = claimSwitchPrepareIntent()
-
-      setSwitchInProgress(true)
+      const prepareActivityOwner = `prepare:${prepareIntent}`
+      acquireSwitchActivityClaim(prepareActivityOwner)
       try {
         // GLOBAL LOCK ORDER: the contract-validated list fetch acquires the
         // Admin session lock (ensureValidTokens → capture) and performs
@@ -572,7 +573,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           }
         })
       } finally {
-        setSwitchInProgress(false)
+        releaseSwitchActivityClaim(prepareActivityOwner)
       }
     },
   )
@@ -601,7 +602,6 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       }
       if (pending.cancelled) {
         setPendingSwitchTransaction(null)
-        setSwitchInProgress(false)
         return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled', executions: [] }
       }
       if (pending.status === 'ready') {
@@ -625,7 +625,8 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         }
       }
 
-      setSwitchInProgress(true)
+      const stopActivityOwner = `stop:${stopToken}`
+      acquireSwitchActivityClaim(stopActivityOwner)
       try {
         for (const execution of listRegisteredProductSpaceExecutions()) {
           if (execution.scope.accountId !== trustedAccountId) continue
@@ -727,7 +728,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           executions: statusesToExecutionSummaries(dispatched, statuses),
         }
       } finally {
-        setSwitchInProgress(false)
+        releaseSwitchActivityClaim(stopActivityOwner)
       }
     },
   )
@@ -777,14 +778,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         // prepared transaction.
         if (pending.fenceGeneration !== getRuntimeFenceGeneration()) {
           setPendingSwitchTransaction(null)
-          setSwitchInProgress(false)
           return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The prepared switch was superseded by a fence change' }
         }
         if (pending.cancelled) {
           // Cancelled during the unlocked fetch window: the switch stays on
           // the origin and the tombstone is consumed.
           setPendingSwitchTransaction(null)
-          setSwitchInProgress(false)
           return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled during commit' }
         }
         if (pending.status !== 'ready') {
@@ -794,7 +793,6 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         // Every failure below consumes the transaction.
         const consumeTransaction = (): void => {
           setPendingSwitchTransaction(null)
-          setSwitchInProgress(false)
         }
         // Membership/list freshness: the captured list must still belong to
         // the trusted account, and the fence must be exactly the one the
@@ -947,7 +945,6 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             // starts and is cleaned up by the stop phase, the TTL, or a
             // superseding prepare.
             pending.cancelled = true
-            setSwitchInProgress(false)
           }
           return { success: true as const, outcome: 'cancelled' as const }
         }
