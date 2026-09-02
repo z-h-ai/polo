@@ -47,6 +47,24 @@ interface AccountScope {
   generation: number
 }
 
+/**
+ * Main's authoritative linearization verdict for a switch cancellation
+ * (CANCEL_SWITCH response). `cancelled` means the transaction was still
+ * cancellable — the switch stays on the origin. `already_committed` means
+ * the COMMIT already won its final gate and moved the Main fence: the
+ * response carries the committed target plus the CURRENT authoritative fence
+ * read-back; the renderer converges to the committed target only while it is
+ * still the latest authority. `no_transaction` matches nothing known.
+ */
+type SwitchCancelOutcome =
+  | { outcome: 'cancelled' }
+  | { outcome: 'no_transaction' }
+  | {
+    outcome: 'already_committed'
+    committedTargetProductSpaceId: string | null
+    activeProductSpaceId: string | null
+  }
+
 function isActiveSpace(space: ProductSpaceSummary): boolean {
   return space.accessMode === 'active'
 }
@@ -113,6 +131,15 @@ export function useProductSpaceContextState() {
   productSpacesRef.current = productSpaces
   const personalProductSpaceIdRef = useRef<string | null>(null)
   personalProductSpaceIdRef.current = personalProductSpaceId
+  // Linearization record of the latest user cancellation: the click only
+  // closes the dialog and advances the generation — the authoritative Main
+  // cancellation verdict decides whether the switch stays on the origin
+  // (cancel won the final gate) or converges to the committed target (the
+  // COMMIT already wrote the fence before the cancel was scheduled).
+  const lateCancelRef = useRef<{
+    generation: number
+    outcome: Promise<SwitchCancelOutcome | null>
+  } | null>(null)
 
   const isCurrentAccountScope = useCallback((scope: AccountScope) => (
     accountIdRef.current === scope.accountId
@@ -258,11 +285,24 @@ export function useProductSpaceContextState() {
     }
   }, [])
 
-  const cancelPreparedSwitch = useCallback(async (): Promise<void> => {
+  const cancelPreparedSwitch = useCallback(async (): Promise<SwitchCancelOutcome | null> => {
     const token = preparedSwitchTokenRef.current
-    if (!token) return
+    if (!token) return null
     preparedSwitchTokenRef.current = null
-    await window.electronAPI.productSpaceCancelSwitch(token).catch(() => {})
+    try {
+      const result = await window.electronAPI.productSpaceCancelSwitch(token)
+      if (!result.success) return null
+      if (result.outcome === 'already_committed') {
+        return {
+          outcome: 'already_committed',
+          committedTargetProductSpaceId: result.committedTargetProductSpaceId ?? null,
+          activeProductSpaceId: result.activeProductSpaceId ?? null,
+        }
+      }
+      return { outcome: result.outcome === 'cancelled' ? 'cancelled' : 'no_transaction' }
+    } catch {
+      return null
+    }
   }, [])
 
   /**
@@ -711,11 +751,37 @@ export function useProductSpaceContextState() {
       return
     }
     // Post-COMMIT generation re-check: a cancel that raced the final commit
-    // await (or any newer switch/bootstrap) must never publish the target.
-    // The renderer stays on the original ProductSpace; the next authoritative
-    // refresh/bootstrap re-aligns the projection with the Main fence.
+    // await (or any newer switch/bootstrap) must never publish a stale
+    // target — unless Main's authoritative cancellation verdict reports that
+    // the commit already won its final gate and the committed target is
+    // still the current fence. In that case the switch linearizes to the
+    // committed target so the Main fence, the renderer projection, the
+    // persisted selection and visible consumers converge on one space.
     if (generation !== switchGenerationRef.current) {
       pendingTargetRef.current = null
+      const lateCancel = lateCancelRef.current
+      lateCancelRef.current = null
+      if (lateCancel && isCurrentAccountScope(scope)) {
+        const resolved = await lateCancel.outcome.catch(() => null)
+        if (
+          resolved?.outcome === 'already_committed'
+          && resolved.committedTargetProductSpaceId === targetId
+          // The committed target must still be the CURRENT authoritative
+          // fence: a newer commit elsewhere keeps the renderer put.
+          && resolved.activeProductSpaceId === resolved.committedTargetProductSpaceId
+          // No newer switch/bootstrap may have started after the cancel.
+          && switchGenerationRef.current === lateCancel.generation
+        ) {
+          switchGenerationRef.current += 1
+          setPendingSwitch(null)
+          publishCommittedSelection(
+            scope.accountId,
+            productSpacesRef.current,
+            personalProductSpaceIdRef.current ?? targetId,
+            targetId,
+          )
+        }
+      }
       return
     }
     switchGenerationRef.current += 1
@@ -937,10 +1003,17 @@ export function useProductSpaceContextState() {
 
   const cancelSwitch = useCallback((): void => {
     switchGenerationRef.current += 1
+    const generation = switchGenerationRef.current
     pendingTargetRef.current = null
     setPendingSwitch(null)
-    // Only valid pre-commit; Main ignores stale tokens.
-    void cancelPreparedSwitch()
+    // The click closes the dialog immediately but does NOT irreversibly
+    // decide the switch: the authoritative Main cancellation result (stored
+    // for the in-flight COMMIT to consume) decides between staying on the
+    // origin and converging to the already-committed target.
+    lateCancelRef.current = {
+      generation,
+      outcome: cancelPreparedSwitch(),
+    }
   }, [cancelPreparedSwitch])
 
   const dismissTargetAccessLost = useCallback((): void => {

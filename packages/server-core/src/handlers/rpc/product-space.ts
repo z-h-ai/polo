@@ -26,6 +26,7 @@ import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
   EXECUTION_STOP_POLL_INTERVAL_MS,
+  getLastCommittedSwitch,
   getPendingSwitchTransaction,
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
@@ -35,6 +36,7 @@ import {
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   revokeRuntimeProductSpaceFence,
+  setLastCommittedSwitch,
   setPendingSwitchTransaction,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
@@ -757,6 +759,14 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         setRuntimeOfflineReadOnly(false)
         setRuntimeActiveProductSpaceAccount(trustedAccountId)
         setRuntimeActiveProductSpace(targetProductSpaceId)
+        // Linearization record: a cancellation that is only processed after
+        // this point must learn that the commit won, with the authoritative
+        // target, instead of receiving a no-op success.
+        setLastCommittedSwitch({
+          token: commitToken,
+          accountId: trustedAccountId,
+          targetProductSpaceId,
+        })
         return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
       })
     },
@@ -768,6 +778,15 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
   // the pending transaction both marks the cancellation (the stop phase
   // checks before every dispatch — already-dispatched stops finish, but no
   // further execution is touched) and invalidates the token.
+  //
+  // The response is the AUTHORITATIVE linearization verdict for the
+  // renderer: `cancelled` means the transaction was still cancellable (the
+  // commit's final gate will reject it — the switch stays on the origin);
+  // `already_committed` means the commit already won its final gate and
+  // moved the fence, and the response carries the committed target plus the
+  // CURRENT authoritative fence read-back so the renderer can converge to
+  // the committed target (or detect a newer commit superseded it);
+  // `no_transaction` matches nothing known (stale token) — stay put.
   server.handle(
     RPC_CHANNELS.productSpace.CANCEL_SWITCH,
     async (_ctx, cancelToken: unknown) => {
@@ -775,16 +794,31 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch cancel request is invalid' }
       }
       const pending = getPendingSwitchTransaction()
-      if (pending?.token === cancelToken && !pending.cancelled) {
-        // Keep the transaction as a cancelled tombstone: the stop phase
-        // observes the flag before every dispatch and reports
-        // SWITCH_CANCELLED; a cancelled transaction no longer blocks new
-        // starts and is cleaned up by the stop phase, the TTL, or a
-        // superseding prepare.
-        pending.cancelled = true
-        setSwitchInProgress(false)
+      if (pending?.token === cancelToken) {
+        if (!pending.cancelled) {
+          // Keep the transaction as a cancelled tombstone: the stop phase
+          // observes the flag before every dispatch and reports
+          // SWITCH_CANCELLED; a cancelled transaction no longer blocks new
+          // starts and is cleaned up by the stop phase, the TTL, or a
+          // superseding prepare.
+          pending.cancelled = true
+          setSwitchInProgress(false)
+        }
+        return { success: true as const, outcome: 'cancelled' as const }
       }
-      return { success: true as const }
+      const committed = getLastCommittedSwitch()
+      if (committed && committed.token === cancelToken) {
+        return {
+          success: true as const,
+          outcome: 'already_committed' as const,
+          committedTargetProductSpaceId: committed.targetProductSpaceId,
+          // Authoritative fence read-back: when a newer commit has already
+          // moved the fence elsewhere, this diverges from the committed
+          // target above and the renderer must not converge to it.
+          activeProductSpaceId: getRuntimeActiveProductSpace(),
+        }
+      }
+      return { success: true as const, outcome: 'no_transaction' as const }
     },
   )
 

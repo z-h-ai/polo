@@ -681,6 +681,7 @@ describe('two-phase switch transaction', () => {
     // pending transaction must still exist and accept the cancellation.
     const cancelled = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
     expect(cancelled.success).toBe(true)
+    expect(cancelled.outcome).toBe('cancelled')
 
     releaseList()
     const committed = await committing
@@ -695,6 +696,50 @@ describe('two-phase switch transaction', () => {
     expect(replay.success).toBe(false)
     expect(replay.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
     expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('reports already_committed with the authoritative fence when the cancel arrives after the commit won', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+
+    // Gate the final authoritative list so the cancel can only be scheduled
+    // after the commit already passed its final gate and wrote the fence.
+    let fetchCalls = 0
+    let releaseList!: () => void
+    const gatedList = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseList = () => resolve({ ok: true, list: visibleList() })
+    })
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchCalls += 1
+      return gatedList
+    })
+
+    const committing = invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    for (let i = 0; i < 300 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    releaseList()
+    const committed = await committing
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+
+    // The late cancellation must learn that the commit won — with the
+    // committed target and the CURRENT authoritative fence read-back —
+    // instead of receiving a meaningless no-op success.
+    const lateCancel = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(lateCancel.success).toBe(true)
+    expect(lateCancel.outcome).toBe('already_committed')
+    expect(lateCancel.committedTargetProductSpaceId).toBe(spaceB)
+    expect(lateCancel.activeProductSpaceId).toBe(spaceB)
+    expect(getRuntimeActive()).toBe(spaceB)
+
+    // An unknown token matches nothing: stay-put verdict.
+    const unknown = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, 'not-a-known-token')
+    expect(unknown.success).toBe(true)
+    expect(unknown.outcome).toBe('no_transaction')
   })
 
   it('still commits through a deferred authoritative list when nothing cancels', async () => {

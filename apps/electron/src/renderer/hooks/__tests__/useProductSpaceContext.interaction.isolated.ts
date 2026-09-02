@@ -138,7 +138,9 @@ function configureIpc(): void {
       },
       productSpaceCancelSwitch: async (token: string) => {
         cancelledTokens.push(token)
-        return { success: true as const }
+        // Default verdict for a held (pending) transaction; tests gate or
+        // override this for the late-linearization scenarios.
+        return { success: true as const, outcome: 'cancelled' as const }
       },
       productSpaceRestoreOfflineView: async () => {
         restoreOfflineViewCalls += 1
@@ -957,12 +959,14 @@ describe('useProductSpaceContextState contract fail-closed during switch (R26)',
     expect(result.current.pendingSwitch).toBeNull()
   })
 
-  it('does not publish the target when the switch generation changed before the commit resolved', async () => {
+  it('converges to the committed target when the commit won before the late cancel was processed', async () => {
     const { result } = renderHook(useHarness)
     await boot(result)
-    // Pathological late-cancel ordering: the commit RESOLVES SUCCESS after
-    // the renderer generation moved. The renderer must still refuse to
-    // publish the stale commit.
+    // The R27 linearization: the COMMIT wins Main's final gate and moves the
+    // fence, but its response has not reached the renderer when the user's
+    // cancel is sent. Main must report `already_committed` with the current
+    // authoritative fence, and the renderer must converge to the committed
+    // target instead of splitting Main fence and renderer projection.
     let commitCalls = 0
     let releaseCommit!: () => void
     const gatedCommit = new Promise<{ success: true; from: string; to: string }>(resolve => {
@@ -975,6 +979,29 @@ describe('useProductSpaceContextState contract fail-closed during switch (R26)',
         return gatedCommit
       },
     })
+    let cancelCalls = 0
+    let releaseCancel!: () => void
+    const gatedCancel = new Promise<{
+      success: true
+      outcome: 'already_committed'
+      committedTargetProductSpaceId: string
+      activeProductSpaceId: string
+    }>(resolve => {
+      releaseCancel = () => resolve({
+        success: true,
+        outcome: 'already_committed',
+        committedTargetProductSpaceId: 'space-ent',
+        activeProductSpaceId: 'space-ent',
+      })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceCancelSwitch', {
+      configurable: true,
+      value: async (token: string) => {
+        cancelledTokens.push(token)
+        cancelCalls += 1
+        return gatedCancel
+      },
+    })
 
     let switching: Promise<void> = Promise.resolve()
     await act(async () => {
@@ -985,6 +1012,80 @@ describe('useProductSpaceContextState contract fail-closed during switch (R26)',
     }
     expect(commitCalls).toBe(1)
 
+    // The user cancels while the commit response is still in flight.
+    await act(async () => {
+      result.current.cancelSwitch()
+    })
+    expect(result.current.pendingSwitch).toBeNull()
+    for (let i = 0; i < 300 && cancelCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(cancelCalls).toBe(1)
+
+    // The COMMIT response (success — Main fence already moved to the target;
+    // the resolving mock is the fence-movement signal) arrives first. The
+    // renderer must wait for Main's cancellation verdict before deciding and
+    // must not publish while the verdict is pending.
+    await act(async () => {
+      releaseCommit()
+    })
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.pendingSwitch).toBeNull()
+
+    // Main's verdict: already committed, committed target is the current
+    // fence → the renderer converges to the committed target through the
+    // same publish path as an ordinary commit.
+    await act(async () => {
+      releaseCancel()
+      await switching
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(result.current.productSpaceContextKey).toContain('space-ent')
+  })
+
+  it('stays on the origin when the committed target is no longer the current authoritative fence', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    // Main reports already_committed for the token, but the CURRENT fence
+    // read-back has moved elsewhere (a newer commit): the stale target must
+    // not be published.
+    let commitCalls = 0
+    let releaseCommit!: () => void
+    const gatedCommit = new Promise<{ success: true; from: string; to: string }>(resolve => {
+      releaseCommit = () => resolve({ success: true, from: personalId, to: 'space-ent' })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceCommitSwitch', {
+      configurable: true,
+      value: async () => {
+        commitCalls += 1
+        return gatedCommit
+      },
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceCancelSwitch', {
+      configurable: true,
+      value: async (token: string) => {
+        cancelledTokens.push(token)
+        return {
+          success: true as const,
+          outcome: 'already_committed' as const,
+          committedTargetProductSpaceId: 'space-ent',
+          activeProductSpaceId: personalId,
+        }
+      },
+    })
+
+    let switching: Promise<void> = Promise.resolve()
+    await act(async () => {
+      switching = result.current.requestSwitch('space-ent')
+    })
+    for (let i = 0; i < 300 && commitCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
     await act(async () => {
       result.current.cancelSwitch()
     })
@@ -992,10 +1093,8 @@ describe('useProductSpaceContextState contract fail-closed during switch (R26)',
       releaseCommit()
       await switching
     })
-    // The generation re-check fenced the stale commit: the renderer stayed
-    // on the original ProductSpace and published nothing.
     expect(result.current.activeProductSpaceId).toBe(personalId)
-    expect(result.current.pendingSwitch).toBeNull()
     expect(result.current.flowState).toBe('ready')
+    expect(result.current.pendingSwitch).toBeNull()
   })
 })

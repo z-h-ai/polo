@@ -157,6 +157,33 @@ export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
 
 export function resetProductSpaceExecutionRegistryForTests(): void {
   registry.clear()
+  lastCommittedSwitch = null
+}
+
+/**
+ * The one-time token record of the switch transaction that most recently won
+ * its final commit gate and moved the fence. It is the linearization anchor
+ * for a cancellation whose RPC is processed only AFTER the commit completed:
+ * CANCEL_SWITCH can then report the authoritative "already committed" outcome
+ * (with the current fence read-back) instead of a meaningless success no-op,
+ * so the renderer can converge to the committed target instead of splitting
+ * Main fence and renderer projection across two ProductSpaces. A newer
+ * commit overwrites the record, so an older token can never claim it.
+ */
+export interface LastCommittedSwitch {
+  token: string
+  accountId: string
+  targetProductSpaceId: string
+}
+
+let lastCommittedSwitch: LastCommittedSwitch | null = null
+
+export function setLastCommittedSwitch(record: LastCommittedSwitch | null): void {
+  lastCommittedSwitch = record
+}
+
+export function getLastCommittedSwitch(): LastCommittedSwitch | null {
+  return lastCommittedSwitch
 }
 
 /**

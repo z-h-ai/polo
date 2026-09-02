@@ -983,7 +983,18 @@ export interface ElectronAPI {
     | { success: true; from: string | null; to: string }
     | { success: false; errorCode: string; message?: string }
   >
-  productSpaceCancelSwitch(token: string): Promise<{ success: boolean }>
+  productSpaceCancelSwitch(token: string): Promise<
+    | { success: false; errorCode: string; message?: string }
+    | {
+      success: true
+      /** Authoritative linearization verdict for the cancelled switch. */
+      outcome: 'cancelled' | 'already_committed' | 'no_transaction'
+      /** Present only for `already_committed`: the committed target space. */
+      committedTargetProductSpaceId?: string
+      /** Present only for `already_committed`: the CURRENT authoritative fence. */
+      activeProductSpaceId?: string | null
+    }
+  >
   productSpaceRestoreOfflineView(): Promise<
     | {
       success: true
