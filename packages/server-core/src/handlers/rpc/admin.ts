@@ -75,7 +75,7 @@ import {
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
-  type TrustedProductSpaceListSnapshot,
+  type TrustedProductSpaceListResult,
 } from './trusted-product-space-account'
 import { revokeRuntimeProductSpaceFence } from '../../runtime/product-space-executions'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
@@ -663,28 +663,41 @@ export function registerAdminHandlers(
   })
 
   // The Main-side switch transaction verifies the target space against the
-  // account's contract-validated visible list (server-authoritative).
-  setTrustedProductSpaceListFetcher(async (): Promise<TrustedProductSpaceListSnapshot | null> => {
+  // account's contract-validated visible list (server-authoritative). The
+  // failure mode is typed: an Admin server speaking an incompatible
+  // ProductSpace contract is preserved as `product_space_contract_unsupported`
+  // so PREPARE/target-revalidation/COMMIT all fail closed into
+  // contract-blocked — it must never masquerade as a transient outage.
+  setTrustedProductSpaceListFetcher(async (): Promise<TrustedProductSpaceListResult> => {
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
       const tokenResult = await ensureValidTokens(adminUrl, manager, sessions, deps)
-      if (!tokenResult.tokens) return null
+      if (!tokenResult.tokens) return { ok: false, errorCode: 'service_unavailable' }
       const client = createAuthenticatedAdminClient(adminUrl, manager, sessions, {
         session: tokenResult.session,
       })
       const list = await client.listProductSpaces(tokenResult.tokens.accessToken)
       return {
-        personalProductSpaceId: list.personalProductSpaceId,
-        productSpaces: list.productSpaces.map(space => ({
-          id: space.id,
-          kind: space.kind,
-          name: space.name,
-          accessMode: space.accessMode,
-        })),
+        ok: true,
+        list: {
+          personalProductSpaceId: list.personalProductSpaceId,
+          productSpaces: list.productSpaces.map(space => ({
+            id: space.id,
+            kind: space.kind,
+            name: space.name,
+            accessMode: space.accessMode,
+          })),
+        },
       }
-    } catch {
-      return null
+    } catch (error) {
+      if (
+        error instanceof AdminError
+        && error.errorCode === 'product_space_contract_unsupported'
+      ) {
+        return { ok: false, errorCode: 'product_space_contract_unsupported' }
+      }
+      return { ok: false, errorCode: 'service_unavailable' }
     }
   })
 

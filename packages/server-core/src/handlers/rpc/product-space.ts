@@ -443,10 +443,21 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           // no-op. Instead this trusted transaction re-validates the
           // contract and membership online and its commit atomically clears
           // the offline read-only view (the fence itself is unchanged).
-          const list = await fetchTrustedProductSpaceList()
-          if (!list) {
-            return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
+          const fetched = await fetchTrustedProductSpaceList()
+          if (!fetched.ok) {
+            // An incompatible server contract must reach the renderer
+            // verbatim: it drives the fail-closed contract-blocked path
+            // instead of a retryable "target failed" state. No transaction
+            // exists yet, so there is nothing to revoke here.
+            return {
+              success: false as const,
+              errorCode: fetched.errorCode,
+              message: fetched.errorCode === 'product_space_contract_unsupported'
+                ? 'The ProductSpace contract is not supported by this client'
+                : 'ProductSpace list is unavailable',
+            }
           }
+          const list = fetched.list
           const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
           if (!target) {
             return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
@@ -649,18 +660,33 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           // The stop phase has not confirmed every origin execution terminal.
           return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'The prepared switch has not finished stopping' }
         }
-        // All checks green: consume the token (one-time use).
-        setPendingSwitchTransaction(null)
-        setSwitchInProgress(false)
+        // The transaction stays PENDING and therefore cancellable through the
+        // final authoritative re-validation: consuming the token before the
+        // list await opened a window where CANCEL_SWITCH saw no transaction
+        // and returned success while the commit still moved the fence after
+        // its await resumed. Every failure below consumes the transaction.
+        const consumeTransaction = (): void => {
+          setPendingSwitchTransaction(null)
+          setSwitchInProgress(false)
+        }
         // Re-verify at commit time that the target is still visible to this
         // account under the current contract.
         const originProductSpaceId = pending.originProductSpaceId || null
-        const list = await fetchTrustedProductSpaceList()
-        if (!list) {
-          return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
+        const fetched = await fetchTrustedProductSpaceList()
+        if (!fetched.ok) {
+          consumeTransaction()
+          return {
+            success: false as const,
+            errorCode: fetched.errorCode,
+            message: fetched.errorCode === 'product_space_contract_unsupported'
+              ? 'The ProductSpace contract is not supported by this client'
+              : 'ProductSpace list is unavailable',
+          }
         }
+        const list = fetched.list
         const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
         if (!target) {
+          consumeTransaction()
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
         }
         // A same-space revalidation commit re-validates online that the
@@ -668,6 +694,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         // and commit refuses the commit without touching the fence or the
         // offline read-only view.
         if (originProductSpaceId === targetProductSpaceId && target.accessMode !== 'active') {
+          consumeTransaction()
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is no longer active' }
         }
         // A same-space revalidation commit carries no origin/target delta:
@@ -685,10 +712,46 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
               active = true
             }
             if (active) {
+              consumeTransaction()
               return { success: false as const, errorCode: 'runtime_stop_failed', message: 'Origin executions appeared after prepare' }
             }
           }
         }
+        // Final gate immediately before the fence mutation. Every await above
+        // (authoritative list, liveness probes) is a window in which the user
+        // may have cancelled, a logout/revoke may have advanced the fence
+        // generation, or the fence may have been re-bound to another account.
+        // The transaction is judged one last time as a whole, synchronously —
+        // nothing can interleave between this gate and the fence write.
+        const final = getPendingSwitchTransaction()
+        if (
+          !final
+          || final.token !== commitToken
+          || final.targetProductSpaceId !== targetProductSpaceId
+          || final.accountId !== trustedAccountId
+          || final.status !== 'ready'
+        ) {
+          consumeTransaction()
+          return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'No matching prepared switch transaction' }
+        }
+        if (final.fenceGeneration !== getRuntimeFenceGeneration()) {
+          consumeTransaction()
+          return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The prepared switch was superseded by a fence change' }
+        }
+        if (final.cancelled) {
+          consumeTransaction()
+          return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled during commit' }
+        }
+        // The committed fence must never be moved for a replaced account.
+        if (
+          getRuntimeActiveProductSpace()
+          && !isRuntimeFenceBoundToAccount(trustedAccountId)
+        ) {
+          consumeTransaction()
+          return { success: false as const, errorCode: 'FORBIDDEN', message: 'The committed ProductSpace belongs to a different account' }
+        }
+        // All checks green: consume the one-time token and move the fence.
+        consumeTransaction()
         // A successful online commit ends the offline read-only view and
         // (re)binds the fence to the committing trusted account.
         setRuntimeOfflineReadOnly(false)

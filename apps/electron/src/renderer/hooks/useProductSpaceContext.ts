@@ -161,6 +161,35 @@ export function useProductSpaceContextState() {
   }, [persistVerifiedContext])
 
   /**
+   * The runtime contract-blocked state (PC-F11): revokes the Main fence and
+   * tears down every renderer projection. Defined before the switch
+   * primitives because PREPARE must fail closed into it when Main reports an
+   * incompatible ProductSpace contract.
+   */
+  const enterContractBlocked = useCallback((accountId: string | null): void => {
+    // PC-F11 at runtime: revoke the Main fence synchronously (renderer can
+    // only ever clear it) and tear down every renderer projection so the
+    // business shell cannot be entered behind a stale context key.
+    void window.electronAPI.productSpaceRevokeActiveContext().catch(() => {})
+    if (accountId) {
+      clearStoredActiveProductSpaceId(accountId)
+      void clearVerifiedProductSpaceContext(accountId)
+      legacyInvalidatedAccountsRef.current.delete(accountId)
+    }
+    switchGenerationRef.current += 1
+    pendingTargetRef.current = null
+    activeProductSpaceIdRef.current = null
+    setProductSpaces([])
+    setPersonalProductSpaceId(null)
+    setActiveProductSpaceId(null)
+    setPendingSwitch(null)
+    setUnavailableSpaceIds(new Set())
+    setError({ code: 'product_space_contract_unsupported' })
+    setContextVersion(version => version + 1)
+    setFlowState('contract-blocked')
+  }, [])
+
+  /**
    * Phase 1 of the cancellable trusted switch. PREPARE (Main): verify the
    * target against the account's contract-validated list and create the
    * one-time transaction token BEFORE stopping anything — the token is held
@@ -188,8 +217,14 @@ export function useProductSpaceContextState() {
     for (const execution of result.executions ?? []) {
       statuses[execution.executionId] = execution.status
     }
+    // A PREPARE that revalidated the target against an incompatible server
+    // contract must fail closed into contract-blocked — never into the
+    // retryable target-failed dialog that keeps the business UI usable.
+    if (result.errorCode === 'product_space_contract_unsupported') {
+      enterContractBlocked(accountIdRef.current)
+    }
     return { ok: false, errorCode: result.errorCode, statuses }
-  }, [])
+  }, [enterContractBlocked])
 
   /**
    * Phase 1b: dispatch the terminations covered by the prepared token. Main
@@ -374,29 +409,6 @@ export function useProductSpaceContextState() {
       personalId: parsed.personalProductSpaceId,
     }
   }, [applyListResponse, isCurrentAccountScope])
-
-  const enterContractBlocked = useCallback((accountId: string | null): void => {
-    // PC-F11 at runtime: revoke the Main fence synchronously (renderer can
-    // only ever clear it) and tear down every renderer projection so the
-    // business shell cannot be entered behind a stale context key.
-    void window.electronAPI.productSpaceRevokeActiveContext().catch(() => {})
-    if (accountId) {
-      clearStoredActiveProductSpaceId(accountId)
-      void clearVerifiedProductSpaceContext(accountId)
-      legacyInvalidatedAccountsRef.current.delete(accountId)
-    }
-    switchGenerationRef.current += 1
-    pendingTargetRef.current = null
-    activeProductSpaceIdRef.current = null
-    setProductSpaces([])
-    setPersonalProductSpaceId(null)
-    setActiveProductSpaceId(null)
-    setPendingSwitch(null)
-    setUnavailableSpaceIds(new Set())
-    setError({ code: 'product_space_contract_unsupported' })
-    setContextVersion(version => version + 1)
-    setFlowState('contract-blocked')
-  }, [])
 
   const bootstrap = useCallback(async (accountId: string): Promise<
     'ready' | 'contract-blocked' | 'error' | null
@@ -583,7 +595,7 @@ export function useProductSpaceContextState() {
   const verifyTargetStillAccessible = useCallback(async (
     scope: AccountScope,
     targetId: string,
-  ): Promise<'ok' | 'access-lost' | 'unavailable' | null> => {
+  ): Promise<'ok' | 'access-lost' | 'unavailable' | 'contract-blocked' | null> => {
     try {
       const result = await window.electronAPI.productSpaceList()
       if (!isCurrentAccountScope(scope)) return null
@@ -610,10 +622,20 @@ export function useProductSpaceContextState() {
         activeProductSpaceIdRef.current,
       )
       return 'ok'
-    } catch {
+    } catch (caught) {
+      const record = (caught ?? {}) as Record<string, unknown>
+      // An incompatible contract discovered while re-validating the target
+      // must enter the existing contract-blocked path (revoke the Main
+      // fence, clear every business projection) — folding it into
+      // "unavailable" would keep the old business UI usable, which violates
+      // the fail-closed contract requirement.
+      if (record.code === 'product_space_contract_unsupported') {
+        enterContractBlocked(scope.accountId)
+        return 'contract-blocked'
+      }
       return 'unavailable'
     }
-  }, [applyListResponse, isCurrentAccountScope, persistVerifiedContext])
+  }, [applyListResponse, enterContractBlocked, isCurrentAccountScope, persistVerifiedContext])
 
   const finishSwitchAfterStop = useCallback(async (
     scope: AccountScope,
@@ -622,6 +644,14 @@ export function useProductSpaceContextState() {
   ): Promise<void> => {
     const verification = await verifyTargetStillAccessible(scope, targetId)
     if (await abandonSwitchIfStale(generation)) return
+    if (verification === 'contract-blocked') {
+      // enterContractBlocked already revoked the fence, cleared every
+      // business projection and bumped the generation (so the abandon check
+      // above cancelled the prepared token). Nothing further may run: the
+      // catalog staging and commit below would issue business requests in a
+      // contract-blocked session.
+      return
+    }
     if (verification === 'access-lost') {
       setPendingSwitch(previous => (
         previous && previous.targetId === targetId
@@ -678,6 +708,14 @@ export function useProductSpaceContextState() {
           ? { ...previous, phase: 'target-failed', errorCode }
           : previous
       ))
+      return
+    }
+    // Post-COMMIT generation re-check: a cancel that raced the final commit
+    // await (or any newer switch/bootstrap) must never publish the target.
+    // The renderer stays on the original ProductSpace; the next authoritative
+    // refresh/bootstrap re-aligns the projection with the Main fence.
+    if (generation !== switchGenerationRef.current) {
+      pendingTargetRef.current = null
       return
     }
     switchGenerationRef.current += 1

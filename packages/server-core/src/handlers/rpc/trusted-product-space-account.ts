@@ -32,25 +32,47 @@ export interface TrustedProductSpaceListSnapshot {
   }>
 }
 
-export type TrustedProductSpaceListFetcher = () => Promise<TrustedProductSpaceListSnapshot | null>
+export type TrustedProductSpaceListFetcher = () => Promise<TrustedProductSpaceListResult>
+
+/**
+ * The failure mode of the trusted list fetch is part of the switch contract:
+ * a transient outage (`service_unavailable`) may keep the current view, but a
+ * server speaking an incompatible ProductSpace contract
+ * (`product_space_contract_unsupported`) must reach the switch transaction
+ * verbatim so every stage fails closed into contract-blocked instead of
+ * masquerading as a retryable outage.
+ */
+export type TrustedProductSpaceListErrorCode =
+  | 'service_unavailable'
+  | 'product_space_contract_unsupported'
+
+export type TrustedProductSpaceListResult =
+  | { ok: true; list: TrustedProductSpaceListSnapshot }
+  | { ok: false; errorCode: TrustedProductSpaceListErrorCode }
 
 let listFetcher: TrustedProductSpaceListFetcher | null = null
+
+/**
+ * Installs the trusted list fetcher. The installed implementation classifies
+ * its own failures into the typed result — the contract-incompatibility code
+ * must survive into the switch transaction.
+ */
+export function setTrustedProductSpaceListFetcher(next: TrustedProductSpaceListFetcher): void {
+  listFetcher = next
+}
 
 /**
  * Fetches the account's visible ProductSpaces from the trusted Admin API
  * (contract-validated). Installed by the admin handler module; used by the
  * Main-side switch transaction to verify the target space.
  */
-export function setTrustedProductSpaceListFetcher(next: TrustedProductSpaceListFetcher): void {
-  listFetcher = next
-}
-
-export async function fetchTrustedProductSpaceList(): Promise<TrustedProductSpaceListSnapshot | null> {
-  if (!listFetcher) return null
+export async function fetchTrustedProductSpaceList(): Promise<TrustedProductSpaceListResult> {
+  if (!listFetcher) return { ok: false, errorCode: 'service_unavailable' }
   try {
     return await listFetcher()
   } catch {
-    return null
+    // A throwing fetcher is a broken installation, not a contract signal.
+    return { ok: false, errorCode: 'service_unavailable' }
   }
 }
 

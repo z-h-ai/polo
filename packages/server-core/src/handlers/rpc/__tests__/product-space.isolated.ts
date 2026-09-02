@@ -22,6 +22,7 @@ import {
 import {
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
+  type TrustedProductSpaceListResult,
   type TrustedProductSpaceListSnapshot,
 } from '../trusted-product-space-account'
 
@@ -91,7 +92,20 @@ function visibleList(): TrustedProductSpaceListSnapshot {
   }
 }
 
-let listResult: TrustedProductSpaceListSnapshot | null
+/**
+ * The falsy states of the trusted list fetcher: `null` is a transient
+ * outage, `contract_unsupported` is the typed contract incompatibility that
+ * must survive into the switch transaction verbatim.
+ */
+let listResult: TrustedProductSpaceListSnapshot | null | 'contract_unsupported'
+
+function listFetcherResult(): TrustedProductSpaceListResult {
+  if (listResult === 'contract_unsupported') {
+    return { ok: false, errorCode: 'product_space_contract_unsupported' }
+  }
+  if (listResult === null) return { ok: false, errorCode: 'service_unavailable' }
+  return { ok: true, list: listResult }
+}
 
 function createHarness() {
   const handlers = new Map<string, HandlerFn>()
@@ -126,7 +140,7 @@ beforeEach(() => {
   setRuntimeOfflineReadOnly(false)
   setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
   listResult = visibleList()
-  setTrustedProductSpaceListFetcher(async () => listResult)
+  setTrustedProductSpaceListFetcher(async () => listFetcherResult())
 })
 
 describe('execution enumeration fence', () => {
@@ -461,8 +475,8 @@ describe('Main-side switch transaction', () => {
     setTrustedProductSpaceListFetcher(async () => {
       // While the transaction verifies the target, the switch is in progress.
       sawSwitchInProgress = isSwitchInProgress()
-      return new Promise(resolve => {
-        releaseSwitch = () => resolve(visibleList())
+      return new Promise<TrustedProductSpaceListResult>(resolve => {
+        releaseSwitch = () => resolve({ ok: true, list: visibleList() })
       })
     })
     let sawSwitchInProgress = false
@@ -635,6 +649,113 @@ describe('two-phase switch transaction', () => {
     expect(stopped.errorCode).toBe('SWITCH_CANCELLED')
     expect(stopCalls).toBe(0)
     expect(await execution.isActive()).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('keeps the commit cancellable through the final authoritative list await', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+
+    // Gate the final authoritative list fetch: COMMIT must hold the
+    // transaction PENDING (cancellable) while it awaits, not consume it.
+    let fetchCalls = 0
+    let releaseList!: () => void
+    const gatedList = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseList = () => resolve({ ok: true, list: visibleList() })
+    })
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchCalls += 1
+      return gatedList
+    })
+
+    const committing = invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    for (let i = 0; i < 300 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(fetchCalls).toBe(1)
+
+    // The user cancels while the commit is still awaiting the list: the
+    // pending transaction must still exist and accept the cancellation.
+    const cancelled = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(cancelled.success).toBe(true)
+
+    releaseList()
+    const committed = await committing
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('SWITCH_CANCELLED')
+    // The fence never moved and the switch-in-progress gate is released.
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isSwitchInProgress()).toBe(false)
+    // The failed commit consumed the tombstoned transaction: a replay is
+    // invalid and cannot revive it.
+    const replay = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(replay.success).toBe(false)
+    expect(replay.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('still commits through a deferred authoritative list when nothing cancels', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+
+    let fetchCalls = 0
+    let releaseList!: () => void
+    const gatedList = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseList = () => resolve({ ok: true, list: visibleList() })
+    })
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchCalls += 1
+      return gatedList
+    })
+
+    const committing = invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    for (let i = 0; i < 300 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    releaseList()
+    const committed = await committing
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+    const replay = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(replay.success).toBe(false)
+  })
+
+  it('fails PREPARE with the typed contract error and prepares no transaction', async () => {
+    const { invoke } = createHarness()
+    listResult = 'contract_unsupported'
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(false)
+    expect(prepared.errorCode).toBe('product_space_contract_unsupported')
+    expect(getRuntimeActive()).toBe(spaceA)
+    // No transaction was created: any stop request finds nothing.
+    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, 'any-token')
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+    expect(isSwitchInProgress()).toBe(false)
+  })
+
+  it('fails COMMIT closed on an incompatible contract and keeps the fence', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+
+    listResult = 'contract_unsupported'
+    const committed = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('product_space_contract_unsupported')
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isSwitchInProgress()).toBe(false)
+    // The consumed transaction cannot commit again after the contract loss.
+    const replay = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(replay.success).toBe(false)
     expect(getRuntimeActive()).toBe(spaceA)
   })
 })

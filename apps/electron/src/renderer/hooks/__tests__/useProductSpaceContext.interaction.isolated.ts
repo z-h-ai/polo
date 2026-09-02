@@ -838,3 +838,164 @@ describe('useProductSpaceContextState cancel race', () => {
     expect(declaredActiveSpace).toBe(personalId)
   })
 })
+
+describe('useProductSpaceContextState contract fail-closed during switch (R26)', () => {
+  it('enters contract-blocked when the switch-time target revalidation finds an incompatible contract', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    let revokes = 0
+    Object.defineProperty(window.electronAPI, 'productSpaceRevokeActiveContext', {
+      configurable: true,
+      value: async () => {
+        revokes += 1
+        return { success: true as const }
+      },
+    })
+    // Installed AFTER bootstrap: the next productSpaceList call is exactly
+    // the switch-time target revalidation (verifyTargetStillAccessible) — it
+    // must surface the typed contract error instead of degrading to
+    // "unavailable".
+    Object.defineProperty(window.electronAPI, 'productSpaceList', {
+      configurable: true,
+      value: async () => ({
+        success: false as const,
+        errorCode: 'product_space_contract_unsupported',
+        message: 'unsupported',
+        contractUnsupported: true,
+      }),
+    })
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    expect(result.current.flowState).toBe('contract-blocked')
+    expect(result.current.error?.code).toBe('product_space_contract_unsupported')
+    // The contract-blocked path revoked the Main fence, cleared every
+    // business projection and left no pending switch behind.
+    expect(revokes).toBe(1)
+    expect(result.current.productSpaces).toHaveLength(0)
+    expect(result.current.allProductSpaces).toHaveLength(0)
+    expect(result.current.activeProductSpaceId).toBeNull()
+    expect(result.current.pendingSwitch).toBeNull()
+    // The commit never ran: the fence transaction never reached Main.
+    expect(declaredActiveSpace).toBe(personalId)
+  })
+
+  it('enters contract-blocked when PREPARE reports the typed contract error', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    switchResult = { success: false, errorCode: 'product_space_contract_unsupported' }
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    expect(result.current.flowState).toBe('contract-blocked')
+    expect(result.current.error?.code).toBe('product_space_contract_unsupported')
+    // Fail-closed: no target-failed dialog, no business projection, no
+    // pending switch the user could still confirm.
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(result.current.activeProductSpaceId).toBeNull()
+    expect(result.current.productSpaces).toHaveLength(0)
+    expect(declaredActiveSpace).toBe(personalId)
+  })
+
+  it('enters contract-blocked when COMMIT reports the typed contract error', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    commitResult = { success: false, errorCode: 'product_space_contract_unsupported' }
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    expect(result.current.flowState).toBe('contract-blocked')
+    expect(result.current.error?.code).toBe('product_space_contract_unsupported')
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(result.current.activeProductSpaceId).toBeNull()
+    expect(result.current.productSpaces).toHaveLength(0)
+    expect(declaredActiveSpace).toBe(personalId)
+  })
+
+  it('keeps the origin space when the commit is cancelled during the final list await', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    // Gate the commit so it resolves only after the user cancelled: Main's
+    // post-await re-check rejects the tombstoned transaction (the Main-side
+    // regression covers the fence), and the renderer must publish nothing.
+    let commitCalls = 0
+    let releaseCommit!: () => void
+    const gatedCommit = new Promise<{ success: boolean; errorCode?: string }>(resolve => {
+      releaseCommit = () => resolve({ success: false, errorCode: 'SWITCH_CANCELLED' })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceCommitSwitch', {
+      configurable: true,
+      value: async () => {
+        commitCalls += 1
+        return gatedCommit
+      },
+    })
+
+    let switching: Promise<void> = Promise.resolve()
+    await act(async () => {
+      switching = result.current.requestSwitch('space-ent')
+    })
+    for (let i = 0; i < 300 && commitCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(commitCalls).toBe(1)
+
+    await act(async () => {
+      result.current.cancelSwitch()
+    })
+    expect(result.current.pendingSwitch).toBeNull()
+
+    await act(async () => {
+      releaseCommit()
+      await switching
+    })
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.pendingSwitch).toBeNull()
+  })
+
+  it('does not publish the target when the switch generation changed before the commit resolved', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    // Pathological late-cancel ordering: the commit RESOLVES SUCCESS after
+    // the renderer generation moved. The renderer must still refuse to
+    // publish the stale commit.
+    let commitCalls = 0
+    let releaseCommit!: () => void
+    const gatedCommit = new Promise<{ success: true; from: string; to: string }>(resolve => {
+      releaseCommit = () => resolve({ success: true, from: personalId, to: 'space-ent' })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceCommitSwitch', {
+      configurable: true,
+      value: async () => {
+        commitCalls += 1
+        return gatedCommit
+      },
+    })
+
+    let switching: Promise<void> = Promise.resolve()
+    await act(async () => {
+      switching = result.current.requestSwitch('space-ent')
+    })
+    for (let i = 0; i < 300 && commitCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(commitCalls).toBe(1)
+
+    await act(async () => {
+      result.current.cancelSwitch()
+    })
+    await act(async () => {
+      releaseCommit()
+      await switching
+    })
+    // The generation re-check fenced the stale commit: the renderer stayed
+    // on the original ProductSpace and published nothing.
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(result.current.flowState).toBe('ready')
+  })
+})
