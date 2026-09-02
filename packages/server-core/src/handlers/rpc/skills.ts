@@ -16,6 +16,7 @@ import {
   getRuntimeActiveProductSpace,
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
 } from '../../runtime/product-space-executions'
 import {
   CreatorSkillBackupDeleteRpcInputSchema,
@@ -254,6 +255,12 @@ async function requireTrustedSkillsScope(): Promise<{
   const activeProductSpaceId = getRuntimeActiveProductSpace()
   if (!activeProductSpaceId || !isRuntimeFenceBoundToAccount(trustedAccountId)) {
     throw Object.assign(new Error('No committed ProductSpace is active for this account'), {
+      code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
+    })
+  }
+  // R32-3: a read_only-restricted space starts no Skill work.
+  if (isRuntimeProductSpaceRestricted(activeProductSpaceId)) {
+    throw Object.assign(new Error('The ProductSpace is restricted to read-only access'), {
       code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
     })
   }

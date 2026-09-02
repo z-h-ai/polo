@@ -25,7 +25,7 @@ import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthSt
  */
 export const SESSION_PERSISTENT_FIELDS = [
   // Identity
-  'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd', 'productSpaceId',
+  'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd', 'productSpaceId', 'accountId',
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
@@ -104,6 +104,9 @@ export interface SessionConfig {
   workspaceRootPath: string;
   /** Immutable ProductSpace binding assigned at creation time */
   productSpaceId?: string;
+  /** Immutable trusted Admin account binding assigned at creation time (R32-2).
+   *  Space-bound legacy records without it are quarantined (fail-closed). */
+  accountId?: string;
   /** Optional user-defined name */
   name?: string;
   createdAt: number;

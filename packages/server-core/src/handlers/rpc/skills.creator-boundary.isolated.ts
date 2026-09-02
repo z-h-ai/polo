@@ -91,6 +91,7 @@ const deps = {
             workspaceId: sessionWorkspaceId,
             workingDirectory: sessionWorkingDirectory,
             productSpaceId: skillsBoundarySpace,
+            accountId: trustedBoundaryAccountId,
           }
         : requestedSessionId === secondSessionId
           ? {
@@ -98,12 +99,13 @@ const deps = {
               workspaceId: workspaceOne.id,
               workingDirectory: secondSessionWorkingDirectory,
               productSpaceId: skillsBoundarySpace,
+              accountId: trustedBoundaryAccountId,
             }
         : null
     ),
     getSessions: () => [
-      { id: sessionId, productSpaceId: skillsBoundarySpace, isProcessing: false },
-      { id: secondSessionId, productSpaceId: skillsBoundarySpace, isProcessing: false },
+      { id: sessionId, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+      { id: secondSessionId, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
     ],
     setActiveViewingSession() {},
   },
@@ -164,12 +166,14 @@ const installInput = {
 }
 
 const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount, setRuntimeOfflineReadOnly } = await import('../../runtime/product-space-executions')
-const { setTrustedProductSpaceAccountProvider } = await import('./trusted-product-space-account')
+const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } = await import('./trusted-product-space-account')
 
 const trustedBoundaryAccountId = 'boundary-account'
 
 beforeEach(async () => {
   setTrustedProductSpaceAccountProvider(async () => trustedBoundaryAccountId)
+  // R32-2: the session fence reads the SYNCHRONOUS trusted account mirror.
+  setSyncTrustedProductSpaceAccountId(trustedBoundaryAccountId)
   setRuntimeActiveProductSpaceAccount(trustedBoundaryAccountId)
   setRuntimeActiveProductSpace(skillsBoundarySpace)
   setRuntimeOfflineReadOnly(false)

@@ -13,8 +13,11 @@ const CLIENT_A = 'sessions-watchers-client-a'
 const CLIENT_B = 'sessions-watchers-client-b'
 
 const { setRuntimeActiveProductSpace } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
 
 setRuntimeActiveProductSpace('watch-test-space')
+// R32-2: the session fence now also requires the trusted account binding.
+setSyncTrustedProductSpaceAccountId('watch-test-account')
 
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
@@ -73,8 +76,8 @@ describe('sessions file watchers', () => {
           return null
         },
         getSessions: () => [
-          { id: 'session-a', productSpaceId: 'watch-test-space', isProcessing: false },
-          { id: 'session-b', productSpaceId: 'watch-test-space', isProcessing: false },
+          { id: 'session-a', productSpaceId: 'watch-test-space', accountId: 'watch-test-account', isProcessing: false },
+          { id: 'session-b', productSpaceId: 'watch-test-space', accountId: 'watch-test-account', isProcessing: false },
         ],
       } as unknown as HandlerDeps['sessionManager'],
       platform: {

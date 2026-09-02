@@ -23,6 +23,7 @@ import {
   ListProductSpacesResponseSchema,
 } from '@polo-ai/shared/product-spaces'
 import type { RpcServer } from '@polo-ai/server-core/transport'
+import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 import type { HandlerDeps } from '../handler-deps'
 import {
   EXECUTION_STOP_POLL_INTERVAL_MS,
@@ -36,6 +37,7 @@ import {
   getRuntimeFenceGeneration,
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   releaseSwitchActivityClaim,
@@ -45,8 +47,10 @@ import {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
+  setRuntimeProductSpaceRestricted,
   stopAllRegisteredProductSpaceExecutions,
   stopRegisteredExecutionsOnce,
+  stopRegisteredProductSpaceExecutionsForSpace,
   withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '../../runtime/product-space-executions'
@@ -62,6 +66,8 @@ import {
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+  RPC_CHANNELS.productSpace.STOP_EXECUTION,
+  RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
   RPC_CHANNELS.productSpace.PREPARE_SWITCH,
   RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS,
   RPC_CHANNELS.productSpace.COMMIT_SWITCH,
@@ -207,7 +213,9 @@ async function executionSummariesForSpace(
       executionId: EXECUTION_ID_SCHEMA.parse(execution.scope.executionId),
       scope: execution.scope,
       name: execution.name,
-      status: 'running',
+      // Real owner-scoped runtime status (R32-4); active executions without
+      // a status provider project as 'running' (historical behavior).
+      status: execution.getStatus?.() ?? 'running',
     })
   }
   validateExecutionScopesForProductSpace(
@@ -395,6 +403,113 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           message: error instanceof Error ? error.message : 'Failed to stop all executions',
         }
       }
+    },
+  )
+
+  // R32-4: atomic single-execution termination. The stop is scoped to the
+  // one-time switch token, the trusted account and the transaction's origin
+  // ProductSpace: a stale token, another account's token, or an executionId
+  // outside that scope can never terminate anything. Per-item stop results
+  // are reported truthfully so the frozen switch dialog can retry failures.
+  server.handle(
+    RPC_CHANNELS.productSpace.STOP_EXECUTION,
+    async (_ctx, stopToken: unknown, executionId: unknown) => {
+      if (typeof stopToken !== 'string' || !stopToken
+        || typeof executionId !== 'string' || !executionId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Execution stop request is invalid' }
+      }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+      const pending = getPendingSwitchTransaction()
+      if (!pending || pending.token !== stopToken) {
+        return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'No matching prepared switch transaction' }
+      }
+      if (pending.accountId !== trustedAccountId) {
+        return { success: false as const, errorCode: 'FORBIDDEN', message: 'The prepared switch belongs to another account' }
+      }
+      if (pending.cancelled) {
+        return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled', status: 'stopping' as const }
+      }
+      const originProductSpaceId = pending.originProductSpaceId || null
+      const execution = listRegisteredProductSpaceExecutions().find(
+        candidate => candidate.scope.executionId === executionId
+          && candidate.scope.accountId === trustedAccountId
+          && candidate.scope.productSpaceId === originProductSpaceId,
+      )
+      if (!execution) {
+        return { success: false as const, errorCode: 'EXECUTION_NOT_FOUND', message: 'The execution does not belong to this switch transaction' }
+      }
+      // Cancellation gate before the dispatch (same rule as the all-stop
+      // loop): a cancelled transaction stops accepting new terminations.
+      const current = getPendingSwitchTransaction()
+      if (!current || current.token !== stopToken) {
+        return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'No matching prepared switch transaction' }
+      }
+      if (current.cancelled) {
+        return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled', status: 'stopping' as const }
+      }
+      const [result] = await stopRegisteredExecutionsOnce([execution])
+      const status: ExecutionStatus = result?.status === 'stopped' ? 'stopped' : 'failed'
+      return {
+        success: status === 'stopped',
+        executionId,
+        status,
+        ...(result?.status === 'failed' ? { errorCode: 'runtime_stop_failed' as const } : {}),
+      }
+    },
+  )
+
+  // R32-3: trusted access-mode restriction transition. A verified list
+  // refresh that degrades the active space to read_only publishes the
+  // restriction fence and terminates the space's executions through the
+  // no-confirmation trusted path BEFORE the restricted projection becomes
+  // usable. Restoring active access clears the fence without restarting any
+  // prior work. Account resolution happens BEFORE the switch lock; the
+  // critical section is all in-memory (global lock order).
+  server.handle(
+    RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+    async (_ctx, requestedAccountId: unknown, productSpaceId: unknown, restricted: unknown) => {
+      if (typeof productSpaceId !== 'string' || !productSpaceId
+        || typeof restricted !== 'boolean') {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Restriction request is invalid' }
+      }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+      const resolved = await resolveTrustedExecutionRequest(
+        requestedAccountId,
+        productSpaceId,
+      )
+      if (!('trustedAccountId' in resolved)) return resolved
+      return withSwitchLock(async () => {
+        // The fence must still be committed to this exact account/space —
+        // an offline view or replaced account cannot publish restrictions.
+        if (
+          getRuntimeActiveProductSpace() !== productSpaceId
+          || !isRuntimeFenceBoundToAccount(trustedAccountId)
+          || isRuntimeOfflineReadOnly()
+        ) {
+          return { success: false as const, errorCode: 'FORBIDDEN', message: 'The committed ProductSpace does not match the restriction target' }
+        }
+        if (restricted) {
+          // Fence FIRST (new starts fail closed immediately), then terminate
+          // the in-flight executions without confirmation.
+          setRuntimeProductSpaceRestricted(productSpaceId, true)
+          const stopped = await stopRegisteredProductSpaceExecutionsForSpace(
+            trustedAccountId,
+            productSpaceId,
+          )
+          return {
+            success: stopped.ok,
+            ...(stopped.ok ? {} : { errorCode: 'runtime_stop_failed', failedExecutionIds: stopped.failedExecutionIds }),
+          }
+        }
+        setRuntimeProductSpaceRestricted(productSpaceId, false)
+        return { success: true as const }
+      })
     },
   )
 

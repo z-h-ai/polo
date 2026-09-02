@@ -136,6 +136,7 @@ export function useProductSpaceContextState() {
   const [contextVersion, setContextVersion] = useState(0)
   const [error, setError] = useState<{ code: string; message?: string } | null>(null)
   const [pendingSwitch, setPendingSwitch] = useState<PendingSpaceSwitch | null>(null)
+  const pendingSwitchRef = useRef<PendingSpaceSwitch | null>(null)
   const [unavailableSpaceIds, setUnavailableSpaceIds] = useState<ReadonlySet<string>>(new Set())
 
   const accountIdRef = useRef<string | null>(null)
@@ -146,6 +147,9 @@ export function useProductSpaceContextState() {
   const legacyInvalidatedAccountsRef = useRef(new Set<string>())
   const productSpacesRef = useRef<ProductSpaceSummary[]>([])
   productSpacesRef.current = productSpaces
+  pendingSwitchRef.current = pendingSwitch
+  /** Last verified access mode per space (R32-3 restriction transition). */
+  const activeAccessModeRef = useRef(new Map<string, ProductSpaceSummary['accessMode']>())
   const personalProductSpaceIdRef = useRef<string | null>(null)
   personalProductSpaceIdRef.current = personalProductSpaceId
   // Operation-scoped switch bookkeeping (R28): each switch request owns a
@@ -495,6 +499,11 @@ export function useProductSpaceContextState() {
   }) => {
     setProductSpaces(parsed.productSpaces)
     setPersonalProductSpaceId(parsed.personalProductSpaceId)
+    // R32-3: remember each space's last verified access mode so a verified
+    // refresh can detect the active→read_only restriction transition.
+    for (const space of parsed.productSpaces) {
+      activeAccessModeRef.current.set(space.id, space.accessMode)
+    }
   }, [])
 
   const fetchProductSpaces = useCallback(async (scope: AccountScope, options?: {
@@ -641,6 +650,42 @@ export function useProductSpaceContextState() {
       // evaluation completes.
       const fetched = await fetchProductSpaces(scope, { publishList: false })
       if (!fetched) return null
+
+      // R32-3: verified active→read_only transition of the ACTIVE space.
+      // The trusted Main restriction fence is published and every active
+      // execution of the space is terminated through the no-confirmation
+      // trusted path BEFORE the restricted projection becomes usable.
+      // Restoring active access clears the fence without restarting prior
+      // work. Offline/membership-loss semantics are untouched (handled
+      // elsewhere).
+      const activeIdNow = activeProductSpaceIdRef.current
+      const activeNow = activeIdNow
+        ? fetched.list.find(space => space.id === activeIdNow)
+        : undefined
+      const previousMode = activeIdNow
+        ? activeAccessModeRef.current.get(activeIdNow)
+        : undefined
+      if (activeNow && activeIdNow) {
+        if (previousMode === 'active' && activeNow.accessMode === 'read_only') {
+          const restricted = await window.electronAPI.productSpaceRestrictActiveSpace(
+            scope.accountId,
+            activeIdNow,
+            true,
+          )
+          if (!restricted.success) {
+            // Fail closed: the restricted projection never becomes usable
+            // while the trusted transition could not be published.
+            setFlowState('error')
+            return null
+          }
+        } else if (previousMode === 'read_only' && activeNow.accessMode === 'active') {
+          await window.electronAPI.productSpaceRestrictActiveSpace(
+            scope.accountId,
+            activeIdNow,
+            false,
+          ).catch(() => {})
+        }
+      }
 
       const listedIds = new Set<string>(fetched.list.map(space => space.id as string))
       setUnavailableSpaceIds(previous => new Set(
@@ -1099,6 +1144,29 @@ export function useProductSpaceContextState() {
     await finishSwitchAfterStop(operation, scope)
   }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch, renewSwitchOperation, stopPreparedSwitchExecutions])
 
+  const stopSwitchExecution = useCallback(async (executionId: string): Promise<void> => {
+    // R32-4: per-item termination is scoped to the CURRENT switch
+    // operation's one-time token (token-, account- and space-checked at
+    // Main).
+    const token = activeSwitchOpRef.current?.token
+    const current = pendingSwitchRef.current
+    if (!token || !current) return
+    const result = await window.electronAPI.productSpaceStopExecution(token, executionId)
+    // Only terminal outcomes update the per-item status; a transient
+    // 'stopping' result leaves the current status untouched for retry.
+    const status: 'stopped' | 'failed' | null = result.success
+      ? 'stopped'
+      : result.status === 'failed'
+        ? 'failed'
+        : null
+    if (!status) return
+    setPendingSwitch(previous => (
+      previous && previous.targetId === current.targetId
+        ? { ...previous, statuses: { ...previous.statuses, [executionId]: status } }
+        : previous
+    ))
+  }, [])
+
   const cancelSwitch = useCallback((): void => {
     const operation = activeSwitchOpRef.current
     switchGenerationRef.current += 1
@@ -1192,6 +1260,7 @@ export function useProductSpaceContextState() {
     retryFailedStops,
     retryTargetLoad,
     cancelSwitch,
+    stopSwitchExecution,
     dismissTargetAccessLost,
     clearAccount,
     rollbackToOrigin,

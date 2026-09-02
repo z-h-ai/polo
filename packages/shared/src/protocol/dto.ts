@@ -54,6 +54,12 @@ export interface Session {
    * values can never reclassify an existing session.
    */
   productSpaceId?: string
+  /**
+   * Immutable trusted Admin account binding recorded when the session was
+   * created (R32-2). Assigned by the runtime from the trusted account
+   * context; space-bound records without it are quarantined.
+   */
+  accountId?: string
   /** Preview of first user message (from JSONL header, for lazy-loaded sessions) */
   preview?: string
   lastMessageAt: number

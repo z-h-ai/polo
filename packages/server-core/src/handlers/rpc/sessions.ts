@@ -16,6 +16,7 @@ import {
   isRuntimeOfflineReadOnly,
   unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
+import { getSyncTrustedProductSpaceAccountId } from './trusted-product-space-account'
 
 /**
  * The offline read-only view keeps only the RPCs needed to read saved
@@ -65,13 +66,35 @@ function sessionOutsideActiveSpace(
   sessionManager: HandlerDeps['sessionManager'],
   sessionId: string,
 ): boolean {
+  const active = sessionInsideActiveSpace(
+    sessionManager,
+    sessionId,
+  )
+  return !active
+}
+
+/**
+ * Space AND account fence (R32-2): a session is inside the active scope
+ * only when its ProductSpace matches the committed fence AND its immutable
+ * account binding matches the current trusted account. Space-bound legacy
+ * records without an accountId are quarantined (fail-closed) — they are
+ * never silently adopted by the next signed-in account.
+ */
+function sessionInsideActiveSpace(
+  sessionManager: HandlerDeps['sessionManager'],
+  sessionId: string,
+): boolean {
   const activeProductSpaceId = getRuntimeActiveProductSpace()
-  if (!activeProductSpaceId) return true
+  if (!activeProductSpaceId) return false
+  const trustedAccountId = getSyncTrustedProductSpaceAccountId()
+  if (!trustedAccountId) return false
   const session = sessionManager
     .getSessions()
     .find(candidate => candidate.id === sessionId)
-  if (!session) return true
-  return session.productSpaceId !== activeProductSpaceId
+  if (!session) return false
+  if (session.productSpaceId !== activeProductSpaceId) return false
+  if (!session.accountId || session.accountId !== trustedAccountId) return false
+  return true
 }
 
 function assertSessionSpaceAllowed(
@@ -203,8 +226,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // Fail closed: with no committed ProductSpace the business surface is not
     // ready and no session crosses the IPC boundary. While committed, sessions
     // bound to any other space (or never bound) are equally invisible.
-    const sessions = activeProductSpaceId
-      ? allSessions.filter(session => session.productSpaceId === activeProductSpaceId)
+    const trustedAccountId = activeProductSpaceId
+      ? getSyncTrustedProductSpaceAccountId()
+      : null
+    const sessions = activeProductSpaceId && trustedAccountId
+      ? allSessions.filter(session => session.productSpaceId === activeProductSpaceId
+        && session.accountId === trustedAccountId)
       : []
     end()
 

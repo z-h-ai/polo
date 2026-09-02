@@ -27,6 +27,7 @@ import {
   getRuntimeActiveProductSpace,
   isRuntimeOfflineReadOnly,
 } from '../runtime/product-space-executions'
+import { getSyncTrustedProductSpaceAccountId } from '../handlers/rpc/trusted-product-space-account'
 import {
   registerAssistantExecutionForSend,
   cancelAssistantStartReservation,
@@ -789,6 +790,9 @@ interface ManagedSession {
   workspace: Workspace
   /** Immutable ProductSpace binding assigned at creation time. */
   productSpaceId?: string
+  /** Immutable trusted Admin account bound at creation (R32-2). Space-bound
+   *  legacy records without it are quarantined (fail-closed). */
+  accountId?: string
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
@@ -2841,6 +2845,7 @@ export class SessionManager implements ISessionManager {
       labels: options?.labels,
       isFlagged: options?.isFlagged,
       productSpaceId: getRuntimeActiveProductSpace() ?? undefined,
+      accountId: getSyncTrustedProductSpaceAccountId() ?? undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -2924,6 +2929,7 @@ export class SessionManager implements ISessionManager {
       model: resolvedModel,
       llmConnection: options?.llmConnection,
       productSpaceId: getRuntimeActiveProductSpace() ?? undefined,
+      accountId: getSyncTrustedProductSpaceAccountId() ?? undefined,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,

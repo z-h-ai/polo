@@ -9,6 +9,7 @@ import {
   getRegisteredProductSpaceExecution,
   getRuntimeActiveProductSpace,
   isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
   isSwitchInProgress,
   registerProductSpaceExecution,
   unregisterProductSpaceExecution,
@@ -116,6 +117,8 @@ export async function registerAssistantExecutionForSend(input: {
       || isRuntimeOfflineReadOnly()
       || isSwitchInProgress()
       || input.productSpaceId !== fence
+      // R32-3: a read_only-restricted space starts no Assistant work.
+      || isRuntimeProductSpaceRestricted(input.productSpaceId)
     ) {
       throw new Error('EXECUTION_REGISTRATION_REFUSED')
     }
@@ -227,6 +230,7 @@ export function confirmAssistantStartProcessing(input: {
   if (
     !isTrustedStartGateCurrent(input.reservation.gate)
     || getRuntimeActiveProductSpace() !== input.reservation.productSpaceId
+    || isRuntimeProductSpaceRestricted(input.reservation.productSpaceId)
   ) {
     cancelAssistantStartReservation(input.reservation)
     unregisterProductSpaceExecution(input.sessionId)
@@ -253,7 +257,29 @@ export function cancelAssistantStartReservation(reservation: AssistantStartReser
  */
 export function releaseAssistantStartExecution(reservation: AssistantStartReservation): void {
   cancelAssistantStartReservation(reservation)
-  releaseAssistantStartExecutionVersion(reservation.executionId, reservation.registrationVersion)
+  const registered = getRegisteredProductSpaceExecution(reservation.executionId)
+  if (
+    sessionRegistrationVersions.get(reservation.executionId) !== reservation.registrationVersion
+    || !registered
+  ) {
+    return
+  }
+  // R32-1: an older CONFIRMED send may own the live processing turn on this
+  // shared session registry record. A newer send that never starts (dedup,
+  // steer, queue, pre-confirm failure) must only cancel its own
+  // reservation — it must never unregister or stop the active processing
+  // execution, which would make it invisible to cleanup and switching.
+  // (Post-confirm failures use the version-based release: the failing send
+  // owns the turn it just cleared.)
+  let processingLive = true
+  try {
+    processingLive = Boolean(registered.isActive())
+  } catch {
+    processingLive = true
+  }
+  if (processingLive) return
+  unregisterProductSpaceExecution(reservation.executionId)
+  sessionRegistrationVersions.delete(reservation.executionId)
 }
 
 /**

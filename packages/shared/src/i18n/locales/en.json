@@ -1146,6 +1146,7 @@
   "productSpace.exec.status.stopped": "Stopped",
   "productSpace.exec.status.stopping": "Stopping",
   "productSpace.exec.status.waiting_for_network": "Waiting for network",
+  "productSpace.exec.stopAction": "Stop",
   "productSpace.logout.revokeFailed": "Could not sign out safely. The space boundary is still active, please retry.",
   "productSpace.restricted": "Restricted",
   "productSpace.role.manager": "Manager",

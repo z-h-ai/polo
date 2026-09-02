@@ -5,6 +5,7 @@ import {
   resetProductSpaceExecutionRegistryForTests,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
+  setRuntimeProductSpaceRestricted,
   stopRegisteredProductSpaceExecutionsForAccount,
   withSwitchLock,
   type RegisteredProductSpaceExecution,
@@ -186,6 +187,104 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
     const gate = await captureTrustedStartGate()
     expect(gate).not.toBeNull()
     expect(gate!.accountId).toBe(trustedAccountId)
+  })
+
+  it('a newer non-starting send preserves the older confirmed processing turn (R32-1)', async () => {
+    // Send A is CONFIRMED and processing on the shared session record.
+    const processingState = { isProcessing: true }
+    const processingStub = {
+      getSessions: (): Array<{ id: string; isProcessing: boolean }> => [
+        { id: 'session-live', isProcessing: processingState.isProcessing },
+      ],
+      // Mirrors the real cancelProcessing: clears the processing state so
+      // the stop drain can reach a terminal outcome.
+      cancelProcessing: async () => {
+        processingState.isProcessing = false
+      },
+    }
+    const { registerAssistantExecutionForSend, confirmAssistantStartProcessing } = await import('./assistant-executions')
+    const reservationA = await registerAssistantExecutionForSend({
+      sessionManager: processingStub,
+      sessionId: 'session-live',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Live turn',
+    })
+    expect(confirmAssistantStartProcessing({
+      sessionId: 'session-live',
+      reservation: reservationA,
+    })).toBe(true)
+
+    // Send B acquires the NEWEST registration version but never starts
+    // (dedup, steer, queue or a pre-confirm failure) — its release must
+    // only cancel B's own reservation, never unregister the processing
+    // execution A owns.
+    const reservationB = await registerAssistantExecutionForSend({
+      sessionManager: processingStub,
+      sessionId: 'session-live',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Non-starting send',
+    })
+    const { releaseAssistantStartExecution } = await import('./assistant-executions')
+    releaseAssistantStartExecution(reservationB)
+
+    // The processing execution is still registered and visible.
+    const registered = listRegisteredProductSpaceExecutions().find(
+      execution => execution.scope.executionId === 'session-live',
+    )
+    expect(registered).toBeDefined()
+    expect(await registered!.isActive()).toBe(true)
+
+    // Account cleanup / ProductSpace switching still sees and stops A.
+    const stopped = await stopRegisteredProductSpaceExecutionsForAccount(trustedAccountId)
+    expect(stopped.ok).toBe(true)
+    expect(listRegisteredProductSpaceExecutions()).toHaveLength(0)
+  })
+
+  it('a read_only-restricted space refuses Assistant registration and confirmation (R32-3)', async () => {
+    const { registerAssistantExecutionForSend, confirmAssistantStartProcessing } = await import('./assistant-executions')
+    // Registration fails closed while restricted.
+    setRuntimeProductSpaceRestricted(organizationA, true)
+    await expect(registerAssistantExecutionForSend({
+      sessionManager: sessionManagerStub(),
+      sessionId: 'session-restricted',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Restricted',
+    })).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
+    expect(listRegisteredProductSpaceExecutions()).toHaveLength(0)
+
+    // The atomic transition to processing is equally gated: register while
+    // active, restrict, then confirm — the reservation is cancelled and the
+    // execution unregistered.
+    setRuntimeProductSpaceRestricted(organizationA, false)
+    const reservation = await registerAssistantExecutionForSend({
+      sessionManager: sessionManagerStub(),
+      sessionId: 'session-restricted-2',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Restricted after register',
+    })
+    expect(listRegisteredProductSpaceExecutions().length).toBe(1)
+    setRuntimeProductSpaceRestricted(organizationA, true)
+    expect(confirmAssistantStartProcessing({
+      sessionId: 'session-restricted-2',
+      reservation,
+    })).toBe(false)
+    expect(listRegisteredProductSpaceExecutions()).toHaveLength(0)
+
+    // Recovery: clearing the restriction allows registration again without
+    // restarting any prior work.
+    setRuntimeProductSpaceRestricted(organizationA, false)
+    const recovered = await registerAssistantExecutionForSend({
+      sessionManager: sessionManagerStub(),
+      sessionId: 'session-recovered',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Recovered',
+    })
+    expect(recovered.accountId).toBe(trustedAccountId)
   })
 
   it('production replacement order — cleanup before revoke refuses the queued start with no orphan (R30-A)', async () => {

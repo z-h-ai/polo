@@ -3,6 +3,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
 import {
+  isRuntimeProductSpaceRestricted,
   isSwitchInProgress,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
@@ -1235,6 +1236,180 @@ describe('two-phase switch transaction', () => {
     expect(getRuntimeActive()).toBe(personalId)
     // B's commit consumed the pending transaction and every claim is gone.
     expect(isSwitchInProgress()).toBe(false)
+  })
+})
+
+describe('access-mode restriction transition (R32-3)', () => {
+  it('stops in-flight executions, keeps new starts blocked, and recovers without restarting prior work', async () => {
+    const { invoke } = createHarness()
+    const inFlight = fakeExecution({ executionId: 'exec-restrict' })
+    registerProductSpaceExecution(inFlight)
+
+    const restricted = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      true,
+    )
+    expect(restricted.success).toBe(true)
+    // The in-flight execution was terminated and unregistered.
+    expect(listRegisteredProductSpaceExecutions()).toHaveLength(0)
+    expect(await inFlight.isActive()).toBe(false)
+    expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(true)
+
+    // The restricted space also refuses fresh registration through the
+    // shared start gate used by Assistant and Local App paths.
+    const { registerAssistantExecutionForSend } = await import('../../../runtime/assistant-executions')
+    await expect(registerAssistantExecutionForSend({
+      sessionManager: { getSessions: () => [], cancelProcessing: async () => {} },
+      sessionId: 'session-restricted',
+      workspaceId: 'ws-a',
+      productSpaceId: spaceA,
+      name: 'restricted',
+    })).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
+
+    // Recovery: restoring active access clears the fence without
+    // restarting any prior work.
+    const recovered = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      false,
+    )
+    expect(recovered.success).toBe(true)
+    expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(false)
+  })
+
+  it('refuses the restriction transition for a replaced account or cleared fence', async () => {
+    const { invoke } = createHarness()
+    setTrustedProductSpaceAccountProvider(async () => 'account-other')
+    const refused = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      true,
+    )
+    expect(refused.success).toBe(false)
+    // The account/space mismatch fails closed before any restriction is
+    // published (resolveTrustedExecutionRequest / fence-binding check).
+    expect(refused.errorCode).toBe('FORBIDDEN')
+    expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(false)
+
+    await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+    setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
+    const noFence = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      true,
+    )
+    expect(noFence.success).toBe(false)
+    expect(noFence.errorCode).toBe('PRODUCT_SPACE_CONTEXT_REQUIRED')
+  })
+})
+
+describe('per-item stop and real statuses (R32-4)', () => {
+  it('stops one execution atomically, rejects stale token and out-of-scope ids, and keeps active statuses blocking COMMIT', async () => {
+    const { invoke } = createHarness()
+    const first = fakeExecution({ executionId: 'exec-s1' })
+    const second = fakeExecution({ executionId: 'exec-s2' })
+    // Real status projection: the item is preparing while active.
+    first.getStatus = () => 'preparing'
+    second.getStatus = () => 'running'
+    registerProductSpaceExecution(first)
+    registerProductSpaceExecution(second)
+
+    const list = await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, trustedAccountId, spaceA)
+    expect(list.success).toBe(true)
+    const statuses = Object.fromEntries(
+      (list.executions as Array<{ executionId: string; status: string }>).map(item => [item.executionId, item.status]),
+    )
+    expect(statuses['exec-s1']).toBe('preparing')
+    expect(statuses['exec-s2']).toBe('running')
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    // Active statuses (preparing/running) block the final PREPARE/COMMIT:
+    // both executions are planned for termination.
+    expect(prepared.executions).toHaveLength(2)
+
+    // Stale token and out-of-scope ids are rejected without side effects.
+    const stale = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, 'not-the-token', 'exec-s1')
+    expect(stale.success).toBe(false)
+    expect(stale.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+    const outOfScope = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-unknown')
+    expect(outOfScope.success).toBe(false)
+    expect(outOfScope.errorCode).toBe('EXECUTION_NOT_FOUND')
+
+    // Atomic single stop: only the targeted execution is terminated.
+    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-s1')
+    expect(stopped.success).toBe(true)
+    expect(stopped.status).toBe('stopped')
+    expect(await first.isActive()).toBe(false)
+    expect(await second.isActive()).toBe(true)
+
+    // The remaining execution still blocks; STOP_ALL finalizes and COMMIT
+    // succeeds with the per-item stop result retained.
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+    const committed = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+  })
+
+  // A truthfully-failed per-item stop keeps the execution active, so the
+  // stop drain runs to its shared 10s deadline before reporting 'failed' —
+  // the test timeout must cover both attempts (bounded, never hanging).
+  it('reports truthful failed per-item status and supports retry before finalization', async () => {
+    const { invoke } = createHarness()
+    const flaky = fakeExecution({ executionId: 'exec-flaky', refuseStop: true })
+    registerProductSpaceExecution(flaky)
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    // First per-item stop fails truthfully (the stop cannot reach a
+    // terminal state yet — the 10s shared drain applies).
+    let flakyStopCalls = 0
+    let flakyRecovered = false
+    const originalFlakyStop = flaky.stop
+    const originalFlakyIsActive = flaky.isActive
+    flaky.stop = async () => {
+      flakyStopCalls += 1
+      if (flakyStopCalls >= 2) flakyRecovered = true
+      return originalFlakyStop()
+    }
+    flaky.isActive = () => (flakyRecovered ? false : originalFlakyIsActive())
+    const failed = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-flaky')
+    expect(failed.success).toBe(false)
+    expect(failed.status).toBe('failed')
+    expect(await flaky.isActive()).toBe(true)
+
+
+
+    // Retry succeeds; the transaction then finalizes and commits.
+    const retried = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-flaky')
+    expect(retried.success).toBe(true)
+    expect(retried.status).toBe('stopped')
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+    const committed = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+  }, 30_000)
+
+  it('a cancelled pending transaction refuses per-item stops (R32-4)', async () => {
+    const { invoke } = createHarness()
+    const execution = fakeExecution({ executionId: 'exec-c10' })
+    registerProductSpaceExecution(execution)
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+
+    const refused = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-c10')
+    expect(refused.success).toBe(false)
+    expect(refused.errorCode).toBe('SWITCH_CANCELLED')
+    expect(await execution.isActive()).toBe(true)
   })
 })
 

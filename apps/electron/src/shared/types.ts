@@ -983,6 +983,21 @@ export interface ElectronAPI {
     | { success: true; from: string | null; to: string }
     | { success: false; errorCode: string; message?: string }
   >
+  productSpaceStopExecution(
+    token: string,
+    executionId: string,
+  ): Promise<
+    | { success: true; executionId: string; status: 'stopped' }
+    | { success: false; errorCode: string; message?: string; status?: 'stopping' | 'failed' }
+  >
+  productSpaceRestrictActiveSpace(
+    accountId: string,
+    productSpaceId: string,
+    restricted: boolean,
+  ): Promise<
+    | { success: true }
+    | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[] }
+  >
   productSpaceCancelSwitch(token: string): Promise<
     | { success: false; errorCode: string; message?: string }
     | {

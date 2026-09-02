@@ -432,6 +432,7 @@ export default function App() {
     retryFailedStops,
     retryTargetLoad,
     cancelSwitch,
+    stopSwitchExecution,
     dismissTargetAccessLost,
   } = productSpace
   // Derive connection default model override from the default LLM connection
@@ -2490,9 +2491,13 @@ export default function App() {
       },
       onCancelSwitch: cancelSwitch,
       onDismissTargetAccessLost: dismissTargetAccessLost,
+      onStopSwitchExecution: (executionId: string) => {
+        void stopSwitchExecution(executionId)
+      },
     }
   }, [
     cancelSwitch,
+    stopSwitchExecution,
     confirmStopAndSwitch,
     currentAdminUser?.userId,
     dismissTargetAccessLost,

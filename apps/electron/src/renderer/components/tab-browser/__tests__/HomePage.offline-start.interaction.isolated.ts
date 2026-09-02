@@ -96,6 +96,7 @@ function AppHomeHarness() {
       },
       onRefreshProductSpaces: () => {},
       onConfirmStopAndSwitch: () => {},
+      onStopSwitchExecution: () => {},
       onRetryFailedStops: () => {},
       onRetryTargetLoad: () => {},
       onCancelSwitch: () => {},

@@ -20,6 +20,8 @@ export interface ProductSpaceContextValue {
   onRetryTargetLoad: () => void
   onCancelSwitch: () => void
   onDismissTargetAccessLost: () => void
+  /** R32-4: per-item atomic termination inside the active switch transaction. */
+  onStopSwitchExecution: (executionId: string) => void
 }
 
 const ProductSpaceContext = createContext<ProductSpaceContextValue | null>(null)

@@ -127,6 +127,10 @@ export function ProductSpaceSwitchDialog() {
                     : status === 'stopping'
                       ? 'productSpace.exec.item.stopping'
                       : null
+                const stoppable = pending.phase === 'stopping'
+                  && status !== 'stopped'
+                  && status !== 'failed'
+                  && status !== 'stopping'
                 return (
                   <div
                     key={execution.executionId}
@@ -151,6 +155,17 @@ export function ProductSpaceSwitchDialog() {
                         ? t('productSpace.exec.status.failed')
                         : t(executionStatusKey(status))}
                     </span>
+                    {stoppable ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-6 px-2 text-xs"
+                        data-testid="product-space-switch-execution-stop"
+                        onClick={() => space.onStopSwitchExecution(execution.executionId)}
+                      >
+                        {t('productSpace.exec.stopAction')}
+                      </Button>
+                    ) : null}
                   </div>
                 )
               })}

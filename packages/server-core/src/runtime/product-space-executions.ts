@@ -1,4 +1,4 @@
-import type { ProductSpaceExecutionScope } from '@polo-ai/shared/product-spaces'
+import type { ExecutionStatus, ProductSpaceExecutionScope } from '@polo-ai/shared/product-spaces'
 
 export type ProductSpaceExecutionKind = 'assistant_session' | 'local_app'
 
@@ -13,6 +13,11 @@ export interface RegisteredProductSpaceExecution {
   ref: string
   /** Returns whether the execution is still in flight. May be async. */
   isActive: () => boolean | Promise<boolean>
+  /** Real owner-scoped runtime status while active (R32-4). When absent,
+   *  active executions project as 'running'. Active statuses are
+   *  preparing/running/waiting_for_network/stopping — all of them block a
+   *  switch PREPARE/COMMIT exactly like isActive. */
+  getStatus?: () => ExecutionStatus
   /** Requests a safe stop and waits for a terminal outcome. */
   stop: () => Promise<ExecutionStopOutcome>
 }
@@ -160,6 +165,7 @@ export function resetProductSpaceExecutionRegistryForTests(): void {
   lastCommittedSwitch = null
   prepareIntentSequence = 0
   switchActivityClaims.clear()
+  restrictedProductSpaces.clear()
 }
 
 /**
@@ -248,6 +254,11 @@ export function setRuntimeActiveProductSpace(productSpaceId: string | null): voi
   // record for a fence that no longer exists must never authenticate a
   // delayed cancellation.
   lastCommittedSwitch = null
+  if (productSpaceId === null) {
+    // A revoked fence has no spaces to restrict; the offline read-only view
+    // blocks starts on its own until an online switch revalidates.
+    restrictedProductSpaces.clear()
+  }
 }
 
 /** Binds (or re-binds) the trusted account of the committed fence. */
@@ -377,6 +388,49 @@ export function setRuntimeOfflineReadOnly(offline: boolean): void {
 
 export function isRuntimeOfflineReadOnly(): boolean {
   return runtimeOfflineReadOnly
+}
+
+/**
+ * Trusted access-mode restriction fence (R32-3). When a verified online
+ * refresh transitions the active enterprise space from `active` to
+ * `read_only`, Main records the space here and every Assistant/App/Skill
+ * start fails closed while existing executions are terminated through the
+ * no-confirmation trusted path. Restoring active access clears the flag
+ * without ever auto-restarting prior work.
+ */
+const restrictedProductSpaces = new Set<string>()
+
+export function setRuntimeProductSpaceRestricted(productSpaceId: string, restricted: boolean): void {
+  if (restricted) restrictedProductSpaces.add(productSpaceId)
+  else restrictedProductSpaces.delete(productSpaceId)
+}
+
+export function isRuntimeProductSpaceRestricted(productSpaceId: string | null | undefined): boolean {
+  if (!productSpaceId) return false
+  return restrictedProductSpaces.has(productSpaceId)
+}
+
+/**
+ * Space-scoped no-confirmation termination used by the restriction
+ * transition: stops every registered execution of one account inside one
+ * ProductSpace and reports the per-item outcomes.
+ */
+export async function stopRegisteredProductSpaceExecutionsForSpace(
+  accountId: string,
+  productSpaceId: string,
+): Promise<{
+  ok: boolean
+  failedExecutionIds: string[]
+}> {
+  const entries = listRegisteredProductSpaceExecutions().filter(
+    execution => execution.scope.accountId === accountId
+      && execution.scope.productSpaceId === productSpaceId,
+  )
+  const results = await stopRegisteredExecutionsOnce(entries)
+  const failedExecutionIds = results
+    .filter(result => result.status === 'failed')
+    .map(result => result.executionId)
+  return { ok: failedExecutionIds.length === 0, failedExecutionIds }
 }
 
 /**

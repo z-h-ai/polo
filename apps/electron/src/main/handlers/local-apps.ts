@@ -39,6 +39,7 @@ import {
   isSwitchInProgress,
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   unregisterProductSpaceExecution,
@@ -709,6 +710,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         throw new LocalAppRuntimeError(
           'PRODUCT_SPACE_CONTEXT_REQUIRED',
           'No committed ProductSpace is active on this device',
+        )
+      }
+      // R32-3: a read_only-restricted space starts no Local App work.
+      if (isRuntimeProductSpaceRestricted(activeProductSpaceId)) {
+        throw new LocalAppRuntimeError(
+          'PRODUCT_SPACE_CONTEXT_REQUIRED',
+          'The ProductSpace is restricted to read-only access',
         )
       }
       // A fence committed for another (replaced) account is never startable,

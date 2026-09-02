@@ -89,6 +89,7 @@ function createTestHarness(sessionPaths: Map<string, string>) {
       getSessions: () => [...sessionPaths.keys()].map(id => ({
         id,
         productSpaceId: 'watch-test-space',
+        accountId: 'watch-test-account',
         isProcessing: false,
       })),
     } as unknown as HandlerDeps['sessionManager'],
@@ -155,8 +156,11 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
 // ---------------------------------------------------------------------------
 
 const { setRuntimeActiveProductSpace } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
 
 setRuntimeActiveProductSpace('watch-test-space')
+// R32-2: the session fence now also requires the trusted account binding.
+setSyncTrustedProductSpaceAccountId('watch-test-account')
 
 describe('session file watcher isolation', () => {
   afterEach(async () => {

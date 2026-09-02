@@ -1146,6 +1146,7 @@
   "productSpace.exec.status.stopped": "停止済み",
   "productSpace.exec.status.stopping": "停止中",
   "productSpace.exec.status.waiting_for_network": "ネットワーク待ち",
+  "productSpace.exec.stopAction": "停止",
   "productSpace.logout.revokeFailed": "安全にサインアウトできませんでした。スペース境界が有効なままです。再試行してください。",
   "productSpace.restricted": "制限中",
   "productSpace.role.manager": "マネージャー",

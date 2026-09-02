@@ -1146,6 +1146,7 @@
   "productSpace.exec.status.stopped": "Detenido",
   "productSpace.exec.status.stopping": "Deteniendo",
   "productSpace.exec.status.waiting_for_network": "Esperando red",
+  "productSpace.exec.stopAction": "Detener",
   "productSpace.logout.revokeFailed": "No se pudo cerrar sesión de forma segura. El límite del espacio sigue activo; inténtalo de nuevo.",
   "productSpace.restricted": "Restringido",
   "productSpace.role.manager": "Manager",
