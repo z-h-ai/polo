@@ -248,7 +248,45 @@ export async function stopAllProductSpaceExecutions(input: {
 }): Promise<StopAllExecutionsResult> {
   const accountId = AccountIdSchema.parse(input.trustedAccountId)
   const productSpaceId = ProductSpaceIdSchema.parse(input.productSpaceId)
-  const active = await executionSummariesForSpace(input.trustedAccountId, input.productSpaceId)
+
+  // R38-5: the INITIAL selection is revision-bracketed — a replacement
+  // registered during the awaited liveness probes invalidates the pass and
+  // the enumeration restarts against the new registry set (bounded). A
+  // selection that never stabilized cannot report an empty space.
+  const INITIAL_SELECTION_PASSES = 5
+  let active: ExecutionSummary[] | null = null
+  let selectionUnstable = false
+  for (let pass = 0; pass < INITIAL_SELECTION_PASSES; pass++) {
+    const revisionBefore = registeredExecutionsScopeRevision(accountId, productSpaceId)
+    const selected = await executionSummariesForSpace(input.trustedAccountId, input.productSpaceId)
+    if (registeredExecutionsScopeRevision(accountId, productSpaceId) === revisionBefore) {
+      active = selected
+      break
+    }
+  }
+  if (active === null) {
+    // R38-5: explicit nonterminal survivor state — the newest generation is
+    // registered and live; project it as `stopping` with allStopped=false.
+    // Never report terminal success over unresolved active work.
+    selectionUnstable = true
+    const survivors = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.scope.accountId === accountId
+        && execution.scope.productSpaceId === productSpaceId,
+    )
+    const executions: ExecutionSummary[] = survivors.map(execution => ({
+      executionId: EXECUTION_ID_SCHEMA.parse(execution.scope.executionId),
+      scope: execution.scope,
+      name: execution.name,
+      status: 'stopping',
+    }))
+    const result: StopAllExecutionsResult = { allStopped: false, executions }
+    return parseStopAllExecutionsResultForProductSpace(
+      result,
+      accountId,
+      productSpaceId,
+      executions.map(execution => execution.scope),
+    )
+  }
   if (active.length === 0) {
     return { allStopped: true, executions: [] }
   }
@@ -276,7 +314,7 @@ export async function stopAllProductSpaceExecutions(input: {
 
   // R35-3: a superseded drain outcome is NEVER terminal success — the
   // replacement generation that took the slot maps to a retryable failure.
-  const summaries: ExecutionSummary[] = active.map(execution => {
+  const baseSummaries: ExecutionSummary[] = active.map(execution => {
     const outcome = outcomeById.get(execution.executionId)
     const stopped = outcome?.status === 'stopped' && outcome.superseded !== true
     return stopped
@@ -284,17 +322,17 @@ export async function stopAllProductSpaceExecutions(input: {
       : { ...execution, status: 'failed', errorCode: 'runtime_stop_failed' }
   })
 
-  // R35-3/R37-5: generation-stable final projection. Each pass brackets its
-  // awaited liveness probes with the registry revision for the exact
-  // account/ProductSpace scope; a same-ID replacement (or any registration/
-  // removal) that happens DURING a probe invalidates the pass and the next
-  // pass re-enumerates the new registry set. Surviving active executions
-  // are projected with their REAL owner-scoped status as explicit
-  // NONTERMINAL rows — allStopped is false while any scoped execution is
-  // live, and the stale generation is never terminal success.
+  // R35-3/R37-5/R38-5: generation-stable final projection. EVERY pass builds
+  // a FRESH projection from the terminal base rows; any row invalidated by a
+  // mid-pass registry change is discarded with the pass and rebuilt by the
+  // next pass against the new registry set. Surviving active executions are
+  // projected with their REAL owner-scoped status as explicit NONTERMINAL
+  // rows — allStopped is false while any scoped execution is live.
   const FINAL_PROJECTION_PASSES = 5
+  let summaries: ExecutionSummary[] = baseSummaries
   let projectionStable = false
   for (let pass = 0; pass < FINAL_PROJECTION_PASSES && !projectionStable; pass++) {
+    const passRows = baseSummaries.map(summary => ({ ...summary }))
     const revisionBefore = registeredExecutionsScopeRevision(accountId, productSpaceId)
     for (const execution of listRegisteredProductSpaceExecutions()) {
       if (execution.scope.accountId !== accountId) continue
@@ -308,12 +346,12 @@ export async function stopAllProductSpaceExecutions(input: {
       if (!activeNow) continue
       const realStatus: ExecutionStatus = execution.getStatus?.() ?? 'running'
       const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
-      const existing = summaries.find(summary => summary.executionId === parsedId)
+      const existing = passRows.find(summary => summary.executionId === parsedId)
       if (existing) {
         existing.status = realStatus
         delete existing.errorCode
       } else {
-        summaries.push({
+        passRows.push({
           executionId: parsedId,
           scope: execution.scope,
           name: execution.name,
@@ -322,22 +360,54 @@ export async function stopAllProductSpaceExecutions(input: {
       }
     }
     if (registeredExecutionsScopeRevision(accountId, productSpaceId) === revisionBefore) {
+      summaries = passRows
       projectionStable = true
     }
+    // An unstable pass is DISCARDED entirely — its provisional rows were
+    // observed against a registry set that no longer exists.
   }
   if (!projectionStable) {
-    // The scope kept changing through every pass: return an explicit
-    // nonterminal failure — every row is a retryable failure and no
-    // terminal success is reported against thrashing ownership.
-    for (const summary of summaries) {
-      summary.status = 'failed'
-      summary.errorCode = 'runtime_stop_failed'
+    // R38-5: the scope kept changing through every pass — bounded retries
+    // are exhausted. Report a schema-compatible NONTERMINAL survivor state:
+    // every in-scope live generation is projected as `stopping` (with its
+    // real status when available), allStopped stays FALSE, and no row is
+    // converted into terminal success over unresolved active work.
+    summaries = baseSummaries.map(summary => ({ ...summary }))
+    const liveRows: ExecutionSummary[] = []
+    for (const execution of listRegisteredProductSpaceExecutions()) {
+      if (execution.scope.accountId !== accountId) continue
+      if (execution.scope.productSpaceId !== productSpaceId) continue
+      let activeNow: boolean
+      try {
+        activeNow = Boolean(await execution.isActive())
+      } catch {
+        activeNow = true
+      }
+      if (!activeNow) continue
+      const realStatus: ExecutionStatus = execution.getStatus?.() === 'stopping' || execution.getStatus?.() === 'waiting_for_network'
+        ? execution.getStatus!()
+        : 'stopping'
+      const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
+      const existing = summaries.find(summary => summary.executionId === parsedId)
+      if (existing) {
+        existing.status = realStatus
+        delete existing.errorCode
+      } else {
+        liveRows.push({
+          executionId: parsedId,
+          scope: execution.scope,
+          name: execution.name,
+          status: realStatus,
+        })
+      }
     }
+    summaries = [...summaries, ...liveRows]
   }
 
   const result: StopAllExecutionsResult = {
-    // R36-2: a surviving active replacement keeps the aggregate explicitly
-    // NONTERMINAL — allStopped is false while any scoped execution is live.
+    // R36-2/R38-5: a surviving active replacement keeps the aggregate
+    // explicitly NONTERMINAL — allStopped is false while any scoped
+    // execution is live.
     allStopped: summaries.every(execution => (
       execution.status === 'stopped' || execution.status === 'failed'
     )),

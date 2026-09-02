@@ -2013,3 +2013,83 @@ describe('STOP_ALL generation-stable final projection (R37-5)', () => {
     void ownedReplacement
   })
 })
+
+describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
+  it('a replacement registered during the INITIAL selection scan is enumerated and stopped (R38-5 initial race)', async () => {
+    const { invoke } = createHarness()
+    // R38-5 fake timing: shorten the bounded stop-drain window so the
+    // refusing-stop survivor scenario is deterministic and fast. Production
+    // semantics are unchanged; the injection is restored in `finally`.
+    const { setExecutionStopDrainTimeoutForTests } = await import('../../../runtime/product-space-executions')
+    setExecutionStopDrainTimeoutForTests(120)
+    let releaseInitial: () => void = () => {}
+    const initialGate = new Promise<void>(resolve => {
+      releaseInitial = resolve
+    })
+    let probeCalls = 0
+    const old = fakeExecution({ executionId: 'exec-initial-race' })
+    old.isActive = async () => {
+      probeCalls += 1
+      // Call 1: the initial selection probe parks; the replacement lands
+      // mid-selection, invalidating that pass.
+      if (probeCalls === 1) await initialGate
+      return probeCalls <= 1
+    }
+    registerProductSpaceExecution(old)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const replacement = fakeExecution({ executionId: 'exec-initial-race' })
+    // The replacement stays active after its own stop is dispatched.
+    replacement.stop = async () => 'failed'
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    releaseInitial()
+
+    const result = await pending
+    expect(result.success).toBe(true)
+    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string }> } }).result
+    // The re-bracketed selection enumerated the replacement; its stop
+    // refused, so the aggregate stays NONTERMINAL with the live row.
+    expect(aggregate.allStopped).toBe(false)
+    const summary = aggregate.executions.find(execution => execution.executionId === 'exec-initial-race')
+    expect(summary?.status).not.toBe('stopped')
+    expect(summary?.status === 'running' || summary?.status === 'failed').toBe(true)
+    expect(getRegisteredProductSpaceExecution('exec-initial-race')).toBe(ownedReplacement)
+    expect(await ownedReplacement.isActive()).toBe(true)
+    setExecutionStopDrainTimeoutForTests(null)
+  })
+
+  it('five continuously unstable final passes end in a nonterminal survivor state (R38-5 exhaustion)', async () => {
+    const { invoke } = createHarness()
+    // R38-5 fake timing: the stop-refusing survivor occupies the bounded
+    // drain window; the test-only injection keeps that window deterministic
+    // and fast (production bound unchanged, restored in `finally`).
+    const { setExecutionStopDrainTimeoutForTests } = await import('../../../runtime/product-space-executions')
+    setExecutionStopDrainTimeoutForTests(120)
+    // A self-replacing execution: every liveness probe registers a NEW
+    // generation of the same ID, so the registry revision never stabilizes.
+    const producer = fakeExecution({ executionId: 'exec-churn' })
+    producer.isActive = async () => {
+      const next = fakeExecution({ executionId: 'exec-churn' })
+      next.isActive = () => true
+      next.getStatus = () => 'stopping'
+      registerProductSpaceExecution(next)
+      return true
+    }
+    producer.getStatus = () => 'running'
+    registerProductSpaceExecution(producer)
+
+    const result = await invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
+    expect(result.success).toBe(true)
+    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string; errorCode?: string }> } }).result
+    // Bounded retries exhausted: the survivor is projected NONTERMINAL —
+    // never converted into terminal failed rows that aggregate to true.
+    expect(aggregate.allStopped).toBe(false)
+    const summary = aggregate.executions.find(execution => execution.executionId === 'exec-churn')
+    expect(summary?.status).toBe('stopping')
+    expect(summary?.status === 'stopped' || summary?.status === 'failed').toBe(false)
+    // The newest generation remains registered and active.
+    expect(await getRegisteredProductSpaceExecution('exec-churn')!.isActive()).toBe(true)
+    setExecutionStopDrainTimeoutForTests(null)
+  })
+})

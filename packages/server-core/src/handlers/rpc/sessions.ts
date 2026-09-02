@@ -18,9 +18,13 @@ import {
 } from '../../runtime/product-space-executions'
 import {
   captureCompleteTrustedSessionScope,
+  captureCompleteTrustedSessionScopeToken,
   captureTrustedSessionScope,
   getSyncTrustedProductSpaceAccountId,
+  isAccountTransitionInProgress,
+  isTrustedSessionScopeTokenCurrent,
   trustedScopeMatchesSessionRecord,
+  type TrustedSessionScopeToken,
 } from './trusted-product-space-account'
 
 /**
@@ -114,6 +118,19 @@ function assertSessionScopeAllowed(
   callerWorkspaceId?: string | null,
 ): void {
   if (sessionOutsideActiveScope(sessionManager, sessionId, callerWorkspaceId)) {
+    throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+  }
+}
+
+/**
+ * R38-3: post-await CAS for awaited session boundaries. The token is
+ * captured at RPC entry; after every await and immediately before
+ * disclosing data or committing a mutation, the identical transition
+ * epoch/account generation/fence generation/scope must still be current.
+ * Missing token or drift throws fail-closed.
+ */
+function assertSessionScopeTokenCurrent(token: TrustedSessionScopeToken | null | undefined): void {
+  if (!token || !isTrustedSessionScopeTokenCurrent(token)) {
     throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
   }
 }
@@ -259,15 +276,22 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       end()
       return []
     }
+    // R38-3: the scope token is captured at entry and revalidated after
+    // every await, before the list is disclosed.
+    const scopeToken = captureCompleteTrustedSessionScopeToken(workspaceId)
     const allSessions = sessionManager.getSessions(workspaceId ?? undefined)
     // Fail closed: R37-3 — the list filter is bound to ONE atomic complete
     // Main-owned scope capture (fence account == trusted mirror, stable
     // settled epoch, caller Workspace). Split fence/mirror states surface
     // nothing.
     const listScope = captureCompleteTrustedSessionScope(workspaceId)
-    const sessions = listScope
+    let sessions = listScope
       ? allSessions.filter(session => trustedScopeMatchesSessionRecord(session, listScope))
       : []
+    // R38-3: post-await CAS before disclosure.
+    if (!scopeToken || !isTrustedSessionScopeTokenCurrent(scopeToken)) {
+      sessions = []
+    }
     end()
 
     log.info('[sessions:get] result', {
@@ -293,6 +317,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     } catch (error) {
       log.error('GET_UNREAD_SUMMARY continuing after initialization failure:', error)
     }
+    // R38-3: post-await CAS — a transition begun during the init await
+    // discloses nothing.
+    if (isAccountTransitionInProgress() || !captureTrustedSessionScope()) {
+      return { totalUnreadSessions: 0, byWorkspace: {}, hasUnreadByWorkspace: {} }
+    }
     return sessionManager.getUnreadSummary(captureTrustedSessionScope())
   })
 
@@ -302,19 +331,27 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // Workspace. A renderer-supplied workspaceId alone can never widen the
     // mutation: without a resolvable caller Workspace, or when the selected
     // id disagrees with it, nothing is marked (fail closed).
-    const scope = captureCompleteTrustedSessionScope(resolveCallerWorkspaceId(ctx))
-    if (!scope || scope.workspaceId !== workspaceId) {
+    const scopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!scopeToken || scopeToken.workspaceId !== workspaceId) {
       return
     }
-    return sessionManager.markAllSessionsRead(workspaceId, scope)
+    // R38-3: post-await CAS before the aggregate mutation.
+    assertSessionScopeTokenCurrent(scopeToken)
+    return sessionManager.markAllSessionsRead(workspaceId, scopeToken)
   })
 
   // Get a single session with messages (for lazy loading)
   server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (ctx, sessionId: string) => {
     if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
+    // R38-3: capture the scope token BEFORE the awaited read and CAS it
+    // before disclosure — an account transition beginning mid-read returns
+    // null instead of account A data.
+    const scopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!scopeToken) return null
     const end = perf.start('rpc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
     end()
+    if (!isTrustedSessionScopeTokenCurrent(scopeToken)) return null
     return session
   })
 
@@ -349,6 +386,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Delete a session
   server.handle(RPC_CHANNELS.sessions.DELETE, async (ctx, sessionId: string) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
+    // R38-3: post-authorization CAS before destructive cleanup.
+    const scopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(scopeToken)
     unregisterProductSpaceExecution(sessionId)
     return sessionManager.deleteSession(sessionId)
   })
@@ -375,6 +415,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     if (isRuntimeOfflineReadOnly()) {
       throw new Error('OFFLINE_READ_ONLY')
     }
+    // R38-3: post-authorization CAS before dispatching the send — the send
+    // itself registers through the checked reservation protocol (whose own
+    // start gate revalidates inside the switch lock), so this boundary never
+    // dispatches work for a stale scope.
+    const sendScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(sendScopeToken)
 
     // R30: the redundant SEND pre-registration was removed — sendMessage
     // itself registers through the checked reservation protocol before any
@@ -425,12 +471,18 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Cancel processing
   server.handle(RPC_CHANNELS.sessions.CANCEL, async (ctx, sessionId: string, silent?: boolean) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
+    // R38-3: post-authorization CAS before the mutation.
+    const cancelScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(cancelScopeToken)
     return sessionManager.cancelProcessing(sessionId, silent)
   })
 
   // Kill background shell
   server.handle(RPC_CHANNELS.sessions.KILL_SHELL, async (ctx, sessionId: string, shellId: string) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
+    // R38-3: post-authorization CAS before the mutation.
+    const killScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(killScopeToken)
     return sessionManager.killShell(sessionId, shellId)
   })
 
@@ -441,12 +493,20 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // resolve before the owner session is even looked up, and the owner is
     // re-checked against that scope inside SessionManager. Missing caller
     // binding discloses nothing.
-    const scope = captureCompleteTrustedSessionScope(resolveCallerWorkspaceId(ctx))
-    if (!scope) {
+    const scopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    const scope = scopeToken
+      ? { accountId: scopeToken.accountId, productSpaceId: scopeToken.productSpaceId, workspaceId: scopeToken.workspaceId }
+      : null
+    if (!scope || !scopeToken) {
       return null
     }
     try {
       const output = await sessionManager.getTaskOutput(taskId, scope)
+      // R38-3: post-await CAS before disclosure — a transition begun during
+      // the awaited read discloses nothing.
+      if (!isTrustedSessionScopeTokenCurrent(scopeToken)) {
+        return null
+      }
       return output
     } catch (err) {
       log.error('Failed to get task output:', err)
@@ -461,6 +521,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // Responding can resume agent processing: never allowed in the offline
     // read-only view.
     assertOnlineBusinessSurface()
+    // R38-3: post-authorization CAS before resuming agent work.
+    const respondScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(respondScopeToken)
     return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
   })
 
@@ -469,6 +532,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (ctx, sessionId: string, requestId: string, response: import('@polo-ai/shared/protocol').CredentialResponse) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     assertOnlineBusinessSurface()
+    // R38-3: post-authorization CAS before delivering the credential.
+    const credentialScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(credentialScopeToken)
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
@@ -511,6 +577,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@polo-ai/shared/protocol').SessionCommand
   ) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
+    // R38-3: post-authorization CAS before any command executes.
+    const commandScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(commandScopeToken)
     if (OFFLINE_MUTATING_COMMANDS.has(command.type)) {
       assertOnlineBusinessSurface()
     }
@@ -623,6 +692,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     sessionId: string
   ) => {
     if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
+    // R38-3: post-authorization CAS before disclosure.
+    const planScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!planScopeToken || !isTrustedSessionScopeTokenCurrent(planScopeToken)) return null
     return sessionManager.getPendingPlanExecution(sessionId)
   })
 
@@ -632,6 +704,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     sessionId: string
   ) => {
     if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
+    // R38-3: post-authorization CAS before disclosure.
+    const modeScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!modeScopeToken || !isTrustedSessionScopeTokenCurrent(modeScopeToken)) return null
     return sessionManager.getSessionPermissionModeState(sessionId)
   })
 
@@ -651,6 +726,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
     if (!callerWorkspaceId || callerWorkspaceId !== workspaceId) {
       log.warn('SEARCH_CONTENT refused: no resolvable caller workspace or requested workspace does not match it', { searchId: id })
+      return []
+    }
+    // R38-3: the search results are disclosed only while the entry-captured
+    // trusted scope is still current after the awaited ripgrep scan.
+    const searchScopeToken = captureCompleteTrustedSessionScopeToken(callerWorkspaceId)
+    if (!searchScopeToken) {
       return []
     }
 
@@ -686,6 +767,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         .map(s => s.id)
     )
     const filteredResults = results.filter(r => !excludedSessionIds.has(r.sessionId))
+    // R38-3: post-await CAS before disclosure.
+    if (!isTrustedSessionScopeTokenCurrent(searchScopeToken)) {
+      return []
+    }
 
     log.info('[search]','ipc:response', { searchId: id, resultCount: filteredResults.length, totalFound: results.length })
     return filteredResults
@@ -698,11 +783,16 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Get files in session directory (recursive tree structure)
   server.handle(RPC_CHANNELS.sessions.GET_FILES, async (ctx, sessionId: string) => {
     if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return []
+    // R38-3: entry token + post-await CAS before disclosure.
+    const filesScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!filesScopeToken) return []
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return []
 
     try {
-      return await scanSessionDirectory(sessionPath)
+      const files = await scanSessionDirectory(sessionPath)
+      if (!isTrustedSessionScopeTokenCurrent(filesScopeToken)) return []
+      return files
     } catch (error) {
       log.error('Failed to get session files:', error)
       return []
@@ -718,6 +808,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // account/space authorization changed (replacement, revoke) can never
     // keep publishing into a renderer that must no longer see the session.
     const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    // R38-3: post-authorization CAS before the watcher is installed.
+    const watchScopeToken = captureCompleteTrustedSessionScopeToken(callerWorkspaceId)
+    assertSessionScopeTokenCurrent(watchScopeToken)
     cleanupSessionFileWatchForClient(clientId)
 
     const sessionPath = sessionManager.getSessionPath(sessionId)
@@ -783,12 +876,16 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Get session notes (reads notes.md from session directory)
   server.handle(RPC_CHANNELS.sessions.GET_NOTES, async (ctx, sessionId: string) => {
     if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return ''
+    // R38-3: entry token + post-await CAS before disclosure.
+    const notesScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    if (!notesScopeToken) return ''
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return ''
 
     try {
       const notesPath = join(sessionPath, 'notes.md')
       const content = await readFile(notesPath, 'utf-8')
+      if (!isTrustedSessionScopeTokenCurrent(notesScopeToken)) return ''
       return content
     } catch {
       // File doesn't exist yet - return empty string
@@ -800,6 +897,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.SET_NOTES, async (ctx, sessionId: string, content: string) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     assertOnlineBusinessSurface()
+    // R38-3: post-authorization CAS before the write.
+    const setNotesScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(setNotesScopeToken)
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -822,11 +922,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.EXPORT, async (ctx, sessionId: string) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     await sessionManager.waitForInit()
+    // R38-3: post-await CAS before building/exporting the payload.
+    const exportScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(exportScopeToken)
     const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     if (!workspaceId) throw new Error('No workspace context')
 
     const bundle = await sessionManager.exportSession(sessionId, workspaceId)
     if (!bundle) throw new Error(`Failed to export session ${sessionId}`)
+    assertSessionScopeTokenCurrent(exportScopeToken)
     return bundle
   })
 
@@ -846,6 +950,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     }
     assertOnlineBusinessSurface()
     await sessionManager.waitForInit()
+    // R38-3: post-await CAS before dispatching the import (the import's
+    // internal publication CAS covers the persistence window itself).
+    const importScopeToken = captureCompleteTrustedSessionScopeToken(callerWorkspaceId)
+    assertSessionScopeTokenCurrent(importScopeToken)
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     if (mode !== 'move' && mode !== 'fork') throw new Error(`Invalid dispatch mode: ${mode}`)
 
@@ -861,11 +969,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.EXPORT_REMOTE_TRANSFER, async (ctx, sessionId: string) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     await sessionManager.waitForInit()
+    // R38-3: post-await CAS before building/exporting the payload.
+    const remoteExportScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(remoteExportScopeToken)
     const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     if (!workspaceId) throw new Error('No workspace context')
 
     const payload = await sessionManager.exportRemoteSessionTransfer(sessionId, workspaceId)
     if (!payload) throw new Error(`Failed to export remote transfer for session ${sessionId}`)
+    assertSessionScopeTokenCurrent(remoteExportScopeToken)
     return payload
   })
 
@@ -881,6 +993,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     }
     assertOnlineBusinessSurface()
     await sessionManager.waitForInit()
+    // R38-3: post-await CAS before dispatching the import.
+    const remoteImportScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(remoteImportScopeToken)
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     return sessionManager.importRemoteSessionTransfer(targetWorkspaceId, payload)
   })

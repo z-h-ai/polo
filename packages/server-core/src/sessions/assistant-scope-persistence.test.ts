@@ -15,7 +15,10 @@ import {
 } from '../runtime/product-space-executions'
 import {
   beginAccountTransition,
+  getActiveAccountTransitionEpoch,
+  isAccountTransitionInProgress,
   getSyncTrustedProductSpaceAccountId,
+  settleAccountTransition,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../handlers/rpc/trusted-product-space-account'
@@ -1103,6 +1106,10 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
     }
     resetProductSpaceExecutionRegistryForTests()
     resetAssistantStartReservationsForTests()
+    // R38-1: an outstanding transition from a previous test is aborted by
+    // its owner handle (mirror commits no longer settle transitions).
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
     signedInAccountId = accountA
     setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
     settleAccountA()
@@ -1134,6 +1141,13 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
     setSyncTrustedProductSpaceAccountId(accountB)
     setRuntimeActiveProductSpaceAccount(accountB)
     expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+
+    // R38-1: the replacement OWNER settles its transition (commit).
+    const ownedEpoch = getActiveAccountTransitionEpoch()
+    expect(ownedEpoch).not.toBeNull()
+    expect(settleAccountTransition(ownedEpoch!, 'commit')).toBe(true)
+    // After settlement the boundary is valid again for the new scope.
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
   })
 
   it('every internal callback fails closed outside the current scope and works within it (R37-2 inventory)', async () => {
@@ -1150,8 +1164,10 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
     const table: Array<{ name: string; invoke: () => unknown; throwing: boolean }> = [
       { name: 'setSessionLabelsFn', invoke: () => callbacks.setSessionLabelsFn!(undefined, ['x']), throwing: true },
       { name: 'setSessionStatusFn', invoke: () => callbacks.setSessionStatusFn!(undefined, 'done'), throwing: true },
-      { name: 'getSessionInfoFn', invoke: () => callbacks.getSessionInfoFn!(undefined), throwing: false },
-      { name: 'listSessionsFn', invoke: () => callbacks.listSessionsFn!(undefined), throwing: false },
+      // R38-2: with the authoritative guard wrapper, EVERY entry — including
+      // the read-only projections — rejects uniformly outside the scope.
+      { name: 'getSessionInfoFn', invoke: () => callbacks.getSessionInfoFn!(undefined), throwing: true },
+      { name: 'listSessionsFn', invoke: () => callbacks.listSessionsFn!(undefined), throwing: true },
       { name: 'resolveLabelsFn', invoke: () => callbacks.resolveLabelsFn!(['x']), throwing: true },
       { name: 'resolveStatusFn', invoke: () => callbacks.resolveStatusFn!('done'), throwing: true },
       { name: 'sendAgentMessageFn', invoke: () => callbacks.sendAgentMessageFn!('same-scope', 'hello'), throwing: true },
@@ -1199,13 +1215,14 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
             throw new Error(`${stateName}/${entry.name}: ${error.message}`)
           })).rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
         } else {
-          const outcome = await entry.invoke()
-          // Non-throwing callbacks fail closed with empty/null projections.
-          if (entry.name === 'getSessionInfoFn') expect(outcome).toBeNull()
-          if (entry.name === 'listSessionsFn') expect(outcome).toEqual({ total: 0, returned: 0, sessions: [] })
+          // Defensive: no entry resolves outside the current scope.
+          await expect(Promise.resolve().then(() => entry.invoke())).rejects.toThrow()
         }
       }
-      // Settle back to the valid scope for the next state.
+      // R38-1: settle the in-transition state by its owner handle, then
+      // settle back to the valid scope for the next state.
+      const activeEpoch = getActiveAccountTransitionEpoch()
+      if (activeEpoch !== null) settleAccountTransition(activeEpoch, 'abort')
       settleAccountA()
       expect(table.length).toBeGreaterThan(0)
       void stateName
@@ -1230,6 +1247,10 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
     seedManaged(sm, { id: 's-ax', accountId: accountA, productSpaceId: personalId })
     beginAccountTransition()
     await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-ax')).resolves.toBeNull()
+
+    // R38-1: the owner abort settles the boundary; the settled scope reads
+    // the same-scope session again.
+    settleAccountTransition(getActiveAccountTransitionEpoch()!, 'abort')
 
     // Settled scope: the same-scope session is readable again.
     setSyncTrustedProductSpaceAccountId(accountA)
@@ -1268,6 +1289,9 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
       const entries = readdirSync(sessionsRoot(), { recursive: true }) as string[]
       expect(entries.some(entry => entry.includes('session.jsonl'))).toBe(false)
       void variantName
+      // R38-1: settle the transition the variant began.
+      const activeEpoch = getActiveAccountTransitionEpoch()
+      if (activeEpoch !== null) settleAccountTransition(activeEpoch, 'abort')
       settleAccountA()
     }
   })
@@ -1344,5 +1368,594 @@ describe('assistant scope transition epoch, callback inventory, atomic predicate
     expect(sm.getSessions()).toHaveLength(0)
     const entries = readdirSync(sessionsRoot(), { recursive: true }) as string[]
     expect(entries.some(entry => entry.includes('import-37'))).toBe(false)
+  })
+})
+
+describe('account-transition owner lifecycle and settlement (R38-1)', () => {
+  let tmpRoot: string
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+  const sessionsRoot = (): string => join(tmpRoot, 'sessions')
+
+  const buildManager = () => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: storage,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  const seedManaged = (sm: SessionManager, input: { id: string; accountId?: string; productSpaceId?: string }) => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    const managed = createManagedSession({
+      id: input.id,
+      workspaceRootPath: wsRoot(),
+      name: input.id,
+      productSpaceId: input.productSpaceId,
+      accountId: input.accountId,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = input.productSpaceId
+    managed.accountId = input.accountId
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(input.id, managed)
+    return managed
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-owner38-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    mkdirSync(sessionsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new RootedSessionStorageCtor(sessionsRoot())
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    setTrustedProductSpaceAccountProvider(async () => accountA)
+    // Abort any transition an earlier test left unsettled.
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('settlement is owner-CAS: a wrong epoch never clears the boundary', () => {
+    const epoch = beginAccountTransition()
+    expect(isAccountTransitionInProgress()).toBe(true)
+    // A different (older/unknown) epoch is not the owner.
+    expect(settleAccountTransition(epoch + 100, 'commit')).toBe(false)
+    expect(settleAccountTransition(epoch - 1, 'abort')).toBe(false)
+    expect(isAccountTransitionInProgress()).toBe(true)
+    // Only the owner settles.
+    expect(settleAccountTransition(epoch, 'commit')).toBe(true)
+    expect(isAccountTransitionInProgress()).toBe(false)
+  })
+
+  it('an explicit abort restores a valid prior boundary after failed cleanup', async () => {
+    const sm = buildManager()
+    const managed = seedManaged(sm, { id: 'managed-a', accountId: accountA, productSpaceId: personalId })
+    const resolver = (sm as unknown as {
+      managedScopeTarget: (managed: unknown, targetId: string) => unknown
+    }).managedScopeTarget
+
+    expect(resolver.call(sm, managed, 'managed-a')).toBe(managed)
+
+    // The replacement begins; cleanup then FAILS (rejected) — the owner
+    // aborts instead of leaving account_transition_pending forever.
+    const epoch = beginAccountTransition()
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+    expect(settleAccountTransition(epoch, 'abort')).toBe(true)
+
+    // The prior account boundary is valid again for the same scope.
+    expect(resolver.call(sm, managed, 'managed-a')).toBe(managed)
+    expect(isAccountTransitionInProgress()).toBe(false)
+  })
+
+  it('concurrent logout/login transitions never settle an older transition early', () => {
+    // Logout cleanup begins transition T1.
+    const t1 = beginAccountTransition()
+    expect(isAccountTransitionInProgress()).toBe(true)
+
+    // A replacement login begins its OWN transition T2 — it supersedes T1.
+    const t2 = beginAccountTransition()
+    expect(t2).toBeGreaterThan(t1)
+
+    // The OLD logout owner tries to settle: refused (T2 owns the boundary).
+    expect(settleAccountTransition(t1, 'commit')).toBe(false)
+    expect(isAccountTransitionInProgress()).toBe(true)
+
+    // Only the newest owner settles.
+    expect(settleAccountTransition(t2, 'commit')).toBe(true)
+    expect(isAccountTransitionInProgress()).toBe(false)
+  })
+
+  it('a mirror refresh that did not start the transition never clears it', () => {
+    const epoch = beginAccountTransition()
+    // Any unrelated mirror snapshot/refresh happens here.
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    // The transition is still in flight — the mirror cannot clear it.
+    expect(isAccountTransitionInProgress()).toBe(true)
+    expect(getActiveAccountTransitionEpoch()).toBe(epoch)
+
+    // The owner settles it after its cleanup outcome.
+    expect(settleAccountTransition(epoch, 'abort')).toBe(true)
+    expect(isAccountTransitionInProgress()).toBe(false)
+  })
+})
+
+describe('session RPC post-await scope CAS races (R38-3)', () => {
+  let tmpRoot: string
+  let handlers: Map<string, Handler>
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const noWorkspaceContext = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+  const sessionsRoot = (): string => join(tmpRoot, 'sessions')
+
+  const buildManager = () => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: storage,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  const registerHandlers = (sm: SessionManager) => {
+    handlers = new Map()
+    const server: RpcServer = {
+      handle(channel: string, handler: HandlerFn) {
+        handlers.set(channel, handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+    } as unknown as RpcServer
+    registerSessionsHandlers(server, {
+      sessionManager: sm,
+      platform: {
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
+      },
+      windowManager: {
+        getWorkspaceForWindow: () => null,
+      },
+    } as unknown as HandlerDeps)
+  }
+
+  const invokeWith = (
+    contextOverride: Partial<{ workspaceId: string | null; clientId: string }>,
+    channel: string,
+    ...args: unknown[]
+  ) => {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler: ${channel}`)
+    return handler({ ...noWorkspaceContext, ...contextOverride } as never, ...args)
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-race38-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    mkdirSync(sessionsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new RootedSessionStorageCtor(sessionsRoot())
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    setTrustedProductSpaceAccountProvider(async () => accountA)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('the R38 GET_MESSAGES runtime reproduction: a transition begun mid-read returns null (R38-3)', async () => {
+    const sm = buildManager()
+    registerHandlers(sm)
+    const managed = createManagedSession({
+      id: 's-race',
+      workspaceRootPath: wsRoot(),
+      name: 's-race',
+      productSpaceId: personalId,
+      accountId: accountA,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [{ id: 'm1', role: 'user', content: 'secret' }],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() } as never, { messagesLoaded: true })
+    managed.productSpaceId = personalId
+    managed.accountId = accountA
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set('s-race', managed)
+
+    // Park the awaited read INSIDE getSession, begin the transition, release.
+    const realGetSession = sm.getSession.bind(sm)
+    let releaseRead: () => void = () => {}
+    const readGate = new Promise<void>(resolve => {
+      releaseRead = resolve
+    })
+    ;(sm as unknown as { getSession: unknown }).getSession = async (...args: unknown[]) => {
+      await readGate
+      return (realGetSession as (...a: unknown[]) => unknown)(...args)
+    }
+
+    const reading = invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-race')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    beginAccountTransition()
+    releaseRead()
+
+    // The post-await CAS discloses nothing once the transition began.
+    await expect(reading).resolves.toBeNull()
+
+    // Settle: the same read under the settled boundary discloses normally.
+    settleAccountTransition(getActiveAccountTransitionEpoch()!, 'abort')
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-race'))
+      .resolves.not.toBeNull()
+  })
+
+  it('table-driven post-await race suite across read/aggregate/mutation/task boundaries (R38-3)', async () => {
+    const sm = buildManager()
+    registerHandlers(sm)
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    const managed = createManagedSession({
+      id: 's-table',
+      workspaceRootPath: wsRoot(),
+      name: 's-table',
+      productSpaceId: personalId,
+      accountId: accountA,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = personalId
+    managed.accountId = accountA
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set('s-table', managed)
+
+    // Park helper: wrap one awaited SessionManager dependency.
+    const parkOn = (method: string) => {
+      const target = sm as unknown as Record<string, (...a: unknown[]) => unknown>
+      const real = target[method].bind(sm)
+      let release: () => void = () => {}
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      target[method] = async (...args: unknown[]) => {
+        await gate
+        return real(...args)
+      }
+      return () => {
+        release()
+        target[method] = real
+      }
+    }
+
+    // Seed one unread session so the list/aggregate valid legs have data.
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.get('s-table') as unknown as { hasUnread: boolean }
+
+    const races: Array<{
+      name: string
+      parkOn: string
+      act: () => Promise<unknown>
+      assertLost: (outcome: unknown) => void
+      assertValid: (outcome: unknown) => void
+    }> = [
+      {
+        name: 'GET list',
+        parkOn: 'waitForInit',
+        act: async () => invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET),
+        assertLost: outcome => expect(outcome).toEqual([]),
+        assertValid: outcome => expect(outcome).not.toEqual([]),
+      },
+      {
+        name: 'GET_MESSAGES',
+        parkOn: 'getSession',
+        act: async () => invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-table'),
+        assertLost: outcome => expect(outcome).toBeNull(),
+        assertValid: outcome => expect(outcome).not.toBeNull(),
+      },
+      {
+        name: 'task output',
+        parkOn: 'getTaskOutput',
+        act: async () => invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.tasks.GET_OUTPUT, 'task-38'),
+        assertLost: outcome => expect(outcome).toBeNull(),
+        assertValid: outcome => expect(outcome).toBeNull(),
+      },
+      {
+        name: 'GET_PENDING_PLAN_EXECUTION',
+        parkOn: 'getPendingPlanExecution',
+        act: async () => invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION, 's-table'),
+        assertLost: outcome => expect(outcome).toBeNull(),
+        assertValid: outcome => expect(outcome).toBeNull(),
+      },
+    ]
+
+    for (const race of races) {
+      const release = parkOn(race.parkOn)
+      const acting = race.act()
+      await new Promise(resolve => setTimeout(resolve, 30))
+      // The transition begins while the awaited dependency is parked.
+      beginAccountTransition()
+      release()
+      race.assertLost(await acting)
+      // R38-1: abort settles the boundary.
+      settleAccountTransition(getActiveAccountTransitionEpoch()!, 'abort')
+      // Valid current scope: the same boundary stays usable.
+      race.assertValid(await race.act())
+    }
+  })
+})
+
+describe('publication rollback completeness (R38-4)', () => {
+  let tmpRoot: string
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+  const sessionsRoot = (): string => join(tmpRoot, 'sessions')
+
+  const buildManager = (sessionStorageInstance?: SessionStorage) => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: sessionStorageInstance ?? storage,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-roll38-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    mkdirSync(sessionsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new RootedSessionStorageCtor(sessionsRoot())
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    setTrustedProductSpaceAccountProvider(async () => accountA)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('a failed storage delete during CREATE rollback surfaces a fail-closed error and keeps the record quarantined', async () => {
+    // ONE storage proxy: create is gate-able (the CAS loss lands mid-write)
+    // and delete can be injected to fail (R38-4 rollback verification).
+    const inner = new RootedSessionStorageCtor(sessionsRoot())
+    let gate: Promise<void> | null = null
+    let releaseGate: () => void = () => {}
+    const state = { failDeletes: false }
+    const gatedStorage = new Proxy(inner, {
+      get(target, prop) {
+        if (prop === 'create') {
+          return async (...args: unknown[]) => {
+            if (gate) await gate
+            return (target as unknown as Record<string, (...a: unknown[]) => unknown>).create(...args)
+          }
+        }
+        if (prop === 'delete') {
+          return (...args: unknown[]) => {
+            if (state.failDeletes) return false
+            return (target as unknown as Record<string, (...a: unknown[]) => unknown>).delete(...args)
+          }
+        }
+        return Reflect.get(target, prop)
+      },
+    }) as unknown as import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+    const sm = buildManager(gatedStorage)
+
+    gate = new Promise(resolve => {
+      releaseGate = resolve
+    })
+    const creating = sm.createSession('ws_test', {})
+    await new Promise(resolve => setTimeout(resolve, 30))
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    state.failDeletes = true
+    releaseGate()
+
+    // R38-4: the rollback-incomplete marker is surfaced, never swallowed.
+    await expect(creating).rejects.toThrow('rollback incomplete')
+    // The stale on-disk record survives (delete failed) — the failure was
+    // surfaced instead of ignored, and nothing was published.
+    const writtenEntries = readdirSync(sessionsRoot(), { recursive: true }) as string[]
+    expect(writtenEntries.length).toBeGreaterThan(0)
+  })
+
+  it('import rollback preserves a concurrent valid same-ID owner and its storage (R38-4)', async () => {
+    const sm = buildManager()
+    const bundle = {
+      version: 1,
+      session: {
+        header: { id: 'owned-import', createdAt: Date.now(), name: 'imported' },
+        messages: [],
+      },
+      files: [],
+    }
+
+    // A concurrent valid same-ID owner commits BEFORE our CAS loss.
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    const owner = createManagedSession({
+      id: 'owned-import',
+      workspaceRootPath: wsRoot(),
+      name: 'concurrent-owner',
+      productSpaceId: personalId,
+      accountId: accountA,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, workspace as never, { messagesLoaded: true })
+    owner.productSpaceId = personalId
+    owner.accountId = accountA
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set('owned-import', owner)
+
+    // Park the awaited storage save; the transition begins mid-save.
+    const inner = storage
+    let releaseSave: () => void = () => {}
+    const saveGate = new Promise<void>(resolve => {
+      releaseSave = resolve
+    })
+    const gatedStorage = new Proxy(inner, {
+      get(target, prop) {
+        if (prop === 'save') {
+          return async (...args: unknown[]) => {
+            await saveGate
+            return (target as unknown as Record<string, (...a: unknown[]) => unknown>).save(...args)
+          }
+        }
+        return Reflect.get(target, prop)
+      },
+    }) as unknown as import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+    ;(sm as unknown as { sessionStorage: SessionStorage }).sessionStorage = gatedStorage
+
+    const importing = sm.importSession('ws_test', bundle as never, 'fork')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    beginAccountTransition()
+    releaseSave()
+
+    // The CAS loss refuses the import…
+    await expect(importing).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    // …and the concurrent valid owner's in-memory record is preserved (no
+    // delete was attempted against a published same-ID owner).
+    expect(sm.getSessions().find(session => session.id === 'owned-import')).not.toBeUndefined()
+  })
+})
+
+describe('authoritative callback guard inventory (R38-2)', () => {
+  const SESSION_MANAGER_SOURCE = 'packages/server-core/src/sessions/SessionManager.ts'
+
+  it('every direct agent callback registration routes through the guard inventory (source scan)', async () => {
+    const { readFileSync } = await import('fs')
+    const source = readFileSync(SESSION_MANAGER_SOURCE, 'utf-8')
+
+    // Every `managed.agent.on<X> =` assignment must be wrapped through the
+    // authoritative guard mechanism.
+    const assignments = [...new Set(
+      (source.match(/managed\.agent\.on[A-Za-z]+ =/g) ?? []).map(a => a.replace(' =', '')),
+    )]
+    expect(assignments.length).toBeGreaterThanOrEqual(8)
+    for (const assignment of assignments) {
+      const callbackName = assignment.replace('managed.agent.', '')
+      expect(source).toContain(`this.guardManagedCallback(managed, 'agent.${callbackName}'`)
+    }
+
+    // The tool-callback builder and the browser-pane record go through the
+    // same authoritative mechanism.
+    expect(source).toContain('mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed))')
+    expect(source).toContain('this.guardManagedCallbackRecord(managed, \'browserPaneFns\', rawBrowserPaneFns.browserPaneFns)')
+  })
+
+  it('the builder registers every entry in the inventory with the caller guard (runtime)', async () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'sm-inv38-'))
+    const wsRoot = join(tmpRoot, 'ws-root')
+    mkdirSync(wsRoot, { recursive: true })
+    try {
+      const { RootedSessionStorage: RootedStorage } = await import('@polo-ai/shared/sessions/session-storage.ts')
+      setSyncTrustedProductSpaceAccountId(accountA)
+      setRuntimeActiveProductSpaceAccount(accountA)
+      setRuntimeActiveProductSpace(personalId)
+      const sm = new SessionManager({
+        workspace: { id: 'ws_test', name: 'T', rootPath: wsRoot, createdAt: Date.now() } as never,
+        sessionStorage: new RootedStorage(join(tmpRoot, 'sessions')),
+      })
+      ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+      const managed = createManagedSession({
+        id: 'inv-managed',
+        workspaceRootPath: wsRoot,
+        name: 'inv',
+        productSpaceId: personalId,
+        accountId: accountA,
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        messages: [],
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+      } as never, { id: 'ws_test', name: 'T', rootPath: wsRoot, createdAt: Date.now() } as never, { messagesLoaded: true })
+      managed.productSpaceId = personalId
+      managed.accountId = accountA
+
+      const callbacks = (sm as unknown as {
+        buildManagedSessionToolCallbacks: (managed: unknown) => Record<string, ((...args: never[]) => unknown) | undefined>
+      }).buildManagedSessionToolCallbacks(managed)
+
+      // Every entry is registered in the authoritative inventory.
+      const expected = [
+        'self.setSessionLabelsFn',
+        'self.setSessionStatusFn',
+        'self.getSessionInfoFn',
+        'self.listSessionsFn',
+        'self.resolveLabelsFn',
+        'self.resolveStatusFn',
+        'self.sendAgentMessageFn',
+        'self.activateSourceInSessionFn',
+      ]
+      const inventory = (sm as unknown as {
+        getManagedCallbackInventoryForTests: (sessionId: string) => string[]
+      }).getManagedCallbackInventoryForTests('inv-managed')
+      for (const name of expected) {
+        expect(inventory).toContain(name)
+        // The object key drops the 'self.' inventory prefix.
+        expect(callbacks[name.replace('self.', '')]).toBeDefined()
+      }
+
+      // The wrapper enforces the caller scope: outside it, every entry rejects.
+      setSyncTrustedProductSpaceAccountId(accountB)
+      setRuntimeActiveProductSpaceAccount(accountB)
+      for (const name of expected) {
+        await expect(Promise.resolve().then(() => callbacks[name.replace('self.', '')]!(undefined as never)))
+          .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+      }
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true })
+      setSyncTrustedProductSpaceAccountId(accountA)
+      setRuntimeActiveProductSpaceAccount(accountA)
+      setRuntimeActiveProductSpace(personalId)
+    }
   })
 })

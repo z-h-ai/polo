@@ -146,6 +146,22 @@ export const EXECUTION_STOP_DRAIN_TIMEOUT_MS = 10_000
 export const EXECUTION_STOP_POLL_INTERVAL_MS = 50
 
 /**
+ * R38-5: test-only fake-timing injection for the shared stop-drain window.
+ * Production always uses EXECUTION_STOP_DRAIN_TIMEOUT_MS; tests may shorten
+ * the window to keep bounded-drain scenarios deterministic and fast, and
+ * MUST restore `null` afterwards.
+ */
+let executionStopDrainTimeoutOverride: number | null = null
+
+export function setExecutionStopDrainTimeoutForTests(ms: number | null): void {
+  executionStopDrainTimeoutOverride = ms
+}
+
+function effectiveStopDrainTimeout(): number {
+  return executionStopDrainTimeoutOverride ?? EXECUTION_STOP_DRAIN_TIMEOUT_MS
+}
+
+/**
  * Awaits a terminal outcome for one execution. Probe failures fail closed:
  * an execution whose liveness cannot be determined is treated as active.
  * Returns true only when the execution is confirmed not active.
@@ -220,7 +236,7 @@ export async function stopRegisteredExecutionsOnce(
   entries: RegisteredProductSpaceExecution[],
 ): Promise<ExecutionStopResult[]> {
   if (entries.length === 0) return []
-  const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
+  const deadline = Date.now() + effectiveStopDrainTimeout()
 
   // Resolve to the registry-owned entry (a fresh immutable object created at
   // registration) and capture entry + generation BEFORE any await: the drain

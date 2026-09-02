@@ -448,6 +448,15 @@ export class AutomationSystem implements AutomationsConfigProvider {
     this.lastKnownMetadata.set(sessionId, { ...metadata });
   }
 
+  /**
+   * Remove the diff baseline for a session (R38-4): a rolled-back session
+   * publication must leave no stale initial metadata behind, or a future
+   * session reusing the id would diff against the ghost baseline.
+   */
+  clearInitialSessionMetadata(sessionId: string): void {
+    this.lastKnownMetadata.delete(sessionId);
+  }
+
   // ============================================================================
   // Direct Event Emission
   // ============================================================================

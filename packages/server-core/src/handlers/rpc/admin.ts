@@ -73,6 +73,8 @@ import {
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
   beginAccountTransition,
+  getActiveAccountTransitionEpoch,
+  settleAccountTransition,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
@@ -2366,6 +2368,11 @@ async function endAdminSession(
   )
   if (!transition) return false
   const { session: ending, cleanup } = transition
+  // R38-1: this flow OWNS the account transition published by beginEnding.
+  // Only this owner settles it — commit when the session ended, abort when
+  // the ending lost its snapshot race (a newer transition's settlement is
+  // then protected by the owner CAS).
+  const ownedTransitionEpoch = getActiveAccountTransitionEpoch()
   // R31: the transition epoch was already published inside beginEnding's
   // ownership section — synchronously before its cleanup could snapshot
   // executions. Publication at the caller would be too late.
@@ -2425,6 +2432,12 @@ async function endAdminSession(
     setSyncTrustedProductSpaceAccountId(null)
     invalidateAllCreatorArtifactCaches()
   }
+  // R38-1: settle the owned transition — commit on a completed ending,
+  // explicit abort when the ending snapshot lost its race. The owner CAS
+  // makes a late settlement of a superseded transition a no-op.
+  if (ownedTransitionEpoch !== null) {
+    settleAccountTransition(ownedTransitionEpoch, didEnd ? 'commit' : 'abort')
+  }
   return didEnd
 }
 
@@ -2440,6 +2453,8 @@ async function completeAdminLogin(args: {
   >
   onSyncFailure: (error: unknown) => void
 }): Promise<AdminSessionSnapshot | null> {
+  // R38-1: handle for the transition this replacement login may begin.
+  let replacementTransitionEpoch: number | null = null
   const replacement = await args.sessions.runExclusive(async () => {
     if (!args.sessions.isLatestLoginAttempt(args.loginAttempt)) return null
 
@@ -2469,7 +2484,7 @@ async function completeAdminLogin(args: {
       // shows account A and the fence revoke is queued behind the switch
       // lock. The epoch is monotonic — an aborted replacement keeps stale
       // starts refused while fresh starts simply capture the new epoch.
-      beginAccountTransition()
+      replacementTransitionEpoch = beginAccountTransition()
       try {
         await args.sessions.getOrStartAccountCleanup(
           previousTokens.userId,
@@ -2480,6 +2495,10 @@ async function completeAdminLogin(args: {
           },
         )
       } catch (error) {
+        // R38-1: the owner explicitly aborts — the prior account boundary
+        // is restored as valid instead of leaving the runtime stuck on
+        // account_transition_pending forever.
+        settleAccountTransition(replacementTransitionEpoch, 'abort')
         args.deps.platform.logger.warn(
           '[Admin] previous account cleanup failed during login replacement; refusing the replacement:',
           error instanceof Error ? error.message : String(error),
@@ -2521,6 +2540,13 @@ async function completeAdminLogin(args: {
     }
     return args.sessions.createSnapshot(nextTokens)
   })
+  // R38-1: this login's cleanup completed, so the prior boundary is valid
+  // again — settle the owned transition (commit). The owner CAS no-ops if a
+  // newer transition already superseded this one.
+  if (replacementTransitionEpoch !== null) {
+    settleAccountTransition(replacementTransitionEpoch, 'commit')
+  }
+
   if (!replacement) return null
 
   try {

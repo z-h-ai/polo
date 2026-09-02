@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1162,6 +1162,63 @@ export class SessionManager implements ISessionManager {
   private readonly runtimeWorkspace?: Workspace
   readonly sessionStorage: SessionStorage
   /**
+   * R38-2: the AUTHORITATIVE managed-callback inventory. Every agent/self-
+   * management callback registration MUST route through
+   * `guardManagedCallback`, which records the callback name here and wraps
+   * it with the caller's stable transition/account/fence scope guard. The
+   * inventory test fails when a callback is registered outside this
+   * mechanism.
+   */
+  private managedCallbackInventory = new Map<string, Set<string>>()
+
+  private recordManagedCallbackInventory(managed: ManagedSession, name: string): void {
+    const names = this.managedCallbackInventory.get(managed.id) ?? new Set<string>()
+    names.add(name)
+    this.managedCallbackInventory.set(managed.id, names)
+  }
+
+  /**
+   * R38-2: wraps ONE callback with the managed session's current trusted
+   * scope guard. The wrapped function resolves the caller's stable
+   * transition/account/fence scope at invocation start and refuses anything
+   * outside it; target-specific checks (managedScopeTarget) stay inside the
+   * wrapped body where applicable.
+   */
+  private guardManagedCallback<F extends (...args: any[]) => any>(managed: ManagedSession, name: string, fn: F): F {
+    this.recordManagedCallbackInventory(managed, name)
+    const guarded = ((...args: any[]) => {
+      if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+      return fn(...args)
+    }) as F
+    return guarded
+  }
+
+  /**
+   * R38-2: wraps a RECORD of callbacks (e.g. browserPaneFns) so every
+   * method is registered through the authoritative guard inventory.
+   */
+  private guardManagedCallbackRecord<F extends Record<string, ((...args: any[]) => any) | undefined>>(
+    managed: ManagedSession,
+    prefix: string,
+    record: F,
+  ): F {
+    const wrapped = Object.fromEntries(
+      Object.entries(record).map(([key, value]) => [
+        key,
+        typeof value === 'function'
+          ? this.guardManagedCallback(managed, `${prefix}.${key}`, value)
+          : value,
+      ]),
+    ) as F
+    return wrapped
+  }
+
+  /** R38-2: the recorded guard inventory for one managed session (tests). */
+  getManagedCallbackInventoryForTests(sessionId: string): string[] {
+    return [...(this.managedCallbackInventory.get(sessionId) ?? [])].sort()
+  }
+
+  /**
    * R37-2: the inventoried builder for every registered self-management /
    * agent callback. Each entry must resolve the CURRENT trusted scope at
    * invocation start (the table-driven inventory test enforces this for
@@ -1169,121 +1226,117 @@ export class SessionManager implements ISessionManager {
    */
   private buildManagedSessionToolCallbacks(managed: ManagedSession): Parameters<typeof mergeSessionScopedToolCallbacks>[1] {
     return {
-    setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
-      const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
-      if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      await this.setSessionLabels(target.id, labels)
-    },
-    setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
-      const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
-      if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      await this.setSessionStatus(target.id, status as SessionStatus)
-    },
-    getSessionInfoFn: (sessionId?: string) => {
-      const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
-      // Fail closed: an out-of-scope target discloses nothing.
-      const session = target
-      if (!session) return null
-      return {
-        id: session.id,
-        name: session.name ?? session.id,
-        labels: session.labels ?? [],
-        status: session.sessionStatus ?? 'todo',
-        permissionMode: session.permissionMode ?? 'ask',
-        createdAt: session.createdAt ?? 0,
-        workingDirectory: session.workingDirectory,
-        llmConnection: session.llmConnection,
-        model: session.model,
-        isActive: session.agent != null,
-      }
-    },
-    listSessionsFn: (options) => {
-      // R36-1: the listing routes through the SAME fail-closed current-
-      // scope resolution as every other callback — an out-of-scope
-      // managed session (legacy, replaced account, missing fence, or
-      // in-flight replacement) lists NOTHING, not even itself.
-      return this.listSessionsInManagedScope(managed, options)
-    },
-    resolveLabelsFn: (labels: string[]) => {
-      // R37-2: every callback starts from the current trusted scope.
-      if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      const labelConfig = loadLabelConfig(managed.workspace.rootPath)
-      return resolveSessionLabels(labels, labelConfig.labels)
-    },
-    resolveStatusFn: (status: string) => {
-      // R37-2: every callback starts from the current trusted scope.
-      if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      const statusConfig = loadStatusConfig(managed.workspace.rootPath)
-      const allStatuses = statusConfig.statuses
-      const available = allStatuses.map(s => s.id)
+      setSessionLabelsFn: this.guardManagedCallback(managed, 'self.setSessionLabelsFn', async (sessionId: string | undefined, labels: string[]) => {
+        const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+        if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+        await this.setSessionLabels(target.id, labels)
+      }),
+      setSessionStatusFn: this.guardManagedCallback(managed, 'self.setSessionStatusFn', async (sessionId: string | undefined, status: string) => {
+        const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+        if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+        await this.setSessionStatus(target.id, status as SessionStatus)
+      }),
+      getSessionInfoFn: this.guardManagedCallback(managed, 'self.getSessionInfoFn', (sessionId?: string) => {
+        const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+        // Fail closed: an out-of-scope target discloses nothing.
+        const session = target
+        if (!session) return null
+        return {
+          id: session.id,
+          name: session.name ?? session.id,
+          labels: session.labels ?? [],
+          status: session.sessionStatus ?? 'todo',
+          permissionMode: session.permissionMode ?? 'ask',
+          createdAt: session.createdAt ?? 0,
+          workingDirectory: session.workingDirectory,
+          llmConnection: session.llmConnection,
+          model: session.model,
+          isActive: session.agent != null,
+        }
+      }),
+      listSessionsFn: this.guardManagedCallback(managed, 'self.listSessionsFn', (options) => {
+        // R36-1: the listing routes through the SAME fail-closed current-
+        // scope resolution as every other callback — an out-of-scope
+        // managed session (legacy, replaced account, missing fence, or
+        // in-flight replacement) lists NOTHING, not even itself.
+        return this.listSessionsInManagedScope(managed, options)
+      }),
+      resolveLabelsFn: this.guardManagedCallback(managed, 'self.resolveLabelsFn', (labels: string[]) => {
+        const labelConfig = loadLabelConfig(managed.workspace.rootPath)
+        return resolveSessionLabels(labels, labelConfig.labels)
+      }),
+      resolveStatusFn: this.guardManagedCallback(managed, 'self.resolveStatusFn', (status: string) => {
+        const statusConfig = loadStatusConfig(managed.workspace.rootPath)
+        const allStatuses = statusConfig.statuses
+        const available = allStatuses.map(s => s.id)
 
-      // Exact ID match
-      const byId = allStatuses.find(s => s.id === status)
-      if (byId) return { resolved: byId.id, available }
-      // Case-insensitive label → ID
-      const byLabel = allStatuses.find(s => s.label.toLowerCase() === status.toLowerCase())
-      if (byLabel) return { resolved: byLabel.id, available }
+        // Exact ID match
+        const byId = allStatuses.find(s => s.id === status)
+        if (byId) return { resolved: byId.id, available }
+        // Case-insensitive label → ID
+        const byLabel = allStatuses.find(s => s.label.toLowerCase() === status.toLowerCase())
+        if (byLabel) return { resolved: byLabel.id, available }
 
-      return { resolved: null, available }
-    },
-    sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
-      // R35-1: cross-session sends resolve the target through the
-      // managed session's complete trusted scope; anything outside it is
-      // refused before a single byte is sent.
-      const target = this.managedScopeTarget(managed, sessionId)
-      if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      // Build FileAttachment[] from paths (same pattern as spawn_session)
-      let fileAttachments: FileAttachment[] | undefined
-      if (attachments?.length) {
-        const builtAttachments: FileAttachment[] = []
-        for (const a of attachments) {
-          try {
-            const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-            const safePath = await validateFilePath(a.path, extraDirs)
-            const attachment = readFileAttachment(safePath)
-            if (attachment) {
-              if (a.name) attachment.name = a.name
-              builtAttachments.push(attachment)
+        return { resolved: null, available }
+      }),
+      sendAgentMessageFn: this.guardManagedCallback(managed, 'self.sendAgentMessageFn', async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
+        // R35-1: cross-session sends resolve the target through the
+        // managed session's complete trusted scope; anything outside it is
+        // refused before a single byte is sent.
+        const target = this.managedScopeTarget(managed, sessionId)
+        if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+        // Build FileAttachment[] from paths (same pattern as spawn_session)
+        let fileAttachments: FileAttachment[] | undefined
+        if (attachments?.length) {
+          const builtAttachments: FileAttachment[] = []
+          for (const a of attachments) {
+            try {
+              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+              const safePath = await validateFilePath(a.path, extraDirs)
+              const attachment = readFileAttachment(safePath)
+              if (attachment) {
+                if (a.name) attachment.name = a.name
+                builtAttachments.push(attachment)
+              }
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : String(error)
+              sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
             }
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error)
-            sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
+          }
+          if (builtAttachments.length > 0) fileAttachments = builtAttachments
+        }
+
+        await this.sendMessage(target.id, message, fileAttachments)
+      }),
+      activateSourceInSessionFn: this.guardManagedCallback(managed, 'self.activateSourceInSessionFn', async (sourceSlug: string) => {
+        // R38-2: route through the DIRECT agent callback, which is itself
+        // guard-wrapped at its assignment site (see onSourceActivationRequest
+        // below) — the tool wrapper only adds the tool-result contract.
+        const cb = managed.agent?.onSourceActivationRequest
+        if (!cb) {
+          return { ok: false, reason: 'Agent has no activation callback wired' }
+        }
+        const ok = await cb(sourceSlug)
+        if (!ok) {
+          return {
+            ok: false,
+            reason: 'Activation failed — source may be unusable (disabled/unauthenticated) or server build failed. Check session logs.',
           }
         }
-        if (builtAttachments.length > 0) fileAttachments = builtAttachments
-      }
-
-      await this.sendMessage(target.id, message, fileAttachments)
-    },
-    activateSourceInSessionFn: async (sourceSlug: string) => {
-      // R37-2: source activation mutates the managed session's source
-      // state and schedules a turn restart — current scope required.
-      if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-      const cb = managed.agent?.onSourceActivationRequest
-      if (!cb) {
-        return { ok: false, reason: 'Agent has no activation callback wired' }
-      }
-      const ok = await cb(sourceSlug)
-      if (!ok) {
-        return {
-          ok: false,
-          reason: 'Activation failed — source may be unusable (disabled/unauthenticated) or server build failed. Check session logs.',
+        // Both backends need the current turn to end before new tools are visible:
+        // Claude SDK freezes mcpServers at query() start; Pi only picks up new proxy
+        // tool defs on the next handlePrompt (`toolsChanged` flag in pi-agent-server).
+        // Mark a pending restart on the agent — ClaudeAgent/PiAgent consume it after
+        // the next tool_result, yield source_activated, and forceAbort. The
+        // `source_activated` handler in this class then schedules a server-side
+        // resend of the original user message with a "[{slug} activated]" suffix —
+        // landing in a fresh turn with tools live (polo-ai-oss#804).
+        const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
+        if (userMessage) {
+          managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
         }
-      }
-      // Both backends need the current turn to end before new tools are visible:
-      // Claude SDK freezes mcpServers at query() start; Pi only picks up new proxy
-      // tool defs on the next handlePrompt (`toolsChanged` flag in pi-agent-server).
-      // Mark a pending restart on the agent — ClaudeAgent/PiAgent consume it after
-      // the next tool_result, yield source_activated, and forceAbort. The
-      // `source_activated` handler in this class then schedules a server-side
-      // resend of the original user message with a "[{slug} activated]" suffix —
-      // landing in a fresh turn with tools live (polo-ai-oss#804).
-      const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
-      if (userMessage) {
-        managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
-      }
-      return { ok: true, availability: 'next-turn' as const }
-    },
+        return { ok: true, availability: 'next-turn' as const }
+      }),
     }
   }
 
@@ -3405,27 +3458,40 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    // R37-4: FINAL publication CAS — immediately before persistence and
-    // publication, the captured account/ProductSpace/fence state must still
-    // be current. A replacement, fence change or epoch bump during branch
-    // validation, storage writes, message loading or backend preflight rolls
-    // the created storage back and publishes nothing.
+    // R37-4/R38-4: FINAL publication CAS — immediately before installing
+    // ANY global runtime state and publishing, the captured
+    // account/ProductSpace/fence state must still be current. A replacement,
+    // fence change or epoch bump during branch validation, storage writes,
+    // message loading or backend preflight rolls the created session back
+    // and publishes nothing.
     if (publicationToken && !isTrustedPublicationTokenCurrent(publicationToken)) {
       sessionLog.warn('Session creation lost its publication race: scope/fence changed during awaited work', {
         workspaceId,
         sessionId: storedSession.id,
       })
-      try {
-        if (managed.agent) {
+      let rollbackFailure: string | null = null
+      if (managed.agent) {
+        try {
           await this.disposeManagedAgentRuntime(managed, 'stale_publication_scope')
+        } catch (rollbackError) {
+          rollbackFailure = `agent rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
         }
-      } catch (rollbackError) {
-        sessionLog.warn('Agent rollback during publication-CAS loss failed:', rollbackError)
       }
-      try {
-        this.sessionStorage.delete(workspaceRootPath, storedSession.id)
-      } catch (rollbackError) {
-        sessionLog.warn('Storage rollback during publication-CAS loss failed:', rollbackError)
+      // R38-4: the storage delete is conditioned on no concurrent valid
+      // same-ID owner having published in the meantime — our record was
+      // never installed, so any installed record belongs to that owner.
+      if (!rollbackFailure && !this.sessions.has(storedSession.id)) {
+        const deleted = this.sessionStorage.delete(workspaceRootPath, storedSession.id)
+        if (deleted === false) {
+          // R38-4: a rollback that could not remove the stale on-disk record
+          // must surface a fail-closed error instead of being swallowed.
+          rollbackFailure = 'storage delete returned false'
+        }
+      }
+      cleanupModeState(storedSession.id)
+      this.automationSystems.get(workspaceRootPath)?.clearInitialSessionMetadata(storedSession.id)
+      if (rollbackFailure) {
+        throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${rollbackFailure})`)
       }
       throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
     }
@@ -3965,7 +4031,8 @@ export class SessionManager implements ISessionManager {
       // Post-construction: debug callback, auth callback, postInit()
       // ============================================================
 
-      managed.agent.onDebug = (msg: string) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onDebug = this.guardManagedCallback(managed, 'agent.onDebug', (msg: string) => {
         const marker = '__PERMISSION_BLOCK__'
         if (msg.includes(marker)) {
           const idx = msg.indexOf(marker)
@@ -3988,10 +4055,11 @@ export class SessionManager implements ISessionManager {
         }
 
         sessionLog.info(msg)
-      }
+      })
 
       // Unified auth callback — replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
-      managed.agent.onBackendAuthRequired = (reason: string) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onBackendAuthRequired = this.guardManagedCallback(managed, 'agent.onBackendAuthRequired', (reason: string) => {
         sessionLog.warn(`Backend auth required for session ${managed.id}: ${reason}`)
         this.sendEvent({
           type: 'info',
@@ -3999,7 +4067,7 @@ export class SessionManager implements ISessionManager {
           message: `Authentication required: ${reason}`,
           level: 'error',
         }, managed.workspace.id)
-      }
+      })
 
       // Run post-init (auth injection) — each backend handles its own
       const postInitResult = await managed.agent.postInit()
@@ -4100,7 +4168,9 @@ export class SessionManager implements ISessionManager {
         }
 
         sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
-        mergeSessionScopedToolCallbacks(sid, {
+        // R38-2: every browser-pane method is registered through the
+        // authoritative guard inventory (per-method caller-scope guard).
+        const rawBrowserPaneFns = {
           browserPaneFns: {
             openPanel: async (options) => {
               const instanceId = options?.background
@@ -4330,6 +4400,9 @@ export class SessionManager implements ISessionManager {
               return bpm.detectSecurityChallenge(instanceId)
             },
           } satisfies BrowserPaneFns,
+        }
+        mergeSessionScopedToolCallbacks(sid, {
+          browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
         })
       }
 
@@ -4337,7 +4410,8 @@ export class SessionManager implements ISessionManager {
       managed.agentReadyResolve?.()
 
       // Set up permission handler to forward requests to renderer
-      managed.agent.onPermissionRequest = (request: {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onPermissionRequest = this.guardManagedCallback(managed, 'agent.onPermissionRequest', (request: {
         requestId: string;
         toolName: string;
         command?: string;
@@ -4413,7 +4487,7 @@ export class SessionManager implements ISessionManager {
             sessionId: managed.id,
           }
         }, managed.workspace.id)
-      }
+      })
 
       // Note: Credential requests now flow through onAuthRequest (unified auth flow)
       // The legacy onCredentialRequest callback has been removed from PoloAi
@@ -4421,7 +4495,8 @@ export class SessionManager implements ISessionManager {
       // which destroys/recreates the agent to get fresh credentials
 
       // Set up mode change handlers
-      managed.agent.onPermissionModeChange = (mode) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onPermissionModeChange = this.guardManagedCallback(managed, 'agent.onPermissionModeChange', (mode: PermissionMode) => {
         if (managed.permissionMode === mode) {
           return
         }
@@ -4446,10 +4521,11 @@ export class SessionManager implements ISessionManager {
           previousPermissionMode: diagnostics.previousPermissionMode,
           transitionDisplay: diagnostics.transitionDisplay,
         }, managed.workspace.id)
-      }
+      })
 
       // Wire up onPlanSubmitted to add plan message to conversation
-      managed.agent.onPlanSubmitted = async (planPath) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onPlanSubmitted = this.guardManagedCallback(managed, 'agent.onPlanSubmitted', async (planPath) => {
         sessionLog.info(`Plan submitted for session ${managed.id}:`, planPath)
         try {
           // Read the plan file content
@@ -4510,10 +4586,11 @@ export class SessionManager implements ISessionManager {
         } catch (error) {
           sessionLog.error(`Failed to read plan file:`, error)
         }
-      }
+      })
 
       // Wire up onAuthRequest to add auth message to conversation and pause execution
-      managed.agent.onAuthRequest = (request) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onAuthRequest = this.guardManagedCallback(managed, 'agent.onAuthRequest', (request) => {
         sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
 
         // Create auth-request message
@@ -4576,14 +4653,14 @@ export class SessionManager implements ISessionManager {
 
         // OAuth flow is client-driven via performOAuth() (preload).
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
-      }
+      })
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls.
       // R37-2: the handler delegates to ONE guarded private implementation so
       // the callback inventory test can exercise it like every other callback.
-      managed.agent.onSpawnSession = async (request) => {
+      managed.agent.onSpawnSession = this.guardManagedCallback(managed, 'agent.onSpawnSession', async (request) => {
         return this.spawnSessionFromManagedAgent(managed, request)
-      }
+      })
 
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
@@ -4598,7 +4675,10 @@ export class SessionManager implements ISessionManager {
       mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed))
 
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
-      managed.agent.onSourceActivationRequest = async (sourceSlug: string): Promise<boolean> => {
+      // R38-2: the DIRECT source-activation callback is registered through
+      // the authoritative guard inventory — Claude and Pi invoke it directly,
+      // bypassing activateSourceInSessionFn, so the guard must live here.
+      managed.agent.onSourceActivationRequest = this.guardManagedCallback(managed, 'agent.onSourceActivationRequest', async (sourceSlug: string): Promise<boolean> => {
         sessionLog.info(`Source activation request for session ${managed.id}:`, sourceSlug)
 
         const workspaceRootPath = managed.workspace.rootPath
@@ -4680,7 +4760,7 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
 
         return true
-      }
+      })
 
       // NOTE: Source reloading is now handled by ConfigWatcher callbacks
       // which detect filesystem changes and update all affected sessions.
@@ -8580,26 +8660,33 @@ export class SessionManager implements ISessionManager {
       })
       managed.messages = bundleMessages.map(storedToMessage)
 
-      setPermissionMode(sessionId, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
-      if (managed.previousPermissionMode) {
-        hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
-      }
-
-      // R37-4: FINAL publication CAS — the import commits (in-memory
-      // registration + session_created event) only while the captured
-      // account/ProductSpace/fence state is still current. On loss the
-      // written storage rolls back and nothing is published.
+      // R38-4: global runtime state (permission mode) is installed only
+      // AFTER the final publication CAS — a stale publication must leave no
+      // mode state behind.
       if (importPublicationToken && !isTrustedPublicationTokenCurrent(importPublicationToken)) {
         sessionLog.warn('Session import lost its publication race: scope/fence changed during awaited work', {
           workspaceId,
           sessionId,
         })
-        try {
-          this.sessionStorage.delete(workspaceRootPath, sessionId)
-        } catch (rollbackError) {
-          sessionLog.warn('Storage rollback during import publication-CAS loss failed:', rollbackError)
+        // R38-4: the delete is conditioned on no concurrent valid same-ID
+        // owner having committed in the meantime — our record was never
+        // registered, so any registered record belongs to that owner.
+        let rollbackFailure: string | null = null
+        if (!this.sessions.has(sessionId)) {
+          const deleted = this.sessionStorage.delete(workspaceRootPath, sessionId)
+          if (deleted === false) {
+            rollbackFailure = 'storage delete returned false'
+          }
+        }
+        if (rollbackFailure) {
+          throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${rollbackFailure})`)
         }
         throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      }
+
+      setPermissionMode(sessionId, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
+      if (managed.previousPermissionMode) {
+        hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
       }
 
       this.sessions.set(sessionId, managed)

@@ -107,8 +107,9 @@ export function setSyncTrustedProductSpaceAccountState(
   bumpTrustedAccountGenerationOnTransition(
     state.status === 'authenticated' ? state.accountId : null,
   )
-  // R37-1: committing a mirror state settles any in-flight transition.
-  accountTransitionInProgress = false
+  // R38-1: a mirror refresh does NOT settle a transition — only the owner
+  // epoch may settle (see settleAccountTransition). Unrelated snapshots
+  // must never clear an older cleanup's boundary early.
   syncAccountState = state
 }
 
@@ -118,8 +119,9 @@ export function setSyncTrustedProductSpaceAccountState(
  */
 export function setSyncTrustedProductSpaceAccountId(accountId: string | null): void {
   bumpTrustedAccountGenerationOnTransition(accountId)
-  // R37-1: committing a mirror state settles any in-flight transition.
-  accountTransitionInProgress = false
+  // R38-1: a mirror refresh does NOT settle a transition — only the owner
+  // epoch may settle (see settleAccountTransition). Unrelated snapshots
+  // must never clear an older cleanup's boundary early.
   syncAccountState = accountId
     ? { status: 'authenticated', accountId }
     : { status: 'signed_out' }
@@ -139,21 +141,68 @@ export function setSyncTrustedProductSpaceAccountId(accountId: string | null): v
 let accountTransitionEpoch = 0
 
 /**
- * R37-1: true from `beginAccountTransition()` until the transition owner
- * commits the next synchronous mirror state (new account, sign-out). While
- * true, every scope capture fails closed — callbacks and session boundaries
- * must not run against an account whose cleanup has already begun, even
- * while the old fence and mirror still agree.
+ * R37-1: true from `beginAccountTransition()` until the transition OWNER
+ * settles it by compare-and-set (commit or explicit abort). While true,
+ * every scope capture fails closed — callbacks and session boundaries must
+ * not run against an account whose cleanup has already begun, even while
+ * the old fence and mirror still agree.
  */
 let accountTransitionInProgress = false
+
+/**
+ * R38-1: the OWNER of the in-flight transition. Settlement (commit or
+ * abort) is a compare-and-set against this token: a mirror refresh or
+ * snapshot that did not start the transition can never clear it, and an
+ * older transition cannot clear a newer one.
+ */
+interface AccountTransitionOwner {
+  epoch: number
+  accountGeneration: number
+}
+
+let activeAccountTransition: AccountTransitionOwner | null = null
 
 export function isAccountTransitionInProgress(): boolean {
   return accountTransitionInProgress
 }
 
+/**
+ * The epoch of the transition currently in flight, or null when no
+ * transition is unsettled. Owners use it to address their settlement.
+ */
+export function getActiveAccountTransitionEpoch(): number | null {
+  return activeAccountTransition?.epoch ?? null
+}
+
+/**
+ * Begins a transition and takes OWNERSHIP of it (R38-1). The returned epoch
+ * is the only handle that may settle this transition.
+ */
 export function beginAccountTransition(): number {
+  const epoch = ++accountTransitionEpoch
+  activeAccountTransition = {
+    epoch,
+    accountGeneration: getTrustedAccountGeneration(),
+  }
   accountTransitionInProgress = true
-  return ++accountTransitionEpoch
+  return epoch
+}
+
+/**
+ * R38-1: settles the transition owned by `epoch`. Only the exact owner may
+ * settle — a mirror refresh that did not start the transition never clears
+ * it, and an older transition can never clear a newer one. `commit` marks
+ * the new boundary as live (replacement/login completed); `abort` restores
+ * a valid prior boundary after failed cleanup instead of leaving the
+ * runtime stuck on `account_transition_pending`.
+ */
+export function settleAccountTransition(epoch: number, outcome: 'commit' | 'abort'): boolean {
+  const active = activeAccountTransition
+  if (!active || active.epoch !== epoch) return false
+  activeAccountTransition = null
+  accountTransitionInProgress = false
+  void outcome
+  return true
 }
 
 export function getAccountTransitionEpoch(): number {
@@ -301,4 +350,47 @@ export function trustedScopeMatchesSessionRecord(
   if (!record.productSpaceId || record.productSpaceId !== scope.productSpaceId) return false
   if (scope.workspaceId && record.workspaceId !== scope.workspaceId) return false
   return true
+}
+
+/**
+ * R38-3: an await-spanning trusted session-scope token. Captured ONCE at
+ * RPC entry, it can be revalidated after EVERY await and immediately before
+ * any disclosure, mutation, watcher registration, event publication or
+ * destructive cleanup — the transition epoch, account-binding generation,
+ * fence generation and the complete committed scope must all still be
+ * current, or the boundary fails closed.
+ */
+export interface TrustedSessionScopeToken {
+  accountId: string
+  productSpaceId: string
+  workspaceId: string
+  transitionEpoch: number
+  accountGeneration: number
+  fenceGeneration: number
+}
+
+export function captureCompleteTrustedSessionScopeToken(
+  callerWorkspaceId: string | null | undefined,
+): TrustedSessionScopeToken | null {
+  const scope = captureCompleteTrustedSessionScope(callerWorkspaceId)
+  if (!scope) return null
+  return {
+    ...scope,
+    transitionEpoch: getAccountTransitionEpoch(),
+    accountGeneration: getTrustedAccountGeneration(),
+    fenceGeneration: getRuntimeFenceGeneration(),
+  }
+}
+
+export function isTrustedSessionScopeTokenCurrent(token: TrustedSessionScopeToken): boolean {
+  if (isAccountTransitionInProgress()) return false
+  if (getAccountTransitionEpoch() !== token.transitionEpoch) return false
+  if (getTrustedAccountGeneration() !== token.accountGeneration) return false
+  if (getRuntimeFenceGeneration() !== token.fenceGeneration) return false
+  const runtimeScope = getRuntimeActiveProductSpaceScope()
+  return Boolean(
+    runtimeScope
+    && runtimeScope.accountId === token.accountId
+    && runtimeScope.productSpaceId === token.productSpaceId,
+  )
 }
