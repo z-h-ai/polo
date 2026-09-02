@@ -208,3 +208,66 @@ describe('ProductSpaceSwitchDialog', () => {
     expect(screen.getByTestId('product-space-cancel-switch').textContent).toBe('留在我的空间')
   })
 })
+
+describe('ProductSpaceSwitchDialog per-item stop (R33-3)', () => {
+  it('every nonterminal row is clickable for a single stop with real production statuses', () => {
+    const onStopSwitchExecution = mock(() => {})
+    renderWithContext(makeContextValue({
+      pendingSwitch: {
+        targetId: 'space-ent',
+        phase: 'stopping',
+        executions: [
+          { executionId: 'exec-1', name: '访谈整理', status: 'running' },
+          { executionId: 'exec-2', name: '周报助手', status: 'preparing' },
+          { executionId: 'exec-3', name: '翻译任务', status: 'waiting_for_network' },
+          { executionId: 'exec-4', name: '数据整理', status: 'stopped' },
+          { executionId: 'exec-5', name: '图片导出', status: 'failed' },
+          { executionId: 'exec-6', name: '代码评审', status: 'stopping' },
+        ],
+        statuses: {
+          'exec-1': 'running',
+          'exec-2': 'preparing',
+          'exec-3': 'waiting_for_network',
+          'exec-4': 'stopped',
+          'exec-5': 'failed',
+          'exec-6': 'stopping',
+        },
+        errorCode: null,
+      },
+      onStopSwitchExecution,
+    }))
+    const buttons = screen.getAllByTestId('product-space-switch-execution-stop')
+    // Exactly the four nonterminal rows (running/preparing/waiting_for_
+    // network) are reachable; stopped/failed/stopping rows are not.
+    expect(buttons).toHaveLength(3)
+    fireEvent.click(buttons[0]!)
+    expect(onStopSwitchExecution).toHaveBeenCalledWith('exec-1')
+    fireEvent.click(buttons[1]!)
+    expect(onStopSwitchExecution).toHaveBeenCalledWith('exec-2')
+    fireEvent.click(buttons[2]!)
+    expect(onStopSwitchExecution).toHaveBeenCalledWith('exec-3')
+    // The selected-row status projection stays truthful per row.
+    const rows = screen.getAllByTestId('product-space-switch-execution-row')
+    expect(rows[0]!.getAttribute('data-execution-status')).toBe('running')
+    expect(rows[3]!.getAttribute('data-execution-status')).toBe('stopped')
+    expect(rows[5]!.getAttribute('data-execution-status')).toBe('stopping')
+  })
+
+  it('a stopping-phase row that already dispatched shows no second stop button', () => {
+    const onStopSwitchExecution = mock(() => {})
+    renderWithContext(makeContextValue({
+      pendingSwitch: {
+        targetId: 'space-ent',
+        phase: 'stopping',
+        executions: [
+          { executionId: 'exec-1', name: '访谈整理', status: 'running' },
+        ],
+        statuses: { 'exec-1': 'stopping' },
+        errorCode: null,
+      },
+      onStopSwitchExecution,
+    }))
+    expect(screen.queryAllByTestId('product-space-switch-execution-stop')).toHaveLength(0)
+    expect(onStopSwitchExecution).not.toHaveBeenCalled()
+  })
+})

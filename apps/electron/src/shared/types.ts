@@ -995,8 +995,8 @@ export interface ElectronAPI {
     productSpaceId: string,
     restricted: boolean,
   ): Promise<
-    | { success: true }
-    | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[] }
+    | { success: true; restricted?: boolean }
+    | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
   >
   productSpaceCancelSwitch(token: string): Promise<
     | { success: false; errorCode: string; message?: string }

@@ -1,6 +1,6 @@
 import type { ExecutionStatus, ProductSpaceExecutionScope } from '@polo-ai/shared/product-spaces'
 
-export type ProductSpaceExecutionKind = 'assistant_session' | 'local_app'
+export type ProductSpaceExecutionKind = 'assistant_session' | 'local_app' | 'skill_operation'
 
 export type ExecutionStopOutcome = 'stopped' | 'failed'
 
@@ -11,6 +11,13 @@ export interface RegisteredProductSpaceExecution {
   name: string
   /** Runtime reference: session ID for assistant sessions, scope key for apps. */
   ref: string
+  /**
+   * Immutable registration generation (R33-4). Assigned exactly once by the
+   * registry at registration time and never reused: a same-ID replacement is
+   * a NEW generation, so an awaited stop cleanup can compare-and-swap the
+   * registry against the captured entry instead of blindly deleting.
+   */
+  generation: number
   /** Returns whether the execution is still in flight. May be async. */
   isActive: () => boolean | Promise<boolean>
   /** Real owner-scoped runtime status while active (R32-4). When absent,
@@ -24,9 +31,13 @@ export interface RegisteredProductSpaceExecution {
 
 const registry = new Map<string, RegisteredProductSpaceExecution>()
 
+/** Monotonic registration generation source (R33-4). */
+let registrationSequence = 0
+
 export function registerProductSpaceExecution(
   execution: RegisteredProductSpaceExecution,
 ): void {
+  execution.generation = ++registrationSequence
   registry.set(execution.scope.executionId, execution)
 }
 
@@ -38,6 +49,18 @@ export function getRegisteredProductSpaceExecution(
   executionId: string,
 ): RegisteredProductSpaceExecution | undefined {
   return registry.get(executionId)
+}
+
+/**
+ * The generation currently registered for `executionId`, or null. Used by
+ * stop callers to revalidate ownership AFTER awaited drains: a completion
+ * captured against an older generation must never be reported against the
+ * same-ID replacement that now owns the registry slot (R33-4).
+ */
+export function getRegisteredProductSpaceExecutionGeneration(
+  executionId: string,
+): number | null {
+  return registry.get(executionId)?.generation ?? null
 }
 
 export function listRegisteredProductSpaceExecutions(): RegisteredProductSpaceExecution[] {
@@ -129,7 +152,13 @@ export async function stopRegisteredExecutionsOnce(
       deadline,
     )
     if (terminal === true) {
-      registry.delete(entry.scope.executionId)
+      // R33-4 generation CAS: only the CAPTURED registration may be deleted.
+      // A same-ID replacement registered while this stop awaited its
+      // terminal probe is a new generation — it stays registered and keeps
+      // the execution visible to cleanup/switching.
+      if (registry.get(entry.scope.executionId) === entry) {
+        registry.delete(entry.scope.executionId)
+      }
       return {
         executionId: entry.scope.executionId,
         status: 'stopped' as const,
@@ -162,6 +191,7 @@ export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
 
 export function resetProductSpaceExecutionRegistryForTests(): void {
   registry.clear()
+  registrationSequence = 0
   lastCommittedSwitch = null
   prepareIntentSequence = 0
   switchActivityClaims.clear()

@@ -4,7 +4,7 @@ import {
   ProductSpaceIdSchema,
   PRODUCT_SPACE_CONTRACT_VERSION,
 } from '@polo-ai/shared/product-spaces'
-import type { WorkspaceId } from '@polo-ai/shared/product-spaces'
+import type { ExecutionStatus, WorkspaceId } from '@polo-ai/shared/product-spaces'
 import {
   getRegisteredProductSpaceExecution,
   getRuntimeActiveProductSpace,
@@ -167,6 +167,7 @@ function buildAssistantExecution(
     kind: 'assistant_session',
     name: input.name,
     ref: input.sessionId,
+    generation: 0,
     isActive: () => {
       // R31-3: the closure resolves the CURRENT operation-owned reservation
       // dynamically — a second/concurrent send's reservation is the one
@@ -178,6 +179,14 @@ function buildAssistantExecution(
         .getSessions()
         .find(candidate => candidate.id === input.sessionId)
       return Boolean(session?.isProcessing)
+    },
+    // R33-3: real owner-scoped status. The bootstrap window (live
+    // reservation) is genuinely 'preparing'; the processing turn is
+    // 'running'. Both remain active for the final PREPARE/COMMIT CAS.
+    getStatus: (): ExecutionStatus => {
+      const live = liveStartReservations.get(input.sessionId)
+      if (live && !live.cancelled) return 'preparing'
+      return 'running'
     },
     stop: async () => {
       // Cancelling the CURRENT live reservation refuses any later transition

@@ -31,6 +31,7 @@ describe('production account-session-ending wiring', () => {
       kind: 'assistant_session',
       name: 'assistant',
       ref: 'session-a',
+      generation: 0,
       isActive: () => !assistantStopped,
       stop: async () => {
         events.push('assistant-stop')
@@ -87,6 +88,7 @@ describe('production account-session-ending wiring', () => {
       kind: 'assistant_session',
       name: 'assistant',
       ref: 'session-a',
+      generation: 0,
       isActive: () => true,
       stop: async () => 'failed',
     })

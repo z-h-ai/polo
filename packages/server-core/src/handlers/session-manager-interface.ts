@@ -59,7 +59,10 @@ export interface ISessionManager {
   setSessionStatus(sessionId: string, status: SessionStatus): Promise<void>
   markSessionRead(sessionId: string): Promise<void>
   markSessionUnread(sessionId: string): Promise<void>
-  markAllSessionsRead(workspaceId: string): Promise<void>
+  markAllSessionsRead(
+    workspaceId: string,
+    scope?: { productSpaceId: string; accountId: string } | null,
+  ): Promise<void>
   setActiveViewingSession(sessionId: string | null, workspaceId: string): void
   clearActiveViewingSession(workspaceId: string): void
 
@@ -192,7 +195,7 @@ export interface ISessionManager {
   getSessionPath(sessionId: string): string | null
   refreshTitle(sessionId: string): Promise<{ success: boolean; title?: string; error?: string }>
   refreshBadge(): void
-  getUnreadSummary(): UnreadSummary
+  getUnreadSummary(scope?: { productSpaceId: string; accountId: string } | null): UnreadSummary
 
   // ---------------------------------------------------------------------------
   // Workspace

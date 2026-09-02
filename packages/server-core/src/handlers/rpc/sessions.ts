@@ -13,6 +13,7 @@ import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession } from './client-active-session'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceScope,
   isRuntimeOfflineReadOnly,
   unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
@@ -57,32 +58,20 @@ function summarizeIds(ids: Iterable<string>, limit = SESSION_GET_LOG_ID_LIMIT) {
 export const PRODUCT_SPACE_CONTEXT_REQUIRED = 'PRODUCT_SPACE_CONTEXT_REQUIRED'
 
 /**
- * Space fence: session operations may only touch sessions bound to the
- * committed active ProductSpace. A null fence means the business surface is
- * not ready — fail closed (no session is readable or writable), never
- * defaulting to "all sessions" or "personal".
- */
-function sessionOutsideActiveSpace(
-  sessionManager: HandlerDeps['sessionManager'],
-  sessionId: string,
-): boolean {
-  const active = sessionInsideActiveSpace(
-    sessionManager,
-    sessionId,
-  )
-  return !active
-}
-
-/**
- * Space AND account fence (R32-2): a session is inside the active scope
- * only when its ProductSpace matches the committed fence AND its immutable
- * account binding matches the current trusted account. Space-bound legacy
- * records without an accountId are quarantined (fail-closed) — they are
- * never silently adopted by the next signed-in account.
+ * Space AND account fence (R32-2), completed with the caller's Main-owned
+ * Workspace binding (R33-1). A session is inside the active scope only when
+ * ALL of the following hold against ONE trusted immutable scope:
+ * - the committed ProductSpace matches the runtime fence,
+ * - the immutable account binding matches the current trusted account
+ *   (space-bound legacy records without an accountId are quarantined —
+ *   fail-closed, never silently adopted by the next signed-in account),
+ * - when the caller's Workspace can be resolved (window registry or RPC
+ *   context), the target session belongs to that same Workspace.
  */
 function sessionInsideActiveSpace(
   sessionManager: HandlerDeps['sessionManager'],
   sessionId: string,
+  callerWorkspaceId?: string | null,
 ): boolean {
   const activeProductSpaceId = getRuntimeActiveProductSpace()
   if (!activeProductSpaceId) return false
@@ -94,16 +83,47 @@ function sessionInsideActiveSpace(
   if (!session) return false
   if (session.productSpaceId !== activeProductSpaceId) return false
   if (!session.accountId || session.accountId !== trustedAccountId) return false
+  if (callerWorkspaceId && session.workspaceId !== callerWorkspaceId) return false
   return true
 }
 
-function assertSessionSpaceAllowed(
+/**
+ * The ONE shared Main-owned authorization predicate for every session
+ * boundary (list/read/write/send/watch/command/branch/import). Everything
+ * ID-addressed funnels through here — there is no second path that could
+ * forget a dimension.
+ */
+function sessionOutsideActiveScope(
   sessionManager: HandlerDeps['sessionManager'],
   sessionId: string,
+  callerWorkspaceId?: string | null,
+): boolean {
+  return !sessionInsideActiveSpace(sessionManager, sessionId, callerWorkspaceId)
+}
+
+function assertSessionScopeAllowed(
+  sessionManager: HandlerDeps['sessionManager'],
+  sessionId: string,
+  callerWorkspaceId?: string | null,
 ): void {
-  if (sessionOutsideActiveSpace(sessionManager, sessionId)) {
+  if (sessionOutsideActiveScope(sessionManager, sessionId, callerWorkspaceId)) {
     throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
   }
+}
+
+/**
+ * Captures the trusted immutable session scope in ONE atomic read: the
+ * runtime fence (space + fence account) and the synchronous trusted account
+ * mirror must agree, otherwise the capture fails closed. Session creation
+ * and import persist exactly this captured scope.
+ */
+function captureTrustedSessionScope(): { accountId: string; productSpaceId: string } | null {
+  const runtimeScope = getRuntimeActiveProductSpaceScope()
+  const syncAccountId = getSyncTrustedProductSpaceAccountId()
+  if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) {
+    return null
+  }
+  return { accountId: syncAccountId, productSpaceId: runtimeScope.productSpaceId }
 }
 
 function sessionWorkspaceDistribution(sessions: Array<{ workspaceId?: string }>): Record<string, number> {
@@ -208,6 +228,21 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   const { sessionManager, platform } = deps
   const log = platform.logger
 
+  /**
+   * R33-1: the caller's Workspace comes from Main-owned state only — the
+   * RPC context or the window registry — never from renderer assertions.
+   * `null`/`undefined` means "cannot bind" (no window, no context): the
+   * account/space dimensions still apply, the Workspace dimension simply
+   * cannot narrow them.
+   */
+  const resolveCallerWorkspaceId = (
+    ctx: { workspaceId?: string | null; webContentsId?: number | null },
+  ): string | null | undefined => {
+    if (ctx.workspaceId) return ctx.workspaceId
+    if (ctx.webContentsId == null) return undefined
+    return deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+  }
+
   // Get all sessions for the calling window's workspace
   // Waits for initialization to complete so sessions are never returned empty during startup
   server.handle(RPC_CHANNELS.sessions.GET, async (ctx) => {
@@ -248,23 +283,28 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessions
   })
 
-  // Get unread summary across all workspaces
+  // Get unread summary across all workspaces. R33-1: the aggregate is
+  // account-aware — only sessions inside the complete trusted scope are
+  // counted, and a replaced account never sees its predecessor's unread
+  // state.
   server.handle(RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY, async () => {
     try {
       await sessionManager.waitForInit()
     } catch (error) {
       log.error('GET_UNREAD_SUMMARY continuing after initialization failure:', error)
     }
-    return sessionManager.getUnreadSummary()
+    return sessionManager.getUnreadSummary(captureTrustedSessionScope())
   })
 
   server.handle(RPC_CHANNELS.sessions.MARK_ALL_READ, async (_ctx, workspaceId: string) => {
-    return sessionManager.markAllSessionsRead(workspaceId)
+    // R33-1: the mutation is bound to the complete trusted scope; without
+    // one, nothing is marked (fail closed).
+    return sessionManager.markAllSessionsRead(workspaceId, captureTrustedSessionScope())
   })
 
   // Get a single session with messages (for lazy loading)
-  server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (_ctx, sessionId: string) => {
-    if (sessionOutsideActiveSpace(sessionManager, sessionId)) return null
+  server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (ctx, sessionId: string) => {
+    if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
     const end = perf.start('rpc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
     end()
@@ -292,8 +332,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Delete a session
-  server.handle(RPC_CHANNELS.sessions.DELETE, async (_ctx, sessionId: string) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+  server.handle(RPC_CHANNELS.sessions.DELETE, async (ctx, sessionId: string) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     unregisterProductSpaceExecution(sessionId)
     return sessionManager.deleteSession(sessionId)
   })
@@ -315,7 +355,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     // Capture the caller's clientId for error routing
     const callerClientId = ctx.clientId
 
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     // The offline read-only view shows saved history but starts no executions.
     if (isRuntimeOfflineReadOnly()) {
       throw new Error('OFFLINE_READ_ONLY')
@@ -368,14 +408,14 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Cancel processing
-  server.handle(RPC_CHANNELS.sessions.CANCEL, async (_ctx, sessionId: string, silent?: boolean) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+  server.handle(RPC_CHANNELS.sessions.CANCEL, async (ctx, sessionId: string, silent?: boolean) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     return sessionManager.cancelProcessing(sessionId, silent)
   })
 
   // Kill background shell
-  server.handle(RPC_CHANNELS.sessions.KILL_SHELL, async (_ctx, sessionId: string, shellId: string) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+  server.handle(RPC_CHANNELS.sessions.KILL_SHELL, async (ctx, sessionId: string, shellId: string) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     return sessionManager.killShell(sessionId, shellId)
   })
 
@@ -392,8 +432,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Respond to a permission request (bash command approval)
   // Returns true if the response was delivered, false if agent/session is gone
-  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (_ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     // Responding can resume agent processing: never allowed in the offline
     // read-only view.
     assertOnlineBusinessSurface()
@@ -402,8 +442,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Respond to a credential request (secure auth input)
   // Returns true if the response was delivered, false if agent/session is gone
-  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (_ctx, sessionId: string, requestId: string, response: import('@polo-ai/shared/protocol').CredentialResponse) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (ctx, sessionId: string, requestId: string, response: import('@polo-ai/shared/protocol').CredentialResponse) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     assertOnlineBusinessSurface()
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
@@ -446,7 +486,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     sessionId: string,
     command: import('@polo-ai/shared/protocol').SessionCommand
   ) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     if (OFFLINE_MUTATING_COMMANDS.has(command.type)) {
       assertOnlineBusinessSurface()
     }
@@ -555,19 +595,19 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Get pending plan execution state (for reload recovery)
   server.handle(RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION, async (
-    _ctx,
+    ctx,
     sessionId: string
   ) => {
-    if (sessionOutsideActiveSpace(sessionManager, sessionId)) return null
+    if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
     return sessionManager.getPendingPlanExecution(sessionId)
   })
 
   // Get authoritative permission mode diagnostics for renderer reconciliation
   server.handle(RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE, async (
-    _ctx,
+    ctx,
     sessionId: string
   ) => {
-    if (sessionOutsideActiveSpace(sessionManager, sessionId)) return null
+    if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return null
     return sessionManager.getSessionPermissionModeState(sessionId)
   })
 
@@ -576,9 +616,17 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // ============================================================
 
   // Search session content using ripgrep
-  server.handle(RPC_CHANNELS.sessions.SEARCH_CONTENT, async (_ctx, workspaceId: string, query: string, searchId?: string) => {
+  server.handle(RPC_CHANNELS.sessions.SEARCH_CONTENT, async (ctx, workspaceId: string, query: string, searchId?: string) => {
     const id = searchId || Date.now().toString(36)
     log.info('[search]','ipc:request', { searchId: id, query })
+
+    // R33-1: the searched workspace must be the CALLER's Main-owned
+    // Workspace — a renderer-provided id alone can never widen the search.
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    if (callerWorkspaceId && callerWorkspaceId !== workspaceId) {
+      log.warn('SEARCH_CONTENT refused: requested workspace does not match the caller workspace', { searchId: id })
+      return []
+    }
 
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
@@ -598,15 +646,22 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       searchId: id,
     })
 
-    // Filter out hidden sessions (e.g., mini edit sessions) and sessions
-    // bound to another ProductSpace (or never bound).
+    // Filter out hidden sessions and every session outside the COMPLETE
+    // trusted scope (other ProductSpace, replaced account, or never-bound
+    // legacy records).
     const allSessions = await sessionManager.getSessions()
     const activeProductSpaceId = getRuntimeActiveProductSpace()
+    const trustedAccountId = activeProductSpaceId
+      ? getSyncTrustedProductSpaceAccountId()
+      : null
     const excludedSessionIds = new Set(
       allSessions
         .filter(s => s.hidden
           || !activeProductSpaceId
-          || s.productSpaceId !== activeProductSpaceId)
+          || !trustedAccountId
+          || s.productSpaceId !== activeProductSpaceId
+          || !s.accountId
+          || s.accountId !== trustedAccountId)
         .map(s => s.id)
     )
     const filteredResults = results.filter(r => !excludedSessionIds.has(r.sessionId))
@@ -620,8 +675,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // ============================================================
 
   // Get files in session directory (recursive tree structure)
-  server.handle(RPC_CHANNELS.sessions.GET_FILES, async (_ctx, sessionId: string) => {
-    if (sessionOutsideActiveSpace(sessionManager, sessionId)) return []
+  server.handle(RPC_CHANNELS.sessions.GET_FILES, async (ctx, sessionId: string) => {
+    if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return []
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return []
 
@@ -635,8 +690,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Start watching a session directory for file changes (per client)
   server.handle(RPC_CHANNELS.sessions.WATCH_FILES, async (ctx, sessionId: string) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     const clientId = ctx.clientId
+    // R33-1: the caller's Workspace is captured at watch time and
+    // revalidated before EVERY publish, so an installed watcher whose
+    // account/space authorization changed (replacement, revoke) can never
+    // keep publishing into a renderer that must no longer see the session.
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
     cleanupSessionFileWatchForClient(clientId)
 
     const sessionPath = sessionManager.getSessionPath(sessionId)
@@ -668,6 +728,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         }
 
         state.debounceTimer = setTimeout(() => {
+          // Authorization revalidation BEFORE the publish: the watcher is
+          // torn down the moment its session leaves the trusted scope.
+          if (sessionOutsideActiveScope(sessionManager, sessionId, callerWorkspaceId)) {
+            cleanupSessionFileWatchForClient(clientId)
+            return
+          }
           pushTyped(server, RPC_CHANNELS.sessions.FILES_CHANGED, { to: 'client', clientId }, state.sessionId)
         }, 100)
       }
@@ -694,8 +760,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Get session notes (reads notes.md from session directory)
-  server.handle(RPC_CHANNELS.sessions.GET_NOTES, async (_ctx, sessionId: string) => {
-    if (sessionOutsideActiveSpace(sessionManager, sessionId)) return ''
+  server.handle(RPC_CHANNELS.sessions.GET_NOTES, async (ctx, sessionId: string) => {
+    if (sessionOutsideActiveScope(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))) return ''
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return ''
 
@@ -710,8 +776,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Set session notes (writes to notes.md in session directory)
-  server.handle(RPC_CHANNELS.sessions.SET_NOTES, async (_ctx, sessionId: string, content: string) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+  server.handle(RPC_CHANNELS.sessions.SET_NOTES, async (ctx, sessionId: string, content: string) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     assertOnlineBusinessSurface()
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) {
@@ -733,7 +799,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Export a session as a portable bundle
   server.handle(RPC_CHANNELS.sessions.EXPORT, async (ctx, sessionId: string) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     await sessionManager.waitForInit()
     const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     if (!workspaceId) throw new Error('No workspace context')
@@ -768,7 +834,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Export a session as a summarized remote-transfer payload.
   server.handle(RPC_CHANNELS.sessions.EXPORT_REMOTE_TRANSFER, async (ctx, sessionId: string) => {
-    assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
     await sessionManager.waitForInit()
     const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     if (!workspaceId) throw new Error('No workspace context')

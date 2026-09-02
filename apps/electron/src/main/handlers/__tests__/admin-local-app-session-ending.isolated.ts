@@ -767,6 +767,7 @@ describe('Admin session and scoped local app production wiring', () => {
       kind: 'assistant_session',
       name: 'assistant',
       ref: 'session-a',
+      generation: 0,
       isActive: () => assistantActive,
       stop: async () => {
         stopCalls += 1

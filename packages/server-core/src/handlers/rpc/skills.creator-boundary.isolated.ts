@@ -104,8 +104,8 @@ const deps = {
         : null
     ),
     getSessions: () => [
-      { id: sessionId, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
-      { id: secondSessionId, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+      { id: sessionId, workspaceId: workspaceOne.id, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+      { id: secondSessionId, workspaceId: workspaceOne.id, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
     ],
     setActiveViewingSession() {},
   },

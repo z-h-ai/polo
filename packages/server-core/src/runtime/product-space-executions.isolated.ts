@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
   EXECUTION_STOP_DRAIN_TIMEOUT_MS,
+  getRegisteredProductSpaceExecution,
+  getRegisteredProductSpaceExecutionGeneration,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
@@ -21,6 +23,7 @@ function executionWithNeverResolvingStop(): RegisteredProductSpaceExecution {
     kind: 'assistant_session',
     name: 'stuck runtime',
     ref: 'session-a',
+    generation: 0,
     isActive: () => true,
     stop: () => new Promise<'stopped'>(() => {
       // Never resolves: a broken or malicious implementation must not extend
@@ -71,6 +74,7 @@ describe('stopRegisteredExecutionsOnce bounded window', () => {
       kind: 'assistant_session',
       name: 'fast runtime',
       ref: 'session-fast',
+      generation: 0,
       isActive: () => fastActive,
       stop: async () => {
         fastStopCalls += 1
@@ -103,4 +107,76 @@ describe('stopRegisteredExecutionsOnce bounded window', () => {
       .some(execution => execution.scope.executionId === 'exec-never-resolving-stop'))
       .toBe(true)
   }, EXECUTION_STOP_DRAIN_TIMEOUT_MS + 5_000)
+
+  it('a same-ID replacement registered during the old drain survives the terminal cleanup (R33-4)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+
+    // The OLD execution's liveness probe blocks until the test releases it,
+    // which is exactly the awaited-drain window the review identified.
+    let releaseOldProbe: () => void = () => {}
+    const oldProbeGate = new Promise<void>(resolve => {
+      releaseOldProbe = resolve
+    })
+    let oldProbeCalls = 0
+    const old: RegisteredProductSpaceExecution = {
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-reuse',
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        workspaceId: 'ws-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'old turn',
+      ref: 'session-a',
+      generation: 0,
+      isActive: async () => {
+        oldProbeCalls += 1
+        if (oldProbeCalls === 1) await oldProbeGate
+        return false
+      },
+      stop: async () => 'stopped',
+    }
+    registerProductSpaceExecution(old)
+    const oldGeneration = old.generation
+
+    // The stale stop starts and enters the old entry's terminal probe.
+    const pending = stopRegisteredExecutionsOnce([old])
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(oldProbeCalls).toBe(1)
+
+    // A same-ID replacement registers while the old stop is still awaiting
+    // its probe — reachable in production after a cancelled switch re-opens
+    // starts and an Assistant send deliberately reuses the session ID.
+    const replacement: RegisteredProductSpaceExecution = {
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-reuse',
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        workspaceId: 'ws-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'replacement turn',
+      ref: 'session-a',
+      generation: 0,
+      isActive: () => true,
+      stop: async () => 'stopped',
+    }
+    registerProductSpaceExecution(replacement)
+    expect(replacement.generation).not.toBe(oldGeneration)
+
+    // The old probe now observes terminal and the stale cleanup completes.
+    releaseOldProbe()
+    const results = await pending
+    expect(results).toEqual([{ executionId: 'exec-reuse', status: 'stopped' }])
+
+    // The generation CAS kept the REPLACEMENT registered — the stale stop
+    // could never delete the newer ownership.
+    const survivor = getRegisteredProductSpaceExecution('exec-reuse')
+    expect(survivor).toBe(replacement)
+    expect(getRegisteredProductSpaceExecutionGeneration('exec-reuse')).toBe(replacement.generation)
+  })
 })

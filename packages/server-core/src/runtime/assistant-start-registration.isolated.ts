@@ -34,6 +34,7 @@ function fakeLocalAppExecution(executionId: string): RegisteredProductSpaceExecu
     kind: 'local_app',
     name: executionId,
     ref: executionId,
+    generation: 0,
     isActive: async () => true,
     stop: async () => 'stopped',
   }

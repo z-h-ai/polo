@@ -150,6 +150,15 @@ export function useProductSpaceContextState() {
   pendingSwitchRef.current = pendingSwitch
   /** Last verified access mode per space (R32-3 restriction transition). */
   const activeAccessModeRef = useRef(new Map<string, ProductSpaceSummary['accessMode']>())
+  /**
+   * R33-2: renderer's belief that Main's restriction fence is SET for a
+   * space. Set whenever a restriction publication was attempted (Main
+   * fences BEFORE stopping, so even a failed stop leaves the fence set);
+   * cleared only by a VERIFIED active recovery whose clear succeeded. The
+   * recovery path reads this flag — never the cached previousMode — so a
+   * verified active refresh always clears a lingering fence.
+   */
+  const restrictionFenceRef = useRef(new Set<string>())
   const personalProductSpaceIdRef = useRef<string | null>(null)
   personalProductSpaceIdRef.current = personalProductSpaceId
   // Operation-scoped switch bookkeeping (R28): each switch request owns a
@@ -557,6 +566,7 @@ export function useProductSpaceContextState() {
     setUnavailableSpaceIds(new Set())
     setFlowState('loading')
     setError(null)
+    restrictionFenceRef.current.clear()
 
     let hadPersistedContext = false
     // Whether THIS bootstrap already fetched the authoritative membership
@@ -651,13 +661,17 @@ export function useProductSpaceContextState() {
       const fetched = await fetchProductSpaces(scope, { publishList: false })
       if (!fetched) return null
 
-      // R32-3: verified active→read_only transition of the ACTIVE space.
+      // R32-3/R33-2: verified restriction transitions of the ACTIVE space.
       // The trusted Main restriction fence is published and every active
       // execution of the space is terminated through the no-confirmation
       // trusted path BEFORE the restricted projection becomes usable.
-      // Restoring active access clears the fence without restarting prior
-      // work. Offline/membership-loss semantics are untouched (handled
-      // elsewhere).
+      // Restoring active access clears the fence WITHOUT restarting prior
+      // work — the clear is driven by the authoritative Main fence state
+      // (restrictionFenceRef), never by the cached previousMode, and a
+      // failed clear is fail-closed. After every restriction/clear await,
+      // the account scope generation and the active space are re-checked
+      // before anything is published: a replacement account or a newer
+      // selection can never be overwritten by this refresh's publication.
       const activeIdNow = activeProductSpaceIdRef.current
       const activeNow = activeIdNow
         ? fetched.list.find(space => space.id === activeIdNow)
@@ -665,25 +679,53 @@ export function useProductSpaceContextState() {
       const previousMode = activeIdNow
         ? activeAccessModeRef.current.get(activeIdNow)
         : undefined
+      let restrictionRecovery = false
       if (activeNow && activeIdNow) {
-        if (previousMode === 'active' && activeNow.accessMode === 'read_only') {
-          const restricted = await window.electronAPI.productSpaceRestrictActiveSpace(
-            scope.accountId,
-            activeIdNow,
-            true,
-          )
-          if (!restricted.success) {
-            // Fail closed: the restricted projection never becomes usable
-            // while the trusted transition could not be published.
-            setFlowState('error')
-            return null
+        if (activeNow.accessMode === 'read_only') {
+          const restrictionEdge = previousMode !== 'read_only'
+          if (restrictionEdge || !restrictionFenceRef.current.has(activeIdNow)) {
+            const restricted = await window.electronAPI.productSpaceRestrictActiveSpace(
+              scope.accountId,
+              activeIdNow,
+              true,
+            )
+            // Post-await scope CAS: the account or active space changed
+            // while the restriction RPC was in flight.
+            if (!isCurrentAccountScope(scope) || activeProductSpaceIdRef.current !== activeIdNow) {
+              return null
+            }
+            // Main fences before stopping: the fence is authoritative set
+            // state even when the stop phase failed.
+            restrictionFenceRef.current.add(activeIdNow)
+            if (!restricted.success) {
+              // Fail closed: the restricted projection never becomes usable
+              // while the trusted transition could not be published.
+              setFlowState('error')
+              return null
+            }
           }
-        } else if (previousMode === 'read_only' && activeNow.accessMode === 'active') {
-          await window.electronAPI.productSpaceRestrictActiveSpace(
+        } else if (restrictionFenceRef.current.has(activeIdNow)) {
+          // Verified active recovery: clear the Main fence regardless of
+          // any cached previousMode. Clear failure is fail-closed.
+          const cleared = await window.electronAPI.productSpaceRestrictActiveSpace(
             scope.accountId,
             activeIdNow,
             false,
-          ).catch(() => {})
+          )
+          if (!isCurrentAccountScope(scope) || activeProductSpaceIdRef.current !== activeIdNow) {
+            return null
+          }
+          if (!cleared.success || cleared.restricted === true) {
+            restrictionFenceRef.current.add(activeIdNow)
+            setFlowState('error')
+            return null
+          }
+          restrictionFenceRef.current.delete(activeIdNow)
+          // R33-2: the restriction transaction is now COMPLETE — fence
+          // cleared, every execution was already terminal, so the business
+          // surface is usable again. A previous failed restriction parked
+          // the flow on the error page; the verified recovery leaves it.
+          restrictionRecovery = true
         }
       }
 
@@ -694,12 +736,14 @@ export function useProductSpaceContextState() {
 
       const activeId = activeProductSpaceIdRef.current
       if (!activeId) {
+        if (restrictionRecovery) setFlowState('ready')
         applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
         persistVerifiedContext(accountId, fetched.list, fetched.personalId, null)
         return fetched.list
       }
       const active = fetched.list.find(space => space.id === activeId)
       if (active && isActiveSpace(active)) {
+        if (restrictionRecovery) setFlowState('ready')
         applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
         persistVerifiedContext(accountId, fetched.list, fetched.personalId, activeId)
         return fetched.list
@@ -724,11 +768,13 @@ export function useProductSpaceContextState() {
           setFlowState('error')
           return null
         }
+        if (restrictionRecovery) setFlowState('ready')
         applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
         persistVerifiedContext(accountId, fetched.list, fetched.personalId, fetched.personalId)
         return fetched.list
       }
 
+      if (restrictionRecovery) setFlowState('ready')
       applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
       persistVerifiedContext(accountId, fetched.list, fetched.personalId, activeId)
       return fetched.list
@@ -1015,15 +1061,14 @@ export function useProductSpaceContextState() {
     }
     const targetId = current.targetId
     pendingTargetRef.current = targetId
+    // R33-3: the phase advances to 'stopping' but every row KEEPS its real
+    // status (preparing/running/waiting_for_network). Marking every row
+    // 'stopping' before the prepared token exists made the per-item stop
+    // button unreachable; per-row 'stopping' is now set only by a real
+    // single-stop dispatch.
     setPendingSwitch(previous => (
       previous && previous.targetId === targetId
-        ? {
-            ...previous,
-            phase: 'stopping',
-            statuses: Object.fromEntries(
-              previous.executions.map(execution => [execution.executionId, 'stopping' as const]),
-            ),
-          }
+        ? { ...previous, phase: 'stopping' }
         : previous
     ))
     try {
@@ -1145,15 +1190,24 @@ export function useProductSpaceContextState() {
   }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch, renewSwitchOperation, stopPreparedSwitchExecutions])
 
   const stopSwitchExecution = useCallback(async (executionId: string): Promise<void> => {
-    // R32-4: per-item termination is scoped to the CURRENT switch
+    // R32-4/R33-3: per-item termination is scoped to the CURRENT switch
     // operation's one-time token (token-, account- and space-checked at
-    // Main).
+    // Main). Only the SELECTED row moves to 'stopping' for the dispatch;
+    // its terminal outcome (or a stale-token/superseded rejection) updates
+    // just that row, leaving every other row's real status untouched.
     const token = activeSwitchOpRef.current?.token
     const current = pendingSwitchRef.current
     if (!token || !current) return
+    const currentStatus = current.statuses[executionId]
+    if (currentStatus === 'stopped' || currentStatus === 'failed' || currentStatus === 'stopping') return
+    setPendingSwitch(previous => (
+      previous && previous.targetId === current.targetId
+        ? { ...previous, statuses: { ...previous.statuses, [executionId]: 'stopping' as const } }
+        : previous
+    ))
     const result = await window.electronAPI.productSpaceStopExecution(token, executionId)
     // Only terminal outcomes update the per-item status; a transient
-    // 'stopping' result leaves the current status untouched for retry.
+    // 'stopping' result leaves the row stopping for retry.
     const status: 'stopped' | 'failed' | null = result.success
       ? 'stopped'
       : result.status === 'failed'
@@ -1214,6 +1268,7 @@ export function useProductSpaceContextState() {
     setError(null)
     setContextVersion(version => version + 1)
     setFlowState('idle')
+    restrictionFenceRef.current.clear()
   }, [])
 
   const retryBootstrap = useCallback(async (): Promise<

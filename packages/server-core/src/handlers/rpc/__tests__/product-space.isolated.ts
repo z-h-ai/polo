@@ -72,6 +72,7 @@ function fakeExecution(input: FakeExecutionOptions): RegisteredProductSpaceExecu
     kind: 'assistant_session',
     name: input.executionId,
     ref: input.executionId,
+    generation: 0,
     isActive: () => {
       if (input.rejectProbe) return Promise.reject(new Error('probe broken'))
       return active
@@ -362,6 +363,7 @@ describe('Main-side switch transaction', () => {
       kind: 'assistant_session',
       name: 'exec-stuck',
       ref: 'exec-stuck',
+      generation: 0,
       isActive: () => !stopped,
       stop: async () => {
         if (refuseStop) return 'failed'
@@ -1606,5 +1608,175 @@ describe('legacy direct-switch cleanup', () => {
     expect(result.results.legacyAuthorizationCacheRemoved).toBe(true)
     expect(result.results.legacyInstallationStateRemoved).toBe(true)
     expect(await legacy.isActive()).toBe(false)
+  })
+})
+
+describe('generation-owned terminal cleanup and post-await revalidation (R33-4)', () => {
+  it('reports superseded and preserves a same-ID replacement that registered during the awaited stop', async () => {
+    const { invoke } = createHarness()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    let probeCalls = 0
+    const old = fakeExecution({ executionId: 'exec-reuse' })
+    old.isActive = async () => {
+      probeCalls += 1
+      if (probeCalls === 1) return true
+      // Probe 2 is the awaited drain window of the per-item stop.
+      if (probeCalls === 2) await probeGate
+      return false
+    }
+    registerProductSpaceExecution(old)
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    // The per-item stop enters the old entry's terminal probe.
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-reuse')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(probeCalls).toBe(2)
+
+    // A same-ID replacement (new registration generation) takes the slot
+    // while the old stop is still awaiting its drain.
+    const replacement = fakeExecution({ executionId: 'exec-reuse' })
+    registerProductSpaceExecution(replacement)
+    expect(replacement.generation).not.toBe(old.generation)
+
+    releaseProbe()
+    const result = await pending
+    // The stale completion is NOT reported as success against the newer
+    // ownership.
+    expect(result.success).toBe(false)
+    expect(result.errorCode).toBe('EXECUTION_SUPERSEDED')
+    expect(result.status).toBe('failed')
+    // The replacement is untouched and still blocks the switch.
+    expect(await replacement.isActive()).toBe(true)
+    expect(listRegisteredProductSpaceExecutions().some(execution => (
+      execution === replacement
+    ))).toBe(true)
+  })
+
+  it('revalidates the transaction after the drain: a cancel racing the stop is truthfully reported', async () => {
+    const { invoke } = createHarness()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    let probeCalls = 0
+    const execution = fakeExecution({ executionId: 'exec-race-cancel' })
+    execution.isActive = async () => {
+      probeCalls += 1
+      if (probeCalls === 1) return true
+      if (probeCalls === 2) await probeGate
+      return false
+    }
+    registerProductSpaceExecution(execution)
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-race-cancel')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(probeCalls).toBe(2)
+    await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    releaseProbe()
+
+    const result = await pending
+    expect(result.success).toBe(false)
+    expect(result.errorCode).toBe('SWITCH_CANCELLED')
+  })
+
+  it('LIST and PREPARE project the real owner-scoped provider status instead of hardcoded running', async () => {
+    const { invoke } = createHarness()
+    const waiting = fakeExecution({ executionId: 'exec-wait' })
+    waiting.getStatus = () => 'waiting_for_network'
+    const bootstrapping = fakeExecution({ executionId: 'exec-boot' })
+    bootstrapping.getStatus = () => 'preparing'
+    registerProductSpaceExecution(waiting)
+    registerProductSpaceExecution(bootstrapping)
+
+    const list = await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, trustedAccountId, spaceA)
+    expect(list.success).toBe(true)
+    const statuses = Object.fromEntries(
+      (list.executions as Array<{ executionId: string; status: string }>).map(item => [item.executionId, item.status]),
+    )
+    expect(statuses['exec-wait']).toBe('waiting_for_network')
+    expect(statuses['exec-boot']).toBe('preparing')
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    const planned = Object.fromEntries(
+      (prepared.executions as Array<{ executionId: string; status: string }>).map(item => [item.executionId, item.status]),
+    )
+    expect(planned['exec-wait']).toBe('waiting_for_network')
+    expect(planned['exec-boot']).toBe('preparing')
+  })
+})
+
+describe('restriction transaction with authoritative fence state (R33-2)', () => {
+  it('keeps the fence on a failed stop, reports the authoritative state, and a verified clear recovers', async () => {
+    const { invoke } = createHarness()
+    const stuck = fakeExecution({ executionId: 'exec-stuck', refuseStop: true })
+    registerProductSpaceExecution(stuck)
+
+    // Fence FIRST, stop fails: the response is a truthful failure AND the
+    // authoritative post-operation fence state (restricted: true).
+    const restricted = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      true,
+    )
+    expect(restricted.success).toBe(false)
+    expect(restricted.errorCode).toBe('runtime_stop_failed')
+    expect(restricted.restricted).toBe(true)
+    expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(true)
+
+    // A verified active recovery clears the fence; the response again
+    // carries the authoritative state.
+    const cleared = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      false,
+    )
+    expect(cleared.success).toBe(true)
+    expect(cleared.restricted).toBe(false)
+    expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(false)
+  }, 30_000)
+
+  it('a tracked Skill operation is a stoppable ProductSpace execution of the restricted space', async () => {
+    const { invoke } = createHarness()
+    let skillSettled = false
+    let skillCancelRequested = false
+    const skillOp: RegisteredProductSpaceExecution = {
+      scope: executionScope({ executionId: 'skill-op-1', accountId: trustedAccountId, productSpaceId: spaceA }),
+      kind: 'skill_operation',
+      name: 'safe-skill',
+      ref: 'skill-op-1',
+      generation: 0,
+      isActive: () => !skillSettled,
+      getStatus: () => (skillCancelRequested ? 'stopping' : 'running'),
+      stop: async () => {
+        skillCancelRequested = true
+        skillSettled = true
+        return 'stopped'
+      },
+    }
+    registerProductSpaceExecution(skillOp)
+
+    const restricted = await invoke(
+      RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+      trustedAccountId,
+      spaceA,
+      true,
+    )
+    expect(restricted.success).toBe(true)
+    expect(restricted.restricted).toBe(true)
+    // The Skill work was terminated through the shared no-confirmation
+    // path — read_only only became usable once it was terminal.
+    expect(skillCancelRequested).toBe(true)
+    expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(true)
   })
 })

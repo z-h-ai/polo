@@ -85,6 +85,22 @@ let restoreViewResult: {
     activeProductSpaceId: string
   }
 }
+let stopExecutionResult: (
+  token: string,
+  executionId: string,
+) => Promise<
+  | { success: true; executionId: string; status: 'stopped' }
+  | { success: false; errorCode: string; message?: string; status?: 'stopping' | 'failed' }
+>
+const restrictCalls: Array<{ accountId: string; productSpaceId: string; restricted: boolean }> = []
+let restrictResult: (
+  accountId: string,
+  productSpaceId: string,
+  restricted: boolean,
+) => Promise<
+  | { success: true; restricted?: boolean }
+  | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
+>
 
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
@@ -153,6 +169,22 @@ function configureIpc(): void {
         }
       },
       productSpaceRevokeActiveContext: async () => ({ success: true }),
+      productSpaceStopExecution: async (
+        token: string,
+        executionId: string,
+      ) => stopExecutionResult(token, executionId),
+      productSpaceRestrictActiveSpace: async (
+        restrictAccountId: string,
+        restrictSpaceId: string,
+        restricted: boolean,
+      ) => {
+        restrictCalls.push({
+          accountId: restrictAccountId,
+          productSpaceId: restrictSpaceId,
+          restricted,
+        })
+        return restrictResult(restrictAccountId, restrictSpaceId, restricted)
+      },
       productSpaceCleanupLegacyState: async () => {
         cleanupCalls += 1
         return cleanupResult
@@ -210,6 +242,14 @@ beforeEach(() => {
   restoreViewResult = { success: false, errorCode: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
   restoreOfflineViewCalls = 0
   cancelledTokens.length = 0
+  stopExecutionResult = async (token, executionId) => {
+    if (!token.startsWith('token-')) {
+      return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', status: 'failed' as const }
+    }
+    return { success: true as const, executionId, status: 'stopped' as const }
+  }
+  restrictCalls.length = 0
+  restrictResult = async (_accountId, _productSpaceId, restricted) => ({ success: true as const, restricted })
   configureIpc()
 })
 
@@ -1180,5 +1220,241 @@ describe('useProductSpaceContextState overlapping switch operations (R28)', () =
     expect(result.current.pendingSwitch).toBeNull()
     expect(result.current.flowState).toBe('ready')
     expect(declaredActiveSpace).toBe('space-ent-2')
+  })
+})
+
+describe('useProductSpaceContextState per-item stop reachability (R33-3)', () => {
+  it('keeps real row statuses through the stopping phase and stops exactly the selected row', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    executionsResult = {
+      success: true as const,
+      executions: [
+        { executionId: 'exec-1', name: 'Running item', status: 'running' },
+        { executionId: 'exec-2', name: 'Waiting item', status: 'waiting_for_network' },
+      ],
+    }
+    // The stop-all dispatch hangs so the dialog stays in the stopping
+    // phase with the prepared token held — the window where per-item stop
+    // must be reachable.
+    let releaseStopAll!: (value: { success: true; executions: never[] }) => void
+    const stopAllGate = new Promise<{ success: true; executions: never[] }>(resolve => {
+      releaseStopAll = resolve
+    })
+    let stopAllEntered = false
+    Object.defineProperty(window.electronAPI, 'productSpaceStopSwitchExecutions', {
+      configurable: true,
+      value: () => {
+        stopAllEntered = true
+        return stopAllGate
+      },
+    })
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    expect(result.current.pendingSwitch?.phase).toBe('confirm')
+    expect(result.current.pendingSwitch?.statuses['exec-1']).toBe('running')
+    expect(result.current.pendingSwitch?.statuses['exec-2']).toBe('waiting_for_network')
+
+    let stopping: Promise<void> = Promise.resolve()
+    await act(async () => {
+      stopping = result.current.confirmStopAndSwitch()
+    })
+    await waitFor(() => {
+      expect(stopAllEntered).toBe(true)
+    })
+    expect(result.current.pendingSwitch?.phase).toBe('stopping')
+    // R33-3: the phase advanced but rows keep their REAL statuses — the
+    // old blanket 'stopping' made every per-item stop unreachable.
+    expect(result.current.pendingSwitch?.statuses['exec-1']).toBe('running')
+    expect(result.current.pendingSwitch?.statuses['exec-2']).toBe('waiting_for_network')
+
+    // Single stop: only the selected row moves to 'stopping' and then to
+    // its terminal outcome; the sibling row is untouched.
+    await act(async () => {
+      await result.current.stopSwitchExecution('exec-1')
+    })
+    expect(result.current.pendingSwitch?.statuses['exec-1']).toBe('stopped')
+    expect(result.current.pendingSwitch?.statuses['exec-2']).toBe('waiting_for_network')
+
+    // A stale-token rejection is truthful: the row reports 'failed' for
+    // retry instead of pretending success.
+    stopExecutionResult = async () => ({
+      success: false as const,
+      errorCode: 'EXECUTION_SUPERSEDED',
+      status: 'failed' as const,
+    })
+    await act(async () => {
+      await result.current.stopSwitchExecution('exec-2')
+    })
+    expect(result.current.pendingSwitch?.statuses['exec-2']).toBe('failed')
+
+    await act(async () => {
+      releaseStopAll({ success: true as const, executions: [] })
+      await stopping
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+  })
+
+  it('refuses a per-item stop before the prepared token exists', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    executionsResult = {
+      success: true as const,
+      executions: [
+        { executionId: 'exec-1', name: 'Running item', status: 'running' },
+      ],
+    }
+    let stopCalls = 0
+    Object.defineProperty(window.electronAPI, 'productSpaceStopExecution', {
+      configurable: true,
+      value: async () => {
+        stopCalls += 1
+        return { success: true as const, executionId: 'exec-1', status: 'stopped' as const }
+      },
+    })
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    // Confirm phase: no token is held yet — the click is a safe no-op.
+    await act(async () => {
+      await result.current.stopSwitchExecution('exec-1')
+    })
+    expect(stopCalls).toBe(0)
+    expect(result.current.pendingSwitch?.statuses['exec-1']).toBe('running')
+  })
+})
+
+describe('useProductSpaceContextState restriction transaction (R33-2)', () => {
+  it('a failed restriction fails closed, and verified active recovery clears the fence regardless of cached mode', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+
+    // Verified active→read_only transition; the trusted stop fails. Main
+    // has ALREADY fenced the space (fence-first), so the renderer records
+    // fence state and refuses the restricted projection.
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'runtime_stop_failed',
+      restricted: true,
+    })
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        personalSpace,
+        enterpriseSpace('space-ent', '北辰智能科技', { accessMode: 'read_only' }),
+      ],
+    }
+    await act(async () => {
+      const refreshed = await result.current.refreshProductSpaces()
+      expect(refreshed).toBeNull()
+    })
+    expect(result.current.flowState).toBe('error')
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+    ])
+
+    // The list flips back to verified ACTIVE. The cached previousMode is
+    // still 'active' (the failed refresh never published), yet the recovery
+    // MUST clear Main's lingering fence — the old cached-edge logic left it
+    // restricted forever.
+    restrictResult = async (_accountId, _productSpaceId, restricted) => ({
+      success: true as const,
+      restricted,
+    })
+    listResult = bothSpaces()
+    await act(async () => {
+      const refreshed = await result.current.refreshProductSpaces()
+      expect(refreshed).not.toBeNull()
+    })
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+      { accountId, productSpaceId: 'space-ent', restricted: false },
+    ])
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+  })
+
+  it('a failed clear is fail-closed', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    // Establish the restricted projection successfully.
+    restrictResult = async (_accountId, _productSpaceId, restricted) => ({
+      success: true as const,
+      restricted,
+    })
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        personalSpace,
+        enterpriseSpace('space-ent', '北辰智能科技', { accessMode: 'read_only' }),
+      ],
+    }
+    await act(async () => {
+      const refreshed = await result.current.refreshProductSpaces()
+      expect(refreshed).not.toBeNull()
+    })
+    expect(result.current.flowState).toBe('ready')
+
+    // Verified active recovery whose clear FAILS: fail closed, never trust
+    // an unfenced active projection while Main may still be restricted.
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'SWITCH_LOCK_BUSY',
+    })
+    listResult = bothSpaces()
+    await act(async () => {
+      const refreshed = await result.current.refreshProductSpaces()
+      expect(refreshed).toBeNull()
+    })
+    expect(result.current.flowState).toBe('error')
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+  })
+
+  it('an account replacement during the restriction await aborts the publication', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    let releaseRestrict!: (value: { success: true; restricted: true }) => void
+    const restrictGate = new Promise<{ success: true; restricted: true }>(resolve => {
+      releaseRestrict = resolve
+    })
+    restrictResult = () => restrictGate
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        personalSpace,
+        enterpriseSpace('space-ent', '北辰智能科技', { accessMode: 'read_only' }),
+      ],
+    }
+
+    let refreshed: unknown = 'pending'
+    await act(async () => {
+      refreshed = result.current.refreshProductSpaces()
+    })
+    // The account is replaced while the restriction RPC is in flight.
+    await act(async () => {
+      result.current.clearAccount()
+    })
+    await act(async () => {
+      releaseRestrict({ success: true as const, restricted: true })
+      refreshed = await refreshed
+    })
+    // Post-await scope CAS: the stale refresh publishes nothing.
+    expect(refreshed).toBeNull()
+    expect(result.current.flowState).toBe('idle')
+    expect(result.current.productSpaces).toEqual([])
   })
 })

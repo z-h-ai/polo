@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
@@ -195,5 +195,185 @@ describe('assistant session account-scope persistence and enforcement (R32-2)', 
     const result = await invoke(RPC_CHANNELS.sessions.GET) as Array<{ id: string }>
     expect(result.map(session => session.id)).toEqual(['s-b-new'])
     expect(getRuntimeActiveProductSpace()).toBe(personalId)
+  })
+})
+
+describe('assistant session complete-scope boundaries (R33-1)', () => {
+  let tmpRoot: string
+  let storage: SessionStorage
+  let sm: SessionManager
+  let handlers: Map<string, Handler>
+  let signedInAccountId: string | null
+
+  let WorkspaceSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').WorkspaceSessionStorage
+
+  const baseContext = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-scope33-'))
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    signedInAccountId = accountA
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+
+    if (!WorkspaceSessionStorageCtor) {
+      ;({ WorkspaceSessionStorage: WorkspaceSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new WorkspaceSessionStorageCtor()
+    sm = new SessionManager()
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+
+    handlers = new Map()
+    const server: RpcServer = {
+      handle(channel: string, handler: HandlerFn) {
+        handlers.set(channel, handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+    } as unknown as RpcServer
+    registerSessionsHandlers(server, {
+      sessionManager: sm,
+      platform: {
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
+      },
+      windowManager: {
+        getWorkspaceForWindow: () => null,
+      },
+    } as unknown as HandlerDeps)
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  function seed(input: {
+    id: string
+    productSpaceId?: string
+    accountId?: string
+    hasUnread?: boolean
+  }): void {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: tmpRoot, createdAt: Date.now() }
+    const stored = {
+      id: input.id,
+      workspaceRootPath: tmpRoot,
+      name: input.id,
+      productSpaceId: input.productSpaceId,
+      accountId: input.accountId,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    }
+    const managed = createManagedSession(stored, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = input.productSpaceId
+    managed.accountId = input.accountId
+    ;(managed as unknown as { hasUnread: boolean }).hasUnread = input.hasUnread ?? false
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(input.id, managed)
+  }
+
+  function invokeWith(
+    contextOverride: Partial<{ workspaceId: string | null; clientId: string }>,
+    channel: string,
+    ...args: unknown[]
+  ) {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler: ${channel}`)
+    return handler({ ...baseContext, ...contextOverride } as never, ...args)
+  }
+
+  it('ID-addressed reads bind the session to the caller workspace (cross-workspace)', async () => {
+    seed({ id: 's-ws', productSpaceId: personalId, accountId: accountA })
+
+    // Same workspace: readable.
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-ws'))
+      .resolves.not.toBeNull()
+    // A renderer claiming another workspace can never read the session.
+    await expect(invokeWith({ workspaceId: 'ws_other' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-ws'))
+      .resolves.toBeNull()
+    // The same rule gates writes and commands.
+    await expect(invokeWith(
+      { workspaceId: 'ws_other' },
+      RPC_CHANNELS.sessions.COMMAND,
+      's-ws',
+      { type: 'rename', name: 'hijacked' },
+    )).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    // The session was untouched by the refused command.
+    const session = await invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-ws')
+    expect((session as unknown as { name: string }).name).toBe('s-ws')
+  })
+
+  it('the unread summary is account-aware across an account replacement', async () => {
+    seed({ id: 's-a-unread', productSpaceId: personalId, accountId: accountA, hasUnread: true })
+    seed({ id: 's-b-unread', productSpaceId: personalId, accountId: accountB, hasUnread: true })
+    // A legacy space-bound record without an account is quarantined.
+    seed({ id: 's-legacy-unread', productSpaceId: personalId, hasUnread: true })
+
+    const summaryA = await invokeWith({}, RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY) as {
+      totalUnreadSessions: number
+    }
+    expect(summaryA.totalUnreadSessions).toBe(1)
+
+    // Account B signs in: its own unread session is counted, A's and the
+    // quarantined legacy record are invisible.
+    signedInAccountId = accountB
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+
+    const summaryB = await invokeWith({}, RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY) as {
+      totalUnreadSessions: number
+    }
+    expect(summaryB.totalUnreadSessions).toBe(1)
+  })
+
+  it('a clean import binds the trusted destination scope; without one it fails before writing', async () => {
+    const { setRuntimeActiveProductSpace: setSpace } = await import('../runtime/product-space-executions')
+    const storageModule = await import('@polo-ai/shared/sessions/session-storage.ts')
+    const workspace = { id: 'ws_import', name: 'I', rootPath: join(tmpRoot, 'ws-import'), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sessionsRoot = join(tmpRoot, 'sessions-import')
+    mkdirSync(sessionsRoot, { recursive: true })
+    const importSm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: new storageModule.RootedSessionStorage(sessionsRoot),
+    })
+
+    const bundle = {
+      version: 1,
+      session: {
+        header: {
+          id: 'bundle-session-1',
+          createdAt: Date.now(),
+          name: 'transferred',
+        },
+        messages: [],
+      },
+      files: [],
+    }
+
+    // With the committed fence: the imported record carries the complete
+    // immutable scope.
+    const imported = await importSm.importSession(workspace.id, bundle as never, 'fork')
+    const managed = importSm.getSessions().find(session => session.id === imported.sessionId)
+    expect(managed?.productSpaceId).toBe(personalId)
+    expect(managed?.accountId).toBe(accountA)
+
+    // Without a committed fence the import fails BEFORE writing anything.
+    setSpace(null)
+    await expect(importSm.importSession(workspace.id, {
+      ...bundle,
+      session: { ...bundle.session, header: { ...bundle.session.header, id: 'bundle-session-2' } },
+    } as never, 'fork')).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    const writtenEntries = readdirSync(sessionsRoot, { recursive: true }) as string[]
+    expect(writtenEntries.some(entry => entry.includes('bundle-session-2'))).toBe(false)
   })
 })

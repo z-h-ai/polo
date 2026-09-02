@@ -28,6 +28,19 @@ import {
   isRuntimeOfflineReadOnly,
 } from '../runtime/product-space-executions'
 import { getSyncTrustedProductSpaceAccountId } from '../handlers/rpc/trusted-product-space-account'
+
+/**
+ * R33-1: ONE atomic trusted scope capture for session creation, branching
+ * and import. The committed runtime fence and the synchronous trusted
+ * account mirror must agree; anything else fails closed (null) so a session
+ * record can never be born with a partial or split scope.
+ */
+function captureTrustedSessionScope(): { accountId: string; productSpaceId: string } | null {
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  const trustedAccountId = getSyncTrustedProductSpaceAccountId()
+  if (!activeProductSpaceId || !trustedAccountId) return null
+  return { accountId: trustedAccountId, productSpaceId: activeProductSpaceId }
+}
 import {
   registerAssistantExecutionForSend,
   cancelAssistantStartReservation,
@@ -2383,7 +2396,7 @@ export class SessionManager implements ISessionManager {
    * Aggregate unread state across all workspaces.
    * Excludes hidden and archived sessions from counts/indicators.
    */
-  getUnreadSummary(productSpaceId?: string | null): UnreadSummary {
+  getUnreadSummary(scope?: { productSpaceId: string; accountId: string } | null): UnreadSummary {
     const byWorkspace: Record<string, number> = {}
     const hasUnreadByWorkspace: Record<string, boolean> = {}
 
@@ -2392,14 +2405,19 @@ export class SessionManager implements ISessionManager {
       hasUnreadByWorkspace[workspace.id] = false
     }
 
-    // Space fence: aggregate only sessions bound to the committed active
-    // ProductSpace; a null fence aggregates nothing (fail closed).
-    const spaceFilter = productSpaceId === undefined
-      ? getRuntimeActiveProductSpace()
-      : productSpaceId
+    // R33-1: the aggregate is bound to the COMPLETE trusted scope — space
+    // AND account. `undefined` derives the scope from the runtime fence
+    // (internal badge callers); an explicit null fails closed to an empty
+    // summary; a replaced account never sees its predecessor's unread state.
+    const effectiveScope = scope === undefined
+      ? captureTrustedSessionScope()
+      : scope
+    if (!effectiveScope) {
+      return { totalUnreadSessions: 0, byWorkspace, hasUnreadByWorkspace }
+    }
     for (const session of this.sessions.values()) {
-      if (spaceFilter && session.productSpaceId !== spaceFilter) continue
-      if (!spaceFilter) continue
+      if (session.productSpaceId !== effectiveScope.productSpaceId) continue
+      if (!session.accountId || session.accountId !== effectiveScope.accountId) continue
       if (session.hidden || session.isArchived) continue
       if (!session.hasUnread) continue
 
@@ -2557,6 +2575,16 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
 
+    // R33-1: the complete immutable scope {accountId, productSpaceId} is
+    // captured in ONE atomic read before anything else. Creating under a
+    // committed fence with an incomplete scope fails closed — a session is
+    // never born partially bound or with the space/account read in two
+    // separate steps that a concurrent replacement could split.
+    const trustedScope = captureTrustedSessionScope()
+    if (getRuntimeActiveProductSpace() && !trustedScope) {
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
+
     // Get new session defaults from workspace config (with global fallback)
     // Options.permissionMode overrides the workspace default (used by EditPopover for auto-execute)
     const workspaceRootPath = workspace.rootPath
@@ -2661,6 +2689,20 @@ export class SessionManager implements ISessionManager {
         })
         throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
       }
+      // R33-1: the branch source must also belong to the CURRENT trusted
+      // account. A replaced account can never branch (and thereby adopt the
+      // message history of) a session bound to its predecessor.
+      if (activeProductSpaceId) {
+        const branchTrustedAccountId = getSyncTrustedProductSpaceAccountId()
+        if (!branchTrustedAccountId || sourceManaged?.accountId !== branchTrustedAccountId) {
+          sessionLog.warn('Branch validation failed: source session belongs to another account', {
+            workspaceId,
+            branchFromSessionId: options.branchFromSessionId,
+            sourceAccountId: sourceManaged?.accountId,
+          })
+          throw new Error('Invalid branch request: source session belongs to a different account')
+        }
+      }
       if (sourceManaged) {
         if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
           sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
@@ -2694,6 +2736,24 @@ export class SessionManager implements ISessionManager {
           activeProductSpaceId,
         })
         throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
+      }
+      // R33-1: a cold source's immutable account binding must equally match
+      // the current trusted account — an unbound (legacy) or replaced-account
+      // cold record is never adopted into a fresh branch.
+      if (activeProductSpaceId) {
+        const coldTrustedAccountId = getSyncTrustedProductSpaceAccountId()
+        if (
+          !coldTrustedAccountId
+          || !sourceSession.accountId
+          || sourceSession.accountId !== coldTrustedAccountId
+        ) {
+          sessionLog.warn('Branch validation failed: cold source session belongs to another account', {
+            workspaceId,
+            branchFromSessionId: options.branchFromSessionId,
+            sourceAccountId: sourceSession.accountId,
+          })
+          throw new Error('Invalid branch request: source session belongs to a different account')
+        }
       }
 
       const sourceBackendContext = resolveBackendContext({
@@ -2844,8 +2904,8 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
-      productSpaceId: getRuntimeActiveProductSpace() ?? undefined,
-      accountId: getSyncTrustedProductSpaceAccountId() ?? undefined,
+      productSpaceId: trustedScope?.productSpaceId,
+      accountId: trustedScope?.accountId,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -2928,8 +2988,8 @@ export class SessionManager implements ISessionManager {
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
       llmConnection: options?.llmConnection,
-      productSpaceId: getRuntimeActiveProductSpace() ?? undefined,
-      accountId: getSyncTrustedProductSpaceAccountId() ?? undefined,
+      productSpaceId: trustedScope?.productSpaceId,
+      accountId: trustedScope?.accountId,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
@@ -5044,15 +5104,21 @@ export class SessionManager implements ISessionManager {
    * Mark all non-hidden, non-archived sessions in a workspace as read.
    * Called from "Mark All Read" context menu on "All Sessions".
    */
-  async markAllSessionsRead(workspaceId: string, productSpaceId?: string | null): Promise<void> {
-    // Space fence: only sessions bound to the committed active ProductSpace
-    // are mutable; a null fence mutates nothing (fail closed).
-    const spaceFilter = productSpaceId === undefined
-      ? getRuntimeActiveProductSpace()
-      : productSpaceId
+  async markAllSessionsRead(
+    workspaceId: string,
+    scope?: { productSpaceId: string; accountId: string } | null,
+  ): Promise<void> {
+    // R33-1: the mutation is bound to the COMPLETE trusted scope (space AND
+    // account); `undefined` derives it from the runtime fence, and anything
+    // incomplete fails closed and mutates nothing.
+    const effectiveScope = scope === undefined
+      ? captureTrustedSessionScope()
+      : scope
+    if (!effectiveScope) return
     const updates: Promise<void>[] = []
     for (const managed of this.sessions.values()) {
-      if (!spaceFilter || managed.productSpaceId !== spaceFilter) continue
+      if (managed.productSpaceId !== effectiveScope.productSpaceId) continue
+      if (!managed.accountId || managed.accountId !== effectiveScope.accountId) continue
       if (managed.workspace.id !== workspaceId) continue
       if (managed.hidden || managed.isArchived) continue
       if (managed.isProcessing) continue
@@ -8108,6 +8174,15 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
 
+    // R33-1: a clean import is bound to the trusted destination scope in
+    // ONE atomic capture. Without a complete committed scope the import
+    // fails BEFORE writing — an unbound (immediately quarantined, unusable)
+    // record is never created.
+    const importScope = captureTrustedSessionScope()
+    if (!importScope) {
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
+
     sessionLog.info(`[import] Target workspace: "${workspace.name}" at ${workspace.rootPath}`)
 
     const warnings: string[] = []
@@ -8179,6 +8254,10 @@ export class SessionManager implements ISessionManager {
         transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
         messages: bundle.session.messages,
         tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
+        // R33-1: the imported record carries the trusted destination scope —
+        // never an unbound (quarantined-at-birth) header.
+        productSpaceId: importScope.productSpaceId,
+        accountId: importScope.accountId,
       }
 
       // Fork-specific: set up SDK branching if branchInfo provided

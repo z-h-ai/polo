@@ -57,6 +57,12 @@ const workspace = {
 }
 mkdirSync(workspace.rootPath, { recursive: true })
 const storage = new BarrierSessionStorage(join(root, 'sessions'))
+// R33-1: imports are bound to a committed trusted scope. The worker seeds
+// the same fence scope the reservation test asserts against.
+const { setRuntimeActiveProductSpace } = await import('../../../runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId } = await import('../../../handlers/rpc/trusted-product-space-account')
+setRuntimeActiveProductSpace('workspace-1-space')
+setSyncTrustedProductSpaceAccountId('worker-account')
 const manager = new SessionManager({
   profile: 'cli-one-shot',
   workspace,

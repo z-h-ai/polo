@@ -40,11 +40,98 @@ import {
 } from '@polo-ai/shared/creator-skills'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
 import { getClientActiveSession } from './client-active-session'
+import {
+  EXECUTION_STOP_DRAIN_TIMEOUT_MS,
+  EXECUTION_STOP_POLL_INTERVAL_MS,
+  registerProductSpaceExecution,
+  unregisterProductSpaceExecution,
+  type RegisteredProductSpaceExecution,
+} from '../../runtime/product-space-executions'
+import {
+  AccountIdSchema,
+  ExecutionIdSchema,
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceIdSchema,
+} from '@polo-ai/shared/product-spaces'
+import type { ExecutionStatus, WorkspaceId } from '@polo-ai/shared/product-spaces'
 
 function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | null {
   if (ctx.workspaceId) return ctx.workspaceId
   if (ctx.webContentsId === null) return null
   return deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+}
+
+/**
+ * R33-2: an in-flight Creator Skill install/uninstall is a ProductSpace
+ * execution like any other. It is registered under its immutable trusted
+ * account/ProductSpace/Workspace scope BEFORE the awaited operation starts,
+ * exposes a real status ('running', 'stopping' once cancellation was
+ * requested) and a bounded cancellation (the shared Creator Skill
+ * cancellation controller + the shared stop drain deadline), so a
+ * read_only-restricted transition terminates Skill work through the same
+ * no-confirmation trusted path as Assistant and Local App executions and
+ * the restricted projection only becomes usable once every execution is
+ * terminal. `settle()` must run when the awaited operation completes.
+ */
+function registerSkillOperationExecution(input: {
+  accountId: string
+  productSpaceId: string
+  workspaceId: string
+  workspaceRoot: string
+  operationOwnerId: string
+  operationId: string
+  slug: string
+  version?: string
+}): { settle: () => void } {
+  let settled = false
+  let cancelRequested = false
+  const executionId = ExecutionIdSchema.parse(`skill-op:${input.operationId}`)
+  const execution: RegisteredProductSpaceExecution = {
+    scope: {
+      contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+      executionId,
+      accountId: AccountIdSchema.parse(input.accountId),
+      productSpaceId: ProductSpaceIdSchema.parse(input.productSpaceId),
+      workspaceId: input.workspaceId as unknown as WorkspaceId,
+      subject: {
+        kind: 'artifact_instance',
+        artifactType: 'skill',
+        artifactInstanceId: input.slug,
+        versionId: input.version ?? input.slug,
+        version: input.version ?? input.slug,
+      },
+    } as unknown as RegisteredProductSpaceExecution['scope'],
+    kind: 'skill_operation',
+    name: input.slug,
+    ref: input.operationId,
+    generation: 0,
+    isActive: () => !settled,
+    getStatus: (): ExecutionStatus => (cancelRequested ? 'stopping' : 'running'),
+    stop: async () => {
+      cancelRequested = true
+      try {
+        await cancelCreatorSkillOperation(
+          input.workspaceRoot,
+          input.operationOwnerId,
+          input.operationId,
+        )
+      } catch {
+        // The bounded drain below decides the outcome.
+      }
+      const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
+      while (!settled && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, EXECUTION_STOP_POLL_INTERVAL_MS))
+      }
+      return settled ? 'stopped' as const : 'failed' as const
+    },
+  }
+  registerProductSpaceExecution(execution)
+  return {
+    settle: () => {
+      settled = true
+      unregisterProductSpaceExecution(executionId)
+    },
+  }
 }
 
 function getBoundWorkspace(
@@ -436,17 +523,36 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     let detached = false
     let forceDeleteCredential: string | undefined
     if (managed || pendingDetach) {
-      const result = await uninstallCreatorSkill({
-        workspaceRoot: workspace.rootPath,
+      // R33-2: the in-flight uninstall is a cancellable ProductSpace
+      // execution under the trusted scope. One operationId binds the
+      // registration to the cancellation controller.
+      const deleteScope = await requireTrustedSkillsScope()
+      const deleteOperationId = crypto.randomUUID()
+      const deleteOperation = registerSkillOperationExecution({
+        accountId: deleteScope.accountId,
+        productSpaceId: deleteScope.productSpaceId,
         workspaceId: workspace.id,
-        operationId: crypto.randomUUID(),
+        workspaceRoot: workspace.rootPath,
+        operationOwnerId: ctx.clientId,
+        operationId: deleteOperationId,
         slug: skillSlug,
-      }, {
-        onError: error => deps.platform.logger?.error(
-          'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
-          error,
-        ),
       })
+      let result: Awaited<ReturnType<typeof uninstallCreatorSkill>>
+      try {
+        result = await uninstallCreatorSkill({
+          workspaceRoot: workspace.rootPath,
+          workspaceId: workspace.id,
+          operationId: deleteOperationId,
+          slug: skillSlug,
+        }, {
+          onError: error => deps.platform.logger?.error(
+            'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
+            error,
+          ),
+        })
+      } finally {
+        deleteOperation.settle()
+      }
       if (!result.success) throw Object.assign(new Error(result.message), {
         code: result.errorCode,
       })
@@ -519,38 +625,55 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     } catch {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
     }
-    const result = await installCreatorSkill(workspace.rootPath, {
-      ...input.data,
-      ...(workingDirectory ? { workingDirectory } : {}),
-    }, {
+    // R33-2: the in-flight install is a cancellable ProductSpace execution.
+    const skillScope = await requireTrustedSkillsScope()
+    const skillOperation = registerSkillOperationExecution({
+      accountId: skillScope.accountId,
+      productSpaceId: skillScope.productSpaceId,
+      workspaceId: workspace.id,
+      workspaceRoot: workspace.rootPath,
       operationOwnerId: ctx.clientId,
-      fetch: createCreatorSkillDownloadFetch(
-        deps.platform.getAdminAccessToken,
-      ),
-      onProgress: progress => pushTyped(
-        server,
-        RPC_CHANNELS.creatorSkills.PROGRESS,
-        { to: 'client', clientId: ctx.clientId },
-        progress,
-      ),
-      assertCommitAllowed: async identity => {
-        const check = await server.invokeClient(
-          ctx.clientId,
-          CLIENT_CREATOR_SKILL_COMMIT_CHECK,
-          identity,
-        ) as {
-          success?: boolean
-          creatorSkillArtifacts?: boolean
-          status?: 'active' | 'revoked' | 'archived'
-          errorCode?: string
-        }
-        assertCreatorSkillCommitAllowed(check)
-      },
-      onError: error => deps.platform.logger?.error(
-        'CREATOR_SKILLS_INSTALL: Server-side failure:',
-        error,
-      ),
+      operationId: input.data.operationId,
+      slug: input.data.grant.slug,
+      version: input.data.grant.version,
     })
+    let result: Awaited<ReturnType<typeof installCreatorSkill>>
+    try {
+      result = await installCreatorSkill(workspace.rootPath, {
+        ...input.data,
+        ...(workingDirectory ? { workingDirectory } : {}),
+      }, {
+        operationOwnerId: ctx.clientId,
+        fetch: createCreatorSkillDownloadFetch(
+          deps.platform.getAdminAccessToken,
+        ),
+        onProgress: progress => pushTyped(
+          server,
+          RPC_CHANNELS.creatorSkills.PROGRESS,
+          { to: 'client', clientId: ctx.clientId },
+          progress,
+        ),
+        assertCommitAllowed: async identity => {
+          const check = await server.invokeClient(
+            ctx.clientId,
+            CLIENT_CREATOR_SKILL_COMMIT_CHECK,
+            identity,
+          ) as {
+            success?: boolean
+            creatorSkillArtifacts?: boolean
+            status?: 'active' | 'revoked' | 'archived'
+            errorCode?: string
+          }
+          assertCreatorSkillCommitAllowed(check)
+        },
+        onError: error => deps.platform.logger?.error(
+          'CREATOR_SKILLS_INSTALL: Server-side failure:',
+          error,
+        ),
+      })
+    } finally {
+      skillOperation.settle()
+    }
     if (result.success) {
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
@@ -600,15 +723,31 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       return workspaceMutationError(input.data.operationId, 'workspace_read_only')
     }
     await ensureRecovered(workspace.rootPath)
-    const result = await uninstallCreatorSkill({
+    // R33-2: the in-flight uninstall is a cancellable ProductSpace execution.
+    const skillScope = await requireTrustedSkillsScope()
+    const skillOperation = registerSkillOperationExecution({
+      accountId: skillScope.accountId,
+      productSpaceId: skillScope.productSpaceId,
+      workspaceId: workspace.id,
       workspaceRoot: workspace.rootPath,
-      ...input.data,
-    }, {
-      onError: error => deps.platform.logger?.error(
-        'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
-        error,
-      ),
+      operationOwnerId: ctx.clientId,
+      operationId: input.data.operationId,
+      slug: input.data.slug,
     })
+    let result: Awaited<ReturnType<typeof uninstallCreatorSkill>>
+    try {
+      result = await uninstallCreatorSkill({
+        workspaceRoot: workspace.rootPath,
+        ...input.data,
+      }, {
+        onError: error => deps.platform.logger?.error(
+          'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
+          error,
+        ),
+      })
+    } finally {
+      skillOperation.settle()
+    }
     if (result.success) {
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }

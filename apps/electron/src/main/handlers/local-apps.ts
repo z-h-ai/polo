@@ -634,6 +634,12 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const registry = getScopedLocalAppRuntimeRegistry()
     // Every start is a distinct execution with its own immutable scope.
     const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
+    // R33-3: real owner-scoped status projection. The runtime status is
+    // probed asynchronously (isActive), so the last observed lifecycle is
+    // cached for the synchronous getStatus provider; a dispatched stop
+    // projects 'stopping' until the terminal outcome.
+    let lastObservedStatus: 'preparing' | 'running' = 'running'
+    let stopDispatched = false
     const execution: RegisteredProductSpaceExecution = {
       scope: {
         contractVersion: 1,
@@ -652,15 +658,20 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       kind: 'local_app',
       name,
       ref: executionId,
+      generation: 0,
       isActive: async () => {
         try {
-          return (await registry.getRuntimeStatus(scope)).status === 'running'
+          const status = await registry.getRuntimeStatus(scope)
+          lastObservedStatus = status.status === 'starting' ? 'preparing' : 'running'
+          return status.status === 'running'
         } catch {
           // Liveness probe failure fails closed: treat as still active.
           return true
         }
       },
+      getStatus: () => (stopDispatched ? 'stopping' : lastObservedStatus),
       stop: async () => {
+        stopDispatched = true
         try {
           await registry.stop(scope)
           return 'stopped'

@@ -35,6 +35,7 @@ import {
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
   getRuntimeFenceGeneration,
+  getRegisteredProductSpaceExecutionGeneration,
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
   isRuntimeProductSpaceRestricted,
@@ -322,6 +323,7 @@ export async function registerAssistantSessionExecution(input: {
     kind: 'assistant_session',
     name: input.name,
     ref: input.sessionId,
+    generation: 0,
     isActive: () => {
       const session = input.sessionManager
         .getSessions()
@@ -441,6 +443,9 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       if (!execution) {
         return { success: false as const, errorCode: 'EXECUTION_NOT_FOUND', message: 'The execution does not belong to this switch transaction' }
       }
+      // R33-4: capture the registration generation BEFORE the awaited stop —
+      // the drain below can outlive this entry's ownership.
+      const capturedGeneration = execution.generation
       // Cancellation gate before the dispatch (same rule as the all-stop
       // loop): a cancelled transaction stops accepting new terminations.
       const current = getPendingSwitchTransaction()
@@ -451,6 +456,36 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled', status: 'stopping' as const }
       }
       const [result] = await stopRegisteredExecutionsOnce([execution])
+      // R33-4: revalidate token/account/scope/generation AFTER the awaited
+      // drain. The await is a window in which the transaction may have been
+      // cancelled or superseded and a same-ID replacement may have taken the
+      // registry slot — a stale completion is never reported against newer
+      // ownership.
+      const afterDrain = getPendingSwitchTransaction()
+      if (
+        !afterDrain
+        || afterDrain.token !== stopToken
+        || afterDrain.accountId !== trustedAccountId
+        || afterDrain.cancelled
+      ) {
+        return {
+          success: false as const,
+          errorCode: afterDrain?.cancelled ? 'SWITCH_CANCELLED' : 'SWITCH_TRANSACTION_INVALID',
+          message: afterDrain?.cancelled ? 'The switch was cancelled' : 'No matching prepared switch transaction',
+          status: 'stopping' as const,
+        }
+      }
+      const generationNow = getRegisteredProductSpaceExecutionGeneration(executionId)
+      if (generationNow !== null && generationNow !== capturedGeneration) {
+        // A same-ID replacement owns the slot: this stop's terminal outcome
+        // belongs to the older generation only.
+        return {
+          success: false as const,
+          errorCode: 'EXECUTION_SUPERSEDED',
+          message: 'The execution was replaced while the stop was in flight',
+          status: 'failed' as const,
+        }
+      }
       const status: ExecutionStatus = result?.status === 'stopped' ? 'stopped' : 'failed'
       return {
         success: status === 'stopped',
@@ -496,7 +531,9 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         }
         if (restricted) {
           // Fence FIRST (new starts fail closed immediately), then terminate
-          // the in-flight executions without confirmation.
+          // the in-flight executions without confirmation. A failed stop
+          // keeps the fence set — recovery is the verified active-clear
+          // transaction, never a silent unfenced window.
           setRuntimeProductSpaceRestricted(productSpaceId, true)
           const stopped = await stopRegisteredProductSpaceExecutionsForSpace(
             trustedAccountId,
@@ -504,11 +541,18 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           )
           return {
             success: stopped.ok,
+            // R33-2: the AUTHORITATIVE post-operation Main fence state, so
+            // the renderer can reconcile against Main instead of a cached
+            // previousMode.
+            restricted: isRuntimeProductSpaceRestricted(productSpaceId),
             ...(stopped.ok ? {} : { errorCode: 'runtime_stop_failed', failedExecutionIds: stopped.failedExecutionIds }),
           }
         }
         setRuntimeProductSpaceRestricted(productSpaceId, false)
-        return { success: true as const }
+        return {
+          success: true as const,
+          restricted: isRuntimeProductSpaceRestricted(productSpaceId),
+        }
       })
     },
   )
@@ -648,7 +692,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
                   executionId: EXECUTION_ID_SCHEMA.parse(execution.scope.executionId),
                   scope: execution.scope,
                   name: execution.name,
-                  status: 'running',
+                  // R33-3: real owner-scoped status — the planned snapshot
+                  // keeps preparing/running/waiting_for_network/stopping
+                  // truthful instead of hardcoding 'running'.
+                  status: execution.getStatus?.() ?? 'running',
                 })
               }
             }

@@ -1224,6 +1224,7 @@ describe('registerAdminHandlers', () => {
       kind: 'assistant_session',
       name: 'assistant',
       ref: 'session-a',
+      generation: 0,
       isActive: () => assistantActive,
       stop: async () => {
         stopCalls += 1
@@ -1933,6 +1934,7 @@ describe('registerAdminHandlers', () => {
       kind: 'assistant_session',
       name: 'assistant',
       ref: 'session-a',
+      generation: 0,
       isActive: () => true,
       stop: async () => {
         stopAttempts += 1
@@ -1985,6 +1987,7 @@ describe('registerAdminHandlers', () => {
       kind: 'assistant_session',
       name: 'assistant',
       ref: 'session-a',
+      generation: 0,
       isActive: () => Promise.reject(new Error('probe broken')),
       stop: async () => 'stopped' as const,
     })
