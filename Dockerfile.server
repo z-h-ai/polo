@@ -72,9 +72,10 @@ RUN bun install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Build the Pi agent server subprocess bundle (consumed via runtime-resolver.ts)
-RUN bun build packages/pi-agent-server/src/index.ts \
-      --outfile packages/pi-agent-server/dist/index.js --target bun --format esm --external koffi
+# Build the Pi agent server subprocess bundle (consumed via runtime-resolver.ts).
+# Routes through the shared production build args (scripts/build/build-pi-agent-server.ts):
+# node-target ESM — the production host is a Node 22 subprocess (ELECTRON_RUN_AS_NODE).
+RUN cd packages/pi-agent-server && bun run build
 
 # Build the WhatsApp worker bundle (CJS, Node target — Bun cannot run it).
 RUN bun run scripts/build-wa-worker.ts

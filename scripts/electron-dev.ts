@@ -9,6 +9,8 @@ import { join, basename } from "path";
 import * as esbuild from "esbuild";
 import { downloadUv, type Platform, type Arch } from "./build/common";
 
+import { piAgentServerBuildArgs } from "./build/pi-build-args.ts";
+
 const ROOT_DIR = join(import.meta.dir, "..");
 const ELECTRON_DIR = join(ROOT_DIR, "apps/electron");
 const DIST_DIR = join(ELECTRON_DIR, "dist");
@@ -297,14 +299,14 @@ async function runEsbuild(
   }
 }
 
-// Build Pi agent server using bun instead of esbuild.
-// The Pi SDK (@mariozechner/pi-coding-agent) is ESM-only, and esbuild with
-// packages:external leaves ESM imports as require() calls that fail at runtime.
-// Bun's bundler handles ESM→ESM bundling correctly.
+// Build the Pi agent server bundle through the SHARED production build
+// arguments (scripts/build/pi-build-args.ts) — node-target ESM: the
+// production host is a Node 22 subprocess (ELECTRON_RUN_AS_NODE), and a
+// bun-targeted bundle crashes there on `import.meta.require`.
 async function buildPiAgentServer(): Promise<{ success: boolean; error?: string }> {
   try {
     const proc = spawn({
-      cmd: ["bun", "build", "src/index.ts", "--outdir=dist", "--target=bun", "--format=esm"],
+      cmd: [process.execPath, ...piAgentServerBuildArgs("src/index.ts", "dist")],
       cwd: PI_AGENT_SERVER_DIR,
       stdout: "pipe",
       stderr: "pipe",

@@ -817,7 +817,7 @@ export function buildPiAgentServer(config: BuildConfig): void {
 
   console.log('Building Pi agent server...');
 
-  // Pi agent server uses --target=bun --format=esm because its Pi SDK deps are ESM-only.
+  // Pi agent server builds through the shared piAgentServerBuildArgs (node-target ESM — the production host is a Node 22 subprocess).
   // --target=node --format=cjs leaves ESM deps as external require() calls that fail at runtime.
   // koffi is marked external because it's a native N-API module — bun can't inline .node binaries
   // and inlining its JS breaks the native binary resolution paths.

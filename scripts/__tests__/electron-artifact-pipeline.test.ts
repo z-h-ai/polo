@@ -16,7 +16,12 @@ describe('Electron final artifact validation pipeline', () => {
     const dockerfile = read('Dockerfile.server')
     expect(dockerfile).not.toContain('session-mcp-server')
     expect(dockerfile).toContain('packages/pi-agent-server/package.json')
-    expect(dockerfile).toContain('packages/pi-agent-server/src/index.ts')
+    // The Docker build routes through the SHARED build args entry — it must
+    // never re-declare a bun target (that would crash the Node production host).
+    expect(dockerfile).toContain('cd packages/pi-agent-server && bun run build')
+    expect(dockerfile).toContain('scripts/build/build-pi-agent-server.ts')
+    expect(dockerfile).not.toContain('--target bun')
+    expect(dockerfile).not.toContain('--target=bun')
 
     const unixValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
     // The shell validator mentions the sidecar ONLY inside its removal
@@ -526,6 +531,21 @@ describe('Electron final artifact validation pipeline', () => {
   // process.exit) and exactly ONE leaf builder returning {success, error}.
   // If the two collapse into one name, the later leaf declaration wins and
   // the failure result is silently swallowed.
+  // CALL-GRAPH REGRESSION: the electron packaging entry
+  // (scripts/electron-build-main.ts) builds the pi bundle through the SHARED
+  // production args (scripts/build/pi-build-args.ts, node-target ESM) — it
+  // must never re-declare a target locally: a bun-targeted ESM bundle crashes
+  // the Node 22 production host (ELECTRON_RUN_AS_NODE=1) on
+  // `import.meta.require`, and electron:build would re-overwrite both the
+  // package dist and the staged resources with it.
+  it('electron-build-main builds the pi bundle through the shared node-target args', () => {
+    const main = read('scripts/electron-build-main.ts')
+    expect(main).toContain('piAgentServerBuildArgs')
+    expect(main).not.toContain('"--target", "bun"')
+    expect(main).not.toContain('--target=bun')
+    expect(main).not.toContain('--target bun')
+  })
+
   it('electron dev keeps the pi bundle wrapper/leaf split with failure propagation', () => {
     const dev = read('scripts/electron-dev.ts')
 

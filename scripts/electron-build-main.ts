@@ -6,8 +6,10 @@
 import { spawn } from "bun";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import { join } from "path";
+import { piAgentServerBuildArgs } from "./build/pi-build-args.ts";
 
 const ROOT_DIR = join(import.meta.dir, "..");
+
 const DIST_DIR = join(ROOT_DIR, "apps/electron/dist");
 const ELECTRON_RESOURCES_DIR = join(ROOT_DIR, "apps/electron/resources");
 const OUTPUT_FILE = join(DIST_DIR, "main.cjs");
@@ -185,17 +187,18 @@ async function buildPiAgentServer(): Promise<void> {
     mkdirSync(distDir, { recursive: true });
   }
 
-  // Use --target=bun --format=esm because the Pi SDK (@mariozechner/pi-coding-agent)
-  // is ESM-only. --target=node --format=cjs leaves ESM deps as external require()
-  // calls that fail at runtime since there are no node_modules relative to dist/.
+  // SHARED BUILD ARGS (scripts/build/pi-build-args.ts): node-target ESM —
+  // the production host is a Node 22 subprocess (ELECTRON_RUN_AS_NODE=1); a
+  // bun-targeted ESM bundle resolves CJS deps through `import.meta.require`,
+  // which is undefined under Node and crashes the server before any model
+  // request. Never re-declare target/format here.
   const proc = spawn({
     cmd: [
-      "bun", "build",
-      join(PI_AGENT_SERVER_DIR, "src/index.ts"),
-      "--outfile", PI_AGENT_SERVER_OUTPUT,
-      "--target", "bun",
-      "--format", "esm",
-      "--external", "koffi",
+      process.execPath,
+      ...piAgentServerBuildArgs(
+        join(PI_AGENT_SERVER_DIR, "src/index.ts"),
+        join(PI_AGENT_SERVER_DIR, "dist"),
+      ),
     ],
     cwd: ROOT_DIR,
     stdout: "inherit",
