@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -538,12 +538,111 @@ describe('Electron final artifact validation pipeline', () => {
   // the Node 22 production host (ELECTRON_RUN_AS_NODE=1) on
   // `import.meta.require`, and electron:build would re-overwrite both the
   // package dist and the staged resources with it.
+  // STAGED-CHAIN HOST REGRESSION: drive the REAL build+stage core used by
+  // the packaging entry (temp layout — the worktree is untouched), then run
+  // the freshly staged `index.js` under the production host (Node +
+  // ELECTRON_RUN_AS_NODE=1) and assert the init/ready handshake. This is the
+  // repeatable form of the once-per-commit manual gate: if staging/copy ever
+  // regresses to a stale or bun-targeted artifact, the handshake fails here
+  // instead of in the field.
+  it('real staging path produces a pi bundle that completes init/ready under the node host', async () => {
+    const {
+      buildPiAgentServerBundle,
+      stagePiAgentServerBundleResource,
+      stagedBundlePath,
+    } = await import(join(root, 'scripts', 'build', 'pi-agent-server-staging.ts'))
+
+    const layoutRoot = mkdtempSync(join(tmpdir(), 'polo-pi-staging-e2e-'))
+    try {
+      const packageDir = join(layoutRoot, 'packages', 'pi-agent-server')
+      const layout = {
+        sourceEntry: join(root, 'packages', 'pi-agent-server', 'src', 'index.ts'),
+        distDir: join(packageDir, 'dist'),
+        resourceDir: join(layoutRoot, 'resources', 'pi-agent-server'),
+        koffiSource: join(root, 'node_modules', 'koffi'),
+      }
+      // Mirror the PRODUCTION layout: the staged bundle sits beside the
+      // package's package.json ("type": "module") — Node's ESM loader needs it.
+      mkdirSync(join(packageDir, 'dist'), { recursive: true })
+      copyFileSync(join(root, 'packages', 'pi-agent-server', 'package.json'), join(packageDir, 'package.json'))
+
+      // REAL build + stage path (same core the packaging entry drives).
+      await buildPiAgentServerBundle(layout, root)
+      stagePiAgentServerBundleResource(layout)
+
+      // BUNDLE SHAPE on the STAGED artifact: node-target ESM only.
+      const staged = readFileSync(stagedBundlePath(layout), 'utf8')
+      expect(staged).not.toContain('import.meta.require')
+      expect(staged).toContain('createRequire')
+
+      // HOST HANDSHAKE: init → ready under Node + ELECTRON_RUN_AS_NODE=1.
+      const host = Bun.spawn({
+        cmd: ['node', join(packageDir, 'dist', 'index.js')],
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      })
+      try {
+        host.stdin.write(
+          JSON.stringify({
+            type: 'init',
+            sessionId: 'staged-chain-regression',
+            workspaceRootPath: '/tmp',
+            cwd: '/tmp',
+          }) + '\n',
+        )
+        await host.stdin.flush()
+
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let ready: Record<string, unknown> | null = null
+        const deadline = Date.now() + 20000
+        while (!ready && Date.now() < deadline) {
+          const newlineIndex = buffer.indexOf('\n')
+          if (newlineIndex >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim()
+            buffer = buffer.slice(newlineIndex + 1)
+            if (line) {
+              const msg = JSON.parse(line) as Record<string, unknown>
+              if (msg.type === 'ready') ready = msg
+            }
+            continue
+          }
+          const reader = host.stdout.getReader()
+          const { value, done } = await reader.read()
+          reader.releaseLock()
+          if (done) throw new Error(`staged pi bundle stdout closed before ready; stderr: ${await new Response(host.stderr).text()}`)
+          buffer += decoder.decode(value, { stream: true })
+        }
+        if (!ready) throw new Error('timed out waiting for ready from the staged pi bundle')
+        expect(ready.type).toBe('ready')
+        expect('callbackPort' in ready).toBe(false)
+      } finally {
+        host.kill()
+      }
+    } finally {
+      rmSync(layoutRoot, { recursive: true, force: true })
+    }
+  }, 60000)
+
   it('electron-build-main builds the pi bundle through the shared node-target args', () => {
     const main = read('scripts/electron-build-main.ts')
-    expect(main).toContain('piAgentServerBuildArgs')
+    // The packaging entry drives the testable staging core, which sources
+    // the production args (node-target ESM) from the single definition.
+    expect(main).toContain('buildPiAgentServerBundle')
+    expect(main).toContain('stagePiAgentServerBundleResource')
+    expect(main).toContain("from \"./build/pi-agent-server-staging.ts\"")
     expect(main).not.toContain('"--target", "bun"')
     expect(main).not.toContain('--target=bun')
     expect(main).not.toContain('--target bun')
+
+    // The staging core is the one place that sources the shared args.
+    const stagingCore = read('scripts/build/pi-agent-server-staging.ts')
+    expect(stagingCore).toContain('piAgentServerBuildArgs')
+    expect(stagingCore).not.toContain('"--target", "bun"')
+    expect(stagingCore).not.toContain('--target=bun')
+    expect(stagingCore).not.toContain('--target bun')
   })
 
   it('electron dev keeps the pi bundle wrapper/leaf split with failure propagation', () => {

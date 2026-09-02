@@ -6,7 +6,10 @@
 import { spawn } from "bun";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import { join } from "path";
-import { piAgentServerBuildArgs } from "./build/pi-build-args.ts";
+import {
+  buildPiAgentServerBundle,
+  stagePiAgentServerBundleResource,
+} from "./build/pi-agent-server-staging.ts";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 
@@ -172,6 +175,9 @@ async function buildInterceptor(): Promise<void> {
 }
 
 // Build the Pi Agent Server (subprocess for Pi SDK sessions)
+// Thin production wrapper around the testable core in
+// scripts/build/pi-agent-server-staging.ts (shared node-target args;
+// throws are translated into the packaging entry's failure policy).
 // Optional: skips if package directory is missing (e.g., not synced to OSS).
 async function buildPiAgentServer(): Promise<void> {
   if (!existsSync(join(PI_AGENT_SERVER_DIR, "src"))) {
@@ -181,40 +187,15 @@ async function buildPiAgentServer(): Promise<void> {
 
   console.log("🥧 Building Pi Agent Server...");
 
-  // Ensure dist directory exists
-  const distDir = join(PI_AGENT_SERVER_DIR, "dist");
-  if (!existsSync(distDir)) {
-    mkdirSync(distDir, { recursive: true });
-  }
-
-  // SHARED BUILD ARGS (scripts/build/pi-build-args.ts): node-target ESM —
-  // the production host is a Node 22 subprocess (ELECTRON_RUN_AS_NODE=1); a
-  // bun-targeted ESM bundle resolves CJS deps through `import.meta.require`,
-  // which is undefined under Node and crashes the server before any model
-  // request. Never re-declare target/format here.
-  const proc = spawn({
-    cmd: [
-      process.execPath,
-      ...piAgentServerBuildArgs(
-        join(PI_AGENT_SERVER_DIR, "src/index.ts"),
-        join(PI_AGENT_SERVER_DIR, "dist"),
-      ),
-    ],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    console.error("❌ Pi agent server build failed with exit code", exitCode);
-    process.exit(exitCode);
-  }
-
-  // Verify output exists
-  if (!existsSync(PI_AGENT_SERVER_OUTPUT)) {
-    console.error("❌ Pi agent server output not found at", PI_AGENT_SERVER_OUTPUT);
+  try {
+    await buildPiAgentServerBundle({
+      sourceEntry: join(PI_AGENT_SERVER_DIR, "src/index.ts"),
+      distDir: join(PI_AGENT_SERVER_DIR, "dist"),
+      resourceDir: PI_AGENT_SERVER_RESOURCE_DIR,
+      koffiSource: join(ROOT_DIR, "node_modules/koffi"),
+    }, ROOT_DIR);
+  } catch (error) {
+    console.error("❌ Pi agent server build failed:", error instanceof Error ? error.message : error);
     process.exit(1);
   }
 
@@ -227,24 +208,18 @@ function stagePiAgentServerResource(): void {
     return;
   }
 
-  if (!existsSync(PI_AGENT_SERVER_OUTPUT)) {
-    console.error("❌ Pi agent server output not found at", PI_AGENT_SERVER_OUTPUT);
+  try {
+    stagePiAgentServerBundleResource({
+      sourceEntry: join(PI_AGENT_SERVER_DIR, "src/index.ts"),
+      distDir: join(PI_AGENT_SERVER_DIR, "dist"),
+      resourceDir: PI_AGENT_SERVER_RESOURCE_DIR,
+      koffiSource: join(ROOT_DIR, "node_modules/koffi"),
+    });
+  } catch (error) {
+    console.error("❌ Pi agent server staging failed:", error instanceof Error ? error.message : error);
     process.exit(1);
   }
 
-  const koffiSource = join(ROOT_DIR, "node_modules/koffi");
-  if (!existsSync(koffiSource)) {
-    console.error("❌ koffi dependency not found at", koffiSource);
-    process.exit(1);
-  }
-
-  rmSync(PI_AGENT_SERVER_RESOURCE_DIR, { recursive: true, force: true });
-  mkdirSync(PI_AGENT_SERVER_RESOURCE_DIR, { recursive: true });
-  cpSync(PI_AGENT_SERVER_OUTPUT, join(PI_AGENT_SERVER_RESOURCE_DIR, "index.js"));
-  cpSync(koffiSource, join(PI_AGENT_SERVER_RESOURCE_DIR, "node_modules/koffi"), {
-    recursive: true,
-    force: true,
-  });
   console.log("📦 Staged Pi Agent Server resource");
 }
 
