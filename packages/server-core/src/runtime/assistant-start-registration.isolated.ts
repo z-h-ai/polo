@@ -5,10 +5,12 @@ import {
   resetProductSpaceExecutionRegistryForTests,
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
+  stopRegisteredProductSpaceExecutionsForAccount,
   withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from './product-space-executions'
 import {
+  beginAccountTransition,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../handlers/rpc/trusted-product-space-account'
@@ -162,5 +164,70 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
     )
     expect(registered!.scope.accountId as string).toBe(otherAccountId)
     expect(registered!.kind).toBe('assistant_session')
+  })
+
+  it('production replacement order — cleanup before revoke refuses the queued start with no orphan (R30-A)', async () => {
+    // EXACT production ordering of an account replacement, without manually
+    // flipping the mirror or fence:
+    //   1. the Assistant start resolved account A (provider gated) and is
+    //      queued for the switch lock;
+    //   2. the replacement begins — the transition epoch is advanced
+    //      SYNCHRONOUSLY before the first cleanup await; cleanup enumerates
+    //      no execution of A yet and completes;
+    //   3. the fence revoke queues behind the switch lock (held here);
+    //   4. the queued start resumes — the transition epoch recheck must
+    //      refuse it so no account-A execution survives the revoke.
+    let releaseSwitchLock!: () => void
+    const switchLockReleased = new Promise<void>(resolve => { releaseSwitchLock = () => resolve() })
+    const lockHolder = withSwitchLock(async () => {
+      await switchLockReleased
+    })
+    let releaseProvider!: () => void
+    const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve(trustedAccountId) })
+    setTrustedProductSpaceAccountProvider(() => gatedProvider)
+
+    const { registerAssistantExecutionForSend } = await import('./assistant-executions')
+    const registering = registerAssistantExecutionForSend({
+      sessionManager: sessionManagerStub(),
+      sessionId: 'session-orphan',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Orphan candidate',
+    })
+    // (1) the start resolves account A: the provider is released and the
+    // helper captures its trusted-start gate, then queues for the switch
+    // lock — all BEFORE the replacement begins.
+    releaseProvider()
+    await new Promise(resolve => setTimeout(resolve, 25))
+    // (2) replacement begins: the epoch advances SYNCHRONOUSLY before
+    // cleanup. Cleanup enumerates account A's registered executions — none
+    // yet — and completes.
+    beginAccountTransition()
+    const cleanup = await stopRegisteredProductSpaceExecutionsForAccount(trustedAccountId)
+    expect(cleanup.ok).toBe(true)
+    // (3) the revoke would queue behind the held switch lock — simulated by
+    // keeping it held until the queued start has been judged.
+    releaseSwitchLock()
+    await lockHolder
+
+    // (4) the queued start must fail closed — no orphan execution of the
+    // replaced account may survive cleanup+revoke.
+    await expect(registering).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
+    expect(listRegisteredProductSpaceExecutions()).toHaveLength(0)
+
+    // An aborted/replaced transition leaves nothing stuck: a FRESH start
+    // that captures the new epoch registers normally.
+    setSyncTrustedProductSpaceAccountId(otherAccountId)
+    setRuntimeActiveProductSpaceAccount(otherAccountId)
+    setTrustedProductSpaceAccountProvider(async () => otherAccountId)
+    await registerAssistantExecutionForSend({
+      sessionManager: sessionManagerStub(),
+      sessionId: 'session-fresh',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Fresh session',
+    })
+    expect(listRegisteredProductSpaceExecutions().map(execution => execution.scope.executionId as string))
+      .toEqual(['session-fresh'])
   })
 })

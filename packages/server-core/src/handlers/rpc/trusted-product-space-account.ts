@@ -120,6 +120,27 @@ export function setSyncTrustedProductSpaceAccountId(accountId: string | null): v
 }
 
 /**
+ * Monotonic lock-free account-transition epoch. The transition owner
+ * (account replacement / logout) advances it SYNCHRONOUSLY before its first
+ * cleanup await — before any execution enumeration or fence revoke — so
+ * in-flight execution starts that captured the previous epoch fail closed
+ * even while the synchronous mirror still shows the old account and the
+ * fence revoke is still queued behind the switch lock. The epoch never
+ * advances backwards: an aborted transition leaves it high, which keeps
+ * stale starts refused while fresh starts simply capture the new epoch —
+ * no transition state can get stuck and no stale start is ever reopened.
+ */
+let accountTransitionEpoch = 0
+
+export function beginAccountTransition(): number {
+  return ++accountTransitionEpoch
+}
+
+export function getAccountTransitionEpoch(): number {
+  return accountTransitionEpoch
+}
+
+/**
  * Monotonic generation of the trusted Admin account binding. It advances on
  * every account TRANSITION (login, logout, account replacement — never on a
  * same-account token refresh capture). Switch transactions capture it around

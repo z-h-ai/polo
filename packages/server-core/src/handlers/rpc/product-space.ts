@@ -538,6 +538,20 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             }
           }
 
+          // Final post-await ownership gate (R30-D): every liveness probe
+          // above is an await — the prepare intent, the trusted-account
+          // binding and the fence must ALL still be ours immediately before
+          // the transaction is installed, even when a newer prepare already
+          // ended in a typed contract error. The early CAS remains as a fast
+          // rejection; this is the authoritative one.
+          if (
+            prepareIntent !== getLatestSwitchPrepareIntent()
+            || getTrustedAccountGeneration() !== accountGenerationBeforeFetch
+            || getRuntimeFenceGeneration() !== fenceGenerationBeforeFetch
+          ) {
+            return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'A newer switch prepare superseded this one' }
+          }
+
           const token = randomBytes(24).toString('hex')
           setPendingSwitchTransaction({
             token,
@@ -600,6 +614,17 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       const dispatched: Array<RegisteredProductSpaceExecution> = []
       const statuses: Record<string, 'stopped' | 'failed'> = {}
 
+      // Token-owned compare-and-clear (R30-E): the pending record may only
+      // be consumed by the transaction it belongs to. A stale STOP whose
+      // record was replaced by a newer PREPARE must NEVER clear the newer
+      // transaction — it reports superseded/invalid and leaves B intact.
+      const clearOwnPending = (): void => {
+        const current = getPendingSwitchTransaction()
+        if (current && current.token === stopToken) {
+          setPendingSwitchTransaction(null)
+        }
+      }
+
       setSwitchInProgress(true)
       try {
         for (const execution of listRegisteredProductSpaceExecutions()) {
@@ -612,10 +637,27 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             active = true
           }
           if (!active) continue
-          // Cancellation gate before EVERY dispatch.
+          // Cancellation/ownership gate before EVERY dispatch.
           const current = getPendingSwitchTransaction()
-          if (!current || current.token !== stopToken || current.cancelled) {
-            setPendingSwitchTransaction(null)
+          if (!current) {
+            return {
+              success: false as const,
+              errorCode: 'SWITCH_TRANSACTION_INVALID',
+              message: 'No matching prepared switch transaction',
+              executions: statusesToExecutionSummaries(dispatched, statuses),
+            }
+          }
+          if (current.token !== stopToken) {
+            // A newer PREPARE owns the pending record: leave it untouched.
+            return {
+              success: false as const,
+              errorCode: 'SWITCH_SUPERSEDED',
+              message: 'The switch was superseded by a newer prepare',
+              executions: statusesToExecutionSummaries(dispatched, statuses),
+            }
+          }
+          if (current.cancelled) {
+            clearOwnPending()
             return {
               success: false as const,
               errorCode: 'SWITCH_CANCELLED',
@@ -630,11 +672,13 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
         // Re-enumerate under the lock: zero origin executions is a hard
         // precondition for finalizing the transaction as committable.
-        const finalized = await withSwitchLock(async () => {
+        const finalized = await withSwitchLock(async (): Promise<'ready' | 'gone' | 'superseded' | 'cancelled' | 'busy'> => {
           const current = getPendingSwitchTransaction()
-          if (!current || current.token !== stopToken || current.cancelled) {
-            setPendingSwitchTransaction(null)
-            return false
+          if (!current) return 'gone'
+          if (current.token !== stopToken) return 'superseded'
+          if (current.cancelled) {
+            clearOwnPending()
+            return 'cancelled'
           }
           for (const execution of listRegisteredProductSpaceExecutions()) {
             if (execution.scope.accountId !== trustedAccountId) continue
@@ -645,23 +689,43 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             } catch {
               active = true
             }
-            if (active) return false
+            if (active) return 'busy'
           }
           current.status = 'ready'
-          return true
+          return 'ready'
         })
-        if (!finalized) {
-          // A failed stop phase consumes the transaction: the renderer's
-          // retry always re-prepares, so no dead token lingers.
-          setPendingSwitchTransaction(null)
+        if (finalized === 'ready') {
+          return { success: true as const, executions: [] }
+        }
+        if (finalized === 'cancelled') {
           return {
             success: false as const,
-            errorCode: 'runtime_stop_failed',
-            message: 'Origin ProductSpace still has running executions',
+            errorCode: 'SWITCH_CANCELLED',
+            message: 'The switch was cancelled during stopping',
             executions: statusesToExecutionSummaries(dispatched, statuses),
           }
         }
-        return { success: true as const, executions: [] }
+        if (finalized === 'superseded' || finalized === 'gone') {
+          // A newer PREPARE owns the pending record (or none is left): stale
+          // STOP A must not consume it.
+          return {
+            success: false as const,
+            errorCode: finalized === 'superseded' ? 'SWITCH_SUPERSEDED' : 'SWITCH_TRANSACTION_INVALID',
+            message: finalized === 'superseded'
+              ? 'The switch was superseded by a newer prepare'
+              : 'No matching prepared switch transaction',
+            executions: statusesToExecutionSummaries(dispatched, statuses),
+          }
+        }
+        // A failed stop phase consumes the transaction: the renderer's
+        // retry always re-prepares, so no dead token lingers.
+        clearOwnPending()
+        return {
+          success: false as const,
+          errorCode: 'runtime_stop_failed',
+          message: 'Origin ProductSpace still has running executions',
+          executions: statusesToExecutionSummaries(dispatched, statuses),
+        }
       } finally {
         setSwitchInProgress(false)
       }

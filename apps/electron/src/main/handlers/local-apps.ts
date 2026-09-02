@@ -46,11 +46,7 @@ import {
   type RegisteredProductSpaceExecution,
 } from '@polo-ai/server-core/runtime/product-space-executions'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
-import {
-  getSyncTrustedProductSpaceAccountId,
-  getTrustedAccountGeneration,
-  resolveTrustedProductSpaceAccountId,
-} from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
 import type { HandlerDeps } from './handler-deps'
 
 /**
@@ -689,24 +685,24 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     startRuntime: () => Promise<{ version: string }>,
     workspaceId: string | null,
   ) => {
-    // GLOBAL LOCK ORDER: resolve the trusted account and capture its
-    // mirror generation BEFORE the switch lock — the Admin session lock
-    // must never be acquired while holding the switch lock, because
+    // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
+    // trusted Admin account) BEFORE the switch lock — the Admin session
+    // lock must never be acquired while holding the switch lock, because
     // account replacement holds the Admin lock while revoking the fence
     // through the switch lock.
-    const trustedAccountId = await resolveTrustedProductSpaceAccountId()
-    if (!trustedAccountId) {
+    const gate = await captureTrustedStartGate()
+    if (!gate) {
       throw new LocalAppRuntimeError(
         'PRODUCT_SPACE_CONTEXT_REQUIRED',
         'The committed ProductSpace belongs to a different account',
       )
     }
-    const accountGeneration = getTrustedAccountGeneration()
     // Runs under the same mutex as PREPARE_SWITCH/COMMIT_SWITCH: a switch
     // transaction cannot interleave with a starting app, and the app cannot
     // slip past a switch that begins while its runtime boots. The critical
-    // section is all in-memory: fence/mirror/generation checks never
-    // acquire the Admin session lock.
+    // section is all in-memory: the shared trusted-start gate (mirror
+    // account, account generation, transition epoch, account-bound fence)
+    // and fence checks never acquire the Admin session lock.
     return withSwitchLock(async () => {
       const activeProductSpaceId = getRuntimeActiveProductSpace()
       if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
@@ -715,20 +711,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'No committed ProductSpace is active on this device',
         )
       }
-      // A fence committed for another (replaced) account is never startable.
-      if (!isRuntimeFenceBoundToAccount(trustedAccountId)) {
-        throw new LocalAppRuntimeError(
-          'PRODUCT_SPACE_CONTEXT_REQUIRED',
-          'The committed ProductSpace belongs to a different account',
-        )
-      }
-      // Lock-free freshness: the account resolved above must still be the
-      // mirror's current authenticated account with the same generation —
-      // a concurrent account replacement fails this start closed.
-      if (
-        getSyncTrustedProductSpaceAccountId() !== trustedAccountId
-        || getTrustedAccountGeneration() !== accountGeneration
-      ) {
+      // A fence committed for another (replaced) account is never startable,
+      // and a concurrent account transition fails the start closed.
+      if (!isTrustedStartGateCurrent(gate)) {
         throw new LocalAppRuntimeError(
           'PRODUCT_SPACE_CONTEXT_REQUIRED',
           'The committed ProductSpace belongs to a different account',
@@ -750,8 +735,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       if (
         isSwitchInProgress()
         || getRuntimeActiveProductSpace() !== scope.organizationId
-        || getSyncTrustedProductSpaceAccountId() !== trustedAccountId
-        || getTrustedAccountGeneration() !== accountGeneration
+        || !isTrustedStartGateCurrent(gate)
       ) {
         await registryStopQuietly(scope)
         throw new LocalAppRuntimeError(
@@ -759,7 +743,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'A ProductSpace switch superseded this start',
         )
       }
-      await registerLocalAppExecution(scope, result.version, workspaceId, trustedAccountId)
+      await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId)
       return result
     })
   }

@@ -27,7 +27,12 @@ import {
   getRuntimeActiveProductSpace,
   isRuntimeOfflineReadOnly,
 } from '../runtime/product-space-executions'
-import { registerAssistantExecutionForSend } from '../runtime/assistant-executions'
+import {
+  registerAssistantExecutionForSend,
+  cancelAssistantStartReservation,
+  confirmAssistantStartProcessing,
+  type AssistantStartReservation,
+} from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
@@ -5628,15 +5633,27 @@ export class SessionManager implements ISessionManager {
     // or a registration failure refuses the send instead of leaving an
     // unregistered execution. Sessions created before the ProductSpace
     // contract (never bound, e.g. CLI runtimes) carry no space semantics and
-    // keep their legacy behavior.
+    // keep their legacy behavior. The returned start reservation keeps the
+    // execution active for account cleanup through the whole bootstrap and
+    // gates the atomic transition to processing below.
+    let startReservation: AssistantStartReservation | null = null
     if (managed.productSpaceId) {
-      await registerAssistantExecutionForSend({
+      startReservation = await registerAssistantExecutionForSend({
         sessionManager: this,
         sessionId,
         workspaceId: managed.workspace.id,
         productSpaceId: managed.productSpaceId,
         name: managed.name || sessionId,
       })
+    }
+    // Every path that ends without starting processing must release the
+    // live reservation — the execution record stays as the session's
+    // lifecycle record, but bootstrap can never be mistaken for activity.
+    const releaseStartReservation = (): void => {
+      if (startReservation) {
+        cancelAssistantStartReservation(startReservation)
+        startReservation = null
+      }
     }
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
@@ -5646,6 +5663,7 @@ export class SessionManager implements ISessionManager {
     // whichever arrives first), subsequent matching calls within the deadline drop.
     if (claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
+      releaseStartReservation()
       return
     }
 
@@ -5726,6 +5744,9 @@ export class SessionManager implements ISessionManager {
       // enqueues with a 500ms debounce. (#616 reliability fix.)
       await this.flushSession(managed.id)
       onAck?.(userMessage.id)
+      // This send ends here (queued for replay); the steered path continues
+      // into the in-flight turn owned by the earlier send.
+      releaseStartReservation()
       return
     }
 
@@ -5828,6 +5849,23 @@ export class SessionManager implements ISessionManager {
       }
     } catch (e) {
       sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
+    }
+
+    // Atomic transition to processing (R30-B): the start reservation must
+    // still be live and owned by THIS send, no account transition may have
+    // begun, and the trusted account/account-bound fence must be unchanged —
+    // otherwise the send fails closed, unregisters and never reaches
+    // `agent.chat`, so no processing session agent can survive without a
+    // registered ProductSpace execution.
+    if (managed.productSpaceId && startReservation) {
+      const confirmed = confirmAssistantStartProcessing({
+        sessionId,
+        reservation: startReservation,
+      })
+      startReservation = null
+      if (!confirmed) {
+        throw new Error('EXECUTION_REGISTRATION_REFUSED')
+      }
     }
 
     managed.lastMessageAt = Date.now()

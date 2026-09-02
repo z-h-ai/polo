@@ -72,6 +72,7 @@ import {
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
+  beginAccountTransition,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
@@ -2360,6 +2361,10 @@ async function endAdminSession(
   if (!transition) return false
   const { session: ending, cleanup } = transition
 
+  // Logout begins an account transition too: advance the lock-free epoch so
+  // in-flight execution starts fail closed before the ending cleanup runs.
+  beginAccountTransition()
+
   // Catalog authorization and the host lifecycle fence are already active.
   // Slow remote/process cleanup stays outside the lock so a replacement login
   // can proceed; final token deletion is guarded by the ending snapshot CAS.
@@ -2452,6 +2457,14 @@ async function completeAdminLogin(args: {
       // replacement is refused with a retryable local error and the login
       // can be retried once the runtime is clean. The coordinator
       // deduplicates this against an already-running logout cleanup.
+      //
+      // The lock-free account-transition epoch is advanced SYNCHRONOUSLY
+      // before the first cleanup await: in-flight execution starts that
+      // captured the previous epoch fail closed even while the mirror still
+      // shows account A and the fence revoke is queued behind the switch
+      // lock. The epoch is monotonic — an aborted replacement keeps stale
+      // starts refused while fresh starts simply capture the new epoch.
+      beginAccountTransition()
       try {
         await args.sessions.getOrStartAccountCleanup(
           previousTokens.userId,

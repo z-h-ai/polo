@@ -1071,6 +1071,166 @@ describe('two-phase switch transaction', () => {
     // later asserts.
     releaseProvider()
   })
+
+  it('a newer prepare intent supersedes PREPARE A even when B ends in a typed contract error (final post-await CAS)', async () => {
+    const { invoke } = createHarness()
+    // An origin execution whose liveness probe A blocks on.
+    const probeExecution = fakeExecution({ executionId: 'exec-probe' })
+    let releaseProbe!: () => void
+    const probeReleased = new Promise<void>(resolve => { releaseProbe = () => resolve() })
+    const originalIsActive = probeExecution.isActive
+    let probeCalls = 0
+    probeExecution.isActive = () => {
+      probeCalls += 1
+      return probeReleased.then(() => originalIsActive())
+    }
+    registerProductSpaceExecution(probeExecution)
+
+    // Fetch sequencing: call 1 (A) gates; call 2 (B) returns the typed
+    // contract error.
+    let releaseListA!: () => void
+    const gatedListA = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseListA = () => resolve({ ok: true, list: visibleList() })
+    })
+    let fetchCalls = 0
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchCalls += 1
+      if (fetchCalls === 1) return gatedListA
+      return { ok: false, errorCode: 'product_space_contract_unsupported' }
+    })
+
+    const preparingA = invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    for (let i = 0; i < 300 && fetchCalls < 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    releaseListA()
+    // A passes its early intent CAS and blocks inside the liveness probe.
+    for (let i = 0; i < 300 && probeCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(probeCalls).toBe(1)
+
+    // B claims the NEWER intent (synchronously at handler start) and ends in
+    // a typed contract error.
+    const preparingB = invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    // Let B's handler claim its intent (it then queues for the switch lock
+    // behind A's probe-blocked critical section).
+    await new Promise(resolve => setTimeout(resolve, 25))
+
+    // A resumes after the probe: the final post-await intent CAS must
+    // reject it — A never publishes a usable token. A's release also lets
+    // B enter the critical section and report its typed contract error.
+    releaseProbe()
+    const preparedA = await preparingA
+    const preparedB = await preparingB
+    expect(preparedA.success).toBe(false)
+    expect(preparedA.errorCode).toBe('SWITCH_SUPERSEDED')
+    expect(preparedB.success).toBe(false)
+    expect(preparedB.errorCode).toBe('product_space_contract_unsupported')
+
+    // Neither prepare left a pending transaction behind.
+    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, 'any-token')
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isSwitchInProgress()).toBe(false)
+  })
+
+  it('a stale STOP loop mismatch cannot consume the newer prepare (loop-mismatch regression)', async () => {
+    const first = fakeExecution({ executionId: 'exec-e1' })
+    const second = fakeExecution({ executionId: 'exec-e2' })
+    registerProductSpaceExecution(first)
+    registerProductSpaceExecution(second)
+
+    const { invoke } = createHarness()
+    const preparedA = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(preparedA.success).toBe(true)
+
+    // Gate the FIRST stop dispatch so A is mid-loop.
+    let releaseFirstStop!: () => void
+    const firstStopReleased = new Promise<void>(resolve => { releaseFirstStop = () => resolve() })
+    const originalFirstStop = first.stop
+    let firstStopCalls = 0
+    first.stop = async () => {
+      firstStopCalls += 1
+      await firstStopReleased
+      return originalFirstStop()
+    }
+    const originalSecondStop = second.stop
+    let secondStopCalls = 0
+    second.stop = async () => {
+      secondStopCalls += 1
+      return originalSecondStop()
+    }
+
+    const stopping = invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, preparedA.token)
+    for (let i = 0; i < 300 && firstStopCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(firstStopCalls).toBe(1)
+
+    // PREPARE B replaces the pending record while A is mid-loop.
+    const preparedB = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, personalId)
+    expect(preparedB.success).toBe(true)
+
+    releaseFirstStop()
+    // A's loop gate must detect the newer transaction and leave it intact —
+    // the second execution is never dispatched.
+    const stoppedA = await stopping
+    expect(stoppedA.success).toBe(false)
+    expect(stoppedA.errorCode).toBe('SWITCH_SUPERSEDED')
+    expect(secondStopCalls).toBe(0)
+    expect(await second.isActive()).toBe(true)
+
+    // B carries through STOP and COMMIT.
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, preparedB.token))
+      .toMatchObject({ success: true })
+    const committedB = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, preparedB.token, personalId)
+    expect(committedB.success).toBe(true)
+    expect(getRuntimeActive()).toBe(personalId)
+  })
+
+  it('a stale STOP finalization mismatch cannot consume the newer prepare (finalization regression)', async () => {
+    const only = fakeExecution({ executionId: 'exec-e3' })
+    registerProductSpaceExecution(only)
+
+    const { invoke } = createHarness()
+    const preparedA = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(preparedA.success).toBe(true)
+
+    let releaseOnlyStop!: () => void
+    const onlyStopReleased = new Promise<void>(resolve => { releaseOnlyStop = () => resolve() })
+    const originalOnlyStop = only.stop
+    let onlyStopCalls = 0
+    only.stop = async () => {
+      onlyStopCalls += 1
+      await onlyStopReleased
+      return originalOnlyStop()
+    }
+
+    const stopping = invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, preparedA.token)
+    for (let i = 0; i < 300 && onlyStopCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(onlyStopCalls).toBe(1)
+
+    // PREPARE B replaces the pending record while A's only dispatch is in
+    // flight: A proceeds straight to finalization after the release.
+    const preparedB = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, personalId)
+    expect(preparedB.success).toBe(true)
+
+    releaseOnlyStop()
+    const stoppedA = await stopping
+    expect(stoppedA.success).toBe(false)
+    expect(stoppedA.errorCode).toBe('SWITCH_SUPERSEDED')
+
+    // B carries through STOP and COMMIT.
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, preparedB.token))
+      .toMatchObject({ success: true })
+    const committedB = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, preparedB.token, personalId)
+    expect(committedB.success).toBe(true)
+    expect(getRuntimeActive()).toBe(personalId)
+  })
 })
 
 describe('offline read-only restore', () => {

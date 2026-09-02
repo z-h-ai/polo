@@ -16,8 +16,6 @@ import {
   isRuntimeOfflineReadOnly,
   unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
-import { ensureAssistantSessionExecution } from '../../runtime/assistant-executions'
-import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
 
 /**
  * The offline read-only view keeps only the RPCs needed to read saved
@@ -258,22 +256,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const end = perf.start('rpc.createSession', { workspaceId })
     const session = await sessionManager.createSession(workspaceId, options)
     end()
-    if (session.productSpaceId) {
-      // Best-effort registration: resolve the trusted account first — the
-      // helper no longer acquires the Admin session lock itself, so it can
-      // never nest it under another lock.
-      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
-      if (trustedAccountId) {
-        await ensureAssistantSessionExecution({
-          sessionManager,
-          sessionId: session.id,
-          workspaceId: session.workspaceId,
-          productSpaceId: session.productSpaceId,
-          name: session.name || session.id,
-          trustedAccountId,
-        })
-      }
-    }
+    // R30: no unchecked best-effort pre-registration here — the first
+    // sendMessage registers the session's execution through the checked
+    // reservation protocol (gate capture + switch-lock critical section +
+    // atomic transition to processing), so no inactive stale record can be
+    // left behind by a path that bypasses that protocol.
     return session
   })
 
@@ -307,26 +294,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       throw new Error('OFFLINE_READ_ONLY')
     }
 
-    // their first send, so a switch can never leave them running unregistered.
-    const sendTarget = sessionManager
-      .getSessions()
-      .find(candidate => candidate.id === sessionId)
-    if (sendTarget?.productSpaceId) {
-      // Best-effort registration: resolve the trusted account first — the
-      // helper no longer acquires the Admin session lock itself, so it can
-      // never nest it under another lock.
-      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
-      if (trustedAccountId) {
-        await ensureAssistantSessionExecution({
-          sessionManager,
-          sessionId,
-          workspaceId: sendTarget.workspaceId,
-          productSpaceId: sendTarget.productSpaceId,
-          name: sendTarget.name || sessionId,
-          trustedAccountId,
-        })
-      }
-    }
+    // R30: the redundant SEND pre-registration was removed — sendMessage
+    // itself registers through the checked reservation protocol before any
+    // bootstrap work, so this path can no longer leave an unchecked record.
 
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
       let acked = false
