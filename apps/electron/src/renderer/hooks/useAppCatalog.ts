@@ -42,10 +42,53 @@ export interface AppCatalogState {
   statusLoadingScopeKeys: Record<string, true>
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
+  /**
+   * CreatorCircle relations visible in the active space's Catalog, derived
+   * from the entries' creator_circle sources (REQ-022: the "我的圈子"
+   * relation entry). Empty for enterprise spaces and when nothing was
+   * derived yet.
+   */
+  creatorCircles: CreatorCircleRelation[]
   host: {
     platform: 'darwin' | 'win32' | 'linux'
     arch: 'arm64' | 'x64'
   } | null
+}
+
+export interface CreatorCircleRelation {
+  circleId: string
+  name: string
+}
+
+/**
+ * Distinct creator_circle sources across the space's Catalog entries — the
+ * account's visible CreatorCircle relations (REQ-022). Deduplicated by
+ * circleId; entries without such sources contribute nothing.
+ */
+export function selectCreatorCircleRelations(
+  entries: ReadonlyArray<Record<string, unknown>>,
+): CreatorCircleRelation[] {
+  const byCircleId = new Map<string, CreatorCircleRelation>()
+  for (const rawEntry of entries) {
+    const sources = rawEntry.sources
+    if (!Array.isArray(sources)) continue
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue
+      const candidate = source as { kind?: unknown; circleId?: unknown; name?: unknown }
+      if (candidate.kind !== 'creator_circle') continue
+      const circleId = typeof candidate.circleId === 'string' && candidate.circleId
+        ? candidate.circleId
+        : (typeof candidate.name === 'string' ? candidate.name : '')
+      if (!circleId) continue
+      if (!byCircleId.has(circleId)) {
+        byCircleId.set(circleId, {
+          circleId,
+          name: typeof candidate.name === 'string' && candidate.name ? candidate.name : circleId,
+        })
+      }
+    }
+  }
+  return [...byCircleId.values()]
 }
 
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
@@ -322,6 +365,7 @@ export function useAppCatalog() {
     statusLoadingScopeKeys: {},
     accessMode: null,
     statuses: {},
+    creatorCircles: [],
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
@@ -558,6 +602,7 @@ export function useAppCatalog() {
         statusLoadingScopeKeys: {},
         accessMode: null,
         statuses: {},
+        creatorCircles: [],
       }))
       return
     }
@@ -640,6 +685,7 @@ export function useAppCatalog() {
             errorCode: failureCode,
             statusLoadingScopeKeys: {},
             accessMode: 'denied',
+            creatorCircles: [],
           }))
           if (deniedCatalog) {
             await refreshRuntimeStatuses(
@@ -682,6 +728,9 @@ export function useAppCatalog() {
         accessMode: catalogResult.accessMode ?? 'online',
         warningCode: catalogResult.warningCode ?? null,
       }
+      // REQ-022: creator_circle sources of the active space's Catalog are
+      // the account's visible CreatorCircle relations.
+      const creatorCircles = selectCreatorCircleRelations(catalogResult.entries)
       knownCatalogRevisionRef.current = result.catalog.appConfigVersion
       catalogRef.current = result.catalog
       const snapshot: ContextSnapshot = {
@@ -718,6 +767,7 @@ export function useAppCatalog() {
           errorCode: null,
           accessMode: result.accessMode,
           statusLoadingScopeKeys,
+          creatorCircles,
         }
       })
       await refreshRuntimeStatuses(
@@ -809,6 +859,7 @@ export function useAppCatalog() {
       statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
+      creatorCircles: [],
     }))
     void sync()
     return () => {
@@ -1175,6 +1226,7 @@ export function useAppCatalog() {
   return {
     productSpace,
     state,
+    creatorCircles: state.creatorCircles,
     sync,
     install,
     start,

@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAppCatalog } from '@/hooks/useAppCatalog'
+import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
 import {
   BUILTIN_APP_IDS,
@@ -441,6 +442,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
       data-testid="home-app-hub"
     >
       <div className="mx-auto w-full max-w-[1120px] space-y-10">
+        {catalog.productSpace && (
+          <HomeSpaceContext
+            spaceName={activeProductSpace?.name
+              || t('homeApps.organization.current')}
+            spaceKind={activeProductSpace?.kind ?? null}
+            creatorCircles={catalog.creatorCircles}
+          />
+        )}
         <section aria-labelledby="recent-apps-heading">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
