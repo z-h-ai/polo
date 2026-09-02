@@ -110,6 +110,8 @@ let restrictResult: (
  */
 const mainRestrictedSpaces = new Set<string>()
 let restrictionStateFailure: string | null = null
+/** Held bootstrap-clear gate for R35-2 publication-order tests. */
+let releaseBootstrapClear: () => void = () => {}
 
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
@@ -275,6 +277,7 @@ beforeEach(() => {
   restrictResult = async (_accountId, _productSpaceId, restricted) => ({ success: true as const, restricted })
   mainRestrictedSpaces.clear()
   restrictionStateFailure = null
+  releaseBootstrapClear = () => {}
   configureIpc()
 })
 
@@ -1516,19 +1519,18 @@ describe('useProductSpaceContextState durable restriction reconciliation (R34-2)
 
     // Reload: every renderer memory is gone, Main's fence survives. The
     // membership has already recovered, so the reloaded bootstrap enters
-    // the active space again.
+    // the active space again — and (R35-2) the BOOTSTRAP ITSELF completes
+    // the Main clear before publishing ready.
     first.unmount()
     listResult = bothSpaces()
-    const second = renderHook(useHarness)
-    expect(await boot(second.result)).toBe('ready')
-
-    // The FIRST verified post-reload refresh must reconcile against Main
-    // and clear the lingering fence — the R33 renderer-only Set could never
-    // have done this after a reload.
     restrictResult = async (_accountId, _productSpaceId, restricted) => ({
       success: true as const,
       restricted,
     })
+    const second = renderHook(useHarness)
+    expect(await boot(second.result)).toBe('ready')
+
+    // No second refresh is required for the recovery.
     await act(async () => {
       expect(await second.result.current.refreshProductSpaces()).not.toBeNull()
     })
@@ -1557,7 +1559,8 @@ describe('useProductSpaceContextState durable restriction reconciliation (R34-2)
     expect(result.current.flowState).toBe('error')
 
     // Membership recovers; the retry goes through the SAME bootstrap
-    // reconciliation path as a reload.
+    // reconciliation path as a reload and (R35-2) completes the clear
+    // before its ready publication.
     listResult = bothSpaces()
     restrictResult = async (_accountId, _productSpaceId, restricted) => ({
       success: true as const,
@@ -1626,5 +1629,156 @@ describe('useProductSpaceContextState durable restriction reconciliation (R34-2)
     const { result } = renderHook(useHarness)
     expect(await boot(result)).toBe('error')
     expect(result.current.flowState).toBe('error')
+  })
+})
+
+describe('useProductSpaceContextState bootstrap restriction recovery (R35-2)', () => {
+  const readOnlyList = () => ({
+    success: true as const,
+    personalProductSpaceId: personalId,
+    productSpaces: [
+      personalSpace,
+      enterpriseSpace('space-ent', '北辰智能科技', { accessMode: 'read_only' as const }),
+    ],
+  })
+
+  it('bootstrap completes the Main clear BEFORE publishing ready — never ready-first', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    // Session 1: a failed restriction leaves Main fenced.
+    const first = renderHook(useHarness)
+    await boot(first.result)
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'runtime_stop_failed',
+      restricted: true,
+    })
+    listResult = readOnlyList()
+    await act(async () => {
+      expect(await first.result.current.refreshProductSpaces()).toBeNull()
+    })
+    first.unmount()
+
+    // Reload with recovered ACTIVE membership: the bootstrap holds the clear
+    // in flight — no ready may be published while it awaits.
+    listResult = bothSpaces()
+    restrictResult = (_accountId, _productSpaceId, restricted) => (
+      restricted
+        ? Promise.resolve({ success: true as const, restricted })
+        : new Promise<{ success: true; restricted: false }>(resolve => {
+          releaseBootstrapClear = () => resolve({ success: true as const, restricted: false })
+        })
+    )
+    const second = renderHook(useHarness)
+    let bootSettled: string | null = null
+    await act(async () => {
+      void second.result.current.bootstrap(accountId).then(value => {
+        bootSettled = value
+      })
+      // Let the bootstrap reach the clear await.
+      await new Promise(resolve => setTimeout(resolve, 30))
+    })
+    // Publication order: while the clear is in flight, NO ready exists —
+    // the bootstrap has neither returned nor published a selection.
+    expect(bootSettled).toBeNull()
+    expect(second.result.current.flowState).toBe('loading')
+    expect(second.result.current.activeProductSpaceId).toBeNull()
+    await act(async () => {
+      releaseBootstrapClear()
+      await new Promise(resolve => setTimeout(resolve, 30))
+    })
+    expect<string | null>(bootSettled).toBe('ready')
+    expect(second.result.current.flowState).toBe('ready')
+    expect(second.result.current.activeProductSpaceId).toBe('space-ent')
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+      { accountId, productSpaceId: 'space-ent', restricted: false },
+    ])
+  })
+
+  it('a failed bootstrap clear is fail-closed and never reaches ready', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const first = renderHook(useHarness)
+    await boot(first.result)
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'runtime_stop_failed',
+      restricted: true,
+    })
+    listResult = readOnlyList()
+    await act(async () => {
+      expect(await first.result.current.refreshProductSpaces()).toBeNull()
+    })
+    first.unmount()
+
+    // Membership is ACTIVE again but the clear transaction fails: the
+    // bootstrap must error instead of publishing an unrecovered ready.
+    listResult = bothSpaces()
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'SWITCH_LOCK_BUSY',
+    })
+    const second = renderHook(useHarness)
+    expect(await boot(second.result)).toBe('error')
+    expect(second.result.current.flowState).toBe('error')
+    expect(second.result.current.activeProductSpaceId).toBeNull()
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+      { accountId, productSpaceId: 'space-ent', restricted: false },
+    ])
+  })
+
+  it('an account replacement during the bootstrap clear await aborts the bootstrap', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const first = renderHook(useHarness)
+    await boot(first.result)
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'runtime_stop_failed',
+      restricted: true,
+    })
+    listResult = readOnlyList()
+    await act(async () => {
+      expect(await first.result.current.refreshProductSpaces()).toBeNull()
+    })
+    first.unmount()
+
+    listResult = bothSpaces()
+    restrictResult = (_accountId, _productSpaceId, restricted) => (
+      restricted
+        ? Promise.resolve({ success: true as const, restricted })
+        : new Promise<{ success: true; restricted: false }>(resolve => {
+          releaseBootstrapClear = () => resolve({ success: true as const, restricted: false })
+        })
+    )
+    const second = renderHook(useHarness)
+    let bootOutcome: string | null | undefined
+    await act(async () => {
+      const bootPromise = second.result.current.bootstrap(accountId)
+      await new Promise(resolve => setTimeout(resolve, 30))
+      // The account is replaced while the clear is in flight.
+      second.result.current.clearAccount()
+      releaseBootstrapClear()
+      bootOutcome = await bootPromise
+    })
+    // The post-await CAS aborts: no selection, no ready.
+    expect(bootOutcome).toBeNull()
+    expect(second.result.current.activeProductSpaceId).toBeNull()
+    expect(second.result.current.flowState).toBe('idle')
+  })
+
+  it('a read_only membership target gets NO bootstrap recovery clear', async () => {
+    // Main retains the restriction for the enterprise space while its
+    // membership is still read_only: bootstrap selects the personal
+    // fallback and must NOT clear the fenced space.
+    mainRestrictedSpaces.add('space-ent')
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    listResult = readOnlyList()
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('ready')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(restrictCalls).toEqual([])
+    // The renderer fence memory still tracks Main's authoritative state for
+    // the read-only space.
+    expect(result.current.flowState).toBe('ready')
   })
 })

@@ -1824,3 +1824,84 @@ describe('restriction transaction with authoritative fence state (R33-2)', () =>
     expect(isRuntimeProductSpaceRestricted(spaceA)).toBe(true)
   })
 })
+
+describe('aggregate stop supersession (R35-3)', () => {
+  it('STOP_ALL maps a superseded replacement to a retryable failure and keeps it registered', async () => {
+    const { invoke } = createHarness()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    let probeCalls = 0
+    const old = fakeExecution({ executionId: 'exec-stopall-superseded' })
+    old.isActive = async () => {
+      probeCalls += 1
+      if (probeCalls === 1) return true
+      if (probeCalls === 2) await probeGate
+      return false
+    }
+    registerProductSpaceExecution(old)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    // A same-ID replacement takes the slot during the awaited drain.
+    const replacement = fakeExecution({ executionId: 'exec-stopall-superseded' })
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    releaseProbe()
+
+    const result = await pending
+    expect(result.success).toBe(true)
+    const summary = (result as { result: { executions: Array<{ executionId: string; status: string; errorCode?: string }> } })
+      .result.executions.find(execution => execution.executionId === 'exec-stopall-superseded')
+    // The stale generation's terminal outcome never becomes a success.
+    expect(summary?.status).toBe('failed')
+    expect(summary?.errorCode).toBe('runtime_stop_failed')
+    // The replacement is untouched, still registered and active.
+    expect(getRegisteredProductSpaceExecution('exec-stopall-superseded')).toBe(ownedReplacement)
+    expect(await ownedReplacement.isActive()).toBe(true)
+  })
+
+  it('the switch stop phase records superseded as failed and the finalize gate keeps the transaction non-committable', async () => {
+    const { invoke } = createHarness()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    let probeCalls = 0
+    const old = fakeExecution({ executionId: 'exec-switch-superseded' })
+    old.isActive = async () => {
+      probeCalls += 1
+      // Call 1: the PREPARE snapshot. Call 2: the stop loop's liveness check
+      // (still active → dispatched). Call 3: the awaited drain window.
+      if (probeCalls === 2) return true
+      if (probeCalls === 3) await probeGate
+      return probeCalls <= 1
+    }
+    registerProductSpaceExecution(old)
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const replacement = fakeExecution({ executionId: 'exec-switch-superseded' })
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    releaseProbe()
+
+    const stopped = await pending
+    // The per-row projection is a truthful retryable failure.
+    expect(stopped.success).toBe(false)
+    const summary = (stopped as { executions: Array<{ executionId: string; status: string; errorCode?: string }> })
+      .executions.find(execution => execution.executionId === 'exec-switch-superseded')
+    expect(summary?.status).toBe('failed')
+    expect(summary?.errorCode).toBe('runtime_stop_failed')
+    // The transaction is NOT finalized: the surviving replacement blocks
+    // COMMIT through the re-enumeration fence.
+    const committed = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(committed.success).toBe(false)
+    expect(getRuntimeActive()).toBe(spaceA)
+    // The replacement survives.
+    expect(getRegisteredProductSpaceExecution('exec-switch-superseded')).toBe(ownedReplacement)
+    expect(await ownedReplacement.isActive()).toBe(true)
+  })
+})

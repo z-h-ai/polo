@@ -1152,6 +1152,23 @@ export class SessionManager implements ISessionManager {
   private readonly runtimeWorkspace?: Workspace
   readonly sessionStorage: SessionStorage
   private sessions: Map<string, ManagedSession> = new Map()
+
+  /**
+   * R35-1: resolves a self-management tool TARGET session through the
+   * managed session's complete trusted scope. The session itself is always
+   * its own valid target; any OTHER session must carry the same immutable
+   * trusted account, committed ProductSpace and Workspace — otherwise the
+   * target does not exist for this caller (null → fail closed).
+   */
+  private managedScopeTarget(managed: ManagedSession, targetId: string): ManagedSession | null {
+    if (targetId === managed.id) return managed
+    const target = this.sessions.get(targetId)
+    if (!target) return null
+    if (!managed.accountId || target.accountId !== managed.accountId) return null
+    if (!managed.productSpaceId || target.productSpaceId !== managed.productSpaceId) return null
+    if (target.workspace.id !== managed.workspace.id) return null
+    return target
+  }
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -4251,16 +4268,26 @@ export class SessionManager implements ISessionManager {
       }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
+      // R35-1: every callback that accepts a TARGET session resolves it
+      // through the managed session's complete trusted scope — the target
+      // must belong to the SAME trusted account, committed ProductSpace and
+      // Workspace, or the operation fails closed. Self-targeted calls
+      // (no id / own id) always remain usable.
       mergeSessionScopedToolCallbacks(managed.id, {
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
-          await this.setSessionLabels(sessionId ?? managed.id, labels)
+          const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+          if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+          await this.setSessionLabels(target.id, labels)
         },
         setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
-          await this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
+          const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+          if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+          await this.setSessionStatus(target.id, status as SessionStatus)
         },
         getSessionInfoFn: (sessionId?: string) => {
-          const targetId = sessionId ?? managed.id
-          const session = this.sessions.get(targetId)
+          const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+          // Fail closed: an out-of-scope target discloses nothing.
+          const session = target
           if (!session) return null
           return {
             id: session.id,
@@ -4281,7 +4308,15 @@ export class SessionManager implements ISessionManager {
           const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
           const offset = options?.offset ?? 0
 
-          let sessions = this.getSessions(managed.workspace.id)
+          // R35-1: the listing is bound to the managed session's complete
+          // trusted scope — same account, committed ProductSpace and
+          // Workspace (the session itself always listable).
+          let sessions = this.getSessions(managed.workspace.id).filter(s => (
+            s.id === managed.id
+            || (Boolean(managed.accountId)
+              && s.accountId === managed.accountId
+              && s.productSpaceId === managed.productSpaceId)
+          ))
 
           // Filter
           if (options?.status) {
@@ -4341,6 +4376,11 @@ export class SessionManager implements ISessionManager {
           return { resolved: null, available }
         },
         sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
+          // R35-1: cross-session sends resolve the target through the
+          // managed session's complete trusted scope; anything outside it is
+          // refused before a single byte is sent.
+          const target = this.managedScopeTarget(managed, sessionId)
+          if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
           // Build FileAttachment[] from paths (same pattern as spawn_session)
           let fileAttachments: FileAttachment[] | undefined
           if (attachments?.length) {
@@ -4362,7 +4402,7 @@ export class SessionManager implements ISessionManager {
             if (builtAttachments.length > 0) fileAttachments = builtAttachments
           }
 
-          await this.sendMessage(sessionId, message, fileAttachments)
+          await this.sendMessage(target.id, message, fileAttachments)
         },
         activateSourceInSessionFn: async (sourceSlug: string) => {
           const cb = managed.agent?.onSourceActivationRequest
@@ -5099,12 +5139,13 @@ export class SessionManager implements ISessionManager {
    */
   async markAllSessionsRead(
     workspaceId: string,
-    scope?: { productSpaceId: string; accountId: string } | null,
+    scope?: { productSpaceId: string; accountId: string; workspaceId?: string } | null,
   ): Promise<void> {
-    // R33-1: the mutation is bound to the COMPLETE trusted scope (space AND
-    // account); `undefined` derives it from the runtime fence, and anything
-    // incomplete fails closed and mutates nothing.
-    const effectiveScope = scope === undefined
+    // R33-1/R35-1: the mutation is bound to the COMPLETE trusted scope
+    // (space AND account AND, when provided, the Main-owned caller
+    // Workspace); `undefined` derives it from the runtime fence, and
+    // anything incomplete fails closed and mutates nothing.
+    const effectiveScope: { productSpaceId: string; accountId: string; workspaceId?: string } | null = scope === undefined
       ? captureTrustedSessionScope()
       : scope
     if (!effectiveScope) return
@@ -5112,6 +5153,9 @@ export class SessionManager implements ISessionManager {
     for (const managed of this.sessions.values()) {
       if (managed.productSpaceId !== effectiveScope.productSpaceId) continue
       if (!managed.accountId || managed.accountId !== effectiveScope.accountId) continue
+      // R35-1: an aggregate scope carrying the caller's Workspace can never
+      // spill into another Workspace's sessions.
+      if (effectiveScope.workspaceId && managed.workspace.id !== effectiveScope.workspaceId) continue
       if (managed.workspace.id !== workspaceId) continue
       if (managed.hidden || managed.isArchived) continue
       if (managed.isProcessing) continue
@@ -6726,19 +6770,31 @@ export class SessionManager implements ISessionManager {
    * @param taskId - The task or shell ID
    * @returns Task output content, or null if task not found
    */
-  async getTaskOutput(taskId: string): Promise<string | null> {
-    // O(1) lookup via taskOutputIndex
+  async getTaskOutput(
+    taskId: string,
+    scope?: { productSpaceId: string; accountId: string; workspaceId: string } | null,
+  ): Promise<string | null> {
+    // O(1) lookup via taskOutputIndex — the OWNER session is resolved first
+    // (R35-1) and then proven to sit inside the caller's complete trusted
+    // scope before any output byte is read.
     const sessionId = this.taskOutputIndex.get(taskId)
     if (!sessionId) {
       sessionLog.info(`No output found for task: ${taskId} (task may still be running)`)
       return null
     }
+    if (!scope) {
+      // Fail closed: without a complete trusted scope the output is never
+      // disclosed, not even for a same-scope caller.
+      return null
+    }
 
-    // Space fence: task output belongs to its owning session's ProductSpace.
-    const activeProductSpaceId = getRuntimeActiveProductSpace()
-    if (!activeProductSpaceId) return null
+    // Space AND account AND workspace fence: task output belongs to its
+    // owning session's complete immutable scope.
     const owner = this.sessions.get(sessionId)
-    if (!owner || owner.productSpaceId !== activeProductSpaceId) return null
+    if (!owner) return null
+    if (!owner.productSpaceId || owner.productSpaceId !== scope.productSpaceId) return null
+    if (!owner.accountId || owner.accountId !== scope.accountId) return null
+    if (owner.workspace.id !== scope.workspaceId) return null
 
     const managed = this.sessions.get(sessionId)
     const info = managed?.backgroundTaskOutputs.get(taskId)

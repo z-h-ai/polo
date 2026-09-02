@@ -606,13 +606,16 @@ export function useProductSpaceContextState() {
       const availableById = new Map<string, ProductSpaceSummary>(fetched.list.map(space => [space.id as string, space]))
       const storedId = getStoredActiveProductSpaceId(accountId)
       const restored = storedId ? availableById.get(storedId) : undefined
-      const target = restored && isActiveSpace(restored) ? restored.id : fetched.personalId
-      // R34-2: reconcile the renderer's ephemeral restriction memory against
-      // Main's AUTHORITATIVE fence state. A reload/retryBootstrap erases the
-      // local Set but never Main's restriction — without this reconciliation
-      // a lingering Main fence would survive every later verified active
-      // recovery. Query failure fails closed (the bootstrap errors instead
-      // of publishing an unreconciled projection).
+      const computeTarget = (): string => (
+        restored && isActiveSpace(restored) ? restored.id : fetched.personalId
+      )
+      const target = computeTarget()
+      // R34-2/R35-2: reconcile the renderer's ephemeral restriction memory
+      // against Main's AUTHORITATIVE fence state. A reload/retryBootstrap
+      // erases the local Set but never Main's restriction — without this
+      // reconciliation a lingering Main fence would survive every later
+      // verified active recovery. Query failure fails closed (the bootstrap
+      // errors instead of publishing an unreconciled projection).
       const fenceState = await window.electronAPI.productSpaceGetRestrictionState(accountId, target)
       if (!isCurrentAccountScope(scope)) return null
       if (!fenceState.success) {
@@ -621,6 +624,29 @@ export function useProductSpaceContextState() {
       if (fenceState.restricted) {
         restrictionFenceRef.current.add(target)
       } else {
+        restrictionFenceRef.current.delete(target)
+      }
+      // R35-2: when the authoritative membership of the SELECTED space is
+      // ACTIVE while Main still reports it restricted, the clear transaction
+      // is part of THIS bootstrap — it completes BEFORE applySpaceSelection
+      // or any ready publication, never in a later refresh. A clear failure
+      // stays fail-closed.
+      const targetSpace = fetched.list.find(space => space.id === target)
+      if (fenceState.restricted && targetSpace && isActiveSpace(targetSpace)) {
+        const cleared = await window.electronAPI.productSpaceRestrictActiveSpace(
+          accountId,
+          target,
+          false,
+        )
+        // Post-await CAS: the account generation and the selected target
+        // ProductSpace must both be unchanged after the clear.
+        if (!isCurrentAccountScope(scope) || computeTarget() !== target) {
+          return null
+        }
+        if (!cleared.success || cleared.restricted === true) {
+          restrictionFenceRef.current.add(target)
+          throw { code: cleared.success ? 'restriction_clear_unverified' : (cleared.errorCode ?? 'restriction_clear_failed') }
+        }
         restrictionFenceRef.current.delete(target)
       }
       await applySpaceSelection(accountId, fetched.list, fetched.personalId, target)

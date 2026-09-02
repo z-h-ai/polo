@@ -222,6 +222,9 @@ export async function stopRegisteredExecutionsOnce(
  * Stops every registered execution regardless of space. Used by the one-shot
  * legacy direct-switch cleanup. Executions that fail to reach a terminal
  * state stay registered so a retry can stop them.
+ *
+ * R35-3: superseded drains and surviving active executions (same-ID
+ * replacements) force a nonterminal result here too.
  */
 export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
   ok: boolean
@@ -229,8 +232,19 @@ export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
 }> {
   const results = await stopRegisteredExecutionsOnce([...registry.values()])
   const failedExecutionIds = results
-    .filter(result => result.status === 'failed')
+    .filter(result => result.status === 'failed' || result.superseded === true)
     .map(result => result.executionId)
+  for (const execution of registry.values()) {
+    let active: boolean
+    try {
+      active = Boolean(await execution.isActive())
+    } catch {
+      active = true
+    }
+    if (active && !failedExecutionIds.includes(execution.scope.executionId)) {
+      failedExecutionIds.push(execution.scope.executionId)
+    }
+  }
   return { ok: failedExecutionIds.length === 0, failedExecutionIds }
 }
 
@@ -390,6 +404,11 @@ export async function revokeRuntimeProductSpaceFence(): Promise<void> {
  * assistant sessions and Local Apps alike. Used by Admin session-ending and
  * account replacement so a prior account can never keep executions running
  * in the background after its trusted session is gone.
+ *
+ * R35-3: a `superseded` drain outcome is NONTERMINAL for the aggregate —
+ * the replacement that took the slot may still be registered and active.
+ * Before reporting success the exact account scope is re-enumerated and any
+ * surviving active execution forces `ok: false`.
  */
 export async function stopRegisteredProductSpaceExecutionsForAccount(accountId: string): Promise<{
   ok: boolean
@@ -400,8 +419,20 @@ export async function stopRegisteredProductSpaceExecutionsForAccount(accountId: 
   )
   const results = await stopRegisteredExecutionsOnce(entries)
   const failedExecutionIds = results
-    .filter(result => result.status === 'failed')
+    .filter(result => result.status === 'failed' || result.superseded === true)
     .map(result => result.executionId)
+  for (const execution of listRegisteredProductSpaceExecutions()) {
+    if (execution.scope.accountId !== accountId) continue
+    let active: boolean
+    try {
+      active = Boolean(await execution.isActive())
+    } catch {
+      active = true
+    }
+    if (active && !failedExecutionIds.includes(execution.scope.executionId)) {
+      failedExecutionIds.push(execution.scope.executionId)
+    }
+  }
   return { ok: failedExecutionIds.length === 0, failedExecutionIds }
 }
 
@@ -489,6 +520,10 @@ export function isRuntimeProductSpaceRestricted(productSpaceId: string | null | 
  * Space-scoped no-confirmation termination used by the restriction
  * transition: stops every registered execution of one account inside one
  * ProductSpace and reports the per-item outcomes.
+ *
+ * R35-3: identical superseded/re-enumeration semantics as the account
+ * aggregate — a replacement that survives the awaited stop keeps the exact
+ * account/ProductSpace scope nonterminal.
  */
 export async function stopRegisteredProductSpaceExecutionsForSpace(
   accountId: string,
@@ -503,8 +538,21 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
   )
   const results = await stopRegisteredExecutionsOnce(entries)
   const failedExecutionIds = results
-    .filter(result => result.status === 'failed')
+    .filter(result => result.status === 'failed' || result.superseded === true)
     .map(result => result.executionId)
+  for (const execution of listRegisteredProductSpaceExecutions()) {
+    if (execution.scope.accountId !== accountId) continue
+    if (execution.scope.productSpaceId !== productSpaceId) continue
+    let active: boolean
+    try {
+      active = Boolean(await execution.isActive())
+    } catch {
+      active = true
+    }
+    if (active && !failedExecutionIds.includes(execution.scope.executionId)) {
+      failedExecutionIds.push(execution.scope.executionId)
+    }
+  }
   return { ok: failedExecutionIds.length === 0, failedExecutionIds }
 }
 

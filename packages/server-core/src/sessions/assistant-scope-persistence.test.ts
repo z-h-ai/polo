@@ -612,3 +612,213 @@ describe('assistant session complete-scope boundaries (R34-1)', () => {
     expect(summary.totalUnreadSessions).toBe(0)
   })
 })
+
+describe('assistant aggregate and self-management scope (R35-1)', () => {
+  let tmpRoot: string
+  let handlers: Map<string, Handler>
+  let signedInAccountId: string | null
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const noWorkspaceContext = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+
+  const buildManager = () => {
+    if (!RootedSessionStorageCtor) {
+      throw new Error('storage ctor missing')
+    }
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: storage,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  const registerHandlers = (sm: SessionManager) => {
+    handlers = new Map()
+    const server: RpcServer = {
+      handle(channel: string, handler: HandlerFn) {
+        handlers.set(channel, handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+    } as unknown as RpcServer
+    registerSessionsHandlers(server, {
+      sessionManager: sm,
+      platform: {
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
+      },
+      windowManager: {
+        getWorkspaceForWindow: () => null,
+      },
+    } as unknown as HandlerDeps)
+  }
+
+  const seedManaged = (sm: SessionManager, input: {
+    id: string
+    accountId?: string
+    productSpaceId?: string
+    workspaceId?: string
+    hasUnread?: boolean
+  }) => {
+    const workspace = { id: input.workspaceId ?? 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    const managed = createManagedSession({
+      id: input.id,
+      workspaceRootPath: wsRoot(),
+      name: input.id,
+      productSpaceId: input.productSpaceId,
+      accountId: input.accountId,
+      hasUnread: input.hasUnread ?? false,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = input.productSpaceId
+    managed.accountId = input.accountId
+    ;(managed as unknown as { hasUnread: boolean }).hasUnread = input.hasUnread ?? false
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(input.id, managed)
+    return managed
+  }
+
+  const invokeWith = (
+    contextOverride: Partial<{ workspaceId: string | null; clientId: string }>,
+    channel: string,
+    ...args: unknown[]
+  ) => {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler: ${channel}`)
+    return handler({ ...noWorkspaceContext, ...contextOverride } as never, ...args)
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-scope35-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new RootedSessionStorageCtor(join(tmpRoot, 'sessions'))
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    signedInAccountId = accountA
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('MARK_ALL_READ is bound to the complete caller scope and never trusts the renderer-selected workspace', async () => {
+    const sm = buildManager()
+    registerHandlers(sm)
+    seedManaged(sm, { id: 's-a', accountId: accountA, productSpaceId: personalId, hasUnread: true })
+    seedManaged(sm, { id: 's-b', accountId: accountB, productSpaceId: personalId, hasUnread: true })
+
+    // Missing caller workspace: nothing is marked.
+    await invokeWith({}, RPC_CHANNELS.sessions.MARK_ALL_READ, 'ws_test')
+    expect((sm as unknown as { sessions: Map<string, { hasUnread: boolean }> }).sessions.get('s-a')!.hasUnread).toBe(true)
+
+    // A renderer-selected id that disagrees with the caller workspace marks
+    // nothing — not even the caller's own sessions.
+    await invokeWith({ workspaceId: 'ws_other' }, RPC_CHANNELS.sessions.MARK_ALL_READ, 'ws_test')
+    expect((sm as unknown as { sessions: Map<string, { hasUnread: boolean }> }).sessions.get('s-a')!.hasUnread).toBe(true)
+
+    // Matching caller workspace: only same-account sessions are marked.
+    await invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.MARK_ALL_READ, 'ws_test')
+    expect((sm as unknown as { sessions: Map<string, { hasUnread: boolean }> }).sessions.get('s-a')!.hasUnread).toBe(false)
+    expect((sm as unknown as { sessions: Map<string, { hasUnread: boolean }> }).sessions.get('s-b')!.hasUnread).toBe(true)
+  })
+
+  it('task output resolves the owner session and requires the complete trusted scope', async () => {
+    const sm = buildManager()
+    registerHandlers(sm)
+    const { writeFile } = await import('fs/promises')
+    const outputFile = join(tmpRoot, 'task-out.txt')
+    await writeFile(outputFile, 'task payload', 'utf-8')
+
+    const managed = seedManaged(sm, { id: 'owner', accountId: accountA, productSpaceId: personalId })
+    ;(sm as unknown as { taskOutputIndex: Map<string, string> }).taskOutputIndex.set('task-1', 'owner')
+    managed.backgroundTaskOutputs.set('task-1', {
+      outputFile,
+      summary: '',
+      status: 'running',
+      completedAt: 0,
+    })
+
+    // Missing caller workspace: no disclosure.
+    await expect(invokeWith({}, RPC_CHANNELS.tasks.GET_OUTPUT, 'task-1')).resolves.toBeNull()
+    // Cross-workspace caller: the owner sits in another Workspace.
+    const crossWorkspace = seedManaged(sm, { id: 'cross-ws-owner', accountId: accountA, productSpaceId: personalId, workspaceId: 'ws_other' })
+    ;(sm as unknown as { taskOutputIndex: Map<string, string> }).taskOutputIndex.set('task-2', 'cross-ws-owner')
+    crossWorkspace.backgroundTaskOutputs.set('task-2', {
+      outputFile,
+      summary: '',
+      status: 'running',
+      completedAt: 0,
+    })
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.tasks.GET_OUTPUT, 'task-2')).resolves.toBeNull()
+
+    // Valid same-scope caller reads the output.
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.tasks.GET_OUTPUT, 'task-1'))
+      .resolves.toBe('task payload')
+
+    // Account replacement: the predecessor's task output is never disclosed.
+    signedInAccountId = accountB
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    const fresh = buildManager()
+    registerHandlers(fresh)
+    const stale = seedManaged(fresh, { id: 'stale-owner', accountId: accountA, productSpaceId: personalId })
+    ;(fresh as unknown as { taskOutputIndex: Map<string, string> }).taskOutputIndex.set('task-3', 'stale-owner')
+    stale.backgroundTaskOutputs.set('task-3', {
+      outputFile,
+      summary: '',
+      status: 'running',
+      completedAt: 0,
+    })
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.tasks.GET_OUTPUT, 'task-3')).resolves.toBeNull()
+  })
+
+  it('Assistant self-management targets resolve through the managed session complete scope', async () => {
+    const sm = buildManager()
+    const managed = seedManaged(sm, { id: 'managed', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'same-scope', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'cross-account', accountId: accountB, productSpaceId: personalId })
+    seedManaged(sm, { id: 'cross-space', accountId: accountA, productSpaceId: 'space-other' })
+    seedManaged(sm, { id: 'cross-workspace', accountId: accountA, productSpaceId: personalId, workspaceId: 'ws_other' })
+
+    const resolver = (sm as unknown as {
+      managedScopeTarget: (managed: unknown, targetId: string) => unknown
+    }).managedScopeTarget
+
+    // Self-target stays usable.
+    expect(resolver.call(sm, managed, 'managed')).toBe(managed)
+    // Same complete scope is reachable.
+    expect(resolver.call(sm, managed, 'same-scope')).not.toBeNull()
+    // Every split-scope target fails closed.
+    expect(resolver.call(sm, managed, 'cross-account')).toBeNull()
+    expect(resolver.call(sm, managed, 'cross-space')).toBeNull()
+    expect(resolver.call(sm, managed, 'cross-workspace')).toBeNull()
+    expect(resolver.call(sm, managed, 'missing')).toBeNull()
+
+    // A legacy managed session (no account binding) can never address a
+    // second session — only itself.
+    const legacy = seedManaged(sm, { id: 'legacy', productSpaceId: personalId })
+    expect(resolver.call(sm, legacy, 'legacy')).toBe(legacy)
+    expect(resolver.call(sm, legacy, 'same-scope')).toBeNull()
+  })
+})

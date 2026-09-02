@@ -61,7 +61,7 @@ export interface ISessionManager {
   markSessionUnread(sessionId: string): Promise<void>
   markAllSessionsRead(
     workspaceId: string,
-    scope?: { productSpaceId: string; accountId: string } | null,
+    scope?: { productSpaceId: string; accountId: string; workspaceId?: string } | null,
   ): Promise<void>
   setActiveViewingSession(sessionId: string | null, workspaceId: string): void
   clearActiveViewingSession(workspaceId: string): void
@@ -96,7 +96,10 @@ export interface ISessionManager {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   cancelAllProcessing(): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
-  getTaskOutput(taskId: string): Promise<string | null>
+  getTaskOutput(
+    taskId: string,
+    scope?: { productSpaceId: string; accountId: string; workspaceId: string } | null,
+  ): Promise<string | null>
   addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void
   removeMessageAnnotation(sessionId: string, messageId: string, annotationId: string): void
   updateMessageAnnotation(

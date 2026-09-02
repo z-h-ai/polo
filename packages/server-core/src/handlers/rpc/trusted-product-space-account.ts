@@ -191,3 +191,24 @@ export function captureTrustedSessionScope(): {
   }
   return { accountId: runtimeScope.accountId, productSpaceId: runtimeScope.productSpaceId }
 }
+
+/**
+ * R35-1: the complete trusted session scope for aggregate boundaries.
+ * Identical atomic fence/mirror capture as `captureTrustedSessionScope`, but
+ * it ALSO requires a Main-resolved caller Workspace and returns the full
+ * immutable `{accountId, productSpaceId, workspaceId}` triple — a boundary
+ * that cannot attribute its caller (or run against a committed fence bound
+ * to the current account) fails closed with null.
+ */
+export function captureCompleteTrustedSessionScope(
+  callerWorkspaceId: string | null | undefined,
+): {
+  accountId: string
+  productSpaceId: string
+  workspaceId: string
+} | null {
+  if (!callerWorkspaceId) return null
+  const scope = captureTrustedSessionScope()
+  if (!scope) return null
+  return { ...scope, workspaceId: callerWorkspaceId }
+}

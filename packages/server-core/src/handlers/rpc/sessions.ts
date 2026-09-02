@@ -17,6 +17,7 @@ import {
   unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
 import {
+  captureCompleteTrustedSessionScope,
   captureTrustedSessionScope,
   getSyncTrustedProductSpaceAccountId,
 } from './trusted-product-space-account'
@@ -298,10 +299,17 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.getUnreadSummary(captureTrustedSessionScope())
   })
 
-  server.handle(RPC_CHANNELS.sessions.MARK_ALL_READ, async (_ctx, workspaceId: string) => {
-    // R33-1: the mutation is bound to the complete trusted scope; without
-    // one, nothing is marked (fail closed).
-    return sessionManager.markAllSessionsRead(workspaceId, captureTrustedSessionScope())
+  server.handle(RPC_CHANNELS.sessions.MARK_ALL_READ, async (ctx, workspaceId: string) => {
+    // R33-1/R35-1: the aggregate mutation is bound to the COMPLETE trusted
+    // scope — account AND committed space AND the caller's Main-owned
+    // Workspace. A renderer-supplied workspaceId alone can never widen the
+    // mutation: without a resolvable caller Workspace, or when the selected
+    // id disagrees with it, nothing is marked (fail closed).
+    const scope = captureCompleteTrustedSessionScope(resolveCallerWorkspaceId(ctx))
+    if (!scope || scope.workspaceId !== workspaceId) {
+      return
+    }
+    return sessionManager.markAllSessionsRead(workspaceId, scope)
   })
 
   // Get a single session with messages (for lazy loading)
@@ -430,9 +438,18 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Get background task output
-  server.handle(RPC_CHANNELS.tasks.GET_OUTPUT, async (_ctx, taskId: string) => {
+  server.handle(RPC_CHANNELS.tasks.GET_OUTPUT, async (ctx, taskId: string) => {
+    // R35-1: the output belongs to its OWNER session — the complete trusted
+    // caller scope (account AND committed space AND caller Workspace) must
+    // resolve before the owner session is even looked up, and the owner is
+    // re-checked against that scope inside SessionManager. Missing caller
+    // binding discloses nothing.
+    const scope = captureCompleteTrustedSessionScope(resolveCallerWorkspaceId(ctx))
+    if (!scope) {
+      return null
+    }
     try {
-      const output = await sessionManager.getTaskOutput(taskId)
+      const output = await sessionManager.getTaskOutput(taskId, scope)
       return output
     } catch (err) {
       log.error('Failed to get task output:', err)

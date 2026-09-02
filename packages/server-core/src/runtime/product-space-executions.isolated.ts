@@ -3,6 +3,9 @@ import {
   EXECUTION_STOP_DRAIN_TIMEOUT_MS,
   getRegisteredProductSpaceExecution,
   getRegisteredProductSpaceExecutionGeneration,
+  stopAllRegisteredProductSpaceExecutions,
+  stopRegisteredProductSpaceExecutionsForAccount,
+  stopRegisteredProductSpaceExecutionsForSpace,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
@@ -234,5 +237,96 @@ describe('stopRegisteredExecutionsOnce bounded window', () => {
     const survivor = getRegisteredProductSpaceExecution('exec-same-object')
     expect(survivor).toBe(second)
     expect(getRegisteredProductSpaceExecutionGeneration('exec-same-object')).toBe(second.generation)
+  })
+})
+
+describe('aggregate stop supersession (R35-3)', () => {
+  const scopedProducer = (executionId: string, gate: Promise<void>): RegisteredProductSpaceExecution => ({
+    scope: {
+      contractVersion: 1,
+      executionId,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      workspaceId: 'ws-a',
+      subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+    } as never,
+    kind: 'assistant_session',
+    name: executionId,
+    ref: executionId,
+    generation: 0,
+    isActive: async () => {
+      await gate
+      return false
+    },
+    stop: async () => 'stopped',
+  })
+
+  it('account cleanup reports a surviving same-object replacement as nonterminal (R35-3)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    const producer = scopedProducer('exec-agg-account', probeGate)
+    registerProductSpaceExecution(producer)
+
+    const pending = stopRegisteredProductSpaceExecutionsForAccount('account-a')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    // The SAME object re-registers during the awaited drain: a new
+    // registry-owned generation takes the slot. The replacement carries its
+    // OWN live liveness — it is a genuinely running new turn.
+    const replacement = registerProductSpaceExecution(producer)
+    replacement.isActive = () => true
+    releaseProbe()
+
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(result.failedExecutionIds).toEqual(['exec-agg-account'])
+    // The replacement survives, active, still blocking.
+    expect(getRegisteredProductSpaceExecution('exec-agg-account')).toBe(replacement)
+    expect(await replacement.isActive()).toBe(true)
+  })
+
+  it('restriction cleanup reports a surviving distinct-object replacement as nonterminal (R35-3)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    const old = scopedProducer('exec-agg-space', probeGate)
+    registerProductSpaceExecution(old)
+
+    const pending = stopRegisteredProductSpaceExecutionsForSpace('account-a', 'space-a')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const replacement = scopedProducer('exec-agg-space', Promise.resolve())
+    replacement.isActive = () => true
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    releaseProbe()
+
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(result.failedExecutionIds).toEqual(['exec-agg-space'])
+    expect(getRegisteredProductSpaceExecution('exec-agg-space')).toBe(ownedReplacement)
+  })
+
+  it('the legacy stop-all cleanup treats superseded as nonterminal (R35-3)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    const producer = scopedProducer('exec-agg-all', probeGate)
+    registerProductSpaceExecution(producer)
+
+    const pending = stopAllRegisteredProductSpaceExecutions()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const replacement = registerProductSpaceExecution(producer)
+    replacement.isActive = () => true
+    releaseProbe()
+
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(result.failedExecutionIds).toEqual(['exec-agg-all'])
+    expect(getRegisteredProductSpaceExecution('exec-agg-all')).toBe(replacement)
   })
 })

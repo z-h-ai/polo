@@ -270,15 +270,47 @@ export async function stopAllProductSpaceExecutions(input: {
     ),
   )
   const outcomeById = new Map(
-    stopResults.map(result => [result.executionId, result.status]),
+    stopResults.map(result => [result.executionId, result]),
   )
 
+  // R35-3: a superseded drain outcome is NEVER terminal success — the
+  // replacement generation that took the slot maps to a retryable failure.
   const summaries: ExecutionSummary[] = active.map(execution => {
-    const status = outcomeById.get(execution.executionId) ?? 'failed'
-    return status === 'stopped'
+    const outcome = outcomeById.get(execution.executionId)
+    const stopped = outcome?.status === 'stopped' && outcome.superseded !== true
+    return stopped
       ? { ...execution, status: 'stopped' }
       : { ...execution, status: 'failed', errorCode: 'runtime_stop_failed' }
   })
+
+  // R35-3: re-enumerate the exact account/ProductSpace scope before any
+  // success: a same-ID replacement (or any execution that registered during
+  // the awaited drains) that is STILL active forces its summary nonterminal.
+  for (const execution of listRegisteredProductSpaceExecutions()) {
+    if (execution.scope.accountId !== accountId) continue
+    if (execution.scope.productSpaceId !== productSpaceId) continue
+    let activeNow: boolean
+    try {
+      activeNow = Boolean(await execution.isActive())
+    } catch {
+      activeNow = true
+    }
+    if (!activeNow) continue
+    const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
+    const existing = summaries.find(summary => summary.executionId === parsedId)
+    if (existing) {
+      existing.status = 'failed'
+      existing.errorCode = 'runtime_stop_failed'
+    } else {
+      summaries.push({
+        executionId: parsedId,
+        scope: execution.scope,
+        name: execution.name,
+        status: 'failed',
+        errorCode: 'runtime_stop_failed',
+      })
+    }
+  }
 
   const result: StopAllExecutionsResult = {
     allStopped: summaries.every(execution => (
@@ -822,7 +854,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           }
           dispatched.push(execution)
           const [result] = await stopRegisteredExecutionsOnce([execution])
-          statuses[execution.scope.executionId] = result?.status ?? 'failed'
+          // R35-3: a superseded outcome is a retryable failure in the
+          // per-row projection — never a terminal success against the
+          // replacement generation that now owns the slot.
+          statuses[execution.scope.executionId] = result?.status === 'stopped' && result.superseded !== true
+            ? 'stopped'
+            : 'failed'
         }
 
         // Re-enumerate under the lock: zero origin executions is a hard
