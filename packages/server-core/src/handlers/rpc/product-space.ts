@@ -51,6 +51,7 @@ import { runLegacyLocalAppCleaner } from '../../runtime/legacy-state-cleaners'
 import { clearLegacySkillCaches } from './admin'
 import {
   fetchTrustedProductSpaceList,
+  getTrustedAccountGeneration,
   resolveTrustedProductSpaceAccountId,
 } from './trusted-product-space-account'
 
@@ -411,54 +412,85 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
       }
 
-      return withSwitchLock(async () => {
-        const originProductSpaceId = getRuntimeActiveProductSpace()
-        // A fence committed for another (replaced) account is never
-        // switchable — it must be revoked and re-committed by a bootstrap.
-        if (originProductSpaceId && !isRuntimeFenceBoundToAccount(trustedAccountId)) {
+      // Advisory pre-fetch gate (no lock held): keeps the cheap no-op
+      // rejection exact without carrying the switch lock across I/O. Every
+      // decision is re-verified inside the critical section below.
+      {
+        const preOrigin = getRuntimeActiveProductSpace()
+        if (preOrigin && !isRuntimeFenceBoundToAccount(trustedAccountId)) {
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The committed ProductSpace belongs to a different account' }
         }
-        // A re-bootstrap against the already-committed SAME space is an
-        // idempotent revalidation — not a no-op error. It re-verifies the
-        // contract and membership online and its commit atomically
-        // re-publishes the fence (clearing the offline read-only view when
-        // one was active). Required so a second bootstrap of a live session
-        // cannot fail and fall back to a stale device snapshot.
-        const sameSpace = targetProductSpaceId === originProductSpaceId
-        const offlineRevalidation =
-          sameSpace && (isRuntimeOfflineReadOnly() || isRuntimeFenceBoundToAccount(trustedAccountId))
-        if (sameSpace && !offlineRevalidation) {
+        const preSameSpace = targetProductSpaceId === preOrigin
+        const preOfflineRevalidation =
+          preSameSpace && (isRuntimeOfflineReadOnly() || isRuntimeFenceBoundToAccount(trustedAccountId))
+        if (preSameSpace && !preOfflineRevalidation) {
           return {
             success: false as const,
             errorCode: 'VALIDATION_ERROR',
             message: 'The target ProductSpace is already active',
           }
         }
-        // A revoke (contract loss / logout) permanently invalidates any
-        // switch prepared against an older fence generation.
-        const fenceGeneration = getRuntimeFenceGeneration()
+      }
 
-        setSwitchInProgress(true)
-        try {
-          // Revalidation of the committed/offline view: the restored view
-          // shows the same space, so a plain switch would be rejected as a
-          // no-op. Instead this trusted transaction re-validates the
-          // contract and membership online and its commit atomically clears
-          // the offline read-only view (the fence itself is unchanged).
-          const fetched = await fetchTrustedProductSpaceList()
-          if (!fetched.ok) {
-            // An incompatible server contract must reach the renderer
-            // verbatim: it drives the fail-closed contract-blocked path
-            // instead of a retryable "target failed" state. No transaction
-            // exists yet, so there is nothing to revoke here.
+      setSwitchInProgress(true)
+      try {
+        // GLOBAL LOCK ORDER: the contract-validated list fetch acquires the
+        // Admin session lock (ensureValidTokens → capture) and performs
+        // network I/O — it must run OUTSIDE the switch lock, because account
+        // replacement holds the Admin session lock while revoking the fence
+        // through the switch lock. Holding the switch lock here would let
+        // COMMIT/PREPARE and login/replacement deadlock each other.
+        const accountGenerationBeforeFetch = getTrustedAccountGeneration()
+        const fenceGenerationBeforeFetch = getRuntimeFenceGeneration()
+        const fetched = await fetchTrustedProductSpaceList()
+        if (!fetched.ok) {
+          // An incompatible server contract must reach the renderer
+          // verbatim: it drives the fail-closed contract-blocked path
+          // instead of a retryable "target failed" state. No transaction
+          // exists yet, so there is nothing to revoke here.
+          return {
+            success: false as const,
+            errorCode: fetched.errorCode,
+            message: fetched.errorCode === 'product_space_contract_unsupported'
+              ? 'The ProductSpace contract is not supported by this client'
+              : 'ProductSpace list is unavailable',
+          }
+        }
+        return await withSwitchLock(async () => {
+          // Freshness proof for the unlocked fetch: the trusted account and
+          // the fence must be exactly the ones the list was captured for.
+          if (
+            getTrustedAccountGeneration() !== accountGenerationBeforeFetch
+            || getRuntimeFenceGeneration() !== fenceGenerationBeforeFetch
+          ) {
+            return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The account session or fence changed during target verification' }
+          }
+          const originProductSpaceId = getRuntimeActiveProductSpace()
+          // A fence committed for another (replaced) account is never
+          // switchable — it must be revoked and re-committed by a bootstrap.
+          if (originProductSpaceId && !isRuntimeFenceBoundToAccount(trustedAccountId)) {
+            return { success: false as const, errorCode: 'FORBIDDEN', message: 'The committed ProductSpace belongs to a different account' }
+          }
+          // A re-bootstrap against the already-committed SAME space is an
+          // idempotent revalidation — not a no-op error. It re-verifies the
+          // contract and membership online and its commit atomically
+          // re-publishes the fence (clearing the offline read-only view when
+          // one was active). Required so a second bootstrap of a live session
+          // cannot fail and fall back to a stale device snapshot.
+          const sameSpace = targetProductSpaceId === originProductSpaceId
+          const offlineRevalidation =
+            sameSpace && (isRuntimeOfflineReadOnly() || isRuntimeFenceBoundToAccount(trustedAccountId))
+          if (sameSpace && !offlineRevalidation) {
             return {
               success: false as const,
-              errorCode: fetched.errorCode,
-              message: fetched.errorCode === 'product_space_contract_unsupported'
-                ? 'The ProductSpace contract is not supported by this client'
-                : 'ProductSpace list is unavailable',
+              errorCode: 'VALIDATION_ERROR',
+              message: 'The target ProductSpace is already active',
             }
           }
+          // A revoke (contract loss / logout) permanently invalidates any
+          // switch prepared against an older fence generation.
+          const fenceGeneration = getRuntimeFenceGeneration()
+
           const list = fetched.list
           const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
           if (!target) {
@@ -510,10 +542,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             to: targetProductSpaceId,
             executions: planned,
           }
-        } finally {
-          setSwitchInProgress(false)
-        }
-      })
+        })
+      } finally {
+        setSwitchInProgress(false)
+      }
     },
   )
 
@@ -639,6 +671,18 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
       }
 
+      // GLOBAL LOCK ORDER: the contract-validated list fetch acquires the
+      // Admin session lock (ensureValidTokens → capture) and performs
+      // network I/O — it must run OUTSIDE the switch lock. Account
+      // replacement holds the Admin session lock while revoking the fence
+      // through the switch lock; acquiring the Admin session lock under the
+      // switch lock would let COMMIT and login/replacement deadlock each
+      // other. The transaction stays PENDING and therefore cancellable
+      // through this unlocked window and the probes below.
+      const accountGenerationBeforeFetch = getTrustedAccountGeneration()
+      const fenceGenerationBeforeFetch = getRuntimeFenceGeneration()
+      const fetched = await fetchTrustedProductSpaceList()
+
       return withSwitchLock(async () => {
         const pending = getPendingSwitchTransaction()
         if (
@@ -658,23 +702,36 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           setSwitchInProgress(false)
           return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The prepared switch was superseded by a fence change' }
         }
-        if (pending.cancelled || pending.status !== 'ready') {
+        if (pending.cancelled) {
+          // Cancelled during the unlocked fetch window: the switch stays on
+          // the origin and the tombstone is consumed.
+          setPendingSwitchTransaction(null)
+          setSwitchInProgress(false)
+          return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled during commit' }
+        }
+        if (pending.status !== 'ready') {
           // The stop phase has not confirmed every origin execution terminal.
           return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'The prepared switch has not finished stopping' }
         }
-        // The transaction stays PENDING and therefore cancellable through the
-        // final authoritative re-validation: consuming the token before the
-        // list await opened a window where CANCEL_SWITCH saw no transaction
-        // and returned success while the commit still moved the fence after
-        // its await resumed. Every failure below consumes the transaction.
+        // Every failure below consumes the transaction.
         const consumeTransaction = (): void => {
           setPendingSwitchTransaction(null)
           setSwitchInProgress(false)
         }
+        // Membership/list freshness: the captured list must still belong to
+        // the trusted account, and the fence must be exactly the one the
+        // fetch was bracketed by — no revoke, rebind, restore or account
+        // transition may have happened while the fetch was in flight.
+        if (
+          getTrustedAccountGeneration() !== accountGenerationBeforeFetch
+          || getRuntimeFenceGeneration() !== fenceGenerationBeforeFetch
+        ) {
+          consumeTransaction()
+          return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The account session or fence changed during commit verification' }
+        }
         // Re-verify at commit time that the target is still visible to this
         // account under the current contract.
         const originProductSpaceId = pending.originProductSpaceId || null
-        const fetched = await fetchTrustedProductSpaceList()
         if (!fetched.ok) {
           consumeTransaction()
           return {
@@ -720,11 +777,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           }
         }
         // Final gate immediately before the fence mutation. Every await above
-        // (authoritative list, liveness probes) is a window in which the user
-        // may have cancelled, a logout/revoke may have advanced the fence
-        // generation, or the fence may have been re-bound to another account.
-        // The transaction is judged one last time as a whole, synchronously —
-        // nothing can interleave between this gate and the fence write.
+        // (liveness probes) is a window in which the user may have cancelled
+        // or a revoke may have advanced the fence generation. The transaction
+        // is judged one last time as a whole, synchronously — nothing can
+        // interleave between this gate and the fence write.
         const final = getPendingSwitchTransaction()
         if (
           !final
@@ -761,11 +817,14 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         setRuntimeActiveProductSpace(targetProductSpaceId)
         // Linearization record: a cancellation that is only processed after
         // this point must learn that the commit won, with the authoritative
-        // target, instead of receiving a no-op success.
+        // target, instead of receiving a no-op success. The record is bound
+        // to the fence generation this commit produced, so a later revoke,
+        // rebind, restore or account replacement invalidates it atomically.
         setLastCommittedSwitch({
           token: commitToken,
           accountId: trustedAccountId,
           targetProductSpaceId,
+          fenceGeneration: getRuntimeFenceGeneration(),
         })
         return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
       })
@@ -793,6 +852,11 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       if (typeof cancelToken !== 'string' || !cancelToken) {
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch cancel request is invalid' }
       }
+      // The disclosing `already_committed` branch is account-authenticated:
+      // the committed record may only be read back by the same trusted
+      // Admin account that committed it. (Runs outside the switch lock; the
+      // Admin session lock is never held by the switch lock.)
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
       const pending = getPendingSwitchTransaction()
       if (pending?.token === cancelToken) {
         if (!pending.cancelled) {
@@ -807,7 +871,18 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         return { success: true as const, outcome: 'cancelled' as const }
       }
       const committed = getLastCommittedSwitch()
-      if (committed && committed.token === cancelToken) {
+      if (
+        committed
+        && committed.token === cancelToken
+        && trustedAccountId !== null
+        && committed.accountId === trustedAccountId
+        // The anchor must still describe the CURRENT fence: a revoke,
+        // rebind, restore, logout or account replacement cleared the record
+        // and advanced the generation, so a stale token can neither
+        // authenticate nor disclose anything.
+        && committed.fenceGeneration === getRuntimeFenceGeneration()
+        && getRuntimeActiveProductSpace() === committed.targetProductSpaceId
+      ) {
         return {
           success: true as const,
           outcome: 'already_committed' as const,

@@ -11,6 +11,7 @@ import {
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
   isRuntimeOfflineReadOnly,
+  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '../../../runtime/product-space-executions'
 import {
@@ -740,6 +741,156 @@ describe('two-phase switch transaction', () => {
     const unknown = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, 'not-a-known-token')
     expect(unknown.success).toBe(true)
     expect(unknown.outcome).toBe('no_transaction')
+  })
+
+  it('never authenticates the committed anchor across an account replacement', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+    const committed = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+
+    // Account replacement: the trusted Admin session now belongs to another
+    // account (the replacement also revoked the replaced account's fence).
+    setTrustedProductSpaceAccountProvider(async () => 'account-other')
+    await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+    setRuntimeActiveProductSpace(spaceB)
+    setRuntimeActiveProductSpaceAccount('account-other')
+
+    // The delayed account-A cancel can neither authenticate nor disclose
+    // anything about account B's fence.
+    const stale = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(stale.success).toBe(true)
+    expect(stale.outcome).toBe('no_transaction')
+    expect(stale.committedTargetProductSpaceId).toBeUndefined()
+    expect(stale.activeProductSpaceId).toBeUndefined()
+
+    // The anchor is also fence-generation-bound: even the ORIGINAL account
+    // cannot revive it after the revoke/rebind (the record was cleared
+    // atomically with the fence mutation).
+    setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
+    setRuntimeActiveProductSpace(spaceB)
+    setRuntimeActiveProductSpaceAccount(trustedAccountId)
+    const revived = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(revived.success).toBe(true)
+    expect(revived.outcome).toBe('no_transaction')
+  })
+
+  it('invalidates the committed anchor when the fence is revoked', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+    const committed = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    expect(committed.success).toBe(true)
+
+    // Logout/contract-loss revoke: the anchor dies with the fence.
+    await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+    expect(getRuntimeActive()).toBeNull()
+    const afterRevoke = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(afterRevoke.success).toBe(true)
+    expect(afterRevoke.outcome).toBe('no_transaction')
+
+    // An offline restore re-commits a fence (account-scoped read-only view):
+    // that rebind also invalidates the anchor — restore needs a verified
+    // snapshot, so here a fresh commit re-establishes and a fence rewrite
+    // through the same primitives is proven instead.
+    const prepared2 = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared2.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared2.token))
+      .toMatchObject({ success: true })
+    const recommitted = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared2.token, spaceB)
+    expect(recommitted.success).toBe(true)
+    // The OLD token still does not match the NEW anchor record.
+    const oldToken = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(oldToken.outcome).toBe('no_transaction')
+    const newToken = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared2.token)
+    expect(newToken.outcome).toBe('already_committed')
+    expect(newToken.activeProductSpaceId).toBe(spaceB)
+  })
+
+  it('keeps the switch lock free while COMMIT verifies the target and loses to a concurrent revoke', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token))
+      .toMatchObject({ success: true })
+
+    let fetchCalls = 0
+    let releaseList!: () => void
+    const gatedList = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseList = () => resolve({ ok: true, list: visibleList() })
+    })
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchCalls += 1
+      return gatedList
+    })
+
+    const committing = invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
+    for (let i = 0; i < 300 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(fetchCalls).toBe(1)
+
+    // Bounded-concurrency proof of the global lock order: while COMMIT is
+    // inside its (Admin-session-lock-taking) list fetch, the switch lock
+    // MUST be acquirable — account replacement's revoke path depends on it.
+    const lockAcquired = await Promise.race([
+      withSwitchLock(async () => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
+    ])
+    expect(lockAcquired).toBe(true)
+
+    // A revoke completing inside that window (as account replacement does)
+    // advances the fence generation; the stale commit must lose against it.
+    await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+    releaseList()
+    const committed = await committing
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('SWITCH_SUPERSEDED')
+    expect(getRuntimeActive()).toBeNull()
+    expect(isSwitchInProgress()).toBe(false)
+  })
+
+  it('keeps the switch lock free while PREPARE verifies the target and loses to a concurrent revoke', async () => {
+    const { invoke } = createHarness()
+    let fetchCalls = 0
+    let releaseList!: () => void
+    const gatedList = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseList = () => resolve({ ok: true, list: visibleList() })
+    })
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchCalls += 1
+      return gatedList
+    })
+
+    const preparing = invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    for (let i = 0; i < 300 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(fetchCalls).toBe(1)
+
+    const lockAcquired = await Promise.race([
+      withSwitchLock(async () => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
+    ])
+    expect(lockAcquired).toBe(true)
+
+    await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+    releaseList()
+    const prepared = await preparing
+    expect(prepared.success).toBe(false)
+    expect(prepared.errorCode).toBe('SWITCH_SUPERSEDED')
+    expect(getRuntimeActive()).toBeNull()
+    // No transaction was created against the revoked fence.
+    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, 'any-token')
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+    expect(isSwitchInProgress()).toBe(false)
   })
 
   it('still commits through a deferred authoritative list when nothing cancels', async () => {

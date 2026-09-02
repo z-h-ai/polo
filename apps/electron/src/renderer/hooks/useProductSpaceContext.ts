@@ -48,6 +48,24 @@ interface AccountScope {
 }
 
 /**
+ * One in-flight switch operation. Every switch request creates its own
+ * record; the one-time Main transaction token and the late-cancel verdict
+ * live ON the record instead of shared singleton refs, so a delayed
+ * completion of switch A can never consume switch B's token/verdict state or
+ * publish over it. Only the record currently in `activeSwitchOpRef` may
+ * mutate shared renderer state.
+ */
+interface SwitchOperation {
+  id: number
+  /** switchGenerationRef value this operation owns (advanced per request). */
+  generation: number
+  accountId: string | null
+  targetId: string
+  /** One-time Main transaction token, owned exclusively by this operation. */
+  token: string | null
+}
+
+/**
  * Main's authoritative linearization verdict for a switch cancellation
  * (CANCEL_SWITCH response). `cancelled` means the transaction was still
  * cancellable — the switch stays on the origin. `already_committed` means
@@ -125,21 +143,63 @@ export function useProductSpaceContextState() {
   const activeProductSpaceIdRef = useRef<string | null>(null)
   const switchGenerationRef = useRef(0)
   const pendingTargetRef = useRef<string | null>(null)
-  const preparedSwitchTokenRef = useRef<string | null>(null)
   const legacyInvalidatedAccountsRef = useRef(new Set<string>())
   const productSpacesRef = useRef<ProductSpaceSummary[]>([])
   productSpacesRef.current = productSpaces
   const personalProductSpaceIdRef = useRef<string | null>(null)
   personalProductSpaceIdRef.current = personalProductSpaceId
-  // Linearization record of the latest user cancellation: the click only
-  // closes the dialog and advances the generation — the authoritative Main
-  // cancellation verdict decides whether the switch stays on the origin
-  // (cancel won the final gate) or converges to the committed target (the
-  // COMMIT already wrote the fence before the cancel was scheduled).
+  // Operation-scoped switch bookkeeping (R28): each switch request owns a
+  // record; tokens and cancel verdicts live on the record, never on shared
+  // singletons, so a delayed completion of switch A cannot consume switch
+  // B's state or publish over it.
+  const switchOpCounterRef = useRef(0)
+  const activeSwitchOpRef = useRef<SwitchOperation | null>(null)
+  // Linearization record of the latest user cancellation, bound to the
+  // operation it cancelled: the click only closes the dialog and advances
+  // the generation — the authoritative Main cancellation verdict decides
+  // whether the switch stays on the origin (cancel won the final gate) or
+  // converges to the committed target (the COMMIT already wrote the fence
+  // before the cancel was scheduled). Only the cancelled operation itself
+  // may consume it.
   const lateCancelRef = useRef<{
+    opId: number
     generation: number
     outcome: Promise<SwitchCancelOutcome | null>
   } | null>(null)
+
+  /**
+   * Starts a new switch operation: advances the switch generation (every new
+   * request invalidates every older operation's in-flight completion) and
+   * installs the record as the only operation allowed to mutate shared
+   * state.
+   */
+  const beginSwitchOperation = useCallback((
+    accountId: string | null,
+    targetId: string,
+  ): SwitchOperation => {
+    switchGenerationRef.current += 1
+    const operation: SwitchOperation = {
+      id: ++switchOpCounterRef.current,
+      generation: switchGenerationRef.current,
+      accountId,
+      targetId,
+      token: null,
+    }
+    activeSwitchOpRef.current = operation
+    return operation
+  }, [])
+
+  /**
+   * Continues an existing operation through a new user-driven stage (dialog
+   * confirm, retry): the operation identity is kept — its token stays valid
+   * — but the generation advances so any older in-flight completion of the
+   * same operation becomes stale.
+   */
+  const renewSwitchOperation = useCallback((operation: SwitchOperation): void => {
+    switchGenerationRef.current += 1
+    operation.generation = switchGenerationRef.current
+    activeSwitchOpRef.current = operation
+  }, [])
 
   const isCurrentAccountScope = useCallback((scope: AccountScope) => (
     accountIdRef.current === scope.accountId
@@ -225,6 +285,7 @@ export function useProductSpaceContextState() {
    * executions are returned for the stop dialog.
    */
   const prepareTrustedSwitch = useCallback(async (
+    operation: SwitchOperation,
     targetId: string,
   ): Promise<{
     ok: boolean
@@ -235,7 +296,14 @@ export function useProductSpaceContextState() {
     const result = await window.electronAPI.productSpacePrepareSwitch(targetId)
     const statuses: Record<string, ExecutionSummary['status']> = {}
     if (result.success) {
-      preparedSwitchTokenRef.current = result.token
+      if (activeSwitchOpRef.current === operation) {
+        // The one-time token is owned by THIS operation only.
+        operation.token = result.token
+      } else {
+        // The operation was superseded while preparing: release the Main
+        // transaction immediately instead of parking it until the TTL.
+        void window.electronAPI.productSpaceCancelSwitch(result.token).catch(() => {})
+      }
       for (const execution of result.executions) {
         statuses[execution.executionId] = execution.status
       }
@@ -275,20 +343,28 @@ export function useProductSpaceContextState() {
     return { ok: false, errorCode: result.errorCode, statuses }
   }, [])
 
-  const commitPreparedSwitch = useCallback(async (targetId: string): Promise<void> => {
-    const token = preparedSwitchTokenRef.current
+  const commitPreparedSwitch = useCallback(async (
+    operation: SwitchOperation,
+    targetId: string,
+  ): Promise<void> => {
+    // The token stays bound to the operation THROUGH the commit await: a
+    // cancel arriving while the commit is in flight must still carry it (the
+    // R27 late-cancel linearization reads Main's authoritative verdict).
+    const token = operation.token
     if (!token) throw { code: 'SWITCH_TRANSACTION_INVALID' }
     const result = await window.electronAPI.productSpaceCommitSwitch(token, targetId)
-    preparedSwitchTokenRef.current = null
+    if (operation.token === token) operation.token = null
     if (!result.success) {
       throw { code: result.errorCode ?? 'runtime_commit_failed' }
     }
   }, [])
 
-  const cancelPreparedSwitch = useCallback(async (): Promise<SwitchCancelOutcome | null> => {
-    const token = preparedSwitchTokenRef.current
+  const cancelPreparedSwitch = useCallback(async (
+    operation: SwitchOperation,
+  ): Promise<SwitchCancelOutcome | null> => {
+    const token = operation.token
+    operation.token = null
     if (!token) return null
-    preparedSwitchTokenRef.current = null
     try {
       const result = await window.electronAPI.productSpaceCancelSwitch(token)
       if (!result.success) return null
@@ -313,10 +389,12 @@ export function useProductSpaceContextState() {
    * to supersede it. Stopping cannot be undone, so cancelling here never
    * revives stopped executions; it only releases the prepared transaction.
    */
-  const abandonSwitchIfStale = useCallback(async (generation: number): Promise<boolean> => {
-    if (generation === switchGenerationRef.current) return false
-    pendingTargetRef.current = null
-    await cancelPreparedSwitch()
+  const abandonSwitchIfStale = useCallback(async (operation: SwitchOperation): Promise<boolean> => {
+    if (operation.generation === switchGenerationRef.current) return false
+    if (activeSwitchOpRef.current === operation) {
+      pendingTargetRef.current = null
+    }
+    await cancelPreparedSwitch(operation)
     return true
   }, [cancelPreparedSwitch])
 
@@ -336,17 +414,18 @@ export function useProductSpaceContextState() {
       ?? personalProductSpaceIdRef.current
       ?? activeProductSpaceIdRef.current
     if (!accountId || !originId) return false
-    const prepared = await prepareTrustedSwitch(originId)
+    const operation = beginSwitchOperation(accountId, originId)
+    const prepared = await prepareTrustedSwitch(operation, originId)
     if (!prepared.ok) return false
     const stopped = await stopPreparedSwitchExecutions(prepared.token!)
     if (!stopped.ok) {
-      await cancelPreparedSwitch()
+      await cancelPreparedSwitch(operation)
       return false
     }
     try {
-      await commitPreparedSwitch(originId)
+      await commitPreparedSwitch(operation, originId)
     } catch {
-      await cancelPreparedSwitch()
+      await cancelPreparedSwitch(operation)
       return false
     }
     publishCommittedSelection(
@@ -356,7 +435,7 @@ export function useProductSpaceContextState() {
       originId,
     )
     return true
-  }, [cancelPreparedSwitch, commitPreparedSwitch, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
+  }, [beginSwitchOperation, cancelPreparedSwitch, commitPreparedSwitch, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
 
   /**
    * Bootstrap initial declaration and membership-loss fallbacks run through
@@ -372,7 +451,8 @@ export function useProductSpaceContextState() {
     errorCode?: string
     statuses: Record<string, ExecutionSummary['status']>
   }> => {
-    const prepared = await prepareTrustedSwitch(targetId)
+    const operation = beginSwitchOperation(accountIdRef.current, targetId)
+    const prepared = await prepareTrustedSwitch(operation, targetId)
     if (!prepared.ok) {
       return { ok: false, errorCode: prepared.errorCode, statuses: prepared.statuses }
     }
@@ -384,7 +464,7 @@ export function useProductSpaceContextState() {
       return { ok: false, errorCode: stopped.errorCode ?? 'runtime_stop_failed', statuses: stopped.statuses }
     }
     try {
-      await commitPreparedSwitch(targetId)
+      await commitPreparedSwitch(operation, targetId)
       return { ok: true, statuses: stopped.statuses }
     } catch (caught) {
       const record = (caught ?? {}) as Record<string, unknown>
@@ -394,7 +474,7 @@ export function useProductSpaceContextState() {
         statuses: stopped.statuses,
       }
     }
-  }, [commitPreparedSwitch, prepareTrustedSwitch, stopPreparedSwitchExecutions])
+  }, [beginSwitchOperation, commitPreparedSwitch, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const applySpaceSelection = useCallback(async (
     accountId: string,
@@ -678,12 +758,12 @@ export function useProductSpaceContextState() {
   }, [applyListResponse, enterContractBlocked, isCurrentAccountScope, persistVerifiedContext])
 
   const finishSwitchAfterStop = useCallback(async (
+    operation: SwitchOperation,
     scope: AccountScope,
-    generation: number,
-    targetId: string,
   ): Promise<void> => {
+    const targetId = operation.targetId
     const verification = await verifyTargetStillAccessible(scope, targetId)
-    if (await abandonSwitchIfStale(generation)) return
+    if (await abandonSwitchIfStale(operation)) return
     if (verification === 'contract-blocked') {
       // enterContractBlocked already revoked the fence, cleared every
       // business projection and bumped the generation (so the abandon check
@@ -722,7 +802,7 @@ export function useProductSpaceContextState() {
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'catalog_load_failed'
       if (errorCode === 'product_space_contract_unsupported') {
-        enterContractBlocked(accountId)
+        enterContractBlocked(scope.accountId)
         return
       }
       setPendingSwitch(previous => (
@@ -735,12 +815,12 @@ export function useProductSpaceContextState() {
     // All prepared conditions are green: atomically move the fence with the
     // one-time transaction token, then publish the renderer projection.
     try {
-      await commitPreparedSwitch(targetId)
+      await commitPreparedSwitch(operation, targetId)
     } catch (caught) {
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'runtime_commit_failed'
       if (errorCode === 'product_space_contract_unsupported') {
-        enterContractBlocked(accountId)
+        enterContractBlocked(scope.accountId)
         return
       }
       setPendingSwitch(previous => (
@@ -753,39 +833,47 @@ export function useProductSpaceContextState() {
     // Post-COMMIT generation re-check: a cancel that raced the final commit
     // await (or any newer switch/bootstrap) must never publish a stale
     // target — unless Main's authoritative cancellation verdict reports that
-    // the commit already won its final gate and the committed target is
-    // still the current fence. In that case the switch linearizes to the
-    // committed target so the Main fence, the renderer projection, the
-    // persisted selection and visible consumers converge on one space.
-    if (generation !== switchGenerationRef.current) {
-      pendingTargetRef.current = null
+    // THIS operation's commit already won its final gate and the committed
+    // target is still the current fence. In that case the switch linearizes
+    // to the committed target so the Main fence, the renderer projection,
+    // the persisted selection and visible consumers converge on one space.
+    if (operation.generation !== switchGenerationRef.current) {
+      // CAS: a stale operation must never consume the shared dialog target
+      // of a newer switch.
+      if (activeSwitchOpRef.current === operation) {
+        pendingTargetRef.current = null
+      }
       const lateCancel = lateCancelRef.current
-      lateCancelRef.current = null
-      if (lateCancel && isCurrentAccountScope(scope)) {
-        const resolved = await lateCancel.outcome.catch(() => null)
-        if (
-          resolved?.outcome === 'already_committed'
-          && resolved.committedTargetProductSpaceId === targetId
-          // The committed target must still be the CURRENT authoritative
-          // fence: a newer commit elsewhere keeps the renderer put.
-          && resolved.activeProductSpaceId === resolved.committedTargetProductSpaceId
-          // No newer switch/bootstrap may have started after the cancel.
-          && switchGenerationRef.current === lateCancel.generation
-        ) {
-          switchGenerationRef.current += 1
-          setPendingSwitch(null)
-          publishCommittedSelection(
-            scope.accountId,
-            productSpacesRef.current,
-            personalProductSpaceIdRef.current ?? targetId,
-            targetId,
-          )
+      if (lateCancel && lateCancel.opId === operation.id) {
+        lateCancelRef.current = null
+        if (isCurrentAccountScope(scope)) {
+          const resolved = await lateCancel.outcome.catch(() => null)
+          if (
+            resolved?.outcome === 'already_committed'
+            && resolved.committedTargetProductSpaceId === targetId
+            // The committed target must still be the CURRENT authoritative
+            // fence: a newer commit elsewhere keeps the renderer put.
+            && resolved.activeProductSpaceId === resolved.committedTargetProductSpaceId
+            // No newer switch/bootstrap may have started after the cancel.
+            && switchGenerationRef.current === lateCancel.generation
+          ) {
+            switchGenerationRef.current += 1
+            setPendingSwitch(null)
+            publishCommittedSelection(
+              scope.accountId,
+              productSpacesRef.current,
+              personalProductSpaceIdRef.current ?? targetId,
+              targetId,
+            )
+          }
         }
       }
       return
     }
     switchGenerationRef.current += 1
-    pendingTargetRef.current = null
+    if (activeSwitchOpRef.current === operation) {
+      pendingTargetRef.current = null
+    }
     setPendingSwitch(null)
     publishCommittedSelection(
       scope.accountId,
@@ -793,7 +881,7 @@ export function useProductSpaceContextState() {
       personalProductSpaceIdRef.current ?? targetId,
       targetId,
     )
-  }, [abandonSwitchIfStale, commitPreparedSwitch, enterContractBlocked, publishCommittedSelection, verifyTargetStillAccessible])
+  }, [abandonSwitchIfStale, commitPreparedSwitch, enterContractBlocked, isCurrentAccountScope, publishCommittedSelection, verifyTargetStillAccessible])
 
   const requestSwitch = useCallback(async (targetId: string): Promise<void> => {
     const accountId = accountIdRef.current
@@ -821,6 +909,10 @@ export function useProductSpaceContextState() {
     for (const execution of executions) {
       statuses[execution.executionId] = execution.status
     }
+    // Every new switch request owns a fresh operation and advances the
+    // generation, so a delayed completion of any older switch can neither
+    // consume this operation's state nor publish over it.
+    const operation = beginSwitchOperation(accountId, targetId)
     pendingTargetRef.current = targetId
     setPendingSwitch({
       targetId,
@@ -833,9 +925,8 @@ export function useProductSpaceContextState() {
     // No running items: verify the target, finalize the (empty) stop phase,
     // and commit without a stop dialog.
     if (executions.length === 0) {
-      const generation = switchGenerationRef.current
-      const prepared = await prepareTrustedSwitch(targetId)
-      if (await abandonSwitchIfStale(generation)) return
+      const prepared = await prepareTrustedSwitch(operation, targetId)
+      if (await abandonSwitchIfStale(operation)) return
       if (!prepared.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -845,7 +936,7 @@ export function useProductSpaceContextState() {
         return
       }
       const stopped = await stopPreparedSwitchExecutions(prepared.token!)
-      if (await abandonSwitchIfStale(generation)) return
+      if (await abandonSwitchIfStale(operation)) return
       if (!stopped.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -858,21 +949,26 @@ export function useProductSpaceContextState() {
         accountId,
         generation: accountScopeGenerationRef.current,
       }
-      await finishSwitchAfterStop(scope, generation, targetId)
+      await finishSwitchAfterStop(operation, scope)
     }
-  }, [abandonSwitchIfStale, finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch, stopPreparedSwitchExecutions])
+  }, [abandonSwitchIfStale, beginSwitchOperation, finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const confirmStopAndSwitch = useCallback(async (): Promise<void> => {
     const accountId = accountIdRef.current
     const current = pendingSwitch
     if (!accountId || !current) return
     if (current.phase !== 'confirm' && current.phase !== 'stop-failed') return
+    // The dialog confirm CONTINUES the operation requestSwitch started: the
+    // identity (and its held token) is kept, the generation advances so any
+    // older in-flight completion becomes stale.
+    const operation = activeSwitchOpRef.current
+    if (!operation || operation.targetId !== current.targetId) return
+    renewSwitchOperation(operation)
     const scope = {
       accountId,
       generation: accountScopeGenerationRef.current,
     }
     const targetId = current.targetId
-    const generation = ++switchGenerationRef.current
     pendingTargetRef.current = targetId
     setPendingSwitch(previous => (
       previous && previous.targetId === targetId
@@ -886,8 +982,8 @@ export function useProductSpaceContextState() {
         : previous
     ))
     try {
-      const committed = await prepareTrustedSwitch(targetId)
-      if (await abandonSwitchIfStale(generation)) return
+      const committed = await prepareTrustedSwitch(operation, targetId)
+      if (await abandonSwitchIfStale(operation)) return
       if (!committed.ok) {
         if (committed.errorCode === 'runtime_stop_failed') {
           setPendingSwitch(previous => (
@@ -918,7 +1014,7 @@ export function useProductSpaceContextState() {
         // dispatched execution running and released the transaction.
         return
       }
-      if (await abandonSwitchIfStale(generation)) return
+      if (await abandonSwitchIfStale(operation)) return
       if (!stopped.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -937,9 +1033,9 @@ export function useProductSpaceContextState() {
           ? { ...previous, phase: 'target-loading', statuses: stopped.statuses, errorCode: null }
           : previous
       ))
-      await finishSwitchAfterStop(scope, generation, targetId)
+      await finishSwitchAfterStop(operation, scope)
     } catch (caught) {
-      if (generation !== switchGenerationRef.current) return
+      if (operation.generation !== switchGenerationRef.current) return
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'runtime_stop_failed'
       setPendingSwitch(previous => {
@@ -953,7 +1049,7 @@ export function useProductSpaceContextState() {
         return { ...previous, phase: 'stop-failed', statuses, errorCode }
       })
     }
-  }, [abandonSwitchIfStale, finishSwitchAfterStop, pendingSwitch, prepareTrustedSwitch, stopPreparedSwitchExecutions])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, pendingSwitch, prepareTrustedSwitch, renewSwitchOperation, stopPreparedSwitchExecutions])
 
   const retryFailedStops = useCallback(async (): Promise<void> => {
     await confirmStopAndSwitch()
@@ -963,11 +1059,13 @@ export function useProductSpaceContextState() {
     const accountId = accountIdRef.current
     const targetId = pendingTargetRef.current
     if (!accountId || !targetId) return
+    const operation = activeSwitchOpRef.current
+    if (!operation || operation.targetId !== targetId) return
+    renewSwitchOperation(operation)
     const scope = {
       accountId,
       generation: accountScopeGenerationRef.current,
     }
-    const generation = switchGenerationRef.current
     setPendingSwitch(previous => (
       previous ? { ...previous, phase: 'target-loading', errorCode: null } : previous
     ))
@@ -976,9 +1074,9 @@ export function useProductSpaceContextState() {
     // commit requires the finalized 'ready' state) before re-staging and
     // committing; a still-held token (pre-commit staging failure) is reused
     // as-is with its already-finalized stop phase.
-    if (!preparedSwitchTokenRef.current) {
-      const prepared = await prepareTrustedSwitch(targetId)
-      if (await abandonSwitchIfStale(generation)) return
+    if (!operation.token) {
+      const prepared = await prepareTrustedSwitch(operation, targetId)
+      if (await abandonSwitchIfStale(operation)) return
       if (!prepared.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -988,7 +1086,7 @@ export function useProductSpaceContextState() {
         return
       }
       const stopped = await stopPreparedSwitchExecutions(prepared.token!)
-      if (await abandonSwitchIfStale(generation)) return
+      if (await abandonSwitchIfStale(operation)) return
       if (!stopped.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -998,22 +1096,29 @@ export function useProductSpaceContextState() {
         return
       }
     }
-    await finishSwitchAfterStop(scope, generation, targetId)
-  }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch, stopPreparedSwitchExecutions])
+    await finishSwitchAfterStop(operation, scope)
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch, renewSwitchOperation, stopPreparedSwitchExecutions])
 
   const cancelSwitch = useCallback((): void => {
+    const operation = activeSwitchOpRef.current
     switchGenerationRef.current += 1
     const generation = switchGenerationRef.current
     pendingTargetRef.current = null
     setPendingSwitch(null)
     // The click closes the dialog immediately but does NOT irreversibly
     // decide the switch: the authoritative Main cancellation result (stored
-    // for the in-flight COMMIT to consume) decides between staying on the
-    // origin and converging to the already-committed target.
-    lateCancelRef.current = {
-      generation,
-      outcome: cancelPreparedSwitch(),
-    }
+    // on the cancelled operation's record for its in-flight COMMIT to
+    // consume) decides between staying on the origin and converging to the
+    // already-committed target. The record is operation-scoped: a newer
+    // switch's own cancel overwrites it, and an older operation can never
+    // consume it.
+    lateCancelRef.current = operation
+      ? {
+          opId: operation.id,
+          generation,
+          outcome: cancelPreparedSwitch(operation),
+        }
+      : null
   }, [cancelPreparedSwitch])
 
   const dismissTargetAccessLost = useCallback((): void => {

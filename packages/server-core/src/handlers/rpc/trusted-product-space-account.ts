@@ -102,6 +102,9 @@ let syncAccountState: SyncTrustedProductSpaceAccountState = { status: 'unknown' 
 export function setSyncTrustedProductSpaceAccountState(
   state: SyncTrustedProductSpaceAccountState,
 ): void {
+  bumpTrustedAccountGenerationOnTransition(
+    state.status === 'authenticated' ? state.accountId : null,
+  )
   syncAccountState = state
 }
 
@@ -110,9 +113,30 @@ export function setSyncTrustedProductSpaceAccountState(
  * explicitly confirmed `signed_out` (never `unknown`).
  */
 export function setSyncTrustedProductSpaceAccountId(accountId: string | null): void {
+  bumpTrustedAccountGenerationOnTransition(accountId)
   syncAccountState = accountId
     ? { status: 'authenticated', accountId }
     : { status: 'signed_out' }
+}
+
+/**
+ * Monotonic generation of the trusted Admin account binding. It advances on
+ * every account TRANSITION (login, logout, account replacement — never on a
+ * same-account token refresh capture). Switch transactions capture it around
+ * their contract-list fetch so the short final critical section can prove
+ * the fetched list still belongs to the current trusted account WITHOUT
+ * acquiring the Admin session lock under the switch lock.
+ */
+let trustedAccountGeneration = 0
+
+export function getTrustedAccountGeneration(): number {
+  return trustedAccountGeneration
+}
+
+function bumpTrustedAccountGenerationOnTransition(nextAccountId: string | null): void {
+  if (getSyncTrustedProductSpaceAccountId() !== nextAccountId) {
+    trustedAccountGeneration += 1
+  }
 }
 
 export function getSyncTrustedProductSpaceAccountState(): SyncTrustedProductSpaceAccountState {

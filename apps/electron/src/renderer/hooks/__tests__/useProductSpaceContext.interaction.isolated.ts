@@ -187,6 +187,7 @@ const { useProductSpaceContextState } = await import('../useProductSpaceContext'
 const {
   resetProductSpaceStorageMemoryForTests,
   setStoredActiveProductSpaceId,
+  getStoredActiveProductSpaceId,
 } = await import('@/lib/product-space-storage')
 
 function useHarness() {
@@ -1096,5 +1097,88 @@ describe('useProductSpaceContextState contract fail-closed during switch (R26)',
     expect(result.current.activeProductSpaceId).toBe(personalId)
     expect(result.current.flowState).toBe('ready')
     expect(result.current.pendingSwitch).toBeNull()
+  })
+})
+
+describe('useProductSpaceContextState overlapping switch operations (R28)', () => {
+  it('a delayed first-switch completion cannot consume the newer switch or publish over it', async () => {
+    // Fixture with two switchable enterprise targets.
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        personalSpace,
+        enterpriseSpace('space-ent', '北辰智能科技'),
+        enterpriseSpace('space-ent-2', '新企业'),
+      ],
+    }
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+
+    // Switch A targets space-ent; its COMMIT wins at Main but the response
+    // is held (delayed).
+    const commitTargets: string[] = []
+    let releaseCommitA!: () => void
+    const gatedCommitA = new Promise<{ success: true; from: string; to: string }>(resolve => {
+      releaseCommitA = () => resolve({ success: true, from: personalId, to: 'space-ent' })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceCommitSwitch', {
+      configurable: true,
+      value: async (_token: string, targetProductSpaceId: string) => {
+        commitTargets.push(targetProductSpaceId)
+        if (targetProductSpaceId === 'space-ent') {
+          // Switch A: Main wins the fence write, but the response is held.
+          return gatedCommitA
+        }
+        // Main's authoritative fence write for every other commit.
+        declaredActiveSpace = targetProductSpaceId
+        return { success: true as const, from: personalId, to: targetProductSpaceId }
+      },
+    })
+
+    let switchingA: Promise<void> = Promise.resolve()
+    await act(async () => {
+      switchingA = result.current.requestSwitch('space-ent')
+    })
+    for (let i = 0; i < 300 && commitTargets.length < 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(commitTargets).toEqual(['space-ent'])
+
+    // The user cancels A (dialog closes, generation advances, the cancel
+    // verdict is requested for A's own token) and immediately starts
+    // switch B to the second target.
+    await act(async () => {
+      result.current.cancelSwitch()
+    })
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(cancelledTokens).toContain('token-space-ent')
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent-2')
+    })
+    // Switch B committed and published everywhere: Main fence, renderer
+    // active id, persisted selection, context key and dialog state.
+    expect(declaredActiveSpace).toBe('space-ent-2')
+    expect(result.current.activeProductSpaceId).toBe('space-ent-2')
+    expect(getStoredActiveProductSpaceId(accountId)).toBe('space-ent-2')
+    expect(result.current.productSpaceContextKey).toContain('space-ent-2')
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(result.current.flowState).toBe('ready')
+
+    // A's delayed COMMIT success must NOT consume B's token/verdict state or
+    // publish A: the operation-scoped records keep every signal on its own
+    // operation, so the renderer stays converged on B.
+    await act(async () => {
+      releaseCommitA()
+      await switchingA
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent-2')
+    expect(getStoredActiveProductSpaceId(accountId)).toBe('space-ent-2')
+    expect(result.current.productSpaceContextKey).toContain('space-ent-2')
+    expect(result.current.pendingSwitch).toBeNull()
+    expect(result.current.flowState).toBe('ready')
+    expect(declaredActiveSpace).toBe('space-ent-2')
   })
 })

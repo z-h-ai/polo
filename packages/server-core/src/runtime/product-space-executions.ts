@@ -169,11 +169,20 @@ export function resetProductSpaceExecutionRegistryForTests(): void {
  * so the renderer can converge to the committed target instead of splitting
  * Main fence and renderer projection across two ProductSpaces. A newer
  * commit overwrites the record, so an older token can never claim it.
+ *
+ * The record is account-bound and fence-generation-bound: CANCEL_SWITCH
+ * authenticates the current trusted Admin account against `accountId` and
+ * verifies `fenceGeneration` (captured after the fence write) before
+ * disclosing anything, and every fence mutation clears the record
+ * atomically — a revoked, rebound, restored, logged-out or replaced fence
+ * can never authenticate a stale cancellation for another account.
  */
 export interface LastCommittedSwitch {
   token: string
   accountId: string
   targetProductSpaceId: string
+  /** Fence generation captured immediately after the commit's fence write. */
+  fenceGeneration: number
 }
 
 let lastCommittedSwitch: LastCommittedSwitch | null = null
@@ -215,11 +224,17 @@ export function setRuntimeActiveProductSpace(productSpaceId: string | null): voi
     runtimeActiveAccountId = null
   }
   runtimeFenceGeneration += 1
+  // Every fence mutation (revoke, re-commit, rebind, offline restore)
+  // invalidates the late-cancel linearization anchor atomically: a commit
+  // record for a fence that no longer exists must never authenticate a
+  // delayed cancellation.
+  lastCommittedSwitch = null
 }
 
 /** Binds (or re-binds) the trusted account of the committed fence. */
 export function setRuntimeActiveProductSpaceAccount(accountId: string | null): void {
   runtimeActiveAccountId = accountId
+  lastCommittedSwitch = null
 }
 
 export function getRuntimeActiveProductSpaceAccount(): string | null {
