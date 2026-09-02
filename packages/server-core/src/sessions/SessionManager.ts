@@ -25,9 +25,14 @@ import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceScope,
   isRuntimeOfflineReadOnly,
 } from '../runtime/product-space-executions'
-import { getSyncTrustedProductSpaceAccountId, captureTrustedSessionScope } from '../handlers/rpc/trusted-product-space-account'
+import {
+  getSyncTrustedProductSpaceAccountId,
+  captureTrustedSessionScope,
+  trustedScopeMatchesSessionRecord,
+} from '../handlers/rpc/trusted-product-space-account'
 
 // R34-1: the trusted session scope is captured through THE shared atomic
 // helper (see trusted-product-space-account). Unlike the previous local
@@ -1151,22 +1156,125 @@ export class SessionManager implements ISessionManager {
   private readonly runtimeProfile: 'default' | 'cli-one-shot'
   private readonly runtimeWorkspace?: Workspace
   readonly sessionStorage: SessionStorage
+  /**
+   * R36-1: the list_sessions implementation bound to the managed session's
+   * CURRENT complete Main-owned scope. An out-of-scope managed session
+   * (legacy/unbound, replaced account, missing fence, or in-flight
+   * fence/account replacement) lists NOTHING — not even itself. In-scope,
+   * only sessions matching the same trusted account, committed ProductSpace
+   * and Workspace are listed.
+   */
+  private listSessionsInManagedScope(
+    managed: ManagedSession,
+    options?: { status?: string; label?: string; search?: string; sortBy?: 'recent' | 'name' | 'status'; limit?: number; offset?: number },
+  ): { total: number; returned: number; sessions: Array<{ id: string; name: string; labels: string[]; status: string; createdAt: number }> } {
+    const scope = this.managedTrustedScope(managed)
+    if (!scope) {
+      return { total: 0, returned: 0, sessions: [] }
+    }
+    const DEFAULT_LIMIT = 20
+    const MAX_LIMIT = 100
+    const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
+    const offset = options?.offset ?? 0
+
+    let sessions = this.getSessions(managed.workspace.id).filter(s => (
+      trustedScopeMatchesSessionRecord(s, scope)
+    ))
+
+    // Filter
+    if (options?.status) {
+      sessions = sessions.filter(s => s.sessionStatus === options.status)
+    }
+    if (options?.label) {
+      sessions = sessions.filter(s => s.labels?.includes(options.label!))
+    }
+    if (options?.search) {
+      const needle = options.search.toLowerCase()
+      sessions = sessions.filter(s => s.name?.toLowerCase().includes(needle))
+    }
+
+    // Sort
+    const sortBy = options?.sortBy ?? 'recent'
+    if (sortBy === 'recent') {
+      sessions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    } else if (sortBy === 'name') {
+      sessions.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+    } else if (sortBy === 'status') {
+      sessions.sort((a, b) => (a.sessionStatus ?? '').localeCompare(b.sessionStatus ?? ''))
+    }
+
+    const total = sessions.length
+
+    // Paginate
+    const page = sessions.slice(offset, offset + limit)
+
+    return {
+      total,
+      returned: page.length,
+      sessions: page.map(s => ({
+        id: s.id,
+        name: s.name ?? s.id,
+        labels: s.labels ?? [],
+        status: s.sessionStatus ?? 'todo',
+        createdAt: s.createdAt ?? 0,
+      })),
+    }
+  }
+
   private sessions: Map<string, ManagedSession> = new Map()
 
   /**
-   * R35-1: resolves a self-management tool TARGET session through the
-   * managed session's complete trusted scope. The session itself is always
-   * its own valid target; any OTHER session must carry the same immutable
-   * trusted account, committed ProductSpace and Workspace — otherwise the
-   * target does not exist for this caller (null → fail closed).
+   * R36-1: resolves the CURRENT complete Main-owned trusted scope for one
+   * managed session at EVERY callback invocation. The managed session
+   * itself must still sit inside the committed fence: a legacy record
+   * without an account binding, a session bound to a replaced account, a
+   * missing fence, or an in-flight fence/account replacement (fence account
+   * and synchronous mirror disagreeing) makes the scope null — fail closed
+   * even for SELF targets. There is no self bypass and no legacy exception.
+   */
+  private managedTrustedScope(managed: ManagedSession): {
+    accountId: string
+    productSpaceId: string
+    workspaceId: string
+  } | null {
+    const runtimeScope = getRuntimeActiveProductSpaceScope()
+    const syncAccountId = getSyncTrustedProductSpaceAccountId()
+    if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) return null
+    if (!trustedScopeMatchesSessionRecord({
+      accountId: managed.accountId,
+      productSpaceId: managed.productSpaceId,
+      workspaceId: managed.workspace.id,
+    }, {
+      accountId: runtimeScope.accountId,
+      productSpaceId: runtimeScope.productSpaceId,
+      workspaceId: managed.workspace.id,
+    })) {
+      return null
+    }
+    return {
+      accountId: runtimeScope.accountId,
+      productSpaceId: runtimeScope.productSpaceId,
+      workspaceId: managed.workspace.id,
+    }
+  }
+
+  /**
+   * R35-1/R36-1: resolves a self-management tool TARGET session through the
+   * managed session's CURRENT complete Main-owned scope. The managed
+   * session and the target — including a SELF target — must both match the
+   * same immutable trusted account, committed ProductSpace and Workspace;
+   * anything else does not exist for this caller (null → fail closed).
    */
   private managedScopeTarget(managed: ManagedSession, targetId: string): ManagedSession | null {
-    if (targetId === managed.id) return managed
+    const scope = this.managedTrustedScope(managed)
+    if (!scope) return null
     const target = this.sessions.get(targetId)
     if (!target) return null
-    if (!managed.accountId || target.accountId !== managed.accountId) return null
-    if (!managed.productSpaceId || target.productSpaceId !== managed.productSpaceId) return null
-    if (target.workspace.id !== managed.workspace.id) return null
+    if (!trustedScopeMatchesSessionRecord({
+      accountId: target.accountId,
+      productSpaceId: target.productSpaceId,
+      workspaceId: target.workspace.id,
+    }, scope)) return null
     return target
   }
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
@@ -4303,59 +4411,11 @@ export class SessionManager implements ISessionManager {
           }
         },
         listSessionsFn: (options) => {
-          const DEFAULT_LIMIT = 20
-          const MAX_LIMIT = 100
-          const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
-          const offset = options?.offset ?? 0
-
-          // R35-1: the listing is bound to the managed session's complete
-          // trusted scope — same account, committed ProductSpace and
-          // Workspace (the session itself always listable).
-          let sessions = this.getSessions(managed.workspace.id).filter(s => (
-            s.id === managed.id
-            || (Boolean(managed.accountId)
-              && s.accountId === managed.accountId
-              && s.productSpaceId === managed.productSpaceId)
-          ))
-
-          // Filter
-          if (options?.status) {
-            sessions = sessions.filter(s => s.sessionStatus === options.status)
-          }
-          if (options?.label) {
-            sessions = sessions.filter(s => s.labels?.includes(options.label!))
-          }
-          if (options?.search) {
-            const needle = options.search.toLowerCase()
-            sessions = sessions.filter(s => s.name?.toLowerCase().includes(needle))
-          }
-
-          // Sort
-          const sortBy = options?.sortBy ?? 'recent'
-          if (sortBy === 'recent') {
-            sessions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-          } else if (sortBy === 'name') {
-            sessions.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-          } else if (sortBy === 'status') {
-            sessions.sort((a, b) => (a.sessionStatus ?? '').localeCompare(b.sessionStatus ?? ''))
-          }
-
-          const total = sessions.length
-
-          // Paginate
-          const page = sessions.slice(offset, offset + limit)
-
-          return {
-            total,
-            returned: page.length,
-            sessions: page.map(s => ({
-              id: s.id,
-              name: s.name ?? s.id,
-              labels: s.labels ?? [],
-              status: s.sessionStatus ?? 'todo',
-              createdAt: s.createdAt ?? 0,
-            })),
-          }
+          // R36-1: the listing routes through the SAME fail-closed current-
+          // scope resolution as every other callback — an out-of-scope
+          // managed session (legacy, replaced account, missing fence, or
+          // in-flight replacement) lists NOTHING, not even itself.
+          return this.listSessionsInManagedScope(managed, options)
         },
         resolveLabelsFn: (labels: string[]) => {
           const labelConfig = loadLabelConfig(managed.workspace.rootPath)
@@ -6789,12 +6849,15 @@ export class SessionManager implements ISessionManager {
     }
 
     // Space AND account AND workspace fence: task output belongs to its
-    // owning session's complete immutable scope.
+    // owning session's complete immutable scope (R35-1, routed through the
+    // shared fail-closed comparator in R36-1).
     const owner = this.sessions.get(sessionId)
     if (!owner) return null
-    if (!owner.productSpaceId || owner.productSpaceId !== scope.productSpaceId) return null
-    if (!owner.accountId || owner.accountId !== scope.accountId) return null
-    if (owner.workspace.id !== scope.workspaceId) return null
+    if (!trustedScopeMatchesSessionRecord({
+      accountId: owner.accountId,
+      productSpaceId: owner.productSpaceId,
+      workspaceId: owner.workspace.id,
+    }, scope)) return null
 
     const managed = this.sessions.get(sessionId)
     const info = managed?.backgroundTaskOutputs.get(taskId)

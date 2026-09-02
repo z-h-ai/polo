@@ -212,3 +212,21 @@ export function captureCompleteTrustedSessionScope(
   if (!scope) return null
   return { ...scope, workspaceId: callerWorkspaceId }
 }
+
+/**
+ * R36-1: the ONE fail-closed scope-record comparator shared by every
+ * session predicate. A session record is inside a trusted scope only when
+ * it carries the scope's immutable account, the committed ProductSpace and
+ * (when the scope carries a caller Workspace) exactly that Workspace.
+ * Records without an account binding never match — there is no legacy
+ * exception.
+ */
+export function trustedScopeMatchesSessionRecord(
+  record: { accountId?: string | null; productSpaceId?: string | null; workspaceId?: string | null },
+  scope: { accountId: string; productSpaceId: string; workspaceId?: string | null },
+): boolean {
+  if (!record.accountId || record.accountId !== scope.accountId) return false
+  if (!record.productSpaceId || record.productSpaceId !== scope.productSpaceId) return false
+  if (scope.workspaceId && record.workspaceId !== scope.workspaceId) return false
+  return true
+}

@@ -1826,7 +1826,7 @@ describe('restriction transaction with authoritative fence state (R33-2)', () =>
 })
 
 describe('aggregate stop supersession (R35-3)', () => {
-  it('STOP_ALL maps a superseded replacement to a retryable failure and keeps it registered', async () => {
+  it('STOP_ALL keeps an active superseding generation nonterminal: allStopped=false with its real status (R36-2)', async () => {
     const { invoke } = createHarness()
     let releaseProbe: () => void = () => {}
     const probeGate = new Promise<void>(resolve => {
@@ -1844,21 +1844,62 @@ describe('aggregate stop supersession (R35-3)', () => {
 
     const pending = invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
     await new Promise(resolve => setTimeout(resolve, 30))
-    // A same-ID replacement takes the slot during the awaited drain.
+    // A same-ID replacement takes the slot during the awaited drain and
+    // carries its own live status provider.
     const replacement = fakeExecution({ executionId: 'exec-stopall-superseded' })
+    replacement.getStatus = () => 'running'
     const ownedReplacement = registerProductSpaceExecution(replacement)
     releaseProbe()
 
     const result = await pending
     expect(result.success).toBe(true)
-    const summary = (result as { result: { executions: Array<{ executionId: string; status: string; errorCode?: string }> } })
-      .result.executions.find(execution => execution.executionId === 'exec-stopall-superseded')
-    // The stale generation's terminal outcome never becomes a success.
-    expect(summary?.status).toBe('failed')
-    expect(summary?.errorCode).toBe('runtime_stop_failed')
+    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string; errorCode?: string }> } }).result
+    // R36-2: the surviving replacement keeps the aggregate explicitly
+    // NONTERMINAL — allStopped=false, real active status, no failure mask.
+    expect(aggregate.allStopped).toBe(false)
+    const summary = aggregate.executions.find(execution => execution.executionId === 'exec-stopall-superseded')
+    expect(summary?.status).toBe('running')
+    expect(summary?.errorCode).toBeUndefined()
     // The replacement is untouched, still registered and active.
     expect(getRegisteredProductSpaceExecution('exec-stopall-superseded')).toBe(ownedReplacement)
     expect(await ownedReplacement.isActive()).toBe(true)
+  })
+
+  it('STOP_ALL keeps a SAME-OBJECT superseding registration nonterminal (R36-2 runtime reproduction)', async () => {
+    const { invoke } = createHarness()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    let probeCalls = 0
+    const producer = fakeExecution({ executionId: 'exec-stopall-same-object' })
+    producer.isActive = async () => {
+      probeCalls += 1
+      // Call 1: the STOP_ALL liveness snapshot (still active). Call 2: the
+      // awaited drain window of the stop itself.
+      if (probeCalls === 2) await probeGate
+      return probeCalls <= 1
+    }
+    registerProductSpaceExecution(producer)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    // The exact R36 runtime reproduction: the SAME producer object
+    // re-registers during the awaited stop — a new registry-owned
+    // generation takes the slot and stays live.
+    const replacement = registerProductSpaceExecution(producer)
+    replacement.isActive = () => true
+    replacement.getStatus = () => 'waiting_for_network'
+    releaseProbe()
+
+    const result = await pending
+    expect(result.success).toBe(true)
+    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string }> } }).result
+    expect(aggregate.allStopped).toBe(false)
+    const summary = aggregate.executions.find(execution => execution.executionId === 'exec-stopall-same-object')
+    expect(summary?.status).toBe('waiting_for_network')
+    expect(getRegisteredProductSpaceExecution('exec-stopall-same-object')).toBe(replacement)
+    expect(await replacement.isActive()).toBe(true)
   })
 
   it('the switch stop phase records superseded as failed and the finalize gate keeps the transaction non-committable', async () => {

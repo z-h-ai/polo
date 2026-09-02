@@ -283,9 +283,11 @@ export async function stopAllProductSpaceExecutions(input: {
       : { ...execution, status: 'failed', errorCode: 'runtime_stop_failed' }
   })
 
-  // R35-3: re-enumerate the exact account/ProductSpace scope before any
-  // success: a same-ID replacement (or any execution that registered during
-  // the awaited drains) that is STILL active forces its summary nonterminal.
+  // R35-3/R36-2: re-enumerate the exact account/ProductSpace scope before
+  // any success: a same-ID replacement (or any execution that registered
+  // during the awaited drains) that is STILL active is projected with its
+  // REAL owner-scoped status as an explicit NONTERMINAL row — allStopped
+  // becomes false and the stale generation is never terminal success.
   for (const execution of listRegisteredProductSpaceExecutions()) {
     if (execution.scope.accountId !== accountId) continue
     if (execution.scope.productSpaceId !== productSpaceId) continue
@@ -296,23 +298,25 @@ export async function stopAllProductSpaceExecutions(input: {
       activeNow = true
     }
     if (!activeNow) continue
+    const realStatus: ExecutionStatus = execution.getStatus?.() ?? 'running'
     const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
     const existing = summaries.find(summary => summary.executionId === parsedId)
     if (existing) {
-      existing.status = 'failed'
-      existing.errorCode = 'runtime_stop_failed'
+      existing.status = realStatus
+      delete existing.errorCode
     } else {
       summaries.push({
         executionId: parsedId,
         scope: execution.scope,
         name: execution.name,
-        status: 'failed',
-        errorCode: 'runtime_stop_failed',
+        status: realStatus,
       })
     }
   }
 
   const result: StopAllExecutionsResult = {
+    // R36-2: a surviving active replacement keeps the aggregate explicitly
+    // NONTERMINAL — allStopped is false while any scoped execution is live.
     allStopped: summaries.every(execution => (
       execution.status === 'stopped' || execution.status === 'failed'
     )),

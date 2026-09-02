@@ -20,6 +20,7 @@ import {
   captureCompleteTrustedSessionScope,
   captureTrustedSessionScope,
   getSyncTrustedProductSpaceAccountId,
+  trustedScopeMatchesSessionRecord,
 } from './trusted-product-space-account'
 
 /**
@@ -79,19 +80,21 @@ function sessionInsideActiveSpace(
   sessionId: string,
   callerWorkspaceId?: string | null,
 ): boolean {
-  if (!callerWorkspaceId) return false
+  // R36-1: the ONE fail-closed scope comparator — no boundary keeps a
+  // divergent authorization path.
   const activeProductSpaceId = getRuntimeActiveProductSpace()
   if (!activeProductSpaceId) return false
   const trustedAccountId = getSyncTrustedProductSpaceAccountId()
-  if (!trustedAccountId) return false
+  if (!trustedAccountId || !callerWorkspaceId) return false
   const session = sessionManager
     .getSessions()
     .find(candidate => candidate.id === sessionId)
   if (!session) return false
-  if (session.productSpaceId !== activeProductSpaceId) return false
-  if (!session.accountId || session.accountId !== trustedAccountId) return false
-  if (session.workspaceId !== callerWorkspaceId) return false
-  return true
+  return trustedScopeMatchesSessionRecord(session, {
+    accountId: trustedAccountId,
+    productSpaceId: activeProductSpaceId,
+    workspaceId: callerWorkspaceId,
+  })
 }
 
 /**

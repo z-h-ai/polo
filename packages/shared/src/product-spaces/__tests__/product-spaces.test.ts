@@ -613,10 +613,18 @@ describe('ProductSpace runtime isolation', () => {
       expectedAccountId, expectedProductSpaceId,
       [expectedExecutionScope],
     )).toThrow('duplicate executionId')
-    expect(() => parseStopAllExecutionsResultForProductSpace(
+    // R36-2: a nonterminal stop-all result is the explicit survivor contract
+    // — allStopped=false with real active statuses parses and stays
+    // nonterminal, while allStopped=true over a live row stays a
+    // contradiction.
+    expect(parseStopAllExecutionsResultForProductSpace(
       { allStopped: false, executions: [execution] }, expectedAccountId, expectedProductSpaceId,
       [expectedExecutionScope],
-    )).toThrow('non-terminal')
+    ).allStopped).toBe(false)
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [execution] }, expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
+    )).toThrow('allStopped must reflect')
     expect(() => parseStopAllExecutionsResultForProductSpace(
       { allStopped: true, executions: [] }, expectedAccountId, expectedProductSpaceId,
       [expectedExecutionScope],

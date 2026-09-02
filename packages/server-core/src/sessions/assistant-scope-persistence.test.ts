@@ -815,10 +815,156 @@ describe('assistant aggregate and self-management scope (R35-1)', () => {
     expect(resolver.call(sm, managed, 'cross-workspace')).toBeNull()
     expect(resolver.call(sm, managed, 'missing')).toBeNull()
 
-    // A legacy managed session (no account binding) can never address a
-    // second session — only itself.
+    // R36-1: a legacy managed session (no account binding) is outside the
+    // current Main-owned scope — even its OWN self target is rejected.
     const legacy = seedManaged(sm, { id: 'legacy', productSpaceId: personalId })
-    expect(resolver.call(sm, legacy, 'legacy')).toBe(legacy)
+    expect(resolver.call(sm, legacy, 'legacy')).toBeNull()
     expect(resolver.call(sm, legacy, 'same-scope')).toBeNull()
+  })
+})
+
+describe('assistant self-management current-scope enforcement (R36-1)', () => {
+  let tmpRoot: string
+  let signedInAccountId: string | null
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+
+  const buildManager = () => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: storage,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  const seedManaged = (sm: SessionManager, input: {
+    id: string
+    accountId?: string
+    productSpaceId?: string
+    workspaceId?: string
+  }) => {
+    const workspace = { id: input.workspaceId ?? 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    const managed = createManagedSession({
+      id: input.id,
+      workspaceRootPath: wsRoot(),
+      name: input.id,
+      productSpaceId: input.productSpaceId,
+      accountId: input.accountId,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = input.productSpaceId
+    managed.accountId = input.accountId
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(input.id, managed)
+    return managed
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-scope36-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new RootedSessionStorageCtor(join(tmpRoot, 'sessions'))
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    signedInAccountId = accountA
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  const resolverOf = (sm: SessionManager) => (sm as unknown as {
+    managedScopeTarget: (managed: unknown, targetId: string) => unknown
+  }).managedScopeTarget
+
+  it('self targets are rejected for legacy, replaced-account, missing-fence, and in-flight-replacement states', async () => {
+    const sm = buildManager()
+    const managed = seedManaged(sm, { id: 'managed-a', accountId: accountA, productSpaceId: personalId })
+    const legacy = seedManaged(sm, { id: 'legacy', productSpaceId: personalId })
+    const resolver = resolverOf(sm)
+
+    // R36-1 runtime reproduction 1: a legacy (unbound) session can no
+    // longer use self-management, even on itself.
+    expect(resolver.call(sm, legacy, 'legacy')).toBeNull()
+
+    // R36-1 runtime reproduction 2: Main's trusted account/fence moves to
+    // account B — the account-A session's SELF target is rejected.
+    signedInAccountId = accountB
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+
+    // A missing fence rejects everything.
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(null)
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+
+    // An in-flight fence/account replacement (fence account and mirror
+    // disagreeing) rejects everything.
+    setRuntimeActiveProductSpace(personalId)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+  })
+
+  it('valid current-scope self and non-self targets remain usable', async () => {
+    const sm = buildManager()
+    const managed = seedManaged(sm, { id: 'managed-a', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'same-scope', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'cross-account', accountId: accountB, productSpaceId: personalId })
+    seedManaged(sm, { id: 'cross-space', accountId: accountA, productSpaceId: 'space-other' })
+    seedManaged(sm, { id: 'cross-workspace', accountId: accountA, productSpaceId: personalId, workspaceId: 'ws_other' })
+    const resolver = resolverOf(sm)
+
+    expect(resolver.call(sm, managed, 'managed-a')).toBe(managed)
+    expect(resolver.call(sm, managed, 'same-scope')).not.toBeNull()
+    expect(resolver.call(sm, managed, 'cross-account')).toBeNull()
+    expect(resolver.call(sm, managed, 'cross-space')).toBeNull()
+    expect(resolver.call(sm, managed, 'cross-workspace')).toBeNull()
+
+    // A committed fence bound to a DIFFERENT space rejects the session even
+    // for itself (the record no longer matches the current scope).
+    setRuntimeActiveProductSpace('space-other')
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+  })
+
+  it('list_sessions lists nothing for an out-of-scope managed session and filters in-scope', async () => {
+    const sm = buildManager()
+    seedManaged(sm, { id: 'managed-a', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'same-scope', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'cross-account', accountId: accountB, productSpaceId: personalId })
+    const list = (sm as unknown as {
+      listSessionsInManagedScope: (managed: unknown, options?: never) => { total: number; returned: number; sessions: Array<{ id: string }> }
+    }).listSessionsInManagedScope
+
+    // Out-of-scope (legacy) managed session: empty listing.
+    const legacy = seedManaged(sm, { id: 'legacy', productSpaceId: personalId })
+    expect(list.call(sm, legacy)).toEqual({ total: 0, returned: 0, sessions: [] })
+
+    // In-scope: only same-account sessions of the same space/workspace.
+    const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('managed-a')
+    const result = list.call(sm, managed)
+    expect(result.total).toBe(2)
+    expect(result.sessions.map(item => item.id).sort()).toEqual(['managed-a', 'same-scope'])
+
+    // After an account replacement: empty again.
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    expect(list.call(sm, managed).sessions).toEqual([])
   })
 })
