@@ -697,6 +697,48 @@ describe('offline read-only restore', () => {
     expect(replay.success).toBe(false)
   })
 
+  it('refuses a same-space revalidation commit when the space degraded to read_only', async () => {
+    // Offline same-space PREPARE succeeds while spaceA is active...
+    setRuntimeOfflineReadOnly(true)
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
+    expect(prepared.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
+
+    // ...but the authoritative list degrades spaceA to read_only before the
+    // commit: the commit must fail WITHOUT moving the fence or clearing the
+    // offline read-only view.
+    listResult = {
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        { id: spaceA, kind: 'enterprise', name: 'A', accessMode: 'read_only' },
+        { id: spaceB, kind: 'enterprise', name: 'B', accessMode: 'active' },
+        { id: personalId, kind: 'personal', name: '我的空间', accessMode: 'active' },
+      ],
+    }
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceA,
+    )
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('FORBIDDEN')
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
+
+    // The token is consumed by the failed commit; a replay fails and the
+    // fail-closed state is still intact.
+    const replay = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceA,
+    )
+    expect(replay.success).toBe(false)
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
+  })
+
   it('keeps the offline view when the restored space lost membership', async () => {
     setRuntimeOfflineReadOnly(true)
     const { invoke } = createHarness()

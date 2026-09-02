@@ -654,6 +654,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         setSwitchInProgress(false)
         // Re-verify at commit time that the target is still visible to this
         // account under the current contract.
+        const originProductSpaceId = pending.originProductSpaceId || null
         const list = await fetchTrustedProductSpaceList()
         if (!list) {
           return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
@@ -662,7 +663,13 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         if (!target) {
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
         }
-        const originProductSpaceId = pending.originProductSpaceId || null
+        // A same-space revalidation commit re-validates online that the
+        // space is still ACTIVE: a degradation to read_only between prepare
+        // and commit refuses the commit without touching the fence or the
+        // offline read-only view.
+        if (originProductSpaceId === targetProductSpaceId && target.accessMode !== 'active') {
+          return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is no longer active' }
+        }
         // A same-space revalidation commit carries no origin/target delta:
         // executions of that space belong to the target as well and may keep
         // running across a re-bootstrap.
