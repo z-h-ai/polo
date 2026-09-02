@@ -416,7 +416,16 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         if (originProductSpaceId && !isRuntimeFenceBoundToAccount(trustedAccountId)) {
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The committed ProductSpace belongs to a different account' }
         }
-        if (targetProductSpaceId === originProductSpaceId && !isRuntimeOfflineReadOnly()) {
+        // A re-bootstrap against the already-committed SAME space is an
+        // idempotent revalidation — not a no-op error. It re-verifies the
+        // contract and membership online and its commit atomically
+        // re-publishes the fence (clearing the offline read-only view when
+        // one was active). Required so a second bootstrap of a live session
+        // cannot fail and fall back to a stale device snapshot.
+        const sameSpace = targetProductSpaceId === originProductSpaceId
+        const offlineRevalidation =
+          sameSpace && (isRuntimeOfflineReadOnly() || isRuntimeFenceBoundToAccount(trustedAccountId))
+        if (sameSpace && !offlineRevalidation) {
           return {
             success: false as const,
             errorCode: 'VALIDATION_ERROR',
@@ -429,12 +438,11 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
         setSwitchInProgress(true)
         try {
-          // Online revalidation of the offline read-only view: the restored
-          // view shows the same space, so a plain switch would be rejected as
-          // a no-op. Instead this trusted transaction re-validates the
+          // Revalidation of the committed/offline view: the restored view
+          // shows the same space, so a plain switch would be rejected as a
+          // no-op. Instead this trusted transaction re-validates the
           // contract and membership online and its commit atomically clears
           // the offline read-only view (the fence itself is unchanged).
-          const offlineRevalidation = targetProductSpaceId === originProductSpaceId
           const list = await fetchTrustedProductSpaceList()
           if (!list) {
             return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
@@ -443,7 +451,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           if (!target) {
             return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
           }
-          if (offlineRevalidation && target.accessMode !== 'active') {
+          if (sameSpace && target.accessMode !== 'active') {
             return { success: false as const, errorCode: 'FORBIDDEN', message: 'The restored ProductSpace is no longer active' }
           }
 
@@ -655,17 +663,23 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
         }
         const originProductSpaceId = pending.originProductSpaceId || null
-        for (const execution of listRegisteredProductSpaceExecutions()) {
-          if (execution.scope.accountId !== trustedAccountId) continue
-          if (execution.scope.productSpaceId !== originProductSpaceId) continue
-          let active: boolean
-          try {
-            active = Boolean(await execution.isActive())
-          } catch {
-            active = true
-          }
-          if (active) {
-            return { success: false as const, errorCode: 'runtime_stop_failed', message: 'Origin executions appeared after prepare' }
+        // A same-space revalidation commit carries no origin/target delta:
+        // executions of that space belong to the target as well and may keep
+        // running across a re-bootstrap.
+        const revalidation = originProductSpaceId === targetProductSpaceId
+        if (!revalidation) {
+          for (const execution of listRegisteredProductSpaceExecutions()) {
+            if (execution.scope.accountId !== trustedAccountId) continue
+            if (execution.scope.productSpaceId !== originProductSpaceId) continue
+            let active: boolean
+            try {
+              active = Boolean(await execution.isActive())
+            } catch {
+              active = true
+            }
+            if (active) {
+              return { success: false as const, errorCode: 'runtime_stop_failed', message: 'Origin executions appeared after prepare' }
+            }
           }
         }
         // A successful online commit ends the offline read-only view and

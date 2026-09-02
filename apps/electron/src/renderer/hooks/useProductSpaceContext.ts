@@ -418,6 +418,12 @@ export function useProductSpaceContextState() {
     setError(null)
 
     let hadPersistedContext = false
+    // Whether THIS bootstrap already fetched the authoritative membership
+    // list from the server. When it did, a later failure must never fall
+    // back to the device-local verified snapshot: that snapshot can be
+    // stale (e.g. membership changed to personal-only) and would shadow the
+    // authoritative result that is already published.
+    let membershipFetchSucceeded = false
     try {
       const persisted = await getProductSpaceContextStorage(accountId)
       if (!isCurrentAccountScope(scope)) return null
@@ -443,6 +449,7 @@ export function useProductSpaceContextState() {
 
       const fetched = await fetchProductSpaces(scope)
       if (!fetched || !isCurrentAccountScope(scope)) return null
+      membershipFetchSucceeded = true
 
 
       const availableById = new Map<string, ProductSpaceSummary>(fetched.list.map(space => [space.id as string, space]))
@@ -460,10 +467,19 @@ export function useProductSpaceContextState() {
         enterContractBlocked(accountId)
         return 'contract-blocked'
       }
-      // Offline or server failure: restore the read-only offline view from
-      // the Main-owned verified snapshot + completed cleanup ledger. Main
-      // validates both before moving the fence; resolves, new App/Skill and
-      // assistant executions stay blocked until an online switch succeeds.
+      // Offline or server failure of the MEMBERSHIP FETCH itself: restore
+      // the read-only offline view from the Main-owned verified snapshot +
+      // completed cleanup ledger. Main validates both before moving the
+      // fence; resolves, new App/Skill and assistant executions stay blocked
+      // until an online switch succeeds.
+      //
+      // When the fetch SUCCEEDED but a later stage failed, the offline
+      // snapshot must not shadow the already-published authoritative list:
+      // fail closed into the safe error state instead.
+      if (membershipFetchSucceeded) {
+        setFlowState('error')
+        return 'error'
+      }
       const restored = await window.electronAPI.productSpaceRestoreOfflineView()
       if (restored.success && isCurrentAccountScope(scope)) {
         applyListResponse(restored.snapshot)

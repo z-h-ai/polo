@@ -74,6 +74,7 @@ let switchResult: {
 }
 let commitResult: { success: boolean; errorCode?: string }
 const cancelledTokens: string[] = []
+let restoreOfflineViewCalls = 0
 let restoreViewResult: {
   success: boolean
   errorCode?: string
@@ -140,6 +141,7 @@ function configureIpc(): void {
         return { success: true as const }
       },
       productSpaceRestoreOfflineView: async () => {
+        restoreOfflineViewCalls += 1
         if (restoreViewResult?.success && restoreViewResult.snapshot) {
           return { success: true as const, snapshot: restoreViewResult.snapshot }
         }
@@ -203,6 +205,7 @@ beforeEach(() => {
   switchResult = { success: true, executions: [] }
   commitResult = { success: true }
   restoreViewResult = { success: false, errorCode: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+  restoreOfflineViewCalls = 0
   cancelledTokens.length = 0
   configureIpc()
 })
@@ -713,6 +716,67 @@ describe('useProductSpaceContextState enterprise refresh signals', () => {
     // The stale enterprise space is still present in the published (old,
     // verified) list — no list without the active space was ever published.
     expect(result.current.allProductSpaces.some(space => space.id === 'space-ent')).toBe(true)
+  })
+})
+
+describe('useProductSpaceContextState stale-snapshot shadowing (REQ-010)', () => {
+  it('does not shadow the authoritative online list with the stale offline snapshot when a later stage fails', async () => {
+    // Fixture-shaped state: the device snapshot still contains the
+    // enterprise from a previous run, while the authoritative server list
+    // is personal-only.
+    productSpaceContextStorage = {
+      verifiedContext: {
+        list: {
+          contractVersion: 1,
+          personalProductSpaceId: personalId,
+          productSpaces: [
+            personalSpace,
+            enterpriseSpace('space-stale-ent', '过期企业空间'),
+          ],
+        },
+        activeProductSpaceId: personalId,
+        verifiedAt: Date.now(),
+      },
+    } as unknown as ProductSpaceContextStorage
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    // The atomic switch to personal fails AFTER the authoritative fetch.
+    activeContextAckSuccess = false
+
+    const { result } = renderHook(useHarness)
+    const outcome = await boot(result)
+    activeContextAckSuccess = true
+
+    // Fail closed: no business entry, no committed active space, and the
+    // published list is the AUTHORITATIVE personal-only one — the stale
+    // enterprise never renders.
+    expect(outcome).toBe('error')
+    expect(result.current.flowState).toBe('error')
+    expect(result.current.activeProductSpaceId).toBeNull()
+    expect(result.current.allProductSpaces.some(space => space.id === 'space-stale-ent')).toBe(false)
+    // The offline restore must not even be attempted: the fetch succeeded.
+    expect(restoreOfflineViewCalls).toBe(0)
+  })
+
+  it('an idempotent second bootstrap against the committed same space stays ready', async () => {
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('ready')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+
+    // A second bootstrap of the live session (e.g. re-login/validate) must
+    // succeed against the committed same space — not fail into a fallback.
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    expect(await boot(result)).toBe('ready')
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.allProductSpaces.some(space => space.kind === 'personal')).toBe(true)
   })
 })
 

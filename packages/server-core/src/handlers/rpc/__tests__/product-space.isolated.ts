@@ -714,11 +714,34 @@ describe('offline read-only restore', () => {
     expect(isRuntimeOfflineReadOnly()).toBe(true)
   })
 
-  it('still rejects a same-space switch outside the offline view', async () => {
+  it('treats a same-space prepare against the bound fence as idempotent revalidation', async () => {
+    // A re-bootstrap of a live session targets the already-committed space:
+    // this is an online revalidation (re-verified membership, fence kept),
+    // not a no-op error — otherwise a second bootstrap would fall back to a
+    // stale device snapshot.
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
+    expect(prepared.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceA)
+
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceA,
+    )
+    expect(committed.success).toBe(true)
+    expect(committed.from).toBe(spaceA)
+    expect(committed.to).toBe(spaceA)
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('still rejects a same-space prepare when the fence belongs to another account', async () => {
+    setRuntimeActiveProductSpaceAccount('account-other')
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
     expect(prepared.success).toBe(false)
-    expect(prepared.errorCode).toBe('VALIDATION_ERROR')
+    expect(prepared.errorCode).toBe('FORBIDDEN')
+    expect(getRuntimeActive()).toBe(spaceA)
     expect(isRuntimeOfflineReadOnly()).toBe(false)
   })
 
