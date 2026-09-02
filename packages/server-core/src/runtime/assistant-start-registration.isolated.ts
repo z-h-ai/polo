@@ -353,3 +353,60 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
       .toEqual(['session-fresh'])
   })
 })
+
+describe('assistant execution real status projection (R34-3)', () => {
+  it('the production provider projects preparing during bootstrap, running in the turn, and stopping after stop dispatch until terminal', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    setRuntimeActiveProductSpace(organizationA)
+    setRuntimeActiveProductSpaceAccount(trustedAccountId)
+    setSyncTrustedProductSpaceAccountId(trustedAccountId)
+    setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
+
+    const processingState = { isProcessing: false }
+    const sessionStub = {
+      getSessions: (): Array<{ id: string; isProcessing: boolean }> => [
+        { id: 'session-status', isProcessing: processingState.isProcessing },
+      ],
+      // Cancel is REQUESTED here; the in-flight turn winds down separately
+      // (as in production), so the stop drain must observe it stay active
+      // until the terminal transition below.
+      cancelProcessing: async () => {},
+    }
+    const { registerAssistantExecutionForSend, confirmAssistantStartProcessing } = await import('./assistant-executions')
+
+    // Bootstrap window: the live reservation is genuinely 'preparing'.
+    const reservation = await registerAssistantExecutionForSend({
+      sessionManager: sessionStub,
+      sessionId: 'session-status',
+      workspaceId: 'ws-a',
+      productSpaceId: organizationA,
+      name: 'Status turn',
+    })
+    const registered = listRegisteredProductSpaceExecutions().find(
+      execution => execution.scope.executionId === 'session-status',
+    )
+    expect(registered).toBeDefined()
+    expect(registered!.getStatus?.()).toBe('preparing')
+    expect(await registered!.isActive()).toBe(true)
+
+    // Confirmed processing turn: 'running', still active for PREPARE/COMMIT.
+    expect(confirmAssistantStartProcessing({
+      sessionId: 'session-status',
+      reservation,
+    })).toBe(true)
+    processingState.isProcessing = true
+    expect(registered!.getStatus?.()).toBe('running')
+
+    // Stop dispatch: 'stopping' immediately — BEFORE the turn reaches a
+    // terminal state — and it stays active until the drain confirms.
+    const stopPromise = registered!.stop!()
+    expect(registered!.getStatus?.()).toBe('stopping')
+    expect(await registered!.isActive()).toBe(true)
+
+    // The turn reaches its terminal outcome: the stop drain confirms.
+    processingState.isProcessing = false
+    expect(await stopPromise).toBe('stopped')
+    expect(await registered!.isActive()).toBe(false)
+  })
+})

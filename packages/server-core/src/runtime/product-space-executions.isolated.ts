@@ -108,7 +108,7 @@ describe('stopRegisteredExecutionsOnce bounded window', () => {
       .toBe(true)
   }, EXECUTION_STOP_DRAIN_TIMEOUT_MS + 5_000)
 
-  it('a same-ID replacement registered during the old drain survives the terminal cleanup (R33-4)', async () => {
+  it('a same-ID replacement registered during the old drain survives the terminal cleanup (R33-4/R34-4)', async () => {
     resetProductSpaceExecutionRegistryForTests()
 
     // The OLD execution's liveness probe blocks until the test releases it,
@@ -138,8 +138,12 @@ describe('stopRegisteredExecutionsOnce bounded window', () => {
       },
       stop: async () => 'stopped',
     }
-    registerProductSpaceExecution(old)
-    const oldGeneration = old.generation
+    // R34-4: registration returns the fresh REGISTRY-OWNED entry; the
+    // producer object is copied, never mutated.
+    const ownedOld = registerProductSpaceExecution(old)
+    expect(ownedOld).not.toBe(old)
+    expect(old.generation).toBe(0)
+    const oldGeneration = ownedOld.generation
 
     // The stale stop starts and enters the old entry's terminal probe.
     const pending = stopRegisteredExecutionsOnce([old])
@@ -165,18 +169,70 @@ describe('stopRegisteredExecutionsOnce bounded window', () => {
       isActive: () => true,
       stop: async () => 'stopped',
     }
-    registerProductSpaceExecution(replacement)
-    expect(replacement.generation).not.toBe(oldGeneration)
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    expect(ownedReplacement.generation).not.toBe(oldGeneration)
 
     // The old probe now observes terminal and the stale cleanup completes.
     releaseOldProbe()
     const results = await pending
-    expect(results).toEqual([{ executionId: 'exec-reuse', status: 'stopped' }])
+    // The work reached terminal, but the slot now belongs to the newer
+    // registration: the outcome is truthfully flagged superseded.
+    expect(results).toEqual([{ executionId: 'exec-reuse', status: 'stopped', superseded: true }])
 
     // The generation CAS kept the REPLACEMENT registered — the stale stop
     // could never delete the newer ownership.
     const survivor = getRegisteredProductSpaceExecution('exec-reuse')
-    expect(survivor).toBe(replacement)
-    expect(getRegisteredProductSpaceExecutionGeneration('exec-reuse')).toBe(replacement.generation)
+    expect(survivor).toBe(ownedReplacement)
+    expect(getRegisteredProductSpaceExecutionGeneration('exec-reuse')).toBe(ownedReplacement.generation)
+  })
+
+  it('re-registering the SAME producer object during the old drain is a new generation the stale stop cannot delete (R34-4)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    const shared: RegisteredProductSpaceExecution = {
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-same-object',
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        workspaceId: 'ws-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'shared producer',
+      ref: 'session-a',
+      generation: 0,
+      isActive: async () => {
+        await probeGate
+        return false
+      },
+      stop: async () => 'stopped',
+    }
+
+    const first = registerProductSpaceExecution(shared)
+    const pending = stopRegisteredExecutionsOnce([shared])
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    // The exact review exploit: the SAME caller object is re-registered
+    // while the old terminal probe is still awaited. The registry-owned
+    // clone makes this a NEW generation — the stale stop can neither delete
+    // it nor claim its ownership, and the caller object was never mutated
+    // into the replacement.
+    const second = registerProductSpaceExecution(shared)
+    expect(second).not.toBe(first)
+    expect(second.generation).not.toBe(first.generation)
+    expect(shared.generation).toBe(0)
+
+    releaseProbe()
+    const results = await pending
+    expect(results).toEqual([{ executionId: 'exec-same-object', status: 'stopped', superseded: true }])
+
+    const survivor = getRegisteredProductSpaceExecution('exec-same-object')
+    expect(survivor).toBe(second)
+    expect(getRegisteredProductSpaceExecutionGeneration('exec-same-object')).toBe(second.generation)
   })
 })

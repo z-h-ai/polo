@@ -12,10 +12,12 @@ export interface RegisteredProductSpaceExecution {
   /** Runtime reference: session ID for assistant sessions, scope key for apps. */
   ref: string
   /**
-   * Immutable registration generation (R33-4). Assigned exactly once by the
-   * registry at registration time and never reused: a same-ID replacement is
-   * a NEW generation, so an awaited stop cleanup can compare-and-swap the
-   * registry against the captured entry instead of blindly deleting.
+   * Immutable registration generation (R33-4/R34-4). Assigned exactly once
+   * by the registry at registration time and never reused: a same-ID
+   * replacement is a NEW generation, so an awaited stop cleanup can
+   * compare-and-swap the registry against the captured entry instead of
+   * blindly deleting. The registry-owned entry is frozen — producer objects
+   * are copied at registration and never mutated.
    */
   generation: number
   /** Returns whether the execution is still in flight. May be async. */
@@ -34,11 +36,25 @@ const registry = new Map<string, RegisteredProductSpaceExecution>()
 /** Monotonic registration generation source (R33-4). */
 let registrationSequence = 0
 
+/**
+ * Registers an execution and returns the REGISTRY-OWNED entry (R34-4). The
+ * registry stores a fresh object with a newly assigned generation — the
+ * caller's object is never mutated and never becomes registry state, so
+ * re-registering the same caller object is always a NEW immutable
+ * generation that an in-flight stop cannot confuse with the old one. The
+ * owned entry's generation is registry state: consumers must never
+ * reassign it (behavior hooks may still be adjusted on the owned entry by
+ * the code that owns the registration).
+ */
 export function registerProductSpaceExecution(
   execution: RegisteredProductSpaceExecution,
-): void {
-  execution.generation = ++registrationSequence
-  registry.set(execution.scope.executionId, execution)
+): RegisteredProductSpaceExecution {
+  const owned: RegisteredProductSpaceExecution = {
+    ...execution,
+    generation: ++registrationSequence,
+  }
+  registry.set(owned.scope.executionId, owned)
+  return owned
 }
 
 export function unregisterProductSpaceExecution(executionId: string): void {
@@ -97,6 +113,13 @@ export interface ExecutionStopResult {
   executionId: string
   status: 'stopped' | 'failed'
   errorCode?: string
+  /**
+   * R34-4: true when the terminal outcome was reached but the registry slot
+   * is now owned by a DIFFERENT registration (same-ID replacement). The
+   * stopped work belonged to the captured generation only — callers must
+   * never report success against the newer ownership.
+   */
+  superseded?: boolean
 }
 
 /**
@@ -128,6 +151,12 @@ function withStopDeadline<T>(promise: Promise<T>, deadline: number): Promise<T |
  * `stopped` even when a sibling stop hangs. Timed-out or still-active
  * entries keep their registry entry (retryable) and are reported as
  * `runtime_stop_failed`.
+ *
+ * R34-4: entries are resolved to their REGISTRY-OWNED registration and the
+ * generation is captured before any await. The terminal cleanup deletes the
+ * slot only when the registry still holds exactly that entry AND generation;
+ * any same-ID replacement (a new registry-owned generation) survives and the
+ * result is flagged `superseded` so callers report truthful ownership.
  */
 export async function stopRegisteredExecutionsOnce(
   entries: RegisteredProductSpaceExecution[],
@@ -135,10 +164,18 @@ export async function stopRegisteredExecutionsOnce(
   if (entries.length === 0) return []
   const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
 
+  // Resolve to the registry-owned entry (a fresh immutable object created at
+  // registration) and capture entry + generation BEFORE any await: the drain
+  // below can outlive this ownership.
+  const owned = entries.map(entry => ({
+    entry: registry.get(entry.scope.executionId) ?? entry,
+    capturedGeneration: (registry.get(entry.scope.executionId) ?? entry).generation,
+  }))
+
   // One stop request per execution, dispatched concurrently. The requests
   // are bounded by the shared deadline but are NOT awaited as a group — a
   // hung stop must not delay sibling confirmations.
-  for (const entry of entries) {
+  for (const { entry } of owned) {
     void withStopDeadline(
       entry.stop().catch(() => undefined),
       deadline,
@@ -146,22 +183,30 @@ export async function stopRegisteredExecutionsOnce(
   }
 
   // Per-entry confirmation, concurrent, all under the same deadline.
-  const results = await Promise.all(entries.map(async entry => {
+  const results = await Promise.all(owned.map(async ({ entry, capturedGeneration }) => {
     const terminal = await withStopDeadline(
       drainExecutionUntilTerminal(entry, deadline),
       deadline,
     )
     if (terminal === true) {
-      // R33-4 generation CAS: only the CAPTURED registration may be deleted.
-      // A same-ID replacement registered while this stop awaited its
-      // terminal probe is a new generation — it stays registered and keeps
-      // the execution visible to cleanup/switching.
-      if (registry.get(entry.scope.executionId) === entry) {
+      // R33-4/R34-4 generation CAS: only the CAPTURED registration may be
+      // deleted. A same-ID replacement registered while this stop awaited
+      // its terminal probe is a new registry-owned generation — it stays
+      // registered and keeps the execution visible to cleanup/switching.
+      const current = registry.get(entry.scope.executionId)
+      if (current === entry && current.generation === capturedGeneration) {
         registry.delete(entry.scope.executionId)
+        return {
+          executionId: entry.scope.executionId,
+          status: 'stopped' as const,
+        }
       }
+      // The slot outlived this registration's ownership: the replacement is
+      // untouched and the stale completion is reported as superseded.
       return {
         executionId: entry.scope.executionId,
         status: 'stopped' as const,
+        superseded: true,
       }
     }
     return {

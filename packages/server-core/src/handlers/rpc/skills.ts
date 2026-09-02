@@ -48,12 +48,11 @@ import {
   type RegisteredProductSpaceExecution,
 } from '../../runtime/product-space-executions'
 import {
-  AccountIdSchema,
   ExecutionIdSchema,
   PRODUCT_SPACE_CONTRACT_VERSION,
-  ProductSpaceIdSchema,
+  ProductSpaceExecutionScopeSchema,
 } from '@polo-ai/shared/product-spaces'
-import type { ExecutionStatus, WorkspaceId } from '@polo-ai/shared/product-spaces'
+import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 
 function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | null {
   if (ctx.workspaceId) return ctx.workspaceId
@@ -86,21 +85,24 @@ function registerSkillOperationExecution(input: {
   let settled = false
   let cancelRequested = false
   const executionId = ExecutionIdSchema.parse(`skill-op:${input.operationId}`)
+  // R34 minor: the scope is validated through the shared runtime schema —
+  // no double assertions, no malformed identifiers can reach the registry.
+  const scope = ProductSpaceExecutionScopeSchema.parse({
+    contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+    executionId,
+    accountId: input.accountId,
+    productSpaceId: input.productSpaceId,
+    workspaceId: input.workspaceId,
+    subject: {
+      kind: 'artifact_instance',
+      artifactType: 'skill',
+      artifactInstanceId: input.slug,
+      versionId: input.version ?? input.slug,
+      version: input.version ?? input.slug,
+    },
+  })
   const execution: RegisteredProductSpaceExecution = {
-    scope: {
-      contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
-      executionId,
-      accountId: AccountIdSchema.parse(input.accountId),
-      productSpaceId: ProductSpaceIdSchema.parse(input.productSpaceId),
-      workspaceId: input.workspaceId as unknown as WorkspaceId,
-      subject: {
-        kind: 'artifact_instance',
-        artifactType: 'skill',
-        artifactInstanceId: input.slug,
-        versionId: input.version ?? input.slug,
-        version: input.version ?? input.slug,
-      },
-    } as unknown as RegisteredProductSpaceExecution['scope'],
+    scope,
     kind: 'skill_operation',
     name: input.slug,
     ref: input.operationId,

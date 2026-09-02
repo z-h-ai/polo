@@ -607,6 +607,22 @@ export function useProductSpaceContextState() {
       const storedId = getStoredActiveProductSpaceId(accountId)
       const restored = storedId ? availableById.get(storedId) : undefined
       const target = restored && isActiveSpace(restored) ? restored.id : fetched.personalId
+      // R34-2: reconcile the renderer's ephemeral restriction memory against
+      // Main's AUTHORITATIVE fence state. A reload/retryBootstrap erases the
+      // local Set but never Main's restriction — without this reconciliation
+      // a lingering Main fence would survive every later verified active
+      // recovery. Query failure fails closed (the bootstrap errors instead
+      // of publishing an unreconciled projection).
+      const fenceState = await window.electronAPI.productSpaceGetRestrictionState(accountId, target)
+      if (!isCurrentAccountScope(scope)) return null
+      if (!fenceState.success) {
+        throw { code: fenceState.errorCode ?? 'restriction_state_unavailable' }
+      }
+      if (fenceState.restricted) {
+        restrictionFenceRef.current.add(target)
+      } else {
+        restrictionFenceRef.current.delete(target)
+      }
       await applySpaceSelection(accountId, fetched.list, fetched.personalId, target)
       return 'ready'
     } catch (caught) {
@@ -679,6 +695,33 @@ export function useProductSpaceContextState() {
       const previousMode = activeIdNow
         ? activeAccessModeRef.current.get(activeIdNow)
         : undefined
+      // R34-2: reconcile renderer memory with Main's AUTHORITATIVE
+      // restriction state before any transition decision. The local Set is
+      // ephemeral (reload/retryBootstrap erases it); Main's fence is not.
+      // A query failure while the space is verified active fails closed —
+      // publishing an active projection over an unverifiable lingering
+      // fence is exactly the defect this reconciliation exists to prevent.
+      let mainRestricted: boolean | null = null
+      if (activeNow && activeIdNow) {
+        const authoritative = await window.electronAPI.productSpaceGetRestrictionState(
+          scope.accountId,
+          activeIdNow,
+        )
+        if (!isCurrentAccountScope(scope) || activeProductSpaceIdRef.current !== activeIdNow) {
+          return null
+        }
+        if (authoritative.success) {
+          mainRestricted = authoritative.restricted === true
+          if (mainRestricted) {
+            restrictionFenceRef.current.add(activeIdNow)
+          } else {
+            restrictionFenceRef.current.delete(activeIdNow)
+          }
+        } else if (activeNow.accessMode !== 'read_only') {
+          setFlowState('error')
+          return null
+        }
+      }
       let restrictionRecovery = false
       if (activeNow && activeIdNow) {
         if (activeNow.accessMode === 'read_only') {
@@ -704,9 +747,11 @@ export function useProductSpaceContextState() {
               return null
             }
           }
-        } else if (restrictionFenceRef.current.has(activeIdNow)) {
-          // Verified active recovery: clear the Main fence regardless of
-          // any cached previousMode. Clear failure is fail-closed.
+        } else if (mainRestricted === true || restrictionFenceRef.current.has(activeIdNow)) {
+          // Verified active recovery (R33-2/R34-2): clear the Main fence
+          // whenever Main reports it restricted OR local memory still
+          // believes it set — never because of a cached previousMode.
+          // Clear failure is fail-closed.
           const cleared = await window.electronAPI.productSpaceRestrictActiveSpace(
             scope.accountId,
             activeIdNow,
@@ -1072,16 +1117,18 @@ export function useProductSpaceContextState() {
         : previous
     ))
     try {
-      const committed = await prepareTrustedSwitch(operation, targetId)
+      // R34 minor: the PREPARE result is named for the phase it represents —
+      // the transaction is only *prepared* here; nothing is committed yet.
+      const prepared = await prepareTrustedSwitch(operation, targetId)
       if (await abandonSwitchIfStale(operation)) return
-      if (!committed.ok) {
-        if (committed.errorCode === 'runtime_stop_failed') {
+      if (!prepared.ok) {
+        if (prepared.errorCode === 'runtime_stop_failed') {
           setPendingSwitch(previous => (
             previous && previous.targetId === targetId
               ? {
                   ...previous,
                   phase: 'stop-failed',
-                  statuses: committed.statuses,
+                  statuses: prepared.statuses,
                   errorCode: 'runtime_stop_failed',
                 }
               : previous
@@ -1090,7 +1137,7 @@ export function useProductSpaceContextState() {
         }
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
-            ? { ...previous, phase: 'target-failed', errorCode: committed.errorCode ?? 'runtime_commit_failed' }
+            ? { ...previous, phase: 'target-failed', errorCode: prepared.errorCode ?? 'runtime_commit_failed' }
             : previous
         ))
         return
@@ -1098,7 +1145,7 @@ export function useProductSpaceContextState() {
       // The token is already held: Main dispatches the terminations now and
       // checks cancellation before every dispatch, so the frozen cancel
       // button is real during this phase.
-      const stopped = await stopPreparedSwitchExecutions(committed.token!)
+      const stopped = await stopPreparedSwitchExecutions(prepared.token!)
       if (stopped.errorCode === 'SWITCH_CANCELLED') {
         // The user cancelled during stopping: Main left every not-yet-
         // dispatched execution running and released the transaction.

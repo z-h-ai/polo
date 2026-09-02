@@ -41,7 +41,7 @@ describe('assistant session account-scope persistence and enforcement (R32-2)', 
   let registeredSessions: Array<{ id: string; productSpaceId?: string; accountId?: string }>
   let signedInAccountId: string | null
 
-  const context = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+  const context = { clientId: 'renderer', workspaceId: 'ws_test', webContentsId: null, signal: new AbortController().signal }
 
   let WorkspaceSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').WorkspaceSessionStorage
 
@@ -375,5 +375,240 @@ describe('assistant session complete-scope boundaries (R33-1)', () => {
     } as never, 'fork')).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
     const writtenEntries = readdirSync(sessionsRoot, { recursive: true }) as string[]
     expect(writtenEntries.some(entry => entry.includes('bundle-session-2'))).toBe(false)
+  })
+})
+
+describe('assistant session complete-scope boundaries (R34-1)', () => {
+  let tmpRoot: string
+  let handlers: Map<string, Handler>
+  let signedInAccountId: string | null
+  let sessionsRoot: string
+
+  const noWorkspaceContext = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const buildManager = async () => {
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    const workspace = { id: 'ws_test', name: 'T', rootPath: join(tmpRoot, 'ws-root'), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: new RootedSessionStorageCtor(sessionsRoot),
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  const registerHandlers = (sm: SessionManager) => {
+    handlers = new Map()
+    const server: RpcServer = {
+      handle(channel: string, handler: HandlerFn) {
+        handlers.set(channel, handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+    } as unknown as RpcServer
+    registerSessionsHandlers(server, {
+      sessionManager: sm,
+      platform: {
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
+      },
+      windowManager: {
+        getWorkspaceForWindow: () => null,
+      },
+    } as unknown as HandlerDeps)
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-scope34-'))
+    sessionsRoot = join(tmpRoot, 'sessions')
+    mkdirSync(sessionsRoot, { recursive: true })
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    signedInAccountId = accountA
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  function invokeWith(
+    sm: SessionManager,
+    contextOverride: Partial<{ workspaceId: string | null; clientId: string }>,
+    channel: string,
+    ...args: unknown[]
+  ) {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler: ${channel}`)
+    return handler({ ...noWorkspaceContext, ...contextOverride } as never, ...args)
+  }
+
+  it('CREATE fails closed without a resolvable caller workspace and never trusts a renderer-selected destination', async () => {
+    const sm = await buildManager()
+    registerHandlers(sm)
+
+    // Missing caller workspace: fail closed before any record exists.
+    await expect(invokeWith(sm, {}, RPC_CHANNELS.sessions.CREATE, 'ws_test'))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    // Cross-workspace destination: the renderer-selected id is refused.
+    await expect(invokeWith(sm, { workspaceId: 'ws_other' }, RPC_CHANNELS.sessions.CREATE, 'ws_test'))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    expect(sm.getSessions()).toHaveLength(0)
+
+    // The matching caller workspace creates normally with the full scope.
+    const created = await invokeWith(sm, { workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.CREATE, 'ws_test') as {
+      id: string
+    }
+    const managed = sm.getSessions().find(session => session.id === created.id)
+    expect(managed?.productSpaceId).toBe(personalId)
+    expect(managed?.accountId).toBe(accountA)
+  })
+
+  it('SEARCH_CONTENT fails closed when the caller workspace is unresolvable or mismatched', async () => {
+    const sm = await buildManager()
+    registerHandlers(sm)
+
+    // No caller workspace at all: nothing is searched.
+    await expect(invokeWith(sm, {}, RPC_CHANNELS.sessions.SEARCH_CONTENT, 'ws_test', 'needle'))
+      .resolves.toEqual([])
+    // A renderer-provided id can never widen the search beyond the caller.
+    await expect(invokeWith(sm, { workspaceId: 'ws_other' }, RPC_CHANNELS.sessions.SEARCH_CONTENT, 'ws_test', 'needle'))
+      .resolves.toEqual([])
+  })
+
+  it('direct and chunked imports bind the destination to the caller workspace', async () => {
+    const sm = await buildManager()
+    registerHandlers(sm)
+    const bundle = {
+      version: 1,
+      session: {
+        header: { id: 'import-34-1', createdAt: Date.now(), name: 'imported' },
+        messages: [],
+      },
+      files: [],
+    }
+
+    // Missing caller workspace: fail closed.
+    await expect(invokeWith(sm, {}, RPC_CHANNELS.sessions.IMPORT, 'ws_test', bundle, 'fork'))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    // Cross-workspace destination: refused.
+    await expect(invokeWith(sm, { workspaceId: 'ws_other' }, RPC_CHANNELS.sessions.IMPORT, 'ws_test', bundle, 'fork'))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    const writtenEntries = readdirSync(sessionsRoot, { recursive: true }) as string[]
+    expect(writtenEntries.some(entry => entry.includes('import-34-1'))).toBe(false)
+
+    // Matching caller workspace: the import commits with the trusted scope.
+    const imported = await invokeWith(sm, { workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.IMPORT, 'ws_test', bundle, 'fork') as {
+      sessionId: string
+    }
+    const managed = sm.getSessions().find(session => session.id === imported.sessionId)
+    expect(managed?.productSpaceId).toBe(personalId)
+    expect(managed?.accountId).toBe(accountA)
+  })
+
+  it('remote transfer import fails closed without the caller workspace binding', async () => {
+    const sm = await buildManager()
+    registerHandlers(sm)
+    const payload = { header: { id: 'remote-34' }, messages: [] }
+
+    await expect(invokeWith(sm, {}, RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER, 'ws_test', payload))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    await expect(invokeWith(sm, { workspaceId: 'ws_other' }, RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER, 'ws_test', payload))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+  })
+
+  it('the session list fails closed when the caller workspace cannot be resolved', async () => {
+    const sm = await buildManager()
+    registerHandlers(sm)
+    const created = await invokeWith(sm, { workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.CREATE, 'ws_test') as {
+      id: string
+    }
+    expect(created.id).toBeTruthy()
+
+    await expect(invokeWith(sm, {}, RPC_CHANNELS.sessions.GET)).resolves.toEqual([])
+    await expect(invokeWith(sm, {}, RPC_CHANNELS.sessions.GET_MESSAGES, created.id)).resolves.toBeNull()
+  })
+
+  it('a cold storage-only record can never seed a branch, and a replaced-account source is refused', async () => {
+    const sm = await buildManager()
+    const storage = new RootedSessionStorageCtor(sessionsRoot)
+    const baseHeader = {
+      workspaceRootPath: join(tmpRoot, 'ws-root'),
+      name: 'cold',
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    }
+
+    // COLD source: a storage-only record bound to the space but to NO
+    // account. With no managed record the source cannot even be located
+    // inside the committed fence — fail closed, never adopted.
+    await storage.save({
+      id: 'cold-source',
+      productSpaceId: personalId,
+      ...baseHeader,
+    } as never)
+    await expect(sm.createSession('ws_test', {
+      branchFromSessionId: 'cold-source',
+      branchFromMessageId: 'msg-1',
+    })).rejects.toThrow('belongs to a different ProductSpace')
+
+    // REPLACED-account source: the managed record (and its persisted
+    // header) belong to account B while the trusted account is A — the
+    // branch is refused before any history is adopted.
+    const workspace = { id: 'ws_test', name: 'T', rootPath: join(tmpRoot, 'ws-root'), createdAt: Date.now() }
+    const managed = createManagedSession({
+      id: 'replaced-source',
+      productSpaceId: personalId,
+      accountId: accountB,
+      ...baseHeader,
+    } as never, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = personalId
+    managed.accountId = accountB
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set('replaced-source', managed)
+    await storage.save({
+      id: 'replaced-source',
+      productSpaceId: personalId,
+      accountId: accountB,
+      ...baseHeader,
+    } as never)
+
+    await expect(sm.createSession('ws_test', {
+      branchFromSessionId: 'replaced-source',
+      branchFromMessageId: 'msg-1',
+    })).rejects.toThrow('belongs to a different account')
+  })
+
+  it('a fence/account replacement split fails the atomic capture before persistence', async () => {
+    const sm = await buildManager()
+    registerHandlers(sm)
+
+    // The fence account and the synchronous trusted mirror disagree — a
+    // concurrent replacement captured mid-flight. The shared atomic capture
+    // fails closed, so neither CREATE nor the unread aggregate can be born
+    // from a split scope.
+    setRuntimeActiveProductSpaceAccount('account-stale-fence')
+
+    await expect(invokeWith(sm, { workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.CREATE, 'ws_test'))
+      .rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    const summary = await invokeWith(sm, {}, RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY) as {
+      totalUnreadSessions: number
+    }
+    expect(summary.totalUnreadSessions).toBe(0)
   })
 })

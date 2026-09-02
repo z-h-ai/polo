@@ -7,17 +7,19 @@ import { perf } from '@polo-ai/shared/utils'
 import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
-import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
+import { pushTyped, type RpcServer, type RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession } from './client-active-session'
 import {
   getRuntimeActiveProductSpace,
-  getRuntimeActiveProductSpaceScope,
   isRuntimeOfflineReadOnly,
   unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
-import { getSyncTrustedProductSpaceAccountId } from './trusted-product-space-account'
+import {
+  captureTrustedSessionScope,
+  getSyncTrustedProductSpaceAccountId,
+} from './trusted-product-space-account'
 
 /**
  * The offline read-only view keeps only the RPCs needed to read saved
@@ -59,20 +61,24 @@ export const PRODUCT_SPACE_CONTEXT_REQUIRED = 'PRODUCT_SPACE_CONTEXT_REQUIRED'
 
 /**
  * Space AND account fence (R32-2), completed with the caller's Main-owned
- * Workspace binding (R33-1). A session is inside the active scope only when
- * ALL of the following hold against ONE trusted immutable scope:
+ * Workspace binding (R33-1) and made FAIL-CLOSED on an unresolvable caller
+ * Workspace (R34-1). A session is inside the active scope only when ALL of
+ * the following hold against ONE trusted immutable scope:
+ * - the caller's Workspace is resolvable from Main-owned state (RPC context
+ *   or window registry) — a boundary that cannot attribute its caller never
+ *   operates;
  * - the committed ProductSpace matches the runtime fence,
  * - the immutable account binding matches the current trusted account
  *   (space-bound legacy records without an accountId are quarantined —
  *   fail-closed, never silently adopted by the next signed-in account),
- * - when the caller's Workspace can be resolved (window registry or RPC
- *   context), the target session belongs to that same Workspace.
+ * - the target session belongs to that same caller Workspace.
  */
 function sessionInsideActiveSpace(
   sessionManager: HandlerDeps['sessionManager'],
   sessionId: string,
   callerWorkspaceId?: string | null,
 ): boolean {
+  if (!callerWorkspaceId) return false
   const activeProductSpaceId = getRuntimeActiveProductSpace()
   if (!activeProductSpaceId) return false
   const trustedAccountId = getSyncTrustedProductSpaceAccountId()
@@ -83,7 +89,7 @@ function sessionInsideActiveSpace(
   if (!session) return false
   if (session.productSpaceId !== activeProductSpaceId) return false
   if (!session.accountId || session.accountId !== trustedAccountId) return false
-  if (callerWorkspaceId && session.workspaceId !== callerWorkspaceId) return false
+  if (session.workspaceId !== callerWorkspaceId) return false
   return true
 }
 
@@ -111,20 +117,9 @@ function assertSessionScopeAllowed(
   }
 }
 
-/**
- * Captures the trusted immutable session scope in ONE atomic read: the
- * runtime fence (space + fence account) and the synchronous trusted account
- * mirror must agree, otherwise the capture fails closed. Session creation
- * and import persist exactly this captured scope.
- */
-function captureTrustedSessionScope(): { accountId: string; productSpaceId: string } | null {
-  const runtimeScope = getRuntimeActiveProductSpaceScope()
-  const syncAccountId = getSyncTrustedProductSpaceAccountId()
-  if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) {
-    return null
-  }
-  return { accountId: syncAccountId, productSpaceId: runtimeScope.productSpaceId }
-}
+// R34-1: the scope capture is THE shared atomic helper (see
+// trusted-product-space-account) — the handler layer and SessionManager no
+// longer keep divergent copies.
 
 function sessionWorkspaceDistribution(sessions: Array<{ workspaceId?: string }>): Record<string, number> {
   const distribution: Record<string, number> = {}
@@ -256,6 +251,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       ? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId)
       : undefined
     const workspaceId = ctx.workspaceId ?? windowWorkspaceId
+    // R34-1: the list is Workspace-scoped — a caller whose Workspace cannot
+    // be resolved from Main-owned state is attributed to nothing and fails
+    // closed with an empty list.
+    if (!workspaceId) {
+      end()
+      return []
+    }
     const activeProductSpaceId = getRuntimeActiveProductSpace()
     const allSessions = sessionManager.getSessions(workspaceId ?? undefined)
     // Fail closed: with no committed ProductSpace the business surface is not
@@ -312,7 +314,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Create a new session
-  server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
+  server.handle(RPC_CHANNELS.sessions.CREATE, async (ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
+    // R34-1: the destination Workspace is the CALLER's Main-owned Workspace,
+    // never a renderer-selected id. A caller whose Workspace cannot be
+    // resolved — or that asks for a different destination than its own —
+    // fails closed before any record is created.
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    if (!callerWorkspaceId || callerWorkspaceId !== workspaceId) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
     // A session may only be created inside the committed active ProductSpace;
     // a null fence means the business surface is not ready, and the offline
     // read-only view starts no new sessions.
@@ -620,11 +630,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const id = searchId || Date.now().toString(36)
     log.info('[search]','ipc:request', { searchId: id, query })
 
-    // R33-1: the searched workspace must be the CALLER's Main-owned
-    // Workspace — a renderer-provided id alone can never widen the search.
+    // R33-1/R34-1: the searched workspace must be the CALLER's Main-owned
+    // Workspace, and a caller whose Workspace cannot be resolved never
+    // searches at all — a renderer-provided id alone can never widen the
+    // search.
     const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
-    if (callerWorkspaceId && callerWorkspaceId !== workspaceId) {
-      log.warn('SEARCH_CONTENT refused: requested workspace does not match the caller workspace', { searchId: id })
+    if (!callerWorkspaceId || callerWorkspaceId !== workspaceId) {
+      log.warn('SEARCH_CONTENT refused: no resolvable caller workspace or requested workspace does not match it', { searchId: id })
       return []
     }
 
@@ -809,14 +821,18 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return bundle
   })
 
-  // Import a session bundle into a target workspace
-  // targetWorkspaceId is passed explicitly (not from context) so the renderer
-  // can import into any workspace the server manages, not just the active one.
-  const importHandler = async (_ctx: any, targetWorkspaceId: string, bundle: unknown, mode: string) => {
-    // The same handler serves the direct RPC and the chunked-transfer commit
-    // (transfer:COMMIT invokes it without re-entering the RPC handler), so
-    // both the active fence and the offline read-only refusal live here.
+  // Import a session bundle into the CALLER's Main-owned Workspace (R34-1).
+  // The destination is bound to the caller's Workspace binding — direct RPC
+  // and chunked-transfer commits (transfer:COMMIT re-enters this handler
+  // with the committing client's context) can never import into a workspace
+  // the caller is not in, and a caller without a resolvable Workspace fails
+  // closed before any read or write.
+  const importHandler = async (ctx: RequestContext, targetWorkspaceId: string, bundle: unknown, mode: string) => {
     if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    if (!callerWorkspaceId || callerWorkspaceId !== targetWorkspaceId) {
       throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
     assertOnlineBusinessSurface()
@@ -827,7 +843,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.importSession(targetWorkspaceId, bundle as import('@polo-ai/shared/sessions').SessionBundle, mode)
   }
   server.handle(RPC_CHANNELS.sessions.IMPORT, async (ctx, ...rest: unknown[]) => {
-    return (importHandler as (c: typeof ctx, ...args: unknown[]) => unknown)(ctx, ...rest)
+    return importHandler(ctx, ...(rest as [string, unknown, string]))
   })
   // Also register as transferable so chunked transfer can invoke it on commit
   setTransferableHandler(RPC_CHANNELS.sessions.IMPORT, importHandler)
@@ -844,9 +860,14 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return payload
   })
 
-  // Import a summarized remote-transfer payload into a target workspace.
-  server.handle(RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER, async (_ctx, targetWorkspaceId: string, payload: import('@polo-ai/shared/protocol').RemoteSessionTransferPayload) => {
+  // Import a summarized remote-transfer payload into the CALLER's
+  // Main-owned Workspace (R34-1) — never a renderer-selected destination.
+  server.handle(RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER, async (ctx, targetWorkspaceId: string, payload: import('@polo-ai/shared/protocol').RemoteSessionTransferPayload) => {
     if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    if (!callerWorkspaceId || callerWorkspaceId !== targetWorkspaceId) {
       throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
     assertOnlineBusinessSurface()

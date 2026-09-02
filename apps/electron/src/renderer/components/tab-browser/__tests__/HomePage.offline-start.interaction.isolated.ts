@@ -200,6 +200,7 @@ beforeEach(async () => {
         },
       }),
       productSpaceRevokeActiveContext: async () => ({ success: true }),
+      productSpaceGetRestrictionState: async () => ({ success: true as const, restricted: false }),
       productSpaceCleanupLegacyState: async () => ({
         success: true,
         results: {

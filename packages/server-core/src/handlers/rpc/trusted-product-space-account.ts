@@ -3,6 +3,8 @@
  * Admin session, never from RPC arguments. The admin handler module installs
  * the provider because only it owns the Admin session coordinator.
  */
+import { getRuntimeActiveProductSpaceScope } from '../../runtime/product-space-executions'
+
 export type TrustedProductSpaceAccountProvider = () => Promise<string | null>
 
 let provider: TrustedProductSpaceAccountProvider | null = null
@@ -166,4 +168,26 @@ export function getSyncTrustedProductSpaceAccountState(): SyncTrustedProductSpac
 
 export function getSyncTrustedProductSpaceAccountId(): string | null {
   return syncAccountState.status === 'authenticated' ? syncAccountState.accountId : null
+}
+
+/**
+ * R34-1: ONE atomic trusted session-scope capture shared by every session
+ * creation, branch and import path (handler layer and SessionManager alike).
+ * The committed runtime fence already carries its OWN account binding — the
+ * capture returns a scope only when the fence is committed, bound to an
+ * account, and that fence account is exactly the current synchronous
+ * trusted mirror. Anything else fails closed (null): a session record can
+ * never be born with a partial or split scope from a concurrent
+ * fence/account replacement.
+ */
+export function captureTrustedSessionScope(): {
+  accountId: string
+  productSpaceId: string
+} | null {
+  const runtimeScope = getRuntimeActiveProductSpaceScope()
+  const syncAccountId = getSyncTrustedProductSpaceAccountId()
+  if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) {
+    return null
+  }
+  return { accountId: runtimeScope.accountId, productSpaceId: runtimeScope.productSpaceId }
 }

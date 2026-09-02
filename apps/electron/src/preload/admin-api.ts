@@ -38,6 +38,7 @@ type AdminPreloadApi = Pick<
   | 'productSpaceStopAllExecutions'
   | 'productSpaceStopExecution'
   | 'productSpaceRestrictActiveSpace'
+  | 'productSpaceGetRestrictionState'
   | 'productSpaceGetCatalog'
   | 'productSpacePrepareSwitch'
   | 'productSpaceStopSwitchExecutions'
@@ -127,6 +128,8 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, token, executionId),
     productSpaceRestrictActiveSpace: (accountId, productSpaceId, restricted) =>
       client.invoke(RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE, accountId, productSpaceId, restricted),
+    productSpaceGetRestrictionState: (accountId, productSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE, accountId, productSpaceId),
     productSpaceStopAllExecutions: (accountId, productSpaceId) =>
       client.invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, accountId, productSpaceId),
     productSpaceGetCatalog: (productSpaceId, knownRevision) =>

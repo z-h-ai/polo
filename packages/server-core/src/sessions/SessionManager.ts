@@ -27,20 +27,13 @@ import {
   getRuntimeActiveProductSpace,
   isRuntimeOfflineReadOnly,
 } from '../runtime/product-space-executions'
-import { getSyncTrustedProductSpaceAccountId } from '../handlers/rpc/trusted-product-space-account'
+import { getSyncTrustedProductSpaceAccountId, captureTrustedSessionScope } from '../handlers/rpc/trusted-product-space-account'
 
-/**
- * R33-1: ONE atomic trusted scope capture for session creation, branching
- * and import. The committed runtime fence and the synchronous trusted
- * account mirror must agree; anything else fails closed (null) so a session
- * record can never be born with a partial or split scope.
- */
-function captureTrustedSessionScope(): { accountId: string; productSpaceId: string } | null {
-  const activeProductSpaceId = getRuntimeActiveProductSpace()
-  const trustedAccountId = getSyncTrustedProductSpaceAccountId()
-  if (!activeProductSpaceId || !trustedAccountId) return null
-  return { accountId: trustedAccountId, productSpaceId: activeProductSpaceId }
-}
+// R34-1: the trusted session scope is captured through THE shared atomic
+// helper (see trusted-product-space-account). Unlike the previous local
+// copy, it verifies the committed fence's own account binding against the
+// synchronous trusted mirror — a fence bound to a replaced account can
+// never host a new session scope.
 import {
   registerAssistantExecutionForSend,
   cancelAssistantStartReservation,

@@ -264,6 +264,7 @@ const EXPECTED_CHANNELS: string[] = [
   'product-space:catalog',
   'product-space:cleanupLegacyState',
   'product-space:commitSwitch',
+  'product-space:getRestrictionState',
   'product-space:list',
   'product-space:listActiveExecutions',
   'product-space:prepareSwitch',

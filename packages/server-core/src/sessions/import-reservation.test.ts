@@ -85,11 +85,13 @@ describe('SessionManager import reservations', () => {
     const storage = new RootedSessionStorage(join(root, 'sessions'), {
       controlledRoot: root,
     })
-    // R33-1: imports require a committed trusted scope — seed it for this
-    // rollback lifecycle test.
-    const { setRuntimeActiveProductSpace } = await import('../runtime/product-space-executions')
+    // R33-1/R34-1: imports require a committed trusted scope whose fence
+    // account must equal the synchronous trusted mirror — seed the complete
+    // fence for this rollback lifecycle test.
+    const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('../runtime/product-space-executions')
     const { setSyncTrustedProductSpaceAccountId } = await import('../handlers/rpc/trusted-product-space-account')
     setRuntimeActiveProductSpace('workspace-1-space')
+    setRuntimeActiveProductSpaceAccount('rollback-account')
     setSyncTrustedProductSpaceAccountId('rollback-account')
     const manager = new SessionManager({
       profile: 'cli-one-shot',

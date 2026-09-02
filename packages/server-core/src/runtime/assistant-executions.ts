@@ -1,10 +1,8 @@
 import {
-  AccountIdSchema,
-  ExecutionIdSchema,
-  ProductSpaceIdSchema,
+  ProductSpaceExecutionScopeSchema,
   PRODUCT_SPACE_CONTRACT_VERSION,
 } from '@polo-ai/shared/product-spaces'
-import type { ExecutionStatus, WorkspaceId } from '@polo-ai/shared/product-spaces'
+import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 import {
   getRegisteredProductSpaceExecution,
   getRuntimeActiveProductSpace,
@@ -155,15 +153,22 @@ function buildAssistantExecution(
   },
   accountId: string,
 ): RegisteredProductSpaceExecution {
+  // R34 minor: the scope is validated through the shared runtime schema —
+  // no double assertions, no malformed identifiers can reach the registry.
+  const scope = ProductSpaceExecutionScopeSchema.parse({
+    contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+    executionId: input.sessionId,
+    accountId,
+    productSpaceId: input.productSpaceId,
+    workspaceId: input.workspaceId || 'assistant',
+    subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+  })
+  // R34-3: stop dispatch is tracked independently of the terminal outcome,
+  // so an in-flight Assistant stop projects 'stopping' — an active status
+  // for LIST/PREPARE/COMMIT — until the turn actually reaches terminal.
+  let stopDispatched = false
   return {
-    scope: {
-      contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
-      executionId: ExecutionIdSchema.parse(input.sessionId),
-      accountId: AccountIdSchema.parse(accountId),
-      productSpaceId: ProductSpaceIdSchema.parse(input.productSpaceId),
-      workspaceId: (input.workspaceId || 'assistant') as unknown as WorkspaceId,
-      subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
-    },
+    scope,
     kind: 'assistant_session',
     name: input.name,
     ref: input.sessionId,
@@ -180,15 +185,18 @@ function buildAssistantExecution(
         .find(candidate => candidate.id === input.sessionId)
       return Boolean(session?.isProcessing)
     },
-    // R33-3: real owner-scoped status. The bootstrap window (live
-    // reservation) is genuinely 'preparing'; the processing turn is
-    // 'running'. Both remain active for the final PREPARE/COMMIT CAS.
+    // R33-3/R34-3: real owner-scoped status. The bootstrap window (live
+    // reservation) is genuinely 'preparing'; a dispatched stop is
+    // 'stopping' until terminal; the processing turn is 'running'. All of
+    // them remain active for the final PREPARE/COMMIT CAS.
     getStatus: (): ExecutionStatus => {
+      if (stopDispatched) return 'stopping'
       const live = liveStartReservations.get(input.sessionId)
       if (live && !live.cancelled) return 'preparing'
       return 'running'
     },
     stop: async () => {
+      stopDispatched = true
       // Cancelling the CURRENT live reservation refuses any later transition
       // to processing for whichever send owns it now (R31-3);
       // cancelProcessing is a safe no-op while still bootstrapping.

@@ -46,6 +46,10 @@ import {
   withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '@polo-ai/server-core/runtime/product-space-executions'
+import {
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceExecutionScopeSchema,
+} from '@polo-ai/shared/product-spaces'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
 import type { HandlerDeps } from './handler-deps'
@@ -634,27 +638,32 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const registry = getScopedLocalAppRuntimeRegistry()
     // Every start is a distinct execution with its own immutable scope.
     const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
-    // R33-3: real owner-scoped status projection. The runtime status is
-    // probed asynchronously (isActive), so the last observed lifecycle is
+    // R33-3/R34-3: real owner-scoped status projection. The runtime status
+    // is probed asynchronously (isActive), so the last observed lifecycle is
     // cached for the synchronous getStatus provider; a dispatched stop
-    // projects 'stopping' until the terminal outcome.
+    // projects 'stopping' until the terminal outcome. The Local App runtime
+    // has no waiting_for_network state — its pre-running startup state is
+    // 'starting', which projects as 'preparing'.
     let lastObservedStatus: 'preparing' | 'running' = 'running'
     let stopDispatched = false
+    // R34 minor: the scope is validated through the shared runtime schema —
+    // no double assertions, no malformed identifiers can reach the registry.
+    const executionScope = ProductSpaceExecutionScopeSchema.parse({
+      contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+      executionId,
+      accountId,
+      productSpaceId: scope.organizationId,
+      workspaceId,
+      subject: {
+        kind: 'artifact_instance',
+        artifactType: 'app',
+        artifactInstanceId: scope.catalogAppId,
+        versionId: scope.catalogAppId,
+        version: name,
+      },
+    })
     const execution: RegisteredProductSpaceExecution = {
-      scope: {
-        contractVersion: 1,
-        executionId,
-        accountId,
-        productSpaceId: scope.organizationId,
-        workspaceId,
-        subject: {
-          kind: 'artifact_instance',
-          artifactType: 'app',
-          artifactInstanceId: scope.catalogAppId,
-          versionId: scope.catalogAppId,
-          version: name,
-        },
-      } as unknown as RegisteredProductSpaceExecution['scope'],
+      scope: executionScope,
       kind: 'local_app',
       name,
       ref: executionId,
@@ -662,8 +671,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       isActive: async () => {
         try {
           const status = await registry.getRuntimeStatus(scope)
-          lastObservedStatus = status.status === 'starting' ? 'preparing' : 'running'
-          return status.status === 'running'
+          // R34-3: 'starting' is a genuine non-terminal startup state — a
+          // preparing App must stay registered, visible to LIST/PREPARE and
+          // blocking switches exactly like a running one. Only a terminal
+          // runtime status (stopped/broken/not_installed/...) ends the
+          // execution; the probe failure branch below stays fail-closed.
+          lastObservedStatus = status.status === 'running' ? 'running' : 'preparing'
+          return status.status === 'running' || status.status === 'starting'
         } catch {
           // Liveness probe failure fails closed: treat as still active.
           return true

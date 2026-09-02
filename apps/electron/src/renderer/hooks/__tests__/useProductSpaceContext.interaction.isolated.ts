@@ -101,6 +101,15 @@ let restrictResult: (
   | { success: true; restricted?: boolean }
   | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
 >
+/**
+ * R34-2: the harness models Main's AUTHORITATIVE restriction fence with the
+ * real semantics — a restrict(true) publishes the fence BEFORE stopping (it
+ * stays set even when the stop fails) and a restrict(false) clears it
+ * unconditionally. The new query channel reads exactly this state, so tests
+ * exercise genuine reconciliation instead of a mocked verdict.
+ */
+const mainRestrictedSpaces = new Set<string>()
+let restrictionStateFailure: string | null = null
 
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
@@ -183,7 +192,21 @@ function configureIpc(): void {
           productSpaceId: restrictSpaceId,
           restricted,
         })
+        // Main-side fence-first semantics (R33-2): the set direction keeps
+        // the fence regardless of the stop outcome; the clear direction
+        // clears unconditionally.
+        if (restricted) mainRestrictedSpaces.add(restrictSpaceId)
+        else mainRestrictedSpaces.delete(restrictSpaceId)
         return restrictResult(restrictAccountId, restrictSpaceId, restricted)
+      },
+      productSpaceGetRestrictionState: async (queryAccountId: string, querySpaceId: string) => {
+        if (restrictionStateFailure) {
+          return { success: false as const, errorCode: restrictionStateFailure }
+        }
+        if (queryAccountId !== accountId) {
+          return { success: false as const, errorCode: 'FORBIDDEN' }
+        }
+        return { success: true as const, restricted: mainRestrictedSpaces.has(querySpaceId) }
       },
       productSpaceCleanupLegacyState: async () => {
         cleanupCalls += 1
@@ -250,6 +273,8 @@ beforeEach(() => {
   }
   restrictCalls.length = 0
   restrictResult = async (_accountId, _productSpaceId, restricted) => ({ success: true as const, restricted })
+  mainRestrictedSpaces.clear()
+  restrictionStateFailure = null
   configureIpc()
 })
 
@@ -1456,5 +1481,150 @@ describe('useProductSpaceContextState restriction transaction (R33-2)', () => {
     expect(refreshed).toBeNull()
     expect(result.current.flowState).toBe('idle')
     expect(result.current.productSpaces).toEqual([])
+  })
+})
+
+describe('useProductSpaceContextState durable restriction reconciliation (R34-2)', () => {
+  const readOnlyList = () => ({
+    success: true as const,
+    personalProductSpaceId: personalId,
+    productSpaces: [
+      personalSpace,
+      enterpriseSpace('space-ent', '北辰智能科技', { accessMode: 'read_only' as const }),
+    ],
+  })
+
+  it('a renderer reload after a failed restriction reconciles Main and the verified active recovery clears the lingering fence', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    // Session 1: the restriction stop fails — Main keeps the authoritative
+    // fence (fence-first), the renderer parks on the error page.
+    const first = renderHook(useHarness)
+    await boot(first.result)
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'runtime_stop_failed',
+      restricted: true,
+    })
+    listResult = readOnlyList()
+    await act(async () => {
+      expect(await first.result.current.refreshProductSpaces()).toBeNull()
+    })
+    expect(first.result.current.flowState).toBe('error')
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+    ])
+
+    // Reload: every renderer memory is gone, Main's fence survives. The
+    // membership has already recovered, so the reloaded bootstrap enters
+    // the active space again.
+    first.unmount()
+    listResult = bothSpaces()
+    const second = renderHook(useHarness)
+    expect(await boot(second.result)).toBe('ready')
+
+    // The FIRST verified post-reload refresh must reconcile against Main
+    // and clear the lingering fence — the R33 renderer-only Set could never
+    // have done this after a reload.
+    restrictResult = async (_accountId, _productSpaceId, restricted) => ({
+      success: true as const,
+      restricted,
+    })
+    await act(async () => {
+      expect(await second.result.current.refreshProductSpaces()).not.toBeNull()
+    })
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+      { accountId, productSpaceId: 'space-ent', restricted: false },
+    ])
+    expect(second.result.current.flowState).toBe('ready')
+    expect(second.result.current.activeProductSpaceId).toBe('space-ent')
+  })
+
+  it('retryBootstrap reconciles Main the same way after a failed restriction', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    restrictResult = async () => ({
+      success: false as const,
+      errorCode: 'runtime_stop_failed',
+      restricted: true,
+    })
+    listResult = readOnlyList()
+    await act(async () => {
+      expect(await result.current.refreshProductSpaces()).toBeNull()
+    })
+    expect(result.current.flowState).toBe('error')
+
+    // Membership recovers; the retry goes through the SAME bootstrap
+    // reconciliation path as a reload.
+    listResult = bothSpaces()
+    restrictResult = async (_accountId, _productSpaceId, restricted) => ({
+      success: true as const,
+      restricted,
+    })
+    await act(async () => {
+      expect(await result.current.retryBootstrap()).toBe('ready')
+    })
+
+    await act(async () => {
+      expect(await result.current.refreshProductSpaces()).not.toBeNull()
+    })
+    expect(restrictCalls).toEqual([
+      { accountId, productSpaceId: 'space-ent', restricted: true },
+      { accountId, productSpaceId: 'space-ent', restricted: false },
+    ])
+    expect(result.current.flowState).toBe('ready')
+  })
+
+  it('an account replacement during the recovery clear await aborts the publication', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    // Establish the restricted projection successfully: Main is fenced.
+    restrictResult = async (_accountId, _productSpaceId, restricted) => ({
+      success: true as const,
+      restricted,
+    })
+    listResult = readOnlyList()
+    await act(async () => {
+      expect(await result.current.refreshProductSpaces()).not.toBeNull()
+    })
+    expect(result.current.flowState).toBe('ready')
+
+    // Membership recovers; the clear is held in flight while the account is
+    // replaced. The post-await scope CAS must abort the whole publication.
+    listResult = bothSpaces()
+    let releaseClear!: (value: { success: true; restricted: false }) => void
+    const clearGate = new Promise<{ success: true; restricted: false }>(resolve => {
+      releaseClear = resolve
+    })
+    restrictResult = (_accountId, _productSpaceId, restricted) => (
+      restricted
+        ? Promise.resolve({ success: true as const, restricted })
+        : clearGate
+    )
+    let refreshed: unknown = 'pending'
+    await act(async () => {
+      refreshed = result.current.refreshProductSpaces()
+    })
+    await act(async () => {
+      result.current.clearAccount()
+    })
+    await act(async () => {
+      releaseClear({ success: true as const, restricted: false })
+      refreshed = await refreshed
+    })
+    expect(refreshed).toBeNull()
+    expect(result.current.flowState).toBe('idle')
+    expect(result.current.productSpaces).toEqual([])
+  })
+
+  it('a restriction-state query failure during bootstrap fails closed', async () => {
+    restrictionStateFailure = 'MAIN_UNAVAILABLE'
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('error')
+    expect(result.current.flowState).toBe('error')
   })
 })

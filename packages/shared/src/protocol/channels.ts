@@ -297,6 +297,7 @@ export const RPC_CHANNELS = {
     STOP_ALL_EXECUTIONS: 'product-space:stopAllExecutions',
     STOP_EXECUTION: 'product-space:stopExecution',
     RESTRICT_ACTIVE_SPACE: 'product-space:restrictActiveSpace',
+    GET_RESTRICTION_STATE: 'product-space:getRestrictionState',
     PREPARE_SWITCH: 'product-space:prepareSwitch',
     STOP_SWITCH_EXECUTIONS: 'product-space:stopSwitchExecutions',
     COMMIT_SWITCH: 'product-space:commitSwitch',

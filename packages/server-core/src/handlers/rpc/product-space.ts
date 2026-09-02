@@ -11,7 +11,6 @@ import {
 import type {
   ExecutionSummary,
   StopAllExecutionsResult,
-  WorkspaceId,
 } from '@polo-ai/shared/product-spaces'
 import { randomBytes } from 'node:crypto'
 import { purgeAppCatalogCache } from '@polo-ai/shared/admin/app-catalog-cache'
@@ -26,7 +25,6 @@ import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 import type { HandlerDeps } from '../handler-deps'
 import {
-  EXECUTION_STOP_POLL_INTERVAL_MS,
   acquireSwitchActivityClaim,
   claimSwitchPrepareIntent,
   getLastCommittedSwitch,
@@ -69,6 +67,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_EXECUTION,
   RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE,
+  RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE,
   RPC_CHANNELS.productSpace.PREPARE_SWITCH,
   RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS,
   RPC_CHANNELS.productSpace.COMMIT_SWITCH,
@@ -82,7 +81,6 @@ export const HANDLED_CHANNELS = [
 export const PRODUCT_SPACE_CONTEXT_REQUIRED = 'PRODUCT_SPACE_CONTEXT_REQUIRED'
 
 const EXECUTION_ID_SCHEMA = ExecutionIdSchema
-const WORKER_POLL_INTERVAL_MS = EXECUTION_STOP_POLL_INTERVAL_MS
 
 type TrustedExecutionRequest = {
   trustedAccountId: string
@@ -297,54 +295,13 @@ export async function stopAllProductSpaceExecutions(input: {
 }
 
 /**
- * Binds an assistant session to its immutable execution scope. The account
- * always comes from the trusted Admin session; the ProductSpace is the
- * runtime's committed active space at creation time and can never be
- * reclassified.
+ * R34: the former dormant `registerAssistantSessionExecution` export was
+ * removed — it was a repository-unused second Assistant registration path
+ * that bypassed the authoritative reservation/confirmation state machine.
+ * Assistant executions are registered exclusively through
+ * `registerAssistantExecutionForSend` (runtime/assistant-executions), the
+ * canonical reservation lifecycle.
  */
-export async function registerAssistantSessionExecution(input: {
-  sessionManager: HandlerDeps['sessionManager']
-  sessionId: string
-  workspaceId: string
-  productSpaceId: string
-  name: string
-}): Promise<void> {
-  const accountId = await resolveTrustedProductSpaceAccountId()
-  if (!accountId) return
-  const execution: RegisteredProductSpaceExecution = {
-    scope: {
-      contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
-      executionId: ExecutionIdSchema.parse(input.sessionId),
-      accountId: AccountIdSchema.parse(accountId),
-      productSpaceId: ProductSpaceIdSchema.parse(input.productSpaceId),
-      workspaceId: (input.workspaceId || 'assistant') as unknown as WorkspaceId,
-      subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
-    },
-    kind: 'assistant_session',
-    name: input.name,
-    ref: input.sessionId,
-    generation: 0,
-    isActive: () => {
-      const session = input.sessionManager
-        .getSessions()
-        .find(candidate => candidate.id === input.sessionId)
-      return Boolean(session?.isProcessing)
-    },
-    stop: async () => {
-      await input.sessionManager.cancelProcessing(input.sessionId, true)
-      const deadline = Date.now() + 10_000
-      while (Date.now() < deadline) {
-        const session = input.sessionManager
-          .getSessions()
-          .find(candidate => candidate.id === input.sessionId)
-        if (!session || !session.isProcessing) return 'stopped'
-        await new Promise(resolve => setTimeout(resolve, WORKER_POLL_INTERVAL_MS))
-      }
-      return 'failed'
-    },
-  }
-  registerProductSpaceExecution(execution)
-}
 
 export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(
@@ -443,8 +400,9 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       if (!execution) {
         return { success: false as const, errorCode: 'EXECUTION_NOT_FOUND', message: 'The execution does not belong to this switch transaction' }
       }
-      // R33-4: capture the registration generation BEFORE the awaited stop —
-      // the drain below can outlive this entry's ownership.
+      // R33-4/R34-4: capture the registry-owned entry AND its immutable
+      // registration generation BEFORE the awaited stop — the drain below
+      // can outlive this entry's ownership.
       const capturedGeneration = execution.generation
       // Cancellation gate before the dispatch (same rule as the all-stop
       // loop): a cancelled transaction stops accepting new terminations.
@@ -456,11 +414,13 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled', status: 'stopping' as const }
       }
       const [result] = await stopRegisteredExecutionsOnce([execution])
-      // R33-4: revalidate token/account/scope/generation AFTER the awaited
-      // drain. The await is a window in which the transaction may have been
-      // cancelled or superseded and a same-ID replacement may have taken the
-      // registry slot — a stale completion is never reported against newer
-      // ownership.
+      // R33-4/R34-4: revalidate token/account/scope/generation AFTER the
+      // awaited drain. The await is a window in which the transaction may
+      // have been cancelled or superseded and a same-ID replacement may have
+      // taken the registry slot — a stale completion is never reported
+      // against newer ownership, and a slot that lost the captured
+      // registration in any way (replacement, replacement-then-cleanup) is
+      // superseded rather than terminal success.
       const afterDrain = getPendingSwitchTransaction()
       if (
         !afterDrain
@@ -476,9 +436,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         }
       }
       const generationNow = getRegisteredProductSpaceExecutionGeneration(executionId)
-      if (generationNow !== null && generationNow !== capturedGeneration) {
-        // A same-ID replacement owns the slot: this stop's terminal outcome
-        // belongs to the older generation only.
+      if (
+        result?.superseded === true
+        || (generationNow !== null && generationNow !== capturedGeneration)
+      ) {
+        // A same-ID replacement owns (or owned) the slot: this stop's
+        // terminal outcome belongs to the older generation only.
         return {
           success: false as const,
           errorCode: 'EXECUTION_SUPERSEDED',
@@ -554,6 +517,35 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           restricted: isRuntimeProductSpaceRestricted(productSpaceId),
         }
       })
+    },
+  )
+
+  // R34-2: authoritative Main-owned restriction state query. The renderer's
+  // fence memory is ephemeral (a reload or retryBootstrap erases it), so it
+  // reconciles against THIS state during bootstrap and before every
+  // restriction transition decision. Main's fence — never renderer memory —
+  // is the source of truth for whether a verified active recovery must
+  // clear a lingering restriction.
+  server.handle(
+    RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE,
+    async (_ctx, requestedAccountId: unknown, productSpaceId: unknown) => {
+      if (typeof productSpaceId !== 'string' || !productSpaceId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Restriction query is invalid' }
+      }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+      // The query discloses restriction state only to the trusted account
+      // that owns the fence; a replaced account learns nothing about its
+      // predecessor's spaces.
+      if (requestedAccountId !== trustedAccountId) {
+        return { success: false as const, errorCode: 'FORBIDDEN', message: 'The restriction state belongs to another account' }
+      }
+      return {
+        success: true as const,
+        restricted: isRuntimeProductSpaceRestricted(productSpaceId),
+      }
     },
   )
 

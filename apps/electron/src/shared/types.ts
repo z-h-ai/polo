@@ -998,6 +998,14 @@ export interface ElectronAPI {
     | { success: true; restricted?: boolean }
     | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
   >
+  /** R34-2: Main's authoritative restriction state for one space. */
+  productSpaceGetRestrictionState(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; restricted: boolean }
+    | { success: false; errorCode: string; message?: string }
+  >
   productSpaceCancelSwitch(token: string): Promise<
     | { success: false; errorCode: string; message?: string }
     | {

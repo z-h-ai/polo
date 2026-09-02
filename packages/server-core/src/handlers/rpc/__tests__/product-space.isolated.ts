@@ -3,7 +3,9 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
 import {
+  getRegisteredProductSpaceExecution,
   isRuntimeProductSpaceRestricted,
+  unregisterProductSpaceExecution,
   isSwitchInProgress,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
@@ -590,8 +592,10 @@ describe('two-phase switch transaction', () => {
   it('cancelling during stopping leaves undispatched executions running', async () => {
     const first = fakeExecution({ executionId: 'exec-c1' })
     const second = fakeExecution({ executionId: 'exec-c2' })
-    registerProductSpaceExecution(first)
-    registerProductSpaceExecution(second)
+    // R34-4: behavior hooks are adjusted on the REGISTRY-OWNED entry — the
+    // producer object is only a registration request.
+    const ownedFirst = registerProductSpaceExecution(first)
+    const ownedSecond = registerProductSpaceExecution(second)
 
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
@@ -604,16 +608,16 @@ describe('two-phase switch transaction', () => {
     let releaseFirstStop!: () => void
     const firstStopReleased = new Promise<void>(resolve => { releaseFirstStop = resolve })
     void firstStopStarted
-    const originalFirstStop = first.stop
+    const originalFirstStop = ownedFirst.stop
     let firstStopCalls = 0
-    first.stop = async () => {
+    ownedFirst.stop = async () => {
       firstStopCalls += 1
       await firstStopReleased
       return originalFirstStop()
     }
-    const originalSecondStop = second.stop
+    const originalSecondStop = ownedSecond.stop
     let secondStopCalls = 0
-    second.stop = async () => {
+    ownedSecond.stop = async () => {
       secondStopCalls += 1
       return originalSecondStop()
     }
@@ -639,10 +643,10 @@ describe('two-phase switch transaction', () => {
 
   it('cancelling before the stop phase stops nothing at all', async () => {
     const execution = fakeExecution({ executionId: 'exec-c3' })
-    registerProductSpaceExecution(execution)
+    const ownedExecution = registerProductSpaceExecution(execution)
     let stopCalls = 0
-    const originalStop = execution.stop
-    execution.stop = async () => {
+    const originalStop = ownedExecution.stop
+    ownedExecution.stop = async () => {
       stopCalls += 1
       return originalStop()
     }
@@ -1007,8 +1011,8 @@ describe('two-phase switch transaction', () => {
   it('a cancellation received after the first stop dispatch prevents the second dispatch even while the Admin resolver is unavailable', async () => {
     const first = fakeExecution({ executionId: 'exec-d1' })
     const second = fakeExecution({ executionId: 'exec-d2' })
-    registerProductSpaceExecution(first)
-    registerProductSpaceExecution(second)
+    const ownedFirst = registerProductSpaceExecution(first)
+    const ownedSecond = registerProductSpaceExecution(second)
 
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
@@ -1019,16 +1023,16 @@ describe('two-phase switch transaction', () => {
     // account resolver (Admin session lock) is UNAVAILABLE.
     let releaseFirstStop!: () => void
     const firstStopReleased = new Promise<void>(resolve => { releaseFirstStop = resolve })
-    const originalFirstStop = first.stop
+    const originalFirstStop = ownedFirst.stop
     let firstStopCalls = 0
-    first.stop = async () => {
+    ownedFirst.stop = async () => {
       firstStopCalls += 1
       await firstStopReleased
       return originalFirstStop()
     }
-    const originalSecondStop = second.stop
+    const originalSecondStop = ownedSecond.stop
     let secondStopCalls = 0
-    second.stop = async () => {
+    ownedSecond.stop = async () => {
       secondStopCalls += 1
       return originalSecondStop()
     }
@@ -1142,8 +1146,8 @@ describe('two-phase switch transaction', () => {
   it('a stale STOP loop mismatch cannot consume the newer prepare (loop-mismatch regression)', async () => {
     const first = fakeExecution({ executionId: 'exec-e1' })
     const second = fakeExecution({ executionId: 'exec-e2' })
-    registerProductSpaceExecution(first)
-    registerProductSpaceExecution(second)
+    const ownedFirst = registerProductSpaceExecution(first)
+    const ownedSecond = registerProductSpaceExecution(second)
 
     const { invoke } = createHarness()
     const preparedA = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
@@ -1152,16 +1156,16 @@ describe('two-phase switch transaction', () => {
     // Gate the FIRST stop dispatch so A is mid-loop.
     let releaseFirstStop!: () => void
     const firstStopReleased = new Promise<void>(resolve => { releaseFirstStop = () => resolve() })
-    const originalFirstStop = first.stop
+    const originalFirstStop = ownedFirst.stop
     let firstStopCalls = 0
-    first.stop = async () => {
+    ownedFirst.stop = async () => {
       firstStopCalls += 1
       await firstStopReleased
       return originalFirstStop()
     }
-    const originalSecondStop = second.stop
+    const originalSecondStop = ownedSecond.stop
     let secondStopCalls = 0
-    second.stop = async () => {
+    ownedSecond.stop = async () => {
       secondStopCalls += 1
       return originalSecondStop()
     }
@@ -1195,7 +1199,7 @@ describe('two-phase switch transaction', () => {
 
   it('a stale STOP finalization mismatch cannot consume the newer prepare (finalization regression)', async () => {
     const only = fakeExecution({ executionId: 'exec-e3' })
-    registerProductSpaceExecution(only)
+    const ownedOnly = registerProductSpaceExecution(only)
 
     const { invoke } = createHarness()
     const preparedA = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
@@ -1203,9 +1207,9 @@ describe('two-phase switch transaction', () => {
 
     let releaseOnlyStop!: () => void
     const onlyStopReleased = new Promise<void>(resolve => { releaseOnlyStop = () => resolve() })
-    const originalOnlyStop = only.stop
+    const originalOnlyStop = ownedOnly.stop
     let onlyStopCalls = 0
-    only.stop = async () => {
+    ownedOnly.stop = async () => {
       onlyStopCalls += 1
       await onlyStopReleased
       return originalOnlyStop()
@@ -1365,7 +1369,7 @@ describe('per-item stop and real statuses (R32-4)', () => {
   it('reports truthful failed per-item status and supports retry before finalization', async () => {
     const { invoke } = createHarness()
     const flaky = fakeExecution({ executionId: 'exec-flaky', refuseStop: true })
-    registerProductSpaceExecution(flaky)
+    const ownedFlaky = registerProductSpaceExecution(flaky)
 
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
@@ -1374,18 +1378,18 @@ describe('per-item stop and real statuses (R32-4)', () => {
     // terminal state yet — the 10s shared drain applies).
     let flakyStopCalls = 0
     let flakyRecovered = false
-    const originalFlakyStop = flaky.stop
-    const originalFlakyIsActive = flaky.isActive
-    flaky.stop = async () => {
+    const originalFlakyStop = ownedFlaky.stop
+    const originalFlakyIsActive = ownedFlaky.isActive
+    ownedFlaky.stop = async () => {
       flakyStopCalls += 1
       if (flakyStopCalls >= 2) flakyRecovered = true
       return originalFlakyStop()
     }
-    flaky.isActive = () => (flakyRecovered ? false : originalFlakyIsActive())
+    ownedFlaky.isActive = () => (flakyRecovered ? false : originalFlakyIsActive())
     const failed = await invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-flaky')
     expect(failed.success).toBe(false)
     expect(failed.status).toBe('failed')
-    expect(await flaky.isActive()).toBe(true)
+    expect(await ownedFlaky.isActive()).toBe(true)
 
 
 
@@ -1640,8 +1644,10 @@ describe('generation-owned terminal cleanup and post-await revalidation (R33-4)'
     // A same-ID replacement (new registration generation) takes the slot
     // while the old stop is still awaiting its drain.
     const replacement = fakeExecution({ executionId: 'exec-reuse' })
-    registerProductSpaceExecution(replacement)
-    expect(replacement.generation).not.toBe(old.generation)
+    const ownedOld = getRegisteredProductSpaceExecution('exec-reuse')
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    expect(ownedOld).toBeTruthy()
+    expect(ownedReplacement.generation).not.toBe(ownedOld!.generation)
 
     releaseProbe()
     const result = await pending
@@ -1653,7 +1659,7 @@ describe('generation-owned terminal cleanup and post-await revalidation (R33-4)'
     // The replacement is untouched and still blocks the switch.
     expect(await replacement.isActive()).toBe(true)
     expect(listRegisteredProductSpaceExecutions().some(execution => (
-      execution === replacement
+      execution === ownedReplacement
     ))).toBe(true)
   })
 
@@ -1685,6 +1691,44 @@ describe('generation-owned terminal cleanup and post-await revalidation (R33-4)'
     const result = await pending
     expect(result.success).toBe(false)
     expect(result.errorCode).toBe('SWITCH_CANCELLED')
+  })
+
+  it('a replacement that is itself cleaned up during the old drain is still superseded, never a false success (R34-4)', async () => {
+    const { invoke } = createHarness()
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>(resolve => {
+      releaseProbe = resolve
+    })
+    let probeCalls = 0
+    const old = fakeExecution({ executionId: 'exec-reuse-2' })
+    old.isActive = async () => {
+      probeCalls += 1
+      if (probeCalls === 1) return true
+      if (probeCalls === 2) await probeGate
+      return false
+    }
+    registerProductSpaceExecution(old)
+
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, prepared.token, 'exec-reuse-2')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(probeCalls).toBe(2)
+
+    // A replacement takes the slot AND is stopped/cleaned by a concurrent
+    // path before the old drain completes. The handler must still treat the
+    // lost ownership as superseded — a null generation read can never
+    // upgrade this stale completion into a success.
+    const replacement = fakeExecution({ executionId: 'exec-reuse-2' })
+    registerProductSpaceExecution(replacement)
+    unregisterProductSpaceExecution('exec-reuse-2')
+
+    releaseProbe()
+    const result = await pending
+    expect(result.success).toBe(false)
+    expect(result.errorCode).toBe('EXECUTION_SUPERSEDED')
+    expect(result.status).toBe('failed')
   })
 
   it('LIST and PREPARE project the real owner-scoped provider status instead of hardcoded running', async () => {

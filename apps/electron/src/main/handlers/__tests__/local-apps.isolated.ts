@@ -1501,3 +1501,133 @@ describe('local app main-process authorization boundary', () => {
     expect(result[prototypeNamedIds.length]).not.toHaveProperty('versionError')
   })
 })
+
+describe('local app production status projection (R34-3)', () => {
+  const handlers = new Map<string, Handler>()
+  const context = {
+    clientId: 'renderer',
+    webContentsId: 1 as number | null,
+    signal: new AbortController().signal,
+  }
+  let windowWorkspaceId: string | null = 'ws-window-a'
+
+  beforeEach(() => {
+    signedInAccountId = 'account-a'
+    accessMode = 'online'
+    appAccessDenied = false
+    catalog = createCatalog(1)
+    windowWorkspaceId = 'ws-window-a'
+    context.webContentsId = 1
+    handlers.clear()
+    for (const handlerMock of [
+      getCachedAppCatalog,
+      getAppCatalogAccessMode,
+      assertAppAuthorized,
+      scopedStart,
+      scopedRegistry.stop,
+      scopedRuntimeStatus,
+    ]) {
+      handlerMock.mockClear()
+    }
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'not_installed',
+    }))
+    scopedRegistry.stop.mockImplementation(async (item: CatalogLocalAppScope) => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'stopped' as const,
+    }))
+    const server = {
+      handle(channel, handler) {
+        handlers.set(channel, handler as Handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+      hasClientCapability() {
+        return false
+      },
+      findClientsWithCapability() {
+        return []
+      },
+    } satisfies RpcServer
+    registerLocalAppHandlers(server, {
+      windowManager: {
+        getWorkspaceForWindow: (webContentsId: number) => (
+          context.webContentsId === webContentsId ? windowWorkspaceId : null
+        ),
+      },
+    } as never)
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    setSyncTrustedProductSpaceAccountId(signedInAccountId)
+    if (signedInAccountId) {
+      setRuntimeActiveProductSpaceAccount(signedInAccountId)
+    }
+    setRuntimeOfflineReadOnly(false)
+    setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
+    resetExecutionRegistry()
+  })
+
+  it('a starting Local App stays registered and active and projects preparing until it runs', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'starting' as const,
+    }))
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(1)
+    // R34-3: 'starting' is a genuine non-terminal startup state — the
+    // execution stays active and projects 'preparing' for LIST/PREPARE.
+    expect(await registered[0]!.isActive()).toBe(true)
+    expect(registered[0]!.getStatus?.()).toBe('preparing')
+
+    // Once the runtime reaches 'running' the projection follows truthfully.
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+    }))
+    expect(await registered[0]!.isActive()).toBe(true)
+    expect(registered[0]!.getStatus?.()).toBe('running')
+  })
+
+  it('a dispatched Local App stop projects stopping until the runtime reaches a terminal state', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+    }))
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(1)
+    const execution = registered[0]!
+
+    // The stop is dispatched while the runtime still reports 'running'.
+    const stopPromise = execution.stop!()
+    expect(execution.getStatus?.()).toBe('stopping')
+    expect(await execution.isActive()).toBe(true)
+
+    // The runtime reaches its terminal state: the drain can confirm.
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'stopped' as const,
+    }))
+    expect(await stopPromise).toBe('stopped')
+    expect(await execution.isActive()).toBe(false)
+  })
+})
