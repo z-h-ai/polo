@@ -1459,7 +1459,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
    ========================================================================== */
 :root {
   --tabbar-height: 36px;
-  --topbar-height: 48px;
+  --topbar-height: 64px;
   --content-top-offset: var(--tabbar-height);
 }
 
@@ -1469,7 +1469,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 
 @media (max-width: 768px) {
   :root {
-    --topbar-height: 56px;
+    --topbar-height: 64px;
   }
 
   /* Bump TopBar icons from 18px → 20px in compact mode. Kept tight inside the

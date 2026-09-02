@@ -53,7 +53,7 @@ export function HomeSpaceContext({
     <section
       aria-label={t('homeSpace.context.ariaLabel')}
       data-testid="home-space-context"
-      className="mb-4 rounded-xl border border-foreground/10 px-4 py-3"
+      className="mb-[16px] rounded-[17px] border border-foreground/10 px-[16px] py-[12px]"
     >
       {/* Fail-closed render predicate: the circles branch requires BOTH the
           persisted view state AND the live guard (personal + non-empty
@@ -62,12 +62,12 @@ export function HomeSpaceContext({
           even for the first frame after an identity change or guard loss. */}
       {view === 'circles' && showCirclesEntry ? (
         <div data-testid="product-space-relation-my-circles-view">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-[12px]">
             <div>
               <h2 className="text-base font-semibold">
                 {t('homeSpace.context.myCircles')}
               </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p className="mt-[3px] text-[11px] text-muted-foreground">
                 {t('homeSpace.context.circlesSubtitle', {
                   count: creatorCircles.length,
                 })}
@@ -76,18 +76,18 @@ export function HomeSpaceContext({
             <button
               type="button"
               data-testid="product-space-relation-my-circles-back"
-              className="rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/4"
+              className="rounded-lg px-[10px] py-[6px] text-[11px] text-muted-foreground hover:bg-foreground/4"
               onClick={() => { setView('context') }}
             >
               {t('homeSpace.context.back')}
             </button>
           </div>
-          <ul className="mt-3 flex flex-col gap-1.5">
+          <ul className="mt-[12px] flex flex-col gap-[6px]">
             {creatorCircles.map(circle => (
               <li
                 key={circle.circleId}
                 data-testid="product-space-relation-my-circles-item"
-                className="flex items-center justify-between gap-3 rounded-lg border border-border/40 px-3 py-2 text-sm"
+                className="flex items-center justify-between gap-[12px] rounded-lg border border-border/40 px-[12px] py-[8px] text-[13px]"
               >
                 <span className="truncate font-medium">{circle.name}</span>
                 <span className="text-xs text-muted-foreground">
@@ -100,7 +100,7 @@ export function HomeSpaceContext({
       ) : (
         <div>
           <h2 className="text-base font-semibold">{spaceName}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p className="mt-[3px] text-[11px] text-muted-foreground">
             {spaceKind === 'enterprise'
               ? t('homeSpace.context.enterpriseDescription')
               : t('homeSpace.context.personalDescription')}
@@ -109,21 +109,21 @@ export function HomeSpaceContext({
             <button
               type="button"
               data-testid="product-space-relation-my-circles"
-              className="mt-3 flex w-full items-center gap-3 rounded-lg border border-foreground/10 px-3 py-2.5 text-left hover:bg-foreground/4"
+              className="mt-[12px] grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[10px] rounded-lg px-[10px] py-[9px] text-left hover:bg-foreground/4"
               onClick={() => { setView('circles') }}
             >
-              <Icons.Circle className="size-4 shrink-0 text-muted-foreground" />
+              <Icons.Circle className="size-[14px] shrink-0 text-accent" />
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">
+                <span className="text-[13px] font-semibold">
                   {t('homeSpace.context.myCircles')}
                 </span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-[11px] text-muted-foreground">
                   {t('homeSpace.context.circlesCount', {
                     count: creatorCircles.length,
                   })}
                 </span>
               </span>
-              <Icons.ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              <Icons.ChevronRight className="size-[14px] shrink-0 text-muted-foreground" />
             </button>
           )}
         </div>

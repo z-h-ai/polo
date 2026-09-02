@@ -56,7 +56,7 @@ export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean })
             type="button"
             data-testid="product-space-switcher"
             aria-label={t('productSpace.switcher.label')}
-            className="titlebar-no-drag flex h-9 min-w-[130px] max-w-[190px] items-center gap-2 rounded-[9px] border border-border bg-background px-2.5 text-left hover:border-accent/40"
+            className="titlebar-no-drag flex h-[36px] min-w-[130px] max-w-[190px] items-center gap-[8px] rounded-[9px] border border-border bg-background px-[10px] text-left hover:border-accent/40"
           >
             <span
               className={cn(

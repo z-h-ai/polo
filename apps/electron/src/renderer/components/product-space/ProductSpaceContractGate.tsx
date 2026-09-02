@@ -33,7 +33,7 @@ export function ProductSpaceContractGate() {
       data-testid="product-space-contract-gate"
       data-gate-stage={stage}
     >
-      <section className="flex w-full max-w-[520px] flex-col items-center rounded-[17px] border border-border/50 bg-background px-10 py-9 text-center text-base shadow-minimal">
+      <section className="block w-full max-w-[520px] text-center">
         <span
           aria-hidden="true"
           className={
@@ -46,7 +46,7 @@ export function ProductSpaceContractGate() {
         </span>
         <h1
           data-testid="product-space-contract-title"
-          className="mt-[18px] text-[28px] font-bold tracking-[-0.04em] text-foreground"
+          className="mt-[18px] mb-[9px] text-[28px] font-bold tracking-[-0.04em] text-foreground"
         >
           {stage === 'required'
             ? t('productSpace.contract.requiredTitle')
@@ -54,7 +54,7 @@ export function ProductSpaceContractGate() {
               ? t('productSpace.contract.downloadingTitle')
               : t('productSpace.contract.failedTitle')}
         </h1>
-        <p className="mt-[9px] text-[13px] leading-[1.65] text-foreground/60">
+        <p className="text-[13px] leading-[1.65] text-foreground/60">
           {stage === 'required'
             ? t('productSpace.contract.requiredDesc')
             : stage === 'downloading'

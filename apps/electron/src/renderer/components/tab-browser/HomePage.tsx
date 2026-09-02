@@ -454,15 +454,15 @@ export function HomePage({ onAddApp }: HomePageProps) {
         <section aria-labelledby="recent-apps-heading">
           <div className="mb-[18px] flex items-end justify-between gap-4">
             <div>
-              <h1 id="recent-apps-heading" className="text-[22px] font-bold tracking-[-0.03em]">
+              <h1 id="recent-apps-heading" className="text-[22px] font-bold leading-[1.25] tracking-[-0.03em]">
                 {t('homeApps.recent.title')}
               </h1>
-              <p className="mt-[7px] text-[13px] text-muted-foreground">
+              <p className="mt-[7px] text-[13px] leading-[1.5] text-muted-foreground">
                 {t('homeApps.recent.description')}
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6">
+          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
             {resolvedRecent.map(item => (
               <AppIcon
                 key={item.key}
@@ -473,11 +473,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
           </div>
           {remainingBuiltinApps.length > 0 && (
             <div
-              className="rounded-xl border border-foreground/10 bg-foreground/2 p-4"
+              className="rounded-[17px] border border-foreground/10 bg-foreground/2 p-[16px]"
               data-testid="builtin-app-launcher"
             >
-              <h2 className="text-sm font-medium">{t('homeApps.builtin.title')}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <h2 className="text-[14px] font-medium">{t('homeApps.builtin.title')}</h2>
+              <p className="mt-[4px] text-[12px] text-muted-foreground">
                 {t('homeApps.builtin.description')}
               </p>
               <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
@@ -497,12 +497,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
           <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
             <div className="mb-[18px] flex items-start justify-between gap-4">
               <div>
-                <h2 id="organization-apps-heading" className="text-xl font-[720] tracking-[-0.03em]">
+                <h2 id="organization-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
                   {t('homeApps.organization.title', {
                     name: activeProductSpace?.name || t('homeApps.organization.current'),
                   })}
                 </h2>
-                <p className="mt-1.5 text-sm text-muted-foreground">
+                <p className="mt-[6px] text-[14px] text-muted-foreground">
                   {activeProductSpace?.kind === 'enterprise'
                     ? t('homeApps.organization.enterpriseDescription')
                     : t('homeApps.organization.creatorDescription')}
@@ -632,14 +632,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
         <section aria-labelledby="external-apps-heading">
           <div className="mb-[18px]">
-            <h2 id="external-apps-heading" className="text-xl font-[720] tracking-[-0.03em]">
+            <h2 id="external-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
               {t('homeApps.external.title')}
             </h2>
-            <p className="mt-1.5 text-sm text-muted-foreground">
+            <p className="mt-[6px] text-[14px] text-muted-foreground">
               {t('homeApps.external.description')}
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6">
+          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
             {externalApps.map(app => (
               <AppIcon
                 key={app.id}
