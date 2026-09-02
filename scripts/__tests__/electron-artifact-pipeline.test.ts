@@ -545,39 +545,49 @@ describe('Electron final artifact validation pipeline', () => {
   // repeatable form of the once-per-commit manual gate: if staging/copy ever
   // regresses to a stale or bun-targeted artifact, the handshake fails here
   // instead of in the field.
-  it('real staging path produces a pi bundle that completes init/ready under the node host', async () => {
+  it('real staging path produces a STAGED pi resource that completes init/ready under the node host', async () => {
     const {
       buildPiAgentServerBundle,
       stagePiAgentServerBundleResource,
-      stagedBundlePath,
+      stagedResourceBundlePath,
     } = await import(join(root, 'scripts', 'build', 'pi-agent-server-staging.ts'))
 
     const layoutRoot = mkdtempSync(join(tmpdir(), 'polo-pi-staging-e2e-'))
     try {
-      const packageDir = join(layoutRoot, 'packages', 'pi-agent-server')
+      // Electron-layout temp dir: the staged resource sits at
+      // resources/pi-agent-server/index.js and Node resolves its module type
+      // through the nearest package.json — mirror apps/electron/package.json
+      // ("type": "module") at that exact boundary.
+      const electronPackageJson = JSON.parse(readFileSync(join(root, 'apps', 'electron', 'package.json'), 'utf8')) as { type?: string }
+      mkdirSync(layoutRoot, { recursive: true })
+      writeFileSync(join(layoutRoot, 'package.json'), JSON.stringify({ type: electronPackageJson.type ?? 'module' }))
+
       const layout = {
         sourceEntry: join(root, 'packages', 'pi-agent-server', 'src', 'index.ts'),
-        distDir: join(packageDir, 'dist'),
+        distDir: join(layoutRoot, 'build-output', 'pi-agent-server', 'dist'),
         resourceDir: join(layoutRoot, 'resources', 'pi-agent-server'),
         koffiSource: join(root, 'node_modules', 'koffi'),
       }
-      // Mirror the PRODUCTION layout: the staged bundle sits beside the
-      // package's package.json ("type": "module") — Node's ESM loader needs it.
-      mkdirSync(join(packageDir, 'dist'), { recursive: true })
-      copyFileSync(join(root, 'packages', 'pi-agent-server', 'package.json'), join(packageDir, 'package.json'))
 
       // REAL build + stage path (same core the packaging entry drives).
+      // The dist output is only the build-success precondition — everything
+      // below asserts THE STAGED RESOURCE (resourceDir/index.js), the copy
+      // production actually executes.
       await buildPiAgentServerBundle(layout, root)
       stagePiAgentServerBundleResource(layout)
 
-      // BUNDLE SHAPE on the STAGED artifact: node-target ESM only.
-      const staged = readFileSync(stagedBundlePath(layout), 'utf8')
+      const stagedResource = stagedResourceBundlePath(layout)
+      expect(existsSync(stagedResource)).toBe(true)
+
+      // BUNDLE SHAPE on the STAGED RESOURCE: node-target ESM only.
+      const staged = readFileSync(stagedResource, 'utf8')
       expect(staged).not.toContain('import.meta.require')
       expect(staged).toContain('createRequire')
 
-      // HOST HANDSHAKE: init → ready under Node + ELECTRON_RUN_AS_NODE=1.
+      // HOST HANDSHAKE on the STAGED RESOURCE: init → ready under Node +
+      // ELECTRON_RUN_AS_NODE=1.
       const host = Bun.spawn({
-        cmd: ['node', join(packageDir, 'dist', 'index.js')],
+        cmd: ['node', stagedResource],
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',

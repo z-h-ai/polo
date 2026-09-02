@@ -31,9 +31,21 @@ export interface PiAgentServerStagingLayout {
   koffiSource?: string
 }
 
-/** The staged bundle path inside a layout. */
-export function stagedBundlePath(layout: PiAgentServerStagingLayout): string {
+/** The build OUTPUT path inside a layout (package dist, pre-staging). */
+export function bundleOutputPath(layout: PiAgentServerStagingLayout): string {
   return join(layout.distDir, 'index.js')
+}
+
+/**
+ * The STAGED RESOURCE bundle path inside a layout (the copy that production
+ * actually executes — e.g. electron resources). This is the only path whose
+ * runtime shape and host behavior constitute the product contract.
+ */
+export function stagedResourceBundlePath(layout: PiAgentServerStagingLayout): string {
+  if (!layout.resourceDir) {
+    throw new Error('staging requires a resourceDir in the layout')
+  }
+  return join(layout.resourceDir, 'index.js')
 }
 
 /**
@@ -56,8 +68,8 @@ export async function buildPiAgentServerBundle(
   if (exitCode !== 0) {
     throw new Error(`pi-agent-server bundle build failed with exit code ${exitCode}`)
   }
-  if (!existsSync(stagedBundlePath(layout))) {
-    throw new Error(`pi-agent-server bundle output not found at ${stagedBundlePath(layout)}`)
+  if (!existsSync(bundleOutputPath(layout))) {
+    throw new Error(`pi-agent-server bundle output not found at ${bundleOutputPath(layout)}`)
   }
 }
 
@@ -70,8 +82,8 @@ export function stagePiAgentServerBundleResource(layout: PiAgentServerStagingLay
   if (!layout.resourceDir) {
     throw new Error('staging requires a resourceDir in the layout')
   }
-  if (!existsSync(stagedBundlePath(layout))) {
-    throw new Error(`pi-agent-server bundle output not found at ${stagedBundlePath(layout)}`)
+  if (!existsSync(bundleOutputPath(layout))) {
+    throw new Error(`pi-agent-server bundle output not found at ${bundleOutputPath(layout)}`)
   }
   if (layout.koffiSource && !existsSync(layout.koffiSource)) {
     throw new Error(`koffi dependency not found at ${layout.koffiSource}`)
@@ -79,7 +91,7 @@ export function stagePiAgentServerBundleResource(layout: PiAgentServerStagingLay
 
   rmSync(layout.resourceDir, { recursive: true, force: true })
   mkdirSync(layout.resourceDir, { recursive: true })
-  cpSync(stagedBundlePath(layout), join(layout.resourceDir, 'index.js'))
+  cpSync(bundleOutputPath(layout), stagedResourceBundlePath(layout))
   if (layout.koffiSource) {
     cpSync(layout.koffiSource, join(layout.resourceDir, 'node_modules/koffi'), {
       recursive: true,
