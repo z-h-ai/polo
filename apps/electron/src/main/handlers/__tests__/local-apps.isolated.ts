@@ -214,7 +214,10 @@ mock.module('../../local-app-runtime', () => {
 })
 
 const { registerLocalAppHandlers } = await import('../local-apps')
-const { setTrustedProductSpaceAccountProvider } = await import(
+const {
+  setSyncTrustedProductSpaceAccountId,
+  setTrustedProductSpaceAccountProvider,
+} = await import(
   '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
 )
 const {
@@ -223,6 +226,7 @@ const {
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
+  withSwitchLock,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
 
 function createCatalog(count: number): AppCatalogCacheEntry {
@@ -345,6 +349,9 @@ describe('local app main-process authorization boundary', () => {
       },
     } as never)
     setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    // The lock-free trusted-account mirror authenticates the start path's
+    // critical section; it tracks the same signed-in account.
+    setSyncTrustedProductSpaceAccountId(signedInAccountId)
     if (signedInAccountId) {
       setRuntimeActiveProductSpaceAccount(signedInAccountId)
     }
@@ -424,6 +431,56 @@ describe('local app main-process authorization boundary', () => {
     )
     expect(registered).toHaveLength(2)
     expect(registered.every(execution => execution.scope.productSpaceId === 'organization-a')).toBe(true)
+  })
+
+  it('a Local App start keeps the switch lock free while resolving the account and loses to a concurrent account replacement', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    // Gate the trusted-account provider: the start must resolve the account
+    // BEFORE acquiring the switch lock (global lock order).
+    let releaseProvider!: () => void
+    const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve('account-a') })
+    setTrustedProductSpaceAccountProvider(() => gatedProvider)
+    // Gate the runtime boot so the start sits inside the switch lock.
+    let releaseBoot!: () => void
+    const gatedBoot = new Promise<{ appId: string; scope: CatalogLocalAppScope; version: string; url: string; port: number }>(resolve => {
+      releaseBoot = () => resolve({
+        appId: scope().catalogAppId,
+        scope: scope(),
+        version: '1.2.3',
+        url: 'http://127.0.0.1:9876',
+        port: 9876,
+      })
+    })
+    scopedStart.mockImplementationOnce(() => gatedBoot)
+
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const starting = start(context, scope())
+    for (let i = 0; i < 300 && !scopedStart.mock.calls.length; i += 1) {
+      // Wait until the account was resolved and the critical section began.
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    // While the start resolves the account (and boots the runtime under the
+    // switch lock), the account replacement's revoke path must be able to
+    // take the switch lock — the start must NOT hold it across Admin-lock
+    // work. Bounded assertion.
+    releaseProvider()
+    const lockAcquiredDuringBoot = await Promise.race([
+      withSwitchLock(async () => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
+    ])
+    expect(lockAcquiredDuringBoot).toBe(true)
+
+    // The replacement wins concurrently: mirror flips to account B and the
+    // fence account is rebound — the in-flight start must fail closed.
+    setSyncTrustedProductSpaceAccountId('account-b')
+    releaseBoot()
+    await expect(starting).rejects.toMatchObject({ code: 'SWITCH_IN_PROGRESS' })
+    // The booted runtime was stopped again and nothing was registered under
+    // the replaced account.
+    expect(scopedRegistry.stop).toHaveBeenCalled()
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
   })
 
   it('a workspace stop only unregisters the calling workspace execution', async () => {

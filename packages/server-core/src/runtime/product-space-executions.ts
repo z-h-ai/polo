@@ -158,6 +158,24 @@ export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
 export function resetProductSpaceExecutionRegistryForTests(): void {
   registry.clear()
   lastCommittedSwitch = null
+  prepareIntentSequence = 0
+}
+
+/**
+ * Monotonic Main-side prepare-intent sequence. A PREPARE claims its intent
+ * BEFORE the (unlocked) trusted-list fetch and may only install a pending
+ * switch transaction if it is still the LATEST claim when it re-enters the
+ * switch lock — so two prepares finishing out of order can never let the
+ * older one overwrite or invalidate the newer one's pending token.
+ */
+let prepareIntentSequence = 0
+
+export function claimSwitchPrepareIntent(): number {
+  return ++prepareIntentSequence
+}
+
+export function getLatestSwitchPrepareIntent(): number {
+  return prepareIntentSequence
 }
 
 /**

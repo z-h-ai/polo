@@ -26,10 +26,8 @@ import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
   getRuntimeActiveProductSpace,
   isRuntimeOfflineReadOnly,
-  isSwitchInProgress,
-  withSwitchLock,
 } from '../runtime/product-space-executions'
-import { ensureAssistantSessionExecution } from '../runtime/assistant-executions'
+import { registerAssistantExecutionForSend } from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
@@ -5620,37 +5618,26 @@ export class SessionManager implements ISessionManager {
 
     // Every entry that can push a session into processing must have the
     // session's immutable execution scope registered — including restored
-    // (cold) sessions on their first send. Registration runs inside the
-    // switch lock and re-verifies the trusted fence: an offline read-only
-    // view, an in-flight switch, or a registration failure refuses the send
-    // instead of leaving an unregistered execution. Sessions created before
-    // the ProductSpace contract (never bound, e.g. CLI runtimes) carry no
-    // space semantics and keep their legacy behavior.
-    await withSwitchLock(async () => {
-      if (!managed.productSpaceId) return
-      const fence = getRuntimeActiveProductSpace()
-      if (
-        !fence
-        || isRuntimeOfflineReadOnly()
-        || isSwitchInProgress()
-        || managed.productSpaceId !== fence
-      ) {
-        throw new Error('EXECUTION_REGISTRATION_REFUSED')
-      }
-      // A missing trusted account means the scope could not be bound to an
-      // immutable identity — the send fails closed rather than running
-      // unregistered.
-      const registered = await ensureAssistantSessionExecution({
+    // (cold) sessions on their first send. The trusted account is resolved
+    // BEFORE the switch lock (GLOBAL LOCK ORDER: the Admin session lock must
+    // never be acquired while holding the switch lock — account replacement
+    // holds the Admin lock while revoking the fence through the switch
+    // lock), and the short critical section re-verifies fence, switch state
+    // and the lock-free trusted-account mirror/generation: an offline
+    // read-only view, an in-flight switch, a concurrent account replacement
+    // or a registration failure refuses the send instead of leaving an
+    // unregistered execution. Sessions created before the ProductSpace
+    // contract (never bound, e.g. CLI runtimes) carry no space semantics and
+    // keep their legacy behavior.
+    if (managed.productSpaceId) {
+      await registerAssistantExecutionForSend({
         sessionManager: this,
         sessionId,
         workspaceId: managed.workspace.id,
         productSpaceId: managed.productSpaceId,
         name: managed.name || sessionId,
       })
-      if (!registered) {
-        throw new Error('EXECUTION_REGISTRATION_REFUSED')
-      }
-    })
+    }
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching

@@ -26,7 +26,9 @@ import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
   EXECUTION_STOP_POLL_INTERVAL_MS,
+  claimSwitchPrepareIntent,
   getLastCommittedSwitch,
+  getLatestSwitchPrepareIntent,
   getPendingSwitchTransaction,
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
@@ -51,6 +53,7 @@ import { runLegacyLocalAppCleaner } from '../../runtime/legacy-state-cleaners'
 import { clearLegacySkillCaches } from './admin'
 import {
   fetchTrustedProductSpaceList,
+  getSyncTrustedProductSpaceAccountId,
   getTrustedAccountGeneration,
   resolveTrustedProductSpaceAccountId,
 } from './trusted-product-space-account'
@@ -432,6 +435,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         }
       }
 
+      // Claim the monotonic prepare intent BEFORE the unlocked fetch: on
+      // switch-lock re-entry only the LATEST claimed intent may install the
+      // pending transaction, so two prepares finishing out of order can
+      // never let the older one overwrite the newer one's token.
+      const prepareIntent = claimSwitchPrepareIntent()
+
       setSwitchInProgress(true)
       try {
         // GLOBAL LOCK ORDER: the contract-validated list fetch acquires the
@@ -443,19 +452,6 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         const accountGenerationBeforeFetch = getTrustedAccountGeneration()
         const fenceGenerationBeforeFetch = getRuntimeFenceGeneration()
         const fetched = await fetchTrustedProductSpaceList()
-        if (!fetched.ok) {
-          // An incompatible server contract must reach the renderer
-          // verbatim: it drives the fail-closed contract-blocked path
-          // instead of a retryable "target failed" state. No transaction
-          // exists yet, so there is nothing to revoke here.
-          return {
-            success: false as const,
-            errorCode: fetched.errorCode,
-            message: fetched.errorCode === 'product_space_contract_unsupported'
-              ? 'The ProductSpace contract is not supported by this client'
-              : 'ProductSpace list is unavailable',
-          }
-        }
         return await withSwitchLock(async () => {
           // Freshness proof for the unlocked fetch: the trusted account and
           // the fence must be exactly the ones the list was captured for.
@@ -464,6 +460,24 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             || getRuntimeFenceGeneration() !== fenceGenerationBeforeFetch
           ) {
             return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The account session or fence changed during target verification' }
+          }
+          // CAS the prepare intent: a late (older) PREPARE must never
+          // replace, cancel or consume a newer pending transaction.
+          if (prepareIntent !== getLatestSwitchPrepareIntent()) {
+            return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'A newer switch prepare superseded this one' }
+          }
+          if (!fetched.ok) {
+            // An incompatible server contract must reach the renderer
+            // verbatim: it drives the fail-closed contract-blocked path
+            // instead of a retryable "target failed" state. No transaction
+            // exists yet, so there is nothing to revoke here.
+            return {
+              success: false as const,
+              errorCode: fetched.errorCode,
+              message: fetched.errorCode === 'product_space_contract_unsupported'
+                ? 'The ProductSpace contract is not supported by this client'
+                : 'ProductSpace list is unavailable',
+            }
           }
           const originProductSpaceId = getRuntimeActiveProductSpace()
           // A fence committed for another (replaced) account is never
@@ -852,24 +866,37 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       if (typeof cancelToken !== 'string' || !cancelToken) {
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch cancel request is invalid' }
       }
+      // SYNCHRONOUS, lock-free pending-cancel gate — runs before ANY await so
+      // a cancellation is never delayed behind the Admin session lock while
+      // the stop phase keeps dispatching. The transaction captured the
+      // trusted account at prepare time; the synchronous trusted-account
+      // mirror (maintained by the Admin session lifecycle, no lock) proves
+      // the canceller is still the same account, fail-closed on `unknown`.
+      const pending = getPendingSwitchTransaction()
+      if (pending?.token === cancelToken) {
+        const mirrorAccountId = getSyncTrustedProductSpaceAccountId()
+        if (mirrorAccountId && mirrorAccountId === pending.accountId) {
+          if (!pending.cancelled) {
+            // Keep the transaction as a cancelled tombstone: the stop phase
+            // observes the flag before every dispatch and reports
+            // SWITCH_CANCELLED; a cancelled transaction no longer blocks new
+            // starts and is cleaned up by the stop phase, the TTL, or a
+            // superseding prepare.
+            pending.cancelled = true
+            setSwitchInProgress(false)
+          }
+          return { success: true as const, outcome: 'cancelled' as const }
+        }
+        // A stale/replaced-account token stays invalid: it must not mark the
+        // transaction and reveals nothing about any fence.
+        return { success: true as const, outcome: 'no_transaction' as const }
+      }
       // The disclosing `already_committed` branch is account-authenticated:
       // the committed record may only be read back by the same trusted
       // Admin account that committed it. (Runs outside the switch lock; the
-      // Admin session lock is never held by the switch lock.)
+      // Admin session lock is never held by the switch lock. The pending
+      // cancellation gate above was already handled synchronously.)
       const trustedAccountId = await resolveTrustedProductSpaceAccountId()
-      const pending = getPendingSwitchTransaction()
-      if (pending?.token === cancelToken) {
-        if (!pending.cancelled) {
-          // Keep the transaction as a cancelled tombstone: the stop phase
-          // observes the flag before every dispatch and reports
-          // SWITCH_CANCELLED; a cancelled transaction no longer blocks new
-          // starts and is cleaned up by the stop phase, the TTL, or a
-          // superseding prepare.
-          pending.cancelled = true
-          setSwitchInProgress(false)
-        }
-        return { success: true as const, outcome: 'cancelled' as const }
-      }
       const committed = getLastCommittedSwitch()
       if (
         committed

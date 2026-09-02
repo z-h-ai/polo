@@ -21,6 +21,7 @@ import {
   getRuntimeActiveProductSpace as runtimeActiveSpace,
 } from '../../../runtime/product-space-executions'
 import {
+  setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
   setTrustedProductSpaceListFetcher,
   type TrustedProductSpaceListResult,
@@ -140,6 +141,10 @@ beforeEach(() => {
   setRuntimeActiveProductSpaceAccount(trustedAccountId)
   setRuntimeOfflineReadOnly(false)
   setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
+  // The synchronous trusted-account mirror is the lock-free authenticator
+  // for the pending-cancel gate; the harness keeps it bound to the same
+  // trusted account the provider resolves.
+  setSyncTrustedProductSpaceAccountId(trustedAccountId)
   listResult = visibleList()
   setTrustedProductSpaceListFetcher(async () => listFetcherResult())
 })
@@ -953,6 +958,118 @@ describe('two-phase switch transaction', () => {
     const replay = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, prepared.token, spaceB)
     expect(replay.success).toBe(false)
     expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('a late superseded PREPARE never replaces the newer transaction and B carries through STOP and COMMIT', async () => {
+    const { invoke } = createHarness()
+    // Two overlapping prepares with opposite fetch completion order: A
+    // claims its intent first but its authoritative list resolves LAST.
+    const fetchOrder: string[] = []
+    let releaseListA!: () => void
+    const gatedListA = new Promise<TrustedProductSpaceListResult>(resolve => {
+      releaseListA = () => resolve({ ok: true, list: visibleList() })
+    })
+    setTrustedProductSpaceListFetcher(async () => {
+      fetchOrder.push(fetchOrder.length === 0 ? 'A' : 'B')
+      if (fetchOrder.length === 1) return gatedListA
+      return { ok: true, list: visibleList() }
+    })
+
+    const preparingA = invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    for (let i = 0; i < 300 && fetchOrder.length < 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    const preparingB = invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    // B completes first (its fetch resolves immediately) and installs the
+    // pending transaction with token B.
+    const preparedB = await preparingB
+    expect(preparedB.success).toBe(true)
+    expect(typeof preparedB.token).toBe('string')
+
+    // Late A finishes after B: it must be rejected WITHOUT replacing,
+    // cancelling or consuming B's pending transaction.
+    releaseListA()
+    const preparedA = await preparingA
+    expect(preparedA.success).toBe(false)
+    expect(preparedA.errorCode).toBe('SWITCH_SUPERSEDED')
+
+    // B's token still carries through the whole transaction.
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, preparedB.token))
+      .toMatchObject({ success: true })
+    const committedB = await invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, preparedB.token, spaceB)
+    expect(committedB.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+  })
+
+  it('a cancellation received after the first stop dispatch prevents the second dispatch even while the Admin resolver is unavailable', async () => {
+    const first = fakeExecution({ executionId: 'exec-d1' })
+    const second = fakeExecution({ executionId: 'exec-d2' })
+    registerProductSpaceExecution(first)
+    registerProductSpaceExecution(second)
+
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(prepared.executions).toHaveLength(2)
+
+    // Block inside the first stop dispatch; while it is in flight the Admin
+    // account resolver (Admin session lock) is UNAVAILABLE.
+    let releaseFirstStop!: () => void
+    const firstStopReleased = new Promise<void>(resolve => { releaseFirstStop = resolve })
+    const originalFirstStop = first.stop
+    let firstStopCalls = 0
+    first.stop = async () => {
+      firstStopCalls += 1
+      await firstStopReleased
+      return originalFirstStop()
+    }
+    const originalSecondStop = second.stop
+    let secondStopCalls = 0
+    second.stop = async () => {
+      secondStopCalls += 1
+      return originalSecondStop()
+    }
+    let releaseProvider!: () => void
+    const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve(trustedAccountId) })
+    // The provider stays available for STOP's own start-of-handler
+    // resolution, then becomes unavailable (Admin session lock held) —
+    // CANCEL must not need it for the pending cancellation gate.
+    let providerGated = false
+    setTrustedProductSpaceAccountProvider(async () => {
+      if (!providerGated) return trustedAccountId
+      return gatedProvider
+    })
+
+    const stopping = invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
+    for (let i = 0; i < 300 && firstStopCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(firstStopCalls).toBe(1)
+    providerGated = true
+
+    // The user cancels while the first stop is blocked and the Admin
+    // resolver cannot answer: the synchronous pending-cancel gate must mark
+    // the transaction cancelled WITHOUT any await.
+    const cancelled = await Promise.race([
+      invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('cancel waited on the Admin lock')), 500)),
+    ])
+    expect(cancelled.success).toBe(true)
+    expect(cancelled.outcome).toBe('cancelled')
+
+    // The first (already dispatched) stop finishes; the second execution
+    // must NEVER be dispatched and the stop phase reports SWITCH_CANCELLED.
+    releaseFirstStop()
+    const stopped = await stopping
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('SWITCH_CANCELLED')
+    expect(secondStopCalls).toBe(0)
+    expect(await second.isActive()).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceA)
+
+    // Cleanup: the pending tombstone is consumed; release the provider for
+    // later asserts.
+    releaseProvider()
   })
 })
 

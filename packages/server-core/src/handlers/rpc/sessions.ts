@@ -17,6 +17,7 @@ import {
   unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
 import { ensureAssistantSessionExecution } from '../../runtime/assistant-executions'
+import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
 
 /**
  * The offline read-only view keeps only the RPCs needed to read saved
@@ -258,13 +259,20 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const session = await sessionManager.createSession(workspaceId, options)
     end()
     if (session.productSpaceId) {
-      await ensureAssistantSessionExecution({
-        sessionManager,
-        sessionId: session.id,
-        workspaceId: session.workspaceId,
-        productSpaceId: session.productSpaceId,
-        name: session.name || session.id,
-      })
+      // Best-effort registration: resolve the trusted account first — the
+      // helper no longer acquires the Admin session lock itself, so it can
+      // never nest it under another lock.
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (trustedAccountId) {
+        await ensureAssistantSessionExecution({
+          sessionManager,
+          sessionId: session.id,
+          workspaceId: session.workspaceId,
+          productSpaceId: session.productSpaceId,
+          name: session.name || session.id,
+          trustedAccountId,
+        })
+      }
     }
     return session
   })
@@ -304,13 +312,20 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       .getSessions()
       .find(candidate => candidate.id === sessionId)
     if (sendTarget?.productSpaceId) {
-      await ensureAssistantSessionExecution({
-        sessionManager,
-        sessionId,
-        workspaceId: sendTarget.workspaceId,
-        productSpaceId: sendTarget.productSpaceId,
-        name: sendTarget.name || sessionId,
-      })
+      // Best-effort registration: resolve the trusted account first — the
+      // helper no longer acquires the Admin session lock itself, so it can
+      // never nest it under another lock.
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (trustedAccountId) {
+        await ensureAssistantSessionExecution({
+          sessionManager,
+          sessionId,
+          workspaceId: sendTarget.workspaceId,
+          productSpaceId: sendTarget.productSpaceId,
+          name: sendTarget.name || sessionId,
+          trustedAccountId,
+        })
+      }
     }
 
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
