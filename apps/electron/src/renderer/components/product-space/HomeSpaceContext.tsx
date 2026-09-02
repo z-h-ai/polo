@@ -55,7 +55,12 @@ export function HomeSpaceContext({
       data-testid="home-space-context"
       className="mb-4 rounded-xl border border-foreground/10 px-4 py-3"
     >
-      {view === 'circles' ? (
+      {/* Fail-closed render predicate: the circles branch requires BOTH the
+          persisted view state AND the live guard (personal + non-empty
+          relations). The effects below only normalize state after render —
+          this predicate guarantees an invalid branch can never render, not
+          even for the first frame after an identity change or guard loss. */}
+      {view === 'circles' && showCirclesEntry ? (
         <div data-testid="product-space-relation-my-circles-view">
           <div className="flex items-center justify-between gap-3">
             <div>

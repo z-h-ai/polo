@@ -365,6 +365,110 @@ describe('useAppCatalog creator circle relations', () => {
     })
     expect(result.current.creatorCircles).toEqual([])
   })
+
+  it('clears derived creator circles when a Catalog refresh throws', async () => {
+    const entriesWithCircle = [{
+      kind: 'app',
+      catalogEntryId: 'circle-app',
+      name: 'Circle App',
+      description: '',
+      availability: 'available',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://example.com/circle-app',
+      sortOrder: 0,
+      sources: [{
+        kind: 'creator_circle',
+        circleId: 'circle-1',
+        name: '桥岸圈子',
+      }],
+    }]
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-circles',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: entriesWithCircle,
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-circles')
+    })
+    expect(result.current.creatorCircles).toEqual([
+      { circleId: 'circle-1', name: '桥岸圈子' },
+    ])
+
+    // THROWN failure (the fetch promise rejects — distinct from the
+    // success:false errorCode path): stale relations are still invalidated.
+    catalogApi.productSpaceGetCatalog = async () => {
+      throw new Error('socket down')
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.errorCode).toBe('request_failed')
+    })
+    expect(result.current.creatorCircles).toEqual([])
+  })
+
+  it('clears derived creator circles on a thrown authorization failure', async () => {
+    const entriesWithCircle = [{
+      kind: 'app',
+      catalogEntryId: 'circle-app',
+      name: 'Circle App',
+      description: '',
+      availability: 'available',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://example.com/circle-app',
+      sortOrder: 0,
+      sources: [{
+        kind: 'creator_circle',
+        circleId: 'circle-1',
+        name: '桥岸圈子',
+      }],
+    }]
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-circles',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: entriesWithCircle,
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-circles')
+    })
+    expect(result.current.creatorCircles).toEqual([
+      { circleId: 'circle-1', name: '桥岸圈子' },
+    ])
+
+    // THROWN authorization failure (FORBIDDEN, catalog-scoped): the denied
+    // fail-closed branch must also invalidate the stale relations.
+    catalogApi.productSpaceGetCatalog = async () => {
+      throw Object.assign(new Error('Admin request is not permitted'), {
+        code: 'FORBIDDEN',
+      })
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.accessMode).toBe('denied')
+    })
+    expect(result.current.creatorCircles).toEqual([])
+  })
 })
 
 describe('useAppCatalog scoped async state', () => {
