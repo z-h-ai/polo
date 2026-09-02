@@ -1946,3 +1946,70 @@ describe('aggregate stop supersession (R35-3)', () => {
     expect(await ownedReplacement.isActive()).toBe(true)
   })
 })
+
+describe('STOP_ALL generation-stable final projection (R37-5)', () => {
+  it('a replacement registered during the final liveness probe forces allStopped=false (R37-5)', async () => {
+    const { invoke } = createHarness()
+    const releaseDrainGate = (() => {
+      let release!: () => void
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      return { gate, release: () => release() }
+    })()
+    const releaseFinalGate = (() => {
+      let release!: () => void
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      return { gate, release: () => release() }
+    })()
+
+    let probeCalls = 0
+    const old = fakeExecution({ executionId: 'exec-final-race' })
+    old.isActive = async () => {
+      probeCalls += 1
+      // Call 1: the STOP_ALL snapshot. Call 2: the awaited drain window.
+      if (probeCalls === 2) await releaseDrainGate.gate
+      return probeCalls <= 1
+    }
+    registerProductSpaceExecution(old)
+
+    const pending = invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    // A same-ID replacement registers during the awaited drain.
+    const replacement = fakeExecution({ executionId: 'exec-final-race' })
+    // Its own liveness parks during the FINAL projection pass so the test
+    // can register a third generation mid-pass — the exact R37 race.
+    replacement.isActive = async () => {
+      await releaseFinalGate.gate
+      return true
+    }
+    replacement.getStatus = () => 'running'
+    const ownedReplacement = registerProductSpaceExecution(replacement)
+    releaseDrainGate.release()
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    // Pass 1 of the final projection is now parked probing the a:2
+    // generation — register the third generation mid-pass.
+    const third = fakeExecution({ executionId: 'exec-final-race' })
+    third.isActive = () => true
+    third.getStatus = () => 'preparing'
+    const ownedThird = registerProductSpaceExecution(third)
+    releaseFinalGate.release()
+
+    const result = await pending
+    expect(result.success).toBe(true)
+    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string }> } }).result
+    // The generation-stable strategy re-enumerated after the mid-pass
+    // registration: the surviving generation keeps the aggregate
+    // nonterminal with its real status.
+    expect(aggregate.allStopped).toBe(false)
+    const summary = aggregate.executions.find(execution => execution.executionId === 'exec-final-race')
+    expect(summary?.status).toBe('preparing')
+    // The newest generation survives, registered and active.
+    expect(getRegisteredProductSpaceExecution('exec-final-race')).toBe(ownedThird)
+    expect(await ownedThird.isActive()).toBe(true)
+    void ownedReplacement
+  })
+})

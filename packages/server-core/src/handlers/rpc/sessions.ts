@@ -80,21 +80,18 @@ function sessionInsideActiveSpace(
   sessionId: string,
   callerWorkspaceId?: string | null,
 ): boolean {
-  // R36-1: the ONE fail-closed scope comparator — no boundary keeps a
-  // divergent authorization path.
-  const activeProductSpaceId = getRuntimeActiveProductSpace()
-  if (!activeProductSpaceId) return false
-  const trustedAccountId = getSyncTrustedProductSpaceAccountId()
-  if (!trustedAccountId || !callerWorkspaceId) return false
+  // R37-3: ONE atomic complete Main-owned scope capture — the runtime fence
+  // account must equal the trusted mirror, the transition epoch must be
+  // stable and settled, and the record is compared only against that
+  // immutable account/ProductSpace/caller-Workspace tuple. Split
+  // fence/mirror states can never authorize a boundary.
+  const scope = captureCompleteTrustedSessionScope(callerWorkspaceId)
+  if (!scope) return false
   const session = sessionManager
     .getSessions()
     .find(candidate => candidate.id === sessionId)
   if (!session) return false
-  return trustedScopeMatchesSessionRecord(session, {
-    accountId: trustedAccountId,
-    productSpaceId: activeProductSpaceId,
-    workspaceId: callerWorkspaceId,
-  })
+  return trustedScopeMatchesSessionRecord(session, scope)
 }
 
 /**
@@ -262,17 +259,14 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       end()
       return []
     }
-    const activeProductSpaceId = getRuntimeActiveProductSpace()
     const allSessions = sessionManager.getSessions(workspaceId ?? undefined)
-    // Fail closed: with no committed ProductSpace the business surface is not
-    // ready and no session crosses the IPC boundary. While committed, sessions
-    // bound to any other space (or never bound) are equally invisible.
-    const trustedAccountId = activeProductSpaceId
-      ? getSyncTrustedProductSpaceAccountId()
-      : null
-    const sessions = activeProductSpaceId && trustedAccountId
-      ? allSessions.filter(session => session.productSpaceId === activeProductSpaceId
-        && session.accountId === trustedAccountId)
+    // Fail closed: R37-3 — the list filter is bound to ONE atomic complete
+    // Main-owned scope capture (fence account == trusted mirror, stable
+    // settled epoch, caller Workspace). Split fence/mirror states surface
+    // nothing.
+    const listScope = captureCompleteTrustedSessionScope(workspaceId)
+    const sessions = listScope
+      ? allSessions.filter(session => trustedScopeMatchesSessionRecord(session, listScope))
       : []
     end()
 
@@ -680,20 +674,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
     // Filter out hidden sessions and every session outside the COMPLETE
     // trusted scope (other ProductSpace, replaced account, or never-bound
-    // legacy records).
+    // legacy records). R37-3: one atomic complete scope capture — split
+    // fence/mirror states surface nothing.
     const allSessions = await sessionManager.getSessions()
-    const activeProductSpaceId = getRuntimeActiveProductSpace()
-    const trustedAccountId = activeProductSpaceId
-      ? getSyncTrustedProductSpaceAccountId()
-      : null
+    const searchScope = captureCompleteTrustedSessionScope(callerWorkspaceId)
     const excludedSessionIds = new Set(
       allSessions
         .filter(s => s.hidden
-          || !activeProductSpaceId
-          || !trustedAccountId
-          || s.productSpaceId !== activeProductSpaceId
-          || !s.accountId
-          || s.accountId !== trustedAccountId)
+          || !searchScope
+          || !trustedScopeMatchesSessionRecord(s, searchScope))
         .map(s => s.id)
     )
     const filteredResults = results.filter(r => !excludedSessionIds.has(r.sessionId))

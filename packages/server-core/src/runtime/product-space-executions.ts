@@ -83,6 +83,64 @@ export function listRegisteredProductSpaceExecutions(): RegisteredProductSpaceEx
   return [...registry.values()]
 }
 
+/**
+ * R37-5: a membership/generation signature of the registry for one exact
+ * account/ProductSpace scope (or the whole registry when the scope is
+ * omitted). Two reads returning the same signature prove that no
+ * registration, replacement or removal happened in between — the boundary
+ * any liveness projection must observe to be generation-stable.
+ */
+export function registeredExecutionsScopeRevision(
+  accountId?: string,
+  productSpaceId?: string,
+): string {
+  return listRegisteredProductSpaceExecutions()
+    .filter(execution => (
+      (accountId === undefined || execution.scope.accountId === accountId)
+      && (productSpaceId === undefined || execution.scope.productSpaceId === productSpaceId)
+    ))
+    .map(execution => `${execution.scope.executionId}:${execution.generation}`)
+    .sort()
+    .join('|')
+}
+
+/**
+ * R37-5: bounded generation-stable liveness scan of one exact scope. Each
+ * pass brackets its awaited probes with the registry revision; a revision
+ * change (replacement/removal/registration during any probe) restarts the
+ * pass against the new registry set, up to MAX_PROJECTION_PASSES. Returns
+ * the surviving ACTIVE execution ids plus whether a stable pass was ever
+ * observed — an unstable scan must be treated as an explicit nonterminal
+ * failure by the caller.
+ */
+const MAX_PROJECTION_PASSES = 5
+
+export async function collectActiveExecutionIdsInScope(
+  accountId: string | undefined,
+  productSpaceId: string | undefined,
+): Promise<{ activeIds: string[]; stable: boolean }> {
+  const activeIds = new Set<string>()
+  for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass++) {
+    activeIds.clear()
+    const revisionBefore = registeredExecutionsScopeRevision(accountId, productSpaceId)
+    for (const execution of listRegisteredProductSpaceExecutions()) {
+      if (accountId !== undefined && execution.scope.accountId !== accountId) continue
+      if (productSpaceId !== undefined && execution.scope.productSpaceId !== productSpaceId) continue
+      let active: boolean
+      try {
+        active = Boolean(await execution.isActive())
+      } catch {
+        active = true
+      }
+      if (active) activeIds.add(execution.scope.executionId)
+    }
+    if (registeredExecutionsScopeRevision(accountId, productSpaceId) === revisionBefore) {
+      return { activeIds: [...activeIds], stable: true }
+    }
+  }
+  return { activeIds: [...activeIds], stable: false }
+}
+
 /** Shared deadline for concurrent stop drains. */
 export const EXECUTION_STOP_DRAIN_TIMEOUT_MS = 10_000
 export const EXECUTION_STOP_POLL_INTERVAL_MS = 50
@@ -234,18 +292,13 @@ export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
   const failedExecutionIds = results
     .filter(result => result.status === 'failed' || result.superseded === true)
     .map(result => result.executionId)
-  for (const execution of registry.values()) {
-    let active: boolean
-    try {
-      active = Boolean(await execution.isActive())
-    } catch {
-      active = true
-    }
-    if (active && !failedExecutionIds.includes(execution.scope.executionId)) {
-      failedExecutionIds.push(execution.scope.executionId)
-    }
+  // R37-5: generation-stable final liveness scan (see ForAccount).
+  const { activeIds, stable } = await collectActiveExecutionIdsInScope(undefined, undefined)
+  for (const activeId of activeIds) {
+    if (!failedExecutionIds.includes(activeId)) failedExecutionIds.push(activeId)
   }
-  return { ok: failedExecutionIds.length === 0, failedExecutionIds }
+  const ok = stable && failedExecutionIds.length === 0
+  return { ok, failedExecutionIds }
 }
 
 export function resetProductSpaceExecutionRegistryForTests(): void {
@@ -421,19 +474,14 @@ export async function stopRegisteredProductSpaceExecutionsForAccount(accountId: 
   const failedExecutionIds = results
     .filter(result => result.status === 'failed' || result.superseded === true)
     .map(result => result.executionId)
-  for (const execution of listRegisteredProductSpaceExecutions()) {
-    if (execution.scope.accountId !== accountId) continue
-    let active: boolean
-    try {
-      active = Boolean(await execution.isActive())
-    } catch {
-      active = true
-    }
-    if (active && !failedExecutionIds.includes(execution.scope.executionId)) {
-      failedExecutionIds.push(execution.scope.executionId)
-    }
+  // R37-5: the final liveness scan is generation-stable — a replacement
+  // registered during any awaited probe is re-enumerated by the next pass.
+  const { activeIds, stable } = await collectActiveExecutionIdsInScope(accountId, undefined)
+  for (const activeId of activeIds) {
+    if (!failedExecutionIds.includes(activeId)) failedExecutionIds.push(activeId)
   }
-  return { ok: failedExecutionIds.length === 0, failedExecutionIds }
+  const ok = stable && failedExecutionIds.length === 0
+  return { ok, failedExecutionIds }
 }
 
 /**
@@ -540,20 +588,13 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
   const failedExecutionIds = results
     .filter(result => result.status === 'failed' || result.superseded === true)
     .map(result => result.executionId)
-  for (const execution of listRegisteredProductSpaceExecutions()) {
-    if (execution.scope.accountId !== accountId) continue
-    if (execution.scope.productSpaceId !== productSpaceId) continue
-    let active: boolean
-    try {
-      active = Boolean(await execution.isActive())
-    } catch {
-      active = true
-    }
-    if (active && !failedExecutionIds.includes(execution.scope.executionId)) {
-      failedExecutionIds.push(execution.scope.executionId)
-    }
+  // R37-5: generation-stable final liveness scan (see ForAccount).
+  const { activeIds, stable } = await collectActiveExecutionIdsInScope(accountId, productSpaceId)
+  for (const activeId of activeIds) {
+    if (!failedExecutionIds.includes(activeId)) failedExecutionIds.push(activeId)
   }
-  return { ok: failedExecutionIds.length === 0, failedExecutionIds }
+  const ok = stable && failedExecutionIds.length === 0
+  return { ok, failedExecutionIds }
 }
 
 /**

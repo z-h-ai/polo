@@ -14,6 +14,8 @@ import {
   setRuntimeActiveProductSpaceAccount,
 } from '../runtime/product-space-executions'
 import {
+  beginAccountTransition,
+  getSyncTrustedProductSpaceAccountId,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../handlers/rpc/trusted-product-space-account'
@@ -966,5 +968,381 @@ describe('assistant self-management current-scope enforcement (R36-1)', () => {
     setSyncTrustedProductSpaceAccountId(accountB)
     setRuntimeActiveProductSpaceAccount(accountB)
     expect(list.call(sm, managed).sessions).toEqual([])
+  })
+})
+
+describe('assistant scope transition epoch, callback inventory, atomic predicate, publication CAS (R37)', () => {
+  let tmpRoot: string
+  let handlers: Map<string, Handler>
+  let signedInAccountId: string | null
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const noWorkspaceContext = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+  const sessionsRoot = (): string => join(tmpRoot, 'sessions')
+
+  /** R37-4: storage whose create/save can be parked mid-flight. */
+  const makeGatedStorage = () => {
+    let gate: Promise<void> | null = null
+    let releaseGate: () => void = () => {}
+    const inner = new RootedSessionStorageCtor(sessionsRoot())
+    const gatedProps = new Set(['create', 'save', 'flush'])
+    const proxy = new Proxy(inner, {
+      get(target, prop) {
+        if (typeof prop === 'string' && gatedProps.has(prop)) {
+          return async (...args: unknown[]) => {
+            if (gate) await gate
+            return (target as unknown as Record<string, (...inner: unknown[]) => unknown>)[prop](...args)
+          }
+        }
+        return Reflect.get(target, prop)
+      },
+    }) as unknown as import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+    return {
+      storage: proxy,
+      armGate: () => {
+        gate = new Promise(resolve => {
+          releaseGate = resolve
+        })
+      },
+      release: () => {
+        releaseGate()
+        releaseGate = () => {}
+        gate = null
+      },
+    }
+  }
+
+  const buildManager = (sessionStorageInstance?: SessionStorage) => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: sessionStorageInstance ?? storage!,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  const registerHandlers = (sm: SessionManager) => {
+    handlers = new Map()
+    const server: RpcServer = {
+      handle(channel: string, handler: HandlerFn) {
+        handlers.set(channel, handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+    } as unknown as RpcServer
+    registerSessionsHandlers(server, {
+      sessionManager: sm,
+      platform: {
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
+      },
+      windowManager: {
+        getWorkspaceForWindow: () => null,
+      },
+    } as unknown as HandlerDeps)
+  }
+
+  const seedManaged = (sm: SessionManager, input: {
+    id: string
+    accountId?: string
+    productSpaceId?: string
+    workspaceId?: string
+  }) => {
+    const workspace = { id: input.workspaceId ?? 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    const managed = createManagedSession({
+      id: input.id,
+      workspaceRootPath: wsRoot(),
+      name: input.id,
+      productSpaceId: input.productSpaceId,
+      accountId: input.accountId,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never, workspace as never, { messagesLoaded: true })
+    managed.productSpaceId = input.productSpaceId
+    managed.accountId = input.accountId
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(input.id, managed)
+    return managed
+  }
+
+  const invokeWith = (
+    contextOverride: Partial<{ workspaceId: string | null; clientId: string }>,
+    channel: string,
+    ...args: unknown[]
+  ) => {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler: ${channel}`)
+    return handler({ ...noWorkspaceContext, ...contextOverride } as never, ...args)
+  }
+
+  const settleAccountA = () => {
+    signedInAccountId = accountA
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-scope37-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    mkdirSync(sessionsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    signedInAccountId = accountA
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    settleAccountA()
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('self-management fails closed while a beginEnding epoch is in flight even when fence and mirror agree (R37-1)', async () => {
+    const sm = buildManager()
+    const managed = seedManaged(sm, { id: 'managed-a', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'same-scope', accountId: accountA, productSpaceId: personalId })
+    const resolver = (sm as unknown as {
+      managedScopeTarget: (managed: unknown, targetId: string) => unknown
+    }).managedScopeTarget
+
+    // Valid current scope before the transition.
+    expect(resolver.call(sm, managed, 'managed-a')).toBe(managed)
+
+    // R37-1: beginEnding publishes the epoch while fence and mirror STILL
+    // agree on account A — every target, including self, is rejected.
+    beginAccountTransition()
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+    expect(resolver.call(sm, managed, 'same-scope')).toBeNull()
+
+    // The replacement commits the new mirror: the transition settles, and
+    // the old account-A session stays rejected (replaced account).
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    expect(resolver.call(sm, managed, 'managed-a')).toBeNull()
+  })
+
+  it('every internal callback fails closed outside the current scope and works within it (R37-2 inventory)', async () => {
+    const sm = buildManager()
+    const managed = seedManaged(sm, { id: 'managed-a', accountId: accountA, productSpaceId: personalId })
+    seedManaged(sm, { id: 'same-scope', accountId: accountA, productSpaceId: personalId })
+    const callbacks = (sm as unknown as {
+      buildManagedSessionToolCallbacks: (managed: unknown) => Record<string, ((...args: any[]) => any) | undefined>
+    }).buildManagedSessionToolCallbacks(managed)
+    const spawn = (sm as unknown as {
+      spawnSessionFromManagedAgent: (managed: unknown, request: { prompt: string }) => Promise<unknown>
+    }).spawnSessionFromManagedAgent
+
+    const table: Array<{ name: string; invoke: () => unknown; throwing: boolean }> = [
+      { name: 'setSessionLabelsFn', invoke: () => callbacks.setSessionLabelsFn!(undefined, ['x']), throwing: true },
+      { name: 'setSessionStatusFn', invoke: () => callbacks.setSessionStatusFn!(undefined, 'done'), throwing: true },
+      { name: 'getSessionInfoFn', invoke: () => callbacks.getSessionInfoFn!(undefined), throwing: false },
+      { name: 'listSessionsFn', invoke: () => callbacks.listSessionsFn!(undefined), throwing: false },
+      { name: 'resolveLabelsFn', invoke: () => callbacks.resolveLabelsFn!(['x']), throwing: true },
+      { name: 'resolveStatusFn', invoke: () => callbacks.resolveStatusFn!('done'), throwing: true },
+      { name: 'sendAgentMessageFn', invoke: () => callbacks.sendAgentMessageFn!('same-scope', 'hello'), throwing: true },
+      { name: 'activateSourceInSessionFn', invoke: () => callbacks.activateSourceInSessionFn!('source-x'), throwing: true },
+      { name: 'onSpawnSession', invoke: () => spawn.call(sm, managed, { prompt: 'hello' }), throwing: true },
+    ]
+
+    // Valid current scope: NOTHING may be rejected by the scope guard.
+    for (const entry of table) {
+      try {
+        await entry.invoke()
+      } catch (error) {
+        expect((error as Error).message).not.toContain('SESSION_OUT_OF_TRUSTED_SCOPE')
+      }
+    }
+
+    const invalidStates: Array<[string, () => void]> = [
+      ['replaced-account', () => {
+        setSyncTrustedProductSpaceAccountId(accountB)
+        setRuntimeActiveProductSpaceAccount(accountB)
+      }],
+      ['missing-fence', () => {
+        setRuntimeActiveProductSpace(null)
+      }],
+      ['split-fence', () => {
+        setRuntimeActiveProductSpace(personalId)
+        setRuntimeActiveProductSpaceAccount(accountA)
+        setSyncTrustedProductSpaceAccountId(accountB)
+      }],
+      ['in-transition', () => {
+        setSyncTrustedProductSpaceAccountId(accountA)
+        setRuntimeActiveProductSpaceAccount(accountA)
+        beginAccountTransition()
+      }],
+    ]
+
+    for (const [stateName, applyState] of invalidStates) {
+      applyState()
+      for (const entry of table) {
+        if (entry.throwing) {
+          await expect(Promise.resolve().then(() => entry.invoke()).then((resolved: unknown) => {
+            throw new Error(`RESOLVED_IN_${stateName}_${entry.name}: ${JSON.stringify(resolved)}`)
+          }).catch((error: Error) => {
+            if (error.message.includes('RESOLVED_IN_')) throw error
+            throw new Error(`${stateName}/${entry.name}: ${error.message}`)
+          })).rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+        } else {
+          const outcome = await entry.invoke()
+          // Non-throwing callbacks fail closed with empty/null projections.
+          if (entry.name === 'getSessionInfoFn') expect(outcome).toBeNull()
+          if (entry.name === 'listSessionsFn') expect(outcome).toEqual({ total: 0, returned: 0, sessions: [] })
+        }
+      }
+      // Settle back to the valid scope for the next state.
+      settleAccountA()
+      expect(table.length).toBeGreaterThan(0)
+      void stateName
+    }
+  })
+
+  it('the session RPC predicate is atomic: split fence/mirror and in-transition states authorize nothing (R37-3)', async () => {
+    const sm = buildManager()
+    registerHandlers(sm)
+
+    // Split transition: the fence belongs to account A while the mirror
+    // already shows account B. A B/X session in the caller workspace must
+    // NOT match the synthesized tuple.
+    seedManaged(sm, { id: 's-bx', accountId: accountB, productSpaceId: personalId })
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setSyncTrustedProductSpaceAccountId(accountB)
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-bx')).resolves.toBeNull()
+
+    // In-flight transition: fence and mirror agree on account A but the
+    // epoch is unsettled — nothing crosses the boundary.
+    settleAccountA()
+    seedManaged(sm, { id: 's-ax', accountId: accountA, productSpaceId: personalId })
+    beginAccountTransition()
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-ax')).resolves.toBeNull()
+
+    // Settled scope: the same-scope session is readable again.
+    setSyncTrustedProductSpaceAccountId(accountA)
+    await expect(invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.GET_MESSAGES, 's-ax')).resolves.not.toBeNull()
+  })
+
+  it('CREATE rolls back storage and publishes nothing when scope/fence changes during awaited work (R37-4)', async () => {
+    const variants: Array<[string, () => void]> = [
+      ['account-replacement', () => {
+        setSyncTrustedProductSpaceAccountId(accountB)
+        setRuntimeActiveProductSpaceAccount(accountB)
+      }],
+      ['fence-revoke', () => {
+        setRuntimeActiveProductSpace(null)
+      }],
+      ['epoch-bump', () => {
+        beginAccountTransition()
+      }],
+    ]
+
+    for (const [variantName, mutate] of variants) {
+      const gated = makeGatedStorage()
+      const sm = buildManager(gated.storage)
+      registerHandlers(sm)
+      gated.armGate()
+
+      const creating = invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.CREATE, 'ws_test')
+      // Let CREATE park inside the gated storage write.
+      await new Promise(resolve => setTimeout(resolve, 30))
+      mutate()
+      gated.release()
+
+      await expect(creating).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      // Nothing was published and no storage survives the rollback.
+      expect(sm.getSessions()).toHaveLength(0)
+      const entries = readdirSync(sessionsRoot(), { recursive: true }) as string[]
+      expect(entries.some(entry => entry.includes('session.jsonl'))).toBe(false)
+      void variantName
+      settleAccountA()
+    }
+  })
+
+  it('a branch creation rolls back on a scope change during the awaited copy (R37-4)', async () => {
+    const gated = makeGatedStorage()
+    const sm = buildManager(gated.storage)
+    const source = seedManaged(sm, { id: 'branch-source', accountId: accountA, productSpaceId: personalId })
+    // The managed source carries the copyable history AND its SDK context
+    // (the sdk-fork strategy validates both before the awaited copy).
+    ;(source as unknown as {
+      messages: Array<Record<string, unknown>>
+      sdkSessionId?: string
+      sdkCwd?: string
+      branchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
+    }).messages = [
+      { id: 'msg-1', role: 'user', content: 'hello', timestamp: Date.now() },
+    ]
+    ;(source as unknown as { sdkSessionId?: string }).sdkSessionId = 'sdk-parent-1'
+    ;(source as unknown as { branchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session' }).branchContextStrategy = 'sdk-fork'
+    await gated.storage.save({
+      id: 'branch-source',
+      workspaceRootPath: wsRoot(),
+      name: 'source',
+      productSpaceId: personalId,
+      accountId: accountA,
+      sdkSessionId: 'sdk-parent-1',
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+    } as never)
+    void source
+
+    gated.armGate()
+    const creating = sm.createSession('ws_test', {
+      branchFromSessionId: 'branch-source',
+      branchFromMessageId: 'msg-1',
+    })
+    // The branch validation awaits the source session's storage flush —
+    // the fence revoke lands inside that awaited stage (same account, but
+    // the fence generation moved), before any storage is created for the
+    // new session.
+    await new Promise(resolve => setTimeout(resolve, 30))
+    setRuntimeActiveProductSpace(null)
+    gated.release()
+
+    await expect(creating).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    // The source remains; no branch session was written or published.
+    expect(sm.getSessions()).toHaveLength(1)
+    const entries = readdirSync(sessionsRoot(), { recursive: true }) as string[]
+    expect(entries.some(entry => entry.includes('session.jsonl') && !entry.includes('branch-source'))).toBe(false)
+  })
+
+  it('import rolls back storage and emits no session when scope changes during the save (R37-4)', async () => {
+    const gated = makeGatedStorage()
+    const sm = buildManager(gated.storage)
+    const bundle = {
+      version: 1,
+      session: {
+        header: { id: 'import-37', createdAt: Date.now(), name: 'imported' },
+        messages: [],
+      },
+      files: [],
+    }
+
+    gated.armGate()
+    const importing = sm.importSession('ws_test', bundle as never, 'fork')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    beginAccountTransition()
+    gated.release()
+
+    await expect(importing).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    expect(sm.getSessions()).toHaveLength(0)
+    const entries = readdirSync(sessionsRoot(), { recursive: true }) as string[]
+    expect(entries.some(entry => entry.includes('import-37'))).toBe(false)
   })
 })

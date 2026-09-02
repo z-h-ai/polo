@@ -156,10 +156,13 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
 // Tests
 // ---------------------------------------------------------------------------
 
-const { setRuntimeActiveProductSpace } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('@polo-ai/server-core/runtime/product-space-executions')
 const { setSyncTrustedProductSpaceAccountId } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
 
 setRuntimeActiveProductSpace('watch-test-space')
+// R37-3: the atomic scope capture proves the FENCE account equals the
+// synchronous mirror, so the runtime fence account is seeded too.
+setRuntimeActiveProductSpaceAccount('watch-test-account')
 // R32-2: the session fence now also requires the trusted account binding.
 setSyncTrustedProductSpaceAccountId('watch-test-account')
 

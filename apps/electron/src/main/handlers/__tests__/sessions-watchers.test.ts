@@ -16,11 +16,14 @@ const watchContext = (clientId: string) => ({ clientId, workspaceId: 'ws-watch' 
 const CLIENT_A = 'sessions-watchers-client-a'
 const CLIENT_B = 'sessions-watchers-client-b'
 
-const { setRuntimeActiveProductSpace } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('@polo-ai/server-core/runtime/product-space-executions')
 const { setSyncTrustedProductSpaceAccountId } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
 
 setRuntimeActiveProductSpace('watch-test-space')
 // R32-2: the session fence now also requires the trusted account binding.
+// R37-3: the atomic capture additionally proves the FENCE account equals
+// the synchronous mirror, so the runtime fence account is seeded too.
+setRuntimeActiveProductSpaceAccount('watch-test-account')
 setSyncTrustedProductSpaceAccountId('watch-test-account')
 
 describe('sessions file watchers', () => {

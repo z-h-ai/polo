@@ -26,6 +26,7 @@ import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 import type { HandlerDeps } from '../handler-deps'
 import {
   acquireSwitchActivityClaim,
+  registeredExecutionsScopeRevision,
   claimSwitchPrepareIntent,
   getLastCommittedSwitch,
   getLatestSwitchPrepareIntent,
@@ -283,34 +284,54 @@ export async function stopAllProductSpaceExecutions(input: {
       : { ...execution, status: 'failed', errorCode: 'runtime_stop_failed' }
   })
 
-  // R35-3/R36-2: re-enumerate the exact account/ProductSpace scope before
-  // any success: a same-ID replacement (or any execution that registered
-  // during the awaited drains) that is STILL active is projected with its
-  // REAL owner-scoped status as an explicit NONTERMINAL row — allStopped
-  // becomes false and the stale generation is never terminal success.
-  for (const execution of listRegisteredProductSpaceExecutions()) {
-    if (execution.scope.accountId !== accountId) continue
-    if (execution.scope.productSpaceId !== productSpaceId) continue
-    let activeNow: boolean
-    try {
-      activeNow = Boolean(await execution.isActive())
-    } catch {
-      activeNow = true
+  // R35-3/R37-5: generation-stable final projection. Each pass brackets its
+  // awaited liveness probes with the registry revision for the exact
+  // account/ProductSpace scope; a same-ID replacement (or any registration/
+  // removal) that happens DURING a probe invalidates the pass and the next
+  // pass re-enumerates the new registry set. Surviving active executions
+  // are projected with their REAL owner-scoped status as explicit
+  // NONTERMINAL rows — allStopped is false while any scoped execution is
+  // live, and the stale generation is never terminal success.
+  const FINAL_PROJECTION_PASSES = 5
+  let projectionStable = false
+  for (let pass = 0; pass < FINAL_PROJECTION_PASSES && !projectionStable; pass++) {
+    const revisionBefore = registeredExecutionsScopeRevision(accountId, productSpaceId)
+    for (const execution of listRegisteredProductSpaceExecutions()) {
+      if (execution.scope.accountId !== accountId) continue
+      if (execution.scope.productSpaceId !== productSpaceId) continue
+      let activeNow: boolean
+      try {
+        activeNow = Boolean(await execution.isActive())
+      } catch {
+        activeNow = true
+      }
+      if (!activeNow) continue
+      const realStatus: ExecutionStatus = execution.getStatus?.() ?? 'running'
+      const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
+      const existing = summaries.find(summary => summary.executionId === parsedId)
+      if (existing) {
+        existing.status = realStatus
+        delete existing.errorCode
+      } else {
+        summaries.push({
+          executionId: parsedId,
+          scope: execution.scope,
+          name: execution.name,
+          status: realStatus,
+        })
+      }
     }
-    if (!activeNow) continue
-    const realStatus: ExecutionStatus = execution.getStatus?.() ?? 'running'
-    const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
-    const existing = summaries.find(summary => summary.executionId === parsedId)
-    if (existing) {
-      existing.status = realStatus
-      delete existing.errorCode
-    } else {
-      summaries.push({
-        executionId: parsedId,
-        scope: execution.scope,
-        name: execution.name,
-        status: realStatus,
-      })
+    if (registeredExecutionsScopeRevision(accountId, productSpaceId) === revisionBefore) {
+      projectionStable = true
+    }
+  }
+  if (!projectionStable) {
+    // The scope kept changing through every pass: return an explicit
+    // nonterminal failure — every row is a retryable failure and no
+    // terminal success is reported against thrashing ownership.
+    for (const summary of summaries) {
+      summary.status = 'failed'
+      summary.errorCode = 'runtime_stop_failed'
     }
   }
 

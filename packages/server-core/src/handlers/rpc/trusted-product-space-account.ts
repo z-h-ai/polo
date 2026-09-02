@@ -3,7 +3,7 @@
  * Admin session, never from RPC arguments. The admin handler module installs
  * the provider because only it owns the Admin session coordinator.
  */
-import { getRuntimeActiveProductSpaceScope } from '../../runtime/product-space-executions'
+import { getRuntimeActiveProductSpaceScope, getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
 
 export type TrustedProductSpaceAccountProvider = () => Promise<string | null>
 
@@ -107,6 +107,8 @@ export function setSyncTrustedProductSpaceAccountState(
   bumpTrustedAccountGenerationOnTransition(
     state.status === 'authenticated' ? state.accountId : null,
   )
+  // R37-1: committing a mirror state settles any in-flight transition.
+  accountTransitionInProgress = false
   syncAccountState = state
 }
 
@@ -116,6 +118,8 @@ export function setSyncTrustedProductSpaceAccountState(
  */
 export function setSyncTrustedProductSpaceAccountId(accountId: string | null): void {
   bumpTrustedAccountGenerationOnTransition(accountId)
+  // R37-1: committing a mirror state settles any in-flight transition.
+  accountTransitionInProgress = false
   syncAccountState = accountId
     ? { status: 'authenticated', accountId }
     : { status: 'signed_out' }
@@ -134,7 +138,21 @@ export function setSyncTrustedProductSpaceAccountId(accountId: string | null): v
  */
 let accountTransitionEpoch = 0
 
+/**
+ * R37-1: true from `beginAccountTransition()` until the transition owner
+ * commits the next synchronous mirror state (new account, sign-out). While
+ * true, every scope capture fails closed — callbacks and session boundaries
+ * must not run against an account whose cleanup has already begun, even
+ * while the old fence and mirror still agree.
+ */
+let accountTransitionInProgress = false
+
+export function isAccountTransitionInProgress(): boolean {
+  return accountTransitionInProgress
+}
+
 export function beginAccountTransition(): number {
+  accountTransitionInProgress = true
   return ++accountTransitionEpoch
 }
 
@@ -184,12 +202,66 @@ export function captureTrustedSessionScope(): {
   accountId: string
   productSpaceId: string
 } | null {
+  // R37-1/R37-3: the capture brackets its reads with the account transition
+  // epoch and refuses an in-flight transition outright. A beginEnding that
+  // has already published its epoch fails closed even while the old fence
+  // and mirror still agree.
+  const transitionEpochBefore = getAccountTransitionEpoch()
+  const accountGenerationBefore = getTrustedAccountGeneration()
   const runtimeScope = getRuntimeActiveProductSpaceScope()
   const syncAccountId = getSyncTrustedProductSpaceAccountId()
+  const transitionEpochAfter = getAccountTransitionEpoch()
+  if (transitionEpochAfter !== transitionEpochBefore) return null
+  if (isAccountTransitionInProgress()) return null
+  if (getTrustedAccountGeneration() !== accountGenerationBefore) return null
   if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) {
     return null
   }
   return { accountId: runtimeScope.accountId, productSpaceId: runtimeScope.productSpaceId }
+}
+
+/**
+ * R37-4: an atomic publication token for long-running session mutations
+ * (CREATE/branch/import). It captures the complete trusted scope together
+ * with the transition epoch, account-binding generation and fence
+ * generation so the mutation can prove — immediately before persistence and
+ * publication — that the account, ProductSpace and fence it captured are
+ * all still current.
+ */
+export interface TrustedPublicationToken {
+  accountId: string
+  productSpaceId: string
+  transitionEpoch: number
+  accountGeneration: number
+  fenceGeneration: number
+}
+
+export function captureTrustedPublicationToken(): TrustedPublicationToken | null {
+  const scope = captureTrustedSessionScope()
+  if (!scope) return null
+  return {
+    ...scope,
+    transitionEpoch: getAccountTransitionEpoch(),
+    accountGeneration: getTrustedAccountGeneration(),
+    fenceGeneration: getRuntimeFenceGeneration(),
+  }
+}
+
+export function isTrustedPublicationTokenCurrent(token: TrustedPublicationToken): boolean {
+  return (
+    !isAccountTransitionInProgress()
+    && getAccountTransitionEpoch() === token.transitionEpoch
+    && getTrustedAccountGeneration() === token.accountGeneration
+    && getRuntimeFenceGeneration() === token.fenceGeneration
+    && (() => {
+      const runtimeScope = getRuntimeActiveProductSpaceScope()
+      return Boolean(
+        runtimeScope
+        && runtimeScope.accountId === token.accountId
+        && runtimeScope.productSpaceId === token.productSpaceId,
+      )
+    })()
+  )
 }
 
 /**
