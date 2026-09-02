@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import type { CreatorCircleRelation } from '@/hooks/useAppCatalog'
@@ -10,6 +10,13 @@ interface HomeSpaceContextProps {
   spaceKind: 'personal' | 'enterprise' | null
   /** CreatorCircle relations visible in the active space's Catalog (REQ-022). */
   creatorCircles: CreatorCircleRelation[]
+  /**
+   * Stable ProductSpace identity (account+space context key). A change —
+   * including a flip to enterprise or empty relations — resets the mounted
+   * view back to `context`, so the circles relation view can never linger
+   * across a space transition.
+   */
+  spaceKey?: string
 }
 
 /**
@@ -24,10 +31,23 @@ export function HomeSpaceContext({
   spaceName,
   spaceKind,
   creatorCircles,
+  spaceKey,
 }: HomeSpaceContextProps) {
   const { t } = useTranslation()
   const [view, setView] = useState<'context' | 'circles'>('context')
   const showCirclesEntry = spaceKind === 'personal' && creatorCircles.length > 0
+
+  // Fail-closed transitions: a ProductSpace identity change or a lost guard
+  // (non-personal / relations emptied) always collapses back to the context
+  // view — the circles relation view never lingers across a transition.
+  useEffect(() => {
+    setView('context')
+  }, [spaceKey])
+  useEffect(() => {
+    if (spaceKind !== 'personal' || creatorCircles.length === 0) {
+      setView('context')
+    }
+  }, [spaceKind, creatorCircles])
 
   return (
     <section

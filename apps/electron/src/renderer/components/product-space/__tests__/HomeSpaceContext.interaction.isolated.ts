@@ -15,6 +15,19 @@ const circles = [
   { circleId: 'circle-north', name: '北辰圈子' },
 ]
 
+function withProvider(props: {
+  spaceName: string
+  spaceKind: 'personal' | 'enterprise' | null
+  creatorCircles: Array<{ circleId: string; name: string }>
+  spaceKey?: string
+}) {
+  return createElement(
+    I18nextProvider,
+    { i18n },
+    createElement(HomeSpaceContext, { ...props }),
+  )
+}
+
 function renderWithContext(props: {
   spaceName: string
   spaceKind: 'personal' | 'enterprise' | null
@@ -70,6 +83,77 @@ describe('HomeSpaceContext — 我的圈子 relation entry (REQ-022)', () => {
     expect(screen.queryByTestId('product-space-item')).toBeNull()
 
     fireEvent.click(screen.getByTestId('product-space-relation-my-circles-back'))
+    expect(screen.queryByTestId('product-space-relation-my-circles-view')).toBeNull()
+    expect(screen.getByTestId('product-space-relation-my-circles')).toBeTruthy()
+  })
+
+  it('collapses the circles view when the space flips to enterprise on the same mount', () => {
+    const initial = {
+      spaceName: '我的空间',
+      spaceKey: 'ctx-personal',
+      spaceKind: 'personal' as const,
+      creatorCircles: circles,
+    }
+    const view = render(withProvider(initial))
+
+    fireEvent.click(screen.getByTestId('product-space-relation-my-circles'))
+    expect(screen.getByTestId('product-space-relation-my-circles-view')).toBeTruthy()
+
+    // Identity flips to enterprise on the SAME mounted instance: the
+    // circles relation view must never linger.
+    view.rerender(withProvider({
+      spaceName: '北辰智能科技',
+      spaceKey: 'ctx-enterprise',
+      spaceKind: 'enterprise',
+      creatorCircles: circles,
+    }))
+
+    expect(screen.queryByTestId('product-space-relation-my-circles-view')).toBeNull()
+    expect(screen.queryByTestId('product-space-relation-my-circles')).toBeNull()
+  })
+
+  it('collapses the circles view when relations are emptied on the same mount', () => {
+    const initial = {
+      spaceName: '我的空间',
+      spaceKey: 'ctx-personal',
+      spaceKind: 'personal' as const,
+      creatorCircles: circles,
+    }
+    const view = render(withProvider(initial))
+
+    fireEvent.click(screen.getByTestId('product-space-relation-my-circles'))
+    expect(screen.getByTestId('product-space-relation-my-circles-view')).toBeTruthy()
+
+    // Relations emptied (e.g. a failed refresh invalidates them): the view
+    // collapses and the entry disappears with the lost guard.
+    view.rerender(withProvider({
+      ...initial,
+      creatorCircles: [],
+    }))
+
+    expect(screen.queryByTestId('product-space-relation-my-circles-view')).toBeNull()
+    expect(screen.queryByTestId('product-space-relation-my-circles')).toBeNull()
+  })
+
+  it('collapses the circles view when only the space identity changes', () => {
+    const initial = {
+      spaceName: '我的空间',
+      spaceKey: 'ctx-account-a',
+      spaceKind: 'personal' as const,
+      creatorCircles: circles,
+    }
+    const view = render(withProvider(initial))
+
+    fireEvent.click(screen.getByTestId('product-space-relation-my-circles'))
+    expect(screen.getByTestId('product-space-relation-my-circles-view')).toBeTruthy()
+
+    // Same shape, different ProductSpace identity: the mounted circles view
+    // is reset to the context view for the new identity.
+    view.rerender(withProvider({
+      ...initial,
+      spaceKey: 'ctx-account-b',
+    }))
+
     expect(screen.queryByTestId('product-space-relation-my-circles-view')).toBeNull()
     expect(screen.getByTestId('product-space-relation-my-circles')).toBeTruthy()
   })

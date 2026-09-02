@@ -308,6 +308,65 @@ afterEach(() => {
   cleanup()
 })
 
+describe('useAppCatalog creator circle relations', () => {
+  it('clears derived creator circles when a Catalog refresh fails', async () => {
+    // The wrapper stub maps entries from catalog.apps; for this test the
+    // product-space RPC is replaced directly so raw entries (with
+    // creator_circle sources) reach the hook.
+    const entriesWithCircle = [{
+      kind: 'app',
+      catalogEntryId: 'circle-app',
+      name: 'Circle App',
+      description: '',
+      availability: 'available',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://example.com/circle-app',
+      sortOrder: 0,
+      sources: [{
+        kind: 'creator_circle',
+        circleId: 'circle-1',
+        name: '桥岸圈子',
+      }],
+    }]
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-circles',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: entriesWithCircle,
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-circles')
+    })
+    // The creator_circle source is derived into a visible relation.
+    expect(result.current.creatorCircles).toEqual([
+      { circleId: 'circle-1', name: '桥岸圈子' },
+    ])
+
+    // The refresh fails: stale relations are invalidated (fail-closed) and
+    // the relation entry must not re-echo the previous Catalog.
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: false as const,
+      errorCode: 'NETWORK_ERROR',
+      message: 'catalog unavailable',
+    })
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.errorCode).toBe('NETWORK_ERROR')
+    })
+    expect(result.current.creatorCircles).toEqual([])
+  })
+})
+
 describe('useAppCatalog scoped async state', () => {
   it('keeps a local app status unknown until its initial batch resolves', async () => {
     const pendingStatuses = deferred<LocalAppRuntimeStatus[]>()

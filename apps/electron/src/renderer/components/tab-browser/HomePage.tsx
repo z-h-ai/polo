@@ -448,6 +448,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
               || t('homeApps.organization.current')}
             spaceKind={activeProductSpace?.kind ?? null}
             creatorCircles={catalog.creatorCircles}
+            spaceKey={catalog.productSpace.productSpaceContextKey}
           />
         )}
         <section aria-labelledby="recent-apps-heading">

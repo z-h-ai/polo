@@ -706,6 +706,9 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode: failureCode,
+          // A failed refresh invalidates stale circle relations (fail-closed):
+          // the relation entry must not re-echo the previous Catalog.
+          creatorCircles: [],
         }))
         return
       }
@@ -798,6 +801,7 @@ export function useAppCatalog() {
           errorCode,
           statusLoadingScopeKeys: {},
           accessMode: 'denied',
+          creatorCircles: [],
         }))
         if (deniedCatalog) {
           await refreshRuntimeStatuses(
@@ -817,6 +821,7 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode,
+          creatorCircles: [],
         }))
       }
     }
