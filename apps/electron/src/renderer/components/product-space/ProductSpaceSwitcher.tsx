@@ -56,23 +56,23 @@ export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean })
             type="button"
             data-testid="product-space-switcher"
             aria-label={t('productSpace.switcher.label')}
-            className="titlebar-no-drag flex h-[28px] max-w-52 items-center gap-1.5 rounded-lg px-2 text-sm text-foreground/80 hover:bg-foreground/5"
+            className="titlebar-no-drag flex h-9 min-w-[130px] max-w-[190px] items-center gap-2 rounded-[9px] border border-border bg-background px-2.5 text-left hover:border-accent/40"
           >
             <span
               className={cn(
-                'flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-primary-foreground',
+                'size-2 shrink-0 rounded-full',
                 active.kind === 'personal' ? 'bg-success' : 'bg-accent',
               )}
-            >
-              {activeInitial}
+            />
+            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+              {active.name}
             </span>
-            <span className="truncate">{active.name}</span>
             {activeRestricted ? (
               <span className="shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground">
                 {t('productSpace.restricted')}
               </span>
             ) : null}
-            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            <ChevronDown className="size-[13px] shrink-0 text-muted-foreground" />
           </button>
         )}
       </DropdownMenuTrigger>

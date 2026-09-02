@@ -1184,6 +1184,8 @@
   "productSpace.target.removedLabel": "Aus dem Wechsler entfernt",
   "productSpace.target.retry": "Laden wiederholen",
   "productSpace.target.stay": "In {{name}} bleiben",
+  "productSpace.windowGuard.description": "Dieses Fenster ist schmaler als 640px und kann die Polo-Workbench nicht sicher darstellen. Vergrößern Sie das Fenster, um fortzufahren.",
+  "productSpace.windowGuard.title": "Fenster zu schmal",
   "sendToWorkspace.description_few": "{{count}} Sitzungen an einen Remote-Workspace senden.",
   "sendToWorkspace.description_many": "{{count}} Sitzungen an einen Remote-Workspace senden.",
   "sendToWorkspace.description_one": "{{count}} Sitzung an einen Remote-Workspace senden.",

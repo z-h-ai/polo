@@ -438,10 +438,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
   return (
     <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-6 py-8 text-foreground sm:px-8"
+      className="h-full min-h-0 overflow-y-auto bg-background px-11 pb-[72px] pt-[46px] text-foreground"
       data-testid="home-app-hub"
     >
-      <div className="mx-auto w-full max-w-[1120px] space-y-10">
+      <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
         {catalog.productSpace && (
           <HomeSpaceContext
             spaceName={activeProductSpace?.name
@@ -452,17 +452,17 @@ export function HomePage({ onAddApp }: HomePageProps) {
           />
         )}
         <section aria-labelledby="recent-apps-heading">
-          <div className="mb-4 flex items-end justify-between gap-4">
+          <div className="mb-[18px] flex items-end justify-between gap-4">
             <div>
-              <h1 id="recent-apps-heading" className="text-lg font-semibold">
+              <h1 id="recent-apps-heading" className="text-[22px] font-bold tracking-[-0.03em]">
                 {t('homeApps.recent.title')}
               </h1>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-[7px] text-[13px] text-muted-foreground">
                 {t('homeApps.recent.description')}
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
+          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6">
             {resolvedRecent.map(item => (
               <AppIcon
                 key={item.key}
@@ -495,14 +495,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
         {catalog.productSpace && (
           <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
-            <div className="mb-4 flex items-center justify-between gap-4">
+            <div className="mb-[18px] flex items-start justify-between gap-4">
               <div>
-                <h2 id="organization-apps-heading" className="text-base font-semibold">
+                <h2 id="organization-apps-heading" className="text-xl font-[720] tracking-[-0.03em]">
                   {t('homeApps.organization.title', {
                     name: activeProductSpace?.name || t('homeApps.organization.current'),
                   })}
                 </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1.5 text-sm text-muted-foreground">
                   {activeProductSpace?.kind === 'enterprise'
                     ? t('homeApps.organization.enterpriseDescription')
                     : t('homeApps.organization.creatorDescription')}
@@ -631,15 +631,15 @@ export function HomePage({ onAddApp }: HomePageProps) {
         )}
 
         <section aria-labelledby="external-apps-heading">
-          <div className="mb-4">
-            <h2 id="external-apps-heading" className="text-base font-semibold">
+          <div className="mb-[18px]">
+            <h2 id="external-apps-heading" className="text-xl font-[720] tracking-[-0.03em]">
               {t('homeApps.external.title')}
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1.5 text-sm text-muted-foreground">
               {t('homeApps.external.description')}
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
+          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6">
             {externalApps.map(app => (
               <AppIcon
                 key={app.id}

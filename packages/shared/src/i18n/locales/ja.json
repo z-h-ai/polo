@@ -1184,6 +1184,8 @@
   "productSpace.target.removedLabel": "切り替えから削除されました",
   "productSpace.target.retry": "再読み込み",
   "productSpace.target.stay": "{{name}} に留まる",
+  "productSpace.windowGuard.description": "このウィンドウは 640px より狭く、Polo ワークベンチを安全に表示できません。ウィンドウを広げて続行してください。",
+  "productSpace.windowGuard.title": "ウィンドウが狭すぎます",
   "sendToWorkspace.description_few": "{{count}}件のセッションをリモートWorkspaceに送信します。",
   "sendToWorkspace.description_many": "{{count}}件のセッションをリモートWorkspaceに送信します。",
   "sendToWorkspace.description_one": "{{count}}件のセッションをリモートWorkspaceに送信します。",

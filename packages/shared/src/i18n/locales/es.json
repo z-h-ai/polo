@@ -1184,6 +1184,8 @@
   "productSpace.target.removedLabel": "Eliminado del selector",
   "productSpace.target.retry": "Reintentar carga",
   "productSpace.target.stay": "Quedarse en {{name}}",
+  "productSpace.windowGuard.description": "Esta ventana mide menos de 640px, demasiado pequeña para mostrar el espacio de trabajo de Polo de forma segura. Amplíe la ventana para continuar.",
+  "productSpace.windowGuard.title": "Ventana demasiado estrecha",
   "sendToWorkspace.description_few": "Enviar {{count}} sesiones a un Workspace remoto.",
   "sendToWorkspace.description_many": "Enviar {{count}} sesiones a un Workspace remoto.",
   "sendToWorkspace.description_one": "Enviar {{count}} sesión a un Workspace remoto.",

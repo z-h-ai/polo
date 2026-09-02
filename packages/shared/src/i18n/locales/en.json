@@ -1184,6 +1184,8 @@
   "productSpace.target.removedLabel": "Removed from the switcher",
   "productSpace.target.retry": "Retry loading",
   "productSpace.target.stay": "Stay in {{name}}",
+  "productSpace.windowGuard.description": "This window is narrower than 640px, which is too small to safely render the Polo workbench. Resize the window to continue.",
+  "productSpace.windowGuard.title": "Window too narrow",
   "sendToWorkspace.description_few": "Send {{count}} sessions to a remote workspace.",
   "sendToWorkspace.description_many": "Send {{count}} sessions to a remote workspace.",
   "sendToWorkspace.description_one": "Send {{count}} session to a remote workspace.",

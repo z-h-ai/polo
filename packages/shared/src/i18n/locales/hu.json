@@ -1184,6 +1184,8 @@
   "productSpace.target.removedLabel": "Eltávolítva a váltóból",
   "productSpace.target.retry": "Betöltés újra",
   "productSpace.target.stay": "Maradj itt: {{name}}",
+  "productSpace.windowGuard.description": "Ez az ablak 640px-nál keskenyebb, így nem lehet biztonságosan megjeleníteni a Polo munkafelületet. A folytatáshoz nagyobbítsa az ablakot.",
+  "productSpace.windowGuard.title": "Az ablak túl keskeny",
   "sendToWorkspace.description_few": "{{count}} munkamenet küldése távoli munkaterületre.",
   "sendToWorkspace.description_many": "{{count}} munkamenet küldése távoli munkaterületre.",
   "sendToWorkspace.description_one": "{{count}} munkamenet küldése távoli munkaterületre.",

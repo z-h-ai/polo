@@ -1184,6 +1184,8 @@
   "productSpace.target.removedLabel": "Usunięto z przełącznika",
   "productSpace.target.retry": "Ponów wczytywanie",
   "productSpace.target.stay": "Zostań w {{name}}",
+  "productSpace.windowGuard.description": "To okno jest węższe niż 640px — za małe, aby bezpiecznie wyświetlić środowisko robocze Polo. Powiększ okno, aby kontynuować.",
+  "productSpace.windowGuard.title": "Okno zbyt wąskie",
   "sendToWorkspace.description_few": "Wyślij {{count}} sesje do zdalnego Workspace.",
   "sendToWorkspace.description_many": "Wyślij {{count}} sesji do zdalnego Workspace.",
   "sendToWorkspace.description_one": "Wyślij {{count}} sesję do zdalnego Workspace.",

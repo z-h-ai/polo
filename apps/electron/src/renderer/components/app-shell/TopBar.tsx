@@ -126,10 +126,10 @@ export function TopBar({
   return (
     <div
       data-testid="workbench-topbar"
-      className="fixed left-0 right-0 z-panel titlebar-drag-region"
+      className="fixed left-0 right-0 z-panel flex items-center gap-3 titlebar-drag-region"
       style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
     >
-      <div className="flex h-full w-full items-center justify-between gap-2">
+      <div className="flex h-full w-full items-center justify-between gap-3">
       {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
       {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
       {/* In compact mode the right slot is hidden, so we add right padding here

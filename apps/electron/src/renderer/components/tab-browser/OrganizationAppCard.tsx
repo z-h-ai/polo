@@ -212,7 +212,7 @@ export function OrganizationAppCard({
   return (
     <article
       className={cn(
-        'relative flex min-h-[176px] flex-col rounded-xl border border-foreground/10 bg-[var(--background-elevated)] p-4 shadow-xs transition-shadow hover:shadow-minimal',
+        'relative flex min-h-[176px] flex-col rounded-[17px] border border-foreground/10 bg-[var(--background-elevated)] p-5 shadow-xs transition-shadow hover:shadow-minimal',
         app.availability !== 'available' && 'opacity-65',
       )}
       data-testid={`organization-app-${app.id}`}

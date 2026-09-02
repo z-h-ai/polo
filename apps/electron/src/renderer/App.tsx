@@ -80,6 +80,7 @@ import {
   type ProductSpaceContextValue,
 } from '@/context/ProductSpaceContext'
 import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
+import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
 import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
 import {
@@ -409,6 +410,9 @@ export default function App() {
     currentAdminUserIdRef.current = nextAccountId
     setCurrentAdminUser(user)
   }, [])
+  // REQ-010/POO-41 frozen guard: below 640px the workbench/hub is replaced
+  // by the fullscreen narrow-window guard.
+  const narrowViewport = useNarrowViewport()
   const productSpaceRefreshGenerationRef = useRef(0)
   const invalidateProductSpaceDeepLinkRefresh = useCallback(() => {
     productSpaceRefreshGenerationRef.current += 1
@@ -2606,6 +2610,12 @@ export default function App() {
       window.electronAPI.setTrafficLightsVisible(visible)
     },
   }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
+
+  // Narrow-window guard (POO-41 frozen): below 640px the workbench/hub is
+  // hidden and the fullscreen guard renders instead of any product UI.
+  if (narrowViewport) {
+    return <WindowWidthGuard />
+  }
 
   // Loading state - show splash screen
   if (appState === 'loading') {
