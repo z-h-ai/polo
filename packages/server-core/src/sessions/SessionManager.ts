@@ -9,6 +9,7 @@ import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { getSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -58,28 +59,6 @@ import {
   type AssistantStartReservation,
 } from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
-
-/**
- * R45: typed aggregate for agent runtime disposal failures. Strict-mode
- * `disposeManagedAgentRuntime` calls throw this instead of returning a
- * swallowed result, so a half-disposed runtime (stale agent process still
- * alive) can never be reported as a successful refresh/rollback/convergence.
- * The failed references are deliberately KEPT on the ManagedSession and the
- * bookkeeping/callback state is left untouched for a retry.
- */
-class AgentRuntimeDisposalError extends Error {
-  readonly reason: string
-  readonly failures: string[]
-  readonly callbacksUnregistered: boolean
-
-  constructor(reason: string, failures: string[], callbacksUnregistered: boolean) {
-    super(`agent runtime disposal failed during ${reason}: ${failures.join('; ')}`)
-    this.name = 'AgentRuntimeDisposalError'
-    this.reason = reason
-    this.failures = failures
-    this.callbacksUnregistered = callbacksUnregistered
-  }
-}
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
   getWorkspaces,
@@ -206,6 +185,28 @@ function buildBackendHostRuntimeContext(): BackendHostRuntimeContext {
     appRootPath: _platform.appRootPath,
     resourcesPath: _platform.resourcesPath,
     isPackaged: _platform.isPackaged,
+  }
+}
+
+/**
+ * R45: typed aggregate for agent runtime disposal failures. Strict-mode
+ * `disposeManagedAgentRuntime` calls throw this instead of returning a
+ * swallowed result, so a half-disposed runtime (stale agent process still
+ * alive) can never be reported as a successful refresh/rollback/convergence.
+ * The failed references are deliberately KEPT on the ManagedSession and the
+ * bookkeeping/callback state is left untouched for a retry.
+ */
+class AgentRuntimeDisposalError extends Error {
+  readonly reason: string
+  readonly failures: string[]
+  readonly callbacksUnregistered: boolean
+
+  constructor(reason: string, failures: string[], callbacksUnregistered: boolean) {
+    super(`agent runtime disposal failed during ${reason}: ${failures.join('; ')}`)
+    this.name = 'AgentRuntimeDisposalError'
+    this.reason = reason
+    this.failures = failures
+    this.callbacksUnregistered = callbacksUnregistered
   }
 }
 
@@ -1307,6 +1308,7 @@ export class SessionManager implements ISessionManager {
   private readonly unpublishedRuntimeQuarantine = new Map<string, {
     managed: ManagedSession
     quarantineToken: string
+    refusingCallbacks: SessionScopedToolCallbacks
     reason: string
     quarantinedAt: number
   }>()
@@ -4140,38 +4142,48 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * R46: quarantine a NEVER-PUBLISHED session candidate whose runtime could
-   * not be disposed during the stale-publication rollback. The entry keeps
-   * the live runtime reachable through THIS manager (owner-token-bound),
-   * replaces the candidate's session-scoped callback registration with
-   * refusing stubs (every execution rejects — the candidate was never a
-   * usable session), and stays in the registry for retryable cleanup. A
-   * later legitimate owner registering the same id simply overwrites the
-   * refusing stubs.
+   * R46/R47: quarantine a NEVER-PUBLISHED session candidate whose runtime
+   * could not be disposed during the stale-publication rollback. The entry
+   * keeps the live runtime reachable through THIS manager (owner-token-bound)
+   * and replaces the candidate's session-scoped callback registration with an
+   * EXPLICITLY ENUMERABLE refusing record — one concrete throwing function per
+   * key of the current registration — so the production guard installation
+   * (`applySessionScopedToolCallbackGuard` iterates `Object.entries`) actually
+   * wraps real refusing stubs instead of silently installing an empty object
+   * (a non-enumerable Proxy would). A later legitimate owner registering the
+   * same id simply overwrites the refusing record.
    */
   private quarantineUnpublishedCandidateRuntime(managed: ManagedSession, reason: string): void {
     const quarantineToken = randomUUID()
+    const existingCallbacks = getSessionScopedToolCallbacks(managed.id)
+    const refusingCallbacks: Record<string, () => never> = {}
+    for (const key of Object.keys(existingCallbacks ?? {})) {
+      refusingCallbacks[key] = () => {
+        throw new Error(`SESSION_QUARANTINED_UNPUBLISHED (${reason})`)
+      }
+    }
+    const refusingRecord = refusingCallbacks as unknown as SessionScopedToolCallbacks
+    registerSessionScopedToolCallbacks(managed.id, refusingRecord)
     this.unpublishedRuntimeQuarantine.set(managed.id, {
       managed,
       quarantineToken,
+      refusingCallbacks: refusingRecord,
       reason,
       quarantinedAt: Date.now(),
     })
-    const refusingCallbacks = new Proxy({}, {
-      get: () => () => {
-        throw new Error(`SESSION_QUARANTINED_UNPUBLISHED (${reason})`)
-      },
-    }) as unknown as SessionScopedToolCallbacks
-    registerSessionScopedToolCallbacks(managed.id, refusingCallbacks)
-    sessionLog.warn(`Unpublished candidate runtime for session ${managed.id} quarantined (token ${quarantineToken}): its callbacks refuse execution and its runtime stays reachable for retryable cleanup (${reason})`)
+    sessionLog.warn(`Unpublished candidate runtime for session ${managed.id} quarantined (token ${quarantineToken}): ${Object.keys(refusingCallbacks).length} callback entr(ies) now refuse execution and its runtime stays reachable for retryable cleanup (${reason})`)
   }
 
   /**
-   * R46: retry the cleanup of every quarantined unpublished candidate. A
-   * disposal that now succeeds removes the registry entry (owner-token
-   * verified) and unregisters the refusing callback stubs; anything still
-   * failing stays quarantined for the next sweep. Runs at every createSession
-   * entry — a no-op while the registry is empty.
+   * R46/R47: retry the cleanup of every quarantined unpublished candidate.
+   * Runs at every createSession entry — a no-op while the registry is empty.
+   * R47 owner isolation:
+   * - callbacks/guard are unregistered COMPARE-AND-UNREGISTER style — only
+   *   while the current registration is still OUR refusing record AND no live
+   *   replacement session owns the id;
+   * - the candidate's storage record is deleted only when no live
+   *   replacement owns the id (absent-or-ours);
+   * - anything skipped or still failing keeps the entry retryable.
    */
   private async sweepQuarantinedUnpublishedRuntimes(): Promise<void> {
     if (this.unpublishedRuntimeQuarantine.size === 0) return
@@ -4180,22 +4192,36 @@ export class SessionManager implements ISessionManager {
         const result = await this.disposeManagedAgentRuntime(
           entry.managed,
           `quarantined unpublished runtime retry (${entry.reason})`,
-          { bestEffort: true },
+          {
+            bestEffort: true,
+            shouldUnregisterCallbacks: () =>
+              getSessionScopedToolCallbacks(sessionId) === entry.refusingCallbacks
+              && !this.sessions.has(sessionId),
+          },
         )
         // Owner-token binding: only the exact registered entry settles here.
         if (result.failures.length === 0 && this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken === entry.quarantineToken) {
-          // The quarantined candidate's storage record is also part of the
-          // deferred cleanup — remove it once the runtime is fully disposed.
+          // A live replacement owns the id: its storage record and
+          // registrations must never be touched.
+          const replacementOwnsId = this.sessions.has(sessionId)
           let storageFailure: string | null = null
-          try {
-            const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
-            if (deleted === false) storageFailure = 'storage delete returned false'
-          } catch (storageError) {
-            storageFailure = storageError instanceof Error ? storageError.message : String(storageError)
+          if (!replacementOwnsId) {
+            try {
+              const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
+              if (deleted === false) storageFailure = 'storage delete returned false'
+            } catch (storageError) {
+              storageFailure = storageError instanceof Error ? storageError.message : String(storageError)
+            }
+          }
+          // compare-and-unregister: only when the CURRENT registration is
+          // still our refusing record (a replacement's registration is never
+          // removed).
+          if (getSessionScopedToolCallbacks(sessionId) === entry.refusingCallbacks && !replacementOwnsId) {
+            unregisterSessionScopedToolCallbacks(sessionId)
           }
           if (!storageFailure) {
             this.unpublishedRuntimeQuarantine.delete(sessionId)
-            sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry`)
+            sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry${replacementOwnsId ? ' (storage/registrations preserved for the live replacement)' : ''}`)
           } else {
             sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${storageFailure}); kept for retry`)
           }
@@ -4229,64 +4255,26 @@ export class SessionManager implements ISessionManager {
    *     `agent.updateRuntimeConfig` and falls back to dispose if the backend
    *     can't apply the update.
    */
-  private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
-    // Serialize against any in-flight refresh on this session. The waiter
-    // doesn't propagate the prior call's errors — those are logged at the
-    // origin call site.
+  /**
+   * R47: the ONE per-session agent-runtime lifecycle mutex. Every lifecycle
+   * operation (runtime refresh AND incomplete-disposal settlement before
+   * replacement construction) runs inside this critical section: the slot is
+   * installed before the first await of `work`, concurrent callers await the
+   * tracked promise and re-evaluate afterwards.
+   */
+  private async withAgentRuntimeLifecycleLock<T>(managed: ManagedSession, work: () => Promise<T>): Promise<T> {
     const inflight = this.agentRefreshLocks.get(managed.id)
     if (inflight) {
       await inflight.catch(() => undefined)
     }
-
-    if (!managed.agent) return
-
-    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model,
-    })
-    const connection = backendContext.connection
-    const sigInput = {
-      connection,
-      provider: backendContext.provider,
-      authType: backendContext.authType,
-      resolvedModel: backendContext.resolvedModel,
-    }
-    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
-    const restartSignature = buildRestartRequiredSignature(sigInput)
-
-    if (!managed.backendRuntimeSignature || !managed.backendRestartSignature) {
-      managed.backendRuntimeSignature = runtimeSignature
-      managed.backendRestartSignature = restartSignature
-      return
-    }
-
-    const restartRequired = managed.backendRestartSignature !== restartSignature
-    const runtimeChanged = managed.backendRuntimeSignature !== runtimeSignature
-
-    if (!restartRequired && !runtimeChanged) return
-
-    if (managed.agent.isProcessing()) {
-      sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
-      return
-    }
-
-    const work = this.runAgentRuntimeRefresh(
-      managed,
-      backendContext,
-      runtimeSignature,
-      restartSignature,
-      restartRequired,
-      reason,
-    )
+    const promise = work()
     // Track the work so concurrent callers serialize. Swallow errors on the
     // tracked promise — the awaiter shouldn't get someone else's exception;
-    // errors are logged inside `runAgentRuntimeRefresh`.
-    const tracked = work.then(() => undefined, () => undefined)
+    // errors are propagated to the primary awaiter.
+    const tracked = promise.then(() => undefined, () => undefined)
     this.agentRefreshLocks.set(managed.id, tracked)
     try {
-      await work
+      return await promise
     } finally {
       // Concurrent callers awaited `tracked` before reaching this point and
       // each registered their own work serially, so the slot is always ours
@@ -4295,6 +4283,63 @@ export class SessionManager implements ISessionManager {
         this.agentRefreshLocks.delete(managed.id)
       }
     }
+  }
+
+  private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+    // Serialize against any in-flight refresh on this session. The waiter
+    // doesn't propagate the prior call's errors — those are logged at the
+    // origin call site.
+    return this.withAgentRuntimeLifecycleLock(managed, async () => {
+      // R47: the incomplete-disposal settlement happens INSIDE the per-session
+      // refresh critical section, BEFORE the no-agent early return — a strict
+      // disposal whose pool/MCP faces failed leaves `managed.agent` null with
+      // retained live surfaces, and this early return used to skip their
+      // retry forever while reporting success to the caller.
+      await this.settlePendingRuntimeDisposal(managed, `runtime refresh (${reason})`)
+
+      if (!managed.agent) return
+
+      const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+      const backendContext = resolveBackendContext({
+        sessionConnectionSlug: managed.llmConnection,
+        workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
+        managedModel: managed.model,
+      })
+      const connection = backendContext.connection
+      const sigInput = {
+        connection,
+        provider: backendContext.provider,
+        authType: backendContext.authType,
+        resolvedModel: backendContext.resolvedModel,
+      }
+      const runtimeSignature = buildBackendRuntimeSignature(sigInput)
+      const restartSignature = buildRestartRequiredSignature(sigInput)
+
+      if (!managed.backendRuntimeSignature || !managed.backendRestartSignature) {
+        managed.backendRuntimeSignature = runtimeSignature
+        managed.backendRestartSignature = restartSignature
+        return
+      }
+
+      const restartRequired = managed.backendRestartSignature !== restartSignature
+      const runtimeChanged = managed.backendRuntimeSignature !== runtimeSignature
+
+      if (!restartRequired && !runtimeChanged) return
+
+      if (managed.agent.isProcessing()) {
+        sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
+        return
+      }
+
+      await this.runAgentRuntimeRefresh(
+        managed,
+        backendContext,
+        runtimeSignature,
+        restartSignature,
+        restartRequired,
+        reason,
+      )
+    })
   }
 
   private async runAgentRuntimeRefresh(
@@ -4386,11 +4431,14 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
-    // R46: retry retained runtime faces BEFORE constructing a replacement
+    // R46/R47: retry retained runtime faces BEFORE constructing a replacement
     // agent — the creation below overwrites `managed.mcpPool` and
     // `managed.poolServer`, which would orphan any still-live processes from
-    // a partially failed disposal.
-    await this.settlePendingRuntimeDisposal(managed, 'agent creation')
+    // a partially failed disposal. The settlement runs under the SAME
+    // per-session lifecycle mutex as runtime refreshes (never outside it).
+    await this.withAgentRuntimeLifecycleLock(managed, async () => {
+      await this.settlePendingRuntimeDisposal(managed, 'agent creation')
+    })
 
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place

@@ -1231,7 +1231,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
           },
         }
         candidate.agent = agent
-        registerSessionScopedToolCallbacks(candidate.id, { list_sessions: async () => 'candidate-runtime' } as never)
+        registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'candidate-runtime' } as never)
         return agent
       }
 
@@ -1253,9 +1253,12 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       // At quarantine time the candidate's storage record is deliberately
       // still present — its cleanup is deferred to the retry sweep.
       expect(storageSessionCount()).toBe(2)
-      // The candidate's callbacks REFUSE execution while quarantined.
+      // The candidate's callbacks REFUSE execution while quarantined — and
+      // the refusing record is EXPLICITLY ENUMERABLE (R47: the production
+      // guard iterates Object.entries, so the refusal is really installed).
       const quarantinedCallbacks = getSessionScopedToolCallbacks(quarantinedId)
       expect(quarantinedCallbacks).toBeDefined()
+      expect(Object.keys(quarantinedCallbacks ?? {}).length).toBeGreaterThan(0)
       expect(() => quarantinedCallbacks!.listSessionsFn!()).toThrow('SESSION_QUARANTINED_UNPUBLISHED')
 
       // Retry cleanup (owner-token verified): dispose succeeds on the second
@@ -1268,6 +1271,130 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(disposeCalls).toBe(2)
       expect(getSessionScopedToolCallbacks(quarantinedId)).toBeUndefined()
       expect(storageSessionCount()).toBe(1) // only the source session remains
+    })
+
+    // ------------------------------------------------------------------
+    // R47-B: a replacement owner that lands BEFORE the sweep keeps its
+    // callbacks, guard, mode state and storage — the sweep's
+    // compare-and-unregister and absent-or-ours storage semantics never
+    // touch a live replacement.
+    // ------------------------------------------------------------------
+    it('a replacement landing before the sweep keeps its callbacks, guard, mode state and storage', async () => {
+      const candidate = seedSession('q-park-cand')
+      candidate.agent = { dispose: () => {} } as never
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never)
+      seedColdEditPopoverHeader('q-park-cand')
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(candidate, 'probe parked sweep')
+
+      // The replacement owner lands BEFORE the sweep: live session entry,
+      // its own callbacks (overwriting the refusing record), mode state.
+      const replacement = createManagedSession(
+        { id: candidate.id, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(candidate.id, replacement)
+      setPermissionMode(candidate.id, 'allow-all', { changedBy: 'system' })
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'replacement' } as never)
+
+      await (sm as unknown as {
+        sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
+      }).sweepQuarantinedUnpublishedRuntimes()
+
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(candidate.id)).toBe(replacement)
+      const replacementCallbacks = getSessionScopedToolCallbacks(candidate.id)
+      expect(replacementCallbacks).toBeDefined()
+      // The replacement's callbacks are ITS OWN — invocable, never refusing.
+      await expect(replacementCallbacks!.listSessionsFn!()).resolves.toBe('replacement' as never)
+      expect(getPermissionMode(candidate.id)).toBe('allow-all')
+      // The replacement owns the id: its storage record is preserved.
+      expect(storageSessionCount()).toBe(1)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(0)
+      unregisterSessionScopedToolCallbacks(candidate.id)
+    })
+  })
+
+  // ==========================================================================
+  // R47-A: the PRODUCTION refresh entry (refreshConnectionRuntime) and the
+  // create path must settle an incomplete disposal inside the per-session
+  // lifecycle mutex — the no-agent early return may never skip the retry.
+  // ==========================================================================
+
+  describe('runtime disposal production-entry retryability (R47-A)', () => {
+    const seedPartialDisposal = (sessionId: string, stopImpl: () => Promise<void>): { managed: { poolServer?: unknown; disposalIncomplete?: unknown }; stopCalls: () => number } => {
+      const managed = seedSession(sessionId)
+      managed.agent = null
+      let stopCalls = 0
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await stopImpl()
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      managed.llmConnection = 'slug-A'
+      return { managed, stopCalls: () => stopCalls }
+    }
+
+    it('refreshConnectionRuntime settles the retained pool face despite the missing agent (public entry)', async () => {
+      const { managed, stopCalls } = seedPartialDisposal('q-entry-refresh', async () => {})
+      await sm.refreshConnectionRuntime('slug-A')
+      expect(stopCalls()).toBe(1)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+    })
+
+    it('concurrent public refresh callers serialize: exactly one settlement runs', async () => {
+      const { managed, stopCalls } = seedPartialDisposal('q-entry-concurrent', async () => {})
+      await Promise.all([
+        sm.refreshConnectionRuntime('slug-A'),
+        sm.refreshConnectionRuntime('slug-A'),
+      ])
+      expect(stopCalls()).toBe(1)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+    })
+
+    it('the create path settles under the same lifecycle mutex before constructing', async () => {
+      const { managed, stopCalls } = seedPartialDisposal('q-entry-create', async () => {})
+      // getOrCreateAgent proceeds to the (harness-failing) platform check
+      // AFTER the settlement — the retained face is retried first.
+      await expect((sm as unknown as {
+        getOrCreateAgent: (m: unknown) => Promise<unknown>
+      }).getOrCreateAgent(managed)).rejects.toThrow()
+      expect(stopCalls()).toBe(1)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+    })
+
+    it('a slow settlement under the mutex blocks a concurrent create-path lifecycle op until settled', async () => {
+      let releaseStop!: () => void
+      const gated = new Promise<void>(resolve => { releaseStop = () => resolve() })
+      let stopEntered = false
+      const { managed, stopCalls } = seedPartialDisposal('q-entry-mutex', async () => {
+        stopEntered = true
+        await gated
+      })
+      const refreshWork = sm.refreshConnectionRuntime('slug-A')
+      for (let i = 0; i < 300 && !stopEntered; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(stopEntered).toBe(true)
+      // The create path joins the same mutex: its own settlement only runs
+      // after the refresh's settlement completed.
+      const createWork = (sm as unknown as {
+        getOrCreateAgent: (m: unknown) => Promise<unknown>
+      }).getOrCreateAgent(managed)
+      releaseStop()
+      const results = await Promise.allSettled([refreshWork, createWork])
+      expect(results[0]!.status).toBe('fulfilled')
+      expect(stopCalls()).toBe(1)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
     })
   })
 })

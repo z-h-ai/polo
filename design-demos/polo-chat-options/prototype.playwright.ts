@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { join } from "node:path";
 
 // This spec targets the Playwright runner exclusively. The file name
 // (`*.playwright.ts`) is deliberately outside bun test's default discovery
@@ -6,8 +7,11 @@ import { test, expect } from "@playwright/test";
 // loads it in environments where `@playwright/test` is not installed; this
 // config collects it explicitly via `bunx playwright test`.
 
-const base = "http://127.0.0.1:8765/design-demos/polo-chat-options";
-const screenshotDir = "/Users/wow/project/z-h-ai/polo-dir/POO-50/feature/polo-chat-options/design-demos/polo-chat-options/screenshots";
+// R47: all paths are derived from THIS checkout (import.meta.dir), and the
+// served base URL comes from the Playwright config's baseURL (relative
+// page.goto below) — the spec only ever reads/writes the checkout it runs
+// in, on any machine/OS.
+const screenshotDir = join(import.meta.dir, "screenshots");
 
 test.use({ channel: "chrome" });
 
@@ -25,7 +29,7 @@ function trackPageErrors(page: import("@playwright/test").Page) {
 // playwright-config migration — these are its interaction cases).
 test("After supports cancel, multi Other, explicit exclusivity, retry, draft restoration, and keyboard selection", async ({ page }) => {
   const errors = trackPageErrors(page);
-  await page.goto(`${base}/after.html?scene=question&theme=light&lang=en`);
+  await page.goto(`/after.html?scene=question&theme=light&lang=en`);
   await expect(page.getByRole("radio", { name: /Move to Trash/ })).toBeVisible();
 
   // Keyboard selection: focus + Space toggles the radio.
@@ -91,7 +95,7 @@ test("declared scenes render without page errors and screenshots match the manif
   ] as const;
   for (const [pageName, scene, theme, lang, viewport, width, height] of shots) {
     await page.setViewportSize({ width, height });
-    await page.goto(`${base}/${pageName}.html?scene=${scene}&theme=${theme}&lang=${lang}`);
+    await page.goto(`/${pageName}.html?scene=${scene}&theme=${theme}&lang=${lang}`);
     await expect(page.locator("[data-polo-content]")).toBeVisible();
     await page.screenshot({ path:`${screenshotDir}/${pageName}-${scene}-${theme}-${lang}-${viewport}.png`, fullPage:false });
   }
@@ -100,7 +104,7 @@ test("declared scenes render without page errors and screenshots match the manif
 
 test("comparison page loads both synchronized prototypes", async ({ page }) => {
   const errors = trackPageErrors(page);
-  await page.goto(`${base}/comparison.html?scene=error&theme=dark&lang=en&viewport=mobile`);
+  await page.goto(`/comparison.html?scene=error&theme=dark&lang=en&viewport=mobile`);
   await expect(page.locator("iframe")).toHaveCount(2);
   await expect(page.locator("iframe").first()).toHaveAttribute("src", /scene=error/);
   await expect(page.locator("iframe").nth(1)).toHaveAttribute("src", /theme=dark/);
