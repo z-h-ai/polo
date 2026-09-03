@@ -480,6 +480,14 @@ export class ClaudeAgent extends BaseAgent {
   private branchFromSdkTurnId: string | null = null;
   private isHeadless: boolean = false;
   private pendingPermissions: Map<string, PendingPermission> = new Map();
+  /**
+   * R50: set as the FIRST act of destroy(). postInit consults this after
+   * every await and before every process-level side effect (credential proxy
+   * creation, env var overwrites) — a construction attempt that was timed out
+   * and disposed must never apply late credential side effects that a
+   * same-id successor runtime would inherit or be unable to clean up.
+   */
+  private postInitAborted: boolean = false;
   // Permission whitelists are now managed by this.permissionManager (inherited from BaseAgent)
   // Source state tracking is now managed by this.sourceManager (inherited from BaseAgent)
   // Source MCP connections are managed by this.config.mcpPool (centralized in main process)
@@ -693,6 +701,11 @@ export class ClaudeAgent extends BaseAgent {
     if (!slug) {
       return { authInjected: false, authWarning: 'No connection slug available', authWarningLevel: 'error' };
     }
+    // R50: an aborted (timed-out-and-disposed) construction applies zero
+    // process-level side effects.
+    if (this.postInitAborted) {
+      return { authInjected: false, authWarning: 'Agent destroyed before post-init; credential side effects skipped' };
+    }
 
     const connection = getLlmConnection(slug);
     if (!connection) {
@@ -711,6 +724,14 @@ export class ClaudeAgent extends BaseAgent {
     // Resolve auth env vars via shared utility
     const manager = getCredentialManager();
     const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+
+    // R50: the credential resolution may complete long after the
+    // construction attempt was timed out and disposed (the SessionManager's
+    // race only bounds the WAIT). The late outcome must apply zero side
+    // effects — no env overwrite, no credential proxy listener.
+    if (this.postInitAborted) {
+      return { authInjected: false, authWarning: 'Agent destroyed during post-init credential resolution; credential side effects skipped' };
+    }
 
     if (!result.success) {
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
@@ -734,7 +755,7 @@ export class ClaudeAgent extends BaseAgent {
       }
 
       await this.invocationCredentialProxy?.close();
-      this.invocationCredentialProxy = await startInvocationCredentialProxy({
+      const credentialProxy = await startInvocationCredentialProxy({
         upstreamBaseUrl,
         headers: upstreamHeaders,
         credentialHeaders: [
@@ -743,6 +764,14 @@ export class ClaudeAgent extends BaseAgent {
             : { name: 'x-api-key', format: 'raw' },
         ],
       });
+      // R50: the proxy listener is a PROCESS-LEVEL side effect — if the agent
+      // was destroyed while the listener was starting, close it immediately
+      // and apply nothing.
+      if (this.postInitAborted) {
+        await credentialProxy.close();
+        return { authInjected: false, authWarning: 'Agent destroyed while starting the invocation credential proxy; listener closed and credential side effects skipped' };
+      }
+      this.invocationCredentialProxy = credentialProxy;
 
       // The Claude subprocess receives only an invocation-scoped loopback URL
       // and opaque capability. Real credentials remain in this runtime.
@@ -758,6 +787,12 @@ export class ClaudeAgent extends BaseAgent {
       }
       this.config.envOverrides = nextOverrides;
     } else {
+      // R50: the process-global env overwrite is a late side effect guarded by
+      // the same abort check — a destroyed agent's late credential outcome is
+      // dropped (a same-id successor owns the process credential state).
+      if (this.postInitAborted) {
+        return { authInjected: false, authWarning: 'Agent destroyed before applying credential env vars; credential side effects skipped' };
+      }
       this.config.envOverrides = {
         ...this.config.envOverrides,
         ...result.envVars,
@@ -2753,6 +2788,10 @@ This is a branched conversation. All prior messages in this conversation are par
    * Calls super.destroy() for base cleanup, then Claude-specific cleanup.
    */
   destroy(): void {
+    // R50: mark the lifecycle ended FIRST — an in-flight postInit whose
+    // credential resolution completes after this point must apply zero
+    // process-level side effects (env overwrites, credential proxies).
+    this.postInitAborted = true;
     // Claude-specific cleanup first
     this.currentQueryAbortController?.abort();
     this.pendingPermissions.clear();

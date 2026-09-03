@@ -1023,6 +1023,15 @@ interface ManagedSession {
    */
   turnStartReserved?: boolean
   /**
+   * R50: the OWNER-BOUND callback/guard lease of THIS session's runtime —
+   * the installed (guard-wrapped) record snapshot captured at construction
+   * and refreshed at every owner mutation (publish guard, wiring end).
+   * Disposal cleanup CASses against THIS lease; the sessionId's CURRENT
+   * registry lookup is never an ownership proof (a same-id successor's
+   * record/guard is never touched by a stale disposal).
+   */
+  callbackLease?: SessionScopedToolCallbacks
+  /**
    * R46: a strict runtime disposal that PARTIALLY failed (some surfaces
    * disposed, others retained with their references on this session). The
    * retained poolServer/mcpPool refs live on THIS object independent of
@@ -3197,9 +3206,10 @@ export class SessionManager implements ISessionManager {
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
-    // R46: retry the cleanup of any quarantined unpublished candidate first —
-    // a no-op while the quarantine registry is empty.
+    // R46/R50: retry the cleanup of any quarantined unpublished candidate and
+    // any timed-out runtime disposal first — no-ops while empty.
     await this.sweepQuarantinedUnpublishedRuntimes()
+    await this.sweepQuarantinedRuntimeDisposals()
     const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
@@ -3770,6 +3780,8 @@ export class SessionManager implements ISessionManager {
     // R39-2: the registration guard is installed BEFORE the session (and
     // later its agent) can register any tool callback.
     this.installManagedSessionCallbackGuard(managed)
+    // R50: rebind the owner lease to the published guard identity.
+    managed.callbackLease = getSessionScopedToolCallbacks(storedSession.id)
 
     // Initialize session metadata in AutomationSystem for diffing
     const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -4067,41 +4079,51 @@ export class SessionManager implements ISessionManager {
       failures.push(`${what}: ${detail}`)
       sessionLog.warn(`Failed to dispose ${what} for ${sessionId} during ${reason}: ${detail}`)
     }
-    // R49: capture the callback/guard lease THIS runtime owns at entry —
-    // BEFORE any await. The cleanup below uses an atomic lease CAS instead of
-    // an unconditional id-wide erase, so a same-id successor that publishes a
-    // new guarded record while this disposal is parked is never erased.
-    const callbackLeaseAtEntry = getSessionScopedToolCallbacks(sessionId)
+    // R49/R50: capture the OWNER-BOUND lease — `managed.callbackLease` is
+    // the exact (record, guard) pair THIS session's runtime registered and
+    // refreshed at every owner mutation. The sessionId's CURRENT registry
+    // lookup is never an ownership proof: a same-id successor that published
+    // before this disposal started must not be captured here, and one that
+    // publishes during the awaited disposals fails the CAS below.
+    const callbackLeaseAtEntry = managed.callbackLease
 
     if (managed.agent) {
       try {
         if (managed.agent.disposeForRestart) {
-          await managed.agent.disposeForRestart()
+          // R50: bounded — a hung disposeForRestart must not pin the
+          // lifecycle lock tail or the question-state lock.
+          const restarted = await this.boundedRuntimeDisposal(sessionId, 'agent-dispose-for-restart', async () => {
+            await managed.agent!.disposeForRestart!()
+            return 'disposed' as const
+          }, failures)
+          if (restarted === 'disposed') managed.agent = null
+          // On timeout the failure is recorded and the reference retained.
         } else {
           managed.agent.dispose()
+          managed.agent = null
         }
-        managed.agent = null
       } catch (error) {
         note('agent', error)
       }
     }
 
     if (managed.poolServer) {
-      try {
-        await managed.poolServer.stop()
-        managed.poolServer = undefined
-      } catch (error) {
-        note('pool-server', error)
-      }
+      // R50: bounded — on timeout the reference is RETAINED and the runtime
+      // is moved to the manager-owned retryable disposal quarantine.
+      const stopped = await this.boundedRuntimeDisposal(sessionId, 'pool-server', async () => {
+        await managed.poolServer!.stop()
+        return 'stopped' as const
+      }, failures)
+      if (stopped === 'stopped') managed.poolServer = undefined
     }
 
     if (managed.mcpPool) {
-      try {
-        await managed.mcpPool.disconnectAll()
-        managed.mcpPool = undefined
-      } catch (error) {
-        note('mcp-pool', error)
-      }
+      // R50: bounded — same retained-on-timeout semantics as pool-server.
+      const disconnected = await this.boundedRuntimeDisposal(sessionId, 'mcp-pool', async () => {
+        await managed.mcpPool!.disconnectAll()
+        return 'disconnected' as const
+      }, failures)
+      if (disconnected === 'disconnected') managed.mcpPool = undefined
     }
 
     const strictFailure = failures.length > 0 && opts?.bestEffort !== true
@@ -4117,6 +4139,10 @@ export class SessionManager implements ISessionManager {
       // R46: the retained faces are tracked INDEPENDENTLY of managed.agent —
       // a successor agent must never be built over them silently.
       managed.disposalIncomplete = { reason, failures: [...failures] }
+      // R50: move the retained live faces into the manager-owned retryable
+      // quarantine — delete/refresh/create proceed while the still-shutting-
+      // down resources are retried by the sweep (exactly-once per entry).
+      this.quarantineIncompleteRuntimeDisposal(managed, failures, reason)
     }
 
     let callbacksUnregistered = false
@@ -4153,6 +4179,54 @@ export class SessionManager implements ISessionManager {
     await this.disposeManagedAgentRuntime(managed, `${reason}: retrying incomplete disposal`)
     managed.disposalIncomplete = undefined
     sessionLog.info(`Retried incomplete disposal for session ${managed.id} is now fully settled`)
+  }
+
+  /**
+   * R50: manager-owned RETRYABLE quarantine for runtimes whose disposal
+   * timed out (a retained pool/MCP face still shutting down). Entries hold
+   * the exact managed object (retained references intact) and settle via the
+   * same strict retry as the live lifecycle path — exactly once, verified by
+   * owner token. Swept at every createSession entry.
+   */
+  private readonly quarantinedRuntimeDisposals = new Map<string, {
+    managed: ManagedSession
+    quarantineToken: string
+    failures: string[]
+    reason: string
+    quarantinedAt: number
+  }>()
+
+  private async sweepQuarantinedRuntimeDisposals(): Promise<void> {
+    if (this.quarantinedRuntimeDisposals.size === 0) return
+    for (const [sessionId, entry] of this.quarantinedRuntimeDisposals) {
+      // A different live session owning the id makes the entry stale.
+      if (this.sessions.has(sessionId) && this.sessions.get(sessionId) !== entry.managed) {
+        this.quarantinedRuntimeDisposals.delete(sessionId)
+        continue
+      }
+      try {
+        await this.settlePendingRuntimeDisposal(entry.managed, 'quarantined disposal retry')
+        if (this.quarantinedRuntimeDisposals.get(sessionId)?.quarantineToken === entry.quarantineToken) {
+          this.quarantinedRuntimeDisposals.delete(sessionId)
+          sessionLog.info(`Quarantined runtime disposal for session ${sessionId} settled on retry`)
+        }
+      } catch (retryError) {
+        sessionLog.warn(`Retry cleanup for quarantined runtime disposal ${sessionId} failed; kept for retry:`, retryError)
+      }
+    }
+  }
+
+  private quarantineIncompleteRuntimeDisposal(managed: ManagedSession, failures: string[], reason: string): void {
+    if (!managed.disposalIncomplete) return
+    if (this.quarantinedRuntimeDisposals.has(managed.id)) return
+    this.quarantinedRuntimeDisposals.set(managed.id, {
+      managed,
+      quarantineToken: randomUUID(),
+      failures: [...failures],
+      reason,
+      quarantinedAt: Date.now(),
+    })
+    sessionLog.warn(`Runtime disposal for session ${managed.id} quarantined for retry (${reason}): ${failures.join('; ')}`)
   }
 
   /**
@@ -4309,6 +4383,36 @@ export class SessionManager implements ISessionManager {
    * concurrently with it. Cleanup compares and clears only the caller's OWN
    * tail — queued waiters never delete each other's slot.
    */
+  /**
+   * R50: bounds ONE runtime disposal await. On expiry the failure is recorded
+   * and `undefined` is returned — the caller RETAINS the still-live resource
+   * reference and (for strict disposals) moves the runtime into the
+   * manager-owned retryable disposal quarantine. No fake success, no dropped
+   * reference, and the lifecycle lock tail releases regardless.
+   */
+  private runtimeDisposalTimeoutMs = 10_000
+
+  private async boundedRuntimeDisposal<T>(sessionId: string, what: string, op: () => Promise<T>, failures: string[]): Promise<T | undefined> {
+    const timeoutMs = this.runtimeDisposalTimeoutMs
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`${what} disposal timed out after ${timeoutMs}ms; the live resource was retained in the retryable disposal quarantine`))
+      }, timeoutMs)
+      timer.unref?.()
+    })
+    try {
+      return await Promise.race([op(), timeout])
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      failures.push(`${what}: ${detail}`)
+      sessionLog.warn(`Runtime disposal of ${what} for session ${sessionId} failed during cleanup: ${detail}`)
+      return undefined
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
   private async withAgentRuntimeLifecycleLock<T>(managed: ManagedSession, work: () => Promise<T>): Promise<T> {
     const priorTail = this.agentRefreshLocks.get(managed.id) ?? Promise.resolve()
     const ownTail = priorTail.then(work, work)
@@ -4724,6 +4828,13 @@ export class SessionManager implements ISessionManager {
       // Construct backend via factory
       // ============================================================
 
+      // R50-B: install THE authoritative registration guard BEFORE the
+      // backend factory constructs the agent — the factory's core callback
+      // registration therefore snapshots THIS guard identity, and the same
+      // construction lease stays stable through postInit/wiring (no
+      // post-factory replacement that would break lease-based cleanup).
+      this.installManagedSessionCallbackGuard(managed)
+
       managed.agent = createBackendFromResolvedContext({
         context: backendContext,
         hostRuntime: buildBackendHostRuntimeContext(),
@@ -4793,10 +4904,12 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
-      // R39-2: (re)install the authoritative registration guard BEFORE the
-      // backend constructs the agent and registers its callbacks — every
-      // registration is atomically guarded from the first record on.
-      this.installManagedSessionCallbackGuard(managed)
+      // R50: the backend's constructor registered its core callback record
+      // under the guard installed above (BEFORE the factory) — bind that
+      // exact lease to THIS managed owner. The construction lease identity
+      // is NOT replaced afterwards (the previous post-factory reinstall was
+      // removed), so lease-based cleanup stays exact for this construction.
+      managed.callbackLease = getSessionScopedToolCallbacks(managed.id)
 
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
@@ -5597,6 +5710,10 @@ export class SessionManager implements ISessionManager {
       managed.backendRestartSignature = restartSignature
       end()
     }
+      // R50: refresh the owner-bound lease — the wiring above may have
+      // merged/replaced the installed record; the lease stays bound to THIS
+      // managed owner with the CURRENT guard identity.
+      managed.callbackLease = getSessionScopedToolCallbacks(managed.id)
       return managed.agent
     } catch (constructionError) {
       // R49: the candidate was never published — dispose its runtime faces
@@ -11375,6 +11492,8 @@ export class SessionManager implements ISessionManager {
       // R39-2: the registration guard is installed atomically with the
       // in-memory publication.
       this.installManagedSessionCallbackGuard(managed)
+      // R50: rebind the owner lease to the published guard identity.
+      managed.callbackLease = getSessionScopedToolCallbacks(sessionId)
 
       // Initialize automation metadata
       const automationSystem = this.automationSystems.get(workspaceRootPath)

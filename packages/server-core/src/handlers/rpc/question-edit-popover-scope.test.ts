@@ -859,7 +859,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       } as never
       // R49: the runtime owns a callback lease (registered before disposal) —
       // the entry-time CAS still removes it despite the agent-face failure.
-      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'owned' } as never)
+      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'owned' } as never)
       const result = await (sm as unknown as {
         disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: { bestEffort?: boolean }) => Promise<{ failures: string[]; callbacksUnregistered: boolean }>
       }).disposeManagedAgentRuntime(managed, 'test', { bestEffort: true })
@@ -1669,7 +1669,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
 
   describe('default disposal owner isolation (R49-B)', () => {
     const installReplacementDuringParkedDispose = async (
-      managed: { id: string; agent?: unknown; disposalIncomplete?: unknown },
+      managed: { id: string; agent?: unknown; disposalIncomplete?: unknown; callbackLease?: unknown },
       invokeDispose: () => Promise<unknown>,
     ): Promise<{ replacement: unknown; guardCalls: string[] }> => {
       let releaseDispose!: () => void
@@ -1682,7 +1682,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         },
       } as never
       // The dying runtime's own lease at dispose entry.
-      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'stale' } as never)
+      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'stale' } as never)
 
       const disposeWork = invokeDispose()
       for (let i = 0; i < 300 && !disposeEntered; i += 1) {
@@ -1899,6 +1899,139 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       // The next queued lifecycle caller proceeds.
       await sm.refreshConnectionRuntime('slug-A')
       r49StallPostInit = false
+    })
+  })
+
+  // ==========================================================================
+  // R50-A: the dispose entry lease is OWNER-BOUND (managed.callbackLease) —
+  // a same-id successor that published BEFORE the disposal entry is never
+  // captured or erased, at every production site.
+  // ==========================================================================
+
+  describe('pre-existing successor lease isolation (R50-A)', () => {
+    const seedOwnerAndSuccessor = (sessionId: string): { managed: { id: string; callbackLease?: unknown; poolServer?: unknown; disposalIncomplete?: unknown }; replacement: unknown; guardCalls: string[] } => {
+      const managed = seedSession(sessionId)
+      managed.agent = { dispose: () => {} } as never
+      // The dying runtime's OWN lease (registered during its construction).
+      managed.callbackLease = registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'own' } as never)
+      // The successor publishes FIRST: live session, new guard, new
+      // callbacks, distinct mode.
+      const replacement = createManagedSession(
+        { id: sessionId, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, replacement)
+      setPermissionMode(sessionId, 'allow-all', { changedBy: 'system' })
+      const guardCalls: string[] = []
+      installSessionScopedToolCallbackGuard(sessionId, name => { guardCalls.push(name) })
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never)
+      return { managed, replacement, guardCalls }
+    }
+
+    const assertSuccessorFiveFaces = async (sessionId: string, replacement: unknown, guardCalls: string[]): Promise<void> => {
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(sessionId)).toBe(replacement)
+      const cbs = getSessionScopedToolCallbacks(sessionId)!
+      await expect(cbs.listSessionsFn!()).resolves.toBe('replacement' as never)
+      expect(guardCalls.length).toBeGreaterThan(0)
+      expect(getPermissionMode(sessionId)).toBe('allow-all')
+    }
+
+    it('deleted/stopped convergence: the stale managed disposal keeps its own lease and never erases the successor', async () => {
+      const { managed, replacement, guardCalls } = seedOwnerAndSuccessor('q-r50-conv')
+      await (sm as unknown as {
+        disposeManagedAgentRuntime: (m: unknown, reason: string) => Promise<{ callbacksUnregistered: boolean }>
+      }).disposeManagedAgentRuntime(managed, 'session deleted or stopped before chat start')
+      // The CAS ran against the OWNER lease: current record is the
+      // successor's → cleanup skipped.
+      expect(getSessionScopedToolCallbacks('q-r50-conv')).toBeDefined()
+      await assertSuccessorFiveFaces('q-r50-conv', replacement, guardCalls)
+      unregisterSessionScopedToolCallbacks('q-r50-conv')
+    })
+
+    it('pending-disposal settlement: the retained faces retry against the owner lease only', async () => {
+      const { managed, replacement, guardCalls } = seedOwnerAndSuccessor('q-r50-settle')
+      let stopCalls = 0
+      managed.poolServer = { stop: async () => { stopCalls += 1 } } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      await (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managed, 'test settle')
+      expect(stopCalls).toBe(1)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      await assertSuccessorFiveFaces('q-r50-settle', replacement, guardCalls)
+      unregisterSessionScopedToolCallbacks('q-r50-settle')
+    })
+
+    const refreshCase = (label: string, restartRequired: boolean): void => {
+      it(`${label}: the stale managed disposal keeps its own lease and never erases the successor`, async () => {
+        const { managed, replacement, guardCalls } = seedOwnerAndSuccessor(`q-r50-refresh-${label}`)
+        await (sm as unknown as {
+          runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+        }).runAgentRuntimeRefresh(managed, {} as never, 'rt', 'rst', restartRequired, `${label} parked`)
+        await assertSuccessorFiveFaces(`q-r50-refresh-${label}`, replacement, guardCalls)
+        unregisterSessionScopedToolCallbacks(`q-r50-refresh-${label}`)
+      })
+    }
+    refreshCase('restart-required', true)
+    refreshCase('in-place-config', false)
+  })
+
+  // ==========================================================================
+  // R50-D: a hung runtime disposal is BOUNDED — the lifecycle locks release,
+  // the retained faces move to the manager-owned retryable quarantine, and
+  // delete/next-lifecycle proceed; releasing the stuck shutdown settles the
+  // quarantine exactly once.
+  // ==========================================================================
+
+  describe('bounded runtime disposal quarantine (R50-D)', () => {
+    it('a hung pool shutdown cannot pin the locks: bounded settle quarantines, delete proceeds, release settles exactly once', async () => {
+      const managed = seedSession('q-r50-hung-stop')
+      let stopCalls = 0
+      let releaseStop!: () => void
+      const gated = new Promise<void>(resolve => { releaseStop = () => resolve() })
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await gated
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 200
+
+      let settleSettled = false
+      const settleWork = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managed, 'bounded settle test')
+      settleWork.catch(() => { settleSettled = true })
+      const watchdog = new Promise<boolean>(resolve => {
+        setTimeout(() => resolve(settleSettled), 2000)
+      })
+      expect(await watchdog).toBe(true)
+      // The retained face was moved into the manager-owned quarantine.
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(1)
+      expect(managed.poolServer).toBeTruthy()
+      expect(managed.disposalIncomplete).toBeTruthy()
+
+      // Delete proceeds while the shutdown is still stuck.
+      await sm.deleteSession(managed.id)
+
+      // Release the stuck shutdown: the next sweep settles exactly once.
+      releaseStop()
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      // stop calls: (1) the abandoned bounded settle, (2) deleteSession's own
+      // bounded disposal retry, (3) the sweep's exactly-once quarantine
+      // settlement. The QUARANTINE ENTRY settled exactly once (1 → 0).
+      expect(stopCalls).toBe(3)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
     })
   })
 })
