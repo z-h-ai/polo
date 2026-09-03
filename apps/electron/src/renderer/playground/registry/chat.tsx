@@ -14,7 +14,7 @@ import { motion } from 'motion/react'
 import { ArrowUp, Paperclip, ChevronDown, Circle, Sparkles } from 'lucide-react'
 import type { LabelConfig } from '@polo-ai/shared/labels'
 import type { SessionStatus } from '@/config/session-status-config'
-import type { FileAttachment, PermissionRequest, PermissionMode } from '../../../shared/types'
+import type { FileAttachment, PermissionRequest, PermissionMode, QuestionRequest } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import { AppShellProvider } from '@/context/AppShellContext'
 import { ModalProvider } from '@/context/ModalContext'
@@ -28,6 +28,7 @@ import {
 } from '../mock-utils'
 import { mockAdminApprovalRequest } from '../adapters/input-adapters'
 import { getRecentDirsForScenario, type RecentDirScenario } from '../recent-working-dirs'
+import { QuestionSubmitScenarioRunner } from '../lib/question-submit-scenario'
 
 const sampleCodeAttachment: FileAttachment = {
   type: 'text',
@@ -76,6 +77,35 @@ docker push registry.example.com/myapp:latest
 # Deploy to kubernetes
 kubectl apply -f k8s/deployment.yaml
 kubectl rollout status deployment/myapp`,
+}
+
+// Sample agent question request (single-select + multi-select with exclusive)
+const sampleQuestionRequest: QuestionRequest = {
+  requestId: 'question-1',
+  sessionId: 'playground-session',
+  createdAt: Date.now(),
+  questions: [
+    {
+      id: 'data-handling',
+      header: 'Data',
+      question: 'What should happen to related data when the project is deleted?',
+      options: [
+        { id: 'trash', label: 'Move to Trash', description: 'Recommended — recoverable for 30 days', recommended: true },
+        { id: 'delete', label: 'Delete permanently', description: 'Remove immediately with no recovery' },
+      ],
+    },
+    {
+      id: 'notify',
+      header: 'Notifications',
+      question: 'Who should be notified about this deletion?',
+      multiple: true,
+      options: [
+        { id: 'admins', label: 'Project admins', description: 'Workspace owners and maintainers' },
+        { id: 'members', label: 'All project members', description: 'Everyone assigned to the project' },
+        { id: 'none', label: 'Do not notify anyone', description: 'Skip all notifications', exclusive: true },
+      ],
+    },
+  ],
 }
 
 // Sample background tasks
@@ -177,6 +207,7 @@ const playgroundAppShellContext = {
   refreshLlmConnections: async () => {},
   pendingPermissions: new Map(),
   pendingCredentials: new Map(),
+  pendingQuestions: new Map(),
   getDraft: () => '',
   sessionOptions: new Map(),
   onCreateSession: async () => ({
@@ -524,7 +555,10 @@ const deepNestedActivities: ActivityItem[] = [
   },
 ]
 
-type InputContainerMode = 'freeform' | 'permission' | 'admin_approval'
+type InputContainerMode = 'freeform' | 'permission' | 'admin_approval' | 'question'
+
+/** Deterministic question submit behaviors for the Playground (P1 review contract). */
+type QuestionSubmitScenario = 'normal' | 'submitting' | 'error'
 
 interface InputContainerPlaygroundProps {
   disabled?: boolean
@@ -534,6 +568,8 @@ interface InputContainerPlaygroundProps {
   permissionMode?: PermissionMode
   workingDirectory?: string
   inputMode?: InputContainerMode
+  /** Only meaningful with inputMode='question': controls onStructuredResponse behavior. */
+  questionScenario?: QuestionSubmitScenario
   compactMode?: boolean
   showOptionBadges?: boolean
   showTasks?: boolean
@@ -559,6 +595,7 @@ function InputContainerPlayground({
   permissionMode = 'ask',
   workingDirectory = '/Users/demo/projects/polo-ai',
   inputMode = 'freeform',
+  questionScenario = 'normal',
   compactMode = false,
   showOptionBadges = true,
   showTasks = true,
@@ -704,6 +741,26 @@ function InputContainerPlayground({
     return () => clearTimeout(timer)
   }, [showAttachments, attachmentSeedKey, attachmentFiles, playgroundSessionId])
 
+  // Deterministic question submit behavior (P1 review contract: the
+  // Playground must be able to reproduce submitting / transient_failure
+  // deterministically for visual + interaction review).
+  // The runner is recreated whenever the scenario or input mode changes —
+  // its attempt counter resets with it, so a NEW error scenario always
+  // rejects on the first submit (error → normal → error works repeatedly).
+  const questionSubmitRunnerRef = React.useRef<{ runner: QuestionSubmitScenarioRunner; key: string } | null>(null)
+  const runnerKey = `${inputMode}:${questionScenario}`
+  if (!questionSubmitRunnerRef.current || questionSubmitRunnerRef.current.key !== runnerKey) {
+    questionSubmitRunnerRef.current = {
+      runner: new QuestionSubmitScenarioRunner(inputMode === 'question' ? questionScenario : 'normal'),
+      key: runnerKey,
+    }
+  }
+  const handleStructuredResponse = React.useCallback((response: StructuredResponse): void | Promise<void> => {
+    console.log('[Playground] Structured response:', response)
+    if (inputMode !== 'question') return
+    return questionSubmitRunnerRef.current?.runner.handle(response)
+  }, [inputMode])
+
   const structuredInput = React.useMemo(() => {
     if (inputMode === 'permission') {
       return {
@@ -724,6 +781,13 @@ function InputContainerPlayground({
       }
     }
 
+    if (inputMode === 'question') {
+      return {
+        type: 'question' as const,
+        data: sampleQuestionRequest,
+      }
+    }
+
     return undefined
   }, [inputMode])
 
@@ -734,7 +798,7 @@ function InputContainerPlayground({
         <div className="flex-1" />
 
         <ChatInputZone
-          key={`input:${inputMode}:${compactMode ? 'compact' : 'full'}:${showAttachments ? attachmentSeedKey : 'none'}:${showFollowUps ? followUpCount : 0}:${seedRecentDirs ? recentDirScenario : 'unseeded'}`}
+          key={`input:${inputMode}:${questionScenario}:${compactMode ? 'compact' : 'full'}:${showAttachments ? attachmentSeedKey : 'none'}:${showFollowUps ? followUpCount : 0}:${seedRecentDirs ? recentDirScenario : 'unseeded'}`}
           compactMode={compactMode}
           showOptionBadges={showOptionBadges}
           permissionMode={mode}
@@ -754,9 +818,7 @@ function InputContainerPlayground({
             disabled,
             isProcessing,
             structuredInput,
-            onStructuredResponse: (response) => {
-              console.log('[Playground] Structured response:', response)
-            },
+            onStructuredResponse: handleStructuredResponse,
             currentModel: model,
             sources: showSources ? sources : [],
             enabledSourceSlugs: showSources ? enabledSourceSlugs : [],
@@ -1255,9 +1317,23 @@ export const chatComponents: ComponentEntry[] = [
             { label: 'Freeform', value: 'freeform' },
             { label: 'Permission', value: 'permission' },
             { label: 'Admin Approval', value: 'admin_approval' },
+            { label: 'Question', value: 'question' },
           ],
         },
         defaultValue: 'freeform',
+      },
+      {
+        name: 'questionScenario',
+        description: 'Question submit behavior (inputMode=question only): normal resolves, submitting never settles, error rejects once then succeeds',
+        control: {
+          type: 'select',
+          options: [
+            { label: 'Normal', value: 'normal' },
+            { label: 'Submitting (never resolves)', value: 'submitting' },
+            { label: 'Error (reject once, retry succeeds)', value: 'error' },
+          ],
+        },
+        defaultValue: 'normal',
       },
       {
         name: 'disabled',
@@ -1481,6 +1557,32 @@ export const chatComponents: ComponentEntry[] = [
         description: 'Structured admin approval request state',
         props: {
           inputMode: 'admin_approval',
+          showFollowUps: false,
+        },
+      },
+      {
+        name: 'Question UI',
+        description: 'Agent question request: single-select + multi-select with exclusive option and Other',
+        props: {
+          inputMode: 'question',
+          showFollowUps: false,
+        },
+      },
+      {
+        name: 'Question Submitting',
+        description: 'Deterministic stuck-submitting state: all controls disabled with spinner (submit never settles)',
+        props: {
+          inputMode: 'question',
+          questionScenario: 'submitting',
+          showFollowUps: false,
+        },
+      },
+      {
+        name: 'Question Error',
+        description: 'Deterministic transient_failure: first submit rejects (selections + Other text kept, retryable error), retry succeeds',
+        props: {
+          inputMode: 'question',
+          questionScenario: 'error',
           showFollowUps: false,
         },
       },

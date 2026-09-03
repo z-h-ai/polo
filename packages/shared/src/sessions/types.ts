@@ -12,6 +12,28 @@
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@polo-ai/core/types';
+import type { QuestionRequest, SessionOrigin } from '../protocol/dto.ts';
+
+/**
+ * Recoverable "answer committed, waiting for agent resume" state.
+ * `messageId` is the persisted answer message that must become the next turn
+ * (resume reuses it via existingMessageId — never a duplicate user message).
+ * `completed: true` marks a TERMINAL record: the agent turn already executed
+ * but its durable clear could not be persisted — a restart must clear this
+ * record WITHOUT re-executing the answer turn.
+ */
+export interface PendingAgentResume {
+  messageId: string;
+  attempts: number;
+  completed?: boolean;
+  /**
+   * Trusted entry source captured from the pendingQuestion that produced the
+   * answer (the turn that asked the question). The resume, its retries, and
+   * restart recovery pass it back so the resumed turn keeps the same tool
+   * visibility instead of re-inferring it as an ordinary desktop turn.
+   */
+  invocationSource?: import('../protocol/dto').InvocationSource;
+}
 
 /**
  * Session fields that persist to disk.
@@ -30,16 +52,25 @@ export const SESSION_PERSISTENT_FIELDS = [
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
   'name', 'isFlagged', 'sessionStatus', 'labels', 'hidden', 'origin',
+  // Edit Popover ownership (scoped pending-question recovery)
+  'popoverOwner',
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
+  // System prompt preset ('mini' edit-popover sessions must survive restarts
+  // — the request_user_input eligibility matrix re-derives isMini from it)
+  'systemPromptPreset',
   // Sharing
   'sharedUrl', 'sharedId', 'sharedWriteToken',
   // Plan execution
   'pendingPlanExecution',
+  // Pending agent question (request_user_input)
+  'pendingQuestion',
+  // Recoverable "answer committed, waiting for agent resume" state
+  'pendingAgentResume',
   // Archive
   'isArchived', 'archivedAt',
   // Branching
@@ -147,6 +178,8 @@ export interface SessionConfig {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** System prompt preset for this session ('default' | 'mini' or custom) */
+  systemPromptPreset?: string;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -162,10 +195,29 @@ export interface SessionConfig {
     /** Whether execution has already been dispatched from the UI. */
     executionDispatched?: boolean;
   };
+  /**
+   * Authoritative pending agent question (request_user_input). While set,
+   * the desktop input area is taken over by the question UI and the agent
+   * turn is paused via a QuestionRequested handoff.
+   *
+   * Cleared on: answer accepted, user skips, replaced by a newer request,
+   * session stop/archive/delete, or session missing.
+   */
+  pendingQuestion?: QuestionRequest;
+  /**
+   * Recoverable resume state: the user's answer was committed and persisted,
+   * but starting the next agent turn failed (backend init, credential refresh,
+   * source build — failures before the internal chat try/catch). The resume
+   * retries WITHOUT writing a second user message; a new user message
+   * supersedes it. Cleared on successful resume / supersede.
+   */
+  pendingAgentResume?: PendingAgentResume;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Host experience that owns this session. */
-  origin?: 'cli-run' | 'cli-exec';
+  origin?: SessionOrigin;
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
+  popoverOwner?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */
@@ -226,7 +278,9 @@ export interface SessionHeader {
   /** Optional user-defined name */
   name?: string;
   /** Host experience that owns this session. */
-  origin?: 'cli-run' | 'cli-exec';
+  origin?: SessionOrigin;
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
+  popoverOwner?: string;
   createdAt: number;
   lastUsedAt: number;
   /** Timestamp of last meaningful message — persisted separately from lastUsedAt for stable date grouping across restarts. */
@@ -269,6 +323,8 @@ export interface SessionHeader {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** System prompt preset for this session ('default' | 'mini' or custom) */
+  systemPromptPreset?: string;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -284,6 +340,16 @@ export interface SessionHeader {
     /** Whether execution has already been dispatched from the UI. */
     executionDispatched?: boolean;
   };
+  /**
+   * Authoritative pending agent question (request_user_input) — included in
+   * the header so a full read restores it; the list view only consumes the
+   * derived `hasPendingQuestion` / `pendingQuestionRequestId` flags below.
+   */
+  pendingQuestion?: QuestionRequest;
+  /** True when an agent question is awaiting an answer (session list badge without loading messages). */
+  hasPendingQuestion?: boolean;
+  /** requestId of the pending question, when hasPendingQuestion is true. */
+  pendingQuestionRequestId?: string;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Whether this session is archived */
@@ -354,6 +420,8 @@ export interface SessionMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** System prompt preset for this session ('default' | 'mini' or custom) */
+  systemPromptPreset?: string;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
   /** ID of the last final (non-intermediate) assistant message - for unread detection */
@@ -368,10 +436,23 @@ export interface SessionMetadata {
   tokenUsage?: SessionTokenUsage;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
+  /** Host experience that owns this session (from the JSONL header). */
+  origin?: SessionOrigin;
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
+  popoverOwner?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */
   archivedAt?: number;
   /** Message ID that this session was branched from (hard context cutoff marker). */
   branchFromMessageId?: string;
+  /** True when an agent question is awaiting an answer (session list badge). */
+  hasPendingQuestion?: boolean;
+  /** requestId of the pending question, when hasPendingQuestion is true. */
+  pendingQuestionRequestId?: string;
+  /**
+   * Full pending agent question payload — kept in metadata so a cold-start
+   * getSessions can restore the renderer card without loading messages.
+   */
+  pendingQuestion?: QuestionRequest;
 }

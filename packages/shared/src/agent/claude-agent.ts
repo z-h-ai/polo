@@ -665,6 +665,15 @@ export class ClaudeAgent extends BaseAgent {
         this.onDebug?.(`[ClaudeAgent] onAuthRequest received: ${request.sourceSlug} (type: ${request.type})`);
         this.onAuthRequest?.(request);
       },
+      // GENERATION BINDING: the generation
+      // is snapshotted at TOOL-CALL INITIATION by the handler via
+      // getTurnGeneration below, and this registration only FORWARDS that
+      // immutable value — it never re-reads the mutable field at execution.
+      onQuestionRequested: (questions, generationAtRequest) => {
+        this.onDebug?.(`[ClaudeAgent] onQuestionRequested received: ${questions.length} question(s)`);
+        return this.onQuestionRequested?.(questions, generationAtRequest);
+      },
+      getTurnGeneration: () => this.sessionTurnGeneration,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
     });
@@ -955,12 +964,17 @@ export class ClaudeAgent extends BaseAgent {
       // Build full MCP servers set first, then filter for mini agents
       const fullMcpServers: Options['mcpServers'] = {
         // Session-scoped tools (SubmitPlan, source_test, update_user_preferences, transform_data, etc.)
+        // request_user_input visibility is computed per-turn by the session layer
+        // (desktop turns + the explicit Edit Popover exception); mini sessions
+        // are only reachable with that exception, so the flag is authoritative
+        // here — no additional mini gate.
         session: getSessionScopedTools(
           sessionId,
           this.workspaceRootPath,
           undefined,
           this.sessionStorage,
           this.workingDirectory,
+          { allowRequestUserInput: this.allowRequestUserInput },
         ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed
@@ -1476,6 +1490,9 @@ export class ClaudeAgent extends BaseAgent {
 
       // Create AbortController for this query - allows force-stopping via forceAbort()
       this.currentQueryAbortController = new AbortController();
+      // The query's abort state is installed — the turn is genuinely
+      // abortable from here (chat-start reservation signal).
+      this.signalTurnQueryLive();
       const optionsWithAbort = {
         ...options,
         abortController: this.currentQueryAbortController,

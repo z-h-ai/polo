@@ -13,7 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
-import type { AuthRequest } from '@polo-ai/session-tools-core';
+import type { AuthRequest, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import { debug } from '../utils/debug.ts';
 
 /**
@@ -31,6 +31,23 @@ export interface SessionScopedToolCallbacks {
    * The auth UI should be shown and execution paused.
    */
   onAuthRequest?: (request: AuthRequest) => void;
+
+  /**
+   * Called when the agent requests structured user input via
+   * request_user_input. The question UI should be shown and the turn paused.
+   * May return a Promise — the tool handler awaits the durable handoff.
+   * `generationAtRequest` is the issuing turn's processing generation,
+   * snapshotted by the agent at tool-call time and carried through.
+   */
+  onQuestionRequested?: (questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
+
+  /**
+   * Reader for the CURRENT processing generation, registered by each agent
+   * backend. It is invoked by the tool handler AT TOOL-CALL INITIATION —
+   * synchronously, before any await — and the returned value is bound
+   * immutably into the callback chain from there.
+   */
+  getTurnGeneration?: () => number;
 
   /**
    * Agent-native LLM query callback for call_llm tool (OAuth path).

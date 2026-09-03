@@ -1,4 +1,4 @@
-import type { PermissionRequest, CredentialRequest, CredentialResponse } from '../../../../../shared/types'
+import type { PermissionRequest, CredentialRequest, CredentialResponse, QuestionRequest, QuestionResponse } from '../../../../../shared/types'
 import type { AdminApprovalRequestData } from './AdminApprovalRequest'
 
 /**
@@ -9,7 +9,7 @@ export type InputMode = 'freeform' | 'structured'
 /**
  * Types of structured input UIs
  */
-export type StructuredInputType = 'permission' | 'credential' | 'admin_approval'
+export type StructuredInputType = 'permission' | 'credential' | 'admin_approval' | 'question'
 
 /**
  * Union type for structured input data
@@ -18,13 +18,14 @@ export type StructuredInputData =
   | { type: 'permission'; data: PermissionRequest }
   | { type: 'credential'; data: CredentialRequest }
   | { type: 'admin_approval'; data: AdminApprovalRequestData }
+  | { type: 'question'; data: QuestionRequest }
 
 /**
  * State for structured input
  */
 export interface StructuredInputState {
   type: StructuredInputType
-  data: PermissionRequest | CredentialRequest | AdminApprovalRequestData
+  data: PermissionRequest | CredentialRequest | AdminApprovalRequestData | QuestionRequest
 }
 
 /**
@@ -46,9 +47,25 @@ export interface AdminApprovalResponse {
 }
 
 /**
+ * Response from a question request (agent asked, user answered)
+ */
+export interface QuestionInputResponse {
+  type: 'question'
+  response: QuestionResponse
+}
+
+/**
+ * Cancel action for a question request ("skip for now")
+ */
+export interface QuestionCancelResponse {
+  type: 'question_cancel'
+  requestId: string
+}
+
+/**
  * Union type for all structured responses
  */
-export type StructuredResponse = PermissionResponse | CredentialResponse | AdminApprovalResponse
+export type StructuredResponse = PermissionResponse | CredentialResponse | AdminApprovalResponse | QuestionInputResponse | QuestionCancelResponse
 
 // Re-export CredentialResponse for convenience
 export type { CredentialResponse }

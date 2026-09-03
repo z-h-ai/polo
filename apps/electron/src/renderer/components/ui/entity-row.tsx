@@ -61,6 +61,9 @@ export interface EntityRowProps {
   titleSuffix?: React.ReactNode
   /** Optional subtitle line beneath the title */
   subtitle?: React.ReactNode
+  /** Stable test anchor on the subtitle container (e.g. the compact/mobile
+   *  expanded row preview) */
+  subtitleTestId?: string
   /** Badge/subtitle row beneath the title */
   badges?: React.ReactNode
   /** Right-aligned content in the badge row (timestamp, child toggle) */
@@ -122,6 +125,7 @@ export function EntityRow({
   titleTrailing,
   titleSuffix,
   subtitle,
+  subtitleTestId,
   badges,
   trailing,
   children,
@@ -365,7 +369,10 @@ export function EntityRow({
 
           {/* Subtitle line */}
           {subtitle && (
-            <div className="flex items-start gap-[10px] w-full text-[12px] text-foreground/55 min-w-0 -mt-1">
+            <div
+              data-testid={subtitleTestId}
+              className="flex items-start gap-[10px] w-full text-[12px] text-foreground/55 min-w-0 -mt-1"
+            >
               {icon && (
                 <div className="shrink-0 flex items-center gap-[10px] [&>*]:w-3 [&>*]:h-3 invisible" aria-hidden="true">
                   {icon}

@@ -9,6 +9,8 @@ import { join, basename } from "path";
 import * as esbuild from "esbuild";
 import { downloadUv, type Platform, type Arch } from "./build/common";
 
+import { piAgentServerBuildArgs } from "./build/pi-build-args.ts";
+
 const ROOT_DIR = join(import.meta.dir, "..");
 const ELECTRON_DIR = join(ROOT_DIR, "apps/electron");
 const DIST_DIR = join(ELECTRON_DIR, "dist");
@@ -24,9 +26,6 @@ const MAIN_PROCESS_ALIAS: Record<string, string> = {
   "abort-controller": join(ROOT_DIR, "apps/electron/src/main/shims/abort-controller.cjs"),
 };
 
-// MCP server paths
-const SESSION_SERVER_DIR = join(ROOT_DIR, "packages/session-mcp-server");
-const SESSION_SERVER_OUTPUT = join(SESSION_SERVER_DIR, "dist/index.js");
 // Pi agent server path (subprocess for Pi SDK sessions)
 const PI_AGENT_SERVER_DIR = join(ROOT_DIR, "packages/pi-agent-server");
 const PI_AGENT_SERVER_OUTPUT = join(PI_AGENT_SERVER_DIR, "dist/index.js");
@@ -215,29 +214,16 @@ async function buildWaWorker(): Promise<void> {
   }
 }
 
-// Build MCP servers for Codex sessions and Pi agent server (one-time, no watch needed)
-async function buildMcpServers(): Promise<void> {
-  console.log("🌉 Building MCP servers and Pi agent server...");
+// Dev orchestration for the Pi agent server subprocess bundle (one-time, no
+// watch needed). Wraps the leaf builder below and owns the failure policy: a
+// failed bundle build must STOP the dev entry instead of booting Electron
+// against a missing or stale artifact.
+async function ensurePiAgentServerBuiltForDev(): Promise<void> {
+  console.log("🌉 Building Pi agent server...");
 
-  // Ensure dist directories exist
-  const sessionDistDir = join(SESSION_SERVER_DIR, "dist");
+  // Ensure dist directory exists
   const piDistDir = join(PI_AGENT_SERVER_DIR, "dist");
-  if (!existsSync(sessionDistDir)) mkdirSync(sessionDistDir, { recursive: true });
   if (!existsSync(piDistDir)) mkdirSync(piDistDir, { recursive: true });
-
-  // Build session MCP server (esbuild, packages external — deps resolve from root node_modules)
-  const sessionResult = await runEsbuild(
-    "packages/session-mcp-server/src/index.ts",
-    "packages/session-mcp-server/dist/index.js",
-    {},
-    { packagesExternal: true }
-  );
-
-  if (!sessionResult.success) {
-    console.error("❌ Session MCP server build failed:", sessionResult.error);
-    process.exit(1);
-  }
-  console.log("✅ Session MCP server built");
 
   // Build Pi agent server with bun (not esbuild) because its Pi SDK deps are ESM-only.
   // esbuild with packages:external leaves them as require() calls which fail at runtime.
@@ -277,10 +263,6 @@ function getOAuthDefines(): Record<string, string> {
 function getElectronEnv(): Record<string, string> {
   const vitePort = process.env.POLO_AI_VITE_PORT || "5173";
 
-  // Codex binary path is resolved at runtime by the binary-resolver module.
-  // It checks: CODEX_PATH env var > bundled binary > local dev fork > system PATH.
-  // You can override with CODEX_PATH env var if needed for debugging.
-
   return {
     ...process.env as Record<string, string>,
     VITE_DEV_SERVER_URL: `http://localhost:${vitePort}`,
@@ -317,14 +299,14 @@ async function runEsbuild(
   }
 }
 
-// Build Pi agent server using bun instead of esbuild.
-// The Pi SDK (@mariozechner/pi-coding-agent) is ESM-only, and esbuild with
-// packages:external leaves ESM imports as require() calls that fail at runtime.
-// Bun's bundler handles ESM→ESM bundling correctly.
+// Build the Pi agent server bundle through the SHARED production build
+// arguments (scripts/build/pi-build-args.ts) — node-target ESM: the
+// production host is a Node 22 subprocess (ELECTRON_RUN_AS_NODE), and a
+// bun-targeted bundle crashes there on `import.meta.require`.
 async function buildPiAgentServer(): Promise<{ success: boolean; error?: string }> {
   try {
     const proc = spawn({
-      cmd: ["bun", "build", "src/index.ts", "--outdir=dist", "--target=bun", "--format=esm"],
+      cmd: [process.execPath, ...piAgentServerBuildArgs("src/index.ts", "dist")],
       cwd: PI_AGENT_SERVER_DIR,
       stdout: "pipe",
       stderr: "pipe",
@@ -419,8 +401,8 @@ async function main(): Promise<void> {
 
   copyResources();
 
-  // Build MCP servers for Codex sessions
-  await buildMcpServers();
+  // Build the Pi agent server subprocess bundle
+  await ensurePiAgentServerBuiltForDev();
 
   // Build WhatsApp worker bundle so the adapter can spawn it on demand
   await buildWaWorker();

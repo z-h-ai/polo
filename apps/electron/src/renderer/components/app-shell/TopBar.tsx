@@ -125,6 +125,7 @@ export function TopBar({
 
   return (
     <div
+      data-testid="chat-topbar"
       className="fixed left-0 right-0 z-panel titlebar-drag-region"
       style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
     >

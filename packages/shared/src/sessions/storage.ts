@@ -193,6 +193,8 @@ export interface CreateSessionOptions {
     llmConnection?: string;
     hidden?: boolean;
     origin?: 'cli-run' | 'cli-exec';
+    popoverOwner?: string;
+    systemPromptPreset?: string;
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
@@ -240,6 +242,7 @@ export async function createSessionWithStorage(
     llmConnection: options?.llmConnection,
     hidden: options?.hidden,
     origin: options?.origin,
+    systemPromptPreset: options?.systemPromptPreset,
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
     isFlagged: options?.isFlagged,
@@ -457,7 +460,10 @@ function headerToMetadata(
     const workingDir = header.workingDirectory ? expandPath(header.workingDirectory) : undefined;
     const sdkCwd = header.sdkCwd ? expandPath(header.sdkCwd) : workingDir;
 
-    // Destructure fields that don't exist on SessionMetadata or need overrides
+    // Destructure fields that don't exist on SessionMetadata or need overrides.
+    // NOTE: pendingQuestion is intentionally KEPT — restart hydration needs the
+    // full payload in metadata so getSessions can restore the waiting-for-answer
+    // badge and the renderer card without loading messages.
     const {
       enabledSourceSlugs: _es, pendingPlanExecution: _pp,
       sessionStatus: _ss, workingDirectory: _wd, sdkCwd: _sc,

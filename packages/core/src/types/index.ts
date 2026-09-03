@@ -51,6 +51,9 @@ export type {
   CredentialInputMode,
   AuthRequestType,
   AuthStatus,
+  // Question request metadata types
+  QuestionResponseMetadata,
+  QuestionResolutionMetadata,
 } from './message.ts';
 export { generateMessageId } from './message.ts';
 

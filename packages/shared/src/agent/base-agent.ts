@@ -45,6 +45,7 @@ import type {
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
+import { parseRequestUserInputArgs, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import type { Workspace } from '../config/storage.ts';
 
 // Core modules
@@ -252,6 +253,54 @@ export abstract class BaseAgent implements AgentBackend {
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
+  /**
+   * Question request callback. `generationAtRequest` is the processing
+   * generation of the turn that issued the request_user_input tool call —
+   * snapshotted by THIS agent at tool-completion handling time (synchronous
+   * with the issuing turn's event stream, via {@link sessionTurnGeneration})
+   * and carried through the closure, so the SessionManager can reject a
+   * callback whose turn was stopped/superseded before it executed.
+   */
+  onQuestionRequested: ((questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>) | null = null;
+  /**
+   * Per-turn capability flag: whether the request_user_input tool is visible.
+   * Set by the SessionManager before each turn (desktop interactive sessions
+   * only — messaging/automation/headless/internal turns fail closed).
+   */
+  allowRequestUserInput = false;
+  /**
+   * The processing generation of the turn whose events this agent is
+   * currently processing. Injected by the SessionManager at every turn start
+   * (and after agent creation) so tool-call callbacks can carry their
+   * issuing turn's generation instead of reading the CURRENT one at late
+   * execution time.
+   */
+  protected sessionTurnGeneration = 0;
+
+  /** Called by the SessionManager when a turn claims a new generation. */
+  setSessionTurnGeneration(generation: number): void {
+    this.sessionTurnGeneration = generation;
+  }
+
+  /**
+   * LIVE-TURN SIGNAL (chat-start reservation): the SessionManager arms this
+   * right before the query is entered; the backend fires it at the exact
+   * point its per-turn abort state is installed (Claude: the query's
+   * AbortController; Pi: the subprocess turn handle after the state reset).
+   * A deletion declaration waits on this signal — forceAbort must never hit
+   * a not-yet-created/already-reset abort state.
+   */
+  private turnQueryLiveSignal: (() => void) | null = null;
+
+  setTurnQueryLiveSignal(signal: () => void): void {
+    this.turnQueryLiveSignal = signal;
+  }
+
+  protected signalTurnQueryLive(): void {
+    const signal = this.turnQueryLiveSignal;
+    this.turnQueryLiveSignal = null;
+    signal?.();
+  }
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;
@@ -398,80 +447,6 @@ export abstract class BaseAgent implements AgentBackend {
       await this.automationSystem?.executeAgentEvent(event, input, signal);
     } catch (err) {
       this.debug(`Automation event ${event} failed: ${err}`);
-    }
-  }
-
-  // ============================================================
-  // Session MCP Tool Completion Handling
-  // ============================================================
-
-  /**
-   * Handle successful completion of a session MCP tool (SubmitPlan, auth tools).
-   *
-   * WHY THIS IS ON BaseAgent:
-   * -------------------------
-   * Session-scoped tools (SubmitPlan, source_oauth_trigger, etc.) run in an
-   * EXTERNAL MCP server subprocess (packages/session-mcp-server). That subprocess
-   * has its own process memory, so when it calls getSessionScopedToolCallbacks(),
-   * the callback registry is empty — it was populated in THIS process, not the subprocess.
-   *
-   * Instead, PiAgent detects session MCP tool completions from its own event
-   * stream and calls THIS shared method to fire the appropriate callback.
-   *
-   * ClaudeAgent doesn't need this — its session-scoped tools run in-process
-   * via Claude Agent SDK, so the callback registry works directly.
-   *
-   * CALLBACKS FIRED:
-   * - SubmitPlan → this.onPlanSubmitted(planPath)
-   *   → Electron reads plan file, shows plan card, calls interruptForHandoff(PlanSubmitted)
-   * - Auth tools → this.onAuthRequest(authRequest)
-   *   → Electron shows auth dialog, calls interruptForHandoff(AuthRequest)
-   */
-  protected handleSessionMcpToolCompletion(
-    toolName: string,
-    args: Record<string, unknown>
-  ): void {
-    // SubmitPlan — trigger plan view in the UI.
-    // The Electron SessionManager's onPlanSubmitted callback will:
-    //   1. Read the plan file content
-    //   2. Create a plan message (role: 'plan')
-    //   3. Send plan_submitted event to renderer
-    //   4. Call interruptForHandoff(AbortReason.PlanSubmitted) → turn terminates
-    if (toolName === 'SubmitPlan' && args.planPath) {
-      this.debug(`SubmitPlan completed: ${args.planPath}`);
-      this.onPlanSubmitted?.(args.planPath as string);
-      return;
-    }
-
-    // Auth tools — trigger auth request in the UI.
-    // Maps MCP tool names to auth request types.
-    const authToolTypes: Record<string, string> = {
-      'source_oauth_trigger': 'oauth',
-      'source_google_oauth_trigger': 'oauth-google',
-      'source_slack_oauth_trigger': 'oauth-slack',
-      'source_microsoft_oauth_trigger': 'oauth-microsoft',
-      'source_credential_prompt': 'credential',
-    };
-
-    const authType = authToolTypes[toolName];
-    if (authType && args.sourceSlug && this.onAuthRequest) {
-      const sourceSlug = args.sourceSlug as string;
-      const source = this.sourceManager.getAllSources().find(s => s.config.slug === sourceSlug);
-      const sourceName = source?.config.name || sourceSlug;
-      this.debug(`Auth tool completed: ${toolName} for ${sourceSlug}`);
-      this.onAuthRequest({
-        type: authType,
-        requestId: `${Date.now()}-auth`,
-        sessionId: this.config.session?.id || '',
-        sourceSlug,
-        sourceName,
-        ...(authType === 'credential' && {
-          mode: (args.mode as string) || 'bearer',
-          labels: args.labels as Record<string, string> | undefined,
-          description: args.description as string | undefined,
-          hint: args.hint as string | undefined,
-        }),
-      } as AuthRequest);
     }
   }
 

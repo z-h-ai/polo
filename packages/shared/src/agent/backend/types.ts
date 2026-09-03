@@ -96,6 +96,18 @@ export type PlanCallback = (planPath: string) => void;
 export type AuthCallback = (request: AuthRequest) => void;
 
 /**
+ * Question request callback signature.
+ * Called when the agent requests structured user input (request_user_input).
+ * May return a Promise — the session layer's durable handoff is awaited by
+ * the tool handler so failures surface as tool errors.
+ */
+export type QuestionRequestedCallback = (
+  questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+  /** The issuing turn's processing generation, stamped by the agent at tool-call time. */
+  generationAtRequest: number
+) => void | Promise<void>;
+
+/**
  * Source change callback signature.
  * Called when a source is activated, deactivated, or modified.
  */
@@ -487,6 +499,14 @@ export interface AgentBackend {
   /** Set permission mode */
   setPermissionMode(mode: PermissionMode): void;
 
+  /**
+   * Stamp the processing generation of the turn this agent is currently
+   * processing — called by the SessionManager at every turn start (and after
+   * agent creation) so request_user_input callbacks carry their issuing
+   * turn's generation.
+   */
+  setSessionTurnGeneration(generation: number): void;
+
   /** Cycle to next permission mode */
   cyclePermissionMode(): PermissionMode;
 
@@ -610,6 +630,16 @@ export interface AgentBackend {
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;
+
+  /** Called when the agent requests structured user input (request_user_input) */
+  onQuestionRequested: QuestionRequestedCallback | null;
+
+  /**
+   * Per-turn capability flag: whether the request_user_input tool is visible.
+   * Set by the session layer before each turn (desktop interactive sessions
+   * only); backends read it when building/registering their toolset.
+   */
+  allowRequestUserInput: boolean;
 
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;

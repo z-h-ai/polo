@@ -1,0 +1,249 @@
+import type { QuestionRequest } from '../../shared/types'
+
+/**
+ * Pending-question map helpers (request_user_input).
+ *
+ * Pure functions so the cleanup semantics stay unit-testable. At most one
+ * pending question exists per session; a new requestId replaces the old one.
+ *
+ * State model:
+ * - REALTIME events (question_request / question_resolved / session_deleted)
+ *   are authoritative and mutate the map directly;
+ * - session snapshots only FILL HOLES — an existing entry (fresher
+ *   event-driven state) is never downgraded, replaced, or resurrected by an
+ *   in-flight fetch, and holes made by a NEWER resolution / deletion are
+ *   never re-filled by an OLDER snapshot (see {@link PendingQuestionTerminalGuard});
+ * - resolutions are guarded by requestId so a stale resolution can never
+ *   delete a newer card.
+ */
+
+/**
+ * Terminal markers for snapshot filling (lightweight, requestId-scoped).
+ *
+ * A requestIds' lifecycle is terminal the moment realtime authority moves
+ * past it — it is RESOLVED (answer/cancel/skip) or SUPERSEDED (a newer
+ * question_request replaced it) or the whole session was DELETED. A session
+ * snapshot that was already in flight carries OLDER state and must never
+ * re-fill a terminal requestId's card. {@link syncPendingQuestionFromSession}
+ * consults this guard before filling. Sets are bounded per session (FIFO) —
+ * snapshot staleness windows are short, so a small memory is sufficient.
+ */
+export class PendingQuestionTerminalGuard {
+  /**
+   * While snapshots are in flight, terminal markers are NEVER evicted: an
+   * in-flight snapshot can still be carrying any of them, and forgetting one
+   * would resurrect a settled question. Markers accumulated during flight
+   * are pruned only after the last in-flight snapshot applies (then bounded
+   * to the recent window — new snapshots always capture fresh state).
+   */
+  private static readonly MAX_PER_SESSION_WHEN_IDLE = 16
+  /** Session → terminal requestIds (resolved OR superseded). */
+  private terminal = new Map<string, Set<string>>()
+  /** Sessions deleted locally — every snapshot fill for them is stale. */
+  private deleted = new Set<string>()
+  /** In-flight snapshot scopes (lifecycle-bound eviction guard). */
+  private inFlightSnapshots = 0
+
+  /**
+   * Mark a snapshot fetch as in flight. MUST be paired with
+   * {@link endSnapshot} (finally) after the fetch's result has been applied
+   * or discarded. Terminal markers are retention-pinned until every scope
+   * opened before their creation has closed.
+   */
+  beginSnapshot(): void {
+    this.inFlightSnapshots += 1
+  }
+
+  /** Close one in-flight snapshot scope; prune when none remain. */
+  endSnapshot(): void {
+    this.inFlightSnapshots = Math.max(0, this.inFlightSnapshots - 1)
+    if (this.inFlightSnapshots === 0) this.pruneToBound()
+  }
+
+  private pruneToBound(): void {
+    for (const [sessionId, ids] of this.terminal) {
+      if (ids.size <= PendingQuestionTerminalGuard.MAX_PER_SESSION_WHEN_IDLE) continue
+      const excess = ids.size - PendingQuestionTerminalGuard.MAX_PER_SESSION_WHEN_IDLE
+      let removed = 0
+      for (const id of ids) {
+        if (removed >= excess) break
+        ids.delete(id)
+        removed++
+      }
+      if (ids.size === 0) this.terminal.delete(sessionId)
+    }
+  }
+
+  private markTerminal(sessionId: string, requestId: string): void {
+    let ids = this.terminal.get(sessionId)
+    if (!ids) {
+      ids = new Set()
+      this.terminal.set(sessionId, ids)
+    }
+    ids.add(requestId)
+    // Eviction only while NO snapshot is in flight — a marker that any
+    // in-flight snapshot can still carry is retention-pinned.
+    if (this.inFlightSnapshots === 0 && ids.size > PendingQuestionTerminalGuard.MAX_PER_SESSION_WHEN_IDLE) {
+      const oldest = ids.values().next().value
+      if (oldest !== undefined) ids.delete(oldest)
+    }
+  }
+
+  /** Record a requestId as terminally settled (resolution consumed it). */
+  markResolved(sessionId: string, requestId: string): void {
+    this.markTerminal(sessionId, requestId)
+  }
+
+  /**
+   * Record the card a fresh realtime question REPLACED as terminal — the
+   * superseded requestId can never legitimately re-fill, even though its
+   * card was swapped (not removed) by the newer question.
+   */
+  markSuperseded(sessionId: string, requestId: string): void {
+    this.markTerminal(sessionId, requestId)
+  }
+
+  /** Record a session deletion — blocks every snapshot fill for it. */
+  markDeleted(sessionId: string): void {
+    this.deleted.add(sessionId)
+    this.terminal.delete(sessionId)
+  }
+
+  /**
+   * A fresh realtime question re-opens the lifecycle for DELETION markers
+   * only. Terminal requestId markers are NEVER cleared: a settled or
+   * superseded requestId stays terminal even when a newer question took
+   * over.
+   */
+  markReplaced(sessionId: string): void {
+    this.deleted.delete(sessionId)
+  }
+
+  /** Whether a snapshot payload with this requestId may fill the hole. */
+  canFill(sessionId: string, requestId: string): boolean {
+    if (this.deleted.has(sessionId)) return false
+    return !this.terminal.get(sessionId)?.has(requestId)
+  }
+}
+
+/**
+ * UNIFIED snapshot lifecycle: the guard scope opens BEFORE the snapshot RPC
+ * is issued and closes only after the fetched payload has been applied (or
+ * discarded) SYNCHRONOUSLY. Terminal markers pinned by the scope therefore
+ * cover the entire in-flight window — a payload that was already in flight
+ * can never lose its terminal marker to FIFO eviction.
+ */
+export async function applySnapshotUnderGuard<T>(
+  guard: PendingQuestionTerminalGuard,
+  fetchSnapshot: () => Promise<T>,
+  apply: (payload: T) => void,
+): Promise<void> {
+  guard.beginSnapshot()
+  try {
+    const payload = await fetchSnapshot()
+    apply(payload)
+  } finally {
+    guard.endSnapshot()
+  }
+}
+
+/**
+ * Set (replace) the pending question for a session. A new requestId
+ * automatically replaces the previous entry; the REPLACED requestId (if a
+ * card was displayed) is recorded terminal — superseded requestIds can never
+ * be re-filled by an older in-flight snapshot — and deletion markers for the
+ * session are re-opened by the fresh realtime authority.
+ */
+export function setPendingQuestionForSession(
+  map: Map<string, QuestionRequest>,
+  sessionId: string,
+  request: QuestionRequest,
+  guard?: PendingQuestionTerminalGuard,
+): Map<string, QuestionRequest> {
+  const next = new Map(map)
+  const previous = next.get(sessionId)
+  next.set(sessionId, request)
+  if (guard && previous && previous.requestId !== request.requestId) {
+    guard.markSuperseded(sessionId, previous.requestId)
+  }
+  guard?.markReplaced(sessionId)
+  return next
+}
+
+/**
+ * Remove the pending question for a session ONLY when its current requestId
+ * matches resolvedRequestId — a stale resolution must not delete a newer
+ * card. The resolved requestId is marked terminal REGARDLESS of the match:
+ * the realtime resolution proves that requestId is terminal even when the
+ * displayed card has already moved on, so an older in-flight snapshot can
+ * never re-fill it.
+ */
+export function removePendingQuestionForSession(
+  map: Map<string, QuestionRequest>,
+  sessionId: string,
+  resolvedRequestId: string,
+  guard?: PendingQuestionTerminalGuard,
+): Map<string, QuestionRequest> {
+  guard?.markResolved(sessionId, resolvedRequestId)
+  const current = map.get(sessionId)
+  if (!current || current.requestId !== resolvedRequestId) return map
+  const next = new Map(map)
+  next.delete(sessionId)
+  return next
+}
+
+/** The requestId a resolution targets (answer payload or explicit cancel). */
+export function questionResolutionRequestId(
+  resolution: import('../../shared/types').QuestionResolution,
+): string {
+  return resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
+}
+
+/**
+ * Hydrate the pendingQuestions map from a fully-loaded Session payload.
+ *
+ * Only FILLS a missing entry — an existing entry (fresher event-driven state:
+ * question_request / question_resolved / resolution cleanup) is never
+ * downgraded or resurrected by an in-flight session fetch, and a payload
+ * whose requestId already reached a terminal state locally (resolved /
+ * deleted per {@link PendingQuestionTerminalGuard}) is never re-filled from
+ * an older snapshot. A snapshot is a hole-filler, never an authority over
+ * realtime state.
+ */
+export function syncPendingQuestionFromSession(
+  map: Map<string, QuestionRequest>,
+  session: Pick<QuestionRequestSession, 'id' | 'pendingQuestion'>,
+  guard?: PendingQuestionTerminalGuard,
+): Map<string, QuestionRequest> {
+  const payload = session.pendingQuestion
+  if (!payload) return map
+  if (map.has(session.id)) return map
+  if (guard && !guard.canFill(session.id, payload.requestId)) return map
+  const next = new Map(map)
+  next.set(session.id, payload)
+  return next
+}
+
+/** Minimal structural shape needed from the Session DTO. */
+type QuestionRequestSession = {
+  id: string
+  pendingQuestion?: QuestionRequest
+}
+
+/**
+ * Unconditionally clear the pending question for a deleted session.
+ * Deletion is a session terminal state — no requestId condition applies,
+ * repeated (multi-window) events must stay idempotent, and no older
+ * in-flight snapshot may re-fill the session's card.
+ */
+export function clearPendingQuestionForDeletedSession(
+  map: Map<string, QuestionRequest>,
+  sessionId: string,
+  guard?: PendingQuestionTerminalGuard,
+): Map<string, QuestionRequest> {
+  guard?.markDeleted(sessionId)
+  if (!map.has(sessionId)) return map
+  const next = new Map(map)
+  next.delete(sessionId)
+  return next
+}

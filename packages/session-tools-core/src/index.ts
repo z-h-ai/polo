@@ -2,7 +2,7 @@
  * Session Tools Core
  *
  * Shared utilities for session-scoped tools used by both
- * Claude (in-process) and Codex (subprocess) implementations.
+ * Claude (in-process) and Pi (host-side proxy execution) implementations.
  *
  * @packageDocumentation
  */
@@ -29,7 +29,6 @@ export type {
   AuthResult,
 
   // IPC types
-  CallbackMessage,
 
   // Tool result types
   TextContent,
@@ -111,6 +110,31 @@ export {
   validateSourceConfigBasic,
 } from './validation.ts';
 
+// Question request protocol (request_user_input)
+export {
+  REQUEST_USER_INPUT_OTHER_OPTION_ID,
+  REQUEST_USER_INPUT_ID_PATTERN,
+  REQUEST_USER_INPUT_MAX_QUESTIONS,
+  REQUEST_USER_INPUT_MIN_OPTIONS,
+  REQUEST_USER_INPUT_MAX_OPTIONS,
+  REQUEST_USER_INPUT_MAX_OTHER_TEXT,
+  RequestUserInputOptionSchema,
+  RequestUserInputQuestionSchema,
+  RequestUserInputArgsSchema,
+  validateRequestUserInputArgs,
+  parseRequestUserInputArgs,
+} from './question-types.ts';
+
+export type {
+  RequestUserInputOptionArgs,
+  RequestUserInputQuestionArgs,
+  RequestUserInputArgs,
+} from './question-types.ts';
+
+// Session MCP server spawn spec (dependency-free leaf — see spawn-spec.ts)
+export { buildSessionMcpServerArgs } from './spawn-spec.ts';
+export type { SessionMcpSpawnOptions } from './spawn-spec.ts';
+
 // Context interface
 export type {
   SessionToolContext,
@@ -166,6 +190,8 @@ export {
   handleMicrosoftOAuthTrigger,
   // Credential Prompt
   handleCredentialPrompt,
+  // Request User Input
+  handleRequestUserInput,
   // Update Preferences
   handleUpdatePreferences,
   // Transform Data

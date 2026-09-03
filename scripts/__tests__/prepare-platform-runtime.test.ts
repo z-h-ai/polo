@@ -72,7 +72,6 @@ describe('preparePlatformRuntime', () => {
     const sdkBinary = join(sdkScope, 'claude-agent-sdk-darwin-x64')
     const ripgrep = join(modules, '@vscode', 'ripgrep')
     const shared = join(root, 'packages', 'shared', 'src')
-    const sessionServer = join(root, 'packages', 'session-mcp-server', 'src')
     const piServer = join(root, 'packages', 'pi-agent-server', 'src')
     const koffi = join(modules, 'koffi')
     const bunFixture = join(root, 'fixture bun')
@@ -82,7 +81,6 @@ describe('preparePlatformRuntime', () => {
     mkdirSync(sdkBinary, { recursive: true })
     mkdirSync(join(ripgrep, 'bin'), { recursive: true })
     mkdirSync(shared, { recursive: true })
-    mkdirSync(sessionServer, { recursive: true })
     mkdirSync(piServer, { recursive: true })
     mkdirSync(join(koffi, 'lib'), { recursive: true })
     mkdirSync(join(koffi, 'build', 'koffi', 'darwin_x64'), { recursive: true })
@@ -95,7 +93,6 @@ describe('preparePlatformRuntime', () => {
     writeFileSync(join(sdkBinary, 'claude'), '')
     truncateSync(join(sdkBinary, 'claude'), 50_000_001)
     writeFileSync(join(ripgrep, 'bin', 'rg'), '#!/bin/sh\n')
-    writeFileSync(join(sessionServer, 'index.ts'), 'export const sessionFixture = true\n')
     writeFileSync(join(piServer, 'index.ts'), 'export const piFixture = true\n')
     writeFileSync(join(koffi, 'package.json'), '{"name":"koffi"}\n')
     writeFileSync(join(koffi, 'index.js'), 'module.exports = {}\n')
@@ -136,7 +133,6 @@ describe('preparePlatformRuntime', () => {
       join(electronDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary', 'claude'),
       join(electronDir, 'node_modules', '@vscode', 'ripgrep', 'bin', 'rg'),
       join(electronDir, 'packages', 'shared', 'src', 'unified-network-interceptor.ts'),
-      join(electronDir, 'resources', 'session-mcp-server', 'index.js'),
       join(electronDir, 'resources', 'pi-agent-server', 'index.js'),
     ]) {
       expect(existsSync(path)).toBe(true)

@@ -26,7 +26,6 @@ export interface ResolvedBackendRuntimePaths {
    * doesn't accept `--preload`.
    */
   interceptorBundlePath?: string;
-  sessionServerPath?: string;
   bridgeServerPath?: string;
   piServerPath?: string;
   nodeRuntimePath?: string;
@@ -230,7 +229,6 @@ export function resolveBackendRuntimePaths(hostRuntime: BackendHostRuntimeContex
   return {
     claudeCliPath: resolveClaudeBinaryPath(hostRuntime),
     interceptorBundlePath: resolveInterceptorBundlePath(hostRuntime),
-    sessionServerPath: resolveServerPath(hostRuntime, 'session-mcp-server'),
     bridgeServerPath: resolveServerPath(hostRuntime, 'bridge-mcp-server'),
     piServerPath: resolveServerPath(hostRuntime, 'pi-agent-server'),
     nodeRuntimePath: hostRuntime.nodeRuntimePath || bundledRuntimePath || process.execPath,

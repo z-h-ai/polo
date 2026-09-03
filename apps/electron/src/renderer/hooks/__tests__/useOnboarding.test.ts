@@ -18,6 +18,11 @@ import type { ApiSetupMethod, OnboardingState } from '@/components/onboarding'
 import type { SetupNeeds } from '../../../shared/types'
 
 setupI18n()
+// Pin the language: these assertions expect English strings, but the i18n
+// singleton is shared across test files in a single-process run and other
+// files may leave it on zh-Hans/es (navigator/locale detection also varies
+// per environment). Without the pin, this file flakes on full-suite runs.
+void i18n.changeLanguage('en')
 
 // ============================================================
 // resolveSlugForMethod

@@ -12,6 +12,9 @@ import {
   createCanonicalCreatorAppBundle as realCreateCanonicalCreatorAppBundle,
   createPlatformOwnedManifest as realCreatePlatformOwnedManifest,
   decodeCreatorAppPayloadZip as realDecodeCreatorAppPayloadZip,
+  CREATOR_APP_CANONICAL_ENTRIES as realCreatorAppCanonicalEntries,
+  CREATOR_APP_PAYLOAD_LIMITS as realCreatorAppPayloadLimits,
+  CREATOR_APP_PAYLOAD_MAX_BYTES as realCreatorAppPayloadMaxBytes,
 } from '../../../../shared/src/admin/creator-app-publishing'
 
 type StoredTokens = {
@@ -414,6 +417,11 @@ const mockCredentialManager = {
 
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
+  // Re-exported constants must survive the mock — later test files in the same
+  // bun process (e.g. manager.test.ts) import them through this module path.
+  CREATOR_APP_CANONICAL_ENTRIES: realCreatorAppCanonicalEntries,
+  CREATOR_APP_PAYLOAD_LIMITS: realCreatorAppPayloadLimits,
+  CREATOR_APP_PAYLOAD_MAX_BYTES: realCreatorAppPayloadMaxBytes,
   AdminError: TestAdminError,
   analyzeCreatorAppPayload: realAnalyzeCreatorAppPayload,
   createCanonicalCreatorAppBundle: realCreateCanonicalCreatorAppBundle,
