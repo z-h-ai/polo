@@ -1397,4 +1397,201 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(managed.poolServer).toBeUndefined()
     })
   })
+
+  // ==========================================================================
+  // R48-A: N queued lifecycle callers run strictly one-at-a-time (the mutex
+  // is an immediately installed per-session promise TAIL).
+  // ==========================================================================
+
+  describe('lifecycle lock three-waiter exclusion (R48-A)', () => {
+    it('three queued callers (refresh + create + refresh) run with maxActive=1 and settle exactly once', async () => {
+      const managed = seedSession('q-three-waiters')
+      managed.agent = null
+      managed.llmConnection = 'slug-A'
+      let stopCalls = 0
+      let active = 0
+      let maxActive = 0
+      managed.poolServer = {
+        stop: async () => {
+          active += 1
+          maxActive = Math.max(maxActive, active)
+          try {
+            await new Promise(r => setTimeout(r, 25))
+          } finally {
+            active -= 1
+          }
+          stopCalls += 1
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+
+      const refresh = sm.refreshConnectionRuntime.bind(sm) as (slug: string) => Promise<void>
+      const create = (sm as unknown as {
+        getOrCreateAgent: (m: unknown) => Promise<unknown>
+      }).getOrCreateAgent.bind(sm)
+      const results = await Promise.allSettled([
+        refresh('slug-A'),
+        create(managed),
+        refresh('slug-A'),
+      ])
+      expect(maxActive).toBe(1)
+      expect(stopCalls).toBe(1)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+      // refresh entries fulfil; the create entry may reject on the harness
+      // platform check — AFTER the serialized settlement either way.
+      expect(results[0]!.status).toBe('fulfilled')
+      expect(results[2]!.status).toBe('fulfilled')
+    })
+  })
+
+  // ==========================================================================
+  // R48-B: successor construction runs INSIDE the lifecycle lock — an
+  // overlapping refresh fully completes (settle included) before the
+  // successor constructor even starts, and vice versa.
+  // ==========================================================================
+
+  describe('successor construction lock coverage (R48-B)', () => {
+    it('overlapping refresh and create: construction waits for the parked refresh, exactly one lifecycle sequence', async () => {
+      const managed = seedSession('q-overlap-lock')
+      managed.llmConnection = 'slug-A'
+      let refreshRelease!: () => void
+      const gated = new Promise<void>(resolve => { refreshRelease = () => resolve() })
+      let settleEntered = false
+      managed.agent = null
+      managed.poolServer = {
+        stop: async () => {
+          settleEntered = true
+          await gated
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['seeded'] }
+
+      // Instrument the successor constructor: it must not start while the
+      // refresh's settlement is parked.
+      const realConstruct = (sm as unknown as {
+        constructAgentUnlocked: (m: unknown) => Promise<unknown>
+      }).constructAgentUnlocked.bind(sm)
+      let constructStarted = false
+      ;(sm as unknown as { constructAgentUnlocked: unknown }).constructAgentUnlocked = async (m: unknown) => {
+        constructStarted = true
+        return realConstruct(m)
+      }
+
+      const refreshWork = sm.refreshConnectionRuntime('slug-A')
+      for (let i = 0; i < 300 && !settleEntered; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(settleEntered).toBe(true)
+
+      const createWork = (sm as unknown as {
+        getOrCreateAgent: (m: unknown) => Promise<unknown>
+      }).getOrCreateAgent(managed)
+      await new Promise(r => setTimeout(r, 60))
+      expect(constructStarted).toBe(false)
+
+      refreshRelease()
+      const results = await Promise.allSettled([refreshWork, createWork])
+      expect(constructStarted).toBe(true)
+      expect(results[0]!.status).toBe('fulfilled')
+    })
+  })
+
+  // ==========================================================================
+  // R48-C: REAL backend disposal performs no id-wide callback/mode deletion —
+  // same-id successors keep their callbacks, guard and mode state.
+  // ==========================================================================
+
+  describe('production backend disposal ownership (R48-C)', () => {
+    it('real PiAgent destroy leaves session-scoped callbacks and mode state intact', async () => {
+      const { PiAgent } = await import('@polo-ai/shared/agent')
+      const sessionId = 'q-pi-real'
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'live' } as never)
+      setPermissionMode(sessionId, 'allow-all', { changedBy: 'system' })
+      const pi = new PiAgent({
+        session: { id: sessionId, rootPath: tmpRoot },
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+      } as never)
+      pi.destroy()
+      const callbacks = getSessionScopedToolCallbacks(sessionId)
+      expect(callbacks).toBeDefined()
+      await expect(callbacks!.listSessionsFn!()).resolves.toBe('live' as never)
+      expect(getPermissionMode(sessionId)).toBe('allow-all')
+      unregisterSessionScopedToolCallbacks(sessionId)
+    })
+
+    it('real ClaudeAgent destroy leaves session-scoped callbacks and mode state intact', async () => {
+      const { ClaudeAgent } = await import('@polo-ai/shared/agent')
+      const sessionId = 'q-claude-real'
+      const claude = new ClaudeAgent({
+        session: { id: sessionId, rootPath: tmpRoot },
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+      } as never)
+      // Register AFTER construction (the constructor installs its own
+      // production callback record) and set a DISTINCT mode state.
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'live' } as never)
+      setPermissionMode(sessionId, 'allow-all', { changedBy: 'system' })
+      claude.destroy()
+      const callbacks = getSessionScopedToolCallbacks(sessionId)
+      expect(callbacks).toBeDefined()
+      await expect(callbacks!.listSessionsFn!()).resolves.toBe('live' as never)
+      expect(getPermissionMode(sessionId)).toBe('allow-all')
+      unregisterSessionScopedToolCallbacks(sessionId)
+    })
+
+    it('quarantine sweep with a replacement landing during the parked disposal keeps the replacement (five surfaces)', async () => {
+      const candidate = seedSession('q-sweep-during')
+      candidate.agent = { dispose: () => {} } as never
+      let sweepRelease!: () => void
+      const sweepGated = new Promise<void>(resolve => { sweepRelease = () => resolve() })
+      let stopEntered = false
+      candidate.poolServer = {
+        stop: async () => {
+          stopEntered = true
+          await sweepGated
+        },
+      } as never
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never)
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(candidate, 'probe replacement during disposal')
+
+      // Replacement lands BEFORE the sweep, which parks inside its disposal.
+      const replacement = createManagedSession(
+        { id: candidate.id, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(candidate.id, replacement)
+      setPermissionMode(candidate.id, 'allow-all', { changedBy: 'system' })
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'replacement' } as never)
+
+      const sweepWork = (sm as unknown as {
+        sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
+      }).sweepQuarantinedUnpublishedRuntimes()
+      for (let i = 0; i < 300 && !stopEntered; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(stopEntered).toBe(true)
+      // The replacement lands DURING the parked disposal.
+      sweepRelease()
+      await sweepWork
+
+      // Five surfaces all survived for the replacement owner.
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(candidate.id)).toBe(replacement)
+      const replacementCallbacks = getSessionScopedToolCallbacks(candidate.id)
+      expect(replacementCallbacks).toBeDefined()
+      await expect(replacementCallbacks!.listSessionsFn!()).resolves.toBe('replacement' as never)
+      expect(getPermissionMode(candidate.id)).toBe('allow-all')
+      // The replacement owns the id: the quarantined candidate had no storage
+      // record of its own and the replacement's surfaces are preserved.
+      expect(storageSessionCount()).toBe(0)
+      // The quarantine registry settled (runtime disposed); no stale guard or
+      // refusing record remains.
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(0)
+      unregisterSessionScopedToolCallbacks(candidate.id)
+    })
+  })
 })

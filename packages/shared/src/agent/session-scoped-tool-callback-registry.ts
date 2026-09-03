@@ -144,13 +144,19 @@ function applySessionScopedToolCallbackGuard(
 /**
  * Register callbacks for a specific session. Every function-valued entry is
  * atomically wrapped with the installed per-session guard (R39-2).
+ *
+ * R48: returns the INSTALLED (guard-wrapped) record — the lease handle that
+ * `unregisterSessionScopedToolCallbacksIf` compares against, so an owner can
+ * clean up its own registration without ever touching a successor's.
  */
 export function registerSessionScopedToolCallbacks(
   sessionId: string,
   callbacks: SessionScopedToolCallbacks
-): void {
-  sessionScopedToolCallbackRegistry.set(sessionId, applySessionScopedToolCallbackGuard(sessionId, callbacks));
+): SessionScopedToolCallbacks {
+  const installed = applySessionScopedToolCallbackGuard(sessionId, callbacks);
+  sessionScopedToolCallbackRegistry.set(sessionId, installed);
   debug('session-scoped-tools', `Registered callbacks for session ${sessionId}`);
+  return installed;
 }
 
 /**
@@ -179,6 +185,25 @@ export function unregisterSessionScopedToolCallbacks(sessionId: string): void {
   sessionScopedToolCallbackRegistry.delete(sessionId);
   sessionScopedToolCallbackGuards.delete(sessionId);
   debug('session-scoped-tools', `Unregistered callbacks for session ${sessionId}`);
+}
+
+/**
+ * R48: atomic compare-and-unregister. Removes the session's callbacks AND
+ * its per-session guard ONLY when the currently installed record is exactly
+ * `expectedInstalled` (the lease returned by
+ * `registerSessionScopedToolCallbacks` for THIS owner's registration). A
+ * successor owner's later registration is never touched. Returns whether the
+ * removal happened.
+ */
+export function unregisterSessionScopedToolCallbacksIf(
+  sessionId: string,
+  expectedInstalled: SessionScopedToolCallbacks,
+): boolean {
+  if (sessionScopedToolCallbackRegistry.get(sessionId) !== expectedInstalled) {
+    return false
+  }
+  unregisterSessionScopedToolCallbacks(sessionId)
+  return true
 }
 
 /**

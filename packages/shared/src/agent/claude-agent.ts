@@ -40,7 +40,6 @@ import {
   getLastPlanFilePath,
   clearPlanFileState,
   registerSessionScopedToolCallbacks,
-  unregisterSessionScopedToolCallbacks,
   getSessionScopedTools,
   cleanupSessionScopedTools,
   type AuthRequest,
@@ -52,7 +51,6 @@ import {
   setPermissionMode,
   cyclePermissionMode,
   initializeModeState,
-  cleanupModeState,
   blockWithReason,
   type PermissionMode,
   PERMISSION_MODE_CONFIG,
@@ -2773,9 +2771,11 @@ This is a branched conversation. All prior messages in this conversation are par
     const configSessionId = this.config.session?.id;
     if (configSessionId) {
       clearPlanFileState(configSessionId);
-      unregisterSessionScopedToolCallbacks(configSessionId);
       cleanupSessionScopedTools(configSessionId);
-      cleanupModeState(configSessionId);
+      // R48: the id-wide session-scoped callback/guard unregistration and the
+      // permission-mode state deletion belong to the SessionManager's
+      // owner-aware lifecycle coordination — a same-id successor's
+      // registrations and mode state must survive a backend disposal.
     }
 
     // Clear session

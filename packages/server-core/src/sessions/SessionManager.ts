@@ -9,7 +9,7 @@ import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1308,7 +1308,7 @@ export class SessionManager implements ISessionManager {
   private readonly unpublishedRuntimeQuarantine = new Map<string, {
     managed: ManagedSession
     quarantineToken: string
-    refusingCallbacks: SessionScopedToolCallbacks
+    installedCallbacks: SessionScopedToolCallbacks
     reason: string
     quarantinedAt: number
   }>()
@@ -4162,12 +4162,14 @@ export class SessionManager implements ISessionManager {
         throw new Error(`SESSION_QUARANTINED_UNPUBLISHED (${reason})`)
       }
     }
-    const refusingRecord = refusingCallbacks as unknown as SessionScopedToolCallbacks
-    registerSessionScopedToolCallbacks(managed.id, refusingRecord)
+    // R48: the registry returns the INSTALLED (guard-wrapped) record — the
+    // lease this quarantine binds to. Identity checks against the raw input
+    // would never match a guarded record.
+    const installedCallbacks = registerSessionScopedToolCallbacks(managed.id, refusingCallbacks as unknown as SessionScopedToolCallbacks)
     this.unpublishedRuntimeQuarantine.set(managed.id, {
       managed,
       quarantineToken,
-      refusingCallbacks: refusingRecord,
+      installedCallbacks,
       reason,
       quarantinedAt: Date.now(),
     })
@@ -4192,38 +4194,36 @@ export class SessionManager implements ISessionManager {
         const result = await this.disposeManagedAgentRuntime(
           entry.managed,
           `quarantined unpublished runtime retry (${entry.reason})`,
-          {
-            bestEffort: true,
-            shouldUnregisterCallbacks: () =>
-              getSessionScopedToolCallbacks(sessionId) === entry.refusingCallbacks
-              && !this.sessions.has(sessionId),
-          },
+          // R48: the runtime disposal never unregisters the id-wide
+          // callback/guard state itself — the LEASE compare-and-unregister
+          // below is the single owner-aware removal.
+          { bestEffort: true, shouldUnregisterCallbacks: () => false },
         )
         // Owner-token binding: only the exact registered entry settles here.
         if (result.failures.length === 0 && this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken === entry.quarantineToken) {
-          // A live replacement owns the id: its storage record and
-          // registrations must never be touched.
+          // R48: compare-and-unregister against the quarantine's LEASE —
+          // removes the callbacks/guard only while the installed record is
+          // still the quarantine's own; a successor owner's registration is
+          // never touched. The candidate's storage record is deleted only
+          // when no live replacement session owns the id (absent-or-ours).
           const replacementOwnsId = this.sessions.has(sessionId)
-          let storageFailure: string | null = null
-          if (!replacementOwnsId) {
+          let cleanupFailure: string | null = null
+          const callbacksRemoved = unregisterSessionScopedToolCallbacksIf(sessionId, entry.installedCallbacks)
+          if (replacementOwnsId) {
+            sessionLog.info(`Quarantined unpublished runtime ${sessionId}: live replacement owns the id — storage/registrations preserved`)
+          } else {
             try {
               const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
-              if (deleted === false) storageFailure = 'storage delete returned false'
+              if (deleted === false) cleanupFailure = 'storage delete returned false'
             } catch (storageError) {
-              storageFailure = storageError instanceof Error ? storageError.message : String(storageError)
+              cleanupFailure = storageError instanceof Error ? storageError.message : String(storageError)
             }
           }
-          // compare-and-unregister: only when the CURRENT registration is
-          // still our refusing record (a replacement's registration is never
-          // removed).
-          if (getSessionScopedToolCallbacks(sessionId) === entry.refusingCallbacks && !replacementOwnsId) {
-            unregisterSessionScopedToolCallbacks(sessionId)
-          }
-          if (!storageFailure) {
+          if (!cleanupFailure) {
             this.unpublishedRuntimeQuarantine.delete(sessionId)
-            sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry${replacementOwnsId ? ' (storage/registrations preserved for the live replacement)' : ''}`)
+            sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry${replacementOwnsId ? ' (storage/registrations preserved for the live replacement)' : ''}${callbacksRemoved ? '' : ' (callbacks were already owned by a successor)'}`)
           } else {
-            sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${storageFailure}); kept for retry`)
+            sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${cleanupFailure}); kept for retry`)
           }
         }
       } catch (sweepError) {
@@ -4256,90 +4256,96 @@ export class SessionManager implements ISessionManager {
    *     can't apply the update.
    */
   /**
-   * R47: the ONE per-session agent-runtime lifecycle mutex. Every lifecycle
-   * operation (runtime refresh AND incomplete-disposal settlement before
-   * replacement construction) runs inside this critical section: the slot is
-   * installed before the first await of `work`, concurrent callers await the
-   * tracked promise and re-evaluate afterwards.
+   * R47/R48: the ONE per-session agent-runtime lifecycle mutex. Every
+   * lifecycle operation (runtime refresh AND incomplete-disposal settlement
+   * before replacement construction) runs inside this critical section.
+   *
+   * R48: the lock is an IMMEDIATELY INSTALLED per-session promise TAIL — each
+   * caller atomically appends its own work to the tail it observed
+   * (`newTail = currentTail.then(work, work)`) before its first await, so N
+   * concurrent callers queue strictly one-at-a-time (maxActive === 1): a
+   * later caller observes an EARLIER caller's tail and can never run
+   * concurrently with it. Cleanup compares and clears only the caller's OWN
+   * tail — queued waiters never delete each other's slot.
    */
   private async withAgentRuntimeLifecycleLock<T>(managed: ManagedSession, work: () => Promise<T>): Promise<T> {
-    const inflight = this.agentRefreshLocks.get(managed.id)
-    if (inflight) {
-      await inflight.catch(() => undefined)
-    }
-    const promise = work()
-    // Track the work so concurrent callers serialize. Swallow errors on the
-    // tracked promise — the awaiter shouldn't get someone else's exception;
-    // errors are propagated to the primary awaiter.
-    const tracked = promise.then(() => undefined, () => undefined)
-    this.agentRefreshLocks.set(managed.id, tracked)
+    const priorTail = this.agentRefreshLocks.get(managed.id) ?? Promise.resolve()
+    const ownTail = priorTail.then(work, work)
+    // The slot stores the void-normalized tail (settles right after `ownTail`)
+    // so any value type can flow through the critical section.
+    const ownTailSlot = ownTail.then(() => undefined, () => undefined)
+    this.agentRefreshLocks.set(managed.id, ownTailSlot)
     try {
-      return await promise
+      return await ownTail
     } finally {
-      // Concurrent callers awaited `tracked` before reaching this point and
-      // each registered their own work serially, so the slot is always ours
-      // to clear when our own work resolves.
-      if (this.agentRefreshLocks.get(managed.id) === tracked) {
+      if (this.agentRefreshLocks.get(managed.id) === ownTailSlot) {
         this.agentRefreshLocks.delete(managed.id)
       }
     }
+  }
+
+  /**
+   * R48: lock-ASSUMING body of the runtime refresh. Callers must hold the
+   * lifecycle lock (`tryRefreshAgentRuntime` wraps it; `getOrCreateAgent`
+   * calls it inside its own settlement→construction critical section).
+   */
+  private async refreshAgentRuntimeUnlocked(managed: ManagedSession, reason: string): Promise<void> {
+    // R47: the incomplete-disposal settlement happens INSIDE the per-session
+    // refresh critical section, BEFORE the no-agent early return — a strict
+    // disposal whose pool/MCP faces failed leaves `managed.agent` null with
+    // retained live surfaces, and this early return used to skip their
+    // retry forever while reporting success to the caller.
+    await this.settlePendingRuntimeDisposal(managed, `runtime refresh (${reason})`)
+
+    if (!managed.agent) return
+
+    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+    const backendContext = resolveBackendContext({
+      sessionConnectionSlug: managed.llmConnection,
+      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
+      managedModel: managed.model,
+    })
+    const connection = backendContext.connection
+    const sigInput = {
+      connection,
+      provider: backendContext.provider,
+      authType: backendContext.authType,
+      resolvedModel: backendContext.resolvedModel,
+    }
+    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
+    const restartSignature = buildRestartRequiredSignature(sigInput)
+
+    if (!managed.backendRuntimeSignature || !managed.backendRestartSignature) {
+      managed.backendRuntimeSignature = runtimeSignature
+      managed.backendRestartSignature = restartSignature
+      return
+    }
+
+    const restartRequired = managed.backendRestartSignature !== restartSignature
+    const runtimeChanged = managed.backendRuntimeSignature !== runtimeSignature
+
+    if (!restartRequired && !runtimeChanged) return
+
+    if (managed.agent.isProcessing()) {
+      sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
+      return
+    }
+
+    await this.runAgentRuntimeRefresh(
+      managed,
+      backendContext,
+      runtimeSignature,
+      restartSignature,
+      restartRequired,
+      reason,
+    )
   }
 
   private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
     // Serialize against any in-flight refresh on this session. The waiter
     // doesn't propagate the prior call's errors — those are logged at the
     // origin call site.
-    return this.withAgentRuntimeLifecycleLock(managed, async () => {
-      // R47: the incomplete-disposal settlement happens INSIDE the per-session
-      // refresh critical section, BEFORE the no-agent early return — a strict
-      // disposal whose pool/MCP faces failed leaves `managed.agent` null with
-      // retained live surfaces, and this early return used to skip their
-      // retry forever while reporting success to the caller.
-      await this.settlePendingRuntimeDisposal(managed, `runtime refresh (${reason})`)
-
-      if (!managed.agent) return
-
-      const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-      const backendContext = resolveBackendContext({
-        sessionConnectionSlug: managed.llmConnection,
-        workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
-        managedModel: managed.model,
-      })
-      const connection = backendContext.connection
-      const sigInput = {
-        connection,
-        provider: backendContext.provider,
-        authType: backendContext.authType,
-        resolvedModel: backendContext.resolvedModel,
-      }
-      const runtimeSignature = buildBackendRuntimeSignature(sigInput)
-      const restartSignature = buildRestartRequiredSignature(sigInput)
-
-      if (!managed.backendRuntimeSignature || !managed.backendRestartSignature) {
-        managed.backendRuntimeSignature = runtimeSignature
-        managed.backendRestartSignature = restartSignature
-        return
-      }
-
-      const restartRequired = managed.backendRestartSignature !== restartSignature
-      const runtimeChanged = managed.backendRuntimeSignature !== runtimeSignature
-
-      if (!restartRequired && !runtimeChanged) return
-
-      if (managed.agent.isProcessing()) {
-        sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
-        return
-      }
-
-      await this.runAgentRuntimeRefresh(
-        managed,
-        backendContext,
-        runtimeSignature,
-        restartSignature,
-        restartRequired,
-        reason,
-      )
-    })
+    return this.withAgentRuntimeLifecycleLock(managed, () => this.refreshAgentRuntimeUnlocked(managed, reason))
   }
 
   private async runAgentRuntimeRefresh(
@@ -4430,21 +4436,31 @@ export class SessionManager implements ISessionManager {
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
    */
+  /**
+   * R48: the public constructor entry holds the lifecycle lock ONCE across
+   * the entire settle → refresh decision → successor construction/publication
+   * sequence (backend resolution, pool/server creation, `managed.agent`
+   * assignment, postInit, callback wiring). The bodies are lock-ASSUMING
+   * (`refreshAgentRuntimeUnlocked` / `constructAgentUnlocked`) so the
+   * non-reentrant lock is never re-entered inside the critical section.
+   */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
-    // R46/R47: retry retained runtime faces BEFORE constructing a replacement
-    // agent — the creation below overwrites `managed.mcpPool` and
-    // `managed.poolServer`, which would orphan any still-live processes from
-    // a partially failed disposal. The settlement runs under the SAME
-    // per-session lifecycle mutex as runtime refreshes (never outside it).
-    await this.withAgentRuntimeLifecycleLock(managed, async () => {
+    return this.withAgentRuntimeLifecycleLock(managed, async () => {
       await this.settlePendingRuntimeDisposal(managed, 'agent creation')
+      await this.refreshAgentRuntimeUnlocked(managed, 'send-path refresh')
+      return this.constructAgentUnlocked(managed)
     })
+  }
 
-    // Refresh runtime config in-place when the connection has drifted since
-    // the agent was created. May null out `managed.agent` if the in-place
-    // refresh fails, in which case the create branch below rebuilds it.
-    await this.tryRefreshAgentRuntime(managed, 'send-path refresh')
-
+  /**
+   * R48: lock-assuming successor construction. Runs strictly inside the
+   * per-session lifecycle lock: backend resolution, pool/server creation,
+   * the `managed.agent` assignment, postInit and callback wiring all happen
+   * before the lock releases — a concurrent refresh can never dispose or
+   * replace the successor mid-construction, and the retained faces from an
+   * earlier partial disposal were already settled at the lock's head.
+   */
+  private async constructAgentUnlocked(managed: ManagedSession): Promise<AgentInstance> {
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
       sessionConnectionSlug: managed.llmConnection,

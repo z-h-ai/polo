@@ -121,7 +121,6 @@ import { refreshChatGptTokens } from '../auth/chatgpt-oauth.ts';
 import {
   registerSessionScopedToolCallbacks,
   mergeSessionScopedToolCallbacks,
-  unregisterSessionScopedToolCallbacks,
   setLastPlanFilePath,
   getSessionScopedToolCallbacks,
 } from './session-scoped-tools.ts';
@@ -2595,10 +2594,11 @@ export class PiAgent extends BaseAgent {
   destroy(): void {
     this.stopConfigWatcher();
 
-    // Unregister session-scoped tool callbacks
-    if (this.config.session?.id) {
-      unregisterSessionScopedToolCallbacks(this.config.session.id);
-    }
+    // R48: session-scoped callback/guard registration is ID-WIDE state owned
+    // by the SessionManager's lifecycle coordination — a backend disposal
+    // must never unconditionally delete it. Same-id successors (replacement
+    // owners) register their own guarded record; the SessionManager removes
+    // registrations via its owner-aware compare-and-unregister.
 
     this._sessionToolContext = null;
     // Pool clients are owned by the main process — don't close them here.
@@ -2612,10 +2612,6 @@ export class PiAgent extends BaseAgent {
 
   async disposeForRestart(): Promise<void> {
     this.stopConfigWatcher();
-
-    if (this.config.session?.id) {
-      unregisterSessionScopedToolCallbacks(this.config.session.id);
-    }
 
     this._sessionToolContext = null;
     await this.killSubprocessGracefully();
