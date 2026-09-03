@@ -4067,6 +4067,11 @@ export class SessionManager implements ISessionManager {
       failures.push(`${what}: ${detail}`)
       sessionLog.warn(`Failed to dispose ${what} for ${sessionId} during ${reason}: ${detail}`)
     }
+    // R49: capture the callback/guard lease THIS runtime owns at entry —
+    // BEFORE any await. The cleanup below uses an atomic lease CAS instead of
+    // an unconditional id-wide erase, so a same-id successor that publishes a
+    // new guarded record while this disposal is parked is never erased.
+    const callbackLeaseAtEntry = getSessionScopedToolCallbacks(sessionId)
 
     if (managed.agent) {
       try {
@@ -4115,9 +4120,18 @@ export class SessionManager implements ISessionManager {
     }
 
     let callbacksUnregistered = false
-    if (!strictFailure && (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks())) {
-      unregisterSessionScopedToolCallbacks(sessionId)
-      callbacksUnregistered = true
+    const wantsCallbackCleanup = !strictFailure
+      && (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks())
+    if (wantsCallbackCleanup) {
+      // R49: owner-aware atomic CAS against the entry lease. When the CAS
+      // misses (a successor replaced the record/guard during the awaited
+      // disposals) the face is skipped and recorded — never force-erased.
+      if (callbackLeaseAtEntry !== undefined) {
+        callbacksUnregistered = unregisterSessionScopedToolCallbacksIf(sessionId, callbackLeaseAtEntry)
+        if (!callbacksUnregistered) {
+          sessionLog.info(`Callback lease for session ${sessionId} was replaced by a successor during ${reason}; cleanup skipped`)
+        }
+      }
     }
     if (strictFailure) {
       throw new AgentRuntimeDisposalError(reason, failures, callbacksUnregistered)
@@ -4139,6 +4153,33 @@ export class SessionManager implements ISessionManager {
     await this.disposeManagedAgentRuntime(managed, `${reason}: retrying incomplete disposal`)
     managed.disposalIncomplete = undefined
     sessionLog.info(`Retried incomplete disposal for session ${managed.id} is now fully settled`)
+  }
+
+  /**
+   * R49: bounded post-init for successor construction. The construction
+   * critical section (lifecycle lock tail + the caller's question-state lock)
+   * must never be pinned by a backend whose credential/OAuth/post-init chain
+   * never settles: the race makes the wait bounded and abort-like (the
+   * timeout rejects at the construction boundary, which disposes the
+   * unpublished candidate — no late publication survives). Test seam: the
+   * bound is instance-configurable.
+   */
+  private agentPostInitTimeoutMs = 30_000
+
+  private async runAgentPostInit(managed: ManagedSession, agent: AgentInstance): Promise<PostInitResult> {
+    const timeoutMs = this.agentPostInitTimeoutMs
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutTimer = setTimeout(() => {
+        reject(new Error(`agent postInit timed out after ${timeoutMs}ms (construction abandoned; the session stays retryable)`))
+      }, timeoutMs)
+      timeoutTimer.unref?.()
+    })
+    try {
+      return await Promise.race([agent.postInit(), timeout])
+    } finally {
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+    }
   }
 
   /**
@@ -4477,7 +4518,13 @@ export class SessionManager implements ISessionManager {
     const runtimeSignature = buildBackendRuntimeSignature(sigInput)
     const restartSignature = buildRestartRequiredSignature(sigInput)
 
-    if (!managed.agent) {
+    // R49: bounded-construction boundary — any failure inside this region
+    // (including a stalled postInit hitting the timeout) disposes the
+    // never-published candidate (best-effort, owner-aware) and rethrows, so
+    // neither the lifecycle lock tail nor the question-state lock stays
+    // pinned and no late agent/pool/callback publication survives.
+    try {
+      if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })
 
       // Lock the connection after first resolution
@@ -4806,7 +4853,12 @@ export class SessionManager implements ISessionManager {
       })
 
       // Run post-init (auth injection) — each backend handles its own
-      const postInitResult = await managed.agent.postInit()
+      // R49: BOUNDED — a backend whose credential/OAuth/post-init chain
+      // never settles can no longer pin the lifecycle lock tail and the
+      // question-state lock: the timeout rejects inside the construction
+      // boundary, which disposes the unpublished candidate and releases
+      // both locks for delete/retry.
+      const postInitResult = await this.runAgentPostInit(managed, managed.agent)
       if (postInitResult.authWarning) {
         sessionLog.warn(`Auth warning for session ${managed.id}: ${postInitResult.authWarning}`)
         this.sendEvent({
@@ -5545,7 +5597,18 @@ export class SessionManager implements ISessionManager {
       managed.backendRestartSignature = restartSignature
       end()
     }
-    return managed.agent
+      return managed.agent
+    } catch (constructionError) {
+      // R49: the candidate was never published — dispose its runtime faces
+      // (best-effort, owner-aware lease CAS) and rethrow so delete/retry can
+      // proceed.
+      await this.disposeManagedAgentRuntime(
+        managed,
+        `successor construction failed: ${constructionError instanceof Error ? constructionError.message : String(constructionError)}`,
+        { bestEffort: true },
+      )
+      throw constructionError
+    }
   }
 
   async flagSession(sessionId: string): Promise<void> {

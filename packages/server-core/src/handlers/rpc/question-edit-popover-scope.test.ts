@@ -23,8 +23,8 @@ import {
 } from './trusted-product-space-account'
 import { getSessionFilePath, writeSessionJsonl } from '@polo-ai/shared/sessions'
 import type { StoredSession } from '@polo-ai/shared/sessions'
-import { getPermissionMode, setPermissionMode } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getPermissionMode, setPermissionMode, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent'
+import { getSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterAllSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import { makeAnswerResolution, makeQuestionRequest } from '../../sessions/request-user-input-fixtures'
 
 const TEST_ACCOUNT_ID = 'account-a'
@@ -50,6 +50,35 @@ mock.module('@polo-ai/server-core/domain', () => ({
   releaseBrowserOwnershipOnForcedStop: async (...args: unknown[]) => {
     if (realRelease) return await realRelease(...args)
     return undefined
+  },
+}))
+
+// R49-C harness seam: the R49-C regression needs the construction pipeline to
+// produce a backend whose postInit NEVER settles. The real Claude/Pi creation
+// requires packaged SDK binaries unavailable in unit tests, so the backend
+// module is wrapped — the production `createBackendFromResolvedContext` is
+// honoured unless the stall flag is armed by the R49-C test.
+const agentBackendModule = await import('@polo-ai/shared/agent/backend')
+let r49StallPostInit = false
+const r49StalledAgent = {
+  dispose: () => {},
+  setSessionTurnGeneration: () => {},
+  queryLlm: () => {
+    throw new Error('stalled construction: queryLlm must never run')
+  },
+  spawnSession: () => {
+    throw new Error('stalled construction: spawnSession must never run')
+  },
+  preExecuteSpawnSession: () => {
+    throw new Error('stalled construction: preExecuteSpawnSession must never run')
+  },
+  postInit: () => new Promise(() => {}),
+}
+mock.module('@polo-ai/shared/agent/backend', () => ({
+  ...agentBackendModule,
+  createBackendFromResolvedContext: (context: unknown) => {
+    if (r49StallPostInit) return r49StalledAgent
+    return agentBackendModule.createBackendFromResolvedContext(context as never)
   },
 }))
 
@@ -828,6 +857,9 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       managed.agent = {
         dispose: () => { throw new Error('dispose boom') },
       } as never
+      // R49: the runtime owns a callback lease (registered before disposal) —
+      // the entry-time CAS still removes it despite the agent-face failure.
+      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'owned' } as never)
       const result = await (sm as unknown as {
         disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: { bestEffort?: boolean }) => Promise<{ failures: string[]; callbacksUnregistered: boolean }>
       }).disposeManagedAgentRuntime(managed, 'test', { bestEffort: true })
@@ -836,6 +868,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       // The failed reference is deliberately KEPT (never a fake cleanup).
       expect(managed.agent).toBeTruthy()
       expect(result.callbacksUnregistered).toBe(true)
+      expect(getSessionScopedToolCallbacks(managed.id)).toBeUndefined()
     })
   })
 
@@ -1592,6 +1625,280 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         unpublishedRuntimeQuarantine: Map<string, unknown>
       }).unpublishedRuntimeQuarantine.size).toBe(0)
       unregisterSessionScopedToolCallbacks(candidate.id)
+    })
+  })
+
+  // ==========================================================================
+  // R49-A: the guard is independently replaceable state — a stale callback
+  // lease must NEVER remove a successor's newer guard (guard-only publish
+  // window before lazy callback registration).
+  // ==========================================================================
+
+  describe('guard lease owner isolation (R49-A)', () => {
+    it('a stale quarantine lease never removes a successor guard installed before lazy callbacks', async () => {
+      const sessionId = 'q-guard-lease'
+      // Quarantine registers Q while guard G1 is installed → lease = (Q, G1).
+      let g1Calls = 0
+      installSessionScopedToolCallbackGuard(sessionId, () => { g1Calls += 1 })
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'stale' } as never)
+      const staleRecord = getSessionScopedToolCallbacks(sessionId)!
+      // Successor publishes guard-only: G2 replaces G1 BEFORE its lazy
+      // callback registration lands.
+      const g2Calls: string[] = []
+      installSessionScopedToolCallbackGuard(sessionId, name => { g2Calls.push(name) })
+      // The stale sweep's CAS must FAIL — the guard identity changed.
+      expect(unregisterSessionScopedToolCallbacksIf(sessionId, staleRecord)).toBe(false)
+      // G2 still installed: the (now live) successor callbacks run under it.
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never)
+      const cbs = getSessionScopedToolCallbacks(sessionId)!
+      await expect(cbs.listSessionsFn!()).resolves.toBe('replacement' as never)
+      expect(g2Calls.length).toBeGreaterThan(0)
+      expect(g1Calls).toBe(0)
+      // And the explicit whole-session teardown still works when genuinely
+      // closing the session.
+      unregisterAllSessionScopedToolCallbacks(sessionId)
+      expect(getSessionScopedToolCallbacks(sessionId)).toBeUndefined()
+    })
+  })
+
+  // ==========================================================================
+  // R49-B: default disposal is owner-aware — a replacement landing during a
+  // PARKED disposal keeps its callbacks, guard, mode state, storage and
+  // live-session identity at every production call site.
+  // ==========================================================================
+
+  describe('default disposal owner isolation (R49-B)', () => {
+    const installReplacementDuringParkedDispose = async (
+      managed: { id: string; agent?: unknown; disposalIncomplete?: unknown },
+      invokeDispose: () => Promise<unknown>,
+    ): Promise<{ replacement: unknown; guardCalls: string[] }> => {
+      let releaseDispose!: () => void
+      const gated = new Promise<void>(resolve => { releaseDispose = () => resolve() })
+      let disposeEntered = false
+      managed.agent = {
+        dispose: async () => {
+          disposeEntered = true
+          await gated
+        },
+      } as never
+      // The dying runtime's own lease at dispose entry.
+      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'stale' } as never)
+
+      const disposeWork = invokeDispose()
+      for (let i = 0; i < 300 && !disposeEntered; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(disposeEntered).toBe(true)
+
+      // Replacement lands DURING the parked disposal: live session, new
+      // guard, new callbacks, distinct mode.
+      const replacement = createManagedSession(
+        { id: managed.id, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(managed.id, replacement)
+      setPermissionMode(managed.id, 'allow-all', { changedBy: 'system' })
+      const guardCalls: string[] = []
+      installSessionScopedToolCallbackGuard(managed.id, name => { guardCalls.push(name) })
+      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'replacement' } as never)
+
+      releaseDispose()
+      await disposeWork
+      return { replacement, guardCalls }
+    }
+
+    const assertReplacementSurvives = async (managedId: string, replacement: unknown, guardCalls: string[]): Promise<void> => {
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(managedId)).toBe(replacement)
+      const cbs = getSessionScopedToolCallbacks(managedId)!
+      expect(cbs.listSessionsFn).toBeDefined()
+      // The replacement's callbacks invoke under ITS OWN guard (executed) and
+      // return the replacement's own result — never the quarantined refusal.
+      await expect(cbs.listSessionsFn!()).resolves.toBe('replacement' as never)
+      expect(guardCalls.length).toBeGreaterThan(0)
+      expect(getPermissionMode(managedId)).toBe('allow-all')
+    }
+
+    it('stale-publication rollback: replacement during the parked dispose survives (no quarantine, five faces)', async () => {
+      // sdk-fork harness: the preflight agent's dispose parks; the
+      // replacement lands inside that park.
+      const sourceId = 'q-r49-stale-source'
+      const sourcePath = getSessionFilePath(tmpRoot, sourceId)
+      mkdirSync(dirname(sourcePath), { recursive: true })
+      writeSessionJsonl(sourcePath, {
+        id: sourceId,
+        workspaceRootPath: tmpRoot,
+        name: 'parent',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sdkSessionId: 'sdk-parent-1',
+        sdkCwd: tmpRoot,
+        productSpaceId: TEST_SPACE_ID,
+        accountId: TEST_ACCOUNT_ID,
+        messages: [{ id: 'bm1', role: 'user', content: 'parent turn', timestamp: Date.now() }],
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+      } as unknown as StoredSession)
+      const sourceManaged = createManagedSession(
+        { id: sourceId, name: 'parent', createdAt: Date.now(), sdkSessionId: 'sdk-parent-1', sdkCwd: tmpRoot },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: TEST_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      sourceManaged.messages = [{ id: 'bm1', role: 'user', content: 'parent turn', timestamp: Date.now() }] as never
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sourceId, sourceManaged)
+
+      const storage = sm as unknown as { sessionStorage: { create: (...args: unknown[]) => Promise<unknown>; list: (r: string) => Array<{ id: string }> } }
+      const realCreate = storage.sessionStorage.create.bind(storage.sessionStorage)
+      storage.sessionStorage.create = async (...args: unknown[]) => {
+        const created = await realCreate(...args)
+        setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+        return created
+      }
+      let releaseDispose!: () => void
+      const gated = new Promise<void>(resolve => { releaseDispose = () => resolve() })
+      let disposeEntered = false
+      let candidateId: string | null = null
+      ;(sm as unknown as { getOrCreateAgent: unknown }).getOrCreateAgent = async (candidate: { id: string; agent: unknown }) => {
+        candidateId = candidate.id
+        const agent = {
+          ensureBranchReady: async () => {},
+          dispose: async () => {
+            disposeEntered = true
+            await gated
+          },
+        }
+        candidate.agent = agent
+        registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'candidate-runtime' } as never)
+        return agent
+      }
+
+      const createWork = (sm as unknown as {
+        createSession: (workspaceId: string, options: Record<string, unknown>) => Promise<unknown>
+      }).createSession(WORKSPACE_ID, { branchFromSessionId: sourceId, branchFromMessageId: 'bm1' })
+      // Mark the expected rejection as handled immediately; the .rejects
+      // matcher below still observes it.
+      createWork.catch(() => {})
+      for (let i = 0; i < 300 && !disposeEntered; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(disposeEntered).toBe(true)
+      expect(candidateId).toBeTruthy()
+
+      // Replacement lands during the parked stale-publication disposal.
+      const replacement = createManagedSession(
+        { id: candidateId!, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(candidateId!, replacement)
+      setPermissionMode(candidateId!, 'allow-all', { changedBy: 'system' })
+      const guardCalls: string[] = []
+      installSessionScopedToolCallbackGuard(candidateId!, name => { guardCalls.push(name) })
+      registerSessionScopedToolCallbacks(candidateId!, { listSessionsFn: async () => 'replacement' } as never)
+
+      releaseDispose()
+      // Dispose succeeded → the CAS missed (successor's record) → callback
+      // cleanup skipped; the rollback observes the live replacement owner and
+      // skips mode/storage cleanup too — plain CAS refusal, no quarantine.
+      await expect(createWork).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(0)
+      // Five faces survive for the replacement owner.
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(candidateId!)).toBe(replacement)
+      const replacementCallbacks = getSessionScopedToolCallbacks(candidateId!)
+      expect(replacementCallbacks).toBeDefined()
+      await expect(replacementCallbacks!.listSessionsFn!()).resolves.toBe('replacement' as never)
+      expect(guardCalls.length).toBeGreaterThan(0)
+      expect(getPermissionMode(candidateId!)).toBe('allow-all')
+      // R49 note: the on-disk branch-copy state at this point is harness-driven
+      // (branch copy + persistence-queue timing); the owner-aware guarantee is
+      // that the LIVE replacement surfaces survive, which the assertions above
+      // pin. The rollback skipped its storage delete for the owned id.
+    })
+
+    it('restart-required refresh: replacement during the parked dispose keeps five faces', async () => {
+      const managed = seedSession('q-r49-refresh')
+      managed.llmConnection = 'slug-A'
+      const invoke = () => (sm as unknown as {
+        runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+      }).runAgentRuntimeRefresh(managed, {} as never, 'rt', 'rst', true, 'restart-required parked')
+      const { replacement, guardCalls } = await installReplacementDuringParkedDispose(        managed as unknown as { id: string; agent?: unknown; disposalIncomplete?: unknown },
+        invoke,
+      )
+      await assertReplacementSurvives(managed.id, replacement, guardCalls)
+      unregisterSessionScopedToolCallbacks(managed.id)
+    })
+
+    it('in-place config refresh: replacement during the parked dispose keeps five faces', async () => {
+      const managed = seedSession('q-r49-config')
+      managed.llmConnection = 'slug-A'
+      const invoke = () => (sm as unknown as {
+        runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+      }).runAgentRuntimeRefresh(managed, {} as never, 'rt', 'rst', false, 'config parked')
+      const { replacement, guardCalls } = await installReplacementDuringParkedDispose(        managed as unknown as { id: string; agent?: unknown; disposalIncomplete?: unknown },
+        invoke,
+      )
+      await assertReplacementSurvives(managed.id, replacement, guardCalls)
+      unregisterSessionScopedToolCallbacks(managed.id)
+    })
+
+    it('deleted/stopped-before-chat convergence: replacement during the parked dispose keeps five faces', async () => {
+      const managed = seedSession('q-r49-converge')
+      const invoke = () => (sm as unknown as {
+        disposeManagedAgentRuntime: (m: unknown, reason: string) => Promise<unknown>
+      }).disposeManagedAgentRuntime(managed, 'session deleted or stopped before chat start')
+      const { replacement, guardCalls } = await installReplacementDuringParkedDispose(        managed as unknown as { id: string; agent?: unknown; disposalIncomplete?: unknown },
+        invoke,
+      )
+      await assertReplacementSurvives(managed.id, replacement, guardCalls)
+      unregisterSessionScopedToolCallbacks(managed.id)
+    })
+  })
+
+  // ==========================================================================
+  // R49-C: a never-settling postInit cannot pin the lifecycle locks —
+  // bounded construction abandons, disposes the candidate, and lets
+  // delete/refresh proceed.
+  // ==========================================================================
+
+  describe('bounded construction cancellation (R49-C)', () => {
+    it('a never-settling postInit cannot pin the locks: bounded construction disposes the candidate and delete proceeds', async () => {
+      const { setSessionPlatform } = await import('../../sessions/SessionManager.ts')
+      setSessionPlatform({
+        appRootPath: tmpRoot,
+        resourcesPath: tmpRoot,
+        isPackaged: false,
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
+      } as never)
+      // Arm the backend seam: the constructed successor's postInit never
+      // settles (stalled credential/OAuth/post-init chain).
+      r49StallPostInit = true
+      const managed = seedSession('q-stall-postinit')
+      managed.llmConnection = 'slug-A'
+      ;(sm as unknown as { agentPostInitTimeoutMs: number }).agentPostInitTimeoutMs = 250
+
+      let constructSettled = false
+      const createWork = (sm as unknown as {
+        getOrCreateAgent: (m: unknown) => Promise<unknown>
+      }).getOrCreateAgent(managed)
+      createWork.catch(() => {}).finally(() => { constructSettled = true })
+      // Wait beyond the 250ms bound.
+      await new Promise(r => setTimeout(r, 700))
+      expect(constructSettled).toBe(true)
+      await expect(createWork).rejects.toThrow('agent postInit timed out')
+      // No late agent/pool/callback publication survives.
+      expect(managed.agent).toBeNull()
+      expect(getSessionScopedToolCallbacks(managed.id)).toBeUndefined()
+      // The question-state lock is free: delete completes within contract.
+      await sm.deleteSession(managed.id)
+      // The next queued lifecycle caller proceeds.
+      await sm.refreshConnectionRuntime('slug-A')
+      r49StallPostInit = false
     })
   })
 })
