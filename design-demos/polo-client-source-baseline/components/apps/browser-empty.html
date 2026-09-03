@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>浏览器空态卡 · Polo 组件画廊</title>
+<style>
+/* Translated from apps/electron/src/renderer/index.css :root/.dark plus the
+   shadow utility classes (index.css ~604-652). Values are the source ones;
+   --fg-* aliases kept for the existing prototype stylesheets. */
+
+:root {
+  --background: oklch(0.98 0.003 265);
+  --foreground: oklch(0.185 0.01 270);
+  --foreground-rgb: 38, 36, 42;
+  --accent: oklch(0.62 0.13 293);
+  --accent-rgb: 104, 78, 133;
+  --info: oklch(0.75 0.16 70);
+  --info-rgb: 180, 120, 40;
+  --success: oklch(0.55 0.17 145);
+  --success-rgb: 34, 120, 60;
+  --destructive: oklch(0.58 0.24 28);
+  --destructive-rgb: 180, 60, 50;
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+  --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  /* Source-named shadcn compatibility tokens (index.css:164-178). */
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--fg-50);
+  --foreground-2: var(--fg-2);
+  --amber-strong: #d97706;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--background));
+  --info-soft: color-mix(in srgb, var(--info) 12%, var(--background));
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--background));
+  --danger-soft: color-mix(in srgb, var(--destructive) 10%, var(--background));
+  --on-accent: #fff;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --panel-gap: 6px;
+  --panel-inset: 6px;
+  --tabbar-height: 36px;
+  --content-top-offset: 84px;
+  --radius-xs: 2px;
+  --radius-sm: 3.75px;
+  --radius-md: 5.625px;
+  --radius-lg: 11.25px;
+  --radius-edge: 14px;
+  --radius-pill: 999px;
+  --topbar-height: 48px;
+  /* Shadow opacity registry (index.css:113-115) and layered shadows
+     (index.css:118-139, 604-652). The 1px ring is always foreground 6%. */
+  --shadow-border-opacity: 0.08;
+  --shadow-blur-opacity: 0.06;
+  --shadow-minimal:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px;
+  --shadow-middle:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px;
+  --shadow-strong:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 12px 12px -6px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 24px 24px -12px;
+  /* Tinted shadow: set --shadow-color to an "r, g, b" triple before use
+     (index.css:619-628). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-border-opacity) * 1.5)) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-border-opacity)) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-blur-opacity) * 0.67)) 0 6px 6px -3px;
+  --shadow-panel: 0 18px 52px rgba(0,0,0,.18);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .06) 0 0 0 1px,
+    rgba(0,0,0,.04) 0 1px 1px -.5px,
+    rgba(0,0,0,.04) 0 3px 3px 0,
+    rgba(0,0,0,.02) 0 6px 6px 0,
+    rgba(0,0,0,.02) 0 12px 12px 0,
+    rgba(0,0,0,.02) 0 24px 24px 0;
+}
+
+html[data-theme="dark"] {
+  --background: oklch(0.145 0.015 270);
+  --foreground: oklch(0.95 0.01 270);
+  --foreground-rgb: 237, 236, 240;
+  --accent: oklch(0.65 0.22 293);
+  --accent-rgb: 130, 75, 185;
+  --info: oklch(0.78 0.14 70);
+  --info-rgb: 210, 155, 55;
+  --success: oklch(0.60 0.17 145);
+  --success-rgb: 50, 140, 80;
+  --destructive: oklch(0.65 0.22 28);
+  --destructive-rgb: 200, 70, 60;
+  --background-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --border: oklch(from var(--foreground) l c h / 0.09);
+  /* Dark mode uses stronger blur opacity; the ring stays foreground 6%
+     exactly as in the source (index.css:267-269 and utility classes). */
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+  /* Dark tinted shadows are outline-only at uniform lightness 0.425
+     (index.css:632-640). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    oklch(from rgb(var(--shadow-color, 0, 0, 0)) 0.425 c h / 0.6) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 6px 6px -3px;
+  --amber-strong: #fbbf24;
+  --shadow-panel: 0 20px 70px rgba(0,0,0,.48);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .12) 0 0 0 1px,
+    rgba(0,0,0,.08) 0 1px 1px -.5px,
+    rgba(0,0,0,.08) 0 3px 3px 0,
+    rgba(0,0,0,.04) 0 6px 6px 0,
+    rgba(0,0,0,.04) 0 12px 12px 0,
+    rgba(0,0,0,.04) 0 24px 24px 0;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html { font-size: 15px; font-optical-sizing: auto; background: var(--background); }
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: color .2s ease, background .2s ease;
+}
+button, input, textarea, select { color: inherit; font: inherit; }
+button { border: 0; cursor: pointer; }
+/* Source buttons use disabled:pointer-events-none disabled:opacity-50. */
+button:disabled { pointer-events: none; opacity: .5; }
+/* Source inputs/buttons focus with a 1px foreground/30 ring, not an accent
+   outline (input.tsx, button.tsx). */
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+*:hover::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: var(--fg-20); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* SpinKit grid spinner keyframes from packages/ui/src/styles/index.css,
+   used by the source Spinner component (LoadingIndicator.tsx). */
+@keyframes spinner-grid {
+  0%, 70%, 100% { transform: scale3d(0.5, 0.5, 1); }
+  35% { transform: scale3d(0, 0, 1); }
+}
+.icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; flex: 0 0 auto; }
+.icon svg { width: 100%; height: 100%; }
+.muted { color: var(--fg-50); }
+.eyebrow { margin: 0 0 7px; color: var(--fg-50); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; font-size: 12px; }
+.button:hover { background: var(--fg-5); }
+.button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.button.danger { border-color: var(--destructive); background: var(--destructive); color: var(--on-accent); }
+
+</style>
+<style>
+/* Gallery chrome only — not part of the translated component. */
+html, body { overflow: auto; height: auto; }
+#root { min-height: 100%; }
+.gallery-body { position: relative; min-height: 100vh; background: var(--background); }
+.gallery-note { position: fixed; left: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; background: color-mix(in srgb, var(--foreground) 4%, var(--background)); box-shadow: var(--shadow-minimal); color: var(--fg-50); font-size: 11px; user-select: none; }
+.gallery-dark-toggle { position: fixed; right: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); background: var(--background); color: var(--foreground); font-size: 11px; box-shadow: var(--shadow-minimal); }
+/* Canvas-embed mode (?embed=1): the gallery index frames components in iframes
+   and provides its own chrome, so hide the per-page note and theme toggle. */
+.gallery-embed .gallery-note, .gallery-embed .gallery-dark-toggle { display: none; }
+</style>
+</head>
+<body>
+<script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
+<div id="root"><div class="gallery-body"><div data-route="browser/empty-state" style="width:100%;height:100%;overflow:hidden;background:var(--fg-2)"><div style="width:100%;height:100%;overflow:auto;background:var(--background)"><div style="display:flex;width:100%;min-height:100%;box-sizing:border-box;align-items:center;justify-content:center;padding:30px"><section style="width:100%;max-width:700px;overflow:hidden;border:1px solid color-mix(in srgb, var(--border) 30%, transparent);border-radius:8px;background:var(--background);box-shadow:var(--shadow-minimal)"><header style="display:flex;align-items:center;padding:11.25px 15px;border-bottom:1px solid color-mix(in srgb, var(--border) 30%, transparent);background:color-mix(in srgb, var(--fg-5) 100%, transparent);user-select:none"><h3 style="margin:0;color:var(--foreground);font-size:13px;font-weight:500;letter-spacing:-.025em">浏览器已准备就绪 ;)</h3></header><div style="padding:11.25px 15px 11.25px 22px;font-size:13.125px"><p style="margin:0;color:color-mix(in srgb, var(--foreground) 65%, transparent);line-height:1.625">让任何会话使用此浏览器（或打开另一个）来完成研究、填写表单、质检或数据提取等任务。</p><div style="display:grid;justify-items:start;gap:5.625px;margin-top:13.125px"><button type="button" title="Use the browser to open https://news.ycombinator.com and summarize the top 10 stories in a table with columns: title, source domain, points, comments, and why it matters." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">1.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">HN: summarize top 10 stories in a table</span></button><button type="button" title="Use the browser to go to https://www.producthunt.com, find today&#x27;s top 5 launches, and give me a comparison of product, category, pricing model, and ICP (ideal customer profile)." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">2.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Product Hunt: compare today&#x27;s top 5 launches</span></button><button type="button" title="Use the browser to open https://www.datadoghq.com/pricing, https://newrelic.com/pricing, and https://grafana.com/pricing; build a side-by-side pricing matrix with plan names, monthly cost, free-tier limits, data retention, and overage pricing." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">3.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Observability pricing matrix (DD/New Relic/Grafana)</span></button><button type="button" title="Use the browser to navigate to https://docs.github.com/en, find the latest updates related to GitHub Actions, and summarize actionable changes for a dev team in under 10 bullets." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">4.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">GitHub Docs: latest Actions updates</span></button><button type="button" title="Use the browser to go to https://www.gov.uk/search/news-and-communications and collect the 5 most recent policy announcements, including title, date, department, and one-line summary." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">5.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">UK policy feed: 5 latest announcements</span></button><button type="button" title="Use the browser to go to https://www.booking.com, search for hotels in Budapest for next weekend, and return the top 10 options sorted by review score with price per night, cancellation policy, and distance from city center." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">6.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Booking.com: best Budapest stays next weekend</span></button><button type="button" title="Use the browser to open https://www.kaggle.com/datasets, search for customer churn, shortlist 8 high-quality datasets, and rank them by usability for a quick ML prototype." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">7.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Kaggle: shortlist 8 churn datasets</span></button><button type="button" title="Use the browser to visit https://status.openai.com, https://www.githubstatus.com, and https://www.cloudflarestatus.com; create a concise reliability snapshot with current status, active incidents, and affected components." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">8.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Status snapshot across OpenAI/GitHub/Cloudflare</span></button><button type="button" title="Use the browser to go to https://www.figma.com/community, find top trending design system files this week, and summarize which ones are best for SaaS dashboard UI inspiration." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">9.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Figma Community: trending design systems</span></button><button type="button" title="Use the browser to open https://developers.google.com/search/docs and extract all pages about Core Web Vitals; produce a practical checklist for engineering and SEO teams." style="display:flex;max-width:100%;height:30px;align-items:center;gap:3.75px;padding:0 11.25px;border:0;border-radius:6px;color:color-mix(in srgb, var(--foreground) 70%, transparent);background:var(--background);box-shadow:var(--shadow-minimal);font-size:12px;text-align:left;transition:background-color 150ms"><span style="width:15px;flex-shrink:0;color:color-mix(in srgb, var(--foreground) 40%, transparent);font-size:11px;font-variant-numeric:tabular-nums">10.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Google Search docs: Core Web Vitals checklist</span></button></div></div><footer style="display:flex;align-items:center;gap:7.5px;padding:9.375px 15px;border-top:1px solid color-mix(in srgb, var(--border) 30%, transparent);color:color-mix(in srgb, var(--foreground) 55%, transparent);background:color-mix(in srgb, var(--fg-5) 100%, transparent);font-size:13px"><p style="margin:0">Polo AI 仅在您要求时才会控制浏览器窗口。</p></footer></section></div></div></div></div></div>
+<div class="gallery-note">Browser / 浏览器空态卡 — 静态翻译自 Renderer 源码</div>
+<button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
+</body>
+</html>

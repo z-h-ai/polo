@@ -48,6 +48,9 @@
 /* App grid: gap-x-4 gap-y-5, 3 → 4 (sm) → 6 (md) columns. */
 .source-home__grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); column-gap:15px; row-gap:18.75px; }
 .source-home__grid--builtin { margin-top:15px; }
+/* OrganizationAppCard grid: HomePage.tsx renders org cards in a
+   sm:grid-cols-2 xl:grid-cols-3 responsive grid with gap-4. */
+.source-home__grid--cards { grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:15px; row-gap:15px; }
 @media (min-width:600px) { .source-home__grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
 @media (min-width:720px) { .source-home__grid { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 /* AppIcon button: gap-3 p-3 rounded-lg hover bg-foreground/4, -translate-y-0.5. */

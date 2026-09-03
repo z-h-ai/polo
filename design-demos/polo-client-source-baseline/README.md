@@ -55,6 +55,7 @@ traceability 文件自洽。`verification.sourceFidelity: static-source-derived`
 
 - `src/`：长期可编辑的模块化原型真源。
 - `prototype.html`：自动导出的单文件评审产物，不直接编辑。
+- `components/`：组件级产物，按 scene-catalog 分组导出的每组件自包含 HTML（`tools/export-component-gallery.mjs` 生成，不直接编辑；`components/index.html` 为分组目录）。
 - `scene-catalog.json`：稳定场景、状态、区域和源码路径。
 - `SCENE-TRACEABILITY.md`：逐场景源码、参考截图和未完成审计项。
 - `prototype-manifest.json`：来源、协议、覆盖、近似项和验收证据。

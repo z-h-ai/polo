@@ -20,9 +20,9 @@
       "id": "onboarding",
       "label": "首次启动引导",
       "group": "lifecycle",
-      "states": ["admin-login", "admin-kicked", "welcome", "git-bash", "provider-select", "local-model", "credentials", "complete"],
+      "states": ["admin-login", "admin-kicked", "welcome", "git-bash", "provider-select", "local-model", "credentials", "copilot-code", "claude-code", "complete"],
       "regions": ["onboarding-card", "onboarding-progress"],
-      "source": ["src/renderer/components/onboarding/OnboardingWizard.tsx"]
+      "source": ["src/renderer/components/onboarding/OnboardingWizard.tsx", "src/renderer/components/onboarding/GitBashWarning.tsx", "src/renderer/components/onboarding/ProviderSelectStep.tsx", "src/renderer/components/onboarding/LocalModelStep.tsx", "src/renderer/components/onboarding/CredentialsStep.tsx"]
     },
     {
       "id": "reauth",
@@ -52,17 +52,17 @@
       "id": "enterprise-home",
       "label": "企业空间首页",
       "group": "workbench",
-      "states": ["normal", "empty", "loading", "failure", "restricted"],
+      "states": ["normal", "organization-apps", "empty", "loading", "failure", "restricted"],
       "regions": ["workbench-bar", "space-switcher", "app-tabs", "home-content", "app-card-grid"],
-      "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/workspace"]
+      "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/tab-browser/OrganizationAppCard.tsx", "src/renderer/components/workspace"]
     },
     {
       "id": "chat",
       "label": "Polo 助手会话",
       "group": "assistant",
-      "states": ["normal", "detail", "streaming", "error", "empty", "archived", "loading", "restricted"],
+      "states": ["normal", "conversation", "detail", "streaming", "error", "empty", "archived", "loading", "restricted"],
       "regions": ["workbench-bar", "session-sidebar", "chat-header", "message-list", "composer"],
-      "source": ["src/renderer/pages/ChatPage.tsx", "src/renderer/components/app-shell"]
+      "source": ["src/renderer/pages/ChatPage.tsx", "src/renderer/components/app-shell", "packages/ui/src/components/chat/UserMessageBubble.tsx"]
     },
     {
       "id": "chat-permission",
@@ -94,15 +94,15 @@
       "group": "resources",
       "states": ["list", "detail", "empty", "test", "loading", "failure", "restricted"],
       "regions": ["resource-header", "automation-detail", "automation-actions"],
-      "source": ["src/renderer/components/automations/AutomationInfoPage.tsx"]
+      "source": ["src/renderer/components/automations/AutomationInfoPage.tsx", "src/renderer/components/automations/AutomationsListPanel.tsx", "src/renderer/components/ui/entity-row.tsx"]
     },
     {
       "id": "browser",
       "label": "Browser App",
       "group": "apps",
-      "states": ["normal", "empty", "loading", "failure", "restricted"],
+      "states": ["normal", "toolbar", "empty", "loading", "failure", "restricted"],
       "regions": ["browser-tab-strip", "browser-toolbar", "browser-content"],
-      "source": ["src/renderer/components/browser", "src/renderer/browser-empty-state.tsx"]
+      "source": ["src/renderer/components/browser", "packages/ui/src/components/ui/BrowserControls.tsx", "src/renderer/components/browser/BrowserTabBadge.tsx", "src/renderer/browser-empty-state.tsx"]
     },
     {
       "id": "app-menu",
@@ -116,15 +116,15 @@
       "id": "settings",
       "label": "设置",
       "group": "settings",
-      "states": ["list", "detail", "appearance", "notifications", "loading", "failure", "restricted"],
+      "states": ["list", "app", "appearance", "input", "workspace", "permissions", "labels", "messaging", "server", "shortcuts", "preferences", "account-security", "detail", "loading", "failure", "restricted"],
       "regions": ["settings-navigator", "settings-content", "settings-form"],
-      "source": ["src/renderer/pages/settings/SettingsNavigator.tsx", "src/renderer/pages/settings"]
+      "source": ["src/renderer/pages/settings/SettingsNavigator.tsx", "src/renderer/pages/settings", "src/renderer/components/settings"]
     },
     {
       "id": "organization",
       "label": "组织管理",
       "group": "organization",
-      "states": ["loading", "join", "select", "create", "normal", "members", "artifacts", "failure"],
+      "states": ["loading", "join", "select", "create", "normal", "members", "invitations", "artifacts", "failure"],
       "regions": ["organization-shell", "organization-list", "organization-actions"],
       "source": ["src/renderer/components/organization/OrganizationManagementDialog.tsx", "src/renderer/components/organization/OrganizationOnboarding.tsx"]
     },

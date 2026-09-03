@@ -22,7 +22,7 @@ export function normalizeQuery(input = {}) {
   return { scene: normalizedScene, state, theme, lang }
 }
 
-export function readQuery(url = window.location.href) {
+export function readQuery(url = typeof window === 'undefined' ? 'http://localhost/' : window.location.href) {
   const params = new URL(url).searchParams
   return normalizeQuery({
     scene: params.get('scene') ?? undefined,
@@ -34,6 +34,9 @@ export function readQuery(url = window.location.href) {
 
 export function writeQuery(next, { replace = true } = {}) {
   const normalized = normalizeQuery(next)
+  // SSR (component gallery export) has no DOM: skip URL/history writes and
+  // just return the normalized query.
+  if (typeof window === 'undefined') return normalized
   const url = new URL(window.location.href)
   Object.entries(normalized).forEach(([key, value]) => url.searchParams.set(key, value))
   if (replace) window.history.replaceState({}, '', url)

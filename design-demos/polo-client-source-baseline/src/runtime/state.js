@@ -17,7 +17,10 @@ export function reset() {
   return snapshot
 }
 
-window.addEventListener('popstate', () => {
-  snapshot = readQuery()
-  notify()
-})
+// SSR (component gallery export) runs in Node without window.
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => {
+    snapshot = readQuery()
+    notify()
+  })
+}
