@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1021,6 +1021,15 @@ interface ManagedSession {
    * branch with their own options instead of claiming a second turn.
    */
   turnStartReserved?: boolean
+  /**
+   * R46: a strict runtime disposal that PARTIALLY failed (some surfaces
+   * disposed, others retained with their references on this session). The
+   * retained poolServer/mcpPool refs live on THIS object independent of
+   * `managed.agent` — `settlePendingRuntimeDisposal` must retry them before
+   * any early return or replacement construction can orphan them. Cleared
+   * only by a fully successful disposal.
+   */
+  disposalIncomplete?: { reason: string; failures: string[] }
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
@@ -1285,6 +1294,22 @@ interface PendingDelta {
 export class SessionManager implements ISessionManager {
   private readonly runtimeProfile: 'default' | 'cli-one-shot'
   private readonly runtimeWorkspace?: Workspace
+  /**
+   * R46: quarantine for UNPUBLISHED session candidates whose runtime could
+   * not be disposed during the stale-publication rollback. The live runtime
+   * (agent, retained pool/mcp faces, registered callbacks) would otherwise
+   * become unreachable the moment createSession throws — the map entry is
+   * only installed after the publication CAS. Entries are owner-token-bound,
+   * reject every callback execution, are never published as usable sessions,
+   * and stay retryable via `sweepQuarantinedUnpublishedRuntimes` until a
+   * disposal succeeds.
+   */
+  private readonly unpublishedRuntimeQuarantine = new Map<string, {
+    managed: ManagedSession
+    quarantineToken: string
+    reason: string
+    quarantinedAt: number
+  }>()
   readonly sessionStorage: SessionStorage
   /**
    * R38-2: the AUTHORITATIVE managed-callback inventory. Every agent/self-
@@ -3170,6 +3195,9 @@ export class SessionManager implements ISessionManager {
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
+    // R46: retry the cleanup of any quarantined unpublished candidate first —
+    // a no-op while the quarantine registry is empty.
+    await this.sweepQuarantinedUnpublishedRuntimes()
     const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
@@ -3694,6 +3722,12 @@ export class SessionManager implements ISessionManager {
           await this.disposeManagedAgentRuntime(managed, 'stale_publication_scope')
         } catch (rollbackError) {
           rollbackFailure = `agent rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+          // R46: the disposal failed, so the live runtime references survive
+          // on this never-published candidate — hand it into the manager-
+          // owned quarantine registry (owner-token-bound, callback-refusing,
+          // retryable) instead of letting it become unreachable when this
+          // method throws.
+          this.quarantineUnpublishedCandidateRuntime(managed, 'stale_publication_scope rollback disposal failed')
         }
       }
       // R39-4: cleanup is conditioned on OWNER IDENTITY — no concurrent
@@ -4070,6 +4104,12 @@ export class SessionManager implements ISessionManager {
       managed.agentReadyResolve = undefined
       managed.backendRuntimeSignature = undefined
       managed.backendRestartSignature = undefined
+      // A fully successful disposal settles any earlier incomplete one.
+      managed.disposalIncomplete = undefined
+    } else {
+      // R46: the retained faces are tracked INDEPENDENTLY of managed.agent —
+      // a successor agent must never be built over them silently.
+      managed.disposalIncomplete = { reason, failures: [...failures] }
     }
 
     let callbacksUnregistered = false
@@ -4081,6 +4121,89 @@ export class SessionManager implements ISessionManager {
       throw new AgentRuntimeDisposalError(reason, failures, callbacksUnregistered)
     }
     return { failures, callbacksUnregistered }
+  }
+
+  /**
+   * R46: retry every retained runtime face from an earlier partially failed
+   * strict disposal BEFORE the caller takes any early return or constructs a
+   * replacement runtime — otherwise the retained poolServer/mcpPool
+   * references would be orphaned (overwritten) and their processes leaked.
+   * Strict: a retry that fails again keeps the state and propagates the
+   * typed error, so no successor runtime is ever built over retained faces.
+   */
+  private async settlePendingRuntimeDisposal(managed: ManagedSession, reason: string): Promise<void> {
+    if (!managed.disposalIncomplete) return
+    sessionLog.info(`Retrying the incompletely disposed runtime surfaces for session ${managed.id} (${managed.disposalIncomplete.reason}) before ${reason}`)
+    await this.disposeManagedAgentRuntime(managed, `${reason}: retrying incomplete disposal`)
+    managed.disposalIncomplete = undefined
+    sessionLog.info(`Retried incomplete disposal for session ${managed.id} is now fully settled`)
+  }
+
+  /**
+   * R46: quarantine a NEVER-PUBLISHED session candidate whose runtime could
+   * not be disposed during the stale-publication rollback. The entry keeps
+   * the live runtime reachable through THIS manager (owner-token-bound),
+   * replaces the candidate's session-scoped callback registration with
+   * refusing stubs (every execution rejects — the candidate was never a
+   * usable session), and stays in the registry for retryable cleanup. A
+   * later legitimate owner registering the same id simply overwrites the
+   * refusing stubs.
+   */
+  private quarantineUnpublishedCandidateRuntime(managed: ManagedSession, reason: string): void {
+    const quarantineToken = randomUUID()
+    this.unpublishedRuntimeQuarantine.set(managed.id, {
+      managed,
+      quarantineToken,
+      reason,
+      quarantinedAt: Date.now(),
+    })
+    const refusingCallbacks = new Proxy({}, {
+      get: () => () => {
+        throw new Error(`SESSION_QUARANTINED_UNPUBLISHED (${reason})`)
+      },
+    }) as unknown as SessionScopedToolCallbacks
+    registerSessionScopedToolCallbacks(managed.id, refusingCallbacks)
+    sessionLog.warn(`Unpublished candidate runtime for session ${managed.id} quarantined (token ${quarantineToken}): its callbacks refuse execution and its runtime stays reachable for retryable cleanup (${reason})`)
+  }
+
+  /**
+   * R46: retry the cleanup of every quarantined unpublished candidate. A
+   * disposal that now succeeds removes the registry entry (owner-token
+   * verified) and unregisters the refusing callback stubs; anything still
+   * failing stays quarantined for the next sweep. Runs at every createSession
+   * entry — a no-op while the registry is empty.
+   */
+  private async sweepQuarantinedUnpublishedRuntimes(): Promise<void> {
+    if (this.unpublishedRuntimeQuarantine.size === 0) return
+    for (const [sessionId, entry] of this.unpublishedRuntimeQuarantine) {
+      try {
+        const result = await this.disposeManagedAgentRuntime(
+          entry.managed,
+          `quarantined unpublished runtime retry (${entry.reason})`,
+          { bestEffort: true },
+        )
+        // Owner-token binding: only the exact registered entry settles here.
+        if (result.failures.length === 0 && this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken === entry.quarantineToken) {
+          // The quarantined candidate's storage record is also part of the
+          // deferred cleanup — remove it once the runtime is fully disposed.
+          let storageFailure: string | null = null
+          try {
+            const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
+            if (deleted === false) storageFailure = 'storage delete returned false'
+          } catch (storageError) {
+            storageFailure = storageError instanceof Error ? storageError.message : String(storageError)
+          }
+          if (!storageFailure) {
+            this.unpublishedRuntimeQuarantine.delete(sessionId)
+            sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry`)
+          } else {
+            sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${storageFailure}); kept for retry`)
+          }
+        }
+      } catch (sweepError) {
+        sessionLog.warn(`Retry cleanup for quarantined unpublished runtime ${sessionId} failed; kept for retry:`, sweepError)
+      }
+    }
   }
 
   /**
@@ -4182,6 +4305,12 @@ export class SessionManager implements ISessionManager {
     restartRequired: boolean,
     reason: string,
   ): Promise<void> {
+    // R46: retry retained runtime faces from an earlier partially failed
+    // disposal BEFORE any early return or replacement construction can
+    // orphan them. This runs INSIDE the serialized refresh work, so the
+    // retry cannot reopen the concurrent-refresh race window.
+    await this.settlePendingRuntimeDisposal(managed, `runtime refresh (${reason})`)
+
     if (restartRequired) {
       sessionLog.info(`Restart-required field changed for session ${managed.id}; recreating backend runtime (${reason})`)
       await this.disposeManagedAgentRuntime(managed, 'restart-required runtime change')
@@ -4257,6 +4386,12 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    // R46: retry retained runtime faces BEFORE constructing a replacement
+    // agent — the creation below overwrites `managed.mcpPool` and
+    // `managed.poolServer`, which would orphan any still-live processes from
+    // a partially failed disposal.
+    await this.settlePendingRuntimeDisposal(managed, 'agent creation')
+
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -9391,9 +9526,12 @@ export class SessionManager implements ISessionManager {
    * R45: FAIL-CLOSED barrier consultation. Only a PROVEN absence (ENOENT)
    * allows the resume to arm — a barrier that exists but cannot be read
    * (EACCES/EISDIR/…), parses as malformed/truncated JSON, or fails its
-   * strict version/schema validation quarantines the session. The barrier
-   * is session-wide once valid: any armed resume for a quarantined session
-   * is non-executable.
+   * strict version/schema validation quarantines the session.
+   *
+   * R46: matching is EXACT per answer turn. A valid barrier for a DIFFERENT
+   * messageId (an older answer's compensation) does NOT quarantine a newer,
+   * legitimate resume — the session is not poisoned forever by one stale
+   * barrier; only the barrier's own answer turn stays non-executable.
    */
   private async isResumeQuarantinedByBarrier(
     workspaceRootPath: string,
@@ -9424,7 +9562,10 @@ export class SessionManager implements ISessionManager {
     }
     const quarantinedMessageId = (parsed as { messageId?: unknown }).messageId as string
     if (messageId && quarantinedMessageId !== messageId) {
-      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} covers message ${quarantinedMessageId} (asked: ${messageId}) — failing closed`)
+      // R46: valid barrier, different answer turn — the newer resume is
+      // legitimate and must still be armed (exact-answer matching).
+      sessionLog.info(`Resume-quarantine barrier for session ${sessionId} covers message ${quarantinedMessageId} only; resume ${messageId} is a different answer turn and stays armed`)
+      return false
     }
     return true
   }

@@ -119,6 +119,35 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     return storage.load(tmpRoot, sessionId) as StoredSession
   }
 
+  const barrierFileFor = (sessionId: string): string => join(
+    tmpRoot,
+    '.polo-resume-quarantine',
+    `${createHash('sha256').update(sessionId).digest('hex')}.json`,
+  )
+
+  const coldHydrateWithBarrier = async (sessionId: string): Promise<{
+    sm2: InstanceType<typeof SessionManager>
+    cold: { pendingAgentResume?: unknown; isProcessing: boolean; resumeRetryTimer?: unknown }
+    sm2Events: Array<Record<string, unknown>>
+  }> => {
+    const sm2 = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+      workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
+    })
+    const sm2Events: Array<Record<string, unknown>> = []
+    sm2.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
+      sm2Events.push(event)
+    }) as never)
+    const cold = createManagedSession(
+      { id: sessionId, name: 'cold rebuild', createdAt: Date.now() },
+      { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+      {},
+    )
+    ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, cold)
+    await sm2.getSession(sessionId)
+    await new Promise(r => setTimeout(r, 80))
+    return { sm2, cold: cold as never, sm2Events }
+  }
+
   const storageSessionCount = (): number => {
     const storage = (sm as unknown as { sessionStorage: { list: (root: string) => unknown[] } }).sessionStorage
     return storage.list(tmpRoot).length
@@ -816,35 +845,6 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
   // ==========================================================================
 
   describe('resume-quarantine barrier hardening (R45-A)', () => {
-    const barrierFileFor = (sessionId: string): string => join(
-      tmpRoot,
-      '.polo-resume-quarantine',
-      `${createHash('sha256').update(sessionId).digest('hex')}.json`,
-    )
-
-    const coldHydrateWithBarrier = async (sessionId: string): Promise<{
-      sm2: InstanceType<typeof SessionManager>
-      cold: { pendingAgentResume?: unknown; isProcessing: boolean; resumeRetryTimer?: unknown }
-      sm2Events: Array<Record<string, unknown>>
-    }> => {
-      const sm2 = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
-        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
-      })
-      const sm2Events: Array<Record<string, unknown>> = []
-      sm2.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
-        sm2Events.push(event)
-      }) as never)
-      const cold = createManagedSession(
-        { id: sessionId, name: 'cold rebuild', createdAt: Date.now() },
-        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
-        {},
-      )
-      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, cold)
-      await sm2.getSession(sessionId)
-      await new Promise(r => setTimeout(r, 80))
-      return { sm2, cold: cold as never, sm2Events }
-    }
-
     const seedBarrierScenario = (sessionId: string): void => {
       seedColdEditPopoverHeader(sessionId, { withPendingAgentResume: true })
       mkdirSync(dirname(barrierFileFor(sessionId)), { recursive: true })
@@ -927,16 +927,16 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     })
 
     it('a bundle-v1 traversal session id cannot escape the quarantine directory', async () => {
-      const smX = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+      const barrierSessionManager = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
         workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
       })
       const malicious = '../../outside-quarantine'
-      const mX = createManagedSession(
+      const maliciousManagedSession = createManagedSession(
         { id: malicious, name: 'malicious', createdAt: Date.now() },
         { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
         {},
       )
-      const barrierPath = (smX as unknown as {
+      const barrierPath = (barrierSessionManager as unknown as {
         resumeQuarantineBarrierPath: (root: string, id: string) => string
       }).resumeQuarantineBarrierPath(tmpRoot, malicious)
       const quarantineDir = join(tmpRoot, '.polo-resume-quarantine')
@@ -945,39 +945,43 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(barrierPath.includes('..')).toBe(false)
       // Writing a barrier for the malicious id lands INSIDE the directory,
       // keyed by the sha256 digest — nothing escapes the workspace.
-      await (smX as unknown as {
+      await (barrierSessionManager as unknown as {
         writeResumeQuarantineBarrier: (m: unknown, r: unknown, reason: string) => Promise<void>
-      }).writeResumeQuarantineBarrier(mX, { messageId: 'm1', invocationSource: 'desktop' }, 'probe')
+      }).writeResumeQuarantineBarrier(maliciousManagedSession, { messageId: 'm1', invocationSource: 'desktop' }, 'probe')
       expect(existsSync(barrierPath)).toBe(true)
       expect(existsSync(join(tmpRoot, 'outside-quarantine.json'))).toBe(false)
-      expect(await (smX as unknown as {
+      expect(await (barrierSessionManager as unknown as {
         isResumeQuarantinedByBarrier: (root: string, id: string, messageId?: string) => Promise<boolean>
       }).isResumeQuarantinedByBarrier(tmpRoot, malicious, 'm1')).toBe(true)
     })
 
     it('concurrent barrier writers cannot expose partial JSON (atomic private rename)', async () => {
       seedBarrierScenario('q-barr-concurrent')
-      const smX = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+      const barrierSessionManager = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
         workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
       })
-      const mX = createManagedSession(
+      const concurrentManagedSession = createManagedSession(
         { id: 'q-barr-concurrent', name: 'x', createdAt: Date.now() },
         { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
         {},
       )
-      const writeBarrier = (smX as unknown as {
+      const writeBarrier = (barrierSessionManager as unknown as {
         writeResumeQuarantineBarrier: (m: unknown, r: unknown, reason: string) => Promise<void>
-      }).writeResumeQuarantineBarrier.bind(smX)
+      }).writeResumeQuarantineBarrier.bind(barrierSessionManager)
       await Promise.all([
-        writeBarrier(mX, { messageId: 'm1', invocationSource: 'desktop' }, 'w1'),
-        writeBarrier(mX, { messageId: 'm2', invocationSource: 'desktop' }, 'w2'),
+        writeBarrier(concurrentManagedSession, { messageId: 'm1', invocationSource: 'desktop' }, 'w1'),
+        writeBarrier(concurrentManagedSession, { messageId: 'm2', invocationSource: 'desktop' }, 'w2'),
       ])
       // The file at the barrier path is ALWAYS a complete document.
-      const parsed = JSON.parse(readFileSync(barrierFileFor('q-barr-concurrent'), 'utf-8')) as { version?: number }
+      const parsed = JSON.parse(readFileSync(barrierFileFor('q-barr-concurrent'), 'utf-8')) as { version?: number; messageId?: string }
       expect(parsed.version).toBe(1)
-      expect(await (smX as unknown as {
+      // R46 exact-answer matching: the surviving barrier quarantines ITS OWN
+      // message id — never the whole session.
+      const isQuarantined = (barrierSessionManager as unknown as {
         isResumeQuarantinedByBarrier: (root: string, id: string, messageId?: string) => Promise<boolean>
-      }).isResumeQuarantinedByBarrier(tmpRoot, 'q-barr-concurrent', 'm1')).toBe(true)
+      }).isResumeQuarantinedByBarrier.bind(barrierSessionManager)
+      expect(await isQuarantined(tmpRoot, 'q-barr-concurrent', parsed.messageId)).toBe(true)
+      expect(await isQuarantined(tmpRoot, 'q-barr-concurrent', `other-${parsed.messageId}`)).toBe(false)
     })
   })
 
@@ -1053,6 +1057,217 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(rollbackFailure).toContain('stale_publication_scope')
       expect(rollbackFailure).toContain('dispose boom')
       expect(managed.agent).toBeTruthy()
+    })
+  })
+
+  // ==========================================================================
+  // R46-A: a valid barrier quarantines only ITS OWN answer turn — a newer
+  // legitimate resume for the same session must still arm (exact-answer
+  // matching, cold rebuild).
+  // ==========================================================================
+
+  describe('resume-quarantine barrier exactness (R46-A)', () => {
+    it('an older m1 barrier does not quarantine a newer m2 resume (cold rebuild)', async () => {
+      // Armed resume in the header: messageId = msg-q-exact-m2, WITH its
+      // answer message present (so the armed state survives the drain).
+      const sessionId = 'q-exact-m2'
+      const filePath = getSessionFilePath(tmpRoot, sessionId)
+      mkdirSync(dirname(filePath), { recursive: true })
+      const stored = {
+        id: sessionId,
+        workspaceRootPath: tmpRoot,
+        name: 'cold popover session',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        hidden: true,
+        origin: 'edit-popover',
+        popoverOwner: OWNER_ID,
+        systemPromptPreset: 'mini',
+        productSpaceId: TEST_SPACE_ID,
+        accountId: TEST_ACCOUNT_ID,
+        pendingAgentResume: { messageId: `msg-${sessionId}`, attempts: 1, invocationSource: 'desktop' },
+        messages: [{ id: `msg-${sessionId}`, role: 'user', content: 'the committed m2 answer', timestamp: Date.now() }],
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+      } as unknown as StoredSession
+      writeSessionJsonl(filePath, stored)
+      // A valid barrier left by an OLDER answer turn (different messageId).
+      mkdirSync(dirname(barrierFileFor(sessionId)), { recursive: true })
+      writeFileSync(
+        barrierFileFor(sessionId),
+        JSON.stringify({ version: 1, sessionId, messageId: 'm1-older-answer', quarantinedAt: Date.now(), reason: 'older answer compensation' }),
+        'utf-8',
+      )
+      const { sm2, cold, sm2Events } = await coldHydrateWithBarrier(sessionId)
+      // The newer m2 resume is armed (zero false quarantine); the stale m1
+      // barrier would have poisoned the whole session under Round 5.
+      expect((cold.pendingAgentResume as { messageId?: string } | undefined)?.messageId).toBe(`msg-${sessionId}`)
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    })
+  })
+
+  // ==========================================================================
+  // R46-B: a PARTIALLY failed strict disposal (agent face done, pool/mcp
+  // faces retained) must be retried before any early return or replacement
+  // runtime orphans the retained processes.
+  // ==========================================================================
+
+  describe('runtime disposal partial-failure retryability (R46-B)', () => {
+    it('restart-required refresh: pool-server stop failing is retried before any new runtime', async () => {
+      const managed = seedSession('q-partial-pool')
+      let disposeCalls = 0
+      let stopCalls = 0
+      managed.agent = { dispose: () => { disposeCalls += 1 } } as never
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          if (stopCalls === 1) throw new Error('stop boom')
+        },
+      } as never
+
+      const refresh = (sm as unknown as {
+        runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+      }).runAgentRuntimeRefresh.bind(sm)
+      // First refresh: agent face disposed, pool face fails → typed refusal.
+      await expect(refresh(managed, {} as never, 'rt1', 'rst1', true, 'first pass'))
+        .rejects.toThrow('pool-server: stop boom')
+      expect(disposeCalls).toBe(1)
+      expect(managed.agent).toBeNull()
+      expect(managed.poolServer).toBeTruthy()
+      expect(managed.disposalIncomplete?.failures.some(f => f.includes('stop boom'))).toBe(true)
+
+      // Second refresh: settles the retained face BEFORE any replacement.
+      await refresh(managed, {} as never, 'rt2', 'rst2', true, 'retry pass')
+      expect(stopCalls).toBe(2)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+      // The retry dispose skips the already-disposed agent face (null).
+      expect(disposeCalls).toBe(1)
+    })
+
+    it('in-place refresh fallback: MCP disconnect failing is retried before any new runtime', async () => {
+      const managed = seedSession('q-partial-mcp')
+      let mcpCalls = 0
+      // Working dispose on the agent face (succeeds → null); NO
+      // updateRuntimeConfig → in-place refresh falls back to disposal, where
+      // the MCP disconnect fails first.
+      managed.agent = { dispose: () => {} } as never
+      managed.mcpPool = {
+        disconnectAll: async () => {
+          mcpCalls += 1
+          if (mcpCalls === 1) throw new Error('mcp boom')
+        },
+      } as never
+
+      const refresh = (sm as unknown as {
+        runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+      }).runAgentRuntimeRefresh.bind(sm)
+      await expect(refresh(managed, {} as never, 'rt1', 'rst1', false, 'first pass'))
+        .rejects.toThrow('mcp-pool: mcp boom')
+      expect(managed.agent).toBeNull()
+      expect(managed.mcpPool).toBeTruthy()
+      expect(managed.disposalIncomplete?.failures.some(f => f.includes('mcp boom'))).toBe(true)
+
+      await refresh(managed, {} as never, 'rt2', 'rst2', false, 'retry pass')
+      expect(mcpCalls).toBe(2)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.mcpPool).toBeUndefined()
+    })
+  })
+
+  // ==========================================================================
+  // R46-C: an UNPUBLISHED sdk-fork candidate whose runtime cannot be disposed
+  // during the stale-publication rollback stays manager-reachable (owner-token
+  // quarantine), refuses callback execution, and is retryably cleanable.
+  // ==========================================================================
+
+  describe('stale-publication undisposable candidate reachability (R46-C)', () => {
+    it('the live runtime is quarantined manager-owned, its callbacks refuse, and a retry cleans it up', async () => {
+      // Source session with an SDK context and a branch message.
+      const sourceId = 'q-fork-source'
+      const sourcePath = getSessionFilePath(tmpRoot, sourceId)
+      mkdirSync(dirname(sourcePath), { recursive: true })
+      const sourceStored = {
+        id: sourceId,
+        workspaceRootPath: tmpRoot,
+        name: 'parent',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sdkSessionId: 'sdk-parent-1',
+        sdkCwd: tmpRoot,
+        productSpaceId: TEST_SPACE_ID,
+        accountId: TEST_ACCOUNT_ID,
+        messages: [{ id: 'bm1', role: 'user', content: 'parent turn', timestamp: Date.now() }],
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+      } as unknown as StoredSession
+      writeSessionJsonl(sourcePath, sourceStored)
+      // The branch source must be a REGISTERED session bound to the active
+      // space/account (R33-1 validation reads the live managed object).
+      const sourceManaged = createManagedSession(
+        { id: sourceId, name: 'parent', createdAt: Date.now(), sdkSessionId: 'sdk-parent-1', sdkCwd: tmpRoot },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: TEST_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      sourceManaged.messages = [{ id: 'bm1', role: 'user', content: 'parent turn', timestamp: Date.now() }] as never
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sourceId, sourceManaged)
+
+      // The fence moves the moment the candidate record is created — the
+      // pre-write CAS has already passed, so the FINAL publication CAS fails.
+      const storage = sm as unknown as { sessionStorage: { create: (...args: unknown[]) => Promise<unknown> } }
+      const realCreate = storage.sessionStorage.create.bind(storage.sessionStorage)
+      storage.sessionStorage.create = async (...args: unknown[]) => {
+        const created = await realCreate(...args)
+        setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+        return created
+      }
+      // The branch preflight's agent is stubbed: a live runtime whose FIRST
+      // dispose fails (kept alive), with real session-scoped callbacks.
+      let disposeCalls = 0
+      ;(sm as unknown as { getOrCreateAgent: unknown }).getOrCreateAgent = async (candidate: { id: string; agent: unknown }) => {
+        const agent = {
+          ensureBranchReady: async () => {},
+          dispose: () => {
+            disposeCalls += 1
+            if (disposeCalls === 1) throw new Error('dispose boom')
+          },
+        }
+        candidate.agent = agent
+        registerSessionScopedToolCallbacks(candidate.id, { list_sessions: async () => 'candidate-runtime' } as never)
+        return agent
+      }
+
+      await expect((sm as unknown as {
+        createSession: (workspaceId: string, options: Record<string, unknown>) => Promise<unknown>
+      }).createSession(WORKSPACE_ID, { branchFromSessionId: sourceId, branchFromMessageId: 'bm1' }))
+        .rejects.toThrow('rollback incomplete: agent rollback failed')
+
+      // The undisposable runtime stayed MANAGER-REACHABLE through the
+      // owner-token-bound quarantine — never published as usable.
+      const quarantine = (sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, { managed: { agent: unknown }; quarantineToken: string }>
+      }).unpublishedRuntimeQuarantine
+      expect(quarantine.size).toBe(1)
+      const [quarantinedId, entry] = [...quarantine.entries()][0]
+      expect(entry.quarantineToken).toBeTruthy()
+      expect(entry.managed.agent).toBeTruthy()
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.has(quarantinedId)).toBe(false)
+      // At quarantine time the candidate's storage record is deliberately
+      // still present — its cleanup is deferred to the retry sweep.
+      expect(storageSessionCount()).toBe(2)
+      // The candidate's callbacks REFUSE execution while quarantined.
+      const quarantinedCallbacks = getSessionScopedToolCallbacks(quarantinedId)
+      expect(quarantinedCallbacks).toBeDefined()
+      expect(() => quarantinedCallbacks!.listSessionsFn!()).toThrow('SESSION_QUARANTINED_UNPUBLISHED')
+
+      // Retry cleanup (owner-token verified): dispose succeeds on the second
+      // attempt, the registry entry, refusing stubs and the storage record
+      // are all removed.
+      await (sm as unknown as {
+        sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
+      }).sweepQuarantinedUnpublishedRuntimes()
+      expect(quarantine.size).toBe(0)
+      expect(disposeCalls).toBe(2)
+      expect(getSessionScopedToolCallbacks(quarantinedId)).toBeUndefined()
+      expect(storageSessionCount()).toBe(1) // only the source session remains
     })
   })
 })
