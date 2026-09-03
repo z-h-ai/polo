@@ -329,6 +329,26 @@ export interface Message {
   authError?: string;             // Error message if auth failed
   authEmail?: string;             // Authenticated email (for OAuth)
   authWorkspace?: string;         // Authenticated workspace (for Slack)
+  // Question-specific fields (for request_user_input answers)
+  questionResponse?: QuestionResponseMetadata;   // Structured answer payload
+  // Question cancellation record (user chose "skip for now")
+  questionResolution?: QuestionResolutionMetadata;
+}
+
+/** Structured metadata persisted on user messages that answer a question request. */
+export interface QuestionResponseMetadata {
+  requestId: string;
+  answers: Array<{
+    questionId: string;
+    selectedOptionIds: string[];
+    otherText?: string;
+  }>;
+}
+
+/** Structured metadata persisted on user messages that skip a question request. */
+export interface QuestionResolutionMetadata {
+  action: 'cancel';
+  requestId: string;
 }
 
 /**
@@ -408,6 +428,9 @@ export interface StoredMessage {
   authError?: string;
   authEmail?: string;
   authWorkspace?: string;
+  // Question-specific fields (persisted for reload / idempotency checks)
+  questionResponse?: QuestionResponseMetadata;
+  questionResolution?: QuestionResolutionMetadata;
   // Queued: user message that is waiting to be processed (persisted for recovery)
   isQueued?: boolean;
 }

@@ -14,7 +14,6 @@
  * separate process, avoiding bundling issues in the Electron main process.
  */
 
-import http from 'node:http';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -58,6 +57,7 @@ setBedrockProviderModule(bedrockProviderModule);
 // Model resolution (extracted for testability + custom-endpoint precedence)
 import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
 import { pickProviderAppropriateMiniModel } from './pick-mini-model.ts';
+import { ProxyToolRegistry } from './proxy-tool-registry.ts';
 import {
   buildCustomEndpointModelDef,
   normalizeCustomEndpointModelEntry,
@@ -68,7 +68,7 @@ import {
 
 // Direct source imports from shared (bundled by bun build)
 import { handleLargeResponse, estimateTokens, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
-import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
+import { withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
@@ -135,7 +135,7 @@ interface RuntimeConfigUpdateMessage {
 type InboundMessage =
   | InitMessage
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
-  | { type: 'register_tools'; tools: ProxyToolDef[] }
+  | { type: 'register_tools'; tools: ProxyToolDef[]; scope?: 'session' | 'pool' }
   | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
   | { type: 'abort' }
@@ -172,7 +172,7 @@ type EnrichedToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_
 type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent;
 
 /** Messages to main process (stdout) */
-interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
+interface OutboundReady { type: 'ready'; sessionId: string | null }
 interface OutboundEvent { type: 'event'; event: OutboundAgentEvent }
 interface OutboundPreToolUseReq {
   type: 'pre_tool_use_request';
@@ -182,7 +182,6 @@ interface OutboundPreToolUseReq {
   input: Record<string, unknown>;
 }
 interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
-interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
   type: 'llm_query_result';
@@ -225,7 +224,6 @@ type OutboundMessage =
   | OutboundEvent
   | OutboundPreToolUseReq
   | OutboundToolExecReq
-  | OutboundSessionToolCompleted
   | OutboundMiniResult
   | OutboundLlmQueryResult
   | OutboundEnsureSessionReadyResult
@@ -254,11 +252,11 @@ let currentUserMessage = '';
 const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
 const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
 
-// Pending session MCP tool calls for completion detection
-const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
-
-// Proxy tool definitions from main process
-let proxyToolDefs: ProxyToolDef[] = [];
+// Proxy tool definitions from main process — session tools are REPLACED
+// wholesale per registration (per-turn capability bits like request_user_input
+// must fail closed); pool (MCP/API source) tools merge by name. See
+// proxy-tool-registry.ts for the scope semantics.
+const proxyToolRegistry = new ProxyToolRegistry();
 
 // Speculative prefetch for read-only tools (enables parallel execution despite Pi SDK's sequential loop).
 // When the LLM emits multiple call_llm tool calls in a single message, we fire all requests
@@ -272,12 +270,8 @@ function isPrefetchableTool(toolName: string): boolean {
   return PREFETCHABLE_TOOLS.has(stripped);
 }
 
-// Flag: proxy tools changed since last session creation — session needs recreation
-let toolsChanged = false;
-
-// Callback server for call_llm
-let callbackServer: http.Server | null = null;
-let callbackPort = 0;
+// Proxy tools changed since last session creation — session needs recreation.
+// Single source of truth: ProxyToolRegistry.toolsChanged.
 
 // ============================================================
 // JSONL I/O
@@ -306,57 +300,6 @@ function findMostRecentSessionFile(sessionDir: string): string | null {
     }
   }
   return best?.path ?? null;
-}
-
-// ============================================================
-// Callback Server (for call_llm from session MCP server)
-// ============================================================
-
-async function startCallbackServer(): Promise<void> {
-  if (callbackServer) return;
-
-  const server = http.createServer(async (req, res) => {
-    if (req.method !== 'POST' || req.url !== '/call-llm') {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-    try {
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(chunk as Buffer);
-      const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
-
-      debugLog('Received call_llm request via callback server');
-      const result = await preExecuteCallLlm(body);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      debugLog(`call_llm via callback failed: ${msg}`);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: msg }));
-    }
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      callbackPort = typeof addr === 'object' && addr ? addr.port : 0;
-      debugLog(`Callback server listening on 127.0.0.1:${callbackPort}`);
-      resolve();
-    });
-    server.on('error', reject);
-  });
-
-  callbackServer = server;
-}
-
-function stopCallbackServer(): void {
-  if (callbackServer) {
-    callbackServer.close();
-    callbackServer = null;
-    callbackPort = 0;
-  }
 }
 
 // ============================================================
@@ -686,7 +629,7 @@ async function ensureSession(): Promise<AgentSession> {
   const { session } = await createAgentSession(sessionOptions);
   piSession = session;
 
-  toolsChanged = false;
+  proxyToolRegistry.markConsumed();
   debugLog(`Created Pi session: ${session.sessionId} (${wrappedAll.length} tools)`);
 
   // Notify main process of session ID
@@ -842,6 +785,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 // ============================================================
 
 function buildProxyTools(): ToolDefinition<any, any>[] {
+  const proxyToolDefs = proxyToolRegistry.tools;
   debugLog(`Building proxy tools from ${proxyToolDefs.length} definitions: ${proxyToolDefs.map(t => t.name).join(', ')}`);
 
   return proxyToolDefs.map<ToolDefinition<any, any>>(def => ({
@@ -1099,11 +1043,6 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
   }
 }
 
-async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
-  const sessionPath = initConfig?.sessionPath || undefined;
-  const request = await buildCallLlmRequest(input, { backendName: 'Pi', sessionPath });
-  return queryLlm(request);
-}
 
 async function runMiniCompletion(prompt: string): Promise<string | null> {
   try {
@@ -1221,36 +1160,14 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     }
   }
 
-  // Detect session MCP tool completions + enrich tool starts with canonical metadata
+  // Enrich session tool starts with canonical metadata
   if (event.type === 'tool_execution_start') {
-    const toolName = event.toolName;
-    if (toolName.startsWith('session__') || toolName.startsWith('mcp__session__')) {
-      const mcpToolName = toolName.replace(/^(mcp__session__|session__)/, '');
-      pendingSessionToolCalls.set(event.toolCallId, {
-        toolName: mcpToolName,
-        arguments: (event.args ?? {}) as Record<string, unknown>,
-      });
-    }
-
     const toolMetadata = extractToolExecutionMetadata((event.args ?? {}) as Record<string, unknown>);
     if (toolMetadata) {
       forwardedEvent = {
         ...event,
         toolMetadata,
       };
-    }
-  }
-
-  if (event.type === 'tool_execution_end') {
-    const pending = pendingSessionToolCalls.get(event.toolCallId);
-    if (pending) {
-      pendingSessionToolCalls.delete(event.toolCallId);
-      send({
-        type: 'session_tool_completed',
-        toolName: pending.toolName,
-        args: pending.arguments,
-        isError: !!event.isError,
-      });
     }
   }
 
@@ -1284,13 +1201,9 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
     debugLog('Set AZURE_OPENAI_BASE_URL for active runtime endpoint');
   }
 
-  // Start callback server for call_llm (idempotent — skips if already running)
-  await startCallbackServer();
-
   send({
     type: 'ready',
     sessionId: null,
-    callbackPort,
   });
 }
 
@@ -1325,7 +1238,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // If proxy tools changed since last session creation, dispose and recreate.
     // This avoids calling _buildRuntime() for dynamic tool updates — instead
     // we create a fresh session via continueRecent() with all tools known upfront.
-    if (toolsChanged && piSession) {
+    if (proxyToolRegistry.toolsChanged && piSession) {
       debugLog('Recreating session due to tool changes');
       if (unsubscribeEvents) {
         unsubscribeEvents();
@@ -1379,18 +1292,19 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
 }
 
 function handleRegisterTools(msg: Extract<InboundMessage, { type: 'register_tools' }>): void {
-  // Merge: replace existing tools by name, add new ones
-  const incoming = new Map(msg.tools.map(t => [t.name, t]));
-  proxyToolDefs = [
-    ...proxyToolDefs.filter(t => !incoming.has(t.name)),
-    ...msg.tools,
-  ];
-  debugLog(`Registered ${msg.tools.length} proxy tools (total: ${proxyToolDefs.length}): ${msg.tools.map(t => t.name).join(', ')}`);
+  // Session tools use explicit REPLACE semantics: the main process sends the
+  // complete session-tool set on every registration, so tools omitted from
+  // the list (e.g. request_user_input after a desktop → messaging turn
+  // switch) are removed — the per-turn capability bit fails closed.
+  // Pool tools (MCP/API sources) keep the legacy merge-by-name behavior.
+  const scope = msg.scope ?? 'pool';
+  const total = proxyToolRegistry.register(scope, msg.tools);
+  debugLog(`Registered ${msg.tools.length} ${scope} proxy tools (effective total: ${total}: ${proxyToolRegistry.tools.map(t => t.name).join(', ')})`);
 
   // If session exists, mark for recreation on next prompt.
   // Don't dispose mid-generation — the flag is checked in handlePrompt().
   if (piSession) {
-    toolsChanged = true;
+    // registry marks changed internally on any effective-set mutation
     debugLog('Proxy tools changed — session will be recreated on next prompt');
   }
 }
@@ -1672,9 +1586,6 @@ function handleShutdown(): void {
     piSession.dispose();
     piSession = null;
   }
-
-  // Stop callback server
-  stopCallbackServer();
 
   // Reject pending promises
   for (const [, pending] of pendingPreToolUse) {

@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": ">=1.0.0",
     "@polo-ai/core": "workspace:*",
     "@polo-ai/shared": "workspace:*",
     "jose": "^6.0.0",

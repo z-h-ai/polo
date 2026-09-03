@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { i18n } from '@polo-ai/shared/i18n'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -28,6 +29,8 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
+import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
+import { applySnapshotUnderGuard, clearPendingQuestionForDeletedSession, PendingQuestionTerminalGuard, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -455,6 +458,27 @@ export default function App() {
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
   // Credential requests per session (queue to handle multiple concurrent requests)
   const [pendingCredentials, setPendingCredentials] = useState<Map<string, CredentialRequest[]>>(new Map())
+  // Pending agent questions per session (request_user_input).
+  // At most one per session — a new requestId replaces the previous entry.
+  // Survives refresh/restart via Session.pendingQuestion hydration.
+  // State model: realtime events are authoritative; session snapshots only
+  // fill holes (an existing entry is never downgraded by an in-flight fetch);
+  // resolutions are requestId-guarded so a stale resolution never deletes a
+  // newer card.
+  const [pendingQuestions, setPendingQuestions] = useState<Map<string, QuestionRequest>>(new Map())
+  // Terminal markers (resolved requestIds / deleted sessions): an in-flight
+  // session snapshot whose payload is OLDER than a local resolution or
+  // deletion must never re-fill the hole that the newer realtime event made.
+  const pendingQuestionGuardRef = useRef(new PendingQuestionTerminalGuard())
+  // Synchronous mirror: snapshot reducers must apply against the CURRENT map
+  // inside the guard scope (before endSnapshot), not during a later render.
+  const pendingQuestionsRef = useRef(pendingQuestions)
+  const applyPendingQuestions = useCallback((updater: (prev: Map<string, QuestionRequest>) => Map<string, QuestionRequest>) => {
+    const next = updater(pendingQuestionsRef.current)
+    pendingQuestionsRef.current = next
+    setPendingQuestions(next)
+    return next
+  }, [])
   // Draft composer state per session (text + attachment refs), preserved across mode
   // switches, conversation changes, and app restarts. Using a ref avoids re-renders
   // during typing; attachments are stored as lightweight refs (path + name) and
@@ -591,21 +615,37 @@ export default function App() {
   }, [])
 
   const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the RPC is issued and
+    // closes after the payload has been applied synchronously — terminal
+    // markers are pinned for the whole in-flight window.
     try {
-      const fresh = await window.electronAPI.getSessionMessages(sessionId)
-      if (!fresh) return 'failed'
+      let outcome: 'refreshed' | 'preserved_stale_messages' | 'failed' = 'refreshed'
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessionMessages(sessionId),
+        fresh => {
+          if (!fresh) {
+            outcome = 'failed'
+            return
+          }
+          const prevSession = store.get(sessionAtomFamily(sessionId))
+          const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
+          const nextSession = preservedStaleMessages
+            ? { ...fresh, messages: prevSession.messages }
+            : fresh
 
-      const prevSession = store.get(sessionAtomFamily(sessionId))
-      const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
-      const nextSession = preservedStaleMessages
-        ? { ...fresh, messages: prevSession.messages }
-        : fresh
-
-      clearStreamingState(sessionId)
-      replaceLoadedSession(nextSession)
-      syncSessionOptionsFromSession(nextSession)
-      void reconcilePermissionModeState(sessionId)
-      return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
+          clearStreamingState(sessionId)
+          replaceLoadedSession(nextSession)
+          syncSessionOptionsFromSession(nextSession)
+          // Opening/refreshing a session fills a MISSING pending question from
+          // the snapshot — an existing entry (fresher realtime state) is never
+          // downgraded by the fetch.
+          applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
+          void reconcilePermissionModeState(sessionId)
+          if (preservedStaleMessages) outcome = 'preserved_stale_messages'
+        },
+      )
+      return outcome
     } catch (err) {
       console.error(`[App] Failed to refresh session ${sessionId}:`, err)
       return 'failed'
@@ -615,13 +655,33 @@ export default function App() {
   const loadSessionsFromServer = useCallback(async () => {
     setSessionLoadError(null)
 
-    try {      // The runtime enforces the committed ProductSpace: sessions bound to
-      // other spaces never cross the sessions:list boundary.
-      const loadedSessions = await window.electronAPI.getSessions()
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
+    // closes after the snapshot has been applied synchronously.
+    // The runtime enforces the committed ProductSpace: sessions bound to
+    // other spaces never cross the sessions:list boundary.
+    let loadedSessions: Session[] = []
+    try {
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessions(),
+        sessions => {
+          loadedSessions = sessions
+          // Initialize per-session atoms and metadata map
+          // NOTE: No sessionsAtom used - sessions are only in per-session atoms
+          initializeSessions(loadedSessions)
 
-      // Initialize per-session atoms and metadata map
-      // NOTE: No sessionsAtom used - sessions are only in per-session atoms
-      initializeSessions(loadedSessions)
+          // Hydrate pending agent questions from the snapshot — fill holes
+          // only: entries that already exist came from fresher realtime
+          // events and are never downgraded by the list fetch.
+          applyPendingQuestions(prev => {
+            let next = prev
+            for (const session of loadedSessions) {
+              next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+            }
+            return next
+          })
+        },
+      )
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -721,44 +781,64 @@ export default function App() {
     const beforeIds = new Set(beforeMetaMap.keys())
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
+    // closes after the snapshot has been applied synchronously (same helper
+    // as every other list path).
+    let sessions: Session[] = []
+    let nextMetaMap: Map<string, SessionMeta> | null = null
     try {
-      const sessions = await window.electronAPI.getSessions()
-      const returnedIds = new Set(sessions.map(s => s.id))
-      const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
-      const addedIds = sessions.map(s => s.id).filter(id => !beforeIds.has(id))
-      const logPayload = {
-        reason,
-        removeMissing,
-        windowWorkspaceId,
-        windowRemoteWorkspaceId,
-        selectedSessionId,
-        beforeCount: beforeIds.size,
-        returnedCount: sessions.length,
-        beforeIds: summarizeIds(beforeIds),
-        returnedIds: summarizeIds(returnedIds),
-        missingIds: summarizeIds(missingIds),
-        addedIds: summarizeIds(addedIds),
-        beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
-        returnedWorkspaceIds: workspaceDistribution(sessions),
-        transportState,
-      }
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessions(),
+        fetchedSessions => {
+          sessions = fetchedSessions
+          const returnedIds = new Set(sessions.map(s => s.id))
+          const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
+          const addedIds = sessions.map(s => s.id).filter(id => !beforeIds.has(id))
+          const logPayload = {
+            reason,
+            removeMissing,
+            windowWorkspaceId,
+            windowRemoteWorkspaceId,
+            selectedSessionId,
+            beforeCount: beforeIds.size,
+            returnedCount: sessions.length,
+            beforeIds: summarizeIds(beforeIds),
+            returnedIds: summarizeIds(returnedIds),
+            missingIds: summarizeIds(missingIds),
+            addedIds: summarizeIds(addedIds),
+            beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
+            returnedWorkspaceIds: workspaceDistribution(sessions),
+            transportState,
+          }
 
-      rendererLog.info('[App] Session list metadata refresh result', logPayload)
-      if (!removeMissing && missingIds.length > 0) {
-        rendererLog.warn('[App] Non-destructive refresh preserved sessions omitted by getSessions(); this indicates a partial backend response or workspace-context mismatch', logPayload)
-      }
+          rendererLog.info('[App] Session list metadata refresh result', logPayload)
+          if (!removeMissing && missingIds.length > 0) {
+            rendererLog.warn('[App] Non-destructive refresh preserved sessions omitted by getSessions(); this indicates a partial backend response or workspace-context mismatch', logPayload)
+          }
 
-      const loadedSessionIds = store.get(loadedSessionsAtom)
+          const loadedSessionIds = store.get(loadedSessionsAtom)
 
-      // Single transactional atom write — all cross-atom mutations happen
-      // inside one Jotai write function so React subscribers see one
-      // consistent update instead of intermediate states.
-      const nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing })
+          // Single transactional atom write — all cross-atom mutations happen
+          // inside one Jotai write function so React subscribers see one
+          // consistent update instead of intermediate states.
+          nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing })
 
-      // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
-      for (const session of sessions) {
-        syncSessionOptionsFromSession(session)
-      }
+          // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
+          for (const session of sessions) {
+            syncSessionOptionsFromSession(session)
+          }
+          // Reconnect metadata refresh carries the pending state — fill missing
+          // entries; existing event-driven entries are never touched.
+          applyPendingQuestions(prev => {
+            let next = prev
+            for (const session of sessions) {
+              next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+            }
+            return next
+          })
+        },
+      )
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
       return nextMetaMap
@@ -777,7 +857,7 @@ export default function App() {
       })
       return null
     }
-  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, windowWorkspaceId, windowRemoteWorkspaceId])
+  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, pendingQuestionGuardRef, windowWorkspaceId, windowRemoteWorkspaceId])
 
   // Stale session watchdog — catches stuck sessions that the reconnect protocol misses
   const { trackSessionActivity } = useStaleSessionRecovery({
@@ -1285,6 +1365,23 @@ export default function App() {
             })
             break
           }
+          case 'question_request': {
+            // A new requestId replaces any previous pending question —
+            // the old card's local answers are dropped with it.
+            applyPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request, pendingQuestionGuardRef.current))
+            // Native notification (same gating as permission notifications)
+            const notifySession = store.get(sessionAtomFamily(sessionId))
+            if (notifySession && !notifySession.hidden) {
+              showSessionNotification(notifySession, i18n.t('chat.questionNotification'))
+            }
+            break
+          }
+          case 'question_resolved': {
+            // requestId-conditional: never delete a newer question card that
+            // replaced the one this resolution is about.
+            applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId, pendingQuestionGuardRef.current))
+            break
+          }
           case 'restore_input': {
             // Queued messages were removed from chat on abort — restore their text to the input field.
             // Append to existing draft (user may have started typing) rather than overwrite.
@@ -1338,6 +1435,9 @@ export default function App() {
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
       if (event.type === 'session_created') {
+        // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the fetch RPC and
+        // closes after the payload has been applied synchronously.
+        pendingQuestionGuardRef.current.beginSnapshot()
         window.electronAPI.getSessionMessages(sessionId)
           .then((createdSession: Session | null) => {
             if (createdSession) {
@@ -1348,15 +1448,21 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
+              applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
           })
           .catch((error: unknown) => console.error('Failed to handle session_created event:', error))
+          .finally(() => pendingQuestionGuardRef.current.endSnapshot())
         return
       }
 
       if (event.type === 'session_deleted') {
+        // Deletion is a terminal state: the pending question (if any) expires —
+        // clear unconditionally so no stale card survives in any window
+        // (repeated events are idempotent).
+        applyPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId, pendingQuestionGuardRef.current))
         removeSession(sessionId)
         return
       }
@@ -1545,6 +1651,21 @@ export default function App() {
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
     const session = await window.electronAPI.createSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
+    addSession(session)
+    syncSessionOptionsFromSession(session)
+
+    return session
+  }, [addSession, syncSessionOptionsFromSession])
+
+  // Dedicated, trusted creation path for the Edit Popover session: the server
+  // stamps the 'edit-popover' origin + owner identity. The generic
+  // handleCreateSession above can never grant that origin.
+  const handleCreateEditPopoverSession = useCallback(async (
+    workspaceId: string,
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+  ): Promise<Session> => {
+    const session = await window.electronAPI.createEditPopoverSession(workspaceId, options)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
@@ -1836,11 +1957,16 @@ export default function App() {
         lastMessageAt: Date.now()
       }))
 
-      // Step 6: Send to Claude with processed attachments + stored attachments for persistence
+      // Step 6: Send to Claude with processed attachments + stored attachments for persistence.
+      // Desktop interactive turns explicitly declare their invocation source so
+      // request_user_input is registered for this turn (P0 entry-eligibility contract).
+      // The Edit Popover exception is server-side: its session carries the
+      // 'edit-popover' origin recorded at creation — no per-turn marker exists.
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        invocationSource: 'desktop',
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -2094,6 +2220,75 @@ export default function App() {
         return next
       })
     }
+  }, [])
+
+  // Resolve a pending agent question (answer or "skip for now").
+  // Terminal results clear the card; transient_failure rejects so the
+  // QuestionRequest component keeps its state and allows retry.
+  const handleRespondToQuestion = useCallback(async (
+    sessionId: string,
+    resolution: QuestionResolution,
+  ): Promise<QuestionResolutionResult> => {
+    const result = await window.electronAPI.respondToQuestion(sessionId, resolution)
+    // requestId-conditional cleanup: if the agent already fired a follow-up
+    // question (q2) while this resolution (q1) was in flight, the stale
+    // resolution must not delete the newer card.
+    const resolvedRequestId = questionResolutionRequestId(resolution)
+
+    switch (result.status) {
+      case 'accepted':
+      case 'cancelled':
+      case 'already_answered':
+        applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
+        break
+      case 'stale':
+      case 'session_missing':
+        // One-time readable notice, then drop the stale card
+        toast.error(i18n.t('toast.questionNoLongerActive'), { duration: 5000 })
+        applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
+        break
+      case 'transient_failure':
+        throw new Error(result.message)
+    }
+
+    return result
+  }, [])
+
+  // Locate the Edit Popover session that still owns an active pending
+  // question for the given workspace + popover owner and seed it into the
+  // shared pendingQuestions map. The popover's hidden session is not reachable
+  // through the session list, so a reopen / renderer reload / app restart
+  // would otherwise orphan the persisted request. The server derives the
+  // association from the session's 'edit-popover' origin + the authoritative
+  // pendingQuestion + an exact workspace/owner match, so it clears exactly
+  // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
+  // deleted) and can never cross workspaces or popover owners.
+  const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<EditPopoverRestoreOutcome> => {
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the lookup RPC and
+    // closes after the seed has been applied synchronously — terminal markers
+    // are pinned for the whole in-flight window (an RPC rejection absorbs as
+    // transient; retry ownership (bounded loop) lives in
+    // useEditPopoverSessionRestore).
+    let outcome: EditPopoverRestoreOutcome = { outcome: 'transient' }
+    await applySnapshotUnderGuard(
+      pendingQuestionGuardRef.current,
+      () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
+      result => {
+        if (!result) {
+          outcome = { outcome: 'empty' }
+          return
+        }
+        // Seed the authoritative request through the SNAPSHOT path (fill-only
+        // + terminal guard) — the same ordering rules as a session fetch: a
+        // realtime card that arrived while the RPC was in flight is never
+        // overwritten, and a terminal (resolved/superseded) requestId is
+        // never re-seeded. usePendingQuestion(inlineSessionId) resolves and
+        // every existing event-driven cleanup keeps working.
+        applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, { id: result.sessionId, pendingQuestion: result.request }, pendingQuestionGuardRef.current))
+        outcome = { outcome: 'found', sessionId: result.sessionId }
+      },
+    )
+    return outcome
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to
@@ -2369,12 +2564,14 @@ export default function App() {
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
+    pendingQuestions,
     getDraft,
     getDraftAttachmentRefs,
     hydrateDraftAttachments,
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
+    onCreateEditPopoverSession: handleCreateEditPopoverSession,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
@@ -2388,6 +2585,8 @@ export default function App() {
     onDeleteSession: handleDeleteSession,
     onRespondToPermission: handleRespondToPermission,
     onRespondToCredential: handleRespondToCredential,
+    onRespondToQuestion: handleRespondToQuestion,
+    onGetEditPopoverPendingQuestion: handleGetEditPopoverPendingQuestion,
     // File/URL handlers
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
@@ -2418,11 +2617,13 @@ export default function App() {
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
+    pendingQuestions,
     getDraft,
     getDraftAttachmentRefs,
     hydrateDraftAttachments,
     sessionOptions,
     handleCreateSession,
+    handleCreateEditPopoverSession,
     handleSendMessage,
     handleRenameSession,
     handleFlagSession,
@@ -2436,6 +2637,8 @@ export default function App() {
     handleDeleteSession,
     handleRespondToPermission,
     handleRespondToCredential,
+    handleRespondToQuestion,
+    handleGetEditPopoverPendingQuestion,
     handleOpenFile,
     handleOpenUrl,
     handleSelectWorkspace,

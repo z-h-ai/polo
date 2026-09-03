@@ -90,6 +90,7 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type PendingAgentResume,
   pickSessionFields,
   WorkspaceSessionStorage,
   type SessionStorage,
@@ -103,7 +104,7 @@ import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@polo-ai/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
 import { loadAllSkills, invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
@@ -188,6 +189,13 @@ export const AGENT_FLAGS = {
   /** Default modes enabled for new sessions */
   defaultModesEnabled: true,
 } as const
+
+/**
+ * Bounded wait for a reserved chat start (see chatStartReservation). A turn
+ * that set the reservation reaches its query within this budget; the delete
+ * declaration must not run its abort-less cleanup before that.
+ */
+const CHAT_START_RESERVATION_WAIT_MS = 15_000
 
 const MAX_ADMIN_REMEMBER_MINUTES = 60
 const MAX_ANNOTATIONS_PER_MESSAGE = 200
@@ -802,7 +810,14 @@ type AgentInstance = AgentBackend
 
 interface ManagedSession {
   id: string
-  origin?: 'cli-run' | 'cli-exec'
+  /** Host experience that owns this session (e.g. 'edit-popover' Edit Popover sessions). */
+  origin?: import('@polo-ai/shared/protocol').SessionOrigin
+  /**
+   * Stable Edit Popover owner identity (renderer-generated fixed-length
+   * editor-identity hash). Scoped pending-question recovery matches on it —
+   * never on a global newest-wins scan.
+   */
+  popoverOwner?: string
   workspace: Workspace
   /** Immutable ProductSpace binding assigned at creation time. */
   productSpaceId?: string
@@ -927,6 +942,58 @@ interface ManagedSession {
   // Pending auth request tracking (for unified auth flow)
   pendingAuthRequestId?: string
   pendingAuthRequest?: AuthRequest
+  // Authoritative pending agent question (request_user_input).
+  // Persisted via SESSION_PERSISTENT_FIELDS; survives restarts.
+  pendingQuestion?: QuestionRequest
+  // Recoverable "answer committed, waiting for agent resume" state —
+  // retried without duplicating the user message; cleared on success,
+  // supersede (new user message), stop, or delete.
+  pendingAgentResume?: PendingAgentResume
+  // Scheduled retry handle for pendingAgentResume — owned by the session so
+  // delete/stop can cancel it (a stale closure must never fire events or
+  // restart turns for a removed session).
+  resumeRetryTimer?: ReturnType<typeof setTimeout>
+
+  /**
+   * IRREVOCABLE CHAT-START RESERVATION (embedded turns): created in the SAME
+   * locked critical section as the chat-start identity gate; its `started`
+   * promise resolves once agent.chat() has been entered (the turn is
+   * genuinely abortable). A delete declaration that lands while this is set
+   * AWITS the promise (bounded) — declaring before the query exists would
+   * strand a ghost turn the cleanup cannot abort.
+   */
+  chatStartReservation?: { generation: number; started: Promise<void>; resolveStarted: () => void }
+  // Invocation source of the most recent turn ('desktop' enables
+  // request_user_input; defaults to 'internal' — fail closed).
+  invocationSource?: InvocationSource
+  /**
+   * Invocation source bound to the CURRENT processing generation. Set only when a new turn actually starts — queued or
+   * steered messages never touch it, so a mid-flight desktop turn keeps its
+   * request_user_input capability even when messaging/automation messages
+   * are queued behind it. handleQuestionRequested reads THIS, never the
+   * last-send session field.
+   */
+   activeTurnSource?: InvocationSource
+  /**
+   * Question-lifecycle TOMBSTONE. Set AFTER a
+   * durable stop/archive clear of the pending question; cleared when a NEW
+   * turn starts (generation bump). A late onQuestionRequested callback from
+   * an aborted/stopped agent must find this tombstone and be REJECTED —
+   * a terminated lifecycle can never resurrect an active question or
+   * re-broadcast question_request. In-memory by design: a stale callback can
+   * only originate from a live agent object in this process; after a restart
+   * hydration re-derives authority from the (cleared) persisted state.
+   */
+   questionLifecycleTombstone?: { reason: 'stopped' | 'archived' | 'deleted'; at: number }
+   /**
+   * Synchronous turn-start reservation. Set at
+   * sendMessage entry — BEFORE any await — by the caller that claimed the
+   * next processing generation; cleared when the turn actually starts
+   * (setProcessing(true)) or when the reserved turn aborts before starting.
+   * Callers arriving while a reservation is held must take the steer/queue
+   * branch with their own options instead of claiming a second turn.
+   */
+  turnStartReserved?: boolean
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
@@ -1036,9 +1103,37 @@ export function claimAutoRetryPending(
 }
 
 /**
- * Create a ManagedSession from any session-like source (SessionMetadata, SessionConfig, StoredSession).
- * Spreads all matching fields from the source so new persistent fields automatically propagate.
- * Runtime-only fields get sensible defaults.
+ * Per-turn eligibility for the request_user_input tool (fail-closed matrix).
+ *
+ * The Edit Popover exception (adjudicated product decision)
+ * is bound to a SERVER-VERIFIABLE session origin, not a per-turn marker:
+ * - Non-desktop invocation sources (messaging / automation / headless /
+ *   internal) NEVER get the tool.
+ * - Ordinary desktop turns get it unless the session is hidden or mini.
+ * - ONLY a session created with the trusted `edit-popover` origin, hidden AND
+ *   mini, on a desktop turn gets the tool. The origin is recorded at session
+ *   creation, persisted with the session, and cannot be granted retroactively
+ *   through the generic send API — a hidden non-mini or visible mini session
+ *   with the origin stays closed, and every other hidden/mini turn fails shut.
+ */
+export function computeRequestUserInputEligibility(
+  invocationSource: InvocationSource | undefined,
+  hidden: boolean | undefined,
+  isMini: boolean | undefined,
+  origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
+): boolean {
+  if (invocationSource !== 'desktop') return false
+  if (origin === 'edit-popover') {
+    return hidden === true && isMini === true
+  }
+  return !hidden && !isMini
+}
+
+/**
+ * Create a ManagedSession for a workspace. `source` can be a StoredSession,
+ * SessionMetadata, or a partial record; it spreads all matching fields from
+ * the source so new persistent fields automatically propagate. Runtime-only
+ * fields get sensible defaults.
  */
 export function createManagedSession(
   source: { id: string } & Partial<ManagedSession>,
@@ -1137,6 +1232,9 @@ function managedToSession(
     tokenUsage: m.tokenUsage,
     messageCount: m.messageCount,
     lastFinalMessageId: m.lastFinalMessageId,
+    // Pending question badge + payload (hydrates renderer after restart/switch)
+    hasPendingQuestion: !!m.pendingQuestion,
+    pendingQuestionRequestId: m.pendingQuestion?.requestId,
     // Runtime-only fields
     workspaceId: m.workspace.id,
     workspaceName: m.workspace.name,
@@ -1384,7 +1482,10 @@ export class SessionManager implements ISessionManager {
       labels: request.labels ?? managed.labels,
       workingDirectory: request.workingDirectory,
       hidden: managed.hidden,
-      origin: managed.origin,
+      // Spawned sessions NEVER inherit the Edit Popover grant — the
+      // origin is scoped to the exact popover session that earned it
+      // (fail closed).
+      origin: managed.origin === 'edit-popover' ? undefined : managed.origin,
     })
 
     // Build FileAttachment[] from paths (if any)
@@ -1613,6 +1714,18 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  /**
+   * Question-state serialization: ONE tail-linked per-session lock chains
+   * every pendingQuestion transition — tool-requested replacements
+   * (handleQuestionRequested), answer/cancel commits (respondToQuestion) and
+   * lifecycle clears (stop/archive). Because the ENTIRE durable resolution
+   * commit (memory mutation + persist + flush + rollback) runs inside this
+   * lock, concurrent resolutions of the same requestId serialize: the loser
+   * reads fully-committed or fully-rolled-back state and derives
+   * already_answered / gets a real retry — never a fake outcome from
+   * rollback-able in-memory state.
+   */
+  private questionStateLocks: Map<string, Promise<unknown>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -2415,11 +2528,11 @@ export class SessionManager implements ISessionManager {
    * `loadStoredSession` is synchronous (sync fs reads), so the entire path
    * stays sync — no microtask race window between the load and the enqueue.
    */
-  private persistSession(managed: ManagedSession): void {
+  private persistSession(managed: ManagedSession, stagedOverrides?: Partial<StoredSession>): void {
     if (!managed.messagesLoaded) {
       this.hydrateMessagesForColdPersist(managed)
     }
-    this.enqueuePersist(managed)
+    this.enqueuePersist(managed, stagedOverrides)
   }
 
   // Cold-persist hydration. Mirrors the messages/queue-recovery half of
@@ -2473,7 +2586,14 @@ export class SessionManager implements ISessionManager {
 
   // Build the StoredSession snapshot and hand it to the persistence queue.
   // Caller must ensure `managed.messagesLoaded` is true.
-  private enqueuePersist(managed: ManagedSession): void {
+  //
+  // `stagedOverrides` lets a caller enqueue a
+  // snapshot that differs from live memory — e.g. a lifecycle clear commits
+  // `pendingQuestion: undefined` to disk BEFORE publishing the cleared state
+  // to memory. The override applies to the enqueued snapshot only; the
+  // derived header fields (hasPendingQuestion / pendingQuestionRequestId)
+  // are recomputed from it at write time.
+  private enqueuePersist(managed: ManagedSession, stagedOverrides?: Partial<StoredSession>): void {
     try {
       // Filter out transient status messages (progress indicators like "Compacting...")
       // Error messages are now persisted with rich fields for diagnostics
@@ -2488,6 +2608,7 @@ export class SessionManager implements ISessionManager {
         lastUsedAt: Date.now(),
         messages: persistableMessages.map(messageToStored),
         tokenUsage: managed.tokenUsage ?? DEFAULT_TOKEN_USAGE,
+        ...stagedOverrides,
       } as StoredSession
 
       // Queue for async persistence with debouncing
@@ -2936,6 +3057,40 @@ export class SessionManager implements ISessionManager {
       // Sync transferred session summary state from disk
       managed.transferredSessionSummary = storedSession.transferredSessionSummary
       managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
+      // Restore the authoritative pending question (survives restarts).
+      // A stale request that was resolved while the server was down is pruned:
+      // if a resolution record already exists on disk, the pending copy is dropped.
+      if (storedSession.pendingQuestion) {
+        if (this.hasPersistedQuestionResolution(managed, storedSession.pendingQuestion.requestId)) {
+          sessionLog.info(`Pruning resolved pending question ${storedSession.pendingQuestion.requestId} for session ${managed.id}`)
+          managed.pendingQuestion = undefined
+        } else {
+          managed.pendingQuestion = storedSession.pendingQuestion
+        }
+      } else {
+        managed.pendingQuestion = undefined
+      }
+      // Re-arm a recoverable answer→resume that never completed (crash/failure).
+      // The retry reuses the persisted answer message — no duplicate user turn.
+      // A TERMINAL completed record only clears durably — it must never
+      // re-execute an already-completed answer turn.
+      if (storedSession.pendingAgentResume) {
+        if (storedSession.pendingAgentResume.completed) {
+          managed.pendingAgentResume = storedSession.pendingAgentResume
+          sessionLog.info(`Restoring TERMINAL pendingAgentResume for session ${managed.id} — clearing without resuming`)
+          setImmediate(() => {
+            void this.resumePendingAgentTurn(managed)
+          })
+        } else {
+          managed.pendingAgentResume = storedSession.pendingAgentResume
+          sessionLog.info(`Restoring pendingAgentResume for session ${managed.id} (message ${storedSession.pendingAgentResume.messageId}, attempts ${storedSession.pendingAgentResume.attempts})`)
+          setImmediate(() => {
+            void this.resumePendingAgentTurn(managed)
+          })
+        }
+      } else {
+        managed.pendingAgentResume = undefined
+      }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
       // Queue recovery: find orphaned queued messages from crash/restart and re-queue them
@@ -2999,6 +3154,16 @@ export class SessionManager implements ISessionManager {
     // the session is persisted and published ONLY while that exact
     // account/ProductSpace/fence state is still current.
     const publicationToken = trustedScope ? captureTrustedPublicationToken() : null
+
+    // Fail closed: the generic creation path can
+    // NEVER grant the Edit Popover origin. The type system already excludes
+    // it, but the RPC boundary is untyped JSON — a forged value must be
+    // stripped before anything is persisted. Only createEditPopoverSession
+    // stamps the origin server-side.
+    if (options && (options.origin as import('@polo-ai/shared/protocol').SessionOrigin | undefined) === 'edit-popover') {
+      sessionLog.warn(`Stripped forged 'edit-popover' origin from a generic createSession call for workspace ${workspaceId}`)
+      options = { ...options, origin: undefined }
+    }
 
     // Get new session defaults from workspace config (with global fallback)
     // Options.permissionMode overrides the workspace default (used by EditPopover for auto-execute)
@@ -3327,6 +3492,9 @@ export class SessionManager implements ISessionManager {
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
       origin: options?.origin,
+      // Persisted so a restart re-derives the mini-agent identity (the
+      // request_user_input eligibility matrix re-checks isMini from it).
+      systemPromptPreset: options?.systemPromptPreset,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
@@ -3428,7 +3596,6 @@ export class SessionManager implements ISessionManager {
       branchSeedApplied: validatedBranch ? validatedBranch.branchContextStrategy === 'sdk-fork' : undefined,
       messagesLoaded: !isBranch,  // Branched sessions: lazy-load messages from JSONL
     })
-
     // Eagerly load messages for branched sessions so the renderer gets the full
     // conversation immediately (needed for scroll-to-bottom on panel open)
     if (isBranch) {
@@ -3550,6 +3717,76 @@ export class SessionManager implements ISessionManager {
       this.sessionStorage,
       isBranch ? { messages: managed.messages } : undefined,
     )
+  }
+
+  /**
+   * Dedicated, trusted creation path for the renderer Edit Popover session.
+   *
+   * The generic sessions:CREATE RPC can never grant the 'edit-popover' origin
+   * — the caller-asserted value is stripped by createSession. THIS method is
+   * the only place the origin is stamped, server-side, together with the
+   * stable popover owner identity that scopes pending-question recovery.
+   * Both are persisted immediately so restart hydration keeps the capability
+   * and the recovery scope.
+   */
+  async createEditPopoverSession(
+    workspaceId: string,
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+  ): Promise<Session> {
+    // Fail closed: the owner is a REQUIRED,
+    // server-validated non-empty stable identity. A missing/blank owner
+    // rejects the creation outright — the session must never exist in a
+    // state where the privileged origin is granted but the scoped recovery
+    // identity is missing. The renderer sends a fixed-length hash id
+    // (editor-identity), but the bound accepts any legal identity up to the
+    // platform path range — no arbitrary truncation.
+    const popoverOwner = typeof options?.popoverOwner === 'string' ? options.popoverOwner.trim() : ''
+    if (!popoverOwner || popoverOwner.length > 4096) {
+      throw new Error('createEditPopoverSession requires a non-empty popoverOwner (max 4096 chars)')
+    }
+    // Never trust a caller-provided origin routing — destructured off and
+    // replaced by the server-side stamp below.
+    const { popoverOwner: _ignored, ...createOptions } = options
+    const session = await this.createSession(workspaceId, createOptions)
+    const managed = this.sessions.get(session.id)
+    if (!managed) {
+      // createSession always registers the managed session; this is pure
+      // defense in depth.
+      return session
+    }
+    // Stamp server-side, then make it durable. ONLY a successful persist+flush
+    // leaves the session privileged: a transient disk failure must never hand
+    // the renderer a "created" session that silently lacks its eligibility —
+    // such a session loses request_user_input on desktop turns and stays
+    // invisible to owner-scoped recovery forever. The just-created hidden
+    // orphan is torn down (runtime + memory + disk, best-effort) and the RPC
+    // REJECTS as transient so the restore/send entry can retry cleanly
+    //.
+    managed.origin = 'edit-popover'
+    managed.popoverOwner = popoverOwner
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; removing the orphan session:`, error)
+      await rollbackFailedBranchCreation({
+        managed,
+        workspaceRootPath: managed.workspace.rootPath,
+        sessionId: managed.id,
+        deleteFromRuntimeSessions: (orphanId) => {
+          const orphan = this.sessions.get(orphanId)
+          if (orphan?.autoRetryTimer) {
+            clearTimeout(orphan.autoRetryTimer)
+            orphan.autoRetryTimer = undefined
+          }
+          if (orphan) orphan.autoRetryPending = undefined
+          this.sessions.delete(orphanId)
+        },
+        deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
+      })
+      throw new Error(`Edit Popover session creation is temporarily unavailable (durable origin stamp failed): ${error instanceof Error ? error.message : String(error)}`)
+    }
+    return managedToSession(managed, this.sessionStorage)
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
@@ -4703,6 +4940,28 @@ export class SessionManager implements ISessionManager {
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
       })
 
+      // Wire up onQuestionRequested: persist the pending question, notify renderers,
+      // then handoff so the agent turn stops while the user answers.
+      // The returned promise is AWAITED by the tool handler — the request_user_input
+      // tool only reports "waiting" success once the durable handoff completed;
+      // a rejection surfaces to the model as a tool error instead.
+      // GENERATION BINDING: the generation is
+      // snapshotted by the AGENT at tool-call time (setSessionTurnGeneration,
+      // stamped at every turn start) and carried through the callback — the
+      // locked commit validates that closure snapshot, never the CURRENT
+      // generation at late execution time.
+      managed.agent.setSessionTurnGeneration(managed.processingGeneration)
+      // AGENT TOOL-SET WIRING: the embedded engine's request_user_input tool
+      // call reaches the durable handoff DIRECTLY through the agent's
+      // onQuestionRequested field — one owner/channel per engine.
+      // R38-2: registered through the authoritative guard inventory — an
+      // out-of-scope (stale/replaced/split-fence/in-transition) caller
+      // fails closed and the rejection surfaces to the model as a tool
+      // error instead of a dangling handoff.
+      managed.agent.onQuestionRequested = this.guardManagedCallback(managed, 'agent.onQuestionRequested', (questions, generationAtRequest) =>
+        this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
+      )
+
       // Wire up onSpawnSession to create independent sessions from agent tool calls.
       // R37-2: the handler delegates to ONE guarded private implementation so
       // the callback inventory test can exercise it like every other callback.
@@ -4874,16 +5133,84 @@ export class SessionManager implements ISessionManager {
 
   async archiveSession(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (managed) {
+    if (!managed) return
+
+    // LIFECYCLE-ATOMIC archive: the archive
+    // flags, the pending-question clear and the answer→resume clear commit as
+    // ONE staged snapshot in ONE flush on the session's question-state lock.
+    // The clear is no longer a separate committed phase: a first-phase
+    // success + second-phase failure could previously broadcast
+    // question_resolved(cancel) and then roll the archive back — losing an
+    // ACTIVE question on a FAILED archive. Now any flush failure rolls back
+    // the whole lifecycle snapshot with ZERO broadcasts, and the terminal
+    // events fire only after the unified commit is durable.
+    //
+    // The lifecycle snapshot is taken INSIDE the lock: while the archive waits for the lock, an answer/cancel/new
+    // question can legitimately change the state — rollback must only ever
+    // restore lock-observed values, never values captured in a stale
+    // pre-lock world (the old out-of-lock read could clobber a freshly
+    // restored pending or resurrect a dead resume on the failure path, and
+    // broadcast a cancel for the WRONG requestId on the success path).
+    await this.withQuestionStateLock(sessionId, async () => {
+      const prevIsArchived = managed.isArchived
+      const prevArchivedAt = managed.archivedAt
+      const pendingAtStart = managed.pendingQuestion
+      const prevPendingAgentResume = managed.pendingAgentResume
+
       managed.isArchived = true
       managed.archivedAt = Date.now()
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
+      // The answer→resume retry dies with the archive (same single commit).
+      if (managed.resumeRetryTimer) {
+        clearTimeout(managed.resumeRetryTimer)
+        managed.resumeRetryTimer = undefined
+      }
+      managed.pendingAgentResume = undefined
+      try {
+        // ONE staged commit: archived flags + no pending question + no resume.
+        // Live memory keeps the pending question visible until this flush
+        // succeeds.
+        this.persistSession(managed, { pendingQuestion: undefined })
+        await this.flushSession(managed.id)
+      } catch (error) {
+        // Roll back the WHOLE lifecycle snapshot. The pending question was
+        // never mutated (staged) and nothing was broadcast.
+        managed.isArchived = prevIsArchived
+        managed.archivedAt = prevArchivedAt
+        managed.pendingAgentResume = prevPendingAgentResume
+        if (prevPendingAgentResume) {
+          // The pre-archive retry timer was cancelled above — re-arm so the
+          // restored recovery still fires.
+          this.scheduleResumeRetry(managed, 1000)
+        }
+        // Best-effort re-persist so the queue matches the rolled-back memory.
+        try {
+          this.persistSession(managed)
+          void this.flushSession(managed.id).catch(requeueError => {
+            sessionLog.error(`Failed to re-persist rolled-back archive state for session ${sessionId}:`, requeueError)
+          })
+        } catch (requeueError) {
+          sessionLog.error(`Failed to re-persist rolled-back archive state for session ${sessionId}:`, requeueError)
+        }
+        throw error
+      }
+      // Durable: publish the memory terminal state and broadcast ONCE.
+      managed.pendingQuestion = undefined
+      if (pendingAtStart) {
+        this.sendEvent({
+          type: 'question_resolved',
+          sessionId,
+          requestId: pendingAtStart.requestId,
+          action: 'cancel',
+        }, managed.workspace.id)
+      }
+      // Lifecycle TOMBSTONE: late question
+      // callbacks of the archived session's turn are rejected; a NEW turn
+      // clears it at the generation bump.
+      managed.questionLifecycleTombstone = { reason: 'archived', at: Date.now() }
       // Notify all windows for this workspace
       this.sendEvent({ type: 'session_archived', sessionId }, managed.workspace.id)
       this.emitUnreadSummaryChanged()
-    }
+    })
   }
 
   async unarchiveSession(sessionId: string): Promise<void> {
@@ -5897,6 +6224,69 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    // DELETION DECLARATION — inside the question-state lock: the tombstone
+    // write AND the availability-removal visibility point form the
+    // linearization point of the deletion. This makes "the sendMessage owner
+    // transaction" and "the deletion" mutually exclusive by construction:
+    // - declaration first → every send observes the removal (identity
+    //   re-validation under this same lock) and aborts with session_missing;
+    // - sendMessage transaction first → the delete waits for the lock, then
+    //   declares and tears the (already running) turn down in its cleanup.
+    // No out-of-lock marker write can interleave a visible intermediate state
+    // anymore. The declaration is the lock's ONLY critical content; the
+    // remaining cleanup runs AFTER it (never before).
+    await this.withQuestionStateLock(sessionId, async () => this.declareSessionDeletedLocked(managed))
+    await this.cleanupDeletedSession(managed)
+  }
+
+  /**
+   * LOCKED declaration — caller must hold the question-state lock. Marks the
+   * session terminally deleted and removes it from the available-session map
+   * (the visibility point). Every later send / resolution / question request
+   * observes the deletion from this instant on.
+   */
+  private async declareSessionDeletedLocked(managed: ManagedSession): Promise<void> {
+    // IRREVOCABLE CHAT-START RESERVATION: a turn that passed the chat-start
+    // gate is milliseconds from a genuinely abortable query. Declaring now
+    // would run the deletion cleanup's forceAbort BEFORE the query exists —
+    // a ghost turn nothing can abort. Await the reserved chat start
+    // (bounded); the subsequent cleanup then aborts the LIVE turn.
+    const reservation = managed.chatStartReservation
+    if (reservation) {
+      const timeout = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), CHAT_START_RESERVATION_WAIT_MS).unref?.())
+      const outcome = await Promise.race([reservation.started.then(() => 'started' as const), timeout])
+      if (outcome === 'timeout') {
+        sessionLog.error(`Session ${managed.id}: chat-start reservation for generation ${reservation.generation} did not clear within ${CHAT_START_RESERVATION_WAIT_MS}ms — declaring deleted anyway`)
+      } else {
+        sessionLog.info(`Session ${managed.id}: waited for the reserved chat start (generation ${reservation.generation}) before declaring deleted`)
+      }
+    }
+    managed.questionLifecycleTombstone = { reason: 'deleted', at: Date.now() }
+    this.sessions.delete(managed.id)
+    sessionLog.info(`Session ${managed.id} declared deleted (linearization point)`)
+  }
+
+  /**
+   * Post-declaration cleanup — runs AFTER the locked declaration, never
+   * before it. Disarms the remaining runtime state and removes the storage
+   * copy. All question-state gates already reject via the declared tombstone
+   * (and the missing map entry), so no lock is required here.
+   */
+  private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
+    const sessionId = managed.id
+
+    // Immediately disarm any answer→resume retry — synchronously, BEFORE the
+    // abort wait / share-revoke window. The identity guard
+    // (`sessions.get(id) === managed`) no longer holds after the declaration,
+    // so a live timer could start a ghost turn during deletion's external
+    // I/O — disarm it here. The disk copy is removed below, so no flush is
+    // needed.
+    if (managed.resumeRetryTimer) {
+      clearTimeout(managed.resumeRetryTimer)
+      managed.resumeRetryTimer = undefined
+    }
+    managed.pendingAgentResume = undefined
+
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
@@ -5941,6 +6331,10 @@ export class SessionManager implements ISessionManager {
     this.pendingDeltas.delete(sessionId)
     this.clearAdminRememberApprovalsForSession(sessionId)
     this.clearPendingPermissionRequestsForSession(sessionId)
+    // Pending question dies with the session (memory only — disk is about to be removed)
+    managed.pendingQuestion = undefined
+    // (answer→resume retry + timer were disarmed synchronously at the top of
+    // this method — before the abort wait and share-revoke window.)
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
     this.sessionStorage.persistenceQueue.cancel(sessionId)
@@ -5976,7 +6370,8 @@ export class SessionManager implements ISessionManager {
     }
     managed.autoRetryPending = undefined
 
-    this.sessions.delete(sessionId)
+    // (Runtime availability removal — this.sessions.delete — happened in the
+    // LOCKED declaration phase, before this cleanup started.)
 
     // Clean up session metadata in AutomationSystem (prevents memory leak)
     const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -5987,12 +6382,106 @@ export class SessionManager implements ISessionManager {
     // Delete from disk too
     this.sessionStorage.delete(workspaceRootPath, sessionId)
 
-    // Notify all windows for this workspace that the session was deleted
-    this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
+    // Notify all windows for this workspace that the session was deleted.
+    // The record left the map in the locked declaration, so the boundary
+    // fence consults the record's pre-removal immutable scope.
+    this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id, managed.productSpaceId)
     this.emitUnreadSummaryChanged()
 
     // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
     sessionLog.info(`Deleted session ${sessionId}`)
+  }
+
+  /**
+   * The MID-STREAM branch of sendMessage: this message must not start a new
+   * turn, so it is steered into the live turn when possible and otherwise
+   * queued for FIFO replay with its own options. Runs INSIDE the
+   * question-state lock with session identity already re-validated — the
+   * push/persist/flush below must never land on a session whose declaration
+   * already removed it (that would be a ghost queue entry and a persistence
+   * attempt on a deleted session).
+   */
+  private async steerOrQueueMidStreamSend(args: {
+    managed: ManagedSession
+    sessionId: string
+    message: string
+    attachments?: FileAttachment[]
+    storedAttachments?: StoredAttachment[]
+    options?: SendMessageOptions
+    existingMessageId?: string
+    onAck?: (messageId: string) => void
+  }): Promise<void> {
+    const { managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck } = args
+    const connection = resolveSessionConnection(managed.llmConnection, undefined)
+    // Fallback to 'steer' when no connection is resolvable — preserves
+    // today's exact behavior (call redirect, take whatever it returns).
+    const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
+
+    const agent = managed.agent
+    let steered = false
+    if (behavior === 'steer') {
+      steered = agent?.redirect(message) ?? false
+    }
+    // For 'queue': skip redirect entirely. The current turn is undisturbed.
+
+    sessionLog.info('mid-stream send', {
+      sessionId,
+      behavior,
+      steered,
+      queueLengthBefore: managed.messageQueue.length,
+      backend: agent ? agent.constructor.name : 'none',
+      connectionSlug: connection?.slug,
+    })
+
+    // Create user message for UI — or REUSE the already-persisted one
+    // when existingMessageId is provided (the answer→resume path): the
+    // queue branch must never duplicate the single readable answer
+    // message.
+    let userMessage: Message
+    if (existingMessageId) {
+      userMessage = this.requireExistingMessage(managed, existingMessageId)
+    } else {
+      userMessage = {
+        id: generateMessageId(),
+        role: 'user',
+        content: message,
+        timestamp: this.monotonic(),
+        attachments: storedAttachments,
+        badges: options?.badges,
+      }
+      managed.messages.push(userMessage)
+    }
+
+    // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
+    // (covers both queue-direct and queue-after-abort paths).
+    this.sendEvent({
+      type: 'user_message',
+      sessionId,
+      message: userMessage,
+      status: steered ? 'accepted' : 'queued',
+      optimisticMessageId: options?.optimisticMessageId
+    }, managed.workspace.id)
+
+    if (!steered) {
+      // Push for FIFO replay on next onProcessingStopped tick. Same shape
+      // for both queue-direct (current turn still running) and
+      // queue-after-abort (backend already aborted) — the replay path in
+      // processNextQueuedMessage is identical. The interrupted-response
+      // reminder only applies when a turn was actually running or was
+      // aborted — a reservation-queued message (turn not started yet) is
+      // a fresh message, not a continuation.
+      managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
+      if (managed.isProcessing) {
+        managed.wasInterrupted = true
+      }
+    }
+
+    this.persistSession(managed)
+    // Force a synchronous flush so the user message is genuinely on disk
+    // before we tell the renderer "accepted" — `persistSession` only
+    // enqueues with a 500ms debounce. (#616 reliability fix.)
+    await this.flushSession(managed.id)
+    onAck?.(userMessage.id)
   }
 
   async sendMessage(
@@ -6023,29 +6512,51 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    // DELETE TURN-START GATE: the deletion's terminal tombstone is written
+    // in its locked declaration (deleteSession → question-state lock), and
+    // deleteSession reads it synchronously at entry — a send that arrives
+    // during the deletion window must never start a new turn — the
+    // turn-start boundary below would bump the generation and CLEAR the
+    // tombstone, resurrecting a deleted session's question lifecycle.
+    // CONVERGES SILENTLY: nothing was persisted or reserved yet, the
+    // session_deleted event informs the UI, and an expected-cancellation
+    // error must not surface to the caller.
+    if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+      sessionLog.info(`sendMessage: session ${sessionId} is being deleted — the send converges silently (nothing persisted)`)
+      return
+    }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // Every entry that can push a session into processing must have the
     // session's immutable execution scope registered — including restored
-    // (cold) sessions on their first send. The trusted account is resolved
-    // BEFORE the switch lock (GLOBAL LOCK ORDER: the Admin session lock must
-    // never be acquired while holding the switch lock — account replacement
-    // holds the Admin lock while revoking the fence through the switch
-    // lock), and the short critical section re-verifies fence, switch state
-    // and the lock-free trusted-account mirror/generation: an offline
-    // read-only view, an in-flight switch, a concurrent account replacement
-    // or a registration failure refuses the send instead of leaving an
-    // unregistered execution. Sessions created before the ProductSpace
-    // contract (never bound, e.g. CLI runtimes) carry no space semantics and
-    // keep their legacy behavior. The returned start reservation keeps the
-    // execution active for account cleanup through the whole bootstrap and
-    // gates the atomic transition to processing below. From successful
-    // acquisition until the transition (or an owned release) the whole
-    // lifecycle is exception-safe (R31-4): every pre-confirm throw cancels
-    // THIS send's reservation and unregisters only its owned execution.
+    // (cold) sessions on their first send. In the merged turn-start
+    // reservation model, that is exactly the caller that CLAIMS the turn
+    // start (below): a follower that will steer or queue never transitions
+    // to processing and therefore never registers — registering it anyway
+    // would supersede the owner's live reservation (R31-3 ownership CAS)
+    // and fail the owner's later confirm. The trusted account is resolved
+    // BEFORE the question-state lock (GLOBAL LOCK ORDER: the Admin session
+    // lock must never be acquired while holding the switch lock — account
+    // replacement holds the Admin lock while revoking the fence through the
+    // switch lock), and the short critical section re-verifies fence,
+    // switch state and the lock-free trusted-account mirror/generation: an
+    // offline read-only view, an in-flight switch, a concurrent account
+    // replacement or a registration failure refuses the send instead of
+    // leaving an unregistered execution. Sessions created before the
+    // ProductSpace contract (never bound, e.g. CLI runtimes) carry no space
+    // semantics and keep their legacy behavior. The returned start
+    // reservation keeps the execution active for account cleanup through
+    // the whole bootstrap and gates the atomic transition to processing in
+    // the locked commit. From successful acquisition until the transition
+    // (or an owned release) the whole lifecycle is exception-safe (R31-4):
+    // every pre-confirm throw cancels THIS send's reservation and
+    // unregisters only its owned execution. A follower that claims a
+    // freshly freed reservation IN-LOCK registers there (see the locked
+    // section) before it may confirm.
     let startReservation: AssistantStartReservation | null = null
     let ownedStartVersion: number | null = null
-    if (managed.productSpaceId) {
+    const registerOwnedStart = async (): Promise<void> => {
+      if (!managed.productSpaceId || startReservation) return
       startReservation = await registerAssistantExecutionForSend({
         sessionManager: this,
         sessionId,
@@ -6061,233 +6572,350 @@ export class SessionManager implements ISessionManager {
         startReservation = null
       }
     }
-    try {
 
-    // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
-    // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
-    // duplicate that arrives from a legacy renderer still running the client-side
-    // auto_retry. The first matching caller wins (server timer or legacy RPC,
-    // whichever arrives first), subsequent matching calls within the deadline drop.
-    if (claimAutoRetryPending(managed, message) === 'drop') {
-      sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
-      releaseOwnedStart()
-      return
-    }
+    // NOTE: the pending answer→resume supersede is
+    // NOT performed here. Firing it at entry — before the replacement message
+    // is durable — permanently destroys the recovery when this send later
+    // fails pre-start (pending-plan cleanup, lazy load, flush): the answer
+    // turn would never run AND its recovery would be gone. The supersede is
+    // applied right AFTER the replacement message is durably persisted (see
+    // the user-message flush below), where it is semantically correct: the
+    // answer content is already part of history and a resume retry would
+    // double-start the turn.
 
-    // Clear any pending plan execution state when a new user message is sent.
-    // This acts as a safety valve - if the user moves on, we don't want to
-    // auto-execute an old plan later.
-    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
-
-    // Ensure messages are loaded before we try to add new ones
-    await this.ensureMessagesLoaded(managed)
-
-    // If currently processing, behavior depends on the connection's
-    // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior},
-    // defaults to provider-appropriate value):
+    // Per-turn invocation source: only desktop interactive turns expose
+    // request_user_input; every other source (and the implicit default)
+    // fails closed. Hidden/mini sessions never ask questions — except the
+    // Edit Popover's own session (adjudicated exception), which carries the
+    // server-verified 'edit-popover' origin recorded at creation.
     //
-    // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
-    //   Claude emulates via PreToolUse hook. If `redirect()` returns false
-    //   (Claude with no live query, or backend can't steer), the backend has
-    //   already called forceAbort(Redirect) and we queue for replay.
-    // - 'queue': hold the message untouched; the current turn keeps running
-    //   to natural completion; replay as a new turn afterwards. NO call to
-    //   `agent.redirect()`, NO forceAbort, NO interruption.
-    if (managed.isProcessing) {
-      const connection = resolveSessionConnection(managed.llmConnection, undefined)
-      // Fallback to 'steer' when no connection is resolvable — preserves
-      // today's exact behavior (call redirect, take whatever it returns).
-      const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
-
-      const agent = managed.agent
-      let steered = false
-      if (behavior === 'steer') {
-        steered = agent?.redirect(message) ?? false
-      }
-      // For 'queue': skip redirect entirely. The current turn is undisturbed.
-
-      sessionLog.info('mid-stream send', {
-        sessionId,
-        behavior,
-        steered,
-        queueLengthBefore: managed.messageQueue.length,
-        backend: agent ? agent.constructor.name : 'none',
-        connectionSlug: connection?.slug,
-      })
-
-      // Create user message for UI
-      const userMessage: Message = {
-        id: generateMessageId(),
-        role: 'user',
-        content: message,
-        timestamp: this.monotonic(),
-        attachments: storedAttachments,
-        badges: options?.badges,
-      }
-      managed.messages.push(userMessage)
-
-      // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
-      // (covers both queue-direct and queue-after-abort paths).
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: steered ? 'accepted' : 'queued',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
-
-      if (!steered) {
-        // Push for FIFO replay on next onProcessingStopped tick. Same shape
-        // for both queue-direct (current turn still running) and
-        // queue-after-abort (backend already aborted) — the replay path in
-        // processNextQueuedMessage is identical.
-        managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-        managed.wasInterrupted = true
-      }
-
-      this.persistSession(managed)
-      // Force a synchronous flush so the user message is genuinely on disk
-      // before we tell the renderer "accepted" — `persistSession` only
-      // enqueues with a 500ms debounce. (#616 reliability fix.)
-      await this.flushSession(managed.id)
-      onAck?.(userMessage.id)
-      // This send ends here (queued for replay); the steered path continues
-      // into the in-flight turn owned by the earlier send.
-      releaseOwnedStart()
-      return
+    // SYNCHRONOUS turn-start reservation: the
+    // claim of the next processing generation AND the binding of its source
+    // happen BEFORE any await. Two concurrent senders can otherwise both see
+    // isProcessing=false across the pre-processing awaits and both take the
+    // new-turn path — the second overwriting the first's activeTurnSource.
+    // A caller that arrives while a reservation is held takes the steer/queue
+    // branch below and keeps its own options for its own future turn.
+    const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
+    const claimedAtEntry = !managed.isProcessing && !managed.turnStartReserved
+    let turnStarted = false
+    // `holdsReservation` may grow past the entry claim: a caller that WAITED
+    // on the question-state lock re-evaluates in-lock (see below) and can
+    // claim a freshly freed reservation there.
+    let holdsReservation = claimedAtEntry
+    if (claimedAtEntry) {
+      managed.turnStartReserved = true
+      this.applyTurnInvocationSource(managed, invocationSource)
+      // NOTE: the owner's execution registration runs INSIDE the locked
+      // section (see the owner path below), not here: awaiting it between
+      // the claim and the lock would open a window where an answer/another
+      // sender jumps the lock queue and breaks the claim's serialization
+      // guarantees. Entering the lock queue first preserves POO-53's
+      // linearization semantics; registering before the in-lock confirm
+      // preserves the ProductSpace fence.
     }
 
-    // Add user message with stored attachments for persistence
-    // Skip if existingMessageId is provided (message was already created when queued)
-    let userMessage: Message
-    if (existingMessageId) {
-      // Find existing message (already added when queued)
-      userMessage = managed.messages.find(m => m.id === existingMessageId)!
-      if (!userMessage) {
-        throw new Error(`Existing message ${existingMessageId} not found`)
-      }
-    } else {
-      // Create new message
-      userMessage = {
-        id: generateMessageId(),
-        role: 'user',
-        content: message,
-        timestamp: this.monotonic(),
-        attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
-        badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
-      }
-      managed.messages.push(userMessage)
+    // Single cleanup boundary: EVERYTHING between the synchronous claim and the actual
+    // setProcessing(true) is inside this try — so a pre-start failure can
+    // never strand a phantom reservation (followers would queue forever
+    // behind a turn that never starts).
+    //
+    // ONE LOCK-HELD LINEARIZATION SECTION: session identity, the pending-plan
+    // clear, the lazy message load, the mid-stream branch's queue/persist
+    // side effects and the turn-start commit all run under the question-state
+    // lock. Identity is validated FIRST — before any await or storage side
+    // effect — so a delete whose declaration won the race converges with zero
+    // persistence attempts, zero events and zero ghost turns (the declaration
+    // atomically removes the map entry). The lock also serializes every side
+    // effect below against the delete's own locked cleanup, so nothing can
+    // interleave a declaration between the identity check and the commit.
+    try {
+      let droppedDuplicateRetry = false
+      let queuedMidStream = false
+      let turnAbandonedBeforeCommit = false
+      await this.withQuestionStateLock(sessionId, async () => {
+        if (this.sessions.get(sessionId) !== managed) {
+          // The delete/replace declaration won the linearization race.
+          // CONVERGES SILENTLY: no persistence side effect happened, the
+          // reservation is released by the finally below, and the
+          // session_deleted event informs the UI — an expected-cancellation
+          // error must not surface to the caller.
+          turnAbandonedBeforeCommit = true
+          return
+        }
 
-      // Update lastMessageRole for badge display
-      managed.lastMessageRole = 'user'
+        // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
+        // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
+        // duplicate that arrives from a legacy renderer still running the client-side
+        // auto_retry. The first matching caller wins (server timer or legacy RPC,
+        // whichever arrives first), subsequent matching calls within the deadline drop.
+        if (claimAutoRetryPending(managed, message) === 'drop') {
+          droppedDuplicateRetry = true
+          return
+        }
 
-      // Persist + flush before announcing — the user message must be
-      // genuinely on disk before we tell the renderer "accepted", and
-      // `persistSession` is debounced (500ms). #616.
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      onAck?.(userMessage.id)
+        // Clear any pending plan execution state when a new user message is sent.
+        // This acts as a safety valve - if the user moves on, we don't want to
+        // auto-execute an old plan later.
+        await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
 
-      // Emit user_message event so UI can confirm the optimistic message
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: 'accepted',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
+        // Ensure messages are loaded before we try to add new ones
+        await this.ensureMessagesLoaded(managed)
 
-      // If this is the first user message and no title exists, set one immediately
-      // AI generation will enhance it later, but we always have a title from the start
-      // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
-        // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
-        // so titles show human-readable names instead of raw IDs
-        let titleSource = message
-        if (options?.badges) {
-          for (const badge of options.badges) {
-            if (badge.rawText && badge.label) {
-              titleSource = titleSource.replace(badge.rawText, badge.label)
+        // If currently processing — or another caller holds the turn-start
+        // reservation (its pre-chat work is in flight) — this message must not
+        // start a second turn. Steer into the live turn when possible, otherwise
+        // queue for FIFO replay WITH ITS OWN OPTIONS:
+        // a queued message's source is applied when the replay becomes a new
+        // turn, never by overwriting the reserved/active turn's source.
+        //
+        // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
+        //   Claude emulates via PreToolUse hook. If `redirect()` returns false
+        //   (Claude with no live query, or backend can't steer), the backend has
+        //   already called forceAbort(Redirect) and we queue for replay.
+        // - 'queue': hold the message untouched; the current turn keeps running
+        //   to natural completion; replay as a new turn afterwards. NO call to
+        //   `agent.redirect()`, NO forceAbort, NO interruption.
+        //
+        // The branch decision uses the POST-WAIT state, not the stale entry
+        // snapshot: a caller that waited on this lock behind a reservation
+        // whose turn then failed pre-start finds the reservation freed here
+        // and claims the fresh turn itself — exactly what the failed-turn-start
+        // drain used to replay, now decided at a single linearized point.
+        if (!holdsReservation && !managed.isProcessing && !managed.turnStartReserved) {
+          managed.turnStartReserved = true
+          holdsReservation = true
+        }
+        if (managed.isProcessing || !holdsReservation) {
+          await this.steerOrQueueMidStreamSend({
+            managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck,
+          })
+          queuedMidStream = true
+          return
+        }
+
+        // OWNER PATH — the turn-start commit: the lock entry re-validated
+        // session identity and the lock serializes this section against the
+        // delete's own locked declaration, so nothing can have deleted the
+        // session mid-section: starting the turn here is final for this
+        // generation, and a committed turn can only ever be torn down by that
+        // cleanup — never resurrect after it.
+
+        // The turn-start reservation was already bound at entry (before any
+        // await). Re-assert here defensively: between the entry bind and this
+        // point nothing else may have claimed the generation, and question
+        // requests from this turn stamp THIS source — messages that arrive
+        // mid-turn and get queued keep their own options for their own future
+        // turn.
+        this.applyTurnInvocationSource(managed, invocationSource)
+
+        // ProductSpace execution registration (R33-1/R37-4): the owner
+        // registers its immutable execution scope HERE — inside the lock,
+        // before the bootstrap flush — so the reservation is live and
+        // visible to account cleanup for the whole bootstrap window, yet no
+        // await ever separates the claim from the lock entry (the
+        // linearization guarantee). A follower that will steer or queue
+        // never reaches this path and never registers, so it can never
+        // supersede the owner's live reservation (R31-3 ownership CAS).
+        if (managed.productSpaceId && holdsReservation) {
+          await registerOwnedStart()
+        }
+
+        // Add user message with stored attachments for persistence
+        // Skip if existingMessageId is provided (message was already created when queued)
+        let userMessage: Message
+        if (existingMessageId) {
+          userMessage = this.requireExistingMessage(managed, existingMessageId)
+          // A replayed QUEUED message (not the answer's own resume call)
+          // supersedes a pending recovery: the answer content is already in
+          // history as part of the context, so the recovery retry would
+          // double-start the answer turn. ONE staged durable commit carries
+          // the cleared recovery (the replayed message itself is already
+          // durable from when it was queued); the live clear publishes only
+          // after the flush succeeds.
+          if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
+            this.persistSession(managed, { pendingAgentResume: undefined })
+            await this.flushSession(managed.id)
+            managed.pendingAgentResume = undefined
+            sessionLog.info(`Superseded the armed answer→resume recovery for session ${sessionId} (replayed queued message, durable)`)
+          }
+        } else {
+          // Create new message
+          userMessage = {
+            id: generateMessageId(),
+            role: 'user',
+            content: message,
+            timestamp: this.monotonic(),
+            attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
+            badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+          }
+          managed.messages.push(userMessage)
+
+          // Update lastMessageRole for badge display
+          managed.lastMessageRole = 'user'
+
+          // SUPERSEDE + USER MESSAGE — ONE durable commit: when this new
+          // message supersedes an armed answer→resume recovery, the staged
+          // snapshot carries BOTH the new message AND the cleared recovery.
+          // The two state changes therefore share a single awaited flush:
+          // a crash before it leaves the previous consistent world (no new
+          // message + armed recovery → the deferred retry still completes
+          // the answer turn), a crash after it leaves the new message +
+          // cleared recovery — the superseded answer turn can never replay.
+          // Applied here rather than at method entry so a pre-start failure
+          // preserves the recovery. The resume path's OWN call
+          // (existingMessageId = the answer message) is exempt — otherwise
+          // it would clear its own recovery state.
+          const supersedesRecovery = managed.pendingAgentResume !== undefined
+            && managed.pendingAgentResume.messageId !== existingMessageId
+          this.persistSession(managed, supersedesRecovery ? { pendingAgentResume: undefined } : undefined)
+          await this.flushSession(managed.id)
+          onAck?.(userMessage.id)
+          if (supersedesRecovery) {
+            managed.pendingAgentResume = undefined
+            sessionLog.info(`Superseded the armed answer→resume recovery for session ${sessionId} (single durable commit with the new message)`)
+          }
+
+          // Emit user_message event so UI can confirm the optimistic message
+          this.sendEvent({
+            type: 'user_message',
+            sessionId,
+            message: userMessage,
+            status: 'accepted',
+            optimisticMessageId: options?.optimisticMessageId
+          }, managed.workspace.id)
+
+          // If this is the first user message and no title exists, set one immediately
+          // AI generation will enhance it later, but we always have a title from the start
+          // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
+          const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
+          if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
+            // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
+            // so titles show human-readable names instead of raw IDs
+            let titleSource = message
+            if (options?.badges) {
+              for (const badge of options.badges) {
+                if (badge.rawText && badge.label) {
+                  titleSource = titleSource.replace(badge.rawText, badge.label)
+                }
+              }
             }
+            // Sanitize: strip any remaining bracket mentions, XML blocks, tags
+            const sanitized = sanitizeForTitle(titleSource)
+            const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
+            managed.name = initialTitle
+            this.persistSession(managed)
+            // Flush immediately so disk is authoritative before notifying renderer
+            await this.flushSession(managed.id)
+            this.sendEvent({
+              type: 'title_generated',
+              sessionId,
+              title: initialTitle,
+            }, managed.workspace.id)
+
+            // Generate AI title asynchronously using agent's SDK
+            // (waits briefly for agent creation if needed)
+            this.generateTitle(managed, message)
           }
         }
-        // Sanitize: strip any remaining bracket mentions, XML blocks, tags
-        const sanitized = sanitizeForTitle(titleSource)
-        const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
-        managed.name = initialTitle
-        this.persistSession(managed)
-        // Flush immediately so disk is authoritative before notifying renderer
-        await this.flushSession(managed.id)
-        this.sendEvent({
-          type: 'title_generated',
-          sessionId,
-          title: initialTitle,
-        }, managed.workspace.id)
 
-        // Generate AI title asynchronously using agent's SDK
-        // (waits briefly for agent creation if needed)
-        this.generateTitle(managed, message)
-      }
-    }
+        // Evaluate auto-label rules against the user message (common path for both
+        // fresh and queued messages). Scans regex patterns configured on labels,
+        // then merges any new matches into the session's label array.
+        try {
+          const labelTree = listLabels(managed.workspace.rootPath)
+          const autoMatches = evaluateAutoLabels(message, labelTree)
 
-    // Evaluate auto-label rules against the user message (common path for both
-    // fresh and queued messages). Scans regex patterns configured on labels,
-    // then merges any new matches into the session's label array.
-    try {
-      const labelTree = listLabels(managed.workspace.rootPath)
-      const autoMatches = evaluateAutoLabels(message, labelTree)
+          if (autoMatches.length > 0) {
+            const existingLabels = managed.labels ?? []
+            const newEntries = autoMatches
+              .map(m => `${m.labelId}::${m.value}`)
+              .filter(entry => !existingLabels.includes(entry))
 
-      if (autoMatches.length > 0) {
-        const existingLabels = managed.labels ?? []
-        const newEntries = autoMatches
-          .map(m => `${m.labelId}::${m.value}`)
-          .filter(entry => !existingLabels.includes(entry))
-
-        if (newEntries.length > 0) {
-          managed.labels = [...existingLabels, ...newEntries]
-          this.persistSession(managed)
-          this.sendEvent({
-            type: 'labels_changed',
-            sessionId,
-            labels: managed.labels,
-          }, managed.workspace.id)
+            if (newEntries.length > 0) {
+              managed.labels = [...existingLabels, ...newEntries]
+              this.persistSession(managed)
+              this.sendEvent({
+                type: 'labels_changed',
+                sessionId,
+                labels: managed.labels,
+              }, managed.workspace.id)
+            }
+          }
+        } catch (e) {
+          sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
         }
-      }
-    } catch (e) {
-      sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
-    }
 
-    // Atomic transition to processing (R30-B): the start reservation must
-    // still be live and owned by THIS send, no account transition may have
-    // begun, and the trusted account/account-bound fence must be unchanged —
-    // otherwise the send fails closed, unregisters and never reaches
-    // `agent.chat`, so no processing session agent can survive without a
-    // registered ProductSpace execution.
-    if (managed.productSpaceId && startReservation) {
-      const confirmed = confirmAssistantStartProcessing({
-        sessionId,
-        reservation: startReservation,
+        // Atomic transition to processing (R30-B, ProductSpace fence): the
+        // start reservation must still be live and owned by THIS send, no
+        // account transition may have begun, and the trusted
+        // account/account-bound fence must be unchanged — otherwise the send
+        // fails closed, unregisters and never reaches `agent.chat`, so no
+        // processing session agent can survive without a registered
+        // ProductSpace execution. Runs INSIDE the question-state lock, in
+        // the same critical section as the commit below: a fenced/refused
+        // start can never be observed as a processing turn.
+        if (managed.productSpaceId && startReservation) {
+          const confirmed = confirmAssistantStartProcessing({
+            sessionId,
+            reservation: startReservation,
+          })
+          startReservation = null
+          if (!confirmed) {
+            releaseAssistantStartExecutionVersion(sessionId, ownedStartVersion)
+            throw new Error('EXECUTION_REGISTRATION_REFUSED')
+          }
+        }
+
+        // COMMIT — the locked section entry re-validated session identity and
+        // the lock serializes against the delete's own locked declaration,
+        // so nothing can have deleted the session mid-section: starting the
+        // turn here is final for this generation.
+        managed.lastMessageAt = Date.now()
+        this.setProcessing(managed, true)
+        managed.streamingText = ''
+        managed.processingGeneration++
+        // A new turn starts a NEW question lifecycle — a prior stop/archive
+        // tombstone no longer applies to this generation.
+        managed.questionLifecycleTombstone = undefined
+        // GENERATION BINDING: stamp the agent
+        // with the claiming generation so request_user_input callbacks carry
+        // their ISSUING turn's generation (snapshotted at tool-call time),
+        // not whatever generation happens to be active at late execution.
+        managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
+        managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
       })
-      startReservation = null
-      if (!confirmed) {
-        releaseAssistantStartExecutionVersion(sessionId, ownedStartVersion)
-        throw new Error('EXECUTION_REGISTRATION_REFUSED')
+      if (droppedDuplicateRetry) {
+        sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
+        return
       }
-    }
-    } catch (error) {
-      // R31-4: every pre-confirm throw releases THIS send's reservation and
-      // unregisters only its owned execution — a retry starts clean, and a
-      // newer send's registration is never touched (version CAS).
+      if (queuedMidStream) {
+        // The message was steered into the live turn or queued for FIFO
+        // replay — this call never starts a turn of its own.
+        return
+      }
+      if (turnAbandonedBeforeCommit) {
+        // The turn-start reservation is released by the finally below — the
+        // turn converges as silently deleted (the session no longer exists).
+        sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted before commit (declaration won the race)`)
+        return
+      }
+      // The turn has claimed its processing generation — the reservation is
+      // consumed; isProcessing now gates subsequent callers.
+      turnStarted = true
+    } finally {
+      if (holdsReservation) {
+        this.releaseTurnStartReservation(managed, sessionId, turnStarted)
+      }
+      // R31-4 (ProductSpace fence): every path that still holds an
+      // unconfirmed start reservation — an early return above or any
+      // pre-confirm throw inside the locked section — releases THIS send's
+      // reservation and unregisters only its owned execution, so a retry
+      // starts clean and a newer send's registration is never touched
+      // (version CAS). After a confirmed commit the reservation is consumed
+      // and this is a no-op.
       releaseOwnedStart()
-      throw error
     }
-
-    managed.lastMessageAt = Date.now()
-    this.setProcessing(managed, true)
-    managed.streamingText = ''
-    managed.processingGeneration++
-    managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
 
     // Reset auth retry flag for this new message (allows one retry per message)
     // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
@@ -6308,6 +6936,7 @@ export class SessionManager implements ISessionManager {
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
+
 
     // Start perf span for entire sendMessage flow
     const sendSpan = perf.span('session.sendMessage', { sessionId })
@@ -6332,46 +6961,142 @@ export class SessionManager implements ISessionManager {
       ? getSourcesBySlugs(workspaceRootPath, enabledSlugs)
       : []
 
-    if (hasSources && managed.tokenRefreshManager) {
-      const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
-      if (refreshResult.failedSources.length > 0) {
-        sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
+    // Pre-chat preparation (credential refresh, agent creation, source
+    // servers). Failures here happen AFTER processing was flagged but BEFORE
+    // any chat started — without this boundary isProcessing would stay true
+    // forever (session stuck "processing", resume retries forever skip).
+    // onProcessingStopped resets processing by the current generation and
+    // notifies the renderer, then the error propagates to the caller.
+    let agent: AgentInstance
+    try {
+      if (hasSources && managed.tokenRefreshManager) {
+        const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
+        if (refreshResult.failedSources.length > 0) {
+          sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
+        }
+        if (refreshResult.refreshedCount > 0) {
+          sendSpan.mark('oauth.refreshed')
+        }
       }
-      if (refreshResult.refreshedCount > 0) {
-        sendSpan.mark('oauth.refreshed')
+
+      // Get or create the agent (lazy loading). Its internal cold-session build at
+      // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
+      // ensureFreshToken mirrors the disk write to source.config in-memory).
+      //
+      // LAZY AGENT CREATION — DELETION GATE: the turn was committed in the
+      // locked critical section, but the lazy agent may not exist yet. A
+      // deletion that wins the declaration in this window must BLOCK
+      // creation — checked by SESSION IDENTITY in-lock (the declaration
+      // atomically removes the map entry, and the lock serializes this gate
+      // against the delete's own locked declaration) — otherwise the freshly
+      // created agent would start a ghost turn on a deleted session.
+      // `resolvedAgent` is the gate's sentinel: null = the identity gate
+      // failed (converge as deleted); non-null = the agent this turn runs on
+      // (freshly created OR already existing — getOrCreateAgent returns both).
+      let resolvedAgent: AgentBackend | null = null
+      await this.withQuestionStateLock(sessionId, async () => {
+        if (this.sessions.get(sessionId) !== managed) return
+        resolvedAgent = await this.getOrCreateAgent(managed)
+      })
+      if (resolvedAgent === null) {
+        // The turn converges silently as deleted (the user message was
+        // already persisted/broadcast in the section; the delete's cleanup —
+        // queued behind this section — owns the storage removal).
+        sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted before agent start`)
+        return
       }
+      agent = resolvedAgent
+      sendSpan.mark('agent.ready')
+
+      // GENERATION BINDING: a freshly created
+      // agent must carry the CURRENT turn's generation (the bump happened at
+      // the turn-start boundary, before this creation); later turns re-stamp
+      // there when the agent already exists.
+      agent.setSessionTurnGeneration(managed.processingGeneration)
+
+      // Re-apply the per-turn capability flag — a freshly created agent defaults
+      // to false, so desktop turns must set it after creation as well. The
+      // source is the one bound to THIS turn (captured at the new-generation
+      // boundary), never a message that was queued behind it.
+      const allowRequestUserInputNow = computeRequestUserInputEligibility(
+        invocationSource,
+        managed.hidden,
+        managed.systemPromptPreset === 'mini',
+        managed.origin,
+      )
+      if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
+        agent.allowRequestUserInput = allowRequestUserInputNow
+      }
+
+      // Always set all sources for context (even if none are enabled), including built-ins
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
+      sendSpan.mark('sources.loaded')
+
+      // Apply source servers if any are enabled
+      if (hasSources) {
+        const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
+        // Single fresh build — tokens already refreshed above.
+        const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
+        if (errors.length > 0) {
+          sessionLog.warn(`Source build errors:`, errors)
+        }
+
+        const mcpCount = Object.keys(mcpServers).length
+        const apiCount = Object.keys(apiServers).length
+        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
+          const usableSources = sources.filter(isSourceUsable)
+          const intendedSlugs = usableSources.map(s => s.config.slug)
+          await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+          await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
+          sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
+        }
+        sendSpan.mark('servers.applied')
+      }
+    } catch (prepError) {
+      sendSpan.mark('prep.failed')
+      sessionLog.error(`Pre-chat preparation failed for session ${sessionId}:`, prepError)
+      if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+        await this.onProcessingStopped(sessionId, 'error')
+      }
+      throw prepError
     }
 
-    // Get or create the agent (lazy loading). Its internal cold-session build at
-    // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.disk in-memory).
-    const agent = await this.getOrCreateAgent(managed)
-    sendSpan.mark('agent.ready')
-
-    // Always set all sources for context (even if none are enabled), including built-ins
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
-    sendSpan.mark('sources.loaded')
-
-    // Apply source servers if any are enabled
-    if (hasSources) {
-      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
-      // Single fresh build — tokens already refreshed above.
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
+    // CHAT-START CONVERGENCE GATE: the deterministic delete-vs-slow-creation
+    // convergence point. The deletion's declaration (tombstone + availability
+    // removal) is the linearization point; re-validate it under the
+    // question-state lock IMMEDIATELY before chat:
+    // - a delete that declared before this point converges the turn silently
+    //   here (the freshly created agent is disposed — no ghost turn, no
+    //   agent leak, no exception to the caller);
+    // - a delete that declares after this point sees the IRREVOCABLE
+    //   CHAT-START RESERVATION set below (same critical section) and WAITS
+    //   until the query is genuinely abortable, then owns the teardown of
+    //   the RUNNING turn through its cleanup (force-abort + dispose).
+    // A terminal lifecycle tombstone (stopped/archived) converges the same
+    // way: the lifecycle was already torn down when the tombstone was set.
+    const turnAlive = await this.withQuestionStateLock(sessionId, async () => {
+      if (this.sessions.get(sessionId) !== managed || managed.questionLifecycleTombstone) return false
+      let resolveStarted!: () => void
+      const started = new Promise<void>(resolve => { resolveStarted = resolve })
+      managed.chatStartReservation = { generation: myGeneration, started, resolveStarted }
+      // LIVE-TURN SIGNAL: the backend resolves the reservation at the exact
+      // point its per-turn abort state is installed (Claude: query
+      // AbortController; Pi: subprocess turn handle). Backends without the
+      // signal (plain test doubles) are treated as live at query entry.
+      const signalCapable = agent as { setTurnQueryLiveSignal?: (fn: () => void) => void }
+      if (typeof signalCapable.setTurnQueryLiveSignal === 'function') {
+        signalCapable.setTurnQueryLiveSignal(resolveStarted)
+      } else {
+        resolveStarted()
       }
-
-      const mcpCount = Object.keys(mcpServers).length
-      const apiCount = Object.keys(apiServers).length
-      if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
-        const usableSources = sources.filter(isSourceUsable)
-        const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-        await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
-        sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
-      }
-      sendSpan.mark('servers.applied')
+      return true
+    })
+    if (!turnAlive) {
+      sendSpan.mark('turn.converged-deleted')
+      sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted/stopped before chat start`)
+      await this.disposeManagedAgentRuntime(managed, 'session deleted or stopped before chat start')
+      return
     }
 
     try {
@@ -6630,7 +7355,22 @@ export class SessionManager implements ISessionManager {
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed?.isProcessing) {
+    if (!managed) {
+      return // Session not found, nothing to cancel
+    }
+
+    // A pending question cannot survive a user stop. This must run BEFORE the
+    // isProcessing early-return: the QuestionRequested handoff already flipped
+    // isProcessing to false, so "stop while a question is pending" would
+    // otherwise never reach any cleanup.
+    await this.clearPendingQuestionForSession(managed)
+
+    // A user stop also cancels any scheduled answer→resume retry — stopping
+    // means "do not start new turns". Awaited flush: a crash must not re-arm
+    // the stopped recovery from disk.
+    await this.clearPendingAgentResume(managed, 'user stopped the session')
+
+    if (!managed.isProcessing) {
       return // Not processing, nothing to cancel
     }
 
@@ -6831,7 +7571,6 @@ export class SessionManager implements ISessionManager {
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
-
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
 
@@ -7183,6 +7922,982 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Cannot respond to credential - no pending request for ${requestId}`)
       return false
     }
+  }
+
+  // ============================================================
+  // Question requests (request_user_input)
+  // ============================================================
+
+  /**
+   * Bind an invocation source to the turn that is actually starting: stores it as the session's last-applied source AND as
+   * the ACTIVE turn's source, and applies the request_user_input eligibility
+   * flag to the agent. Must only be called on a new processing generation —
+   * queued/steered messages keep their own options for their own future turn
+   * and never overwrite an in-flight turn's source.
+   */
+  private applyTurnInvocationSource(managed: ManagedSession, invocationSource: InvocationSource): void {
+    managed.invocationSource = invocationSource
+    managed.activeTurnSource = invocationSource
+    const allowRequestUserInput = computeRequestUserInputEligibility(
+      invocationSource,
+      managed.hidden,
+      managed.systemPromptPreset === 'mini',
+      managed.origin,
+    )
+    if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
+      managed.agent.allowRequestUserInput = allowRequestUserInput
+    }
+  }
+
+  /**
+   * Shared existing-message resolution for the follower (queue-reuse) and
+   * owner (replay) branches: one missing-message
+   * error and one identity check.
+   */
+  private requireExistingMessage(managed: ManagedSession, existingMessageId: string): Message {
+    const existing = managed.messages.find(m => m.id === existingMessageId)
+    if (!existing) {
+      throw new Error(`Existing message ${existingMessageId} not found`)
+    }
+    return existing
+  }
+
+  /**
+   * Single named cleanup boundary for the turn-start reservation: the finally around sendMessage's pre-start section
+   * funnels EVERY exit through here.
+   *
+   * - turnStarted: the claim is consumed — isProcessing now gates callers,
+   *   so only the reservation flag is cleared.
+   * - Pre-start failure/early return: the reserved turn never runs. Release
+   *   the reservation AND the bound active-turn state (fail closed — a
+   *   source bound to a turn that never started must not leak into a later
+   *   question), then kick the queue once if followers already persisted
+   *   behind the reservation so confirmed queued messages are not stranded
+   *   forever without an onProcessingStopped to drain them.
+   */
+  private releaseTurnStartReservation(managed: ManagedSession, sessionId: string, turnStarted: boolean): void {
+    if (turnStarted) {
+      managed.turnStartReserved = false
+      return
+    }
+    const hadFollowers = managed.messageQueue.length > 0
+    managed.turnStartReserved = false
+    managed.activeTurnSource = undefined
+    managed.invocationSource = undefined
+    if (hadFollowers) {
+      sessionLog.warn(`Turn start failed for session ${sessionId} with ${managed.messageQueue.length} queued follower(s) — draining`)
+      setImmediate(() => {
+        try {
+          this.processNextQueuedMessage(sessionId)
+        } catch (error) {
+          sessionLog.error(`Failed to drain queued followers for session ${sessionId} after a failed turn start:`, error)
+        }
+      })
+    }
+  }
+
+  /**
+   * PRODUCTION agent tool-set routing: the embedded engines (Claude SDK
+   * in-process toolset, Pi host-side proxy execution) reach the durable
+   * handoff DIRECTLY — one owner/channel per engine. An embedded call never
+   * loops through a sidecar or a second callback chain, so a single tool
+   * call can never produce two durable handoffs.
+   */
+  private routeAgentQuestionRequested(
+    managed: ManagedSession,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
+  ): Promise<void> {
+    return this.handleQuestionRequested(managed, questions, generationAtRequest)
+  }
+
+  private async handleQuestionRequested(
+    managed: ManagedSession,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
+  ): Promise<void> {
+    // Serialized behind the session's question-state lock: a tool-requested replacement must never interleave with a
+    // lifecycle clear's staged commit — otherwise a stop clear that already
+    // enqueued its cleared snapshot could later flush it OVER a question that
+    // legitimately replaced the pending state.
+    //
+    // GENERATION BINDING: `generationAtRequest`
+    // is snapshotted by the agent AT TOOL-CALL TIME and carried through the
+    // callback closure — the locked commit validates it against the current
+    // generation. Reading the current generation at execution time (the old
+    // shape) was a no-op gate: a callback late enough to execute after the
+    // next turn started would read the NEW generation and pass.
+    await this.withQuestionStateLock(managed.id, () =>
+      this.handleQuestionRequestedLocked(managed, questions, generationAtRequest),
+    )
+  }
+
+  private async handleQuestionRequestedLocked(
+    managed: ManagedSession,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
+  ): Promise<void> {
+    // 0. STALE-CALLBACK GATE: a late callback
+    //    from an aborted/stopped agent must never rebuild a pending question
+    //    or re-broadcast question_request on a terminated lifecycle. All
+    //    three checks reject BEFORE any state mutation or I/O:
+    //    - session identity: the managed object was deleted/replaced;
+    //    - lifecycle tombstone: stop/archive durably cleared this session's
+    //      question (cleared again when a NEW turn starts a new lifecycle);
+    //    - generation: the turn that dispatched this callback is no longer
+    //      the active turn (superseded or drained).
+    if (this.sessions.get(managed.id) !== managed) {
+      sessionLog.warn(`Question request for session ${managed.id} rejected: session no longer active in this runtime`)
+      throw new Error('Question request rejected: the session is no longer active')
+    }
+    if (managed.questionLifecycleTombstone) {
+      sessionLog.warn(`Question request for session ${managed.id} rejected: lifecycle was terminally ${managed.questionLifecycleTombstone.reason} at ${new Date(managed.questionLifecycleTombstone.at).toISOString()}`)
+      throw new Error(`Question request rejected: the session's question lifecycle was terminally ${managed.questionLifecycleTombstone.reason}`)
+    }
+    if (managed.processingGeneration !== generationAtRequest) {
+      sessionLog.warn(`Question request for session ${managed.id} rejected: dispatching turn generation ${generationAtRequest} is stale (active: ${managed.processingGeneration})`)
+      throw new Error('Question request rejected: the asking turn is no longer active')
+    }
+
+    // 1. Re-validate (defense in depth) and generate the Polo-side identity
+    const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
+    const parsed = parseRequestUserInputArgs({ questions })
+    if (!parsed.ok) {
+      throw new Error(`Invalid question request: ${parsed.error}`)
+    }
+
+    await this.ensureMessagesLoaded(managed)
+
+    const request: QuestionRequest = {
+      requestId: `q-${randomUUID()}`,
+      sessionId: managed.id,
+      createdAt: Date.now(),
+      questions: parsed.data.questions,
+      // Persist the trusted entry capability of the turn that asked the
+      // question. This is the ACTIVE turn's source (bound at the
+      // new-generation boundary) — NOT the most recent sendMessage call,
+      // which may be a messaging/automation message queued behind a running
+      // desktop turn. The post-answer resume, its
+      // retries, and restart recovery re-derive tool visibility from this.
+      // DEFAULT IS INTERNAL: the protocol's
+      // fail-closed contract — a missing source (legacy/malformed persisted
+      // state) must never upgrade to desktop; only an explicit value is
+      // persisted and restored.
+      invocationSource: managed.activeTurnSource ?? 'internal',
+    }
+
+    // 2. SINGLE DURABLE COMMIT: the completed
+    //    tool activity AND the new pending question land in the SAME staged
+    //    persist+flush. The old two-phase shape (pending first, tool-activity
+    //    "best effort" later) could leave a VISIBLE question whose activity
+    //    was still 'executing' on disk — rendering as running forever after a
+    //    restart. Now either both are durable, or neither is and the tool
+    //    call fails without any handoff.
+    const previousPending = managed.pendingQuestion
+    const toolMsg = [...managed.messages].reverse().find(
+      m => m.toolName?.includes('request_user_input') && m.toolStatus === 'executing'
+    )
+    const toolMsgSnapshot = toolMsg
+      ? { toolStatus: toolMsg.toolStatus, content: toolMsg.content, toolResult: toolMsg.toolResult }
+      : undefined
+    if (toolMsg) {
+      toolMsg.toolStatus = 'completed'
+      toolMsg.content = 'Waiting for user input'
+      toolMsg.toolResult = 'Waiting for user input'
+    }
+    managed.pendingQuestion = request
+
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      // Roll back BOTH mutations — the turn continues (no handoff happened),
+      // the activity stays executing, and any previous pending is restored.
+      if (toolMsg && toolMsgSnapshot) {
+        toolMsg.toolStatus = toolMsgSnapshot.toolStatus
+        toolMsg.content = toolMsgSnapshot.content
+        toolMsg.toolResult = toolMsgSnapshot.toolResult
+      }
+      managed.pendingQuestion = previousPending
+      try {
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (rollbackError) {
+        sessionLog.error(`Failed to persist rolled-back question state for session ${managed.id}:`, rollbackError)
+      }
+      sessionLog.error(`Failed to persist question request for session ${managed.id}; handoff skipped:`, error)
+      throw new Error(
+        `Failed to persist the question request (execution NOT paused): ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+
+    // 3. Notify renderers — the input area is taken over by the question UI
+    this.sendEvent({
+      type: 'question_request',
+      sessionId: managed.id,
+      request,
+    }, managed.workspace.id)
+
+    // 4. Handoff — the turn pauses until the user answers or skips: the
+    // processing-stopped boundary applies (the embedded agent is interrupted
+    // for the handoff and the answer path owns the continuation).
+    if (managed.isProcessing && managed.agent) {
+      sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
+      managed.agent?.interruptForHandoff(AbortReason.QuestionRequested)
+      this.setProcessing(managed, false)
+
+      // Release browser overlay + session binding because the agent is paused.
+      // A release failure must not skip the complete event — the turn is
+      // already aborted at this point.
+      try {
+        await releaseBrowserOwnershipOnForcedStop(
+          (sid) => this.getBrowserPaneManagerForSession(sid),
+          managed.id,
+        )
+      } catch (releaseError) {
+        sessionLog.error(`Failed to release browser ownership for session ${managed.id} after question handoff:`, releaseError)
+      }
+
+      // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
+      this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+    }
+  }
+
+  /**
+   * Get the current pending question for a session (null when none).
+   * Used by renderers to restore the question UI after refresh/switch/restart.
+   */
+  getPendingQuestion(sessionId: string): QuestionRequest | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    return managed.pendingQuestion ?? null
+  }
+
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question for a SPECIFIC workspace + popover owner (reachability contract).
+   *
+   * The Edit Popover's session is hidden — it never appears in the session
+   * list, and the popover component clears its local inlineSessionId on every
+   * reopen. Without this lookup the persisted pendingQuestion would become an
+   * orphan the user can never answer after a popover reopen, renderer reload,
+   * or app restart.
+   *
+   * Scoping contract: the caller must identify itself with the current
+   * workspaceId AND its stable popover owner identity (renderer-generated
+   * fixed-length editor-identity hash). Only
+   * an exact match (origin 'edit-popover' + same workspace + same owner + an
+   * active pendingQuestion) is ever returned — there is deliberately NO
+   * global newest-wins fallback, so concurrent popovers (or the same popover
+   * across workspaces) can never adopt each other's session, and an unknown
+   * owner gets null.
+   *
+   * The association ends exactly when the lifecycle ends (answer accepted,
+   * skip, replaced, stop/archive/delete) and never on time.
+   */
+  async getEditPopoverPendingSession(
+    workspaceId: string,
+    popoverOwner: string,
+  ): Promise<{ sessionId: string; request: QuestionRequest } | null> {
+    const matches: Array<{ sessionId: string; createdAt: number; request: QuestionRequest }> = []
+
+    // In-memory first: live sessions (popover may still be mounted, or was
+    // already touched this process). Exact workspace + owner match only.
+    for (const managed of this.sessions.values()) {
+      if (managed.origin !== 'edit-popover' || managed.isArchived) continue
+      if (managed.workspace.id !== workspaceId) continue
+      if ((managed.popoverOwner ?? '') !== popoverOwner) continue
+      const pending = managed.pendingQuestion
+      if (pending) {
+        matches.push({ sessionId: managed.id, createdAt: pending.createdAt, request: pending })
+      }
+    }
+
+    if (matches.length > 0) {
+      // Defensive: one owner normally owns at most one popover session — if
+      // several exist, the most recently asked question wins within THIS
+      // owner's scope (never across owners/workspaces).
+      matches.sort((a, b) => b.createdAt - a.createdAt)
+      return { sessionId: matches[0].sessionId, request: matches[0].request }
+    }
+
+    // Cold path: scan the requested workspace's on-disk headers (origin,
+    // popoverOwner and pendingQuestion are persisted header fields). A
+    // workspace that cannot be resolved has no sessions to scan.
+    const workspace = this.resolveRuntimeWorkspace(workspaceId)
+    if (!workspace) return null
+    let metas: SessionMetadata[] = []
+    try {
+      metas = this.sessionStorage.list(workspace.rootPath)
+    } catch (error) {
+      // TRANSIENT: an I/O failure here must NOT be
+      // reported as an authoritative "no pending question" — that would let
+      // the renderer release its restore gate and orphan the still-persisted
+      // pendingQuestion behind a brand-new session. Re-throw so the RPC
+      // rejects and the client retries with backoff.
+      sessionLog.warn(`getEditPopoverPendingSession: failed to list sessions for workspace ${workspace.id}:`, error)
+      throw new Error(`Edit Popover pending-question lookup is temporarily unavailable (session listing failed): ${error instanceof Error ? error.message : String(error)}`)
+    }
+    let best: { sessionId: string; createdAt: number; request: QuestionRequest; meta: SessionMetadata } | null = null
+    for (const meta of metas) {
+      if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
+      if ((meta.popoverOwner ?? '') !== popoverOwner) continue
+      const pending = meta.pendingQuestion
+      if (pending && (!best || pending.createdAt > best.createdAt)) {
+        best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending, meta }
+      }
+    }
+    if (!best) return null
+
+    // Hydrate the cold session from the FULL metadata: createManagedSession spreads every header field, so hidden /
+    // origin / popoverOwner / systemPromptPreset survive. Registering from a
+    // bare {id, createdAt} would answer into a managed session that lost its
+    // host identity, and the next persist would write that degraded metadata
+    // back — breaking later recovery by the same owner and downgrading the
+    // eligibility matrix to an ordinary desktop session.
+    if (!this.sessions.has(best.sessionId)) {
+      this.sessions.set(best.sessionId, createManagedSession(best.meta, workspace))
+    }
+    try {
+      await this.getSession(best.sessionId)
+    } catch (error) {
+      // TRANSIENT: a hydration failure (disk I/O)
+      // is not an authoritative "no pending question" — re-throw so the RPC
+      // rejects and the client retries with backoff.
+      sessionLog.warn(`getEditPopoverPendingSession: failed to hydrate session ${best.sessionId}:`, error)
+      throw new Error(`Edit Popover pending-question lookup is temporarily unavailable (hydration failed): ${error instanceof Error ? error.message : String(error)}`)
+    }
+    const hydrated = this.sessions.get(best.sessionId)
+    const pending = hydrated?.pendingQuestion
+    // Re-validate the scope on the hydrated session (defense in depth): the
+    // identity must have survived hydration intact.
+    if (!pending
+      || hydrated?.origin !== 'edit-popover'
+      || (hydrated.popoverOwner ?? '') !== popoverOwner
+      || hydrated.workspace.id !== workspaceId
+      || hydrated.hidden !== true
+      || hydrated.systemPromptPreset !== 'mini') {
+      sessionLog.warn(`getEditPopoverPendingSession: hydrated session ${best.sessionId} lost its Edit Popover identity — refusing to adopt`)
+      return null
+    }
+    return { sessionId: best.sessionId, request: pending }
+  }
+
+  /**
+   * Whether a persisted resolution (answer or cancel) already exists for the
+   * given requestId. Backs the already_answered idempotency result.
+   */
+  private hasPersistedQuestionResolution(managed: ManagedSession, requestId: string): boolean {
+    return managed.messages.some(m =>
+      m.questionResponse?.requestId === requestId
+      || m.questionResolution?.requestId === requestId
+    )
+  }
+
+  /**
+   * Build the readable content for a user message that answers a question request.
+   * The same text is used as the resuming agent input, so it carries full context.
+   */
+  private formatQuestionAnswerContent(request: QuestionRequest, response: import('@polo-ai/shared/protocol').QuestionResponse): string {
+    const lines: string[] = []
+    for (const answer of response.answers) {
+      const question = request.questions.find(q => q.id === answer.questionId)
+      const header = question?.header ?? answer.questionId
+      const questionText = question?.question ?? ''
+      const selectedLabels = answer.selectedOptionIds
+        .map(id => question?.options.find(o => o.id === id)?.label ?? id)
+      if (answer.otherText?.trim()) {
+        selectedLabels.push(`Other: "${answer.otherText.trim()}"`)
+      }
+      lines.push(`${header}: ${questionText}`)
+      lines.push(`Answer: ${selectedLabels.join(', ')}`)
+      lines.push('')
+    }
+    return lines.join('\n').trim()
+  }
+
+  /**
+   * Validate an answer payload against the pending request. Returns an error
+   * message when invalid (→ transient_failure before ANY state mutation), or
+   * null when valid.
+   *
+   * Contract:
+   * - every request question is answered exactly once (1:1 questionId mapping)
+   * - option IDs are valid, duplicate-free
+   * - single-select: exactly one choice — one preset option XOR free text
+   * - multi-select: at least one choice; an `exclusive` option excludes every
+   *   other preset option and the Other free text
+   */
+  private validateQuestionAnswerPayload(
+    pending: QuestionRequest,
+    response: import('@polo-ai/shared/protocol').QuestionResponse,
+  ): string | null {
+    if (response.answers.length !== pending.questions.length) {
+      return 'Not all questions were answered'
+    }
+
+    const seenQuestionIds = new Set<string>()
+    for (const answer of response.answers) {
+      if (seenQuestionIds.has(answer.questionId)) {
+        return `Duplicate answer for questionId "${answer.questionId}"`
+      }
+      seenQuestionIds.add(answer.questionId)
+
+      const question = pending.questions.find(q => q.id === answer.questionId)
+      if (!question) {
+        return `Unknown questionId "${answer.questionId}"`
+      }
+
+      const optionIds = answer.selectedOptionIds
+      if (new Set(optionIds).size !== optionIds.length) {
+        return `Duplicate optionId in answer for question "${question.id}"`
+      }
+      const validOptionIds = new Set(question.options.map(o => o.id))
+      for (const optionId of optionIds) {
+        if (!validOptionIds.has(optionId)) {
+          return `Unknown optionId "${optionId}" for question "${question.id}"`
+        }
+      }
+
+      const otherText = answer.otherText?.trim() ?? ''
+      if (otherText.length > 2000) {
+        return 'Other text exceeds 2000 characters'
+      }
+
+      if (!question.multiple) {
+        // Single-select: exactly one choice — one preset option XOR free text
+        if (optionIds.length > 1) {
+          return `Question "${question.id}" allows only one selection`
+        }
+        if (optionIds.length === 1 && otherText) {
+          return `Question "${question.id}" accepts either an option or free text, not both`
+        }
+        if (optionIds.length === 0 && !otherText) {
+          return `Question "${question.id}" requires an answer`
+        }
+      } else {
+        // Multi-select: at least one choice; exclusive excludes everything else
+        const selectedOptions = question.options.filter(o => optionIds.includes(o.id))
+        const hasExclusive = selectedOptions.some(o => o.exclusive)
+        if (hasExclusive && (selectedOptions.length > 1 || otherText)) {
+          return `Question "${question.id}" has an exclusive option that cannot be combined with other selections`
+        }
+        if (optionIds.length === 0 && !otherText) {
+          return `Question "${question.id}" requires an answer`
+        }
+      }
+    }
+    return null
+  }
+
+  /**
+   * Resolve a pending question: apply the answer, write ONE readable user
+   * message (with structured metadata), clear the pending state atomically,
+   * persist, and only then start the next agent turn with that same message.
+   *
+   * Atomicity: the in-memory transition is rolled back if persist/flush
+   * fails, so a transient_failure result is genuinely retryable.
+   * Cancellation performs the same atomic cleanup but never starts the agent.
+   */
+  async respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`Cannot respond to question - session ${sessionId} not found`)
+      return { status: 'session_missing' }
+    }
+
+    // NO single-flight map: the durable commit below runs ENTIRELY under the
+    // session's question-state lock, so concurrent submissions of the SAME
+    // requestId serialize. The loser always reads fully-committed or
+    // fully-rolled-back state: first success → already_answered (idempotent),
+    // first failure → the pending question is intact and the loser becomes a
+    // genuine retry owner. Followers can never derive an outcome from
+    // rollback-able in-memory state.
+    const requestId = resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
+    return this.respondToQuestionInner(managed, sessionId, resolution, requestId)
+  }
+
+  private async respondToQuestionInner(
+    managed: ManagedSession,
+    sessionId: string,
+    resolution: QuestionResolution,
+    requestId: string,
+  ): Promise<QuestionResolutionResult> {
+    try {
+      await this.ensureMessagesLoaded(managed)
+
+      // The durable commit runs under the session's question-state lock
+      // so it can never interleave with a
+      // stop/archive clear's staged flush — whichever lands first settles the
+      // question and the other observes the settled world.
+      const outcome = await this.withQuestionStateLock(sessionId, () =>
+        this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId),
+      )
+
+      if (outcome.resume) {
+        // Resume the agent OUTSIDE the question-state lock: the resumed turn
+        // can run for minutes (and may itself ask follow-up questions, which
+        // re-enter the lock safely from handleQuestionRequested). Holding the
+        // lock here would block a concurrent stop/archive clear behind a
+        // whole agent turn.
+        // resumePendingAgentTurn never rejects: a failure is user-visible
+        // (error event), persisted in pendingAgentResume, and retried.
+        await this.resumePendingAgentTurn(managed)
+        sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
+      }
+
+      return outcome.result
+    } catch (error) {
+      sessionLog.error(`Failed to resolve question ${requestId} for session ${sessionId}:`, error)
+      return {
+        status: 'transient_failure',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  /**
+   * The durable answer/cancel commit. Caller MUST hold the session's
+   * question-state lock. Returns whether the
+   * agent resume is owed so the caller can run it outside the lock.
+   */
+  private async commitQuestionResolutionLocked(
+    managed: ManagedSession,
+    sessionId: string,
+    resolution: QuestionResolution,
+    requestId: string,
+  ): Promise<{ result: QuestionResolutionResult; resume: boolean }> {
+    // SESSION IDENTITY RE-VALIDATION: the
+    // resolution may have waited for the lock past a delete/replace — the
+    // managed object held by this closure can be an orphaned leftover. A
+    // stale resolution must return session_missing without persisting or
+    // broadcasting anything.
+    if (this.sessions.get(sessionId) !== managed) {
+      sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} rejected: the session was deleted or replaced while the resolution waited`)
+      return { result: { status: 'session_missing' }, resume: false }
+    }
+    // DELETE START GATE: deletion established
+    // its terminal marker synchronously at entry — a resolution that queued
+    // before the delete but commits after it must observe session_missing,
+    // never persist into the deletion window.
+    if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+      sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} rejected: the session is being deleted`)
+      return { result: { status: 'session_missing' }, resume: false }
+    }
+
+    const pending = managed.pendingQuestion
+
+    if (!pending || pending.requestId !== requestId) {
+      // Idempotency: an answer for an already-resolved request succeeds quietly;
+      // anything else is stale (replaced, stopped, or from a previous run).
+      if (this.hasPersistedQuestionResolution(managed, requestId)) {
+        sessionLog.info(`Question ${requestId} already resolved for session ${sessionId}`)
+        return { result: { status: 'already_answered' }, resume: false }
+      }
+      sessionLog.warn(`Stale question resolution ${requestId} for session ${sessionId} (active: ${pending?.requestId ?? 'none'})`)
+      return { result: { status: 'stale' }, resume: false }
+    }
+
+    if (resolution.action === 'cancel') {
+      // Atomic cleanup: write the readable cancel record, clear pending, persist.
+      const cancelMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content: i18n.t('chat.questionSkippedRecord'),
+        timestamp: this.monotonic(),
+        questionResolution: { action: 'cancel', requestId },
+      }
+      // Rollback snapshot — a failed persist/flush must leave the session
+      // exactly as before so the skip can be retried.
+      const prevMessages = managed.messages.slice()
+      const prevLastMessageRole = managed.lastMessageRole
+      try {
+        managed.messages.push(cancelMessage)
+        managed.lastMessageRole = 'user'
+        managed.pendingQuestion = undefined
+
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (error) {
+        this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole }, pending)
+        throw error
+      }
+
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: cancelMessage,
+        status: 'accepted',
+      }, managed.workspace.id)
+      this.sendEvent({
+        type: 'question_resolved',
+        sessionId,
+        requestId,
+        action: 'cancel',
+      }, managed.workspace.id)
+
+      sessionLog.info(`Question ${requestId} cancelled for session ${sessionId} (agent not resumed)`)
+      return { result: { status: 'cancelled' }, resume: false }
+    }
+
+    // --- action === 'answer' ---
+
+    // Validate answers against the pending request before mutating anything.
+    const response = resolution.response
+    const validationError = this.validateQuestionAnswerPayload(pending, response)
+    if (validationError) {
+      return { result: { status: 'transient_failure', message: validationError }, resume: false }
+    }
+
+    // Atomic: write ONE readable answer message with structured metadata,
+    // clear pending, arm the recoverable resume state, persist + flush —
+    // all before starting the agent. "Answer committed + awaiting resume"
+    // is itself persisted so a resume failure is never silently lost.
+    const content = this.formatQuestionAnswerContent(pending, response)
+    const answerMessage: Message = {
+      id: generateMessageId(),
+      role: 'user',
+      content,
+      timestamp: this.monotonic(),
+      questionResponse: {
+        requestId,
+        answers: response.answers,
+      },
+    }
+    // Rollback snapshot — a failed persist/flush must leave the session
+    // exactly as before so the same answer can be retried.
+    const prevMessages = managed.messages.slice()
+    const prevLastMessageRole = managed.lastMessageRole
+    const prevLastMessageAt = managed.lastMessageAt
+    const prevPendingAgentResume = managed.pendingAgentResume
+    try {
+      managed.messages.push(answerMessage)
+      managed.lastMessageRole = 'user'
+      managed.lastMessageAt = Date.now()
+      managed.pendingQuestion = undefined
+      // Carry the trusted entry capability of the question-producing turn
+      // into the recoverable resume state — first resume, failure retries,
+      // and restart recovery all pass it back to sendMessage.
+      managed.pendingAgentResume = {
+        messageId: answerMessage.id,
+        attempts: 0,
+        // DEFAULT IS INTERNAL — fail closed for
+        // legacy/malformed persisted states without a persisted source.
+        invocationSource: pending.invocationSource ?? 'internal',
+      }
+
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      this.rollbackQuestionResolution(
+        managed,
+        { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
+        pending,
+      )
+      throw error
+    }
+
+    this.sendEvent({
+      type: 'user_message',
+      sessionId,
+      message: answerMessage,
+      status: 'accepted',
+    }, managed.workspace.id)
+    this.sendEvent({
+      type: 'question_resolved',
+      sessionId,
+      requestId,
+      action: 'answer',
+    }, managed.workspace.id)
+
+    // The agent resume is owed — the caller runs it OUTSIDE the
+    // question-state lock (see respondToQuestionInner).
+    return { result: { status: 'accepted' }, resume: true }
+  }
+
+  /**
+   * Clear the pendingAgentResume state: cancel the scheduled retry timer,
+   * drop the state, and (by default) await a flush so a crash cannot re-arm
+   * a cleared/finished recovery from disk.
+   */
+  private async clearPendingAgentResume(
+    managed: ManagedSession,
+    reason: string,
+  ): Promise<void> {
+    if (managed.resumeRetryTimer) {
+      clearTimeout(managed.resumeRetryTimer)
+      managed.resumeRetryTimer = undefined
+    }
+    if (!managed.pendingAgentResume) return
+    // STAGED DURABLE CLEAR — NO un-awaited variant: the live ManagedSession
+    // stays ARMED while the staged snapshot — built with `pendingAgentResume`
+    // omitted — is persisted and flushed. Only after the durable flush
+    // succeeds is the in-memory clear published, so an observer inside the
+    // flush window (or a crash, however the write is triggered) always sees
+    // a CONSISTENT world: runtime armed + disk armed (pre-commit), or
+    // runtime cleared + disk cleared (post-commit) — never "runtime cleared
+    // + recovery still on disk" (a restart would re-run a superseded answer
+    // turn).
+    this.persistSession(managed, { pendingAgentResume: undefined })
+    await this.flushSession(managed.id)
+    managed.pendingAgentResume = undefined
+    sessionLog.info(`Cleared pendingAgentResume for session ${managed.id}: ${reason}`)
+  }
+
+  /**
+   * Schedule a resume retry. The handle lives on the ManagedSession so
+   * lifecycle transitions (stop/archive/delete) can cancel it; every fire
+   * re-validates that the session still exists and the state is still armed.
+   */
+  private scheduleResumeRetry(managed: ManagedSession, delayMs: number): void {
+    if (this.sessions.get(managed.id) !== managed) return
+    if (!managed.pendingAgentResume) return
+    if (managed.resumeRetryTimer) {
+      clearTimeout(managed.resumeRetryTimer)
+    }
+    const timer = setTimeout(() => {
+      managed.resumeRetryTimer = undefined
+      // Re-validate at fire time: session may have been deleted/replaced, or
+      // the state cleared/superseded in the meantime.
+      if (this.sessions.get(managed.id) !== managed) return
+      if (!managed.pendingAgentResume) return
+      void this.resumePendingAgentTurn(managed)
+    }, delayMs)
+    timer.unref?.()
+    managed.resumeRetryTimer = timer
+  }
+
+  /**
+   * Retryable resume of the agent turn after an answer was committed.
+   *
+   * Reads the persisted pendingAgentResume state — the answer message is
+   * reused via existingMessageId, never duplicated. Failures emit a
+   * user-visible error event and schedule a backoff retry; a restart
+   * re-arms the retry from disk (loadMessagesFromDisk). The state is also
+   * cleared when the user sends any new message (supersede).
+   */
+  private async resumePendingAgentTurn(managed: ManagedSession): Promise<void> {
+    const resume = managed.pendingAgentResume
+    if (!resume) return
+
+    // TERMINAL record: the answer turn already executed in a previous
+    // process/attempt and only the durable clear remains — never re-run it.
+    if (resume.completed) {
+      await this.clearPendingAgentResume(managed, 'terminal marker (answer turn already executed)')
+      return
+    }
+
+    // The closure may outlive the session (deleted mid-retry): drop silently —
+    // no events, no reschedule for a session that no longer exists.
+    if (this.sessions.get(managed.id) !== managed) {
+      if (managed.resumeRetryTimer) {
+        clearTimeout(managed.resumeRetryTimer)
+        managed.resumeRetryTimer = undefined
+      }
+      return
+    }
+
+    if (managed.isProcessing || managed.turnStartReserved) {
+      // A turn is already running — OR another sender holds the turn-start
+      // reservation (its pre-chat work is in flight). The answer message is already persisted as history; starting now
+      // would make this resume a FOLLOWER, whose queue branch duplicates the
+      // answer message and clears the recovery state without executing the
+      // turn. Reschedule (without counting a failed attempt) so the resume
+      // happens once the reservation resolves — never a dead-end busy-skip.
+      this.scheduleResumeRetry(managed, 2000)
+      return
+    }
+
+    resume.attempts += 1
+    const answerMessage = managed.messages.find(m => m.id === resume.messageId)
+    if (!answerMessage) {
+      // The answer message is gone (session cleared?) — nothing to resume with.
+      await this.clearPendingAgentResume(managed, 'answer message missing')
+      return
+    }
+
+    // ---- Boundary 1: Agent turn execution ----
+    try {
+      // The resumed turn reuses the trusted entry capability captured from the
+      // question-producing turn (persisted on the resume state, so restart
+      // recovery keeps it too). It must NOT be re-inferred as an ordinary
+      // desktop turn — the Edit Popover's hidden+mini session would lose
+      // request_user_input visibility for the resumed turn.
+      await this.sendMessage(
+        managed.id,
+        answerMessage.content,
+        [],
+        [],
+        { invocationSource: resume.invocationSource ?? 'internal' },
+        answerMessage.id,
+      )
+    } catch (error) {
+      // Re-validate after the await: the session may have been deleted while
+      // the turn ran (identity or resume identity changed) — drop silently.
+      if (this.sessions.get(managed.id) !== managed) return
+      if (managed.pendingAgentResume?.messageId !== resume.messageId) return
+      sessionLog.error(
+        `Failed to resume agent turn for session ${managed.id} (attempt ${resume.attempts}, answer message preserved):`,
+        error,
+      )
+      // User-visible failure — the answer is saved but the agent did not start.
+      this.sendEvent({
+        type: 'error',
+        sessionId: managed.id,
+        error: 'Your answer was saved, but the assistant could not resume automatically. Retrying…',
+      }, managed.workspace.id)
+      this.scheduleResumeRetry(managed, Math.min(1000 * resume.attempts, 10000))
+      return
+    }
+
+    // ---- Boundary 2: durable clear AFTER a fully executed turn ----
+    // The answer turn already ran to completion (sendMessage resolved).
+    // Re-validate BOTH identities before touching durable state: if this old
+    // resume was superseded mid-await (new user message cleared it, then
+    // another answer armed a NEW pendingAgentResume), the old caller must
+    // exit silently — clearing now would drop the NEW recovery state.
+    if (this.sessions.get(managed.id) !== managed) return
+    if (managed.pendingAgentResume?.messageId !== resume.messageId) {
+      sessionLog.info(`Skipping durable clear for session ${managed.id}: resume ${resume.messageId} was superseded by ${managed.pendingAgentResume?.messageId ?? 'nothing'}`)
+      return
+    }
+    try {
+      await this.clearPendingAgentResume(managed, 'resume succeeded')
+    } catch (clearError) {
+      sessionLog.error(
+        `Agent turn completed but the durable resume clear failed for session ${managed.id} — marking terminal and retrying persistence:`,
+        clearError,
+      )
+      // The failed clear ROLLED BACK to the armed state (runtime matches
+      // disk). Mark the persisted recovery TERMINAL so a restart cannot
+      // re-execute the completed answer turn, then retry the persistence a
+      // few times.
+      managed.pendingAgentResume = { ...resume, completed: true }
+      for (let persistRetry = 0; persistRetry < 3; persistRetry++) {
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          sessionLog.info(`Terminal resume marker persisted for session ${managed.id} (retry ${persistRetry + 1})`)
+          return
+        } catch {
+          await new Promise(resolve => setTimeout(resolve, 200))
+        }
+      }
+      sessionLog.error(
+        `Terminal resume marker could not be persisted for session ${managed.id}; in-memory guard remains active for this process`,
+      )
+    }
+    sessionLog.info(`Agent resumed after answer for session ${managed.id} (attempt ${resume.attempts})`)
+  }
+
+  /**
+   * Roll back an in-flight answer/cancel transition after a persist/flush
+   * failure, restoring the authoritative pending question and message list.
+   * A best-effort re-persist keeps the queue consistent with memory.
+   */
+  private rollbackQuestionResolution(
+    managed: ManagedSession,
+    snapshot: {
+      messages: Message[]
+      lastMessageRole?: ManagedSession['lastMessageRole']
+      lastMessageAt?: number
+      pendingAgentResume?: ManagedSession['pendingAgentResume']
+    },
+    pending: QuestionRequest,
+  ): void {
+    managed.messages = snapshot.messages
+    managed.lastMessageRole = snapshot.lastMessageRole
+    if (snapshot.lastMessageAt !== undefined) {
+      managed.lastMessageAt = snapshot.lastMessageAt
+    }
+    managed.pendingQuestion = pending
+    managed.pendingAgentResume = snapshot.pendingAgentResume
+    try {
+      this.persistSession(managed)
+      void this.flushSession(managed.id).catch(rollbackError => {
+        sessionLog.error(`Failed to re-persist rolled-back question state for session ${managed.id}:`, rollbackError)
+      })
+    } catch (rollbackError) {
+      sessionLog.error(`Failed to re-persist rolled-back question state for session ${managed.id}:`, rollbackError)
+    }
+  }
+
+  /**
+   * Serialize a pendingQuestion transition behind the session's question-state
+   * lock. Critical sections are tail-linked:
+   * each waits for the previous one to settle (success OR failure) before
+   * running, so a stop/archive clear's staged flush can never interleave with
+   * a concurrent answer/cancel commit. Never rejects on its own — the
+   * critical section's error propagates to its own caller only.
+   */
+  private withQuestionStateLock<T>(sessionId: string, critical: () => Promise<T>): Promise<T> {
+    const tail = this.questionStateLocks.get(sessionId) ?? Promise.resolve()
+    const run = tail.then(critical, critical)
+    const release = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.questionStateLocks.set(sessionId, release)
+    void release.then(() => {
+      if (this.questionStateLocks.get(sessionId) === release) {
+        this.questionStateLocks.delete(sessionId)
+      }
+    })
+    return run
+  }
+
+  /**
+   * Clear any pending question for a session and notify renderers.
+   * Used by session stop / archive / delete lifecycle transitions.
+   * Answers the "who cleared it" question on the wire via question_resolved.
+   *
+   * Serialized on the session's question-state lock against answer/cancel
+   * commits and tool-requested replacements.
+   */
+  private async clearPendingQuestionForSession(managed: ManagedSession): Promise<void> {
+    await this.withQuestionStateLock(managed.id, () => this.clearPendingQuestionForSessionLocked(managed))
+  }
+
+  /**
+   * LOCKED clear — caller must hold the question-state lock.
+   *
+   * FAILURE-ATOMIC + STAGED: the cleared
+   * header is committed to disk on a STAGED snapshot while live memory keeps
+   * the pending question visible. Only after the durable flush succeeds is
+   * the memory cleared and question_resolved broadcast — a lock-free reader
+   * (getPendingQuestion, metadata mapping, recovery lookups) can therefore
+   * never observe the pending flip absent-then-restored, and a failed flush
+   * leaves nothing to roll back: the pending simply stays authoritative and
+   * the lifecycle transition stays retryable. Exactly one terminal
+   * question_resolved is broadcast per request.
+   *
+   * UNCONDITIONAL TOMBSTONE: the stop lifecycle
+   * terminates the session's question scope EVEN WHEN no question was active —
+   * the tool callback may simply not have arrived yet. The tombstone is
+   * therefore set on every durable stop clear, pending or not, so a late
+   * onQuestionRequested callback is always rejected. A NEW turn clears it at
+   * the generation bump.
+   */
+  private async clearPendingQuestionForSessionLocked(managed: ManagedSession): Promise<void> {
+    const pending = managed.pendingQuestion
+    if (pending) {
+      try {
+        this.persistSession(managed, { pendingQuestion: undefined })
+        await this.flushSession(managed.id)
+      } catch (error) {
+        sessionLog.error(`Failed to durably clear pending question ${pending.requestId} for session ${managed.id}; pending kept for retry:`, error)
+        throw error
+      }
+      managed.pendingQuestion = undefined
+      this.sendEvent({
+        type: 'question_resolved',
+        sessionId: managed.id,
+        requestId: pending.requestId,
+        action: 'cancel',
+      }, managed.workspace.id)
+      sessionLog.info(`Cleared pending question ${pending.requestId} for session ${managed.id}`)
+    }
+    managed.questionLifecycleTombstone = { reason: 'stopped', at: Date.now() }
   }
 
   /**
@@ -8127,7 +9842,7 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  private sendEvent(event: SessionEvent, workspaceId?: string): void {
+  private sendEvent(event: SessionEvent, workspaceId?: string, sessionProductSpaceId?: string | null): void {
     if (!this.eventSink) {
       sessionLog.warn('Cannot send event - no event sink')
       return
@@ -8144,8 +9859,16 @@ export class SessionManager implements ISessionManager {
     const activeProductSpaceId = getRuntimeActiveProductSpace()
     if (!activeProductSpaceId) return
     if ('sessionId' in event) {
+      // A terminal deletion removes the session from the map BEFORE its
+      // cleanup emits `session_deleted` — the fence then consults the
+      // pre-removal scope captured by the deletion path (the managed
+      // record's immutable binding), so the UI is informed without ever
+      // bypassing the space fence.
       const managed = this.sessions.get(event.sessionId)
-      if (!managed || managed.productSpaceId !== activeProductSpaceId) {
+      const sessionScope = sessionProductSpaceId !== undefined
+        ? sessionProductSpaceId
+        : managed?.productSpaceId
+      if (sessionScope === undefined || sessionScope !== activeProductSpaceId) {
         return
       }
     }
@@ -8295,6 +10018,7 @@ export class SessionManager implements ISessionManager {
     // Send the prompt
     await this.sendMessage(session.id, prompt, undefined, undefined, {
       skillSlugs: resolved?.skillSlugs,
+      invocationSource: 'automation', // automation turns never ask structured questions
     })
 
     return { sessionId: session.id }

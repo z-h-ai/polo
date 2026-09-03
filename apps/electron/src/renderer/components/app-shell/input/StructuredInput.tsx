@@ -1,7 +1,8 @@
-import type { PermissionRequest as PermissionRequestType, CredentialRequest as CredentialRequestType } from '../../../../shared/types'
+import type { PermissionRequest as PermissionRequestType, CredentialRequest as CredentialRequestType, QuestionRequest as QuestionRequestType } from '../../../../shared/types'
 import { PermissionRequest } from './structured/PermissionRequest'
 import { CredentialRequest } from './structured/CredentialRequest'
 import { AdminApprovalRequest } from './structured/AdminApprovalRequest'
+import { QuestionRequest } from './structured/QuestionRequest'
 import type { StructuredInputState, StructuredResponse } from './structured/types'
 
 interface StructuredInputProps {
@@ -17,6 +18,8 @@ interface StructuredInputProps {
  * Routes to the appropriate component based on the input type:
  * - permission: PermissionRequest (bash command approval)
  * - credential: CredentialRequest (secure auth input)
+ * - admin_approval: AdminApprovalRequest (macOS admin authorization)
+ * - question: QuestionRequest (agent-asked structured questions)
  */
 export function StructuredInput({ state, onResponse, unstyled = false }: StructuredInputProps) {
   switch (state.type) {
@@ -42,6 +45,15 @@ export function StructuredInput({ state, onResponse, unstyled = false }: Structu
           request={state.data as import('./structured/AdminApprovalRequest').AdminApprovalRequestData}
           onApprove={({ rememberForMinutes }) => onResponse({ type: 'admin_approval', approved: true, rememberForMinutes })}
           onCancel={() => onResponse({ type: 'admin_approval', approved: false })}
+          unstyled={unstyled}
+        />
+      )
+    case 'question':
+      return (
+        <QuestionRequest
+          request={state.data as QuestionRequestType}
+          onSubmit={response => onResponse({ type: 'question', response })}
+          onCancel={requestId => onResponse({ type: 'question_cancel', requestId })}
           unstyled={unstyled}
         />
       )

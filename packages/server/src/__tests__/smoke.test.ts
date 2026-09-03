@@ -25,6 +25,11 @@ import WebSocket from 'ws'
 const SERVER_ENTRY = join(import.meta.dir, '..', 'index.ts')
 const STARTUP_TIMEOUT = 15_000
 const SHUTDOWN_TIMEOUT = 5_000
+// The stdout/stderr pumps terminate when the pipes close. A killed server
+// may leave briefly-live grandchildren holding the inherited fds, so the
+// drain is BOUNDED — the pumps only feed diagnostics (URL/stderr context),
+// never correctness, and temp-dir cleanup must not hang on them.
+const PUMP_DRAIN_TIMEOUT = 3_000
 const TEST_TIMEOUT = 30_000
 
 interface SpawnTestServerOptions {
@@ -217,7 +222,10 @@ async function spawnTestServer(options: SpawnTestServerOptions = {}): Promise<Sp
         exitCode = await proc.exited
       }
 
-      await Promise.allSettled([stdoutPump, stderrPump])
+      await Promise.race([
+        Promise.allSettled([stdoutPump, stderrPump]),
+        Bun.sleep(PUMP_DRAIN_TIMEOUT).then(() => null),
+      ])
       removeTempRoot(exitCode)
       return exitCode
     })()
@@ -304,6 +312,9 @@ function connectWs(url: string, token: string): Promise<WebSocket> {
 describe('headless server smoke test', () => {
   let server: SpawnedServer | null = null
 
+  // Generous hook budget: under a fully loaded shared test process the
+  // server spawn + graceful shutdown + bounded cleanup are all slower; the
+  // assertions are unchanged.
   afterEach(async () => {
     if (!server) return
     const stoppedServer = server
@@ -312,7 +323,7 @@ describe('headless server smoke test', () => {
     expect(existsSync(stoppedServer.tempRoot)).toBe(false)
     expect(existsSync(stoppedServer.configDir)).toBe(false)
     expect(existsSync(stoppedServer.runtimeDir)).toBe(false)
-  })
+  }, 60_000)
 
   it('accepts valid token handshake', async () => {
     server = await spawnTestServer()

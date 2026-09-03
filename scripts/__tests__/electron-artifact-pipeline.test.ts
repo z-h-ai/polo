@@ -1,11 +1,61 @@
 import { describe, expect, it } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const root = join(import.meta.dir, '..', '..')
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8')
 
 describe('Electron final artifact validation pipeline', () => {
+  // The session MCP sidecar was removed from the product (POO-53): every
+  // packaging/validator entry point must agree on its deletion, and the Pi
+  // agent server must remain the staged subprocess bundle. A regression here
+  // must fail on ALL THREE platform entry points (Docker, macOS/Linux shell,
+  // Windows PowerShell) — not just the one a local build happens to exercise.
+  it('keeps the removed session-mcp-server sidecar out of every packaging entry point', () => {
+    const dockerfile = read('Dockerfile.server')
+    expect(dockerfile).not.toContain('session-mcp-server')
+    expect(dockerfile).toContain('packages/pi-agent-server/package.json')
+    // The Docker build routes through the SHARED build args entry — it must
+    // never re-declare a bun target (that would crash the Node production host).
+    expect(dockerfile).toContain('cd packages/pi-agent-server && bun run build')
+    expect(dockerfile).toContain('scripts/build/build-pi-agent-server.ts')
+    expect(dockerfile).not.toContain('--target bun')
+    expect(dockerfile).not.toContain('--target=bun')
+
+    const unixValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
+    // The shell validator mentions the sidecar ONLY inside its removal
+    // check — never as a staged or required artifact path.
+    expect((unixValidator.match(/session-mcp-server/g) ?? []).length).toBe(3)
+    expect(unixValidator).toContain('still contains the removed session-mcp-server sidecar')
+    expect(unixValidator).not.toContain('resources/session-mcp-server/index.js')
+    expect(unixValidator).toContain('resources/pi-agent-server/index.js')
+
+    const windowsValidator = read('apps/electron/scripts/validate-final-artifacts.ps1')
+    expect(windowsValidator).not.toContain('sessionServerPath')
+    expect(windowsValidator).not.toContain('resources\\session-mcp-server\\index.js')
+    expect(windowsValidator).toContain('removed session-mcp-server sidecar')
+    expect(windowsValidator).toContain('pi-agent-server')
+
+    const builderManifest = read('apps/electron/electron-builder.yml')
+    expect(builderManifest).not.toContain('resources/session-mcp-server')
+    expect(builderManifest).toContain('resources/pi-agent-server/**/*')
+
+    // The repo-wide source tree must not resurrect the sidecar: only the
+    // mandated spawn-spec leaf contract may name it (as a contract comment).
+    for (const file of [
+      'scripts/build-server.ts',
+      'scripts/build/common.ts',
+      'scripts/electron-build-main.ts',
+      'scripts/electron-dev.ts',
+      'scripts/prepare-platform-runtime.ts',
+      'packages/server-core/src/sessions/SessionManager.ts',
+      'packages/shared/src/agent/backend/internal/runtime-resolver.ts',
+    ]) {
+      expect(read(file)).not.toContain('session-mcp-server')
+    }
+  })
+
   it('makes final container smoke a builder gate', () => {
     const builder = read('apps/electron/electron-builder.yml')
     const hook = read('apps/electron/scripts/afterAllArtifactBuild.cjs')
@@ -295,7 +345,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('release-signing-audit-*.jsonl')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
-    expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildMcpServers(config)')
+    expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildPiAgentServer(config)')
     const macValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
     expect(macValidator).toContain('"$MODE" != "signing"')
     expect(macValidator).toContain('platform=macos mode=$MODE')
@@ -467,5 +517,195 @@ describe('Electron final artifact validation pipeline', () => {
       expect(source).toContain('astral-sh-release')
     }
     expect(afterPack).toContain('linux-terminal-integration.sh')
+  })
+
+  // STAGING-LEVEL REGRESSION: the resource copies are overwrite-only, so a
+  // leftover of the removed session MCP sidecar must be PRUNED by the
+  // staging entry itself — in both the source resources/ tree and
+  // dist/resources/ — while the Pi subprocess bundle survives. Static
+  // script-text scans cannot catch a stale artifact; this exercises the
+  // real staging function against a planted sentinel.
+  // CALL-GRAPH REGRESSION: the electron dev entry must keep the wrapper/leaf
+  // split for the Pi agent server bundle — exactly ONE orchestration wrapper
+  // (which owns the failure policy: a failed build stops the dev entry via
+  // process.exit) and exactly ONE leaf builder returning {success, error}.
+  // If the two collapse into one name, the later leaf declaration wins and
+  // the failure result is silently swallowed.
+  // CALL-GRAPH REGRESSION: the electron packaging entry
+  // (scripts/electron-build-main.ts) builds the pi bundle through the SHARED
+  // production args (scripts/build/pi-build-args.ts, node-target ESM) — it
+  // must never re-declare a target locally: a bun-targeted ESM bundle crashes
+  // the Node 22 production host (ELECTRON_RUN_AS_NODE=1) on
+  // `import.meta.require`, and electron:build would re-overwrite both the
+  // package dist and the staged resources with it.
+  // STAGED-CHAIN HOST REGRESSION: drive the REAL build+stage core used by
+  // the packaging entry (temp layout — the worktree is untouched), then run
+  // the freshly staged `index.js` under the production host (Node +
+  // ELECTRON_RUN_AS_NODE=1) and assert the init/ready handshake. This is the
+  // repeatable form of the once-per-commit manual gate: if staging/copy ever
+  // regresses to a stale or bun-targeted artifact, the handshake fails here
+  // instead of in the field.
+  it('real staging path produces a STAGED pi resource that completes init/ready under the node host', async () => {
+    const {
+      buildPiAgentServerBundle,
+      stagePiAgentServerBundleResource,
+      stagedResourceBundlePath,
+    } = await import(join(root, 'scripts', 'build', 'pi-agent-server-staging.ts'))
+
+    const layoutRoot = mkdtempSync(join(tmpdir(), 'polo-pi-staging-e2e-'))
+    try {
+      // Electron-layout temp dir: the staged resource sits at
+      // resources/pi-agent-server/index.js and Node resolves its module type
+      // through the nearest package.json — mirror apps/electron/package.json
+      // ("type": "module") at that exact boundary.
+      const electronPackageJson = JSON.parse(readFileSync(join(root, 'apps', 'electron', 'package.json'), 'utf8')) as { type?: string }
+      mkdirSync(layoutRoot, { recursive: true })
+      writeFileSync(join(layoutRoot, 'package.json'), JSON.stringify({ type: electronPackageJson.type ?? 'module' }))
+
+      const layout = {
+        sourceEntry: join(root, 'packages', 'pi-agent-server', 'src', 'index.ts'),
+        distDir: join(layoutRoot, 'build-output', 'pi-agent-server', 'dist'),
+        resourceDir: join(layoutRoot, 'resources', 'pi-agent-server'),
+        koffiSource: join(root, 'node_modules', 'koffi'),
+      }
+
+      // REAL build + stage path (same core the packaging entry drives).
+      // The dist output is only the build-success precondition — everything
+      // below asserts THE STAGED RESOURCE (resourceDir/index.js), the copy
+      // production actually executes.
+      await buildPiAgentServerBundle(layout, root)
+      stagePiAgentServerBundleResource(layout)
+
+      const stagedResource = stagedResourceBundlePath(layout)
+      expect(existsSync(stagedResource)).toBe(true)
+
+      // BUNDLE SHAPE on the STAGED RESOURCE: node-target ESM only.
+      const staged = readFileSync(stagedResource, 'utf8')
+      expect(staged).not.toContain('import.meta.require')
+      expect(staged).toContain('createRequire')
+
+      // HOST HANDSHAKE on the STAGED RESOURCE: init → ready under Node +
+      // ELECTRON_RUN_AS_NODE=1.
+      const host = Bun.spawn({
+        cmd: ['node', stagedResource],
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      })
+      try {
+        host.stdin.write(
+          JSON.stringify({
+            type: 'init',
+            sessionId: 'staged-chain-regression',
+            workspaceRootPath: '/tmp',
+            cwd: '/tmp',
+          }) + '\n',
+        )
+        await host.stdin.flush()
+
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let ready: Record<string, unknown> | null = null
+        const deadline = Date.now() + 20000
+        while (!ready && Date.now() < deadline) {
+          const newlineIndex = buffer.indexOf('\n')
+          if (newlineIndex >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim()
+            buffer = buffer.slice(newlineIndex + 1)
+            if (line) {
+              const msg = JSON.parse(line) as Record<string, unknown>
+              if (msg.type === 'ready') ready = msg
+            }
+            continue
+          }
+          const reader = host.stdout.getReader()
+          const { value, done } = await reader.read()
+          reader.releaseLock()
+          if (done) throw new Error(`staged pi bundle stdout closed before ready; stderr: ${await new Response(host.stderr).text()}`)
+          buffer += decoder.decode(value, { stream: true })
+        }
+        if (!ready) throw new Error('timed out waiting for ready from the staged pi bundle')
+        expect(ready.type).toBe('ready')
+        expect('callbackPort' in ready).toBe(false)
+      } finally {
+        host.kill()
+      }
+    } finally {
+      rmSync(layoutRoot, { recursive: true, force: true })
+    }
+  }, 60000)
+
+  it('electron-build-main builds the pi bundle through the shared node-target args', () => {
+    const main = read('scripts/electron-build-main.ts')
+    // The packaging entry drives the testable staging core, which sources
+    // the production args (node-target ESM) from the single definition.
+    expect(main).toContain('buildPiAgentServerBundle')
+    expect(main).toContain('stagePiAgentServerBundleResource')
+    expect(main).toContain("from \"./build/pi-agent-server-staging.ts\"")
+    expect(main).not.toContain('"--target", "bun"')
+    expect(main).not.toContain('--target=bun')
+    expect(main).not.toContain('--target bun')
+
+    // The staging core is the one place that sources the shared args.
+    const stagingCore = read('scripts/build/pi-agent-server-staging.ts')
+    expect(stagingCore).toContain('piAgentServerBuildArgs')
+    expect(stagingCore).not.toContain('"--target", "bun"')
+    expect(stagingCore).not.toContain('--target=bun')
+    expect(stagingCore).not.toContain('--target bun')
+  })
+
+  it('electron dev keeps the pi bundle wrapper/leaf split with failure propagation', () => {
+    const dev = read('scripts/electron-dev.ts')
+
+    const wrapperName = 'ensurePiAgentServerBuiltForDev'
+    const leafName = 'buildPiAgentServer'
+
+    // Exactly one declaration of each — no shadowing/recursive collapse.
+    expect((dev.match(new RegExp(`async function ${leafName}\\(`, 'g')) ?? []).length).toBe(1)
+    expect((dev.match(new RegExp(`async function ${wrapperName}\\(`, 'g')) ?? []).length).toBe(1)
+
+    // The leaf returns the failure-bearing result contract.
+    expect(dev).toContain(`async function ${leafName}(): Promise<{ success: boolean; error?: string }>`)
+
+    // The wrapper calls the LEAF once, inspects its result, and exits on
+    // failure — the failure must never be swallowed.
+    const wrapperStart = dev.indexOf(`async function ${wrapperName}(`)
+    const wrapperBody = dev.slice(wrapperStart, dev.indexOf('\n}', wrapperStart))
+    expect(wrapperBody).toContain('await buildPiAgentServer()')
+    expect(wrapperBody).toContain('!piResult.success')
+    expect(wrapperBody).toContain('process.exit(1)')
+    // No self-recursion: the wrapper never awaits itself.
+    expect(wrapperBody).not.toContain(`await ${wrapperName}()`)
+
+    // The dev entry routes through the wrapper (failure policy applied).
+    expect(dev).toContain(`await ${wrapperName}()`)
+  })
+
+  it('resource staging prunes a stale session-mcp-server sidecar from source and dist and keeps the pi bundle', async () => {
+    const { stageResources } = await import(join(root, 'apps', 'electron', 'scripts', 'copy-assets.ts'))
+    const electronDir = mkdtempSync(join(tmpdir(), 'polo-resource-staging-'))
+    try {
+      // Plant the leftover: an old sidecar in BOTH the source staging tree
+      // and dist, next to the live Pi bundle.
+      const sidecarSrc = join(electronDir, 'resources', 'session-mcp-server')
+      const sidecarDist = join(electronDir, 'dist', 'resources', 'session-mcp-server')
+      const piSrc = join(electronDir, 'resources', 'pi-agent-server')
+      mkdirSync(sidecarSrc, { recursive: true })
+      mkdirSync(sidecarDist, { recursive: true })
+      mkdirSync(piSrc, { recursive: true })
+      writeFileSync(join(sidecarSrc, 'index.js'), 'stale sidecar sentinel')
+      writeFileSync(join(sidecarDist, 'index.js'), 'stale sidecar sentinel')
+      writeFileSync(join(piSrc, 'index.js'), 'pi bundle sentinel')
+      writeFileSync(join(electronDir, 'resources', 'config-defaults.json'), '{}')
+
+      stageResources(electronDir)
+
+      expect(existsSync(sidecarSrc)).toBe(false)
+      expect(existsSync(sidecarDist)).toBe(false)
+      expect(existsSync(join(electronDir, 'dist', 'resources', 'pi-agent-server', 'index.js'))).toBe(true)
+    } finally {
+      rmSync(electronDir, { recursive: true, force: true })
+    }
   })
 })

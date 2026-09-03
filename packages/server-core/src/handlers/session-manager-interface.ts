@@ -22,6 +22,9 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
+  QuestionRequest,
+  QuestionResolution,
+  QuestionResolutionResult,
 } from '@polo-ai/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
 import type { EventSink } from '../transport'
@@ -122,6 +125,26 @@ export interface ISessionManager {
   ): boolean
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
   getSessionPermissionModeState(sessionId: string): PermissionModeState | null
+
+  // ---------------------------------------------------------------------------
+  // Questions (request_user_input)
+  // ---------------------------------------------------------------------------
+
+  getPendingQuestion(sessionId: string): QuestionRequest | null
+  respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question for the given workspace + popover owner (hidden session — not
+   * reachable through the session list). Exact match only; returns null when
+   * no scoped popover session is waiting for an answer.
+   */
+  getEditPopoverPendingSession(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null>
+  /**
+   * Dedicated, trusted creation path for the renderer Edit Popover session:
+   * stamps the server-verified 'edit-popover' origin + owner identity. The
+   * generic createSession path strips any caller-provided 'edit-popover'.
+   */
+  createEditPopoverSession(workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions): Promise<import('@polo-ai/shared/protocol').Session>
 
   // ---------------------------------------------------------------------------
   // Plans

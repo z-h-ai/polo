@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<!--
+  POO-50 static source-derived interaction prototype.
+  Source UI revision: 01f4447cf77612ca2c62d9c7155601a51bdb7b5b
+  Frozen shell reference: design-demos/polo-client-source-baseline @ 11d506c9
+  Scope: visual/interaction review only; no production Agent/RPC implementation.
+-->
+<html lang="zh-Hans" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <title>POO-50 · Polo 助手交互选项框原型</title>
+  <script id="prototype-config" type="application/json">
+    {"scenes":["question","multi-other","error","cancelled","resolved"],"themes":["light","dark"],"langs":["zh-Hans","en"]}
+  </script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --background: oklch(0.98 0.003 265);
+      --foreground: oklch(0.185 0.01 270);
+      --foreground-rgb: 38, 36, 42;
+      --accent: oklch(0.62 0.13 293);
+      --info: oklch(0.75 0.16 70);
+      --success: oklch(0.55 0.17 145);
+      --destructive: oklch(0.58 0.24 28);
+      --bg-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+      --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+      --border: oklch(from var(--foreground) l c h / 0.05);
+      --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+      --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+      --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+      --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+      --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+      --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+      --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+      --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+      --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+      --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+      --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+      --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+      --radius-edge: 14px;
+      --radius-inner: 10px;
+      --topbar-h: 48px;
+      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    html[data-theme="dark"] {
+      --background: oklch(0.145 0.015 270);
+      --foreground: oklch(0.95 0.01 270);
+      --foreground-rgb: 237, 236, 240;
+      --accent: oklch(0.65 0.22 293);
+      --info: oklch(0.78 0.14 70);
+      --success: oklch(0.60 0.17 145);
+      --destructive: oklch(0.65 0.22 28);
+      --bg-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+      --border: oklch(from var(--foreground) l c h / 0.09);
+    }
+    * { box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    html { font-size: 15px; }
+    body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, [role="radio"]:focus-visible, [role="checkbox"]:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--border); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--fg-50); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes answerIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 980px) {
+      [data-polo-sidebar], [data-polo-navigator] { display: none !important; }
+      [data-polo-panels] { padding-left: 6px !important; }
+      [data-polo-content] { min-width: 0 !important; border-radius: 14px !important; }
+    }
+    @media (max-width: 620px) {
+      [data-polo-tabbar] { padding-left: 8px !important; }
+      [data-polo-workspace] { width: auto !important; flex: 1 !important; }
+      [data-polo-chat-scroll] { padding: 18px 12px !important; }
+      [data-polo-question] { min-height: 440px !important; max-height: min(560px, calc(100vh - 138px)) !important; }
+      [data-polo-option] { padding: 12px !important; }
+      [data-question-footer] { align-items: flex-end !important; flex-wrap: wrap; }
+      [data-question-status] { flex-basis: 100% !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <!-- approximate:static-handoff-controller -->
+  <script type="text/babel" data-presets="env,react">
+    const { useEffect, useMemo, useRef, useState } = React;
+
+    const I = ({ d, size = 18, sw = 2, style }) => (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" style={style} aria-hidden="true">
+        {(Array.isArray(d) ? d : [d]).map((path, index) => <path key={index} d={path} />)}
+      </svg>
+    );
+
+    const iconPaths = {
+      check: "M20 6 9 17l-5-5",
+      chevLeft: "m15 18-6-6 6-6",
+      chevRight: "m9 18 6-6-6-6",
+      chevDown: "m6 9 6 6 6-6",
+      home: ["M3 11 12 3l9 8", "M5 10v10h14V10", "M9 20v-6h6v6"],
+      close: ["M18 6 6 18", "M6 6l12 12"],
+      plus: ["M12 5v14", "M5 12h14"],
+      help: ["M9.1 9a3 3 0 1 1 5.8 1c0 2-2.9 2.3-2.9 4", "M12 18h.01", "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20"],
+      inbox: ["M4 4h16v16H4z", "M4 13h4l2 3h4l2-3h4"],
+      archive: ["M3 8v13h18V8", "M1 3h22v5H1z", "M10 12h4"],
+      tag: ["M20.6 13.6 11 4H4v7l9.6 9.6a2 2 0 0 0 2.8 0l4.2-4.2a2 2 0 0 0 0-2.8z", "M8.5 8.5h.01"],
+      database: ["M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3z", "M4 6v6c0 1.7 3.6 3 8 3", "M4 12v6c0 1.7 3.6 3 8 3"],
+      globe: ["M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20", "M2 12h20", "M12 2c2.5 2.7 4 6.1 4 10s-1.5 7.3-4 10c-2.5-2.7-4-6.1-4-10s1.5-7.3 4-10"],
+      folder: ["M3 5h6l2 2h10v12H3z", "M3 9h18"],
+      zap: "m13 2-9 12h8l-1 8 9-12h-8z",
+      list: ["M9 6h11", "M9 12h11", "M9 18h11", "M4 6h.01", "M4 12h.01", "M4 18h.01"],
+      clock: ["M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20", "M12 6v6l4 2"],
+      radio: ["M5.5 18.5a9 9 0 0 1 0-13", "M8.5 15.5a5 5 0 0 1 0-7", "M12 12h.01"],
+      bot: ["M12 8V4", "M9 4h6", "M6 8h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z", "M9 13h.01", "M15 13h.01", "M9 17h6"],
+      flag: ["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z", "M4 22v-7"],
+      share: "M8 8.53809C6.74209 8.60866 5.94798 8.80911 5.37868 9.37841C4.5 10.2571 4.5 11.6713 4.5 14.4997V15.4997C4.5 18.3282 4.5 19.7424 5.37868 20.6211C6.25736 21.4997 7.67157 21.4997 10.5 21.4997H13.5C16.3284 21.4997 17.7426 21.4997 18.6213 20.6211C19.5 19.7424 19.5 18.3282 19.5 15.4997V14.4997C19.5 11.6713 19.5 10.2571 18.6213 9.37841C18.052 8.80911 17.2579 8.60866 16 8.53809M12 14V3.5M9.5 5.5C9.99903 4.50411 10.6483 3.78875 11.5606 3.24093C11.7612 3.12053 11.8614 3.06033 12 3.06033C12.1386 3.06033 12.2388 3.12053 12.4394 3.24093C13.3517 3.78875 14.001 4.50411 14.5 5.5"
+    };
+    const Ico = {
+      Check: ({ size = 14 }) => <I d={iconPaths.check} size={size} sw={2.5} />,
+      ChevLeft: ({ size = 14 }) => <I d={iconPaths.chevLeft} size={size} />,
+      ChevRight: ({ size = 14 }) => <I d={iconPaths.chevRight} size={size} />,
+    };
+
+    function PoloSymbol({ size = 18 }) {
+      return <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden="true"><path d="M 22 85 V 10 H 44 A 19 19 0 0 1 44 48 H 34" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round"/><circle cx="42" cy="76" r="9" fill="currentColor"/><path d="M 60 65 V 85 H 68" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/><circle cx="84" cy="76" r="9" fill="currentColor"/></svg>;
+    }
+
+    const COPY = {
+      "zh-Hans": {
+        deleteHeader:"删除方式", deleteQuestion:"删除项目后，相关数据应该如何处理？", trash:"移到废纸篓", trashDesc:"推荐，可在 30 天内恢复", permanent:"永久删除", permanentDesc:"立即清除且无法恢复",
+        notifyHeader:"通知范围", notifyQuestion:"需要通知哪些相关成员？", admins:"项目管理员", all:"所有项目成员", none:"不发送通知", other:"其他", otherDesc:"输入不同的处理方式", otherPlaceholder:"请输入处理方式", otherNotifyPlaceholder:"请输入其他通知对象",
+        recommended:"推荐", multiple:"可多选", cancel:"暂不回答", back:"上一步", next:"下一步", confirm:"确认", retry:"重试", submitting:"正在提交回答…", chooseDelete:"请选择一种处理方式", choseDelete:"已选择删除方式", chooseNotify:"请至少选择一个通知范围", choseNotify:"已选择通知范围",
+        error:"提交失败，回答已保留。请重试。", cancelled:"暂不回答此问题", cancelNote:"已暂停当前问题；Agent 不会继续执行。", initialUser:"把项目删除流程补完整。", initialAssistant:"删除方式会影响数据能否恢复，我需要先确认一个选择。", continued:"好的，我会按这个选择补完整删除流程，并同步完善确认提示、结果反馈和后续恢复路径。", replay:"重新演示", draft:"继续补充：删除前导出审计记录", placeholder:"你想处理什么？", ask:"Ask", attach:"⌕ Attach Files", sources:"Choose Sources"
+      },
+      en: {
+        deleteHeader:"Deletion", deleteQuestion:"What should happen to related data when the project is deleted?", trash:"Move to Trash", trashDesc:"Recommended; recoverable for 30 days", permanent:"Delete permanently", permanentDesc:"Remove immediately with no recovery",
+        notifyHeader:"Notifications", notifyQuestion:"Who should be notified?", admins:"Project admins", all:"All project members", none:"Do not notify anyone", other:"Other", otherDesc:"Enter another handling method", otherPlaceholder:"Enter another handling method", otherNotifyPlaceholder:"Enter another notification target",
+        recommended:"Recommended", multiple:"Multiple", cancel:"Not now", back:"Back", next:"Next", confirm:"Confirm", retry:"Retry", submitting:"Submitting…", chooseDelete:"Choose one handling method", choseDelete:"Deletion method selected", chooseNotify:"Choose at least one notification target", choseNotify:"Notification target selected",
+        error:"Submission failed. Your answers are preserved; please retry.", cancelled:"Not answering this question now", cancelNote:"The question is paused and the Agent will not continue.", initialUser:"Complete the project deletion flow.", initialAssistant:"Deletion affects whether data can be recovered, so I need one choice first.", continued:"Got it. I’ll complete the deletion flow with this choice, including confirmation, result feedback, and recovery behavior.", replay:"Replay", draft:"Also export audit records before deletion", placeholder:"What would you like to work on?", ask:"Ask", attach:"⌕ Attach Files", sources:"Choose Sources"
+      }
+    };
+
+    function makeRequest(lang, requestId) {
+      const t = COPY[lang];
+      return { requestId, questions:[
+        { id:"deletion", header:t.deleteHeader, question:t.deleteQuestion, options:[
+          {id:"trash",label:t.trash,description:t.trashDesc,recommended:true},
+          {id:"permanent",label:t.permanent,description:t.permanentDesc}
+        ]},
+        { id:"notifications", header:t.notifyHeader, question:t.notifyQuestion, multiple:true, options:[
+          {id:"admins",label:t.admins,description:""},
+          {id:"all",label:t.all,description:""},
+          {id:"none",label:t.none,description:"",exclusive:true}
+        ]}
+      ]};
+    }
+
+    function QuestionRequest({ request, onSubmit, onCancel, disabled = false, submitting = false, error = "", unstyled = false, lang = "zh-Hans", demoState }) {
+      const t = COPY[lang];
+      const [step, setStep] = useState(demoState?.step || 0);
+      const [answers, setAnswers] = useState(demoState?.answers || { deletion:[], notifications:[] });
+      const [otherTexts, setOtherTexts] = useState(demoState?.otherTexts || {});
+      const [hoveredOption, setHoveredOption] = useState("");
+      const [focusedOption, setFocusedOption] = useState("");
+      const [hoveredButton, setHoveredButton] = useState("");
+      const [contentVisible, setContentVisible] = useState(true);
+      const otherInputRef = useRef(null);
+      const transitionTimerRef = useRef(null);
+      const ease = "cubic-bezier(.4,0,.2,1)";
+      const question = request.questions[step];
+      const selectedIds = answers[question.id] || [];
+      const otherSelected = selectedIds.includes("__other__");
+      const inactive = disabled || submitting;
+
+      useEffect(() => {
+        window.clearTimeout(transitionTimerRef.current);
+        setStep(demoState?.step || 0);
+        setAnswers(demoState?.answers || { deletion:[], notifications:[] });
+        setOtherTexts(demoState?.otherTexts || {});
+        setContentVisible(true);
+        return () => window.clearTimeout(transitionTimerRef.current);
+      }, [request.requestId]);
+
+      useEffect(() => {
+        if (!otherSelected) return;
+        const timer = window.setTimeout(() => otherInputRef.current?.focus(), 40);
+        return () => window.clearTimeout(timer);
+      }, [step, otherSelected]);
+
+      const moveToStep = (nextStep) => {
+        if (inactive || nextStep === step) return;
+        window.clearTimeout(transitionTimerRef.current);
+        setContentVisible(false);
+        transitionTimerRef.current = window.setTimeout(() => {
+          setStep(nextStep); setHoveredOption(""); setFocusedOption("");
+          window.requestAnimationFrame(() => setContentVisible(true));
+        }, 125);
+      };
+
+      const selectOption = option => {
+        if (inactive) return;
+        setAnswers(current => {
+          const selected = current[question.id] || [];
+          if (!question.multiple) return {...current, [question.id]:[option.id]};
+          const exclusiveIds = question.options.filter(item => item.exclusive).map(item => item.id);
+          if (option.exclusive) {
+            setOtherTexts(texts => ({...texts, [question.id]:""}));
+            return {...current, [question.id]:selected.includes(option.id) ? [] : [option.id]};
+          }
+          const compatible = selected.filter(id => !exclusiveIds.includes(id));
+          return {...current, [question.id]:compatible.includes(option.id) ? compatible.filter(id => id !== option.id) : [...compatible, option.id]};
+        });
+      };
+
+      const selectOther = () => {
+        if (inactive) return;
+        setAnswers(current => {
+          const selected = current[question.id] || [];
+          if (!question.multiple) return {...current, [question.id]:["__other__"]};
+          const compatible = selected.filter(id => !question.options.some(option => option.exclusive && option.id === id));
+          return {...current, [question.id]:compatible.includes("__other__") ? compatible.filter(id => id !== "__other__") : [...compatible, "__other__"]};
+        });
+      };
+
+      const complete = target => {
+        const selected = answers[target.id] || [];
+        return selected.length > 0 && (!selected.includes("__other__") || Boolean((otherTexts[target.id] || "").trim()));
+      };
+      const currentComplete = complete(question);
+      const allComplete = request.questions.every(complete);
+
+      const submit = () => {
+        if (!allComplete || inactive) return;
+        onSubmit?.({ requestId:request.requestId, answers:request.questions.map(item => ({ questionId:item.id, selectedOptionIds:(answers[item.id] || []).filter(id => id !== "__other__"), ...((answers[item.id] || []).includes("__other__") ? {otherText:(otherTexts[item.id] || "").trim()} : {}) })) });
+      };
+
+      const renderChoice = ({ id, title, description, selected, multi = false, recommended = false, onSelect, children }) => {
+        const hovered = hoveredOption === id;
+        const focused = focusedOption === id;
+        return <div key={id} data-polo-option role={multi ? "checkbox" : "radio"} aria-checked={selected} aria-disabled={inactive} tabIndex={inactive ? -1 : 0}
+          onClick={() => !inactive && onSelect()}
+          onKeyDown={event => { if (!inactive && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onSelect(); } }}
+          onMouseEnter={() => !inactive && setHoveredOption(id)} onMouseLeave={() => setHoveredOption("")}
+          onFocus={() => setFocusedOption(id)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedOption(""); }}
+          style={{ width:"100%", display:"flex", alignItems:"flex-start", gap:12, padding:"14px 16px", background:selected?"var(--fg-5)":hovered?"var(--fg-3)":"transparent", cursor:inactive?"default":"pointer", opacity:inactive?.72:1, outline:"none", boxShadow:focused?"inset 0 0 0 1px var(--fg-30)":"none", transition:`background 150ms ${ease}, box-shadow 150ms ${ease}, opacity 150ms ${ease}`, userSelect:"none" }}>
+          <span aria-hidden="true" style={{ width:16, height:16, marginTop:3, flexShrink:0, display:"grid", placeItems:"center", borderRadius:multi?4:9999, border:selected?"2px solid var(--accent)":"1.5px solid var(--fg-30)", background:multi&&selected?"var(--accent)":"transparent", color:"var(--background)" }}>
+            {multi && selected ? <Ico.Check size={11}/> : !multi && selected ? <span style={{width:8,height:8,borderRadius:9999,background:"var(--accent)"}}/> : null}
+          </span>
+          <span style={{ flex:1, minWidth:0 }}>
+            <span style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:8, minHeight:18 }}>
+              <span style={{ fontSize:14, lineHeight:1.25, fontWeight:500 }}>{title}</span>
+              {recommended && <span style={{ display:"inline-flex", alignItems:"center", height:18, padding:"0 6px", borderRadius:4, border:"1px solid color-mix(in srgb,var(--accent) 55%,transparent)", color:"var(--accent)", background:"color-mix(in srgb,var(--accent) 6%,var(--background))", fontSize:10, fontWeight:500 }}>{t.recommended}</span>}
+            </span>
+            {description && <span style={{ display:"block", marginTop:2, fontSize:12, lineHeight:1.5, color:"var(--fg-50)" }}>{description}</span>}
+            {children}
+          </span>
+        </div>;
+      };
+
+      const renderButton = ({ id, label, primary = false, disabled = false, icon, onClick }) => {
+        const hovered = hoveredButton === id;
+        const buttonInactive = disabled || inactive;
+        return <button type="button" disabled={buttonInactive} onClick={onClick} onMouseEnter={() => !buttonInactive && setHoveredButton(id)} onMouseLeave={() => setHoveredButton("")}
+          style={{ height:28, display:"inline-flex", alignItems:"center", justifyContent:"center", gap:6, padding:"0 12px", borderRadius:6, border:primary?"1px solid transparent":"1px solid var(--fg-10)", background:primary?(hovered&&!buttonInactive?"var(--fg-80)":"var(--foreground)"):(hovered&&!buttonInactive?"var(--fg-5)":"transparent"), color:primary?"var(--background)":"var(--foreground)", fontSize:12, fontWeight:500, cursor:buttonInactive?"default":"pointer", opacity:buttonInactive?.5:1, transition:`background 150ms ${ease}, opacity 150ms ${ease}` }}>
+          {icon}<span>{label}</span>
+        </button>;
+      };
+
+      const divider = <div style={{height:1,margin:"0 16px",background:"var(--border)"}}/>;
+      return <div data-polo-question data-unstyled={unstyled || undefined} style={{ position:"relative", width:"100%", minHeight:382, maxHeight:520, display:"flex", flexDirection:"column", overflow:"hidden", borderRadius:unstyled?0:12, background:"var(--background)", boxShadow:unstyled?"none":"0 0 0 1px var(--border), 0 3px 12px rgba(0,0,0,.06)", transition:`height 250ms ${ease}` }}>
+        <div style={{ flex:1, minHeight:0, overflowY:"auto", padding:16 }}>
+          <div style={{ opacity:contentVisible?1:0, transform:contentVisible?"translateY(0)":"translateY(6px)", transition:`opacity 125ms ${ease}, transform 125ms ${ease}` }}>
+            <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:16, marginBottom:12 }}>
+              <div style={{minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><span style={{fontSize:14,fontWeight:600}}>{question.header}</span>{question.multiple&&<span style={{fontSize:10,fontWeight:500,color:"var(--fg-50)"}}>{t.multiple}</span>}</div>
+                <div style={{fontSize:13,lineHeight:"18px",color:"var(--fg-60)"}}>{question.question}</div>
+              </div>
+              <span style={{flexShrink:0,display:"inline-flex",alignItems:"center",justifyContent:"center",height:22,minWidth:42,padding:"0 8px",borderRadius:9999,background:"var(--fg-5)",color:"var(--fg-50)",fontSize:11,fontWeight:500}}>{step+1} / {request.questions.length}</span>
+            </div>
+            <div role={question.multiple?"group":"radiogroup"} aria-label={question.header} style={{overflow:"hidden",borderRadius:8,background:"var(--background)",border:"1px solid var(--border)",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+              {question.options.map((option,index) => <React.Fragment key={option.id}>{index>0&&divider}{renderChoice({id:option.id,title:option.label,description:option.description,selected:selectedIds.includes(option.id),multi:question.multiple,recommended:option.recommended,onSelect:()=>selectOption(option)})}</React.Fragment>)}
+              {divider}
+              {renderChoice({id:"__other__",title:t.other,description:question.multiple?"":t.otherDesc,selected:otherSelected,multi:question.multiple,onSelect:selectOther,children:otherSelected?<span style={{display:"block",marginTop:10}}><input ref={otherInputRef} value={otherTexts[question.id] || ""} onChange={event=>setOtherTexts(current=>({...current,[question.id]:event.target.value}))} onClick={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()} disabled={inactive} placeholder={question.multiple?t.otherNotifyPlaceholder:t.otherPlaceholder} aria-label={question.multiple?t.otherNotifyPlaceholder:t.otherPlaceholder} style={{width:"100%",height:36,padding:"0 12px",borderRadius:6,border:"1px solid var(--fg-20)",background:"var(--background)",color:"var(--foreground)",outline:"none"}}/></span>:null})}
+            </div>
+          </div>
+        </div>
+        <div data-question-footer style={{flexShrink:0,minHeight:45,display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderTop:"1px solid var(--border)",background:"var(--background)"}}>
+          <span data-question-status aria-live="polite" style={{flex:1,minWidth:0,fontSize:10,lineHeight:1.35,color:error?"var(--destructive)":currentComplete?"var(--fg-40)":"var(--fg-50)"}}>{submitting ? t.submitting : error ? error : currentComplete ? (step===0?t.choseDelete:t.choseNotify) : (step===0?t.chooseDelete:t.chooseNotify)}</span>
+          {renderButton({id:"cancel",label:t.cancel,onClick:onCancel})}
+          {step>0&&renderButton({id:"back",label:t.back,icon:<Ico.ChevLeft size={13}/>,onClick:()=>moveToStep(step-1)})}
+          {step<request.questions.length-1?renderButton({id:"next",label:t.next,primary:true,disabled:!currentComplete,icon:<Ico.ChevRight size={13}/>,onClick:()=>moveToStep(step+1)}):renderButton({id:"confirm",label:error?t.retry:(submitting?t.submitting:t.confirm),primary:true,disabled:!allComplete,icon:submitting?<span style={{width:12,height:12,border:"1.5px solid currentColor",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>:<Ico.Check size={13}/>,onClick:submit})}
+        </div>
+      </div>;
+    }
+
+    function FreeformComposer({ onAsk, draft, onDraftChange, lang }) {
+      const t = COPY[lang];
+      return <div>
+        <div style={{minHeight:33,display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,padding:"1px 1px 2px"}}><button type="button" onClick={onAsk} style={{height:30,padding:"0 8px 0 10px",display:"inline-flex",alignItems:"center",gap:6,border:0,borderRadius:8,background:"color-mix(in srgb,var(--info) 10%,transparent)",color:"var(--info)",boxShadow:"0 1px 2px color-mix(in srgb,var(--info) 18%,transparent)",fontSize:12,fontWeight:500,cursor:"pointer"}}><span style={{width:14,height:14,border:"1.5px solid currentColor",borderRadius:"50%",display:"inline-grid",placeItems:"center",fontSize:9}}>?</span><span>{t.ask}</span><I d={iconPaths.chevDown} size={14}/></button></div>
+        <div style={{position:"relative",overflow:"hidden",borderRadius:12,background:"var(--background)",boxShadow:"0 0 0 1px var(--border),0 3px 8px rgba(0,0,0,.05)"}}>
+          <textarea value={draft} onChange={event=>onDraftChange(event.target.value)} placeholder={t.placeholder} style={{display:"block",width:"100%",minHeight:88,maxHeight:300,resize:"none",padding:"16px 16px 12px 20px",border:0,outline:0,color:"var(--foreground)",background:"transparent",lineHeight:1.5}}/>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:8,borderTop:"1px solid var(--border)"}}><button type="button" style={{height:28,padding:"0 8px",border:0,borderRadius:6,background:"transparent",color:"var(--fg-60)"}}>{t.attach}</button><button type="button" style={{height:28,padding:"0 8px",border:0,borderRadius:6,background:"transparent",color:"var(--fg-60)"}}>{t.sources}</button><span style={{flex:1}}/><button type="button" disabled={!draft.trim()} style={{width:28,height:28,border:0,borderRadius:9999,color:"var(--background)",background:draft.trim()?"var(--foreground)":"var(--fg-10)",opacity:draft.trim()?1:.5}}>↑</button></div>
+        </div>
+      </div>;
+    }
+
+    function ChatConversation({ resolution, answerSummary, children, onReset, lang }) {
+      const t = COPY[lang];
+      const [titleHovered, setTitleHovered] = useState(false);
+      const [shareHovered, setShareHovered] = useState(false);
+      const bubble = (content, user, key) => <div key={key} style={{paddingTop:user?16:8,paddingBottom:user?8:0,display:"flex",justifyContent:user?"flex-end":"flex-start",animation:"answerIn 220ms ease-out"}}><div style={{maxWidth:user?"80%":"90%",padding:user?"10px 14px":"12px 16px 12px 24px",border:user?"1px solid var(--border)":0,borderRadius:user?10:8,background:user?"var(--user-bubble)":"var(--background)",boxShadow:"0 1px 2px rgba(0,0,0,.05)",fontSize:14,lineHeight:1.6,overflowWrap:"anywhere"}}>{content}</div></div>;
+      return <section aria-label="Session" style={{height:"100%",minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden",background:"var(--background)"}}>
+        <header style={{height:42,minHeight:42,display:"flex",alignItems:"center",gap:6,paddingLeft:16,paddingRight:8}}>
+          <div style={{minWidth:0,flex:1}}><button type="button" onMouseEnter={()=>setTitleHovered(true)} onMouseLeave={()=>setTitleHovered(false)} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 8px",border:0,borderRadius:6,color:"var(--foreground)",background:titleHovered?"var(--fg-5)":"transparent"}}><h1 style={{margin:0,fontSize:14,fontWeight:600}}>项目删除流程</h1><I d={iconPaths.chevDown} size={14} style={{color:"var(--fg-50)"}}/></button></div>
+          {resolution&&<button type="button" onClick={onReset} style={{height:28,padding:"0 10px",border:"1px solid var(--border)",borderRadius:6,background:"transparent",color:"var(--fg-60)",fontSize:11,cursor:"pointer"}}>{t.replay}</button>}
+          <button type="button" aria-label="Share session" onMouseEnter={()=>setShareHovered(true)} onMouseLeave={()=>setShareHovered(false)} style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",padding:6,border:0,borderRadius:6,color:shareHovered?"var(--foreground)":"var(--fg-70)",background:shareHovered?"var(--fg-5)":"var(--background)",boxShadow:"0 1px 2px rgba(0,0,0,.06)"}}><I d={iconPaths.share} size={16}/></button>
+        </header>
+        <div style={{minHeight:0,flex:1,display:"flex",flexDirection:"column"}}>
+          <main data-polo-chat-scroll style={{minHeight:0,flex:1,overflowY:"auto",maskImage:"linear-gradient(to bottom,transparent 0%,black 32px,black calc(100% - 32px),transparent 100%)"}}><div style={{width:"100%",maxWidth:840,minHeight:"100%",margin:"0 auto",padding:"32px 20px",display:"flex",flexDirection:"column",gap:10}}>
+            {bubble(t.initialUser,true,"initial-user")}{bubble(t.initialAssistant,false,"initial-assistant")}
+            {resolution==="answered"&&<>{bubble(answerSummary,true,"resolved-user")}{bubble(t.continued,false,"resolved-assistant")}</>}
+            {resolution==="cancelled"&&<>{bubble(<><strong>{t.cancelled}</strong><br/><span style={{color:"var(--fg-50)",fontSize:12}}>{t.cancelNote}</span></>,true,"cancelled-user")}</>}
+          </div></main>
+          <div style={{width:"100%",maxWidth:840,margin:"4px auto 0",padding:"1px 16px 16px",flexShrink:0}}>{children}</div>
+        </div>
+      </section>;
+    }
+
+    function PoloShell({ children, theme, onThemeToggle, onReset }) {
+      const [sidebarVisible, setSidebarVisible] = useState(true);
+      const [hovered, setHovered] = useState("");
+      const buttonReset = {padding:0,border:0,fontFamily:"var(--font-sans)",cursor:"pointer"};
+      const iconButton = (id, label, glyph, onClick, disabled=false) => <button type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} onMouseEnter={()=>setHovered(id)} onMouseLeave={()=>setHovered("")} style={{...buttonReset,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:6,color:id==="polo"?"var(--accent)":"var(--fg-70)",background:hovered===id?"var(--fg-5)":"transparent",opacity:disabled?.3:1}}>{glyph}</button>;
+      const navs = [
+        ["all","All Sessions","inbox",true,0],["flag","Flagged","flag",false,1],["archive","Archived","archive",false,1],["labels","Labels","tag",false,0],["sources","Sources","database",false,0],["apis","APIs","globe",false,1],["folders","Local Folders","folder",false,1],["skills","Skills","zap",false,0],["auto","Automations","list",false,0],["scheduled","Scheduled","clock",false,1],["event","Event","radio",false,1],["agentic","Agentic","bot",false,1]
+      ];
+      return <div data-theme={theme} style={{position:"relative",width:"100%",height:"100%",overflow:"hidden",background:"var(--background)",color:"var(--foreground)",colorScheme:theme}}>
+        <div data-polo-tabbar style={{position:"fixed",inset:"0 0 auto",zIndex:40,height:36,display:"flex",alignItems:"center",padding:"0 8px 0 86px",borderBottom:"1px solid var(--fg-10)",background:"color-mix(in srgb,var(--background) 95%,transparent)"}}>
+          <button type="button" aria-label="Home" style={{...buttonReset,width:28,height:28,display:"grid",placeItems:"center",borderRadius:6,background:"var(--fg-7)"}}><I d={iconPaths.home} size={16} sw={1.5}/></button>
+          <button type="button" style={{...buttonReset,height:32,minWidth:120,maxWidth:220,flex:"0 1 220px",alignSelf:"flex-end",marginLeft:4,marginBottom:-1,padding:"0 8px",display:"flex",alignItems:"center",gap:6,border:"1px solid var(--fg-10)",borderBottomColor:"var(--background)",borderRadius:"6px 6px 0 0",background:"var(--fg-7)",fontSize:12}}><span style={{color:"var(--accent)",display:"inline-flex"}}><PoloSymbol size={14}/></span><span style={{flex:1,textAlign:"left"}}>Polo 助手</span><I d={iconPaths.close} size={14} sw={1.5}/></button>
+          <span style={{flex:1}}/><span style={{fontSize:10,color:"var(--fg-40)",paddingRight:8}}>POO-50 · 交互原型</span>
+        </div>
+        <div style={{position:"fixed",top:36,left:0,right:0,zIndex:30,height:"var(--topbar-h)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+          <div style={{minWidth:0,flex:1,display:"flex",alignItems:"center",gap:2,paddingLeft:12}}>{iconButton("sidebar","Toggle Sidebar",<I d={["M9 4V20","M3.5 11.5v1c0 3.77 0 5.66 1.17 6.83C5.84 20.5 7.73 20.5 11.5 20.5h1c3.77 0 5.66 0 6.83-1.17C20.5 18.16 20.5 16.27 20.5 12.5v-1c0-3.77 0-5.66-1.17-6.83C18.16 3.5 16.27 3.5 12.5 3.5h-1c-3.77 0-5.66 0-6.83 1.17C3.5 5.84 3.5 7.73 3.5 11.5Z"]} size={18} sw={1.5}/>,()=>setSidebarVisible(v=>!v))}{iconButton("polo","Polo AI menu",<PoloSymbol size={16}/>)}
+            <div data-polo-workspace style={{width:"clamp(220px,42vw,640px)",minWidth:0,marginLeft:4,display:"flex",alignItems:"center",gap:4}}>{iconButton("back","Back",<I d={iconPaths.chevLeft} size={18}/>,null,true)}{iconButton("forward","Forward",<I d={iconPaths.chevRight} size={18}/>,null,true)}<button type="button" style={{...buttonReset,height:30,minWidth:0,flex:1,marginLeft:4,padding:"0 12px",display:"flex",alignItems:"center",gap:8,border:"1px solid var(--fg-7)",borderRadius:8,background:"transparent",color:"var(--fg-50)",fontSize:13}}><span style={{width:16,height:16,borderRadius:"50%",background:"var(--fg-5)"}}/><span style={{flex:1,textAlign:"left"}}>Workspace</span><I d={iconPaths.chevDown} size={12}/></button></div>
+          </div>
+          <div style={{paddingRight:12,display:"flex",alignItems:"center",gap:2}}>{iconButton("reset","Reset prototype",<I d={iconPaths.plus} size={16}/>,onReset)}{iconButton("theme",theme==="dark"?"切换浅色":"切换深色",theme==="dark"?<span style={{fontSize:14}}>☀</span>:<span style={{fontSize:14}}>☾</span>,onThemeToggle)}{iconButton("help","Help & Documentation",<I d={iconPaths.help} size={16}/>)}</div>
+        </div>
+        <main data-polo-panels style={{position:"absolute",inset:"84px 0 0",display:"flex",gap:6,minHeight:0,padding:sidebarVisible?"0 6px 6px 0":"0 6px 6px 6px"}}>
+          {sidebarVisible&&<aside data-polo-sidebar style={{width:220,flex:"0 0 220px",minHeight:0,display:"flex",flexDirection:"column"}}><button type="button" style={{...buttonReset,width:"calc(100% - 16px)",margin:"0 8px 8px",padding:"7px 8px",display:"flex",alignItems:"center",gap:8,borderRadius:6,background:"var(--background)",boxShadow:"0 0 0 1px var(--border),0 1px 2px rgba(0,0,0,.06)",fontSize:13,textAlign:"left"}}>✎ New Session</button><nav style={{minHeight:0,padding:"4px 8px 16px",display:"grid",alignContent:"start",gap:2,overflow:"auto"}}>{navs.map(([id,label,glyph,active,nested])=><button key={id} type="button" onMouseEnter={()=>setHovered(id)} onMouseLeave={()=>setHovered("")} style={{...buttonReset,width:"100%",display:"flex",alignItems:"center",gap:8,padding:"5px 8px",paddingLeft:nested?28:8,borderRadius:6,background:active?"var(--fg-7)":hovered===id?"var(--fg-5)":"transparent",fontSize:13,textAlign:"left"}}><span style={{width:14,height:14,display:"inline-flex",color:"var(--fg-60)"}}><I d={iconPaths[glyph]} size={14} sw={1.5}/></span>{label}</button>)}</nav></aside>}
+          <section data-polo-navigator style={{width:300,flex:"0 0 300px",height:"100%",overflow:"hidden",borderRadius:10,background:"var(--background)",boxShadow:"0 0 0 1px var(--border),0 4px 12px rgba(0,0,0,.08)"}}><div style={{height:"100%",padding:24,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center"}}><span style={{width:40,height:40,marginBottom:12,padding:10,display:"grid",placeItems:"center",borderRadius:10,color:"var(--fg-50)",background:"var(--fg-5)"}}><I d={iconPaths.inbox} size={20} sw={1.5}/></span><strong style={{fontSize:14}}>No sessions yet</strong><p style={{maxWidth:260,margin:"6px 0 14px",color:"var(--fg-50)",fontSize:13,lineHeight:1.45}}>Sessions with your agent appear here. Start one to get going.</p><button type="button" style={{height:28,padding:"0 12px",border:"1px solid var(--border)",borderRadius:8,background:"var(--background)",fontSize:12}}>New Session</button></div></section>
+          <section data-polo-content style={{height:"100%",minWidth:440,flex:"1 1 0",overflow:"hidden",borderRadius:"10px 14px 14px 10px",background:"var(--background)",boxShadow:"0 0 0 1px var(--border),0 4px 12px rgba(0,0,0,.08)"}}>{children}</section>
+        </main>
+      </div>;
+    }
+
+    function PrototypeScenarioController() {
+      const query = new URLSearchParams(window.location.search);
+      const initialTheme = query.get("theme") === "dark" ? "dark" : "light";
+      const lang = query.get("lang") === "en" ? "en" : "zh-Hans";
+      const availableScenes = ["question","multi-other","error","cancelled","resolved"];
+      const scene = availableScenes.includes(query.get("scene")) ? query.get("scene") : "question";
+      const initialResolution = scene === "cancelled" ? "cancelled" : scene === "resolved" ? "answered" : null;
+      const [theme, setTheme] = useState(initialTheme);
+      const [resolution, setResolution] = useState(initialResolution);
+      const [answerSummary, setAnswerSummary] = useState(scene === "resolved" ? (lang === "en" ? "Deletion: Move to Trash; Notifications: Project admins and Security team" : "删除方式：移到废纸篓；通知范围：项目管理员、安全团队") : "");
+      const [requestSequence, setRequestSequence] = useState(1);
+      const [submitting, setSubmitting] = useState(false);
+      const [error, setError] = useState(scene === "error" ? COPY[lang].error : "");
+      const [attempts, setAttempts] = useState(scene === "error" ? 1 : 0);
+      const [draft, setDraft] = useState(COPY[lang].draft);
+      const timerRef = useRef(null);
+      const request = useMemo(() => makeRequest(lang, `question-${requestSequence}`), [lang, requestSequence]);
+      const demoState = scene === "multi-other" || scene === "error" ? {step:1,answers:{deletion:["trash"],notifications:["admins","__other__"]},otherTexts:{notifications:lang === "en" ? "Security team" : "安全团队"}} : undefined;
+      useEffect(() => { document.documentElement.dataset.theme = theme; document.documentElement.lang = lang; return () => window.clearTimeout(timerRef.current); }, [theme, lang]);
+      const reset = () => { window.clearTimeout(timerRef.current); setResolution(null); setAnswerSummary(""); setSubmitting(false); setError(""); setAttempts(0); setRequestSequence(value => value + 1); };
+      const submit = response => {
+        if (submitting) return;
+        setSubmitting(true); setError("");
+        timerRef.current = window.setTimeout(() => {
+          setSubmitting(false);
+          if (attempts === 0) { setAttempts(1); setError(COPY[lang].error); return; }
+          const labels = Object.fromEntries(request.questions.flatMap(item => item.options.map(option => [option.id, option.label])));
+          const parts = response.answers.map(answer => {
+            const header = request.questions.find(item => item.id === answer.questionId)?.header || answer.questionId;
+            const values = [...answer.selectedOptionIds.map(id => labels[id] || id), ...(answer.otherText ? [answer.otherText] : [])];
+            return `${header}：${values.join(lang === "en" ? ", " : "、")}`;
+          });
+          setAnswerSummary(parts.join(lang === "en" ? "; " : "；")); setResolution("answered");
+        }, 650);
+      };
+      const cancel = () => { if (submitting) return; setError(""); setResolution("cancelled"); };
+      return <PoloShell theme={theme} onThemeToggle={()=>setTheme(value=>value==="dark"?"light":"dark")} onReset={reset}>
+        <ChatConversation resolution={resolution} answerSummary={answerSummary} onReset={reset} lang={lang}>
+          {!resolution ? <QuestionRequest request={request} onSubmit={submit} onCancel={cancel} submitting={submitting} error={error} lang={lang} demoState={demoState}/> : <FreeformComposer onAsk={reset} draft={draft} onDraftChange={setDraft} lang={lang}/>} 
+        </ChatConversation>
+      </PoloShell>;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<PrototypeScenarioController/>);
+  </script>
+</body>
+</html>

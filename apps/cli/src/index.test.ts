@@ -13,6 +13,9 @@ afterEach(async () => {
 })
 
 describe('top-level CLI help', () => {
+  // Explicit generous budget: under a fully loaded shared test process this
+  // sync assertion must never fail on scheduler delay alone (the global
+  // default is 15s). Assertions unchanged.
   it('launches an installed Linux AppImage with the installer sandbox contract', () => {
     expect(resolveAppLaunchCommand('linux', {
       POLO_AI_APPIMAGE: '/home/user/.polo-ai/app/Polo-AI-x64.AppImage',
@@ -20,7 +23,7 @@ describe('top-level CLI help', () => {
       '/home/user/.polo-ai/app/Polo-AI-x64.AppImage',
       '--no-sandbox',
     ])
-  })
+  }, 120_000)
 
   it('uses polo as the primary command and mentions polo-ai only as an alias', () => {
     let output = ''
@@ -46,7 +49,7 @@ describe('top-level CLI help', () => {
     expect(output).toContain('independent CLI runtime')
     expect(output).toContain('does not register a workspace')
     expect(output).not.toContain('Use directory as workspace (creates if needed)')
-  })
+  }, 120_000)
 
   it('never routes run with legacy server options to the old full server', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-run-routing-'))

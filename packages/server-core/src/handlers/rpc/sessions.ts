@@ -219,6 +219,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY,
   RPC_CHANNELS.sessions.MARK_ALL_READ,
   RPC_CHANNELS.sessions.CREATE,
+  RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION,
   RPC_CHANNELS.sessions.DELETE,
   RPC_CHANNELS.sessions.GET_MESSAGES,
   RPC_CHANNELS.sessions.SEND_MESSAGE,
@@ -227,6 +228,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.GET_OUTPUT,
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
+  RPC_CHANNELS.sessions.RESPOND_TO_QUESTION,
+  RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,
@@ -406,6 +409,16 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return session
   })
 
+  // Dedicated, trusted creation path for the renderer Edit Popover session.
+  // The server stamps the 'edit-popover' origin + owner identity here — the
+  // generic CREATE above strips any caller-provided value.
+  server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (_ctx, workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions) => {
+    const end = perf.start('rpc.createEditPopoverSession', { workspaceId })
+    const session = await sessionManager.createEditPopoverSession(workspaceId, options)
+    end()
+    return session
+  })
+
   // Delete a session
   server.handle(RPC_CHANNELS.sessions.DELETE, async (ctx, sessionId: string) => {
     assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
@@ -460,14 +473,24 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
       sessionManager
         .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, undefined, onAck, { callerClientId })
-        .then(() => {
+        .then(async () => {
+          if (acked) return
+          // SILENT DELETE CONVERGENCE: sendMessage returns without an ack
+          // when the send raced a deletion and converged before persisting
+          // anything. That is an expected cancellation, not an invariant
+          // violation — settle the RPC normally (the session_deleted event
+          // informs the UI); only a genuine ack-contract violation errors.
+          const sessionGone = !(await sessionManager.getSession(sessionId).catch(() => null))
+          if (sessionGone) {
+            acked = true
+            resolve({ accepted: true, messageId: '' })
+            return
+          }
           // sendMessage finished without firing onAck — should not happen in
           // practice (every code path that creates a user message acks).
           // Treat as a defensive failure rather than silently dropping.
-          if (!acked) {
-            acked = true
-            reject(new Error('sendMessage completed without persisting a user message'))
-          }
+          acked = true
+          reject(new Error('sendMessage completed without persisting a user message'))
         })
         .catch(err => {
           log.error('Error in sendMessage:', err)
@@ -559,6 +582,22 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const credentialScopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
     assertSessionScopeTokenCurrent(credentialScopeToken)
     return sessionManager.respondToCredential(sessionId, requestId, response)
+  })
+
+  // Respond to a pending question (answer or "skip for now").
+  // Returns the QuestionResolutionResult contract that drives the UI cleanup.
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION, async (_ctx, sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution) => {
+    return sessionManager.respondToQuestion(sessionId, resolution)
+  })
+
+  // Locate the Edit Popover session that still owns an active pending
+  // question for the given workspace + popover owner (hidden session — not
+  // reachable through the session list). Exact workspace + owner match only,
+  // so concurrent popovers can never adopt each other's session. Lets the
+  // popover re-adopt the same hidden session after a
+  // reopen, renderer reload, or app restart instead of orphaning the request.
+  server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async (_ctx, workspaceId: string, popoverOwner: string) => {
+    return sessionManager.getEditPopoverPendingSession(workspaceId, popoverOwner)
   })
 
   // ==========================================================================

@@ -216,6 +216,17 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
 // ============================================================
 
 /**
+ * Options controlling which session tools are built for a query.
+ */
+export interface SessionScopedToolsOptions {
+  /**
+   * Register request_user_input (desktop interactive turns only). The value
+   * participates in the cache key so toggling it between turns rebuilds tools.
+   */
+  allowRequestUserInput?: boolean;
+}
+
+/**
  * Get or create session-scoped tools for a session.
  * Returns an MCP server with all session-scoped tools registered.
  *
@@ -228,9 +239,13 @@ export function getSessionScopedTools(
   workspaceId?: string,
   storage: SessionStorage = defaultWorkspaceSessionStorage,
   workingDirectory?: string,
+  options?: SessionScopedToolsOptions,
 ): ReturnType<typeof createSdkMcpServer> {
   const sessionPath = storage.getSessionPath(workspaceRootPath, sessionId);
-  const cacheKey = `${sessionId}::${sessionPath}`;
+  // The capability flag is part of the cache key: a session switching between
+  // desktop and non-desktop turns must rebuild its toolset (P0 contract).
+  const allowRequestUserInput = options?.allowRequestUserInput ?? false;
+  const cacheKey = `${sessionId}::${sessionPath}::rui-${allowRequestUserInput ? '1' : '0'}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -243,6 +258,10 @@ export function getSessionScopedTools(
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
       sessionStorage: storage,
       workingDirectory,
+      // Tool-call-time generation reader:
+      // the handler invokes this SYNCHRONOUSLY at initiation and binds the
+      // returned value immutably into the callback chain.
+      getTurnGeneration: () => getSessionScopedToolCallbacks(sessionId)?.getTurnGeneration?.() ?? 0,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);
@@ -251,6 +270,14 @@ export function getSessionScopedTools(
       onAuthRequest: (request: unknown) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         callbacks?.onAuthRequest?.(request as AuthRequest);
+      },
+      onQuestionRequested: (questions, generationAtRequest) => {
+        // Propagate the promise: the tool handler awaits the durable handoff
+        // (persist+flush+question_request) before reporting success.
+        // `generationAtRequest` was snapshotted at tool-call initiation by
+        // the handler — forward it as-is.
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        return callbacks?.onQuestionRequested?.(questions, generationAtRequest);
       },
     });
 
@@ -274,7 +301,10 @@ export function getSessionScopedTools(
 
     // Create tools from the canonical registry — all tools with handlers.
     // Tool visibility is centrally filtered in session-tools-core to avoid backend drift.
-    tools = getSessionToolDefs({ includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback })
+    tools = getSessionToolDefs({
+      includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
+      allowRequestUserInput,
+    })
       .filter(def => def.handler !== null) // Skip backend-specific tools (call_llm)
       .map(def => registryTool(def.name, def.inputSchema.shape));
 
