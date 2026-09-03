@@ -946,6 +946,41 @@ export function resetManagedAnthropicAuthEnvVars(): void {
 }
 
 /**
+ * R50: an exact snapshot of every managed credential env key (including the
+ * Bedrock routing keys) for transactional post-init application — a timed-out
+ * or destroyed construction restores precisely this snapshot instead of
+ * leaving an erased or overwritten process-global credential state behind.
+ */
+export interface ManagedAnthropicAuthEnvSnapshot {
+  [key: string]: string | undefined
+}
+
+export function captureManagedAnthropicAuthEnvSnapshot(): ManagedAnthropicAuthEnvSnapshot {
+  if (typeof process === 'undefined' || !process?.env) {
+    return {}
+  }
+  const snapshot: ManagedAnthropicAuthEnvSnapshot = {}
+  for (const key of MANAGED_ANTHROPIC_AUTH_ENV_KEYS) {
+    snapshot[key] = process.env[key]
+  }
+  return snapshot
+}
+
+export function restoreManagedAnthropicAuthEnvSnapshot(snapshot: ManagedAnthropicAuthEnvSnapshot): void {
+  if (typeof process === 'undefined' || !process?.env) {
+    return
+  }
+  for (const key of MANAGED_ANTHROPIC_AUTH_ENV_KEYS) {
+    const value = snapshot[key]
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
+  }
+}
+
+/**
  * Result of resolving auth env vars for an LLM connection.
  */
 export interface ResolvedAuthEnvVars {

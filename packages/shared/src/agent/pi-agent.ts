@@ -2187,13 +2187,17 @@ export class PiAgent extends BaseAgent {
       // value immutably, even if a newer turn re-stamps the field before the
       // callback executes.
       const generationAtRegistration = this.sessionTurnGeneration
-      mergeSessionScopedToolCallbacks(sessionId, {
+      // R51: the per-turn merge REPLACES the session's callback lease — the
+      // returned lease is handed back to the SessionManager so the OWNER's
+      // disposal cleanup stays bound to the CURRENT record/guard pair.
+      const lease = mergeSessionScopedToolCallbacks(sessionId, {
         onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
         onAuthRequest: (request) => this.onAuthRequest?.(request),
         onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
         getTurnGeneration: () => this.sessionTurnGeneration,
         queryFn: (request) => this.queryLlm(request),
       });
+      this.config.onSessionCallbackLeaseChanged?.(lease);
     }
     try {
       // Ensure subprocess is spawned and ready

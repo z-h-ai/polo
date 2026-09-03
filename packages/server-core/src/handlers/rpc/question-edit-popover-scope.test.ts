@@ -24,7 +24,7 @@ import {
 import { getSessionFilePath, writeSessionJsonl } from '@polo-ai/shared/sessions'
 import type { StoredSession } from '@polo-ai/shared/sessions'
 import { getPermissionMode, setPermissionMode, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterAllSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterAllSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import { makeAnswerResolution, makeQuestionRequest } from '../../sessions/request-user-input-fixtures'
 
 const TEST_ACCOUNT_ID = 'account-a'
@@ -1641,13 +1641,13 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       let g1Calls = 0
       installSessionScopedToolCallbackGuard(sessionId, () => { g1Calls += 1 })
       registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'stale' } as never)
-      const staleRecord = getSessionScopedToolCallbacks(sessionId)!
+      const staleLease = getSessionScopedToolCallbackLease(sessionId)!
       // Successor publishes guard-only: G2 replaces G1 BEFORE its lazy
       // callback registration lands.
       const g2Calls: string[] = []
       installSessionScopedToolCallbackGuard(sessionId, name => { g2Calls.push(name) })
       // The stale sweep's CAS must FAIL — the guard identity changed.
-      expect(unregisterSessionScopedToolCallbacksIf(sessionId, staleRecord)).toBe(false)
+      expect(unregisterSessionScopedToolCallbacksIf(sessionId, staleLease!)).toBe(false)
       // G2 still installed: the (now live) successor callbacks run under it.
       registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never)
       const cbs = getSessionScopedToolCallbacks(sessionId)!

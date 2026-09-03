@@ -17,7 +17,9 @@ import { runErrorDiagnostics } from './diagnostics.ts';
 import { loadStoredConfig, loadConfigDefaults, type Workspace, type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
 import { getValidClaudeOAuthToken } from '../auth/state.ts';
 import {
+  captureManagedAnthropicAuthEnvSnapshot,
   clearClaudeBedrockRoutingEnvVars,
+  restoreManagedAnthropicAuthEnvSnapshot,
   resolveAuthEnvVars,
 } from '../config/llm-connections.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
@@ -696,21 +698,30 @@ export class ClaudeAgent extends BaseAgent {
    * Fetches credentials and sets process.env before the SDK subprocess spawns.
    * The subprocess spawns lazily on first chat(), so postInit() is early enough.
    */
-  override async postInit(): Promise<PostInitResult> {
+  override async postInit(options?: { signal?: AbortSignal }): Promise<PostInitResult> {
     const slug = this.config.connectionSlug;
     if (!slug) {
       return { authInjected: false, authWarning: 'No connection slug available', authWarningLevel: 'error' };
     }
-    // R50: an aborted (timed-out-and-disposed) construction applies zero
-    // process-level side effects.
-    if (this.postInitAborted) {
+    // R50/R51: an aborted (timed-out-and-disposed) construction applies zero
+    // process-level side effects. The signal is raised by the
+    // SessionManager's bounded construction wait; the instance flag is set by
+    // destroy(). Both are checked after EVERY await below.
+    const aborted = (): boolean => this.postInitAborted || options?.signal?.aborted === true;
+    if (aborted()) {
       return { authInjected: false, authWarning: 'Agent destroyed before post-init; credential side effects skipped' };
     }
+    options?.signal?.addEventListener('abort', () => { this.postInitAborted = true; }, { once: true });
 
     const connection = getLlmConnection(slug);
     if (!connection) {
       return { authInjected: false, authWarning: `Connection not found: ${slug}`, authWarningLevel: 'error' };
     }
+
+    // R51: TRANSACTIONAL credential application — snapshot the exact
+    // pre-postInit env state; every abort below restores this precise
+    // snapshot instead of leaving an erased/overwritten process-global state.
+    const envSnapshot = captureManagedAnthropicAuthEnvSnapshot();
 
     const invocationScoped = this.config.sessionStorage?.owner === 'cli';
     if (!invocationScoped) {
@@ -724,6 +735,19 @@ export class ClaudeAgent extends BaseAgent {
     // Resolve auth env vars via shared utility
     const manager = getCredentialManager();
     const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+
+    // R50/R51: the credential resolution may complete long after the
+    // construction attempt was timed out and disposed (the SessionManager's
+    // race only bounds the WAIT). The late outcome must apply zero side
+    // effects — the precise pre-postInit env snapshot is restored instead.
+    if (aborted()) {
+      restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+      return { authInjected: false, authWarning: 'Agent destroyed during post-init credential resolution; credential side effects rolled back' };
+    }
+
+    if (!result.success) {
+      return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
+    }
 
     // R50: the credential resolution may complete long after the
     // construction attempt was timed out and disposed (the SessionManager's
@@ -755,6 +779,12 @@ export class ClaudeAgent extends BaseAgent {
       }
 
       await this.invocationCredentialProxy?.close();
+      // R51: RE-CHECK after closing the old proxy — closing then starting a
+      // post-abort listener would create an unreachable credential listener.
+      if (aborted()) {
+        restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+        return { authInjected: false, authWarning: 'Agent destroyed after closing the previous invocation credential proxy; new listener not started' };
+      }
       const credentialProxy = await startInvocationCredentialProxy({
         upstreamBaseUrl,
         headers: upstreamHeaders,
@@ -764,12 +794,13 @@ export class ClaudeAgent extends BaseAgent {
             : { name: 'x-api-key', format: 'raw' },
         ],
       });
-      // R50: the proxy listener is a PROCESS-LEVEL side effect — if the agent
-      // was destroyed while the listener was starting, close it immediately
-      // and apply nothing.
-      if (this.postInitAborted) {
+      // R50/R51: the proxy listener is a PROCESS-LEVEL side effect — if the
+      // agent was destroyed while the listener was starting, close it
+      // immediately and apply nothing.
+      if (aborted()) {
         await credentialProxy.close();
-        return { authInjected: false, authWarning: 'Agent destroyed while starting the invocation credential proxy; listener closed and credential side effects skipped' };
+        restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+        return { authInjected: false, authWarning: 'Agent destroyed while starting the invocation credential proxy; listener closed and credential side effects rolled back' };
       }
       this.invocationCredentialProxy = credentialProxy;
 
@@ -787,11 +818,13 @@ export class ClaudeAgent extends BaseAgent {
       }
       this.config.envOverrides = nextOverrides;
     } else {
-      // R50: the process-global env overwrite is a late side effect guarded by
-      // the same abort check — a destroyed agent's late credential outcome is
-      // dropped (a same-id successor owns the process credential state).
-      if (this.postInitAborted) {
-        return { authInjected: false, authWarning: 'Agent destroyed before applying credential env vars; credential side effects skipped' };
+      // R50/R51: the process-global env overwrite is a late side effect
+      // guarded by the same abort check — a destroyed agent's late credential
+      // outcome is dropped and the precise pre-postInit env snapshot is
+      // restored (a same-id successor owns the process credential state).
+      if (aborted()) {
+        restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+        return { authInjected: false, authWarning: 'Agent destroyed before applying credential env vars; credential side effects rolled back' };
       }
       this.config.envOverrides = {
         ...this.config.envOverrides,

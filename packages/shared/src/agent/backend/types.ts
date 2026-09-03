@@ -180,6 +180,18 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /**
+   * R51: notified whenever the backend re-registers or merges its
+   * session-scoped callback record (e.g. PiAgent's per-turn merge) — the
+   * SessionManager re-binds the OWNER lease (`ManagedSession.callbackLease`)
+   * to the returned lease so disposal cleanup always CASses against the
+   * backend's CURRENT record/guard pair.
+   */
+  onSessionCallbackLeaseChanged?: (lease: {
+    record: unknown;
+    guard: unknown;
+  }) => void;
+
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -433,8 +445,11 @@ export interface AgentBackend {
    * Post-construction initialization.
    * Handles auth injection, initial config generation, etc.
    * Called after construction and callback wiring, before first chat().
+   * R51: `options.signal` is aborted by the SessionManager when the bounded
+   * construction wait expires — implementations must stop and apply zero
+   * further side effects once the signal fires.
    */
-  postInit(): Promise<PostInitResult>;
+  postInit(options?: { signal?: AbortSignal }): Promise<PostInitResult>;
 
   /**
    * Apply bridge/config updates mid-session.

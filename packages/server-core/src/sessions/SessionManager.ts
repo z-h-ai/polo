@@ -9,7 +9,7 @@ import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1023,14 +1023,21 @@ interface ManagedSession {
    */
   turnStartReserved?: boolean
   /**
-   * R50: the OWNER-BOUND callback/guard lease of THIS session's runtime —
-   * the installed (guard-wrapped) record snapshot captured at construction
-   * and refreshed at every owner mutation (publish guard, wiring end).
-   * Disposal cleanup CASses against THIS lease; the sessionId's CURRENT
-   * registry lookup is never an ownership proof (a same-id successor's
-   * record/guard is never touched by a stale disposal).
+   * R50/R51: the OWNER-BOUND callback lease of THIS session's runtime — the
+   * exact (record, guard) pair the backend registered/merged, kept current
+   * via `onSessionCallbackLeaseChanged` and refreshed at every owner
+   * mutation (construct end, publish points). Disposal cleanup CASses
+   * against THIS lease; the sessionId's CURRENT registry lookup is never an
+   * ownership proof (a same-id successor's record/guard is never touched by
+   * a stale disposal).
    */
-  callbackLease?: SessionScopedToolCallbacks
+  callbackLease?: SessionScopedToolCallbackLease
+  /**
+   * R51: the guard installed at CONSTRUCTION time (before the backend
+   * factory) — covers the guard-only window where the factory threw or the
+   * postInit bounded wait expired BEFORE any callback record was registered.
+   */
+  constructionCallbackGuardLease?: SessionScopedToolCallbackGuard
   /**
    * R46: a strict runtime disposal that PARTIALLY failed (some surfaces
    * disposed, others retained with their references on this session). The
@@ -1318,6 +1325,7 @@ export class SessionManager implements ISessionManager {
     managed: ManagedSession
     quarantineToken: string
     installedCallbacks: SessionScopedToolCallbacks
+    installedLease: SessionScopedToolCallbackLease | undefined
     reason: string
     quarantinedAt: number
   }>()
@@ -3780,8 +3788,8 @@ export class SessionManager implements ISessionManager {
     // R39-2: the registration guard is installed BEFORE the session (and
     // later its agent) can register any tool callback.
     this.installManagedSessionCallbackGuard(managed)
-    // R50: rebind the owner lease to the published guard identity.
-    managed.callbackLease = getSessionScopedToolCallbacks(storedSession.id)
+    // R50/R51: rebind the owner lease to the published guard identity.
+    managed.callbackLease = getSessionScopedToolCallbackLease(storedSession.id)
 
     // Initialize session metadata in AutomationSystem for diffing
     const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -4242,17 +4250,28 @@ export class SessionManager implements ISessionManager {
 
   private async runAgentPostInit(managed: ManagedSession, agent: AgentInstance): Promise<PostInitResult> {
     const timeoutMs = this.agentPostInitTimeoutMs
-    let timeoutTimer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutTimer = setTimeout(() => {
+    // R51: the abort signal is threaded INTO postInit so the backend's
+    // credential/OAuth chain can observe the bounded wait (check-after-await
+    // + rollbacks inside the backend). The abort ALSO settles the wait here:
+    // even a backend that ignores the signal cannot pin the lifecycle lock
+    // tail or the question-state lock beyond the bound.
+    const controller = new AbortController()
+    const timedOut = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => {
         reject(new Error(`agent postInit timed out after ${timeoutMs}ms (construction abandoned; the session stays retryable)`))
-      }, timeoutMs)
-      timeoutTimer.unref?.()
+      }, { once: true })
     })
+    const timer = setTimeout(() => controller.abort(new Error('stalled post-init')), timeoutMs)
+    timer.unref?.()
     try {
-      return await Promise.race([agent.postInit(), timeout])
+      return await Promise.race([agent.postInit({ signal: controller.signal }), timedOut])
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`agent postInit timed out after ${timeoutMs}ms (construction abandoned; the session stays retryable): ${error instanceof Error && error.message !== 'stalled post-init' ? error.message : 'stalled post-init'}`)
+      }
+      throw error
     } finally {
-      if (timeoutTimer) clearTimeout(timeoutTimer)
+      clearTimeout(timer)
     }
   }
 
@@ -4280,11 +4299,12 @@ export class SessionManager implements ISessionManager {
     // R48: the registry returns the INSTALLED (guard-wrapped) record — the
     // lease this quarantine binds to. Identity checks against the raw input
     // would never match a guarded record.
-    const installedCallbacks = registerSessionScopedToolCallbacks(managed.id, refusingCallbacks as unknown as SessionScopedToolCallbacks)
+    const installedLease = registerSessionScopedToolCallbacks(managed.id, refusingCallbacks as unknown as SessionScopedToolCallbacks)
     this.unpublishedRuntimeQuarantine.set(managed.id, {
       managed,
       quarantineToken,
-      installedCallbacks,
+      installedCallbacks: installedLease.record,
+      installedLease,
       reason,
       quarantinedAt: Date.now(),
     })
@@ -4323,7 +4343,12 @@ export class SessionManager implements ISessionManager {
           // when no live replacement session owns the id (absent-or-ours).
           const replacementOwnsId = this.sessions.has(sessionId)
           let cleanupFailure: string | null = null
-          const callbacksRemoved = unregisterSessionScopedToolCallbacksIf(sessionId, entry.installedCallbacks)
+          // R51: CAS against the quarantined runtime's OWNER LEASE (record +
+          // guard pair) — the sweep's dispose passes shouldUnregisterCallbacks:
+          // false, so the removal happens ONLY here.
+          const callbacksRemoved = entry.installedLease !== undefined
+            ? unregisterSessionScopedToolCallbacksIf(sessionId, entry.installedLease)
+            : false
           if (replacementOwnsId) {
             sessionLog.info(`Quarantined unpublished runtime ${sessionId}: live replacement owns the id — storage/registrations preserved`)
           } else {
@@ -4828,12 +4853,26 @@ export class SessionManager implements ISessionManager {
       // Construct backend via factory
       // ============================================================
 
+      // R51-B: resolve every AWAITED factory input BEFORE any guard/record
+      // state is installed — the dynamic import + config read yield the event
+      // loop, and a same-id successor could replace the guard/record in that
+      // window. After the resolution the construction verifies it still owns
+      // the id (convergence) BEFORE installing its guard.
+      const enable1MContext = await (async () => { const { getEnable1MContext } = await import('@polo-ai/shared/config/storage'); return getEnable1MContext(); })()
+      if (this.sessions.get(managed.id) && this.sessions.get(managed.id) !== managed) {
+        throw new Error('successor session published during construction inputs resolution; stale construction abandoned')
+      }
+
       // R50-B: install THE authoritative registration guard BEFORE the
       // backend factory constructs the agent — the factory's core callback
       // registration therefore snapshots THIS guard identity, and the same
       // construction lease stays stable through postInit/wiring (no
       // post-factory replacement that would break lease-based cleanup).
       this.installManagedSessionCallbackGuard(managed)
+      // R51-B: bind the guard-only lease immediately — if the factory throws
+      // before registering any callback record, disposal can still CAS-remove
+      // the guard by identity.
+      managed.constructionCallbackGuardLease = getSessionScopedToolCallbackGuard(managed.id)
 
       managed.agent = createBackendFromResolvedContext({
         context: backendContext,
@@ -4847,6 +4886,12 @@ export class SessionManager implements ISessionManager {
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
+        // R51: per-turn callback merges replace the session's lease — the
+        // backend notifies so the OWNER lease (managed.callbackLease) stays
+        // bound to the backend's CURRENT record/guard pair.
+        onSessionCallbackLeaseChanged: () => {
+          managed.callbackLease = getSessionScopedToolCallbackLease(managed.id)
+        },
         getRecoveryMessages,
         getBranchFallbackMessages,
         getBranchSeedMessages,
@@ -4862,7 +4907,7 @@ export class SessionManager implements ISessionManager {
         automationSystem: this.automationSystems.get(managed.workspace.rootPath),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
-        enable1MContext: await (async () => { const { getEnable1MContext } = await import('@polo-ai/shared/config/storage'); return getEnable1MContext(); })(),
+        enable1MContext,
         // Image resize callback — prevents oversized images from entering conversation history
         // R39-2: image resize reads/writes the session tmp directory —
         // registered through the authoritative guard inventory.
@@ -4904,12 +4949,13 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
-      // R50: the backend's constructor registered its core callback record
-      // under the guard installed above (BEFORE the factory) — bind that
-      // exact lease to THIS managed owner. The construction lease identity
-      // is NOT replaced afterwards (the previous post-factory reinstall was
-      // removed), so lease-based cleanup stays exact for this construction.
-      managed.callbackLease = getSessionScopedToolCallbacks(managed.id)
+      // R50/R51: the backend's constructor registered its core callback
+      // record under the guard installed above (BEFORE the factory) — bind
+      // that exact lease to THIS managed owner. The construction lease
+      // identity is NOT replaced afterwards (the previous post-factory
+      // reinstall was removed), so lease-based cleanup stays exact for this
+      // construction.
+      managed.callbackLease = getSessionScopedToolCallbackLease(managed.id)
 
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
@@ -5710,10 +5756,10 @@ export class SessionManager implements ISessionManager {
       managed.backendRestartSignature = restartSignature
       end()
     }
-      // R50: refresh the owner-bound lease — the wiring above may have
+      // R50/R51: refresh the owner-bound lease — the wiring above may have
       // merged/replaced the installed record; the lease stays bound to THIS
       // managed owner with the CURRENT guard identity.
-      managed.callbackLease = getSessionScopedToolCallbacks(managed.id)
+      managed.callbackLease = getSessionScopedToolCallbackLease(managed.id)
       return managed.agent
     } catch (constructionError) {
       // R49: the candidate was never published — dispose its runtime faces
@@ -11492,8 +11538,8 @@ export class SessionManager implements ISessionManager {
       // R39-2: the registration guard is installed atomically with the
       // in-memory publication.
       this.installManagedSessionCallbackGuard(managed)
-      // R50: rebind the owner lease to the published guard identity.
-      managed.callbackLease = getSessionScopedToolCallbacks(sessionId)
+      // R50/R51: rebind the owner lease to the published guard identity.
+      managed.callbackLease = getSessionScopedToolCallbackLease(sessionId)
 
       // Initialize automation metadata
       const automationSystem = this.automationSystems.get(workspaceRootPath)
