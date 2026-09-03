@@ -38,7 +38,9 @@ import {
   isTrustedPublicationTokenCurrent,
   isTrustedSessionScopeTokenCurrent,
   isAccountTransitionInProgress,
+  isProductSpaceScopeRefusal,
   trustedScopeMatchesSessionRecord,
+  ProductSpaceScopeRefusalError,
   type TrustedSessionScopeToken,
 } from '../handlers/rpc/trusted-product-space-account'
 
@@ -55,16 +57,6 @@ import {
   releaseAssistantStartExecutionVersion,
   type AssistantStartReservation,
 } from '../runtime/assistant-executions'
-
-/**
- * R41-1/R41-2: identifies the fail-closed trusted-scope refusal thrown by
- * the question-resolution and edit-popover-stamp checkpoints, so callers can
- * distinguish "scope drifted — durably undo / tear down" from ordinary
- * transient failures.
- */
-function isProductSpaceScopeRefusal(error: unknown): boolean {
-  return error instanceof Error && error.message === 'PRODUCT_SPACE_CONTEXT_REQUIRED'
-}
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
@@ -3773,7 +3765,7 @@ export class SessionManager implements ISessionManager {
     const assertStampScopeCurrent = (): void => {
       if (!entryToken || !isTrustedSessionScopeTokenCurrent(entryToken)) {
         sessionLog.warn(`Edit Popover session creation for workspace ${workspaceId} refused: the trusted scope captured at entry is no longer current`)
-        throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+        throw new ProductSpaceScopeRefusalError()
       }
     }
     // The created record must carry EXACTLY the entry scope's immutable
@@ -3794,56 +3786,113 @@ export class SessionManager implements ISessionManager {
       return session
     }
 
-    // R41-2: owner-identity-aware teardown of the just-created hidden
-    // session — runtime + memory + disk — whose INCOMPLETE outcome is
-    // reported to the caller instead of being swallowed: a stale session
-    // directory is a real hazard and the caller must know cleanup fell
-    // short.
-    const teardownOwned = async (): Promise<string | null> => {
-      try {
-        await rollbackFailedBranchCreation({
-          managed,
-          workspaceRootPath: managed.workspace.rootPath,
-          sessionId: managed.id,
-          deleteFromRuntimeSessions: (orphanId) => {
-            const orphan = this.sessions.get(orphanId)
-            if (orphan?.autoRetryTimer) {
-              clearTimeout(orphan.autoRetryTimer)
-              orphan.autoRetryTimer = undefined
-            }
-            if (orphan) orphan.autoRetryPending = undefined
-            this.sessions.delete(orphanId)
-          },
-          deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
-        })
-      } catch (teardownError) {
-        return `rollback threw: ${teardownError instanceof Error ? teardownError.message : String(teardownError)}`
+    // R42: the immutable CREATION-OWNER identity. Every teardown step below
+    // is conditioned on the exact ManagedSession object still occupying the
+    // id — a replacement owner (same id re-created by a later flow) must
+    // keep its memory entry, storage record, mode state, automation
+    // metadata and callback registrations untouched.
+    const owner = { sessionId: session.id, managed }
+    const stillOwns = (): boolean => this.sessions.get(owner.sessionId) === owner.managed
+
+    // R42: owner-aware teardown whose result ENUMERATES every cleanup
+    // surface (agent runtime + session-scoped callbacks, mode state,
+    // automation metadata, memory, storage) with per-surface
+    // cleaned / skipped-new-owner / failed status. Failures are reported to
+    // the caller honestly — never masked by a post-check that only inspects
+    // the already-deleted object.
+    const teardownOwned = async (reason: string): Promise<string | null> => {
+      const outcomes: Array<{ surface: string; status: 'cleaned' | 'skipped-new-owner' | 'failed'; detail?: string }> = []
+      const push = (surface: string, status: 'cleaned' | 'skipped-new-owner' | 'failed', detail?: string): void => {
+        outcomes.push({ surface, status, detail })
       }
-      const leftovers: string[] = []
-      if (this.sessions.get(managed.id) === managed) {
-        leftovers.push('memory entry survived')
+
+      // R42: ownership is decided ONCE at teardown entry — the surfaces this
+      // creation owns are torn down as a unit. (A replacement that lands
+      // mid-teardown re-persists its own full state, so the ownership
+      // snapshot stays authoritative for the whole primitive.)
+      const ownedAtStart = stillOwns()
+
+      if (!ownedAtStart) {
+        // A replacement owner occupies the id: its memory entry, storage
+        // record, mode state, automation metadata and session-scoped
+        // callback registrations are the NEW owner's and must survive.
+        // (Execution start reservations are reservation-OBJECT scoped and
+        // were never taken by this creation, so there is no id-wide
+        // execution surface to clean.)
+        for (const surface of ['agent-runtime+session-callbacks', 'mode-state', 'automation-metadata', 'memory', 'storage']) {
+          push(surface, 'skipped-new-owner')
+        }
+      } else {
+        // Agent runtime + session-scoped callback/guard registrations for
+        // the id (the guard wraps every callback — a stale-scope guard must
+        // not survive to wrap a future owner's callbacks).
+        try {
+          await this.disposeManagedAgentRuntime(managed, reason)
+          push('agent-runtime+session-callbacks', 'cleaned')
+        } catch (teardownError) {
+          push('agent-runtime+session-callbacks', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+        }
+        try {
+          cleanupModeState(owner.sessionId)
+          push('mode-state', 'cleaned')
+        } catch (teardownError) {
+          push('mode-state', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+        }
+        try {
+          this.automationSystems.get(managed.workspace.rootPath)?.clearInitialSessionMetadata(owner.sessionId)
+          push('automation-metadata', 'cleaned')
+        } catch (teardownError) {
+          push('automation-metadata', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+        }
+        const orphan = this.sessions.get(owner.sessionId)
+        if (orphan?.autoRetryTimer) {
+          clearTimeout(orphan.autoRetryTimer)
+          orphan.autoRetryTimer = undefined
+        }
+        if (orphan) orphan.autoRetryPending = undefined
+        this.sessions.delete(owner.sessionId)
+        push('memory', 'cleaned')
+        try {
+          const deleted = this.sessionStorage.delete(managed.workspace.rootPath, owner.sessionId)
+          if (deleted === false) {
+            push('storage', 'failed', 'storage delete returned false')
+          } else {
+            push('storage', 'cleaned')
+          }
+        } catch (storageError) {
+          push('storage', 'failed', storageError instanceof Error ? storageError.message : String(storageError))
+        }
       }
-      if (this.sessionStorage.load(managed.workspace.rootPath, managed.id)) {
-        leftovers.push('stored session survived')
+
+      for (const outcome of outcomes) {
+        if (outcome.status === 'failed') {
+          sessionLog.error(`Edit Popover creation teardown of ${owner.sessionId}: ${outcome.surface} FAILED${outcome.detail ? `: ${outcome.detail}` : ''}`)
+        } else if (outcome.status === 'skipped-new-owner') {
+          sessionLog.info(`Edit Popover creation teardown of ${owner.sessionId}: ${outcome.surface} preserved for the replacement owner`)
+        }
       }
-      return leftovers.length > 0 ? leftovers.join(' + ') : null
+      const failures = outcomes.filter(o => o.status === 'failed')
+      return failures.length > 0
+        ? failures.map(f => `${f.surface}: ${f.detail ?? 'failed'}`).join('; ')
+        : null
     }
-    const scopeRefusal = (incomplete: string | null): Error =>
-      new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED${incomplete ? ` (rollback incomplete: ${incomplete})` : ''}`)
+    const scopeRefusal = (incomplete: string | null): ProductSpaceScopeRefusalError =>
+      new ProductSpaceScopeRefusalError(incomplete ? `rollback incomplete: ${incomplete}` : undefined)
 
     // Continuation-gap gate: the awaited createSession may have completed
-    // under a scope that was replaced while this frame was suspended.
+    // under a scope that was replaced while this frame was suspended — or
+    // the id may have been taken over by a replacement owner.
     try {
       assertStampScopeCurrent()
+      if (!stillOwns()) {
+        throw new ProductSpaceScopeRefusalError('the created session id is now owned by a replacement')
+      }
       if (!managedMatchesEntryScope(managed)) {
         throw new Error('created session is not bound to the entry trusted scope')
       }
     } catch (error) {
-      sessionLog.error(`Edit Popover session ${managed.id} lost its entry scope after creation; removing the orphan session:`, error)
-      const incomplete = await teardownOwned()
-      if (isProductSpaceScopeRefusal(error)) {
-        throw scopeRefusal(incomplete)
-      }
+      sessionLog.error(`Edit Popover session ${managed.id} lost its entry scope after creation; tearing the creation down:`, error)
+      const incomplete = await teardownOwned('trusted-scope lost after creation')
       throw scopeRefusal(incomplete)
     }
 
@@ -3852,12 +3901,16 @@ export class SessionManager implements ISessionManager {
     // the renderer a "created" session that silently lacks its eligibility —
     // such a session loses request_user_input on desktop turns and stays
     // invisible to owner-scoped recovery forever. The just-created hidden
-    // orphan is torn down (runtime + memory + disk) and the RPC REJECTS so
-    // the restore/send entry can retry cleanly.
+    // orphan is torn down (runtime + memory + disk, every surface identity-
+    // conditioned) and the RPC REJECTS so the restore/send entry can retry
+    // cleanly.
     managed.origin = 'edit-popover'
     managed.popoverOwner = popoverOwner
     try {
       assertStampScopeCurrent()
+      if (!stillOwns()) {
+        throw new ProductSpaceScopeRefusalError('the created session id is now owned by a replacement')
+      }
       if (!managedMatchesEntryScope(managed)) {
         throw new Error('created session is not bound to the entry trusted scope')
       }
@@ -3866,12 +3919,15 @@ export class SessionManager implements ISessionManager {
       // R41-2: post-flush CAS — the stamp is published only while the entry
       // scope still rules and the record still carries its exact identity.
       assertStampScopeCurrent()
+      if (!stillOwns()) {
+        throw new ProductSpaceScopeRefusalError('the created session id is now owned by a replacement')
+      }
       if (!managedMatchesEntryScope(managed)) {
         throw new Error('created session is not bound to the entry trusted scope')
       }
     } catch (error) {
-      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; removing the orphan session:`, error)
-      const incomplete = await teardownOwned()
+      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; tearing the creation down:`, error)
+      const incomplete = await teardownOwned('durable origin stamp failed')
       if (isProductSpaceScopeRefusal(error)) {
         throw scopeRefusal(incomplete)
       }
@@ -8595,7 +8651,7 @@ export class SessionManager implements ISessionManager {
     const assertScopeCurrent = (): void => {
       if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
         sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} refused: the trusted scope changed while the resolution was in flight`)
-        throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+        throw new ProductSpaceScopeRefusalError()
       }
     }
     try {
@@ -8618,11 +8674,13 @@ export class SessionManager implements ISessionManager {
         // whole agent turn.
         // resumePendingAgentTurn never rejects: a failure is user-visible
         // (error event), persisted in pendingAgentResume, and retried.
-        // R40-1/R41-1: the pre-resume revalidation happens BEFORE the resume
-        // — a scope drift that lands between the locked commit and this
-        // check must ALSO durably un-arm the owed answer→resume (the switch
-        // transaction owns the old space's question lifecycle), so the old
-        // space keeps no live recovery and never restarts agent work.
+        // R40-1/R41-1/R42: the pre-resume revalidation happens BEFORE the
+        // resume — a scope drift that lands between the locked commit and
+        // this check must ALSO durably un-arm the owed answer→resume (the
+        // switch transaction owns the old space's question lifecycle), so
+        // the old space keeps no live recovery and never restarts agent
+        // work. The refusal is TYPED: even when the un-arm itself fails, the
+        // caller still sees a scope refusal (never a transient result).
         if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
           sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} refused before the resume: the trusted scope changed`)
           const liveManaged = this.sessions.get(sessionId)
@@ -8633,10 +8691,18 @@ export class SessionManager implements ISessionManager {
               )
             } catch (unarmError) {
               sessionLog.error(`Failed to durably un-arm the answer→resume for session ${sessionId} after a scope drift:`, unarmError)
-              throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (resume un-arm incomplete: ${unarmError instanceof Error ? unarmError.message : String(unarmError)})`)
+              // R42: degrade to the durable TERMINAL quarantine so hydration
+              // can never produce an EXECUTABLE pending resume; surface the
+              // typed refusal with the honest incompleteness either way.
+              const quarantineFailure = await this.quarantinePendingResumeTerminal(managed)
+              throw new ProductSpaceScopeRefusalError(
+                quarantineFailure
+                  ? `resume un-arm incomplete: ${unarmError instanceof Error ? unarmError.message : String(unarmError)}; ${quarantineFailure}`
+                  : `resume un-arm incomplete: ${unarmError instanceof Error ? unarmError.message : String(unarmError)}`,
+              )
             }
           }
-          throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+          throw new ProductSpaceScopeRefusalError()
         }
         await this.resumePendingAgentTurn(managed)
         sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
@@ -8646,8 +8712,11 @@ export class SessionManager implements ISessionManager {
     } catch (error) {
       // Authorization refusals are NOT transient failures: they must reach
       // the RPC caller as a rejection (fail closed), never as a retryable
-      // result that invites resubmission into a dead scope.
-      if (error instanceof Error && error.message === 'PRODUCT_SPACE_CONTEXT_REQUIRED') {
+      // result that invites resubmission into a dead scope. R42: the
+      // classification is TYPED — refusals carrying diagnostic suffixes
+      // (restore/un-arm incompleteness) keep their refusal identity and are
+      // rethrown verbatim.
+      if (isProductSpaceScopeRefusal(error)) {
         throw error
       }
       sessionLog.error(`Failed to resolve question ${requestId} for session ${sessionId}:`, error)
@@ -8821,11 +8890,20 @@ export class SessionManager implements ISessionManager {
       assertScopeCurrent?.()
     } catch (error) {
       if (isProductSpaceScopeRefusal(error)) {
+        // R42: the first flush may already have made the armed resume
+        // durable — hand it to the restore helper so its failure path can
+        // durably quarantine THAT exact record.
+        const durablyArmedResume: ManagedSession['pendingAgentResume'] = {
+          messageId: answerMessage.id,
+          attempts: 0,
+          invocationSource: pending.invocationSource ?? 'internal',
+        }
         await this.durablyRestoreQuestionResolutionSnapshot(
           managed,
           { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
           pending,
           requestId,
+          durablyArmedResume,
         )
         throw error
       }
@@ -9068,9 +9146,14 @@ export class SessionManager implements ISessionManager {
    * the mutation nor the armed resume: restore the exact pre-resolution
    * snapshot — messages, badges, pendingQuestion AND pendingAgentResume —
    * in memory AND on disk (one awaited durable restore), then the caller
-   * refuses with PRODUCT_SPACE_CONTEXT_REQUIRED. Runs inside the session's
-   * question-state lock; a failed restore is reported honestly instead of
-   * being swallowed.
+   * refuses with a TYPED ProductSpaceScopeRefusalError. Runs inside the
+   * session's question-state lock.
+   *
+   * R42: when the restore flush itself fails, the compensation must never
+   * degrade into an executable residue: the answer→resume that the FIRST
+   * flush may have made durable is quarantined with a DURABLE TERMINAL
+   * marker (hydration clears terminal records without ever resuming) before
+   * the typed refusal — carrying the honest incompleteness — is thrown.
    */
   private async durablyRestoreQuestionResolutionSnapshot(
     managed: ManagedSession,
@@ -9082,6 +9165,7 @@ export class SessionManager implements ISessionManager {
     },
     pending: QuestionRequest,
     requestId: string,
+    durablyArmedResume?: ManagedSession['pendingAgentResume'],
   ): Promise<void> {
     managed.messages = snapshot.messages
     managed.lastMessageRole = snapshot.lastMessageRole
@@ -9096,7 +9180,47 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`Restored the pre-resolution question state for session ${managed.id} after a trusted-scope drift (request ${requestId})`)
     } catch (restoreError) {
       sessionLog.error(`Failed to durably restore the pre-resolution question state for session ${managed.id} (request ${requestId}):`, restoreError)
-      throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (pre-resolution restore incomplete: ${restoreError instanceof Error ? restoreError.message : String(restoreError)})`)
+      // The snapshot restore replaced the in-memory state, but the FIRST
+      // flush may already have made the ARMED resume durable — quarantine
+      // that exact record, not the (already un-armed) live state.
+      let quarantineFailure: string | null = null
+      if (durablyArmedResume && !durablyArmedResume.completed) {
+        managed.pendingAgentResume = { ...durablyArmedResume, completed: true }
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          sessionLog.warn(`Quarantined the durably armed answer→resume for session ${managed.id} with a TERMINAL marker (restore failed; the answer turn can never execute)`)
+        } catch (quarantineError) {
+          quarantineFailure = `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
+        }
+      }
+      const detail = `pre-resolution restore incomplete: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`
+      throw new ProductSpaceScopeRefusalError(quarantineFailure ? `${detail}; ${quarantineFailure}` : detail)
+    }
+  }
+
+  /**
+   * R42: the durable quarantine for an armed answer→resume whose ordinary
+   * compensation (restore / un-arm) failed. Flips the record to TERMINAL —
+   * in memory first, then one awaited durable persist — so a restart's
+   * hydration clears it WITHOUT ever re-executing the old space's answer
+   * turn. Returns null when the quarantine is durably complete, or the
+   * honest failure detail when even the terminal marker could not be
+   * persisted.
+   */
+  private async quarantinePendingResumeTerminal(managed: ManagedSession): Promise<string | null> {
+    if (!managed.pendingAgentResume || managed.pendingAgentResume.completed) {
+      return null
+    }
+    managed.pendingAgentResume = { ...managed.pendingAgentResume, completed: true }
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      sessionLog.warn(`Quarantined the armed answer→resume for session ${managed.id} with a durable TERMINAL marker (scope lost; the answer turn can never execute)`)
+      return null
+    } catch (quarantineError) {
+      sessionLog.error(`Failed to persist the TERMINAL quarantine marker for session ${managed.id}:`, quarantineError)
+      return `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
     }
   }
 

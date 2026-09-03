@@ -418,3 +418,24 @@ export function captureTrustedScopeToken(): TrustedAggregateScopeToken | null {
     fenceGeneration: getRuntimeFenceGeneration(),
   }
 }
+
+/**
+ * R42: the typed fail-closed trusted-scope refusal. Domain-coded so that
+ * compensation paths (durable question-state restore, resume un-arm,
+ * edit-popover teardown) can carry diagnostic suffixes — restore/un-arm/
+ * rollback incompleteness — WITHOUT losing their refusal identity: callers
+ * classify by TYPE via {@link isProductSpaceScopeRefusal}, never by exact
+ * Error.message equality, so a refusal with a cleanup suffix can never be
+ * misread as an ordinary transient failure and swallowed into a retryable
+ * result.
+ */
+export class ProductSpaceScopeRefusalError extends Error {
+  constructor(detail?: string) {
+    super(detail ? `PRODUCT_SPACE_CONTEXT_REQUIRED (${detail})` : 'PRODUCT_SPACE_CONTEXT_REQUIRED')
+    this.name = 'ProductSpaceScopeRefusalError'
+  }
+}
+
+export function isProductSpaceScopeRefusal(error: unknown): boolean {
+  return error instanceof ProductSpaceScopeRefusalError
+}

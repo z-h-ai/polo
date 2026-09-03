@@ -22,6 +22,8 @@ import {
 } from './trusted-product-space-account'
 import { getSessionFilePath, writeSessionJsonl } from '@polo-ai/shared/sessions'
 import type { StoredSession } from '@polo-ai/shared/sessions'
+import { getPermissionMode, setPermissionMode } from '@polo-ai/shared/agent'
+import { getSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import { makeAnswerResolution, makeQuestionRequest } from '../../sessions/request-user-input-fixtures'
 
 const TEST_ACCOUNT_ID = 'account-a'
@@ -488,6 +490,79 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(stored.messages.some(m => (m as { questionResponse?: unknown }).questionResponse)).toBe(false)
       expect(events).toEqual([])
     })
+
+    // ------------------------------------------------------------------
+    // R42: a failing COMPENSATION (restore flush) must never downgrade the
+    // refusal — the typed scope refusal reaches the caller even when the
+    // cleanup itself fails, and no executable pending resume survives.
+    // ------------------------------------------------------------------
+    const parkFirstFlushThenFailSecond = (): { release: () => void; parked: Promise<void> } => {
+      const realFlush = (sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession.bind(sm)
+      let release!: () => void
+      const gated = new Promise<void>(resolve => { release = () => resolve() })
+      let parkedSignal!: () => void
+      const parked = new Promise<void>(resolve => { parkedSignal = resolve })
+      let call = 0
+      ;(sm as unknown as { flushSession: unknown }).flushSession = async (id: string) => {
+        call += 1
+        if (call === 1) {
+          parkedSignal()
+          await gated
+          return realFlush(id)
+        }
+        if (call === 2) {
+          throw new Error('disk full injected')
+        }
+        return realFlush(id)
+      }
+      return { release, parked }
+    }
+
+    it('a cancel whose restore flush fails still rejects as a scope refusal (never transient_failure)', async () => {
+      const managed = seedSession('q-restore-cancel')
+      managed.pendingQuestion = makeQuestionRequest('q-restore-cancel')
+      const { release, parked } = parkFirstFlushThenFailSecond()
+
+      const pending = respond('q-restore-cancel', { action: 'cancel', requestId: 'q-q-restore-cancel' })
+      await parked
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      release()
+
+      // TRUE rejection — a typed refusal carrying the honest compensation
+      // failure, never a transient_failure result value.
+      await expect(pending).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED (pre-resolution restore incomplete')
+      expect(events).toEqual([])
+      expect(managed.isProcessing).toBe(false)
+      // No executable pending resume can exist for a cancel.
+      const stored = loadStored('q-restore-cancel')
+      expect(stored.pendingAgentResume ?? undefined).toBeUndefined()
+    })
+
+    it('an answer whose restore flush fails quarantines the resume with a durable TERMINAL marker and still rejects', async () => {
+      const managed = seedSession('q-restore-answer')
+      managed.pendingQuestion = makeQuestionRequest('q-restore-answer')
+      const { release, parked } = parkFirstFlushThenFailSecond()
+
+      const pending = respond('q-restore-answer', makeAnswerResolution(makeQuestionRequest('q-restore-answer')))
+      await parked
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      release()
+
+      await expect(pending).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED (pre-resolution restore incomplete')
+      // Drain the quarantine flush and any straggler callbacks.
+      await new Promise(r => setTimeout(r, 50))
+      expect(events).toEqual([])
+      expect(managed.isProcessing).toBe(false)
+      expect(managed.resumeRetryTimer).toBeUndefined()
+      // In memory AND on disk the resume is TERMINAL — hydration clears it
+      // without ever executing the old space's answer turn. (The quarantine
+      // write carries the restored pendingQuestion snapshot alongside the
+      // terminal marker; the hard guarantee is the NON-EXECUTABLE resume.)
+      expect(managed.pendingAgentResume?.completed).toBe(true)
+      const stored = loadStored('q-restore-answer')
+      expect(stored.pendingAgentResume).toBeTruthy()
+      expect((stored.pendingAgentResume as { completed?: boolean }).completed).toBe(true)
+    })
   })
 
   // ==========================================================================
@@ -531,6 +606,63 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       } finally {
         ;(sm as unknown as { sessionStorage: { delete: (root: string, id: string) => boolean } }).sessionStorage.delete = realDelete
       }
+    })
+
+    // ------------------------------------------------------------------
+    // R42: a replacement owner occupying the id must SURVIVE the scope-loss
+    // teardown — memory entry, storage record, mode state and callback
+    // registrations are the NEW owner's and are never deleted, leaked-into
+    // or wrapped by the stale creation's guard.
+    // ------------------------------------------------------------------
+    it('a replacement owner occupying the id survives the teardown; its mode state and callbacks are preserved', async () => {
+      let creationDone = false
+      const realCreate = (sm as unknown as { createSession: (...args: unknown[]) => Promise<unknown> }).createSession.bind(sm)
+      ;(sm as unknown as { createSession: unknown }).createSession = async (...args: unknown[]) => {
+        const created = await realCreate(...args)
+        creationDone = true
+        return created
+      }
+      const realFlush = (sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession.bind(sm)
+      let release!: () => void
+      const gated = new Promise<void>(resolve => { release = () => resolve() })
+      let parked = false
+      ;(sm as unknown as { flushSession: unknown }).flushSession = async (id: string) => {
+        if (creationDone && !parked) {
+          parked = true
+          await gated
+        }
+        return realFlush(id)
+      }
+
+      const pendingRpc = createViaRpc()
+      for (let i = 0; i < 300 && !parked; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(parked).toBe(true)
+
+      // The replacement owner takes over the id while the stamp flush is
+      // parked, registers its OWN mode state and session-scoped callbacks.
+      const createdId = [...(sm as unknown as { sessions: Map<string, unknown> }).sessions.keys()][0] as string
+      const replacement = createManagedSession(
+        { id: createdId, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(createdId, replacement)
+      setPermissionMode(createdId, 'allow-all', { changedBy: 'system' })
+      registerSessionScopedToolCallbacks(createdId, { list_sessions: async () => [] } as never)
+
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      release()
+
+      await expect(pendingRpc).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      // The replacement owner survived every surface.
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(createdId)).toBe(replacement)
+      expect(storageSessionCount()).toBe(1)
+      expect(getPermissionMode(createdId)).toBe('allow-all')
+      expect(getSessionScopedToolCallbacks(createdId)).toBeDefined()
+      // Tidy the global callback registry for later tests.
+      unregisterSessionScopedToolCallbacks(createdId)
     })
   })
 })
