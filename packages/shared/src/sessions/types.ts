@@ -445,6 +445,11 @@ export interface SessionMetadata {
   origin?: SessionOrigin;
   /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
   popoverOwner?: string;
+  /** Immutable ProductSpace binding (from the JSONL header). */
+  productSpaceId?: string;
+  /** Immutable trusted Admin account binding (from the JSONL header).
+   *  Space-bound legacy records without it are quarantined (fail-closed). */
+  accountId?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */

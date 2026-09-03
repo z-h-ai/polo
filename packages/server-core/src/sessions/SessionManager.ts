@@ -35,8 +35,10 @@ import {
   captureTrustedSessionScope,
   captureTrustedPublicationToken,
   isTrustedPublicationTokenCurrent,
+  isTrustedSessionScopeTokenCurrent,
   isAccountTransitionInProgress,
   trustedScopeMatchesSessionRecord,
+  type TrustedSessionScopeToken,
 } from '../handlers/rpc/trusted-product-space-account'
 
 // R34-1: the trusted session scope is captured through THE shared atomic
@@ -3754,6 +3756,18 @@ export class SessionManager implements ISessionManager {
       // defense in depth.
       return session
     }
+    // R40-2: the origin stamp is a PRIVILEGED PUBLICATION of its own. Bind
+    // it to a fresh publication token and refuse — with a full teardown of
+    // the just-created hidden session — when the account/ProductSpace/fence
+    // state drifted during creation or drifts during the durable stamp, so
+    // a mid-creation transition never leaves a hidden session in memory or
+    // storage.
+    const stampToken = captureTrustedPublicationToken()
+    if (!stampToken) {
+      sessionLog.warn(`Edit Popover session ${managed.id} lost its trusted scope before the origin stamp; removing the orphan session`)
+      await this.teardownUnstampedEditPopoverOrphan(managed)
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
     // Stamp server-side, then make it durable. ONLY a successful persist+flush
     // leaves the session privileged: a transient disk failure must never hand
     // the renderer a "created" session that silently lacks its eligibility —
@@ -3764,9 +3778,18 @@ export class SessionManager implements ISessionManager {
     //.
     managed.origin = 'edit-popover'
     managed.popoverOwner = popoverOwner
+    let scopeLost = false
     try {
+      if (!isTrustedPublicationTokenCurrent(stampToken)) {
+        scopeLost = true
+        throw new Error('scope changed before the durable origin stamp')
+      }
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      if (!isTrustedPublicationTokenCurrent(stampToken)) {
+        scopeLost = true
+        throw new Error('scope changed during the durable origin stamp')
+      }
     } catch (error) {
       sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; removing the orphan session:`, error)
       await rollbackFailedBranchCreation({
@@ -3784,9 +3807,39 @@ export class SessionManager implements ISessionManager {
         },
         deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
       })
+      if (scopeLost) {
+        throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      }
       throw new Error(`Edit Popover session creation is temporarily unavailable (durable origin stamp failed): ${error instanceof Error ? error.message : String(error)}`)
     }
     return managedToSession(managed, this.sessionStorage)
+  }
+
+  /**
+   * R40-2: best-effort teardown of a hidden session that was created but
+   * never received its durable privileged stamp because the trusted scope
+   * drifted — no orphan hidden session may survive in memory or storage.
+   */
+  private async teardownUnstampedEditPopoverOrphan(managed: ManagedSession): Promise<void> {
+    try {
+      await rollbackFailedBranchCreation({
+        managed,
+        workspaceRootPath: managed.workspace.rootPath,
+        sessionId: managed.id,
+        deleteFromRuntimeSessions: (orphanId) => {
+          const orphan = this.sessions.get(orphanId)
+          if (orphan?.autoRetryTimer) {
+            clearTimeout(orphan.autoRetryTimer)
+            orphan.autoRetryTimer = undefined
+          }
+          if (orphan) orphan.autoRetryPending = undefined
+          this.sessions.delete(orphanId)
+        },
+        deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
+      })
+    } catch (teardownError) {
+      sessionLog.error(`Failed to tear down the unstamped Edit Popover orphan session ${managed.id}:`, teardownError)
+    }
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
@@ -8198,7 +8251,33 @@ export class SessionManager implements ISessionManager {
   async getEditPopoverPendingSession(
     workspaceId: string,
     popoverOwner: string,
+    scopeToken?: TrustedSessionScopeToken | null,
   ): Promise<{ sessionId: string; request: QuestionRequest } | null> {
+    // R40-3: when the RPC boundary captured a trusted scope token, BOTH the
+    // live candidates and the cold on-disk headers are filtered against that
+    // exact account/ProductSpace/Workspace scope, and the token is
+    // revalidated after every await — before adopting a hydrated session
+    // into memory and before disclosure. A window bound to ProductSpace A
+    // can never disclose or hydrate A's hidden pending question once the
+    // runtime switched to B (or the account was replaced).
+    const scope = scopeToken
+      ? { accountId: scopeToken.accountId, productSpaceId: scopeToken.productSpaceId, workspaceId: scopeToken.workspaceId }
+      : null
+    const assertScopeCurrent = (): boolean => {
+      if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
+        sessionLog.warn(`getEditPopoverPendingSession refused: the trusted scope changed while the lookup was in flight (workspace ${workspaceId})`)
+        return false
+      }
+      return true
+    }
+    const inScope = (record: { accountId?: string | null; productSpaceId?: string | null; workspaceId?: string | null }): boolean =>
+      !scope || trustedScopeMatchesSessionRecord(record, scope)
+    // Cold metadata carries no workspaceId field (the Workspace dimension is
+    // already enforced by scanning ONLY the caller-equal workspace root), so
+    // the header comparison uses the account/ProductSpace dimensions.
+    const inColdScope = (record: { accountId?: string | null; productSpaceId?: string | null }): boolean =>
+      !scope || trustedScopeMatchesSessionRecord(record, { accountId: scope.accountId, productSpaceId: scope.productSpaceId })
+
     const matches: Array<{ sessionId: string; createdAt: number; request: QuestionRequest }> = []
 
     // In-memory first: live sessions (popover may still be mounted, or was
@@ -8207,6 +8286,9 @@ export class SessionManager implements ISessionManager {
       if (managed.origin !== 'edit-popover' || managed.isArchived) continue
       if (managed.workspace.id !== workspaceId) continue
       if ((managed.popoverOwner ?? '') !== popoverOwner) continue
+      // R40-3: a live candidate outside the caller's trusted scope (old
+      // space, replaced account) is invisible to this lookup.
+      if (!inScope({ accountId: managed.accountId, productSpaceId: managed.productSpaceId, workspaceId: managed.workspace.id })) continue
       const pending = managed.pendingQuestion
       if (pending) {
         matches.push({ sessionId: managed.id, createdAt: pending.createdAt, request: pending })
@@ -8242,12 +8324,21 @@ export class SessionManager implements ISessionManager {
     for (const meta of metas) {
       if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
       if ((meta.popoverOwner ?? '') !== popoverOwner) continue
+      // R40-3: cold candidates are bound to the scope captured at the
+      // lookup's entry — space-bound legacy headers without an account
+      // binding never match (fail-closed quarantine).
+      if (!inColdScope(meta)) continue
       const pending = meta.pendingQuestion
       if (pending && (!best || pending.createdAt > best.createdAt)) {
         best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending, meta }
       }
     }
     if (!best) return null
+
+    // R40-3: the cold scan is followed by an adoption boundary — revalidate
+    // the token BEFORE registering the hydrated session into memory
+    // (水合发布前重验): a scope that drifted during the scan adopts nothing.
+    if (!assertScopeCurrent()) return null
 
     // Hydrate the cold session from the FULL metadata: createManagedSession spreads every header field, so hidden /
     // origin / popoverOwner / systemPromptPreset survive. Registering from a
@@ -8267,6 +8358,9 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`getEditPopoverPendingSession: failed to hydrate session ${best.sessionId}:`, error)
       throw new Error(`Edit Popover pending-question lookup is temporarily unavailable (hydration failed): ${error instanceof Error ? error.message : String(error)}`)
     }
+    // R40-3: post-await CAS — a transition begun during the hydration await
+    // discloses nothing.
+    if (!assertScopeCurrent()) return null
     const hydrated = this.sessions.get(best.sessionId)
     const pending = hydrated?.pendingQuestion
     // Re-validate the scope on the hydrated session (defense in depth): the
@@ -8276,7 +8370,8 @@ export class SessionManager implements ISessionManager {
       || (hydrated.popoverOwner ?? '') !== popoverOwner
       || hydrated.workspace.id !== workspaceId
       || hydrated.hidden !== true
-      || hydrated.systemPromptPreset !== 'mini') {
+      || hydrated.systemPromptPreset !== 'mini'
+      || !inScope({ accountId: hydrated.accountId, productSpaceId: hydrated.productSpaceId, workspaceId: hydrated.workspace.id })) {
       sessionLog.warn(`getEditPopoverPendingSession: hydrated session ${best.sessionId} lost its Edit Popover identity — refusing to adopt`)
       return null
     }
@@ -8399,7 +8494,11 @@ export class SessionManager implements ISessionManager {
    * fails, so a transient_failure result is genuinely retryable.
    * Cancellation performs the same atomic cleanup but never starts the agent.
    */
-  async respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult> {
+  async respondToQuestion(
+    sessionId: string,
+    resolution: QuestionResolution,
+    scopeToken?: TrustedSessionScopeToken | null,
+  ): Promise<QuestionResolutionResult> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       sessionLog.warn(`Cannot respond to question - session ${sessionId} not found`)
@@ -8414,7 +8513,7 @@ export class SessionManager implements ISessionManager {
     // genuine retry owner. Followers can never derive an outcome from
     // rollback-able in-memory state.
     const requestId = resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
-    return this.respondToQuestionInner(managed, sessionId, resolution, requestId)
+    return this.respondToQuestionInner(managed, sessionId, resolution, requestId, scopeToken)
   }
 
   private async respondToQuestionInner(
@@ -8422,16 +8521,31 @@ export class SessionManager implements ISessionManager {
     sessionId: string,
     resolution: QuestionResolution,
     requestId: string,
+    scopeToken?: TrustedSessionScopeToken | null,
   ): Promise<QuestionResolutionResult> {
+    // R40-1: when the RPC boundary captured a trusted scope token, it must
+    // still be current at EVERY checkpoint below: after the message-load
+    // await, inside the question-state lock BEFORE the durable
+    // answer/cancel commit, and immediately before the agent resume. A
+    // ProductSpace switch or account replacement that lands mid-await
+    // fails closed with zero persistence and zero resume side effects —
+    // the stale scope can no longer operate its old space's assistant.
+    const assertScopeCurrent = (): void => {
+      if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
+        sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} refused: the trusted scope changed while the resolution was in flight`)
+        throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      }
+    }
     try {
       await this.ensureMessagesLoaded(managed)
+      assertScopeCurrent()
 
       // The durable commit runs under the session's question-state lock
       // so it can never interleave with a
       // stop/archive clear's staged flush — whichever lands first settles the
       // question and the other observes the settled world.
       const outcome = await this.withQuestionStateLock(sessionId, () =>
-        this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId),
+        this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId, assertScopeCurrent),
       )
 
       if (outcome.resume) {
@@ -8442,12 +8556,23 @@ export class SessionManager implements ISessionManager {
         // whole agent turn.
         // resumePendingAgentTurn never rejects: a failure is user-visible
         // (error event), persisted in pendingAgentResume, and retried.
+        // R40-1: the pre-resume revalidation happens BEFORE the resume — a
+        // scope drift after the durable commit leaves the committed answer
+        // inert (the switch transaction owns the old space's question
+        // lifecycle) and never starts old-space agent work.
+        assertScopeCurrent()
         await this.resumePendingAgentTurn(managed)
         sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
       }
 
       return outcome.result
     } catch (error) {
+      // Authorization refusals are NOT transient failures: they must reach
+      // the RPC caller as a rejection (fail closed), never as a retryable
+      // result that invites resubmission into a dead scope.
+      if (error instanceof Error && error.message === 'PRODUCT_SPACE_CONTEXT_REQUIRED') {
+        throw error
+      }
       sessionLog.error(`Failed to resolve question ${requestId} for session ${sessionId}:`, error)
       return {
         status: 'transient_failure',
@@ -8460,13 +8585,19 @@ export class SessionManager implements ISessionManager {
    * The durable answer/cancel commit. Caller MUST hold the session's
    * question-state lock. Returns whether the
    * agent resume is owed so the caller can run it outside the lock.
+   * `assertScopeCurrent` (R40-1) revalidates the RPC entry's trusted scope
+   * token immediately BEFORE any mutation — the lock wait may have spanned
+   * a ProductSpace switch or account replacement, and a stale scope must
+   * observe zero persistence, zero events and zero resume arming.
    */
   private async commitQuestionResolutionLocked(
     managed: ManagedSession,
     sessionId: string,
     resolution: QuestionResolution,
     requestId: string,
+    assertScopeCurrent?: () => void,
   ): Promise<{ result: QuestionResolutionResult; resume: boolean }> {
+    assertScopeCurrent?.()
     // SESSION IDENTITY RE-VALIDATION: the
     // resolution may have waited for the lock past a delete/replace — the
     // managed object held by this closure can be an orphaned leftover. A

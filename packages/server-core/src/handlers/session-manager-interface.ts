@@ -131,14 +131,24 @@ export interface ISessionManager {
   // ---------------------------------------------------------------------------
 
   getPendingQuestion(sessionId: string): QuestionRequest | null
-  respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
+  /**
+   * R40-1: `scopeToken` is the trusted session-scope token captured at the
+   * RESPOND_TO_QUESTION RPC entry. When present, it is revalidated inside
+   * the question-state lock before the durable answer/cancel commit and
+   * again before the agent resume — a scope drift mid-await fails closed
+   * (the RPC rejects, zero persistence, zero resume side effects).
+   */
+  respondToQuestion(sessionId: string, resolution: QuestionResolution, scopeToken?: import('../handlers/rpc/trusted-product-space-account').TrustedSessionScopeToken | null): Promise<QuestionResolutionResult>
   /**
    * Locate the Edit Popover session that still owns an active pending
    * question for the given workspace + popover owner (hidden session — not
    * reachable through the session list). Exact match only; returns null when
    * no scoped popover session is waiting for an answer.
+   * R40-3: `scopeToken` (captured at the RPC entry) filters BOTH live and
+   * cold candidates by the complete trusted scope and is revalidated after
+   * every await — before hydration adoption and before disclosure.
    */
-  getEditPopoverPendingSession(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null>
+  getEditPopoverPendingSession(workspaceId: string, popoverOwner: string, scopeToken?: import('../handlers/rpc/trusted-product-space-account').TrustedSessionScopeToken | null): Promise<{ sessionId: string; request: QuestionRequest } | null>
   /**
    * Dedicated, trusted creation path for the renderer Edit Popover session:
    * stamps the server-verified 'edit-popover' origin + owner identity. The

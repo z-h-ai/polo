@@ -412,11 +412,33 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Dedicated, trusted creation path for the renderer Edit Popover session.
   // The server stamps the 'edit-popover' origin + owner identity here — the
   // generic CREATE above strips any caller-provided value.
-  server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (_ctx, workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions) => {
+  //
+  // R40-2: IDENTICAL authorization to the generic CREATE boundary — the
+  // destination is the CALLER's Main-owned Workspace (never a
+  // renderer-selected id), the committed ProductSpace fence must be live
+  // and the offline read-only view starts no privileged hidden sessions.
+  // Only after every gate passes may the server-stamped edit-popover origin
+  // be granted; SessionManager additionally binds the durable origin stamp
+  // to a publication-token CAS so a scope drift mid-creation tears the
+  // hidden session down instead of leaving it behind.
+  server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (ctx, workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions) => {
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    if (!callerWorkspaceId || callerWorkspaceId !== workspaceId) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    assertOnlineBusinessSurface()
     const end = perf.start('rpc.createEditPopoverSession', { workspaceId })
-    const session = await sessionManager.createEditPopoverSession(workspaceId, options)
-    end()
-    return session
+    try {
+      const session = await sessionManager.createEditPopoverSession(workspaceId, options)
+      end()
+      return session
+    } catch (error) {
+      end()
+      throw error
+    }
   })
 
   // Delete a session
@@ -586,8 +608,23 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Respond to a pending question (answer or "skip for now").
   // Returns the QuestionResolutionResult contract that drives the UI cleanup.
-  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION, async (_ctx, sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution) => {
-    return sessionManager.respondToQuestion(sessionId, resolution)
+  //
+  // R40-1: the SAME trusted-boundary authorization as every other session
+  // write — the caller's Main-owned Workspace must resolve and the target
+  // session must live inside the caller's complete trusted scope. The scope
+  // token captured at this entry is carried into SessionManager, which
+  // revalidates it inside the question-state lock (before the durable
+  // answer/cancel commit) and again before the agent resume — a stale
+  // renderer holding a pre-switch sessionId can neither persist into nor
+  // resume the old ProductSpace.
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION, async (ctx, sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution) => {
+    assertSessionScopeAllowed(sessionManager, sessionId, resolveCallerWorkspaceId(ctx))
+    // Answering resumes agent processing: never allowed in the offline
+    // read-only view.
+    assertOnlineBusinessSurface()
+    const scopeToken = captureCompleteTrustedSessionScopeToken(resolveCallerWorkspaceId(ctx))
+    assertSessionScopeTokenCurrent(scopeToken)
+    return sessionManager.respondToQuestion(sessionId, resolution, scopeToken)
   })
 
   // Locate the Edit Popover session that still owns an active pending
@@ -596,8 +633,22 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // so concurrent popovers can never adopt each other's session. Lets the
   // popover re-adopt the same hidden session after a
   // reopen, renderer reload, or app restart instead of orphaning the request.
-  server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async (_ctx, workspaceId: string, popoverOwner: string) => {
-    return sessionManager.getEditPopoverPendingSession(workspaceId, popoverOwner)
+  //
+  // R40-3: the lookup Workspace is the CALLER's Main-owned Workspace and the
+  // complete trusted scope (account AND committed ProductSpace AND caller
+  // Workspace) is captured ONCE here. SessionManager filters BOTH its live
+  // sessions and the cold on-disk headers against that scope and revalidates
+  // the token after every await — before adopting a hydrated session and
+  // before disclosure — so a window bound to ProductSpace A can never
+  // disclose or hydrate A's hidden pending question after the switch to B.
+  server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async (ctx, workspaceId: string, popoverOwner: string) => {
+    const callerWorkspaceId = resolveCallerWorkspaceId(ctx)
+    if (!callerWorkspaceId || callerWorkspaceId !== workspaceId) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    const scopeToken = captureCompleteTrustedSessionScopeToken(callerWorkspaceId)
+    assertSessionScopeTokenCurrent(scopeToken)
+    return sessionManager.getEditPopoverPendingSession(workspaceId, popoverOwner, scopeToken)
   })
 
   // ==========================================================================
