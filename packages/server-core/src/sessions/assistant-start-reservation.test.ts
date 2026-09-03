@@ -202,57 +202,55 @@ describe('assistant start reservation versus account replacement (R30-B)', () =>
     expect(registeredAssistantRecords()).toBe(0)
   }, 20000)
 
-  it('a sequential second send owns the reservation; the parked first send can neither consume nor unregister it (R31-3)', async () => {
+  it('a follower queues behind a parked owner without stealing ownership; the stale owner is refused and nothing re-arms an execution (R31-3)', async () => {
     const managed = buildSession('ownership-seq')
-    // Gate BOTH flushes: A parks on flush #1, B parks on flush #2 — both
-    // live with their own reservations (v1, v2).
-    let releaseA!: () => void
-    let releaseB!: () => void
-    const gatedA = new Promise<void>(resolve => { releaseA = () => resolve() })
-    const gatedB = new Promise<void>(resolve => { releaseB = () => resolve() })
-    const real = (sm as unknown as { sessionStorage: SessionStorage }).sessionStorage
-    let flushCalls = 0
-    const storage = new Proxy(real, {
-      get(target, prop, receiver) {
-        if (prop === 'flush') {
-          return (id: string) => {
-            flushCalls += 1
-            if (flushCalls === 1) return gatedA
-            if (flushCalls === 2) return gatedB
-            return real.flush(id)
-          }
-        }
-        const value = Reflect.get(target, prop)
-        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
-      },
-    })
-    ;(sm as unknown as { sessionStorage: SessionStorage }).sessionStorage = storage
+    // Gate the OWNER's first bootstrap flush: A parks inside its own locked
+    // critical section with reservation v1 live and visible. Under the
+    // merged single-lock linearization (POO-53) the follower's whole branch
+    // decision runs inside the session's question-state lock, so it can
+    // never park a second flush beside the owner — the pre-merge "both
+    // parked on their own flush" interleaving is structurally unreachable.
+    const { release } = gateFirstFlush('ownership-seq')
 
     const firstSend = sm.sendMessage('ownership-seq', 'first')
     firstSend.catch(() => {})
-    for (let i = 0; i < 300 && flushCalls < 1; i += 1) {
+    for (let i = 0; i < 300 && registeredAssistantRecords() === 0; i += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
+    expect(registeredAssistantRecords()).toBe(1)
+    expect(managed.isProcessing).toBe(false)
+
+    // The follower arrives while the owner is parked: its entry claim
+    // loses (the owner holds turnStartReserved), so it waits in the lock
+    // queue. It must NEVER register a superseding execution or unseat the
+    // parked owner's reservation (R31-3 ownership CAS).
     const secondSend = sm.sendMessage('ownership-seq', 'second')
     secondSend.catch(() => {})
-    for (let i = 0; i < 300 && flushCalls < 2; i += 1) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    // Both sends are parked, each owning its own reservation.
+    await new Promise(resolve => setTimeout(resolve, 50))
     expect(registeredAssistantRecords()).toBe(1)
-
-    // A resumes first: its CAS must fail (v1 ≠ v2) WITHOUT unregistering
-    // B's owned execution.
-    releaseA()
-    await expect(firstSend).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
-    expect(registeredAssistantRecords()).toBe(1)
-
-    // B then resumes, confirms its own reservation and fails at (harness)
-    // agent bootstrap — releasing ITS OWN execution only.
-    releaseB()
-    await expect(secondSend).rejects.toThrow()
-    expect(registeredAssistantRecords()).toBe(0)
     expect(managed.isProcessing).toBe(false)
+
+    // Account replacement makes the parked owner stale while the follower
+    // still holds nothing: cleanup stops and unregisters the owner's live
+    // execution and revokes the fence.
+    const cleanup = await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+    expect(cleanup.ok).toBe(true)
+    await revokeRuntimeProductSpaceFence()
+    expect(registeredAssistantRecords()).toBe(0)
+
+    // The owner resumes: its pre-processing CAS refuses the stale
+    // reservation (fail-closed, pre-processing — no half-started turn).
+    release()
+    await expect(firstSend).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
+
+    // The follower then re-evaluates in-lock, finds the reservation freed
+    // by the owner's failed turn start, and claims it itself — but the
+    // revoked fence refuses its registration too, so it also fails closed.
+    // Neither send can consume an execution it does not own and none is
+    // left behind.
+    await expect(secondSend).rejects.toThrow('EXECUTION_REGISTRATION_REFUSED')
+    expect(managed.isProcessing).toBe(false)
+    expect(registeredAssistantRecords()).toBe(0)
   })
 
   it('a flush persistence rejection releases the reservation and a retry starts clean (R31-4)', async () => {
@@ -268,14 +266,10 @@ describe('assistant start reservation versus account replacement (R30-B)', () =>
     // The retry starts clean: it re-registers and proceeds to the (harness)
     // agent-bootstrap failure with no residue from the failed attempt.
     const retry = sm.sendMessage('flush-reject', 'hello again')
-    let retryError: unknown
-    retry.catch(e => { retryError = e })
+    retry.catch(() => {})
     for (let i = 0; i < 300 && !managed.isProcessing; i += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
-      if (retryError) { console.log('[dbg retry] rejected early with:', (retryError as Error)?.message); break }
-      if (i % 10 === 0) console.log('[dbg retry] i=', i, 'processing=', managed.isProcessing, 'registered=', listRegisteredProductSpaceExecutions().length)
     }
-    console.log('[dbg retry] after poll: processing=', managed.isProcessing, 'registered=', listRegisteredProductSpaceExecutions().length, 'error=', (retryError as Error)?.message)
     await expect(retry).rejects.toThrow()
     expect(managed.isProcessing).toBe(false)
     expect(registeredAssistantRecords()).toBe(0)
