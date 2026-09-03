@@ -153,8 +153,15 @@ export interface ISessionManager {
    * Dedicated, trusted creation path for the renderer Edit Popover session:
    * stamps the server-verified 'edit-popover' origin + owner identity. The
    * generic createSession path strips any caller-provided 'edit-popover'.
+   * R41-2: `scopeToken` (captured at the RPC entry, BEFORE the first create
+   * await) identifies the whole privileged operation — it gates the
+   * continuation gap after createSession, the durable stamp and the
+   * post-flush publication, together with an exact managed
+   * account/ProductSpace/Workspace identity match; any mismatch tears the
+   * hidden session down with owner-identity-aware cleanup whose incomplete
+   * outcome is reported.
    */
-  createEditPopoverSession(workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions): Promise<import('@polo-ai/shared/protocol').Session>
+  createEditPopoverSession(workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions, scopeToken?: import('../handlers/rpc/trusted-product-space-account').TrustedSessionScopeToken | null): Promise<import('@polo-ai/shared/protocol').Session>
 
   // ---------------------------------------------------------------------------
   // Plans

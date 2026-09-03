@@ -430,9 +430,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
     assertOnlineBusinessSurface()
+    // R41-2: the trusted scope token is captured ONCE here — BEFORE the
+    // awaited creation — and threaded through the whole privileged
+    // operation (generic creation + origin stamp), so a scope replaced
+    // inside any continuation gap can never re-brand the stamp.
+    const scopeToken = captureCompleteTrustedSessionScopeToken(callerWorkspaceId)
+    assertSessionScopeTokenCurrent(scopeToken)
     const end = perf.start('rpc.createEditPopoverSession', { workspaceId })
     try {
-      const session = await sessionManager.createEditPopoverSession(workspaceId, options)
+      const session = await sessionManager.createEditPopoverSession(workspaceId, options, scopeToken)
       end()
       return session
     } catch (error) {

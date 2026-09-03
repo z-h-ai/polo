@@ -83,7 +83,10 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     return managed
   }
 
-  const seedColdEditPopoverHeader = (sessionId: string) => {
+  const seedColdEditPopoverHeader = (
+    sessionId: string,
+    extra: { withPendingAgentResume?: boolean } = {},
+  ) => {
     const filePath = getSessionFilePath(tmpRoot, sessionId)
     mkdirSync(dirname(filePath), { recursive: true })
     const stored = {
@@ -99,10 +102,18 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       productSpaceId: TEST_SPACE_ID,
       accountId: TEST_ACCOUNT_ID,
       pendingQuestion: makeQuestionRequest(sessionId),
+      pendingAgentResume: extra.withPendingAgentResume
+        ? { messageId: `msg-${sessionId}`, attempts: 1, invocationSource: 'desktop' }
+        : undefined,
       messages: [],
       tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
     } as unknown as StoredSession
     writeSessionJsonl(filePath, stored)
+  }
+
+  const loadStored = (sessionId: string): StoredSession => {
+    const storage = (sm as unknown as { sessionStorage: { load: (root: string, id: string) => StoredSession | null } }).sessionStorage
+    return storage.load(tmpRoot, sessionId) as StoredSession
   }
 
   const storageSessionCount = (): number => {
@@ -358,6 +369,168 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const result = await lookup(WORKSPACE_ID)
       expect(result?.sessionId).toBe('q-lookup-cold-ok')
       expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.has('q-lookup-cold-ok')).toBe(true)
+    })
+
+    // ------------------------------------------------------------------
+    // R41-3: the ProductSpace switch must land INSIDE the hydration load —
+    // the candidate is never published before the awaited load completes.
+    // ------------------------------------------------------------------
+    it('a switch during the parked hydration leaves no map entry, no scheduled recovery, no events and no disclosure', async () => {
+      seedColdEditPopoverHeader('q-lookup-cold-race', { withPendingAgentResume: true })
+      const realLoad = (sm as unknown as { loadMessagesFromDisk: (m: unknown) => Promise<void> }).loadMessagesFromDisk.bind(sm)
+      let releaseLoad!: () => void
+      const gated = new Promise<void>(resolve => { releaseLoad = () => resolve() })
+      let parked = false
+      ;(sm as unknown as { loadMessagesFromDisk: unknown }).loadMessagesFromDisk = async (managed: unknown) => {
+        if (!parked) {
+          parked = true
+          await gated
+        }
+        return realLoad(managed)
+      }
+
+      const pending = lookup(WORKSPACE_ID)
+      await new Promise(r => setImmediate(r))
+      // The switch commits while the hydration load is parked.
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      releaseLoad()
+
+      await expect(pending).resolves.toBeNull()
+      // Drain the load's setImmediate recovery callbacks: against the
+      // unregistered candidate they must all no-op.
+      for (let i = 0; i < 5; i += 1) {
+        await new Promise(r => setImmediate(r))
+      }
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(0)
+      expect(events).toEqual([])
+      // The cold header itself is untouched: pending question AND armed
+      // resume stay exactly as persisted.
+      const stored = loadStored('q-lookup-cold-race')
+      expect(stored.pendingQuestion?.requestId).toBe(`q-q-lookup-cold-race`)
+      expect(stored.pendingAgentResume).toBeTruthy()
+    })
+  })
+
+  // ==========================================================================
+  // R41-1: question resolution across the flush boundary
+  // ==========================================================================
+
+  describe('question resolution mid-flush fence switch (R41-1)', () => {
+    /** Parks the resolution's FIRST flushSession so the fence can move inside the flush await. */
+    const parkFirstFlush = (): { release: () => void } => {
+      const realFlush = (sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession.bind(sm)
+      let release!: () => void
+      const gated = new Promise<void>(resolve => { release = () => resolve() })
+      let parked = false
+      ;(sm as unknown as { flushSession: unknown }).flushSession = async (id: string) => {
+        if (!parked) {
+          parked = true
+          await gated
+        }
+        return realFlush(id)
+      }
+      return { release }
+    }
+
+    const respond = (sessionId: string, resolution: unknown) =>
+      handlers.get(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION)!(
+        { workspaceId: WORKSPACE_ID, clientId: 'client-1' },
+        sessionId,
+        resolution,
+      ) as Promise<unknown>
+
+    it('a cancel whose flush spans a ProductSpace switch is refused with the pre-resolution state restored (zero net persistence, zero events)', async () => {
+      const managed = seedSession('q-flush-cancel')
+      managed.pendingQuestion = makeQuestionRequest('q-flush-cancel')
+      const messagesBefore = managed.messages.length
+      const { release } = parkFirstFlush()
+
+      const pending = respond('q-flush-cancel', { action: 'cancel', requestId: 'q-q-flush-cancel' })
+      await new Promise(r => setImmediate(r))
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      release()
+
+      await expect(pending).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      // In-memory: the pre-resolution snapshot is live again.
+      expect(managed.pendingQuestion?.requestId).toBe('q-q-flush-cancel')
+      expect(managed.messages.length).toBe(messagesBefore)
+      expect(managed.pendingAgentResume).toBeUndefined()
+      expect(managed.resumeRetryTimer).toBeUndefined()
+      // Durable: the stored header carries the pending question, no cancel
+      // record, no armed resume — zero NET persistence of the mutation.
+      const stored = loadStored('q-flush-cancel')
+      expect(stored.pendingQuestion?.requestId).toBe('q-q-flush-cancel')
+      expect(stored.messages.some(m => (m as { questionResolution?: unknown }).questionResolution)).toBe(false)
+      expect(stored.pendingAgentResume).toBeUndefined()
+      expect(events).toEqual([])
+    })
+
+    it('an answer whose flush spans a ProductSpace switch is refused, un-arms the resume durably and restores the pending question', async () => {
+      const managed = seedSession('q-flush-answer')
+      managed.pendingQuestion = makeQuestionRequest('q-flush-answer')
+      const messagesBefore = managed.messages.length
+      const { release } = parkFirstFlush()
+
+      const pending = respond('q-flush-answer', makeAnswerResolution(makeQuestionRequest('q-flush-answer')))
+      await new Promise(r => setImmediate(r))
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      release()
+
+      await expect(pending).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      expect(managed.pendingQuestion?.requestId).toBe('q-q-flush-answer')
+      expect(managed.messages.length).toBe(messagesBefore)
+      expect(managed.pendingAgentResume).toBeUndefined()
+      expect(managed.resumeRetryTimer).toBeUndefined()
+      expect(managed.isProcessing).toBe(false)
+      const stored = loadStored('q-flush-answer')
+      expect(stored.pendingQuestion?.requestId).toBe('q-q-flush-answer')
+      expect(stored.pendingAgentResume).toBeUndefined()
+      expect(stored.messages.some(m => (m as { questionResponse?: unknown }).questionResponse)).toBe(false)
+      expect(events).toEqual([])
+    })
+  })
+
+  // ==========================================================================
+  // R41-2: edit-popover creation across the continuation gap
+  // ==========================================================================
+
+  describe('edit-popover creation mid-flight fence switch (R41-2)', () => {
+    const createViaRpc = () =>
+      handlers.get(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION)!(
+        { workspaceId: WORKSPACE_ID, clientId: 'client-1' },
+        WORKSPACE_ID,
+        { popoverOwner: OWNER_ID, model: 'fast', systemPromptPreset: 'mini', hidden: true },
+      ) as Promise<{ id: string }>
+
+    it('a switch landing after createSession but before the origin stamp refuses and leaves no hidden session (memory + storage)', async () => {
+      const realCreate = (sm as unknown as { createSession: (...args: unknown[]) => Promise<unknown> }).createSession.bind(sm)
+      ;(sm as unknown as { createSession: unknown }).createSession = async (...args: unknown[]) => {
+        const created = await realCreate(...args)
+        // The switch commits exactly in the continuation gap between the
+        // awaited creation and the privileged stamp.
+        setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+        return created
+      }
+
+      await expect(createViaRpc()).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(0)
+      expect(storageSessionCount()).toBe(0)
+    })
+
+    it('reports an incomplete teardown honestly instead of swallowing it', async () => {
+      const realCreate = (sm as unknown as { createSession: (...args: unknown[]) => Promise<unknown> }).createSession.bind(sm)
+      ;(sm as unknown as { createSession: unknown }).createSession = async (...args: unknown[]) => {
+        const created = await realCreate(...args)
+        setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+        return created
+      }
+      const realDelete = (sm as unknown as { sessionStorage: { delete: (root: string, id: string) => boolean } }).sessionStorage.delete.bind(sm.sessionStorage)
+      ;(sm as unknown as { sessionStorage: { delete: unknown } }).sessionStorage.delete = () => false
+      try {
+        await expect(createViaRpc()).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete')
+      } finally {
+        ;(sm as unknown as { sessionStorage: { delete: (root: string, id: string) => boolean } }).sessionStorage.delete = realDelete
+      }
     })
   })
 })

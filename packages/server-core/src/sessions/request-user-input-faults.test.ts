@@ -1679,7 +1679,9 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         seedStoredPopover('f-reach-hyd', request, { popoverOwner: OWNER_A })
 
         const smC = new SessionManager({ workspace: buildWorkspace() })
-        ;(smC as unknown as { getSession: () => Promise<unknown> }).getSession = async () => {
+        // R41-3: cold hydration runs against an UNPUBLISHED candidate via
+        // ensureMessagesLoaded — the injection targets that entry point.
+        ;(smC as unknown as { ensureMessagesLoaded: () => Promise<unknown> }).ensureMessagesLoaded = async () => {
           throw new Error('hydration failed (injected)')
         }
         await expect(smC.getEditPopoverPendingSession('ws_test', OWNER_A))
