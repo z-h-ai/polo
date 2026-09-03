@@ -3079,7 +3079,15 @@ export class SessionManager implements ISessionManager {
       // The retry reuses the persisted answer message — no duplicate user turn.
       // A TERMINAL completed record only clears durably — it must never
       // re-execute an already-completed answer turn.
-      if (storedSession.pendingAgentResume) {
+      // R43: the durable resume-quarantine barrier is consulted FIRST — a
+      // quarantined resume (its compensation failed under a lost scope) is
+      // dropped WITHOUT arming and WITHOUT scheduling anything, even when
+      // the header record itself could never be flipped to TERMINAL.
+      if (storedSession.pendingAgentResume
+        && await this.isResumeQuarantinedByBarrier(managed.workspace.rootPath, managed.id, storedSession.pendingAgentResume.messageId)) {
+        sessionLog.warn(`pendingAgentResume for session ${managed.id} is durably QUARANTINED — dropping without arming (the old answer turn can never execute)`)
+        managed.pendingAgentResume = undefined
+      } else if (storedSession.pendingAgentResume) {
         if (storedSession.pendingAgentResume.completed) {
           managed.pendingAgentResume = storedSession.pendingAgentResume
           sessionLog.info(`Restoring TERMINAL pendingAgentResume for session ${managed.id} — clearing without resuming`)
@@ -3806,11 +3814,12 @@ export class SessionManager implements ISessionManager {
         outcomes.push({ surface, status, detail })
       }
 
-      // R42: ownership is decided ONCE at teardown entry — the surfaces this
-      // creation owns are torn down as a unit. (A replacement that lands
-      // mid-teardown re-persists its own full state, so the ownership
-      // snapshot stays authoritative for the whole primitive.)
+      // R42/R43: ownership is decided ONCE at teardown entry, and RE-VERIFIED
+      // before EVERY id-wide cleanup step — a replacement owner that lands
+      // while an awaited disposal is parked must find every later step
+      // skipped, never its own registrations destroyed.
       const ownedAtStart = stillOwns()
+      const ownsNow = (): boolean => stillOwns()
 
       if (!ownedAtStart) {
         // A replacement owner occupies the id: its memory entry, storage
@@ -3823,44 +3832,71 @@ export class SessionManager implements ISessionManager {
           push(surface, 'skipped-new-owner')
         }
       } else {
-        // Agent runtime + session-scoped callback/guard registrations for
-        // the id (the guard wraps every callback — a stale-scope guard must
-        // not survive to wrap a future owner's callbacks).
-        try {
-          await this.disposeManagedAgentRuntime(managed, reason)
-          push('agent-runtime+session-callbacks', 'cleaned')
-        } catch (teardownError) {
-          push('agent-runtime+session-callbacks', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+        // Agent runtime — object-scoped disposal of OUR creation, with the
+        // id-wide callback/guard unregistration gated live on ownership.
+        // Disposal failures are STRUCTURED: they reach this enumeration as
+        // `failed` (never a fake success while the old process may live).
+        const runtime = await this.disposeManagedAgentRuntime(managed, reason, { shouldUnregisterCallbacks: ownsNow })
+        if (runtime.failures.length > 0) {
+          push('agent-runtime', 'failed', runtime.failures.join('; '))
+        } else {
+          push('agent-runtime', 'cleaned')
         }
-        try {
-          cleanupModeState(owner.sessionId)
-          push('mode-state', 'cleaned')
-        } catch (teardownError) {
-          push('mode-state', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
-        }
-        try {
-          this.automationSystems.get(managed.workspace.rootPath)?.clearInitialSessionMetadata(owner.sessionId)
-          push('automation-metadata', 'cleaned')
-        } catch (teardownError) {
-          push('automation-metadata', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
-        }
-        const orphan = this.sessions.get(owner.sessionId)
-        if (orphan?.autoRetryTimer) {
-          clearTimeout(orphan.autoRetryTimer)
-          orphan.autoRetryTimer = undefined
-        }
-        if (orphan) orphan.autoRetryPending = undefined
-        this.sessions.delete(owner.sessionId)
-        push('memory', 'cleaned')
-        try {
-          const deleted = this.sessionStorage.delete(managed.workspace.rootPath, owner.sessionId)
-          if (deleted === false) {
-            push('storage', 'failed', 'storage delete returned false')
-          } else {
-            push('storage', 'cleaned')
+        push('session-callbacks', runtime.callbacksUnregistered ? 'cleaned' : 'skipped-new-owner')
+        // mode state — id-wide: re-verified.
+        if (ownsNow()) {
+          try {
+            cleanupModeState(owner.sessionId)
+            push('mode-state', 'cleaned')
+          } catch (teardownError) {
+            push('mode-state', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
           }
-        } catch (storageError) {
-          push('storage', 'failed', storageError instanceof Error ? storageError.message : String(storageError))
+        } else {
+          push('mode-state', 'skipped-new-owner')
+        }
+        // automation metadata — id-wide: re-verified.
+        if (ownsNow()) {
+          try {
+            this.automationSystems.get(managed.workspace.rootPath)?.clearInitialSessionMetadata(owner.sessionId)
+            push('automation-metadata', 'cleaned')
+          } catch (teardownError) {
+            push('automation-metadata', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+          }
+        } else {
+          push('automation-metadata', 'skipped-new-owner')
+        }
+        // memory — id-wide: only OUR exact object is ever removed.
+        if (this.sessions.get(owner.sessionId) === owner.managed) {
+          const orphan = this.sessions.get(owner.sessionId)
+          if (orphan?.autoRetryTimer) {
+            clearTimeout(orphan.autoRetryTimer)
+            orphan.autoRetryTimer = undefined
+          }
+          if (orphan) orphan.autoRetryPending = undefined
+          this.sessions.delete(owner.sessionId)
+          push('memory', 'cleaned')
+        } else {
+          push('memory', 'skipped-new-owner')
+        }
+        // storage — identity-scoped: deleted only while the id is still OURS.
+        // After our own memory step the map entry is absent — that absence is
+        // THIS teardown's own doing and the storage record remains ours to
+        // delete; a PRESENT different object is a replacement owner whose
+        // record must never be touched.
+        const storageOwnershipProbe = this.sessions.get(owner.sessionId)
+        if (storageOwnershipProbe === undefined || storageOwnershipProbe === owner.managed) {
+          try {
+            const deleted = this.sessionStorage.delete(managed.workspace.rootPath, owner.sessionId)
+            if (deleted === false) {
+              push('storage', 'failed', 'storage delete returned false')
+            } else {
+              push('storage', 'cleaned')
+            }
+          } catch (storageError) {
+            push('storage', 'failed', storageError instanceof Error ? storageError.message : String(storageError))
+          }
+        } else {
+          push('storage', 'skipped-new-owner')
         }
       }
 
@@ -3936,8 +3972,30 @@ export class SessionManager implements ISessionManager {
     return managedToSession(managed, this.sessionStorage)
   }
 
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+  /**
+   * R43: dispose the session's live runtime surfaces with a STRUCTURED
+   * result instead of swallowing failures. Every disposal failure is
+   * reported (the failed reference is deliberately KEPT so a retry can
+   * target the still-live resource) — a caller that needs a guaranteed
+   * teardown must surface `failures` as `rollback incomplete: runtime`
+   * rather than recording a fake success. The id-wide session-scoped tool
+   * callback/guard unregistration is gated by `shouldUnregisterCallbacks`
+   * (re-evaluated AFTER the awaited disposals, R43): a teardown whose owner
+   * was replaced while it was parked must not unregister the replacement
+   * owner's registrations.
+   */
+  private async disposeManagedAgentRuntime(
+    managed: ManagedSession,
+    reason: string,
+    opts?: { shouldUnregisterCallbacks?: () => boolean },
+  ): Promise<{ failures: string[]; callbacksUnregistered: boolean }> {
     const sessionId = managed.id
+    const failures: string[] = []
+    const note = (what: string, error: unknown): void => {
+      const detail = error instanceof Error ? error.message : String(error)
+      failures.push(`${what}: ${detail}`)
+      sessionLog.warn(`Failed to dispose ${what} for ${sessionId} during ${reason}: ${detail}`)
+    }
 
     if (managed.agent) {
       try {
@@ -3946,36 +4004,42 @@ export class SessionManager implements ISessionManager {
         } else {
           managed.agent.dispose()
         }
+        managed.agent = null
       } catch (error) {
-        sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
+        note('agent', error)
       }
     }
 
     if (managed.poolServer) {
       try {
         await managed.poolServer.stop()
+        managed.poolServer = undefined
       } catch (error) {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
+        note('pool-server', error)
       }
     }
 
     if (managed.mcpPool) {
       try {
         await managed.mcpPool.disconnectAll()
+        managed.mcpPool = undefined
       } catch (error) {
-        sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
+        note('mcp-pool', error)
       }
     }
 
-    managed.agent = null
-    managed.poolServer = undefined
-    managed.mcpPool = undefined
     managed.envOverrides = undefined
     managed.agentReady = undefined
     managed.agentReadyResolve = undefined
     managed.backendRuntimeSignature = undefined
     managed.backendRestartSignature = undefined
-    unregisterSessionScopedToolCallbacks(sessionId)
+
+    let callbacksUnregistered = false
+    if (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks()) {
+      unregisterSessionScopedToolCallbacks(sessionId)
+      callbacksUnregistered = true
+    }
+    return { failures, callbacksUnregistered }
   }
 
   /**
@@ -9183,45 +9247,110 @@ export class SessionManager implements ISessionManager {
       // The snapshot restore replaced the in-memory state, but the FIRST
       // flush may already have made the ARMED resume durable — quarantine
       // that exact record, not the (already un-armed) live state.
-      let quarantineFailure: string | null = null
+      // R43: the durable BARRIER is written FIRST (it is the guarantee);
+      // the TERMINAL header marker is hygiene that follows it.
+      let barrierFailure: string | null = null
+      let terminalFailure: string | null = null
       if (durablyArmedResume && !durablyArmedResume.completed) {
+        try {
+          await this.writeResumeQuarantineBarrier(managed, durablyArmedResume, 'pre-resolution restore failed; resume permanently non-executable')
+        } catch (barrierError) {
+          barrierFailure = `quarantine barrier write failed: ${barrierError instanceof Error ? barrierError.message : String(barrierError)}`
+        }
         managed.pendingAgentResume = { ...durablyArmedResume, completed: true }
         try {
           this.persistSession(managed)
           await this.flushSession(managed.id)
           sessionLog.warn(`Quarantined the durably armed answer→resume for session ${managed.id} with a TERMINAL marker (restore failed; the answer turn can never execute)`)
         } catch (quarantineError) {
-          quarantineFailure = `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
+          terminalFailure = `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
         }
       }
       const detail = `pre-resolution restore incomplete: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`
-      throw new ProductSpaceScopeRefusalError(quarantineFailure ? `${detail}; ${quarantineFailure}` : detail)
+      const extra = [barrierFailure, terminalFailure].filter((f): f is string => Boolean(f))
+      throw new ProductSpaceScopeRefusalError(extra.length > 0 ? `${detail}; ${extra.join('; ')}` : detail)
+    }
+  }
+
+  /**
+   * R43: the durable fail-closed quarantine barrier. A dedicated per-session
+   * record OUTSIDE the session JSONL, written through an independent direct
+   * fs path (never the debounced persistence queue), BEFORE any cosmetic
+   * TERMINAL header cleanup is attempted. Hydration (`loadMessagesFromDisk`)
+   * must consult this barrier BEFORE arming any pendingAgentResume — so even
+   * when the restore AND the TERMINAL header writes all fail, the old
+   * space's answer turn can never be scheduled or executed after a restart.
+   */
+  private resumeQuarantineBarrierPath(workspaceRootPath: string, sessionId: string): string {
+    return join(workspaceRootPath, '.polo-resume-quarantine', `${sessionId}.json`)
+  }
+
+  private async writeResumeQuarantineBarrier(
+    managed: ManagedSession,
+    resume: NonNullable<ManagedSession['pendingAgentResume']>,
+    reason: string,
+  ): Promise<void> {
+    const barrierPath = this.resumeQuarantineBarrierPath(managed.workspace.rootPath, managed.id)
+    await mkdir(dirname(barrierPath), { recursive: true })
+    const payload = {
+      sessionId: managed.id,
+      messageId: resume.messageId,
+      invocationSource: resume.invocationSource ?? 'internal',
+      quarantinedAt: Date.now(),
+      reason,
+    }
+    await writeFile(barrierPath, JSON.stringify(payload), 'utf-8')
+    sessionLog.warn(`Durable resume-quarantine barrier written for session ${managed.id} (message ${resume.messageId}): ${reason}`)
+  }
+
+  private async isResumeQuarantinedByBarrier(
+    workspaceRootPath: string,
+    sessionId: string,
+    messageId: string | undefined,
+  ): Promise<boolean> {
+    try {
+      const raw = await readFile(this.resumeQuarantineBarrierPath(workspaceRootPath, sessionId), 'utf-8')
+      const parsed = JSON.parse(raw) as { messageId?: string }
+      // A barrier without a messageId quarantines the whole session's
+      // resumes; with one, it quarantines that exact answer turn.
+      return !parsed.messageId || !messageId || parsed.messageId === messageId
+    } catch {
+      return false
     }
   }
 
   /**
    * R42: the durable quarantine for an armed answer→resume whose ordinary
-   * compensation (restore / un-arm) failed. Flips the record to TERMINAL —
-   * in memory first, then one awaited durable persist — so a restart's
-   * hydration clears it WITHOUT ever re-executing the old space's answer
-   * turn. Returns null when the quarantine is durably complete, or the
-   * honest failure detail when even the terminal marker could not be
-   * persisted.
+   * compensation (restore / un-arm) failed. R43: the BARRIER is written
+   * FIRST — it is the fail-closed guarantee (consulted by hydration before
+   * any arm); flipping the header record to TERMINAL is hygiene that follows
+   * it. Returns null when the quarantine is fully durable (barrier written
+   * AND terminal marker persisted), or the honest failure detail when any
+   * part could not be persisted.
    */
   private async quarantinePendingResumeTerminal(managed: ManagedSession): Promise<string | null> {
     if (!managed.pendingAgentResume || managed.pendingAgentResume.completed) {
       return null
     }
-    managed.pendingAgentResume = { ...managed.pendingAgentResume, completed: true }
+    const resume = managed.pendingAgentResume
+    let barrierFailure: string | null = null
+    try {
+      await this.writeResumeQuarantineBarrier(managed, resume, 'answer→resume compensation failed; resume permanently non-executable')
+    } catch (barrierError) {
+      barrierFailure = `quarantine barrier write failed: ${barrierError instanceof Error ? barrierError.message : String(barrierError)}`
+    }
+    managed.pendingAgentResume = { ...resume, completed: true }
+    let terminalFailure: string | null = null
     try {
       this.persistSession(managed)
       await this.flushSession(managed.id)
       sessionLog.warn(`Quarantined the armed answer→resume for session ${managed.id} with a durable TERMINAL marker (scope lost; the answer turn can never execute)`)
-      return null
     } catch (quarantineError) {
+      terminalFailure = `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
       sessionLog.error(`Failed to persist the TERMINAL quarantine marker for session ${managed.id}:`, quarantineError)
-      return `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
     }
+    const failures = [barrierFailure, terminalFailure].filter((f): f is string => Boolean(f))
+    return failures.length > 0 ? failures.join('; ') : null
   }
 
   /**

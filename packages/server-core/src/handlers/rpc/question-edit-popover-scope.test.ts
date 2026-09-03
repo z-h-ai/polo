@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
@@ -563,6 +563,73 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(stored.pendingAgentResume).toBeTruthy()
       expect((stored.pendingAgentResume as { completed?: boolean }).completed).toBe(true)
     })
+
+    // ------------------------------------------------------------------
+    // R43: even when the restore flush AND the TERMINAL quarantine flush
+    // BOTH fail, the durable quarantine barrier (independent of the session
+    // JSONL) keeps the old answer turn non-executable across a restart.
+    // ------------------------------------------------------------------
+    it('restore AND quarantine writes failing still leave the old answer turn non-executable after a cold rebuild (durable barrier)', async () => {
+      const managed = seedSession('q-barrier-answer')
+      managed.pendingQuestion = makeQuestionRequest('q-barrier-answer')
+      const realFlush = (sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession.bind(sm)
+      let release!: () => void
+      const gated = new Promise<void>(resolve => { release = () => resolve() })
+      let parkedSignal!: () => void
+      const parked = new Promise<void>(resolve => { parkedSignal = resolve })
+      let call = 0
+      ;(sm as unknown as { flushSession: unknown }).flushSession = async (id: string) => {
+        call += 1
+        if (call === 1) {
+          parkedSignal()
+          await gated
+          return realFlush(id)
+        }
+        // call 2 = restore flush, call 3 = TERMINAL quarantine flush — BOTH fail.
+        throw new Error('disk full injected')
+      }
+
+      const pending = respond('q-barrier-answer', makeAnswerResolution(makeQuestionRequest('q-barrier-answer')))
+      await parked
+      setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+      release()
+
+      await expect(pending).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED (pre-resolution restore incomplete')
+      expect(events).toEqual([])
+      // The BARRIER exists on disk although every session-JSONL write after
+      // the first failed — it is the fail-closed guarantee.
+      const barrierPath = join(tmpRoot, '.polo-resume-quarantine', 'q-barrier-answer.json')
+      expect(existsSync(barrierPath)).toBe(true)
+      // The durable header STILL carries the armed resume — the barrier, not
+      // the header marker, is what makes it non-executable.
+      const storedAfter = loadStored('q-barrier-answer')
+      expect(storedAfter.pendingAgentResume).toBeTruthy()
+      expect((storedAfter.pendingAgentResume as { completed?: boolean }).completed ?? false).toBe(false)
+
+      // Cold rebuild from disk: hydration must consult the barrier — the
+      // old answer turn is never armed, never scheduled, never executed.
+      const sm2 = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
+      })
+      const sm2Events: Array<Record<string, unknown>> = []
+      sm2.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
+        sm2Events.push(event)
+      }) as never)
+      const cold = createManagedSession(
+        { id: 'q-barrier-answer', name: 'cold rebuild', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        {},
+      )
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set('q-barrier-answer', cold)
+      await sm2.getSession('q-barrier-answer')
+      // Drain any recovery immediates/timers the hydration could have scheduled.
+      await new Promise(r => setTimeout(r, 80))
+      expect(cold.pendingAgentResume).toBeUndefined()
+      expect(sm2Events).toEqual([])
+      expect(cold.isProcessing).toBe(false)
+      expect(cold.resumeRetryTimer).toBeUndefined()
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    })
   })
 
   // ==========================================================================
@@ -663,6 +730,77 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(getSessionScopedToolCallbacks(createdId)).toBeDefined()
       // Tidy the global callback registry for later tests.
       unregisterSessionScopedToolCallbacks(createdId)
+    })
+
+    // ------------------------------------------------------------------
+    // R43: the replacement lands DURING the parked runtime-disposal await —
+    // every id-wide surface after the disposal must re-verify ownership and
+    // skip, so the replacement's registrations/mode/storage survive and its
+    // callbacks are never unregistered or stale-guard wrapped.
+    // ------------------------------------------------------------------
+    it('a replacement landing during the parked runtime disposal survives every id-wide surface', async () => {
+      const realCreate = (sm as unknown as { createSession: (...args: unknown[]) => Promise<unknown> }).createSession.bind(sm)
+      ;(sm as unknown as { createSession: unknown }).createSession = async (...args: unknown[]) => {
+        const created = await realCreate(...args)
+        setRuntimeActiveProductSpace(OTHER_SPACE_ID)
+        return created
+      }
+      const realDispose = (sm as unknown as { disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: { shouldUnregisterCallbacks?: () => boolean }) => Promise<{ failures: string[]; callbacksUnregistered: boolean }> }).disposeManagedAgentRuntime.bind(sm)
+      let dRelease!: () => void
+      const dGated = new Promise<void>(resolve => { dRelease = () => resolve() })
+      let disposeParkedSignal!: () => void
+      const disposeParkedPromise = new Promise<void>(resolve => { disposeParkedSignal = resolve })
+      let disposeParked = false
+      ;(sm as unknown as { disposeManagedAgentRuntime: unknown }).disposeManagedAgentRuntime = async (managed: unknown, reason: string, opts?: { shouldUnregisterCallbacks?: () => boolean }) => {
+        if (!disposeParked) {
+          disposeParked = true
+          disposeParkedSignal()
+          await dGated
+        }
+        return realDispose(managed, reason, opts)
+      }
+
+      const pendingRpc = createViaRpc()
+      for (let i = 0; i < 300 && !disposeParked; i += 1) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      void disposeParkedPromise
+
+      // The replacement owner takes over the id DURING the parked disposal.
+      const createdId = [...(sm as unknown as { sessions: Map<string, unknown> }).sessions.keys()][0] as string
+      const replacement = createManagedSession(
+        { id: createdId, name: 'replacement owner', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(createdId, replacement)
+      setPermissionMode(createdId, 'allow-all', { changedBy: 'system' })
+      registerSessionScopedToolCallbacks(createdId, { list_sessions: async () => [] } as never)
+
+      dRelease()
+      await expect(pendingRpc).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      // Every id-wide surface after the disposal re-verified ownership and
+      // skipped: the replacement survived untouched.
+      expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.get(createdId)).toBe(replacement)
+      expect(storageSessionCount()).toBe(1)
+      expect(getPermissionMode(createdId)).toBe('allow-all')
+      expect(getSessionScopedToolCallbacks(createdId)).toBeDefined()
+      unregisterSessionScopedToolCallbacks(createdId)
+    })
+
+    it('runtime disposal failures are reported structurally instead of faking success', async () => {
+      const managed = seedSession('q-dispose-fail')
+      managed.agent = {
+        dispose: () => { throw new Error('dispose boom') },
+      } as never
+      const result = await (sm as unknown as {
+        disposeManagedAgentRuntime: (m: unknown, reason: string) => Promise<{ failures: string[]; callbacksUnregistered: boolean }>
+      }).disposeManagedAgentRuntime(managed, 'test')
+      expect(result.failures.length).toBeGreaterThan(0)
+      expect(result.failures.some(f => f.includes('dispose boom'))).toBe(true)
+      // The failed reference is deliberately KEPT (never a fake cleanup).
+      expect(managed.agent).toBeTruthy()
+      expect(result.callbacksUnregistered).toBe(true)
     })
   })
 })
