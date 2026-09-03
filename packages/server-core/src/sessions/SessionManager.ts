@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1211,6 +1211,23 @@ export class SessionManager implements ISessionManager {
       ]),
     ) as F
     return wrapped
+  }
+
+  /**
+   * R39-2: installs THE authoritative per-session registration guard in the
+   * shared tool-callback registry. Every callback registered or merged for
+   * this session (BackendConfig, core/plan/auth/query, messaging, browser
+   * panes, self-management, direct activation, and future records) is
+   * atomically wrapped so the caller's CURRENT stable transition/account/
+   * fence scope is enforced at invocation — deny-by-default for missing,
+   * stale, legacy, replaced or in-transition callers.
+   */
+  private installManagedSessionCallbackGuard(managed: ManagedSession): void {
+    installSessionScopedToolCallbackGuard(managed.id, (callbackName: string) => {
+      if (!this.managedTrustedScope(managed)) {
+        throw new Error(`SESSION_OUT_OF_TRUSTED_SCOPE (${callbackName})`)
+      }
+    })
   }
 
   /** R38-2: the recorded guard inventory for one managed session (tests). */
@@ -3477,19 +3494,27 @@ export class SessionManager implements ISessionManager {
           rollbackFailure = `agent rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
         }
       }
-      // R38-4: the storage delete is conditioned on no concurrent valid
-      // same-ID owner having published in the meantime — our record was
-      // never installed, so any installed record belongs to that owner.
-      if (!rollbackFailure && !this.sessions.has(storedSession.id)) {
-        const deleted = this.sessionStorage.delete(workspaceRootPath, storedSession.id)
-        if (deleted === false) {
-          // R38-4: a rollback that could not remove the stale on-disk record
-          // must surface a fail-closed error instead of being swallowed.
-          rollbackFailure = 'storage delete returned false'
+      // R39-4: cleanup is conditioned on OWNER IDENTITY — no concurrent
+      // valid same-ID owner having published in the meantime. When we own
+      // the rollback, mode/automation state is ALWAYS cleaned (even if the
+      // disk delete fails); only the disk delete failure is surfaced as a
+      // rollback-incomplete error.
+      if (!this.sessions.has(storedSession.id)) {
+        cleanupModeState(storedSession.id)
+        this.automationSystems.get(workspaceRootPath)?.clearInitialSessionMetadata(storedSession.id)
+        if (!rollbackFailure) {
+          let deleted: boolean
+          try {
+            deleted = this.sessionStorage.delete(workspaceRootPath, storedSession.id)
+          } catch (deleteError) {
+            rollbackFailure = `storage delete threw: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`
+            deleted = false
+          }
+          if (deleted === false) {
+            rollbackFailure = 'storage delete returned false'
+          }
         }
       }
-      cleanupModeState(storedSession.id)
-      this.automationSystems.get(workspaceRootPath)?.clearInitialSessionMetadata(storedSession.id)
       if (rollbackFailure) {
         throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${rollbackFailure})`)
       }
@@ -3504,6 +3529,9 @@ export class SessionManager implements ISessionManager {
     }
 
     this.sessions.set(storedSession.id, managed)
+    // R39-2: the registration guard is installed BEFORE the session (and
+    // later its agent) can register any tool callback.
+    this.installManagedSessionCallbackGuard(managed)
 
     // Initialize session metadata in AutomationSystem for diffing
     const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -3861,7 +3889,10 @@ export class SessionManager implements ISessionManager {
         previousPermissionMode: managed.previousPermissionMode,
       }
 
-      const onSdkSessionIdUpdate = (sdkSessionId: string) => {
+      // R39-2: BackendConfig callbacks are registered through the same
+      // authoritative guard — the backend can invoke them at any time and
+      // must never act for a stale/split/in-transition caller.
+      const onSdkSessionIdUpdate = this.guardManagedCallback(managed, 'backend.onSdkSessionIdUpdate', (sdkSessionId: string) => {
         managed.sdkSessionId = sdkSessionId
         // Retire branch-only fork metadata now that child session is established
         if (managed.branchFromSdkSessionId) {
@@ -3874,16 +3905,16 @@ export class SessionManager implements ISessionManager {
         }
         this.persistSession(managed)
         void this.sessionStorage.flush(managed.id)
-      }
+      })
 
-      const onSdkSessionIdCleared = () => {
+      const onSdkSessionIdCleared = this.guardManagedCallback(managed, 'backend.onSdkSessionIdCleared', () => {
         managed.sdkSessionId = undefined
         sessionLog.info(`SDK session ID cleared for ${managed.id} (resume recovery)`)
         this.persistSession(managed)
         void this.sessionStorage.flush(managed.id)
-      }
+      })
 
-      const onBranchForkInvalidated = () => {
+      const onBranchForkInvalidated = this.guardManagedCallback(managed, 'backend.onBranchForkInvalidated', () => {
         managed.sdkSessionId = undefined
         managed.branchFromSdkSessionId = undefined
         managed.branchFromSdkCwd = undefined
@@ -3891,9 +3922,9 @@ export class SessionManager implements ISessionManager {
         sessionLog.info(`Branch fork invalidated for ${managed.id}: cleared all fork metadata`)
         this.persistSession(managed)
         void this.sessionStorage.flush(managed.id)
-      }
+      })
 
-      const getRecoveryMessages = () => {
+      const getRecoveryMessages = this.guardManagedCallback(managed, 'backend.getRecoveryMessages', () => {
         const relevantMessages = managed.messages
           .filter(m => m.role === 'user' || m.role === 'assistant')
           .filter(m => !m.isIntermediate)
@@ -3902,9 +3933,9 @@ export class SessionManager implements ISessionManager {
           type: m.role as 'user' | 'assistant',
           content: m.content,
         }))
-      }
+      })
 
-      const getBranchFallbackMessages = () => {
+      const getBranchFallbackMessages = this.guardManagedCallback(managed, 'backend.getBranchFallbackMessages', () => {
         if (!managed.branchFromMessageId) return []
         return managed.messages
           .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -3913,9 +3944,9 @@ export class SessionManager implements ISessionManager {
             type: m.role as 'user' | 'assistant',
             content: m.content,
           }))
-      }
+      })
 
-      const getBranchSeedMessages = () => {
+      const getBranchSeedMessages = this.guardManagedCallback(managed, 'backend.getBranchSeedMessages', () => {
         if (managed.branchContextStrategy !== 'seeded-fresh-session') return []
         if (managed.branchSeedApplied) return []
 
@@ -3927,9 +3958,9 @@ export class SessionManager implements ISessionManager {
           type: m.role as 'user' | 'assistant',
           content: m.content,
         }))
-      }
+      })
 
-      const markBranchSeedApplied = () => {
+      const markBranchSeedApplied = this.guardManagedCallback(managed, 'backend.markBranchSeedApplied', () => {
         if (managed.branchContextStrategy !== 'seeded-fresh-session') return
         if (managed.branchSeedApplied) return
         managed.branchSeedApplied = true
@@ -3937,22 +3968,22 @@ export class SessionManager implements ISessionManager {
           sessionId: managed.id,
           strategy: managed.branchContextStrategy,
         })
-      }
+      })
 
-      const getTransferredSessionSummary = () => {
+      const getTransferredSessionSummary = this.guardManagedCallback(managed, 'backend.getTransferredSessionSummary', () => {
         const summary = managed.transferredSessionSummaryApplied ? null : (managed.transferredSessionSummary ?? null)
         sessionLog.info(`[transfer-context] getTransferredSessionSummary for ${managed.id}: applied=${managed.transferredSessionSummaryApplied}, has_summary=${!!managed.transferredSessionSummary}, returning=${summary ? `${summary.length} chars` : 'null'}`)
         return summary
-      }
+      })
 
-      const markTransferredSessionSummaryApplied = () => {
+      const markTransferredSessionSummaryApplied = this.guardManagedCallback(managed, 'backend.markTransferredSessionSummaryApplied', () => {
         if (managed.transferredSessionSummaryApplied || !managed.transferredSessionSummary) return
         managed.transferredSessionSummaryApplied = true
         this.persistSession(managed)
         sessionLog.info('Transferred session summary applied', {
           sessionId: managed.id,
         })
-      }
+      })
 
       // ============================================================
       // Construct backend via factory
@@ -3987,7 +4018,9 @@ export class SessionManager implements ISessionManager {
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         enable1MContext: await (async () => { const { getEnable1MContext } = await import('@polo-ai/shared/config/storage'); return getEnable1MContext(); })(),
         // Image resize callback — prevents oversized images from entering conversation history
-        onImageResize: async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
+        // R39-2: image resize reads/writes the session tmp directory —
+        // registered through the authoritative guard inventory.
+        onImageResize: this.guardManagedCallback(managed, 'backend.onImageResize', async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
           try {
             const buffer = await readFile(filePath)
             const result = await resizeImageForAPI(buffer, { maxSizeBytes })
@@ -4014,7 +4047,7 @@ export class SessionManager implements ISessionManager {
             sessionLog.error('Image resize failed:', err)
             return null
           }
-        },
+        }),
         // Source configs for postInit() — backends set up their own bridge/config
         initialSources: {
           enabledSources,
@@ -4025,7 +4058,22 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
+      // R39-2: (re)install the authoritative registration guard BEFORE the
+      // backend constructs the agent and registers its callbacks — every
+      // registration is atomically guarded from the first record on.
+      this.installManagedSessionCallbackGuard(managed)
+
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
+
+      // ============================================================
+      // R39-2: backend-invokable method guards. Claude/Pi register
+      // registry callbacks (queryFn/spawnSessionFn) that delegate to these
+      // agent METHODS — wrapping the methods here guards the actual
+      // invoked path, closing the backend-registration bypass.
+      // ============================================================
+      const backendInvokable = managed.agent as unknown as Record<string, ((...args: never[]) => unknown) | undefined>
+      backendInvokable.queryLlm = this.guardManagedCallback(managed, 'agent.queryLlm', backendInvokable.queryLlm!.bind(managed.agent))
+      backendInvokable.preExecuteSpawnSession = this.guardManagedCallback(managed, 'agent.preExecuteSpawnSession', backendInvokable.preExecuteSpawnSession!.bind(managed.agent))
 
       // ============================================================
       // Post-construction: debug callback, auth callback, postInit()
@@ -8668,6 +8716,7 @@ export class SessionManager implements ISessionManager {
           workspaceId,
           sessionId,
         })
+        const staleManaged = managed
         // R38-4: the delete is conditioned on no concurrent valid same-ID
         // owner having committed in the meantime — our record was never
         // registered, so any registered record belongs to that owner.
@@ -8690,6 +8739,9 @@ export class SessionManager implements ISessionManager {
       }
 
       this.sessions.set(sessionId, managed)
+      // R39-2: the registration guard is installed atomically with the
+      // in-memory publication.
+      this.installManagedSessionCallbackGuard(managed)
 
       // Initialize automation metadata
       const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -8711,11 +8763,27 @@ export class SessionManager implements ISessionManager {
       return { sessionId, warnings: warnings.length > 0 ? warnings : undefined }
     } finally {
       if (!importCommitted) {
-        this.sessions.delete(sessionId)
-        try {
-          this.sessionStorage.delete(workspaceRootPath, sessionId)
-        } catch (cleanupError) {
-          sessionLog.error(`[import] Failed to roll back reservation ${sessionId}:`, cleanupError)
+        // R39-4: owner-conditioned rollback. This import never registered
+        // its record (the CAS threw before sessions.set), so an in-memory
+        // record under this ID belongs to a concurrent valid same-ID owner
+        // and MUST NOT be deleted — neither from the map nor from disk.
+        // Only the orphaned disk reservation left by THIS owner is rolled
+        // back, and delete(false)/delete(throw) are surfaced explicitly.
+        if (!this.sessions.has(sessionId)) {
+          const cleanupRollbackFailure: string[] = []
+          let deleted: boolean
+          try {
+            deleted = this.sessionStorage.delete(workspaceRootPath, sessionId)
+          } catch (cleanupError) {
+            cleanupRollbackFailure.push(`storage delete threw: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
+            deleted = false
+          }
+          if (deleted === false) {
+            cleanupRollbackFailure.push('storage delete returned false')
+          }
+          if (cleanupRollbackFailure.length > 0) {
+            throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${cleanupRollbackFailure.join('; ')})`)
+          }
         }
       }
     }

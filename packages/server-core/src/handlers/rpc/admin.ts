@@ -73,7 +73,6 @@ import {
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
   beginAccountTransition,
-  getActiveAccountTransitionEpoch,
   settleAccountTransition,
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
@@ -168,6 +167,8 @@ interface AdminSessionSnapshot {
 interface AdminSessionEndingTransition {
   session: AdminSessionSnapshot
   cleanup: Promise<void>
+  /** R39-1: the immutable transition epoch THIS flow began and owns. */
+  transitionEpoch: number
 }
 
 interface AdminRequestContext {
@@ -358,7 +359,9 @@ class AdminSessionCoordinator {
       // CAS matched, before getOrStartAccountCleanup can snapshot
       // executions. Rejected/non-owner transitions never advance it, and it
       // is monotonic (never reset) for failed/aborted owned transitions.
-      beginAccountTransition()
+      // R39-1: the epoch returned here is the IMMUTABLE owner token for
+      // this flow — settlement must use it, never the mutable global.
+      const transitionEpoch = beginAccountTransition()
       const cleanup = this.getOrStartAccountCleanup(
         current!.userId,
         ending.generation,
@@ -367,7 +370,7 @@ class AdminSessionCoordinator {
       // The caller awaits and reports this promise after any remote side
       // effect. Observe it now so a fast rejection cannot become unhandled.
       void cleanup.catch(() => {})
-      return { session: ending, cleanup }
+      return { session: ending, cleanup, transitionEpoch }
     })
   }
 
@@ -2367,16 +2370,20 @@ async function endAdminSession(
     accountId => deps?.onAdminSessionEnding?.(accountId),
   )
   if (!transition) return false
-  const { session: ending, cleanup } = transition
-  // R38-1: this flow OWNS the account transition published by beginEnding.
-  // Only this owner settles it — commit when the session ended, abort when
-  // the ending lost its snapshot race (a newer transition's settlement is
-  // then protected by the owner CAS).
-  const ownedTransitionEpoch = getActiveAccountTransitionEpoch()
+  const { session: ending, cleanup, transitionEpoch: ownedTransitionEpoch } = transition
+  // R38-1/R39-1: this flow OWNS the immutable transition epoch returned by
+  // beginEnding. It never reads the mutable global active epoch, so a newer
+  // transition queued concurrently can never be aborted by this older flow.
   // R31: the transition epoch was already published inside beginEnding's
   // ownership section — synchronously before its cleanup could snapshot
   // executions. Publication at the caller would be too late.
 
+  // R39-1: settlement happens in this outer finally using ONLY the owned
+  // epoch: commit after the credential/session transition committed, abort
+  // on every earlier exit or thrown dependency. The settle CAS protects a
+  // newer transition from being cleared by this older flow.
+  let didEnd = false
+  try {
   // Catalog authorization and the host lifecycle fence are already active.
   // Slow remote/process cleanup stays outside the lock so a replacement login
   // can proceed; final token deletion is guarded by the ending snapshot CAS.
@@ -2425,17 +2432,18 @@ async function endAdminSession(
       return true
     },
   )
-  const didEnd = ended.applied && ended.value === true
+  didEnd = ended.applied && ended.value === true
   if (didEnd) {
     // The Admin credentials are gone: the synchronous authenticated-account
     // mirror drops to signed-out (a replacement login re-commits it).
     setSyncTrustedProductSpaceAccountId(null)
     invalidateAllCreatorArtifactCaches()
   }
-  // R38-1: settle the owned transition — commit on a completed ending,
-  // explicit abort when the ending snapshot lost its race. The owner CAS
-  // makes a late settlement of a superseded transition a no-op.
-  if (ownedTransitionEpoch !== null) {
+  } finally {
+    // R39-1: owner-matched settlement from the outer finally — commit only
+    // after the credential/session transition committed; abort on every
+    // earlier exit or thrown dependency. The epoch CAS makes this a no-op
+    // if a newer transition has superseded this owner.
     settleAccountTransition(ownedTransitionEpoch, didEnd ? 'commit' : 'abort')
   }
   return didEnd
@@ -2453,8 +2461,12 @@ async function completeAdminLogin(args: {
   >
   onSyncFailure: (error: unknown) => void
 }): Promise<AdminSessionSnapshot | null> {
-  // R38-1: handle for the transition this replacement login may begin.
+  // R38-1/R39-1: handle for the transition this replacement login may
+  // begin. Settlement is owner-matched and happens on EVERY path below:
+  // commit only after the credential/session snapshot committed, abort on
+  // stale-attempt exit, cleanup rejection, or any thrown dependency.
   let replacementTransitionEpoch: number | null = null
+  let replacementCommitted = false
   const replacement = await args.sessions.runExclusive(async () => {
     if (!args.sessions.isLatestLoginAttempt(args.loginAttempt)) return null
 
@@ -2540,32 +2552,41 @@ async function completeAdminLogin(args: {
     }
     return args.sessions.createSnapshot(nextTokens)
   })
-  // R38-1: this login's cleanup completed, so the prior boundary is valid
-  // again — settle the owned transition (commit). The owner CAS no-ops if a
-  // newer transition already superseded this one.
-  if (replacementTransitionEpoch !== null) {
-    settleAccountTransition(replacementTransitionEpoch, 'commit')
-  }
-
-  if (!replacement) return null
-
+  // R39-1: owner-matched settlement — commit only when the credential/
+  // session snapshot committed; abort on stale attempt or any thrown
+  // dependency. The outer catch guarantees the abort on every throw.
   try {
-    const synced = await syncAdminConnections({
-      adminUrl: args.adminUrl,
-      manager: args.manager,
-      sessions: args.sessions,
-      session: replacement,
-    })
-    return synced.session
+    if (replacement) replacementCommitted = true
+    if (replacementTransitionEpoch !== null) {
+      settleAccountTransition(replacementTransitionEpoch, replacementCommitted ? 'commit' : 'abort')
+    }
+    if (!replacement) return null
+
+    try {
+      const synced = await syncAdminConnections({
+        adminUrl: args.adminUrl,
+        manager: args.manager,
+        sessions: args.sessions,
+        session: replacement,
+      })
+      return synced.session
+    } catch (error) {
+      if (error instanceof AdminSessionChangedError) return null
+      // Authentication has already succeeded and the one-time code may already
+      // be consumed. Keep the persisted session, but fail closed for model
+      // authorization so a previous account's managed connections cannot be used.
+      args.onSyncFailure(error)
+      return await args.sessions.isCurrent(args.manager, replacement)
+        ? replacement
+        : null
+    }
   } catch (error) {
-    if (error instanceof AdminSessionChangedError) return null
-    // Authentication has already succeeded and the one-time code may already
-    // be consumed. Keep the persisted session, but fail closed for model
-    // authorization so a previous account's managed connections cannot be used.
-    args.onSyncFailure(error)
-    return await args.sessions.isCurrent(args.manager, replacement)
-      ? replacement
-      : null
+    // R39-1: a dependency thrown after begin must abort the owned
+    // transition (the settle CAS makes a repeated settlement a no-op).
+    if (replacementTransitionEpoch !== null && !replacementCommitted) {
+      settleAccountTransition(replacementTransitionEpoch, 'abort')
+    }
+    throw error
   }
 }
 

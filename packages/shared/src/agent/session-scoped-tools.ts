@@ -69,6 +69,7 @@ export {
   registerSessionScopedToolCallbacks,
   mergeSessionScopedToolCallbacks,
   unregisterSessionScopedToolCallbacks,
+  installSessionScopedToolCallbackGuard,
   getSessionScopedToolCallbacks,
 } from './session-scoped-tool-callback-registry.ts';
 

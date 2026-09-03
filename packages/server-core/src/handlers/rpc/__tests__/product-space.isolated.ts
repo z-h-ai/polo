@@ -19,6 +19,7 @@ import {
 } from '../../../runtime/product-space-executions'
 import {
   registerProductSpaceHandlers,
+  stopAllProductSpaceExecutions,
 } from '../product-space'
 import {
   getRuntimeActiveProductSpace as runtimeActiveSpace,
@@ -2017,11 +2018,9 @@ describe('STOP_ALL generation-stable final projection (R37-5)', () => {
 describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
   it('a replacement registered during the INITIAL selection scan is enumerated and stopped (R38-5 initial race)', async () => {
     const { invoke } = createHarness()
-    // R38-5 fake timing: shorten the bounded stop-drain window so the
-    // refusing-stop survivor scenario is deterministic and fast. Production
-    // semantics are unchanged; the injection is restored in `finally`.
-    const { setExecutionStopDrainTimeoutForTests } = await import('../../../runtime/product-space-executions')
-    setExecutionStopDrainTimeoutForTests(120)
+    // R39-6 fake timing: the bounded stop-drain window is injected PER CALL
+    // so the refusing-stop survivor scenario is deterministic and fast
+    // without touching any process-global state.
     let releaseInitial: () => void = () => {}
     const initialGate = new Promise<void>(resolve => {
       releaseInitial = resolve
@@ -2037,7 +2036,12 @@ describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
     }
     registerProductSpaceExecution(old)
 
-    const pending = invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
+    // R39-6: the drain deadline is injected per call — no global timing
+    // state that could leak into a concurrent unrelated stop.
+    const pending = stopAllProductSpaceExecutions(
+      { trustedAccountId, productSpaceId: spaceA },
+      { drainTimeoutMs: 120 },
+    )
     await new Promise(resolve => setTimeout(resolve, 30))
     const replacement = fakeExecution({ executionId: 'exec-initial-race' })
     // The replacement stays active after its own stop is dispatched.
@@ -2046,8 +2050,7 @@ describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
     releaseInitial()
 
     const result = await pending
-    expect(result.success).toBe(true)
-    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string }> } }).result
+    const aggregate = (result as { allStopped: boolean; executions: Array<{ executionId: string; status: string }> })
     // The re-bracketed selection enumerated the replacement; its stop
     // refused, so the aggregate stays NONTERMINAL with the live row.
     expect(aggregate.allStopped).toBe(false)
@@ -2056,16 +2059,12 @@ describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
     expect(summary?.status === 'running' || summary?.status === 'failed').toBe(true)
     expect(getRegisteredProductSpaceExecution('exec-initial-race')).toBe(ownedReplacement)
     expect(await ownedReplacement.isActive()).toBe(true)
-    setExecutionStopDrainTimeoutForTests(null)
   })
 
   it('five continuously unstable final passes end in a nonterminal survivor state (R38-5 exhaustion)', async () => {
     const { invoke } = createHarness()
-    // R38-5 fake timing: the stop-refusing survivor occupies the bounded
-    // drain window; the test-only injection keeps that window deterministic
-    // and fast (production bound unchanged, restored in `finally`).
-    const { setExecutionStopDrainTimeoutForTests } = await import('../../../runtime/product-space-executions')
-    setExecutionStopDrainTimeoutForTests(120)
+    // R39-6 fake timing: the bounded stop-drain window is injected PER CALL
+    // (no process-global state to restore).
     // A self-replacing execution: every liveness probe registers a NEW
     // generation of the same ID, so the registry revision never stabilizes.
     const producer = fakeExecution({ executionId: 'exec-churn' })
@@ -2079,9 +2078,11 @@ describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
     producer.getStatus = () => 'running'
     registerProductSpaceExecution(producer)
 
-    const result = await invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, trustedAccountId, spaceA)
-    expect(result.success).toBe(true)
-    const aggregate = (result as { result: { allStopped: boolean; executions: Array<{ executionId: string; status: string; errorCode?: string }> } }).result
+    const result = await stopAllProductSpaceExecutions(
+      { trustedAccountId, productSpaceId: spaceA },
+      { drainTimeoutMs: 120 },
+    )
+    const aggregate = (result as { allStopped: boolean; executions: Array<{ executionId: string; status: string; errorCode?: string }> })
     // Bounded retries exhausted: the survivor is projected NONTERMINAL —
     // never converted into terminal failed rows that aggregate to true.
     expect(aggregate.allStopped).toBe(false)
@@ -2090,6 +2091,5 @@ describe('STOP_ALL generation stability end-to-end (R38-5)', () => {
     expect(summary?.status === 'stopped' || summary?.status === 'failed').toBe(false)
     // The newest generation remains registered and active.
     expect(await getRegisteredProductSpaceExecution('exec-churn')!.isActive()).toBe(true)
-    setExecutionStopDrainTimeoutForTests(null)
   })
 })

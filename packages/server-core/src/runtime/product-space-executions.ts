@@ -91,13 +91,13 @@ export function listRegisteredProductSpaceExecutions(): RegisteredProductSpaceEx
  * any liveness projection must observe to be generation-stable.
  */
 export function registeredExecutionsScopeRevision(
-  accountId?: string,
-  productSpaceId?: string,
+  accountId?: string | null,
+  productSpaceId?: string | null,
 ): string {
   return listRegisteredProductSpaceExecutions()
     .filter(execution => (
-      (accountId === undefined || execution.scope.accountId === accountId)
-      && (productSpaceId === undefined || execution.scope.productSpaceId === productSpaceId)
+      ((accountId === undefined || accountId === null) || execution.scope.accountId === accountId)
+      && ((productSpaceId === undefined || productSpaceId === null) || execution.scope.productSpaceId === productSpaceId)
     ))
     .map(execution => `${execution.scope.executionId}:${execution.generation}`)
     .sort()
@@ -146,19 +146,14 @@ export const EXECUTION_STOP_DRAIN_TIMEOUT_MS = 10_000
 export const EXECUTION_STOP_POLL_INTERVAL_MS = 50
 
 /**
- * R38-5: test-only fake-timing injection for the shared stop-drain window.
- * Production always uses EXECUTION_STOP_DRAIN_TIMEOUT_MS; tests may shorten
- * the window to keep bounded-drain scenarios deterministic and fast, and
- * MUST restore `null` afterwards.
+ * R39-6: per-call stop-drain options. The deadline is injected BY THE CALLER
+ * for a specific operation only — there is no process-global mutable test
+ * hook, so a shortened test window can never leak into a concurrent
+ * unrelated stop or production call.
  */
-let executionStopDrainTimeoutOverride: number | null = null
-
-export function setExecutionStopDrainTimeoutForTests(ms: number | null): void {
-  executionStopDrainTimeoutOverride = ms
-}
-
-function effectiveStopDrainTimeout(): number {
-  return executionStopDrainTimeoutOverride ?? EXECUTION_STOP_DRAIN_TIMEOUT_MS
+export interface ExecutionStopOptions {
+  /** Test-owned override of the bounded drain window for THIS call. */
+  drainTimeoutMs?: number
 }
 
 /**
@@ -234,9 +229,10 @@ function withStopDeadline<T>(promise: Promise<T>, deadline: number): Promise<T |
  */
 export async function stopRegisteredExecutionsOnce(
   entries: RegisteredProductSpaceExecution[],
+  options?: ExecutionStopOptions,
 ): Promise<ExecutionStopResult[]> {
   if (entries.length === 0) return []
-  const deadline = Date.now() + effectiveStopDrainTimeout()
+  const deadline = Date.now() + (options?.drainTimeoutMs ?? EXECUTION_STOP_DRAIN_TIMEOUT_MS)
 
   // Resolve to the registry-owned entry (a fresh immutable object created at
   // registration) and capture entry + generation BEFORE any await: the drain

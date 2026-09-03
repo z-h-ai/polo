@@ -27,6 +27,7 @@ import type { HandlerDeps } from '../handler-deps'
 import {
   acquireSwitchActivityClaim,
   registeredExecutionsScopeRevision,
+  type ExecutionStopOptions,
   claimSwitchPrepareIntent,
   getLastCommittedSwitch,
   getLatestSwitchPrepareIntent,
@@ -245,7 +246,7 @@ export async function listProductSpaceActiveExecutions(input: {
 export async function stopAllProductSpaceExecutions(input: {
   trustedAccountId: string
   productSpaceId: string
-}): Promise<StopAllExecutionsResult> {
+}, stopOptions?: ExecutionStopOptions): Promise<StopAllExecutionsResult> {
   const accountId = AccountIdSchema.parse(input.trustedAccountId)
   const productSpaceId = ProductSpaceIdSchema.parse(input.productSpaceId)
 
@@ -307,6 +308,7 @@ export async function stopAllProductSpaceExecutions(input: {
     targets.map(target => target.registered).filter(
       (registered): registered is RegisteredProductSpaceExecution => Boolean(registered),
     ),
+    stopOptions,
   )
   const outcomeById = new Map(
     stopResults.map(result => [result.executionId, result]),
@@ -367,13 +369,16 @@ export async function stopAllProductSpaceExecutions(input: {
     // observed against a registry set that no longer exists.
   }
   if (!projectionStable) {
-    // R38-5: the scope kept changing through every pass — bounded retries
-    // are exhausted. Report a schema-compatible NONTERMINAL survivor state:
-    // every in-scope live generation is projected as `stopping` (with its
-    // real status when available), allStopped stays FALSE, and no row is
-    // converted into terminal success over unresolved active work.
-    summaries = baseSummaries.map(summary => ({ ...summary }))
+    // R39-5: bounded retries are exhausted. ONE final bracketed observation
+    // is permitted (revisionBefore/After around the awaited probes): if the
+    // registry revision moved during this scan, stability cannot be proven
+    // and the result is CONSERVATIVE — every currently-registered in-scope
+    // generation is projected NONTERMINAL (real status when known,
+    // `stopping` otherwise) and allStopped stays FALSE. Only a fully stable
+    // scan may keep real terminal statuses.
+    const revisionBefore = registeredExecutionsScopeRevision(accountId, productSpaceId)
     const liveRows: ExecutionSummary[] = []
+    let sawLive = false
     for (const execution of listRegisteredProductSpaceExecutions()) {
       if (execution.scope.accountId !== accountId) continue
       if (execution.scope.productSpaceId !== productSpaceId) continue
@@ -384,7 +389,11 @@ export async function stopAllProductSpaceExecutions(input: {
         activeNow = true
       }
       if (!activeNow) continue
-      const realStatus: ExecutionStatus = execution.getStatus?.() === 'stopping' || execution.getStatus?.() === 'waiting_for_network'
+      sawLive = true
+      const realStatus: ExecutionStatus = execution.getStatus?.() === 'stopping'
+        || execution.getStatus?.() === 'waiting_for_network'
+        || execution.getStatus?.() === 'preparing'
+        || execution.getStatus?.() === 'running'
         ? execution.getStatus!()
         : 'stopping'
       const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
@@ -401,7 +410,37 @@ export async function stopAllProductSpaceExecutions(input: {
         })
       }
     }
-    summaries = [...summaries, ...liveRows]
+    const revisionStable = registeredExecutionsScopeRevision(accountId, productSpaceId) === revisionBefore
+    if (!revisionStable || sawLive) {
+      if (!revisionStable) {
+        // Stability cannot be proven: conservatively project EVERY
+        // currently-registered in-scope generation as nonterminal.
+        summaries = baseSummaries.map(summary => ({ ...summary }))
+        for (const execution of listRegisteredProductSpaceExecutions()) {
+          if (execution.scope.accountId !== accountId) continue
+          if (execution.scope.productSpaceId !== productSpaceId) continue
+          const parsedId = EXECUTION_ID_SCHEMA.parse(execution.scope.executionId)
+          const existing = summaries.find(summary => summary.executionId === parsedId)
+          const realStatus: ExecutionStatus = execution.getStatus?.() === 'stopping'
+            || execution.getStatus?.() === 'waiting_for_network'
+            || execution.getStatus?.() === 'preparing'
+            || execution.getStatus?.() === 'running'
+            ? execution.getStatus!()
+            : 'stopping'
+          if (existing) {
+            existing.status = realStatus
+            delete existing.errorCode
+          } else {
+            summaries.push({
+              executionId: parsedId,
+              scope: execution.scope,
+              name: execution.name,
+              status: realStatus,
+            })
+          }
+        }
+      }
+    }
   }
 
   const result: StopAllExecutionsResult = {
@@ -967,6 +1006,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             clearOwnPending()
             return 'cancelled'
           }
+          // R39-5: the finalize re-enumeration is generation-stable — a
+          // replacement registered during any awaited probe invalidates the
+          // scan and yields 'busy' (nonterminal), never a false 'ready'.
+          const revisionBefore = registeredExecutionsScopeRevision(trustedAccountId, originProductSpaceId)
           for (const execution of listRegisteredProductSpaceExecutions()) {
             if (execution.scope.accountId !== trustedAccountId) continue
             if (execution.scope.productSpaceId !== originProductSpaceId) continue
@@ -977,6 +1020,9 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
               active = true
             }
             if (active) return 'busy'
+          }
+          if (registeredExecutionsScopeRevision(trustedAccountId, originProductSpaceId) !== revisionBefore) {
+            return 'busy'
           }
           current.status = 'ready'
           return 'ready'

@@ -85,35 +85,82 @@ export interface SessionScopedToolCallbacks {
 const sessionScopedToolCallbackRegistry = new Map<string, SessionScopedToolCallbacks>();
 
 /**
- * Register callbacks for a specific session
+ * R39-2: the authoritative per-session registration guard. SessionManager
+ * installs this BEFORE Agent construction; every callback registered or
+ * merged afterwards (backend core/plan/auth/query records, messaging,
+ * browser panes, self-management, and any future record) is wrapped so the
+ * guard runs at invocation, before the callback reads, mutates, dispatches
+ * or publishes. The guard resolves the caller's CURRENT stable
+ * transition/account/fence scope and throws on missing/stale scope —
+ * deny-by-default.
+ */
+export type SessionScopedToolCallbackGuard = (callbackName: string) => void;
+
+const sessionScopedToolCallbackGuards = new Map<string, SessionScopedToolCallbackGuard>();
+
+export function installSessionScopedToolCallbackGuard(
+  sessionId: string,
+  guard: SessionScopedToolCallbackGuard,
+): void {
+  sessionScopedToolCallbackGuards.set(sessionId, guard);
+  debug('session-scoped-tools', `Installed callback guard for session ${sessionId}`);
+}
+
+function applySessionScopedToolCallbackGuard(
+  sessionId: string,
+  callbacks: Partial<SessionScopedToolCallbacks>,
+): Partial<SessionScopedToolCallbacks> {
+  const guard = sessionScopedToolCallbackGuards.get(sessionId);
+  if (!guard) return callbacks;
+  const wrapped: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(callbacks)) {
+    wrapped[key] = typeof value === 'function'
+      ? (...args: unknown[]) => {
+          guard(`${sessionId}.${key}`);
+          return (value as (...invokeArgs: unknown[]) => unknown)(...args);
+        }
+      : value;
+  }
+  return wrapped as Partial<SessionScopedToolCallbacks>;
+}
+
+/**
+ * Register callbacks for a specific session. Every function-valued entry is
+ * atomically wrapped with the installed per-session guard (R39-2).
  */
 export function registerSessionScopedToolCallbacks(
   sessionId: string,
   callbacks: SessionScopedToolCallbacks
 ): void {
-  sessionScopedToolCallbackRegistry.set(sessionId, callbacks);
+  sessionScopedToolCallbackRegistry.set(sessionId, applySessionScopedToolCallbackGuard(sessionId, callbacks));
   debug('session-scoped-tools', `Registered callbacks for session ${sessionId}`);
 }
 
 /**
  * Merge additional callbacks into an existing session's callback set.
  * Used by the Electron session manager to add browser pane functions
- * after the agent has already registered its core callbacks.
+ * after the agent has already registered its core callbacks. Merged
+ * entries are guard-wrapped exactly like registered entries (R39-2).
  */
 export function mergeSessionScopedToolCallbacks(
   sessionId: string,
   callbacks: Partial<SessionScopedToolCallbacks>
 ): void {
   const existing = sessionScopedToolCallbackRegistry.get(sessionId) ?? {};
-  sessionScopedToolCallbackRegistry.set(sessionId, { ...existing, ...callbacks });
+  sessionScopedToolCallbackRegistry.set(sessionId, {
+    ...existing,
+    ...applySessionScopedToolCallbackGuard(sessionId, callbacks),
+  });
   debug('session-scoped-tools', `Merged callbacks for session ${sessionId}`);
 }
 
 /**
- * Unregister callbacks for a session
+ * Unregister callbacks for a session. Also clears the per-session
+ * registration guard (cleanup on destroy/construction failure, R39-2).
  */
 export function unregisterSessionScopedToolCallbacks(sessionId: string): void {
   sessionScopedToolCallbackRegistry.delete(sessionId);
+  sessionScopedToolCallbackGuards.delete(sessionId);
   debug('session-scoped-tools', `Unregistered callbacks for session ${sessionId}`);
 }
 

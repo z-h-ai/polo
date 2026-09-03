@@ -24,6 +24,10 @@ import {
 } from '../handlers/rpc/trusted-product-space-account'
 import { resetAssistantStartReservationsForTests } from '../runtime/assistant-executions'
 import { registerSessionsHandlers } from '../handlers/rpc/sessions'
+import {
+  getSessionScopedToolCallbacks,
+  installSessionScopedToolCallbackGuard,
+} from '@polo-ai/shared/agent/session-scoped-tool-callback-registry.ts'
 
 // R32-2: Assistant sessions persist and enforce the COMPLETE immutable
 // scope (accountId + productSpaceId + workspaceId). A space-bound session
@@ -1701,6 +1705,13 @@ describe('session RPC post-await scope CAS races (R38-3)', () => {
         assertLost: outcome => expect(outcome).toBeNull(),
         assertValid: outcome => expect(outcome).toBeNull(),
       },
+      {
+        name: 'WATCH_FILES',
+        parkOn: 'waitForInit',
+        act: async () => invokeWith({ workspaceId: 'ws_test' }, RPC_CHANNELS.sessions.WATCH_FILES, 's-table'),
+        assertLost: () => undefined,
+        assertValid: () => undefined,
+      },
     ]
 
     for (const race of races) {
@@ -1957,5 +1968,157 @@ describe('authoritative callback guard inventory (R38-2)', () => {
       setRuntimeActiveProductSpaceAccount(accountA)
       setRuntimeActiveProductSpace(personalId)
     }
+  })
+})
+
+describe('backend-registered callback guard boundary (R39-2)', () => {
+  let tmpRoot: string
+  let storage: import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  let RootedSessionStorageCtor: typeof import('@polo-ai/shared/sessions/session-storage.ts').RootedSessionStorage
+
+  const wsRoot = (): string => join(tmpRoot, 'ws-root')
+  const sessionsRoot = (): string => join(tmpRoot, 'sessions')
+
+  const buildManager = () => {
+    const workspace = { id: 'ws_test', name: 'T', rootPath: wsRoot(), createdAt: Date.now() }
+    mkdirSync(workspace.rootPath, { recursive: true })
+    const sm = new SessionManager({
+      workspace: workspace as never,
+      sessionStorage: storage,
+    })
+    ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
+    return sm
+  }
+
+  beforeEach(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-bnd39-'))
+    mkdirSync(wsRoot(), { recursive: true })
+    mkdirSync(sessionsRoot(), { recursive: true })
+    if (!RootedSessionStorageCtor) {
+      ;({ RootedSessionStorage: RootedSessionStorageCtor } = await import('@polo-ai/shared/sessions/session-storage.ts'))
+    }
+    storage = new RootedSessionStorageCtor(sessionsRoot())
+    resetProductSpaceExecutionRegistryForTests()
+    resetAssistantStartReservationsForTests()
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    setTrustedProductSpaceAccountProvider(async () => accountA)
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(personalId)
+  })
+
+  afterEach(() => {
+    const outstanding = getActiveAccountTransitionEpoch()
+    if (outstanding !== null) settleAccountTransition(outstanding, 'abort')
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('the createSession-installed registry guard protects backend-registered queryFn across all caller states (R39-2)', async () => {
+    const sm = buildManager()
+    // The authoritative boundary: createSession installs the per-session
+    // registration guard BEFORE any backend can register callbacks.
+    const created = await sm.createSession('ws_test', {})
+    const sessionId = created.id
+
+    // Construct the backend against that session id — its constructor
+    // registers queryFn/onPlanSubmitted/onAuthRequest/spawnSessionFn through
+    // the guarded boundary, so every entry is atomically wrapped.
+    const { ClaudeAgent } = await import('@polo-ai/shared/agent')
+    const agent = new ClaudeAgent({
+      workspace: { id: 'ws_test', name: 'T', rootPath: wsRoot() } as never,
+      session: {
+        id: sessionId,
+        workspaceRootPath: wsRoot(),
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        model: 'claude-test',
+      } as never,
+      model: 'claude-test',
+      isHeadless: true,
+      skipConfigWatcher: true,
+    })
+    // Stub the underlying query — the guard is what is under test.
+    ;(agent as unknown as { queryLlm: unknown }).queryLlm = async () => ({ text: 'wired-secret', model: 'stub' })
+
+    const { getSessionScopedToolCallbacks } = await import('@polo-ai/shared/agent/session-scoped-tool-callback-registry.ts')
+    const callbacks = getSessionScopedToolCallbacks(sessionId)
+    expect(callbacks?.queryFn).toBeDefined()
+
+    // Valid current scope: the registered queryFn resolves.
+    const valid = await callbacks!.queryFn!({ prompt: 'read current context' } as never)
+    expect(JSON.stringify(valid)).toContain('wired-secret')
+
+    // In-flight account transition: the registered queryFn rejects.
+    beginAccountTransition()
+    await expect(Promise.resolve().then(() => callbacks!.queryFn!({ prompt: 'read stale context' } as never)))
+      .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+    settleAccountTransition(getActiveAccountTransitionEpoch()!, 'abort')
+
+    // Replaced account: the registered queryFn rejects.
+    setSyncTrustedProductSpaceAccountId(accountB)
+    setRuntimeActiveProductSpaceAccount(accountB)
+    await expect(Promise.resolve().then(() => callbacks!.queryFn!({ prompt: 'read x' } as never)))
+      .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+
+    // Missing fence: rejects.
+    setSyncTrustedProductSpaceAccountId(accountA)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setRuntimeActiveProductSpace(null)
+    await expect(Promise.resolve().then(() => callbacks!.queryFn!({ prompt: 'read x' } as never)))
+      .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+
+    // Split fence/mirror: rejects.
+    setRuntimeActiveProductSpace(personalId)
+    setRuntimeActiveProductSpaceAccount(accountA)
+    setSyncTrustedProductSpaceAccountId(accountB)
+    await expect(Promise.resolve().then(() => callbacks!.queryFn!({ prompt: 'read x' } as never)))
+      .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+
+    // In-transition again: rejects.
+    setSyncTrustedProductSpaceAccountId(accountA)
+    beginAccountTransition()
+    await expect(Promise.resolve().then(() => callbacks!.queryFn!({ prompt: 'read x' } as never)))
+      .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+    settleAccountTransition(getActiveAccountTransitionEpoch()!, 'abort')
+
+    // Settled valid scope works again.
+    const validAgain = await callbacks!.queryFn!({ prompt: 'read again' } as never)
+    expect(JSON.stringify(validAgain)).toContain('wired-secret')
+
+    agent.destroy()
+  })
+
+  it('a legacy (unbound) session registration is denied even in a settled valid scope (R39-2)', async () => {
+    const sm = buildManager()
+    // A legacy session: bound to the space but carrying NO account binding.
+    // SessionManager installs a deny-unless-valid guard for it.
+    const legacySessionId = 'legacy-cb-39'
+    installSessionScopedToolCallbackGuard(legacySessionId, () => {
+      throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+    })
+
+    const { ClaudeAgent } = await import('@polo-ai/shared/agent')
+    const agent = new ClaudeAgent({
+      workspace: { id: 'ws_test', name: 'T', rootPath: wsRoot() } as never,
+      session: {
+        id: legacySessionId,
+        workspaceRootPath: wsRoot(),
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        model: 'claude-test',
+      } as never,
+      model: 'claude-test',
+      isHeadless: true,
+      skipConfigWatcher: true,
+    })
+
+    const callbacks = getSessionScopedToolCallbacks(legacySessionId)
+    expect(callbacks?.queryFn).toBeDefined()
+    // Deny-by-default: the legacy registration can never invoke.
+    await expect(Promise.resolve().then(() => callbacks!.queryFn!({ prompt: 'x' } as never)))
+      .rejects.toThrow('SESSION_OUT_OF_TRUSTED_SCOPE')
+    agent.destroy()
   })
 })

@@ -330,3 +330,85 @@ describe('aggregate stop supersession (R35-3)', () => {
     expect(getRegisteredProductSpaceExecution('exec-agg-all')).toBe(replacement)
   })
 })
+
+describe('per-call stop-drain deadline isolation (R39-6)', () => {
+  function gatedExecution(id: string): { execution: RegisteredProductSpaceExecution; deactivate: () => void } {
+    let active = true
+    return {
+      execution: {
+        scope: {
+          contractVersion: 1,
+          executionId: id,
+          accountId: 'account-a',
+          productSpaceId: 'space-a',
+          workspaceId: 'ws-a',
+          subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+        } as never,
+        kind: 'assistant_session',
+        name: id,
+        ref: id,
+        generation: 0,
+        isActive: async () => active,
+        getStatus: () => (active ? 'running' : 'stopping'),
+        stop: async () => 'failed',
+      },
+      deactivate: () => {
+        active = false
+      },
+    }
+  }
+
+  it('a per-call short deadline never leaks into a concurrent unrelated stop (R39-6)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    const unrelated = gatedExecution('unrelated-production-stop')
+    const intended = gatedExecution('intended-short-stop')
+
+    // The unrelated stop uses the PRODUCTION deadline (no options).
+    const unrelatedRun = stopRegisteredExecutionsOnce([unrelated.execution])
+    // The intended test-owned stop injects a short per-call deadline.
+    const intendedRun = stopRegisteredExecutionsOnce([intended.execution], { drainTimeoutMs: 30 })
+
+    // The intended stop completes under its short window (~30ms)…
+    expect((await intendedRun)[0]?.status).toBe('failed')
+
+    // …while the unrelated concurrent stop is STILL running — the short
+    // per-call deadline did not leak into it (production 10s window intact).
+    const unrelatedStillRunning = await Promise.race([
+      unrelatedRun.then(() => false),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(true), 150)),
+    ])
+    expect(unrelatedStillRunning).toBe(true)
+
+    // Release the unrelated execution's controllable isActive flag and
+    // await its cleanup — no floating promises or timers remain. The drain
+    // observes the terminal flip and finishes promptly.
+    unrelated.deactivate()
+    const unrelatedResults = await unrelatedRun
+    expect(unrelatedResults[0]?.executionId).toBe('unrelated-production-stop')
+    expect(getRegisteredProductSpaceExecution('unrelated-production-stop')).toBeUndefined()
+    resetProductSpaceExecutionRegistryForTests()
+  })
+
+  it('a failing short-deadline stop leaves no residual deadline state (R39-6)', async () => {
+    resetProductSpaceExecutionRegistryForTests()
+    const first = gatedExecution('first-short-failed')
+    const firstRun = stopRegisteredExecutionsOnce([first.execution], { drainTimeoutMs: 30 })
+    // The short-deadline stop fails; per-call options carry no state, so
+    // nothing needs restoring — proven by the immediately following
+    // default-deadline stop still occupying its full production window.
+    expect((await firstRun)[0]?.status).toBe('failed')
+
+    const second = gatedExecution('second-default-stop')
+    const secondRun = stopRegisteredExecutionsOnce([second.execution])
+    const secondStillRunning = await Promise.race([
+      secondRun.then(() => false),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(true), 150)),
+    ])
+    expect(secondStillRunning).toBe(true)
+
+    second.deactivate()
+    expect((await secondRun)[0]?.executionId).toBe('second-default-stop')
+    expect(getRegisteredProductSpaceExecution('second-default-stop')).toBeUndefined()
+    resetProductSpaceExecutionRegistryForTests()
+  })
+})

@@ -394,3 +394,27 @@ export function isTrustedSessionScopeTokenCurrent(token: TrustedSessionScopeToke
     && runtimeScope.productSpaceId === token.productSpaceId,
   )
 }
+
+/**
+ * R39-3: workspace-less variant of the await-spanning token for aggregate
+ * handlers (e.g. the unread summary) that are account/space-scoped but
+ * deliberately span all Workspaces of the trusted scope.
+ */
+export interface TrustedAggregateScopeToken {
+  accountId: string
+  productSpaceId: string
+  transitionEpoch: number
+  accountGeneration: number
+  fenceGeneration: number
+}
+
+export function captureTrustedScopeToken(): TrustedAggregateScopeToken | null {
+  const scope = captureTrustedSessionScope()
+  if (!scope) return null
+  return {
+    ...scope,
+    transitionEpoch: getAccountTransitionEpoch(),
+    accountGeneration: getTrustedAccountGeneration(),
+    fenceGeneration: getRuntimeFenceGeneration(),
+  }
+}

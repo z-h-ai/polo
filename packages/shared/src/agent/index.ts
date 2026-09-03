@@ -21,6 +21,7 @@ export {
   registerSessionScopedToolCallbacks,
   unregisterSessionScopedToolCallbacks,
   mergeSessionScopedToolCallbacks,
+  installSessionScopedToolCallbackGuard,
   // Types
   type SessionScopedToolCallbacks,
   type BrowserPaneFns,
