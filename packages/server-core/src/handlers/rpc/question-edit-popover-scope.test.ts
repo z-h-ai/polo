@@ -1,7 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, existsSync } from 'fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'os'
-import { dirname, join } from 'path'
+import { dirname, join, resolve as resolvePath } from 'path'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
@@ -597,8 +598,13 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       await expect(pending).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED (pre-resolution restore incomplete')
       expect(events).toEqual([])
       // The BARRIER exists on disk although every session-JSONL write after
-      // the first failed — it is the fail-closed guarantee.
-      const barrierPath = join(tmpRoot, '.polo-resume-quarantine', 'q-barrier-answer.json')
+      // the first failed — it is the fail-closed guarantee. (R45: the file
+      // name is the sha256 digest of the session id.)
+      const barrierPath = join(
+        tmpRoot,
+        '.polo-resume-quarantine',
+        `${createHash('sha256').update('q-barrier-answer').digest('hex')}.json`,
+      )
       expect(existsSync(barrierPath)).toBe(true)
       // The durable header STILL carries the armed resume — the barrier, not
       // the header marker, is what makes it non-executable.
@@ -794,13 +800,259 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         dispose: () => { throw new Error('dispose boom') },
       } as never
       const result = await (sm as unknown as {
-        disposeManagedAgentRuntime: (m: unknown, reason: string) => Promise<{ failures: string[]; callbacksUnregistered: boolean }>
-      }).disposeManagedAgentRuntime(managed, 'test')
+        disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: { bestEffort?: boolean }) => Promise<{ failures: string[]; callbacksUnregistered: boolean }>
+      }).disposeManagedAgentRuntime(managed, 'test', { bestEffort: true })
       expect(result.failures.length).toBeGreaterThan(0)
       expect(result.failures.some(f => f.includes('dispose boom'))).toBe(true)
       // The failed reference is deliberately KEPT (never a fake cleanup).
       expect(managed.agent).toBeTruthy()
       expect(result.callbacksUnregistered).toBe(true)
+    })
+  })
+
+  // ==========================================================================
+  // R45-A: the resume-quarantine barrier must be fail-closed on I/O and
+  // schema errors, contain path traversal, and be atomic under concurrency.
+  // ==========================================================================
+
+  describe('resume-quarantine barrier hardening (R45-A)', () => {
+    const barrierFileFor = (sessionId: string): string => join(
+      tmpRoot,
+      '.polo-resume-quarantine',
+      `${createHash('sha256').update(sessionId).digest('hex')}.json`,
+    )
+
+    const coldHydrateWithBarrier = async (sessionId: string): Promise<{
+      sm2: InstanceType<typeof SessionManager>
+      cold: { pendingAgentResume?: unknown; isProcessing: boolean; resumeRetryTimer?: unknown }
+      sm2Events: Array<Record<string, unknown>>
+    }> => {
+      const sm2 = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
+      })
+      const sm2Events: Array<Record<string, unknown>> = []
+      sm2.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
+        sm2Events.push(event)
+      }) as never)
+      const cold = createManagedSession(
+        { id: sessionId, name: 'cold rebuild', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        {},
+      )
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, cold)
+      await sm2.getSession(sessionId)
+      await new Promise(r => setTimeout(r, 80))
+      return { sm2, cold: cold as never, sm2Events }
+    }
+
+    const seedBarrierScenario = (sessionId: string): void => {
+      seedColdEditPopoverHeader(sessionId, { withPendingAgentResume: true })
+      mkdirSync(dirname(barrierFileFor(sessionId)), { recursive: true })
+    }
+
+    it('a malformed (truncated) barrier fail-closes hydration', async () => {
+      seedBarrierScenario('q-barr-malformed')
+      writeFileSync(barrierFileFor('q-barr-malformed'), '{"version":1,"sessionId":"q-barr', 'utf-8')
+      const { sm2, cold, sm2Events } = await coldHydrateWithBarrier('q-barr-malformed')
+      expect(cold.pendingAgentResume).toBeUndefined()
+      expect(sm2Events).toEqual([])
+      expect(cold.isProcessing).toBe(false)
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    })
+
+    it('a barrier that is a DIRECTORY (EISDIR) fail-closes hydration', async () => {
+      seedBarrierScenario('q-barr-eisdir')
+      mkdirSync(barrierFileFor('q-barr-eisdir'), { recursive: true })
+      const { sm2, cold, sm2Events } = await coldHydrateWithBarrier('q-barr-eisdir')
+      expect(cold.pendingAgentResume).toBeUndefined()
+      expect(sm2Events).toEqual([])
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    })
+
+    it('an unreadable barrier (EACCES) fail-closes hydration', async () => {
+      seedBarrierScenario('q-barr-eacces')
+      writeFileSync(barrierFileFor('q-barr-eacces'), 'x', 'utf-8')
+      chmodSync(barrierFileFor('q-barr-eacces'), 0o000)
+      try {
+        const { sm2, cold, sm2Events } = await coldHydrateWithBarrier('q-barr-eacces')
+        expect(cold.pendingAgentResume).toBeUndefined()
+        expect(sm2Events).toEqual([])
+      } finally {
+        chmodSync(barrierFileFor('q-barr-eacces'), 0o644)
+      }
+    })
+
+    it('a barrier carrying a DIFFERENT session id fails schema validation and fail-closes', async () => {
+      seedBarrierScenario('q-barr-foreign')
+      writeFileSync(
+        barrierFileFor('q-barr-foreign'),
+        JSON.stringify({ version: 1, sessionId: 'someone-else', messageId: 'm1', quarantinedAt: Date.now(), reason: 'x' }),
+        'utf-8',
+      )
+      const { sm2, cold, sm2Events } = await coldHydrateWithBarrier('q-barr-foreign')
+      expect(cold.pendingAgentResume).toBeUndefined()
+      expect(sm2Events).toEqual([])
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    })
+
+    it('a proven-absent barrier (ENOENT) still allows the arm', async () => {
+      // Header with an armed resume AND its answer message present, so the
+      // armed state survives the drain (the retry needs its message).
+      const sessionId = 'q-barr-absent'
+      const filePath = getSessionFilePath(tmpRoot, sessionId)
+      mkdirSync(dirname(filePath), { recursive: true })
+      const stored = {
+        id: sessionId,
+        workspaceRootPath: tmpRoot,
+        name: 'cold popover session',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        hidden: true,
+        origin: 'edit-popover',
+        popoverOwner: OWNER_ID,
+        systemPromptPreset: 'mini',
+        productSpaceId: TEST_SPACE_ID,
+        accountId: TEST_ACCOUNT_ID,
+        pendingQuestion: makeQuestionRequest(sessionId),
+        pendingAgentResume: { messageId: `msg-${sessionId}`, attempts: 1, invocationSource: 'desktop' },
+        messages: [{ id: `msg-${sessionId}`, role: 'user', content: 'the committed answer', timestamp: Date.now() }],
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+      } as unknown as StoredSession
+      writeSessionJsonl(filePath, stored)
+      expect(existsSync(barrierFileFor(sessionId))).toBe(false)
+      const { sm2, cold } = await coldHydrateWithBarrier(sessionId)
+      // Pre-existing semantics: without a barrier the persisted recovery arms.
+      expect((cold.pendingAgentResume as { messageId?: string } | undefined)?.messageId).toBe(`msg-${sessionId}`)
+      ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    })
+
+    it('a bundle-v1 traversal session id cannot escape the quarantine directory', async () => {
+      const smX = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
+      })
+      const malicious = '../../outside-quarantine'
+      const mX = createManagedSession(
+        { id: malicious, name: 'malicious', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        {},
+      )
+      const barrierPath = (smX as unknown as {
+        resumeQuarantineBarrierPath: (root: string, id: string) => string
+      }).resumeQuarantineBarrierPath(tmpRoot, malicious)
+      const quarantineDir = join(tmpRoot, '.polo-resume-quarantine')
+      expect(barrierPath.startsWith(quarantineDir + '/')).toBe(true)
+      expect(resolvePath(barrierPath).startsWith(resolvePath(quarantineDir) + '/')).toBe(true)
+      expect(barrierPath.includes('..')).toBe(false)
+      // Writing a barrier for the malicious id lands INSIDE the directory,
+      // keyed by the sha256 digest — nothing escapes the workspace.
+      await (smX as unknown as {
+        writeResumeQuarantineBarrier: (m: unknown, r: unknown, reason: string) => Promise<void>
+      }).writeResumeQuarantineBarrier(mX, { messageId: 'm1', invocationSource: 'desktop' }, 'probe')
+      expect(existsSync(barrierPath)).toBe(true)
+      expect(existsSync(join(tmpRoot, 'outside-quarantine.json'))).toBe(false)
+      expect(await (smX as unknown as {
+        isResumeQuarantinedByBarrier: (root: string, id: string, messageId?: string) => Promise<boolean>
+      }).isResumeQuarantinedByBarrier(tmpRoot, malicious, 'm1')).toBe(true)
+    })
+
+    it('concurrent barrier writers cannot expose partial JSON (atomic private rename)', async () => {
+      seedBarrierScenario('q-barr-concurrent')
+      const smX = new (SessionManager as unknown as { new(options: unknown): InstanceType<typeof SessionManager> })({
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() },
+      })
+      const mX = createManagedSession(
+        { id: 'q-barr-concurrent', name: 'x', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        {},
+      )
+      const writeBarrier = (smX as unknown as {
+        writeResumeQuarantineBarrier: (m: unknown, r: unknown, reason: string) => Promise<void>
+      }).writeResumeQuarantineBarrier.bind(smX)
+      await Promise.all([
+        writeBarrier(mX, { messageId: 'm1', invocationSource: 'desktop' }, 'w1'),
+        writeBarrier(mX, { messageId: 'm2', invocationSource: 'desktop' }, 'w2'),
+      ])
+      // The file at the barrier path is ALWAYS a complete document.
+      const parsed = JSON.parse(readFileSync(barrierFileFor('q-barr-concurrent'), 'utf-8')) as { version?: number }
+      expect(parsed.version).toBe(1)
+      expect(await (smX as unknown as {
+        isResumeQuarantinedByBarrier: (root: string, id: string, messageId?: string) => Promise<boolean>
+      }).isResumeQuarantinedByBarrier(tmpRoot, 'q-barr-concurrent', 'm1')).toBe(true)
+    })
+  })
+
+  // ==========================================================================
+  // R45-B: runtime disposal failures must be impossible to ignore at every
+  // production call site.
+  // ==========================================================================
+
+  describe('runtime disposal failure consumers (R45-B)', () => {
+    const failingAgent = (): { dispose: () => never } => ({
+      dispose: () => { throw new Error('dispose boom') },
+    })
+
+    it('restart-required refresh fails closed when disposal fails (ref kept, callbacks kept, bookkeeping intact)', async () => {
+      const managed = seedSession('q-refresh-restart')
+      managed.agent = failingAgent() as never
+      registerSessionScopedToolCallbacks(managed.id, { list_sessions: async () => [] } as never)
+      try {
+        await expect((sm as unknown as {
+          runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+        }).runAgentRuntimeRefresh(managed, {} as never, 'rt-signature', 'rst-signature', true, 'test restart'))
+          .rejects.toThrow('agent runtime disposal failed during restart-required runtime change')
+        // The stale agent reference is retained and its bookkeeping is NOT
+        // cleared; the registered callbacks were never unregistered.
+        expect(managed.agent).toBeTruthy()
+        expect(managed.backendRuntimeSignature).toBeUndefined()
+        expect(getSessionScopedToolCallbacks(managed.id)).toBeDefined()
+      } finally {
+        unregisterSessionScopedToolCallbacks(managed.id)
+      }
+    })
+
+    it('in-place refresh fallback fails closed when disposal fails', async () => {
+      const managed = seedSession('q-refresh-inplace')
+      // No updateRuntimeConfig on the stub → in-place refresh reports
+      // not-refreshed → falls back to disposal, which fails.
+      managed.agent = failingAgent() as never
+      registerSessionScopedToolCallbacks(managed.id, { list_sessions: async () => [] } as never)
+      try {
+        await expect((sm as unknown as {
+          runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
+        }).runAgentRuntimeRefresh(managed, {} as never, 'rt-signature', 'rst-signature', false, 'test in-place'))
+          .rejects.toThrow('agent runtime disposal failed during runtime config refresh')
+        expect(managed.agent).toBeTruthy()
+        expect(getSessionScopedToolCallbacks(managed.id)).toBeDefined()
+      } finally {
+        unregisterSessionScopedToolCallbacks(managed.id)
+      }
+    })
+
+    it('deleted/stopped-before-chat convergence refuses to silently return when the runtime survives', async () => {
+      const managed = seedSession('q-converge-dispose')
+      managed.agent = failingAgent() as never
+      await expect((sm as unknown as {
+        disposeManagedAgentRuntime: (m: unknown, reason: string) => Promise<unknown>
+      }).disposeManagedAgentRuntime(managed, 'session deleted or stopped before chat start'))
+        .rejects.toThrow('agent runtime disposal failed during session deleted or stopped before chat start')
+      expect(managed.agent).toBeTruthy()
+    })
+
+    it('stale-publication rollback folds the disposal failure into an honest rollback-incomplete', async () => {
+      const managed = seedSession('q-pub-rollback')
+      managed.agent = failingAgent() as never
+      let rollbackFailure: string | null = null
+      try {
+        await (sm as unknown as {
+          disposeManagedAgentRuntime: (m: unknown, reason: string) => Promise<unknown>
+        }).disposeManagedAgentRuntime(managed, 'stale_publication_scope')
+      } catch (rollbackError) {
+        rollbackFailure = `agent rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+      }
+      expect(rollbackFailure).not.toBeNull()
+      expect(rollbackFailure).toContain('stale_publication_scope')
+      expect(rollbackFailure).toContain('dispose boom')
+      expect(managed.agent).toBeTruthy()
     })
   })
 })

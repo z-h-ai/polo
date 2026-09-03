@@ -7,7 +7,7 @@ import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger 
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
@@ -58,6 +58,28 @@ import {
   type AssistantStartReservation,
 } from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
+
+/**
+ * R45: typed aggregate for agent runtime disposal failures. Strict-mode
+ * `disposeManagedAgentRuntime` calls throw this instead of returning a
+ * swallowed result, so a half-disposed runtime (stale agent process still
+ * alive) can never be reported as a successful refresh/rollback/convergence.
+ * The failed references are deliberately KEPT on the ManagedSession and the
+ * bookkeeping/callback state is left untouched for a retry.
+ */
+class AgentRuntimeDisposalError extends Error {
+  readonly reason: string
+  readonly failures: string[]
+  readonly callbacksUnregistered: boolean
+
+  constructor(reason: string, failures: string[], callbacksUnregistered: boolean) {
+    super(`agent runtime disposal failed during ${reason}: ${failures.join('; ')}`)
+    this.name = 'AgentRuntimeDisposalError'
+    this.reason = reason
+    this.failures = failures
+    this.callbacksUnregistered = callbacksUnregistered
+  }
+}
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
   getWorkspaces,
@@ -3836,7 +3858,12 @@ export class SessionManager implements ISessionManager {
         // id-wide callback/guard unregistration gated live on ownership.
         // Disposal failures are STRUCTURED: they reach this enumeration as
         // `failed` (never a fake success while the old process may live).
-        const runtime = await this.disposeManagedAgentRuntime(managed, reason, { shouldUnregisterCallbacks: ownsNow })
+        // R45: best-effort is explicit here — the whole session is being
+        // discarded and every other surface is enumerated below.
+        const runtime = await this.disposeManagedAgentRuntime(managed, reason, {
+          shouldUnregisterCallbacks: ownsNow,
+          bestEffort: true,
+        })
         if (runtime.failures.length > 0) {
           push('agent-runtime', 'failed', runtime.failures.join('; '))
         } else {
@@ -3976,18 +4003,26 @@ export class SessionManager implements ISessionManager {
    * R43: dispose the session's live runtime surfaces with a STRUCTURED
    * result instead of swallowing failures. Every disposal failure is
    * reported (the failed reference is deliberately KEPT so a retry can
-   * target the still-live resource) — a caller that needs a guaranteed
-   * teardown must surface `failures` as `rollback incomplete: runtime`
-   * rather than recording a fake success. The id-wide session-scoped tool
-   * callback/guard unregistration is gated by `shouldUnregisterCallbacks`
-   * (re-evaluated AFTER the awaited disposals, R43): a teardown whose owner
-   * was replaced while it was parked must not unregister the replacement
-   * owner's registrations.
+   * target the still-live resource).
+   *
+   * R45: disposal failures can no longer be IGNORED by production callers —
+   * with `bestEffort` unset (the default, strict mode) any failure THROWS a
+   * typed {@link AgentRuntimeDisposalError}, and the session's runtime
+   * bookkeeping AND session-scoped callback/guard registrations are left
+   * untouched so the stale runtime stays consistent for a retry (never
+   * unregistered while it still lives). Only an explicit
+   * `bestEffort: true` — the edit-popover creation teardown, where the whole
+   * session is being discarded and every other surface is enumerated anyway
+   * — keeps the R43 behaviour: failures returned, cleanup continued.
+   * The id-wide session-scoped tool callback/guard unregistration remains
+   * gated by `shouldUnregisterCallbacks` (re-evaluated AFTER the awaited
+   * disposals): a teardown whose owner was replaced while it was parked must
+   * not unregister the replacement owner's registrations.
    */
   private async disposeManagedAgentRuntime(
     managed: ManagedSession,
     reason: string,
-    opts?: { shouldUnregisterCallbacks?: () => boolean },
+    opts?: { shouldUnregisterCallbacks?: () => boolean; bestEffort?: boolean },
   ): Promise<{ failures: string[]; callbacksUnregistered: boolean }> {
     const sessionId = managed.id
     const failures: string[] = []
@@ -4028,16 +4063,22 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    managed.envOverrides = undefined
-    managed.agentReady = undefined
-    managed.agentReadyResolve = undefined
-    managed.backendRuntimeSignature = undefined
-    managed.backendRestartSignature = undefined
+    const strictFailure = failures.length > 0 && opts?.bestEffort !== true
+    if (!strictFailure) {
+      managed.envOverrides = undefined
+      managed.agentReady = undefined
+      managed.agentReadyResolve = undefined
+      managed.backendRuntimeSignature = undefined
+      managed.backendRestartSignature = undefined
+    }
 
     let callbacksUnregistered = false
-    if (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks()) {
+    if (!strictFailure && (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks())) {
       unregisterSessionScopedToolCallbacks(sessionId)
       callbacksUnregistered = true
+    }
+    if (strictFailure) {
+      throw new AgentRuntimeDisposalError(reason, failures, callbacksUnregistered)
     }
     return { failures, callbacksUnregistered }
   }
@@ -9280,9 +9321,32 @@ export class SessionManager implements ISessionManager {
    * must consult this barrier BEFORE arming any pendingAgentResume — so even
    * when the restore AND the TERMINAL header writes all fail, the old
    * space's answer turn can never be scheduled or executed after a restart.
+   *
+   * R45: the barrier file name is a sha256 digest of the session id — a
+   * bundle-v1 header id carrying traversal/separator characters can never
+   * resolve the barrier outside the quarantine directory.
    */
   private resumeQuarantineBarrierPath(workspaceRootPath: string, sessionId: string): string {
-    return join(workspaceRootPath, '.polo-resume-quarantine', `${sessionId}.json`)
+    const digest = createHash('sha256').update(sessionId).digest('hex')
+    return join(workspaceRootPath, '.polo-resume-quarantine', `${digest}.json`)
+  }
+
+  /**
+   * R45: strict, versioned schema validation for a barrier record. Anything
+   * malformed, foreign (sessionId mismatch) or truncated is quarantined
+   * (fail-closed) by the caller.
+   */
+  private isValidResumeQuarantineBarrier(
+    parsed: unknown,
+    expectedSessionId: string,
+  ): boolean {
+    if (typeof parsed !== 'object' || parsed === null) return false
+    const candidate = parsed as Record<string, unknown>
+    if (candidate.version !== 1) return false
+    if (candidate.sessionId !== expectedSessionId) return false
+    if (typeof candidate.messageId !== 'string' || candidate.messageId.length === 0) return false
+    if (typeof candidate.quarantinedAt !== 'number' || !Number.isFinite(candidate.quarantinedAt)) return false
+    return true
   }
 
   private async writeResumeQuarantineBarrier(
@@ -9293,30 +9357,76 @@ export class SessionManager implements ISessionManager {
     const barrierPath = this.resumeQuarantineBarrierPath(managed.workspace.rootPath, managed.id)
     await mkdir(dirname(barrierPath), { recursive: true })
     const payload = {
+      version: 1 as const,
       sessionId: managed.id,
       messageId: resume.messageId,
       invocationSource: resume.invocationSource ?? 'internal',
       quarantinedAt: Date.now(),
       reason,
     }
-    await writeFile(barrierPath, JSON.stringify(payload), 'utf-8')
+    // R45: atomic private-mode write — private temp file + fsync + rename,
+    // so a crash or a concurrent writer can never expose a truncated JSON
+    // document at the barrier path.
+    const tempPath = join(
+      dirname(barrierPath),
+      `.${basename(barrierPath)}.${randomUUID()}.tmp`,
+    )
+    const handle = await open(tempPath, 'w', 0o600)
+    try {
+      await handle.writeFile(JSON.stringify(payload), 'utf-8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    try {
+      await rename(tempPath, barrierPath)
+    } catch (renameError) {
+      try { await unlink(tempPath) } catch { /* temp already gone */ }
+      throw renameError
+    }
     sessionLog.warn(`Durable resume-quarantine barrier written for session ${managed.id} (message ${resume.messageId}): ${reason}`)
   }
 
+  /**
+   * R45: FAIL-CLOSED barrier consultation. Only a PROVEN absence (ENOENT)
+   * allows the resume to arm — a barrier that exists but cannot be read
+   * (EACCES/EISDIR/…), parses as malformed/truncated JSON, or fails its
+   * strict version/schema validation quarantines the session. The barrier
+   * is session-wide once valid: any armed resume for a quarantined session
+   * is non-executable.
+   */
   private async isResumeQuarantinedByBarrier(
     workspaceRootPath: string,
     sessionId: string,
     messageId: string | undefined,
   ): Promise<boolean> {
+    const barrierPath = this.resumeQuarantineBarrierPath(workspaceRootPath, sessionId)
+    let raw: string
     try {
-      const raw = await readFile(this.resumeQuarantineBarrierPath(workspaceRootPath, sessionId), 'utf-8')
-      const parsed = JSON.parse(raw) as { messageId?: string }
-      // A barrier without a messageId quarantines the whole session's
-      // resumes; with one, it quarantines that exact answer turn.
-      return !parsed.messageId || !messageId || parsed.messageId === messageId
-    } catch {
-      return false
+      raw = await readFile(barrierPath, 'utf-8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return false
+      }
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} is unreadable (${error instanceof Error ? error.message : String(error)}) — failing closed`)
+      return true
     }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} is malformed — failing closed (${error instanceof Error ? error.message : String(error)})`)
+      return true
+    }
+    if (!this.isValidResumeQuarantineBarrier(parsed, sessionId)) {
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} failed schema validation — failing closed`)
+      return true
+    }
+    const quarantinedMessageId = (parsed as { messageId?: unknown }).messageId as string
+    if (messageId && quarantinedMessageId !== messageId) {
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} covers message ${quarantinedMessageId} (asked: ${messageId}) — failing closed`)
+    }
+    return true
   }
 
   /**
