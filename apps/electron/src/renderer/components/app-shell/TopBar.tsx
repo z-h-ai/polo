@@ -9,19 +9,19 @@
  * ProductSpace switcher entry point lives here (REQ-001).
  */
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
 import { useAtomValue } from "jotai"
 import { sessionMetaMapAtom } from "@/atoms/sessions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
+import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { useTabShell } from "@/context/TabShellContext"
 import { useTheme } from "@/context/ThemeContext"
 import { useNavigation } from "@/contexts/NavigationContext"
-import { useAppCatalog } from "@/hooks/useAppCatalog"
 import { cn } from "@/lib/utils"
 import { getSessionTitle } from "@/utils/session"
-import type { LocalAppRuntimeStatus } from "@polo-ai/shared/protocol"
+import type { ExecutionSummary, ExecutionStatus } from "@polo-ai/shared/product-spaces"
 import {
   Check,
   ChevronRight,
@@ -44,67 +44,66 @@ import { ProductSpaceSwitcher } from "@/components/product-space/ProductSpaceSwi
 
 const MAX_NOTIFICATION_ITEMS = 6
 
-/** ProductSpace app executions counted as "running" (POO-41 active-execution
-    semantics: preparing/starting/running/installing). */
-const ACTIVE_EXECUTION_STATUSES: ReadonlySet<LocalAppRuntimeStatus["status"]> = new Set([
-  "downloading",
-  "installing",
-  "starting",
-  "running",
-])
+const RUNTIME_REFRESH_INTERVAL_MS = 5000
 
-function executionStatusLabel(
-  t: (key: string) => string,
-  status: LocalAppRuntimeStatus,
-): string {
-  if (status.installationStatus === "downloading") return t("homeApps.status.downloadingUpdate")
-  if (status.installationStatus === "installing") return t("homeApps.status.installingUpdate")
-  switch (status.status) {
-    case "downloading": return t("homeApps.status.downloading")
-    case "installing": return t("homeApps.status.installing")
-    case "starting": return t("homeApps.status.starting")
-    case "running": return t("homeApps.status.running")
-    default: return t("homeApps.status.running")
-  }
-}
+/** POO-41 active-execution semantics: preparing/running/waiting/stopping.
+    Terminal `stopped`/`failed` executions are never counted. */
+const ACTIVE_EXECUTION_STATUSES: ReadonlySet<ExecutionStatus> = new Set([
+  "preparing",
+  "running",
+  "waiting_for_network",
+  "stopping",
+])
 
 export function TopBar() {
   const { t } = useTranslation()
   const appShell = useOptionalAppShellContext()
+  const productSpace = useOptionalProductSpaceContext()
   const { activeTab, openTabs, activateHome, activateTab } = useTabShell()
   const { resolvedMode, setMode } = useTheme()
   const { navigateToSession } = useNavigation()
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
-  const catalog = useAppCatalog()
 
   const isHome = activeTab.type === "home"
 
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
-  const activeExecutions = useMemo(() => {
-    const catalogEntry = catalog.state.catalog
-    if (!catalogEntry) return []
-    const executions: Array<{
-      key: string
-      name: string
-      status: LocalAppRuntimeStatus
-    }> = []
-    for (const app of catalogEntry.apps) {
-      const status = catalog.getStatus(app)
-      if (!status) continue
-      const active = ACTIVE_EXECUTION_STATUSES.has(status.status)
-        || status.installationStatus !== undefined
-      if (!active) continue
-      let key = app.id
-      try {
-        key = catalog.scopeKeyForApp(app)
-      } catch {
-        // Stale-context scope keys fall back to the plain app id; the runtime
-        // menu is display-only and disappears on the next catalog sync.
-      }
-      executions.push({ key, name: app.name, status })
+  const [registryExecutions, setRegistryExecutions] = useState<ExecutionSummary[]>([])
+  const accountId = productSpace?.accountId ?? null
+  const activeProductSpaceId = productSpace?.activeProductSpaceId ?? null
+
+  // Trusted ProductSpace active-execution registry: the count and the runtime
+  // dialog read ONLY from productSpaceListActiveExecutions (never from the
+  // Catalog), refreshed on a bounded interval while the bar is mounted.
+  useEffect(() => {
+    if (!accountId || !activeProductSpaceId) {
+      setRegistryExecutions([])
+      return
     }
-    return executions
-  }, [catalog.state, catalog.getStatus, catalog.scopeKeyForApp])
+    let disposed = false
+    const refresh = async () => {
+      try {
+        const result = await window.electronAPI.productSpaceListActiveExecutions(
+          accountId,
+          activeProductSpaceId,
+        )
+        if (!disposed && result.success) {
+          setRegistryExecutions(result.executions)
+        }
+      } catch {
+        // Transient registry failures keep the previous snapshot.
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => { void refresh() }, RUNTIME_REFRESH_INTERVAL_MS)
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+    }
+  }, [accountId, activeProductSpaceId])
+
+  const activeExecutions = useMemo(() => (
+    registryExecutions.filter((execution) => ACTIVE_EXECUTION_STATUSES.has(execution.status))
+  ), [registryExecutions])
   const runningCount = activeExecutions.length
   const unreadSessions = useMemo(() => (
     sessionMetas
@@ -154,7 +153,7 @@ export function TopBar() {
           aria-label={t("topbar.home")}
           aria-current={isHome ? "page" : undefined}
           className={cn(
-            "titlebar-no-drag inline-flex h-9 flex-none items-center justify-center gap-[9px] rounded-[9px] px-3 text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0",
+            "titlebar-no-drag inline-flex h-[36px] flex-none items-center justify-center gap-[8px] rounded-[9px] px-[12px] text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0",
             isHome
               ? "bg-background text-foreground shadow-minimal"
               : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
@@ -184,7 +183,7 @@ export function TopBar() {
                     : "bg-foreground/40",
                 )}
               />
-              <span className="whitespace-nowrap max-[1080px]:hidden">
+              <span className="whitespace-nowrap [@media(max-width:1080px)]:hidden">
                 {runningCount > 0
                   ? t("topbar.runtime.running", { count: runningCount })
                   : t("topbar.runtime.none")}
@@ -202,13 +201,13 @@ export function TopBar() {
             ) : (
               activeExecutions.map((execution) => (
                 <StyledDropdownMenuItem
-                  key={execution.key}
+                  key={execution.executionId}
                   onClick={activateHome}
                 >
                   <span className="size-[7px] flex-none rounded-full bg-success" />
                   <span className="min-w-0 flex-1 truncate">{execution.name}</span>
                   <span className="flex-none text-[11px] text-muted-foreground">
-                    {executionStatusLabel(t, execution.status)}
+                    {t(`productSpace.exec.status.${execution.status}`)}
                   </span>
                 </StyledDropdownMenuItem>
               ))
@@ -224,7 +223,7 @@ export function TopBar() {
               type="button"
               data-testid="topbar-notifications"
               aria-label={t("topbar.notifications.label")}
-              className="titlebar-no-drag relative grid size-8 place-items-center rounded-[8px] text-foreground/50 outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="titlebar-no-drag relative grid size-[32px] place-items-center rounded-[8px] text-foreground/50 outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Icons.Bell className="size-4" strokeWidth={1.7} />
               {unreadSessions.length > 0 && (
@@ -259,7 +258,7 @@ export function TopBar() {
               type="button"
               data-testid="topbar-account"
               aria-label={t("topbar.account.label")}
-              className="titlebar-no-drag ml-[3px] grid size-7 place-items-center rounded-full bg-foreground text-[11px] font-semibold text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="titlebar-no-drag ml-[3px] grid size-[28px] place-items-center rounded-full bg-foreground text-[11px] font-semibold text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {userInitial || <UserRound className="size-3.5" strokeWidth={1.7} />}
             </button>
