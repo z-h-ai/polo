@@ -59,6 +59,7 @@ export function SessionInfoPopover({
         </DrawerTrigger>
         <DrawerContent
           className={cn(DEFAULT_DRAWER_CONTENT_CLASS, contentClassName)}
+          data-testid="session-info-panel"
           onOpenAutoFocus={(e) => {
             e.preventDefault()
           }}
@@ -81,6 +82,7 @@ export function SessionInfoPopover({
       </PopoverTrigger>
       <PopoverContent
         className={contentClassName ?? DEFAULT_POPOVER_CONTENT_CLASS}
+        data-testid="session-info-panel"
         side={side}
         align={align}
         sideOffset={sideOffset}
