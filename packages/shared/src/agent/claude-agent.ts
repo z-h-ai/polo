@@ -771,41 +771,56 @@ export class ClaudeAgent extends BaseAgent {
 
     const invocationScoped = this.config.sessionStorage?.owner === 'cli';
 
-    // R52-C: TRANSACTIONAL credential application — per-key prior values are
-    // recorded BEFORE any mutation; the deletions and writes commit ONLY on
-    // the success path; every abort/failure path rolls back exactly the keys
-    // this transaction touched (per-key CAS), restoring the precise
-    // pre-postInit state for a same-id successor.
+    // R52-C/R53: TRANSACTIONAL credential application — the transaction is
+    // LIVE from the first mutation until the final synchronous env commit
+    // SUCCEEDS (commit) or until any abort/failure/throw rolls it back. Each
+    // touched key records its POST-MUTATION value: a delete records
+    // `undefined`, a write records the committed value. Rollback restores a
+    // key ONLY while its current value still equals the recorded
+    // post-mutation value — a successor's newer committed value is never
+    // clobbered, and a populated pre-existing key erased by the delete is
+    // really restored.
     this.credentialEnvTransaction = {
       prior: envSnapshot,
       touched: new Set<string>(),
       written: {},
     };
-    const txnTouch = (key: string): void => { this.credentialEnvTransaction!.touched.add(key) }
+    const txnTrack = (key: string): void => {
+      const txn = this.credentialEnvTransaction!;
+      txn.touched.add(key);
+      if (!(key in txn.prior)) txn.prior[key] = process.env[key];
+    };
     const txnRestoreKey = (key: string): void => {
       const prior = this.credentialEnvTransaction!.prior[key]
       if (prior === undefined) delete process.env[key]
       else process.env[key] = prior
     }
-    const txnWrite = (key: string): void => {
-      txnTouch(key)
-      this.credentialEnvTransaction!.written[key] = process.env[key]
-    }
+    // R53: the ONE rollback entry — every abort/failure/throw path funnels
+    // here; the transaction ends (cleared) only through rollback or commit.
     const rollbackTxn = (): void => {
       const txn = this.credentialEnvTransaction
       if (!txn) return
       for (const key of txn.touched) {
-        // Per-key CAS: restore ONLY keys whose current value still equals
-        // what THIS transaction wrote — a successor's newer committed value
-        // is never clobbered by a stale rollback.
+        // Per-key CAS against the POST-MUTATION value recorded by THIS
+        // transaction: `undefined` for deletes, the written value for writes.
         if (process.env[key] === txn.written[key]) txnRestoreKey(key)
       }
       this.credentialEnvTransaction = undefined
     }
+    // R53: the success finalizer — called ONLY after the final synchronous
+    // env commit has landed; the keys keep their committed values.
+    const commitTxn = (): void => {
+      this.credentialEnvTransaction = undefined
+    }
     const txnDeleteKey = (key: string): void => {
-      txnTouch(key)
-      txnWrite(key)
+      txnTrack(key)
+      this.credentialEnvTransaction!.written[key] = undefined
       delete process.env[key]
+    }
+    const txnWriteKey = (key: string, value: string): void => {
+      txnTrack(key)
+      this.credentialEnvTransaction!.written[key] = value
+      process.env[key] = value
     }
 
     if (!invocationScoped) {
@@ -816,16 +831,26 @@ export class ClaudeAgent extends BaseAgent {
       for (const key of CLAUDE_BEDROCK_ROUTING_ENV_KEYS) txnDeleteKey(key)
     }
 
-    // Resolve auth env vars via shared utility
+    // Resolve auth env vars via shared utility. R53: the resolution is
+    // wrapped — a THROW must roll the transaction back too (previously the
+    // throw bypassed rollback entirely, leaving the erased/overwritten keys
+    // behind for every later construction).
     const manager = getCredentialManager();
-    const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+    let result: Awaited<ReturnType<typeof resolveAuthEnvVars>>;
+    try {
+      result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+    } catch (resolutionError) {
+      rollbackTxn();
+      throw resolutionError;
+    }
 
-    // R50/R51/R52: the credential resolution may complete long after the
+    // R50/R51/R52/R53: the credential resolution may complete long after the
     // construction attempt was timed out and disposed. The late outcome must
     // roll back THIS transaction's keys (per-key CAS) and apply zero side
-    // effects.
-    rollbackTxn()
+    // effects. The transaction stays LIVE on every path below until the
+    // final synchronous commit.
     if (aborted()) {
+      rollbackTxn()
       return { authInjected: false, authWarning: 'Agent destroyed during post-init credential resolution; credential side effects rolled back' };
     }
 
@@ -891,10 +916,12 @@ export class ClaudeAgent extends BaseAgent {
       }
       this.config.envOverrides = nextOverrides;
     } else {
-      // R50/R51: the process-global env overwrite is a late side effect
+      // R50/R51/R53: the process-global env overwrite is a late side effect
       // guarded by the same abort check — a destroyed agent's late credential
       // outcome is dropped and the precise pre-postInit env snapshot is
       // restored (a same-id successor owns the process credential state).
+      // The writes are TRANSACTIONAL: recorded with their post-mutation
+      // values so the per-key rollback CAS is exact.
       if (aborted()) {
         rollbackTxn()
         return { authInjected: false, authWarning: 'Agent destroyed before applying credential env vars; credential side effects rolled back' };
@@ -904,7 +931,7 @@ export class ClaudeAgent extends BaseAgent {
         ...result.envVars,
       };
       for (const [key, value] of Object.entries(result.envVars)) {
-        process.env[key] = value;
+        txnWriteKey(key, value);
       }
     }
 
@@ -914,19 +941,24 @@ export class ClaudeAgent extends BaseAgent {
     // doesn't exist on the provider's endpoint.
     if (this.config.miniModel) {
       this.config.envOverrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
-      if (!invocationScoped) process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
+      if (!invocationScoped) txnWriteKey('ANTHROPIC_DEFAULT_HAIKU_MODEL', this.config.miniModel);
     }
 
+    // R53: SUCCESS COMMIT — the final synchronous env mutations have landed;
+    // the transaction ends here with its values kept.
+    commitTxn()
     return { authInjected: true };
   }
 
   /**
-   * R52: SYNCHRONOUS per-key rollback of the in-flight credential env
+   * R52/R53: SYNCHRONOUS per-key rollback of the in-flight credential env
    * transaction. Invoked from the SessionManager's bounded-construction
-   * timeout so a provider that ignores the AbortSignal cannot leave erased
-   * or overwritten process-global credentials behind: only keys whose
-   * CURRENT value still equals what THIS transaction wrote are restored;
-   * keys a successor already committed are never touched.
+   * timeout (and from this agent's abort listener) so a provider that
+   * ignores the AbortSignal cannot leave erased or overwritten
+   * process-global credentials behind: only keys whose CURRENT value still
+   * equals the POST-MUTATION value THIS transaction recorded (undefined for
+   * deletes, the committed value for writes) are restored; keys a successor
+   * already committed are never touched.
    */
   rollbackCredentialEnvTransaction(): void {
     const txn = this.credentialEnvTransaction
