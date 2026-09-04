@@ -836,6 +836,22 @@ async function resolveToolDisplayMeta(
 /** Agent type - unified backend interface for all providers */
 type AgentInstance = AgentBackend
 
+/**
+ * R53 (issue 6): one manager-owned retryable runtime disposal — keyed by the
+ * immutable quarantine token, holding the retained managed (faces intact),
+ * the timed-out ORIGINAL ops still awaited before any retry, and the
+ * single-flight settlement claim.
+ */
+interface QuarantinedRuntimeDisposalEntry {
+  managed: ManagedSession
+  quarantineToken: string
+  failures: string[]
+  reason: string
+  quarantinedAt: number
+  originalOps: Promise<unknown>[]
+  inFlight?: Promise<'settled' | 'retryable'>
+}
+
 interface ManagedSession {
   id: string
   /** Host experience that owns this session (e.g. 'edit-popover' Edit Popover sessions). */
@@ -4111,7 +4127,7 @@ export class SessionManager implements ISessionManager {
   private async disposeManagedAgentRuntime(
     managed: ManagedSession,
     reason: string,
-    opts?: { shouldUnregisterCallbacks?: () => boolean; bestEffort?: boolean },
+    opts?: { shouldUnregisterCallbacks?: () => boolean; bestEffort?: boolean; ignoreQuarantineClaim?: boolean },
   ): Promise<{ failures: string[]; callbacksUnregistered: boolean }> {
     const sessionId = managed.id
     const failures: string[] = []
@@ -4130,7 +4146,16 @@ export class SessionManager implements ISessionManager {
 
     const originalOps: Promise<unknown>[] = []
 
-    if (managed.agent) {
+    // R53 (issue 6): when a quarantine claim already owns this managed's
+    // retained faces, the caller must NOT issue overlapping resource API
+    // calls — the claim's retry awaits the originals first and retries
+    // exactly once (the entry only exists while faces are still retained;
+    // it is deleted after a full settle). Only the claim ITSELF
+    // (ignoreQuarantineClaim) may issue.
+    const claimOwnsFaces = opts?.ignoreQuarantineClaim !== true
+      && this.findQuarantinedRuntimeDisposalEntry(managed) !== undefined
+
+    if (managed.agent && !claimOwnsFaces) {
       try {
         if (managed.agent.disposeForRestart) {
           // R50: bounded — a hung disposeForRestart must not pin the
@@ -4151,7 +4176,7 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    if (managed.poolServer) {
+    if (managed.poolServer && !claimOwnsFaces) {
       // R50: bounded — on timeout the reference is RETAINED and the runtime
       // is moved to the manager-owned retryable disposal quarantine.
       const stopped = await this.boundedRuntimeDisposal(sessionId, 'pool-server', async () => {
@@ -4162,7 +4187,7 @@ export class SessionManager implements ISessionManager {
       if (stopped.status === 'settled') managed.poolServer = undefined
     }
 
-    if (managed.mcpPool) {
+    if (managed.mcpPool && !claimOwnsFaces) {
       // R50: bounded — same retained-on-timeout semantics as pool-server.
       const disconnected = await this.boundedRuntimeDisposal(sessionId, 'mcp-pool', async () => {
         await managed.mcpPool!.disconnectAll()
@@ -4238,9 +4263,25 @@ export class SessionManager implements ISessionManager {
    * references would be orphaned (overwritten) and their processes leaked.
    * Strict: a retry that fails again keeps the state and propagates the
    * typed error, so no successor runtime is ever built over retained faces.
+   *
+   * R53 (issue 6): the retry is routed through the SAME per-entry single
+   * -flight claim every other consumer uses — the claim awaits the timed-out
+   * original ops before any resource API call, and THIS caller's join is
+   * bounded. If the settlement has not completed within the bound (or failed
+   * again), the strict typed error propagates instead of building anything
+   * over retained faces.
    */
   private async settlePendingRuntimeDisposal(managed: ManagedSession, reason: string): Promise<void> {
     if (!managed.disposalIncomplete) return
+    const quarantined = this.findQuarantinedRuntimeDisposalEntry(managed)
+    if (quarantined) {
+      sessionLog.info(`Retrying the incompletely disposed runtime surfaces for session ${managed.id} (${managed.disposalIncomplete.reason}) before ${reason}`)
+      this.claimQuarantinedSettlement(quarantined.token, quarantined.entry)
+      const outcome = await this.joinQuarantinedClaimBounded(quarantined.entry)
+      if (outcome === 'settled' && !managed.disposalIncomplete) return
+      throw new AgentRuntimeDisposalError(reason, quarantined.entry.failures, false)
+    }
+    // No quarantine entry (seeded/hand-built state): strict direct retry.
     sessionLog.info(`Retrying the incompletely disposed runtime surfaces for session ${managed.id} (${managed.disposalIncomplete.reason}) before ${reason}`)
     await this.disposeManagedAgentRuntime(managed, `${reason}: retrying incomplete disposal`)
     managed.disposalIncomplete = undefined
@@ -4248,58 +4289,103 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * R50: manager-owned RETRYABLE quarantine for runtimes whose disposal
-   * timed out (a retained pool/MCP face still shutting down). Entries hold
-   * the exact managed object (retained references intact) and settle via the
-   * same strict retry as the live lifecycle path — exactly once, verified by
-   * owner token. Swept at every createSession entry.
+   * R53 (issue 6): manager-owned RETRYABLE quarantine for runtimes whose
+   * disposal timed out — keyed by the IMMUTABLE quarantine token (not the
+   * live session id), so same-id successors never evict a stale runtime's
+   * retry handle and multiple stale runtimes that shared an id all stay
+   * reachable.
+   *
+   * Settlement is a GLOBAL PER-ENTRY SINGLE-FLIGHT claim (`inFlight`): every
+   * retry consumer (create/delete/refresh sweeps) claims-or-joins THE SAME
+   * claim. The claim awaits the timed-out ORIGINAL ops before ANY resource
+   * API call (a still-running shutdown is never overlapped, and timed-out
+   * retries initiated by delete/refresh are tracked by merging their
+   * original ops into the entry). A FAILED claim CLEARS `inFlight` (guard
+   * semantics) so a later sweep can claim again; a successful one deletes
+   * the entry exactly once. Every CALLER's join is BOUNDED
+   * (`quarantineJoinTimeoutMs`) — the lifecycle lock and createSession
+   * return within the contract even while a shutdown is permanently hung.
    */
+  private readonly quarantinedRuntimeDisposals = new Map<string, QuarantinedRuntimeDisposalEntry>()
+
+  /** R53 (issue 6): bound on ONE caller's join of a quarantine claim. */
+  private quarantineJoinTimeoutMs = 2_000
+
   /**
-   * R52-D: manager-owned RETRYABLE quarantine for runtimes whose disposal
-   * timed out — keyed by the IMMUTABLE quarantine token (not the live
-   * session id), so same-id successors never evict a stale runtime's retry
-   * handle and multiple stale runtimes that shared an id all stay reachable.
-   * Each entry atomically claims its in-flight settlement; concurrent sweeps
-   * JOIN the claim. The underlying timed-out ops' ORIGINAL promises are
-   * awaited before any retry — a still-running shutdown is never overlapped.
-   * Entries are removed only after every retained face settled.
+   * R53 (issue 6): the ONE per-entry settlement claim. Installs `inFlight`
+   * atomically if none is active; the claim awaits the entry's original ops
+   * before retrying any resource API, reports `settled`/`retryable`, and
+   * CLEARS `inFlight` on completion so a failed settlement can be re-claimed
+   * by a later sweep. Returns whether this caller installed a NEW claim.
    */
-  private readonly quarantinedRuntimeDisposals = new Map<string, {
-    managed: ManagedSession
-    quarantineToken: string
-    failures: string[]
-    reason: string
-    quarantinedAt: number
-    originalOps: Promise<unknown>[]
-    inFlight?: Promise<void>
-  }>()
+  private claimQuarantinedSettlement(
+    token: string,
+    entry: QuarantinedRuntimeDisposalEntry,
+  ): boolean {
+    if (entry.inFlight) return false
+    const claim: Promise<'settled' | 'retryable'> = (async () => {
+      // Wait out the timed-out ORIGINAL ops (released hung shutdowns etc.)
+      // before retrying — never overlap a still-running shutdown, and never
+      // call a resource API while any original op is still pending.
+      await Promise.all(entry.originalOps.map(p => p.catch(() => undefined)))
+      entry.originalOps = []
+      await this.disposeManagedAgentRuntime(entry.managed, `quarantined disposal retry (${entry.reason})`, { ignoreQuarantineClaim: true })
+      entry.managed.disposalIncomplete = undefined
+      return 'settled' as const
+    })()
+    entry.inFlight = claim
+    void claim.then(
+      outcome => {
+        if (entry.inFlight === claim) entry.inFlight = undefined
+        if (outcome === 'settled') {
+          // Removed only after EVERY retained face settled.
+          this.quarantinedRuntimeDisposals.delete(token)
+          sessionLog.info(`Quarantined runtime disposal for session ${entry.managed.id} settled on retry`)
+        }
+      },
+      retryError => {
+        // Guard-style clearing: the failed claim becomes re-claimable.
+        if (entry.inFlight === claim) entry.inFlight = undefined
+        sessionLog.warn(`Retry cleanup for quarantined runtime disposal ${entry.managed.id} failed; kept for retry:`, retryError)
+      },
+    )
+    return true
+  }
+
+  /**
+   * R53 (issue 6): BOUNDED join of an entry's settlement claim. Never
+   * rejects; reports `pending` when the caller's bound expired (the claim
+   * keeps working in the background and a later sweep re-joins it).
+   */
+  private joinQuarantinedClaimBounded(entry: QuarantinedRuntimeDisposalEntry): Promise<'settled' | 'retryable' | 'pending'> {
+    const claim = entry.inFlight
+    if (!claim) return Promise.resolve('settled')
+    const bound = new Promise<'pending'>(resolve => {
+      setTimeout(() => resolve('pending'), this.quarantineJoinTimeoutMs).unref?.()
+    })
+    return Promise.race([
+      claim.then(outcome => outcome, () => 'retryable' as const),
+      bound,
+    ])
+  }
+
+  private findQuarantinedRuntimeDisposalEntry(managed: ManagedSession): { token: string; entry: QuarantinedRuntimeDisposalEntry } | undefined {
+    for (const [token, entry] of this.quarantinedRuntimeDisposals) {
+      if (entry.managed === managed) return { token, entry }
+    }
+    return undefined
+  }
 
   private async sweepQuarantinedRuntimeDisposals(): Promise<void> {
     if (this.quarantinedRuntimeDisposals.size === 0) return
-    for (const [token, entry] of this.quarantinedRuntimeDisposals) {
-      // R52-D: atomic in-flight claim — concurrent sweeps JOIN the existing
-      // settlement instead of issuing another stop/disconnect.
-      if (entry.inFlight) {
-        await entry.inFlight.catch(() => undefined)
-        continue
-      }
-      const claimed: Promise<void> = (async () => {
-        // Wait out the timed-out ORIGINAL ops (released hung shutdowns etc.)
-        // before retrying — never overlap a still-running shutdown.
-        await Promise.all(entry.originalOps.map(p => p.catch(() => undefined)))
-        entry.originalOps = []
-        await this.settlePendingRuntimeDisposal(entry.managed, `quarantined disposal retry (${entry.reason})`)
-      })()
-      entry.inFlight = claimed
-      try {
-        await claimed
-        // Removed only after EVERY retained face settled
-        // (settlePendingRuntimeDisposal cleared disposalIncomplete).
-        this.quarantinedRuntimeDisposals.delete(token)
-        sessionLog.info(`Quarantined runtime disposal for session ${entry.managed.id} settled on retry`)
-      } catch (retryError) {
-        sessionLog.warn(`Retry cleanup for quarantined runtime disposal ${entry.managed.id} failed; kept for retry:`, retryError)
-      }
+    for (const [token, entry] of [...this.quarantinedRuntimeDisposals]) {
+      // R53 (issue 6): claim-or-join THE single per-entry settlement, with a
+      // BOUNDED wait — a permanently hung shutdown can never pin this caller
+      // (createSession entry, delete/refresh cleanup or a lifecycle-lock
+      // head); the claim continues in the background and a later sweep
+      // re-joins it.
+      this.claimQuarantinedSettlement(token, entry)
+      await this.joinQuarantinedClaimBounded(entry)
     }
   }
 
@@ -4310,11 +4396,17 @@ export class SessionManager implements ISessionManager {
     originalOps: Promise<unknown>[] = [],
   ): void {
     if (!managed.disposalIncomplete) return
-    // R52-D: dedupe by managed identity — the SAME runtime is never
+    // R52-D/R53: dedupe by managed identity — the SAME runtime is never
     // double-quarantined; distinct stale runtimes that shared an id remain
-    // independently reachable (token-keyed entries).
+    // independently reachable (token-keyed entries). R53 (issue 6): a retry
+    // (from create/delete/refresh) that timed out AGAIN merges its new
+    // original ops into the EXISTING entry — every timed-out original op
+    // stays tracked and is awaited before any later retry.
     for (const entry of this.quarantinedRuntimeDisposals.values()) {
-      if (entry.managed === managed) return
+      if (entry.managed === managed) {
+        entry.originalOps.push(...originalOps)
+        return
+      }
     }
     const quarantineToken = randomUUID()
     this.quarantinedRuntimeDisposals.set(quarantineToken, {
@@ -4425,8 +4517,12 @@ export class SessionManager implements ISessionManager {
           `quarantined unpublished runtime retry (${entry.reason})`,
           // R48: the runtime disposal never unregisters the id-wide
           // callback/guard state itself — the LEASE compare-and-unregister
-          // below is the single owner-aware removal.
-          { bestEffort: true, shouldUnregisterCallbacks: () => false },
+          // below is the single owner-aware removal. R53 (issue 6): THIS
+          // sweep is itself a single-flight retry path (entries keyed by
+          // session id, swept at createSession) — it may issue its face
+          // disposal even while a runtime-disposal quarantine entry exists
+          // for the same managed.
+          { bestEffort: true, shouldUnregisterCallbacks: () => false, ignoreQuarantineClaim: true },
         )
         // Owner-token binding: only the exact registered entry settles here.
         if (result.failures.length === 0 && this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken === entry.quarantineToken) {
@@ -4502,13 +4598,7 @@ export class SessionManager implements ISessionManager {
    * concurrently with it. Cleanup compares and clears only the caller's OWN
    * tail — queued waiters never delete each other's slot.
    */
-  /**
-   * R50: bounds ONE runtime disposal await. On expiry the failure is recorded
-   * and `undefined` is returned — the caller RETAINS the still-live resource
-   * reference and (for strict disposals) moves the runtime into the
-   * manager-owned retryable disposal quarantine. No fake success, no dropped
-   * reference, and the lifecycle lock tail releases regardless.
-   */
+  /** R50/R53: bound for ONE runtime disposal await (instance-configurable test seam). */
   private runtimeDisposalTimeoutMs = 10_000
 
   /**
@@ -7175,15 +7265,14 @@ export class SessionManager implements ISessionManager {
     this.browserHostByCanvas.delete(sessionId)
 
     // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
-    if (managed.agent) {
-      managed.agent.dispose()
-    }
-
-    // Stop pool server (HTTP MCP server for external SDK subprocesses)
-    if (managed.poolServer) {
-      managed.poolServer.stop().catch(err => {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      })
+    // R53 (issue 6): the disposal is BOUNDED and quarantine-aware — retained
+    // faces already owned by a per-entry settlement claim are joined with a
+    // bounded wait instead of the previous raw fire-and-forget stop() that
+    // overlapped a still-running shutdown with a SECOND stop call.
+    try {
+      await this.disposeManagedAgentRuntime(managed, 'session deleted', { bestEffort: true })
+    } catch (disposalError) {
+      sessionLog.warn(`Session ${sessionId} disposal during delete retained faces:`, disposalError)
     }
 
     // Cancel any pending source-activation auto-retry timer (polo-ai-oss#804).

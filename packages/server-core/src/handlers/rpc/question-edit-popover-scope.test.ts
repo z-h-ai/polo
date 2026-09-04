@@ -2090,20 +2090,150 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(managed.poolServer).toBeTruthy()
       expect(managed.disposalIncomplete).toBeTruthy()
 
-      // Delete proceeds while the shutdown is still stuck.
+      // Delete proceeds while the shutdown is still stuck. R53 (issue 6):
+      // the retained face is owned by the per-entry claim — deleteSession
+      // does NOT issue a second stop call (the old fire-and-forget stop is
+      // gone); it only joins the claim with a bounded wait.
       await sm.deleteSession(managed.id)
+      expect(stopCalls).toBe(1)
 
       // Release the stuck shutdown: the next sweep settles exactly once.
       releaseStop()
       await (sm as unknown as {
         sweepQuarantinedRuntimeDisposals: () => Promise<void>
       }).sweepQuarantinedRuntimeDisposals()
-      // stop calls: (1) the abandoned bounded settle, (2) deleteSession's own
-      // bounded disposal retry, (3) the sweep's exactly-once quarantine
-      // settlement. The QUARANTINE ENTRY settled exactly once (1 → 0).
+      // stop calls: (1) the abandoned bounded settle, (2) the claim's
+      // exactly-once retry after the original op released. The QUARANTINE
+      // ENTRY settled exactly once (1 → 0).
+      expect(stopCalls).toBe(2)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+    })
+
+    it('a permanently hung shutdown never blocks createSession (bounded join) and no stop is duplicated', async () => {
+      const managed = seedSession('q-r53-hung-forever')
+      let stopCalls = 0
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await new Promise<void>(() => { /* permanently hung */ })
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 120
+      ;(sm as unknown as { quarantineJoinTimeoutMs: number }).quarantineJoinTimeoutMs = 150
+
+      // Seed the quarantine entry through a bounded settle (stop #1 hangs).
+      const settleWork = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managed, 'hung-forever seed')
+      settleWork.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 250))
+      expect(stopCalls).toBe(1)
+
+      // createSession returns within the contract while the shutdown is
+      // permanently hung — the bounded join never pins the caller.
+      const created = await sm.createSession('ws_test', {})
+      expect(created.id).toBeTruthy()
+      expect(stopCalls).toBe(1)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(1)
+      await sm.deleteSession(created.id)
+    })
+
+    it('a failed settlement claim is re-claimable: a later sweep retries and settles exactly once', async () => {
+      const managed = seedSession('q-r53-reclaim')
+      let stopCalls = 0
+      let failStop = true
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          if (failStop) throw new Error('stop exploded (first attempt)')
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 200
+
+      // Seed the quarantine entry (stop #1 throws fast → strict failure).
+      const seedSettle = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managed, 're-claimable seed')
+      seedSettle.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 50))
+      expect(stopCalls).toBe(1)
+
+      // First sweep: the claim's retry stop REJECTS → strict failure → the
+      // claim reports retryable and CLEARS inFlight (re-claimable).
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      expect(stopCalls).toBe(2)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(1)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, { inFlight?: Promise<unknown> }>
+      }).quarantinedRuntimeDisposals.values().next().value?.inFlight ?? undefined).toBeUndefined()
+
+      // The retry stop merges its new original op into the SAME entry —
+      // every timed-out original stays tracked.
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, { originalOps: Promise<unknown>[] }>
+      }).quarantinedRuntimeDisposals.values().next().value?.originalOps.length ?? 0).toBeGreaterThan(0)
+
+      // Second sweep after the stop is healed: the claim retries and the
+      // entry settles exactly once.
+      failStop = false
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
       expect(stopCalls).toBe(3)
       expect(managed.disposalIncomplete).toBeUndefined()
       expect(managed.poolServer).toBeUndefined()
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+    })
+
+    it('concurrent sweeps add CLAIMS not stop calls while the original op is parked', async () => {
+      const managed = seedSession('q-r53-concurrent')
+      let stopCalls = 0
+      let releaseStop!: () => void
+      const gated = new Promise<void>(resolve => { releaseStop = () => resolve() })
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await gated
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 120
+      ;(sm as unknown as { quarantineJoinTimeoutMs: number }).quarantineJoinTimeoutMs = 150
+
+      // Seed the entry (stop #1 parks on the gate).
+      const settleWork = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managed, 'concurrent seed')
+      settleWork.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 250))
+
+      // THREE concurrent sweeps: exactly one claim, no additional stop calls
+      // while the original is parked.
+      await Promise.all([
+        (sm as unknown as { sweepQuarantinedRuntimeDisposals: () => Promise<void> }).sweepQuarantinedRuntimeDisposals(),
+        (sm as unknown as { sweepQuarantinedRuntimeDisposals: () => Promise<void> }).sweepQuarantinedRuntimeDisposals(),
+        (sm as unknown as { sweepQuarantinedRuntimeDisposals: () => Promise<void> }).sweepQuarantinedRuntimeDisposals(),
+      ])
+      expect(stopCalls).toBe(1)
+
+      // Release: the next sweep settles exactly once with a single retry.
+      releaseStop()
+      await (sm as unknown as { sweepQuarantinedRuntimeDisposals: () => Promise<void> }).sweepQuarantinedRuntimeDisposals()
+      expect(stopCalls).toBe(2)
       expect((sm as unknown as {
         quarantinedRuntimeDisposals: Map<string, unknown>
       }).quarantinedRuntimeDisposals.size).toBe(0)
