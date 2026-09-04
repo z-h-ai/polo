@@ -3,7 +3,21 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import type { ExecutionSummary } from '@polo-ai/shared/product-spaces'
 import { createRegistryExecutionPoller } from '../registry-execution-poller'
 
-GlobalRegistrator.register()
+// Register only when no window exists yet, and pin a macOS userAgent — same
+// shared-process pattern as useEditPopoverSessionRestore.test.tsx: happy-dom
+// defaults to a Windows UA, which would flip `isWindows`/`PATH_SEP` in
+// @/lib/platform for every test file running after this one in the shared
+// bun process.
+if (typeof window === 'undefined') {
+  GlobalRegistrator.register({
+    settings: {
+      navigator: {
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      },
+    },
+  })
+}
 
 const emptyExecutions: ExecutionSummary[] = []
 
