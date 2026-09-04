@@ -798,7 +798,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       )
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(createdId, replacement)
       setPermissionMode(createdId, 'allow-all', { changedBy: 'system' })
-      registerSessionScopedToolCallbacks(createdId, { list_sessions: async () => [] } as never)
+      registerSessionScopedToolCallbacks(createdId, { list_sessions: async () => [] } as never, 'test-owner')
 
       setRuntimeActiveProductSpace(OTHER_SPACE_ID)
       release()
@@ -856,7 +856,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       )
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(createdId, replacement)
       setPermissionMode(createdId, 'allow-all', { changedBy: 'system' })
-      registerSessionScopedToolCallbacks(createdId, { list_sessions: async () => [] } as never)
+      registerSessionScopedToolCallbacks(createdId, { list_sessions: async () => [] } as never, 'test-owner')
 
       dRelease()
       await expect(pendingRpc).rejects.toThrow('PRODUCT_SPACE_CONTEXT_REQUIRED')
@@ -876,7 +876,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       } as never
       // R49: the runtime owns a callback lease (registered before disposal) —
       // the entry-time CAS still removes it despite the agent-face failure.
-      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'owned' } as never)
+      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'owned' } as never, 'test-owner')
       const result = await (sm as unknown as {
         disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: { bestEffort?: boolean }) => Promise<{ failures: string[]; callbacksUnregistered: boolean }>
       }).disposeManagedAgentRuntime(managed, 'test', { bestEffort: true })
@@ -1048,7 +1048,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     it('restart-required refresh fails closed when disposal fails (ref kept, callbacks kept, bookkeeping intact)', async () => {
       const managed = seedSession('q-refresh-restart')
       managed.agent = failingAgent() as never
-      registerSessionScopedToolCallbacks(managed.id, { list_sessions: async () => [] } as never)
+      registerSessionScopedToolCallbacks(managed.id, { list_sessions: async () => [] } as never, 'test-owner')
       try {
         await expect((sm as unknown as {
           runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
@@ -1069,7 +1069,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       // No updateRuntimeConfig on the stub → in-place refresh reports
       // not-refreshed → falls back to disposal, which fails.
       managed.agent = failingAgent() as never
-      registerSessionScopedToolCallbacks(managed.id, { list_sessions: async () => [] } as never)
+      registerSessionScopedToolCallbacks(managed.id, { list_sessions: async () => [] } as never, 'test-owner')
       try {
         await expect((sm as unknown as {
           runAgentRuntimeRefresh: (m: unknown, ctx: unknown, rt: string, rst: string, restartRequired: boolean, reason: string) => Promise<void>
@@ -1281,7 +1281,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
           },
         }
         candidate.agent = agent
-        registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'candidate-runtime' } as never)
+        registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'candidate-runtime' } as never, 'candidate-runtime-owner')
         return agent
       }
 
@@ -1332,7 +1332,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     it('a replacement landing before the sweep keeps its callbacks, guard, mode state and storage', async () => {
       const candidate = seedSession('q-park-cand')
       candidate.agent = { dispose: () => {} } as never
-      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never)
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never, 'stale-owner')
       seedColdEditPopoverHeader('q-park-cand')
       ;(sm as unknown as {
         quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
@@ -1347,7 +1347,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       )
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(candidate.id, replacement)
       setPermissionMode(candidate.id, 'allow-all', { changedBy: 'system' })
-      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'replacement' } as never)
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'replacement' } as never, 'replacement-owner')
 
       await (sm as unknown as {
         sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
@@ -1556,7 +1556,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     it('real PiAgent destroy leaves session-scoped callbacks and mode state intact', async () => {
       const { PiAgent } = await import('@polo-ai/shared/agent')
       const sessionId = 'q-pi-real'
-      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'live' } as never)
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'live' } as never, 'test-owner')
       setPermissionMode(sessionId, 'allow-all', { changedBy: 'system' })
       const pi = new PiAgent({
         session: { id: sessionId, rootPath: tmpRoot },
@@ -1576,10 +1576,11 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const claude = new ClaudeAgent({
         session: { id: sessionId, rootPath: tmpRoot },
         workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+        sessionCallbackOwnerToken: 'test-owner',
       } as never)
       // Register AFTER construction (the constructor installs its own
       // production callback record) and set a DISTINCT mode state.
-      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'live' } as never)
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'live' } as never, 'test-owner')
       setPermissionMode(sessionId, 'allow-all', { changedBy: 'system' })
       claude.destroy()
       const callbacks = getSessionScopedToolCallbacks(sessionId)
@@ -1601,7 +1602,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
           await sweepGated
         },
       } as never
-      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never)
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never, 'stale-owner')
       ;(sm as unknown as {
         quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
       }).quarantineUnpublishedCandidateRuntime(candidate, 'probe replacement during disposal')
@@ -1614,7 +1615,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       )
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(candidate.id, replacement)
       setPermissionMode(candidate.id, 'allow-all', { changedBy: 'system' })
-      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'replacement' } as never)
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'replacement' } as never, 'replacement-owner')
 
       const sweepWork = (sm as unknown as {
         sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
@@ -1656,17 +1657,17 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const sessionId = 'q-guard-lease'
       // Quarantine registers Q while guard G1 is installed → lease = (Q, G1).
       let g1Calls = 0
-      installSessionScopedToolCallbackGuard(sessionId, () => { g1Calls += 1 })
-      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'stale' } as never)
+      installSessionScopedToolCallbackGuard(sessionId, () => { g1Calls += 1 }, 'stale-owner')
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'stale' } as never, 'stale-owner')
       const staleLease = getSessionScopedToolCallbackLease(sessionId)!
       // Successor publishes guard-only: G2 replaces G1 BEFORE its lazy
       // callback registration lands.
       const g2Calls: string[] = []
-      installSessionScopedToolCallbackGuard(sessionId, name => { g2Calls.push(name) })
+      installSessionScopedToolCallbackGuard(sessionId, name => { g2Calls.push(name) }, 'successor-owner')
       // The stale sweep's CAS must FAIL — the guard identity changed.
       expect(unregisterSessionScopedToolCallbacksIf(sessionId, staleLease!)).toBe(false)
       // G2 still installed: the (now live) successor callbacks run under it.
-      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never)
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never, 'successor-owner')
       const cbs = getSessionScopedToolCallbacks(sessionId)!
       await expect(cbs.listSessionsFn!()).resolves.toBe('replacement' as never)
       expect(g2Calls.length).toBeGreaterThan(0)
@@ -1679,11 +1680,12 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         { listSessionsFn: async () => 'foreign' } as never,
         'foreign-owner-token',
       )).toThrow('SESSION_CALLBACK_LEASE_OWNER_MISMATCH')
-      // R52-B: a token-less merge (trusted SM-internal record update)
-      // PRESERVES the current owner.
+      // R53: the LIVE OWNER's merge (carrying its own token) is accepted and
+      // keeps ownership — the token-less channel no longer exists.
       const preservedLease = mergeSessionScopedToolCallbacks(
         sessionId,
         { listSessionsFn: async () => 'preserved' } as never,
+        'successor-owner',
       )
       expect(preservedLease.ownerToken).toBe(getSessionScopedToolCallbackLease(sessionId)!.ownerToken)
       // And the explicit whole-session teardown still works when genuinely
@@ -1714,7 +1716,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         },
       } as never
       // The dying runtime's own lease at dispose entry.
-      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'stale' } as never)
+      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'stale' } as never, 'stale-owner')
 
       const disposeWork = invokeDispose()
       for (let i = 0; i < 300 && !disposeEntered; i += 1) {
@@ -1732,8 +1734,8 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(managed.id, replacement)
       setPermissionMode(managed.id, 'allow-all', { changedBy: 'system' })
       const guardCalls: string[] = []
-      installSessionScopedToolCallbackGuard(managed.id, name => { guardCalls.push(name) })
-      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'replacement' } as never)
+      installSessionScopedToolCallbackGuard(managed.id, name => { guardCalls.push(name) }, 'replacement-owner')
+      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'replacement' } as never, 'replacement-owner')
 
       releaseDispose()
       await disposeWork
@@ -1799,7 +1801,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
           },
         }
         candidate.agent = agent
-        registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'candidate-runtime' } as never)
+        registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'candidate-runtime' } as never, 'candidate-runtime-owner')
         return agent
       }
 
@@ -1824,8 +1826,8 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(candidateId!, replacement)
       setPermissionMode(candidateId!, 'allow-all', { changedBy: 'system' })
       const guardCalls: string[] = []
-      installSessionScopedToolCallbackGuard(candidateId!, name => { guardCalls.push(name) })
-      registerSessionScopedToolCallbacks(candidateId!, { listSessionsFn: async () => 'replacement' } as never)
+      installSessionScopedToolCallbackGuard(candidateId!, name => { guardCalls.push(name) }, 'replacement-owner')
+      registerSessionScopedToolCallbacks(candidateId!, { listSessionsFn: async () => 'replacement' } as never, 'replacement-owner')
 
       releaseDispose()
       // Dispose succeeded → the CAS missed (successor's record) → callback
@@ -1945,7 +1947,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const managed = seedSession(sessionId)
       managed.agent = { dispose: () => {} } as never
       // The dying runtime's OWN lease (registered during its construction).
-      managed.callbackLease = registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'own' } as never)
+      managed.callbackLease = registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'own' } as never, 'stale-owner')
       // The successor publishes FIRST: live session, new guard, new
       // callbacks, distinct mode.
       const replacement = createManagedSession(
@@ -1956,8 +1958,8 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, replacement)
       setPermissionMode(sessionId, 'allow-all', { changedBy: 'system' })
       const guardCalls: string[] = []
-      installSessionScopedToolCallbackGuard(sessionId, name => { guardCalls.push(name) })
-      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never)
+      installSessionScopedToolCallbackGuard(sessionId, name => { guardCalls.push(name) }, 'replacement-owner')
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'replacement' } as never, 'successor-owner')
       return { managed, replacement, guardCalls }
     }
 
@@ -2084,6 +2086,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const claude = new ClaudeAgent({
         session: { id: 'q-c-perkey', rootPath: tmpRoot },
         workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+        sessionCallbackOwnerToken: 'test-owner',
       } as never)
       const prior = {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -2121,6 +2124,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const claude = new ClaudeAgent({
         session: { id: 'q-c-entry', rootPath: tmpRoot },
         workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+        sessionCallbackOwnerToken: 'test-owner',
       } as never)
       claude.destroy()
       const envBefore = process.env.ANTHROPIC_API_KEY

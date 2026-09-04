@@ -2190,9 +2190,14 @@ export class PiAgent extends BaseAgent {
       // R51: the per-turn merge REPLACES the session's callback lease — the
       // returned lease is handed back to the SessionManager so the OWNER's
       // disposal cleanup stays bound to the CURRENT record/guard pair.
-      // R52-B: owner-verified merge — a stale runtime arriving after a
+      // R52-B/R53: owner-verified merge — a stale runtime arriving after a
       // same-id successor published its lease is REJECTED here instead of
-      // silently merging into the successor's record.
+      // silently merging into the successor's record. FAIL CLOSED: no
+      // token-less merge path exists.
+      const ownerToken = this.config.sessionCallbackOwnerToken
+      if (!ownerToken) {
+        throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: per-turn merge must carry the runtime owner token)`)
+      }
       const lease = mergeSessionScopedToolCallbacks(
         sessionId,
         {
@@ -2202,7 +2207,7 @@ export class PiAgent extends BaseAgent {
           getTurnGeneration: () => this.sessionTurnGeneration,
           queryFn: (request) => this.queryLlm(request),
         },
-        this.config.sessionCallbackOwnerToken,
+        ownerToken,
       );
       this.config.onSessionCallbackLeaseChanged?.(lease);
     }

@@ -19,7 +19,6 @@ import { debug } from '../utils/debug.ts';
 /**
  * Callbacks that can be registered per-session
  */
-import { randomUUID } from 'node:crypto';
 export interface SessionScopedToolCallbacks {
   /**
    * Called when a plan is submitted via SubmitPlan tool.
@@ -114,7 +113,20 @@ const sessionScopedToolCallbackRegistry = new Map<string, SessionScopedToolCallb
  */
 export type SessionScopedToolCallbackGuard = (callbackName: string) => void;
 
-const sessionScopedToolCallbackGuards = new Map<string, SessionScopedToolCallbackGuard>();
+/**
+ * R53: the guard store binds every installed guard to the IMMUTABLE owner
+ * token of whoever installed it (the runtime construction or the manager's
+ * pre-construction placeholder). Owner verification compares BOTH the record
+ * lease owner AND the guard owner — a successor that replaced the guard
+ * before publishing its record can no longer be merged into under the stale
+ * owner, and the legitimate successor owner is not falsely rejected.
+ */
+interface SessionScopedToolCallbackGuardEntry {
+  guard: SessionScopedToolCallbackGuard;
+  ownerToken: string;
+}
+
+const sessionScopedToolCallbackGuards = new Map<string, SessionScopedToolCallbackGuardEntry>();
 
 /**
  * R49/R51: the per-session OWNER LEASE — the installed (guard-wrapped)
@@ -137,8 +149,12 @@ const sessionScopedToolCallbackLeases = new Map<string, SessionScopedToolCallbac
 export function installSessionScopedToolCallbackGuard(
   sessionId: string,
   guard: SessionScopedToolCallbackGuard,
+  ownerToken: string,
 ): void {
-  sessionScopedToolCallbackGuards.set(sessionId, guard);
+  if (!ownerToken) {
+    throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: guard installation must carry the owner token)`);
+  }
+  sessionScopedToolCallbackGuards.set(sessionId, { guard, ownerToken });
   debug('session-scoped-tools', `Installed callback guard for session ${sessionId}`);
 }
 
@@ -146,8 +162,9 @@ function applySessionScopedToolCallbackGuard(
   sessionId: string,
   callbacks: Partial<SessionScopedToolCallbacks>,
 ): Partial<SessionScopedToolCallbacks> {
-  const guard = sessionScopedToolCallbackGuards.get(sessionId);
-  if (!guard) return callbacks;
+  const entry = sessionScopedToolCallbackGuards.get(sessionId);
+  if (!entry) return callbacks;
+  const guard = entry.guard;
   const wrapped: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(callbacks)) {
     wrapped[key] = typeof value === 'function'
@@ -167,21 +184,31 @@ function applySessionScopedToolCallbackGuard(
  * R48: returns the INSTALLED (guard-wrapped) record — the lease handle that
  * `unregisterSessionScopedToolCallbacksIf` compares against, so an owner can
  * clean up its own registration without ever touching a successor's.
+ *
+ * R53: the caller's immutable runtime owner token is REQUIRED — a
+ * registration always takes ownership for that exact token (construction is
+ * exclusive under the SessionManager's lifecycle lock). No token-less path
+ * exists: an unattributable registration cannot be cleaned up owner-aware.
  */
 export function registerSessionScopedToolCallbacks(
   sessionId: string,
   callbacks: SessionScopedToolCallbacks,
-  ownerToken?: string,
+  ownerToken: string,
 ): SessionScopedToolCallbackLease {
+  if (!ownerToken) {
+    throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: registration must carry the runtime owner token)`);
+  }
   const installed = applySessionScopedToolCallbackGuard(sessionId, callbacks);
-  // R52: construction is exclusive (lifecycle lock) — a fresh registration
-  // takes ownership with the caller's immutable runtime owner token.
+  // R52/R53: construction is exclusive (lifecycle lock) — a fresh
+  // registration takes ownership with the caller's immutable runtime owner
+  // token, which becomes BOTH the lease owner AND the guard owner.
   const lease: SessionScopedToolCallbackLease = {
     record: installed,
-    guard: sessionScopedToolCallbackGuards.get(sessionId),
-    ownerToken: ownerToken ?? randomUUID(),
+    guard: sessionScopedToolCallbackGuards.get(sessionId)?.guard,
+    ownerToken,
   };
-  sessionScopedToolCallbackRegistry.set(sessionId, installed);  sessionScopedToolCallbackLeases.set(sessionId, lease);
+  sessionScopedToolCallbackRegistry.set(sessionId, installed);
+  sessionScopedToolCallbackLeases.set(sessionId, lease);
   debug('session-scoped-tools', `Registered callbacks for session ${sessionId} (owner ${lease.ownerToken})`);
   return lease;
 }
@@ -191,18 +218,30 @@ export function registerSessionScopedToolCallbacks(
  * Used by the Electron session manager to add browser pane functions
  * after the agent has already registered its core callbacks. Merged
  * entries are guard-wrapped exactly like registered entries (R39-2).
+ *
+ * R53: OWNER-VERIFIED with a REQUIRED token. The merge is accepted only
+ * when BOTH the live guard's owner AND the existing record lease's owner
+ * equal the caller's token (or when nothing is registered yet — the caller
+ * becomes the first owner). Comparing only the lease owner let a stale
+ * runtime merge under a successor's freshly-installed guard, and falsely
+ * rejected the legitimate successor.
  */
 export function mergeSessionScopedToolCallbacks(
   sessionId: string,
   callbacks: Partial<SessionScopedToolCallbacks>,
-  ownerToken?: string,
+  ownerToken: string,
 ): SessionScopedToolCallbackLease {
+  if (!ownerToken) {
+    throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: merge must carry the runtime owner token)`);
+  }
   const current = sessionScopedToolCallbackLeases.get(sessionId);
-  // R52: OWNER-VERIFIED merge — a stale runtime arriving after a same-id
-  // successor published its own lease must NEVER merge its callbacks into
-  // the successor's record (under the successor's guard). Reject outright.
-  if (ownerToken !== undefined && current !== undefined && current.ownerToken !== ownerToken) {
-    throw new Error(`SESSION_CALLBACK_LEASE_OWNER_MISMATCH (session ${sessionId}: live lease owner ${current.ownerToken} != caller owner ${ownerToken})`);
+  const guardEntry = sessionScopedToolCallbackGuards.get(sessionId);
+  const leaseOwnerMatches = current === undefined || current.ownerToken === ownerToken;
+  const guardOwnerMatches = guardEntry === undefined || guardEntry.ownerToken === ownerToken;
+  if (!leaseOwnerMatches || !guardOwnerMatches) {
+    const liveLeaseOwner = current?.ownerToken ?? 'none';
+    const liveGuardOwner = guardEntry?.ownerToken ?? 'none';
+    throw new Error(`SESSION_CALLBACK_LEASE_OWNER_MISMATCH (session ${sessionId}: live lease owner ${liveLeaseOwner} / live guard owner ${liveGuardOwner} != caller owner ${ownerToken})`);
   }
   const existing = sessionScopedToolCallbackRegistry.get(sessionId) ?? {};
   const merged = {
@@ -212,14 +251,12 @@ export function mergeSessionScopedToolCallbacks(
   sessionScopedToolCallbackRegistry.set(sessionId, merged);
   // R49/R51: the merged record supersedes the previous one — the session's
   // lease is REPLACED and returned so the owner can re-bind it (per-turn
-  // merges by a live backend keep the owner's lease current).
+  // merges by a live backend keep the owner's lease current). The owner is
+  // INVARIANT here: only the verified owner's token is ever bound.
   const lease: SessionScopedToolCallbackLease = {
     record: merged,
-    guard: sessionScopedToolCallbackGuards.get(sessionId),
-    // R52-B: a token-less merge (trusted SM-internal record updates such as
-    // browser panes) PRESERVES the current owner — only an owner-verified
-    // merge may re-bind ownership.
-    ownerToken: ownerToken ?? current?.ownerToken ?? randomUUID(),
+    guard: guardEntry?.guard,
+    ownerToken,
   };
   sessionScopedToolCallbackLeases.set(sessionId, lease);
   debug('session-scoped-tools', `Merged callbacks for session ${sessionId} (owner ${lease.ownerToken})`);
@@ -256,7 +293,7 @@ export function unregisterSessionScopedToolCallbacksIf(
   // itself. Any drift (successor record, newer guard, different owner)
   // fails the CAS and the caller skips its callback/guard face.
   const liveRecord = sessionScopedToolCallbackRegistry.get(sessionId);
-  const liveGuard = sessionScopedToolCallbackGuards.get(sessionId);
+  const liveGuard = sessionScopedToolCallbackGuards.get(sessionId)?.guard;
   const liveLease = sessionScopedToolCallbackLeases.get(sessionId);
   const recordMatches = expected.record !== undefined
     ? liveRecord === expected.record
@@ -303,6 +340,28 @@ export function getSessionScopedToolCallbacks(sessionId: string): SessionScopedT
 }
 
 /**
+ * R53: OWNER-TOKEN compare-and-unregister — removes the session's ENTIRE
+ * registry state (record + guard + lease) only while BOTH the live lease
+ * owner AND the live guard owner equal `ownerToken`. This is the
+ * construction-cleanup path for a runtime that registered its record but
+ * threw before the lease was promoted to the ManagedSession (the exact
+ * lease snapshot was never captured): ownership is proven by the immutable
+ * token instead. A successor owner (fresh generation token) never matches,
+ * so this can never erase a successor's state.
+ */
+export function unregisterSessionScopedToolCallbacksIfOwner(
+  sessionId: string,
+  ownerToken: string,
+): boolean {
+  const liveLease = sessionScopedToolCallbackLeases.get(sessionId);
+  const guardEntry = sessionScopedToolCallbackGuards.get(sessionId);
+  if (liveLease === undefined || liveLease.ownerToken !== ownerToken) return false;
+  if (guardEntry === undefined || guardEntry.ownerToken !== ownerToken) return false;
+  unregisterSessionScopedToolCallbacks(sessionId);
+  return true;
+}
+
+/**
  * R52-A: GUARD-ONLY compare-and-unregister. Removes the per-session guard
  * ONLY while (a) the live guard is still exactly `expectedGuard` and (b) NO
  * callback record was ever registered (a present record means a successor
@@ -316,7 +375,7 @@ export function unregisterSessionScopedToolGuardIf(
   if (sessionScopedToolCallbackRegistry.get(sessionId) !== undefined) {
     return false;
   }
-  if (sessionScopedToolCallbackGuards.get(sessionId) !== expectedGuard) {
+  if (sessionScopedToolCallbackGuards.get(sessionId)?.guard !== expectedGuard) {
     return false;
   }
   sessionScopedToolCallbackGuards.delete(sessionId);
@@ -330,5 +389,5 @@ export function unregisterSessionScopedToolGuardIf(
 export function getSessionScopedToolCallbackGuard(
   sessionId: string,
 ): SessionScopedToolCallbackGuard | undefined {
-  return sessionScopedToolCallbackGuards.get(sessionId);
+  return sessionScopedToolCallbackGuards.get(sessionId)?.guard;
 }

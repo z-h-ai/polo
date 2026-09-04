@@ -18,6 +18,10 @@ import type { ThinkingLevel } from '../thinking-levels.ts';
 import type { PermissionMode } from '../mode-manager.ts';
 import type { LoadedSource } from '../../sources/types.ts';
 import type { AuthRequest } from '../session-scoped-tools.ts';
+// Type-only import — erased at runtime, never a runtime cycle. The
+// registry's narrowed lease is the single shared contract (R53): no
+// anonymous {record, guard} redeclaration that could drift from it.
+import type { SessionScopedToolCallbackLease } from '../session-scoped-tool-callback-registry.ts';
 import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig as Session } from '../../sessions/storage.ts';
@@ -181,23 +185,23 @@ export interface BackendHostRuntimeContext {
  */
 export interface CoreBackendConfig {
   /**
-   * R51: notified whenever the backend re-registers or merges its
+   * R51/R53: notified whenever the backend re-registers or merges its
    * session-scoped callback record (e.g. PiAgent's per-turn merge) — the
    * SessionManager re-binds the OWNER lease (`ManagedSession.callbackLease`)
    * to the returned lease so disposal cleanup always CASses against the
-   * backend's CURRENT record/guard pair.
+   * backend's CURRENT record/guard pair. The lease is the SHARED named
+   * contract (`SessionScopedToolCallbackLease`) with a REQUIRED owner token —
+   * no anonymous redeclaration that could drift from the registry.
    */
-  onSessionCallbackLeaseChanged?: (lease: {
-    record: unknown;
-    guard: unknown;
-  }) => void;
+  onSessionCallbackLeaseChanged?: (lease: SessionScopedToolCallbackLease) => void;
 
   /**
-   * R52-B: the immutable RUNTIME OWNER TOKEN for this backend's construction.
-   * Carried by the backend's register/merge calls into the session-scoped
-   * callback registry — a mismatch with the live lease's owner REJECTS the
-   * merge outright (a stale runtime can never merge into a successor's
-   * record).
+   * R52-B/R53: the immutable RUNTIME OWNER TOKEN for this backend's
+   * construction. Carried by the backend's register/merge calls into the
+   * session-scoped callback registry — a mismatch with the live lease's
+   * owner REJECTS the outright (a stale runtime can never merge into a
+   * successor's record). Backends FAIL CLOSED when this is absent: the
+   * registry's owner-bearing APIs have no token-less path.
    */
   sessionCallbackOwnerToken?: string;
 

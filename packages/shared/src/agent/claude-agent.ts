@@ -47,6 +47,7 @@ import {
   cleanupSessionScopedTools,
   type AuthRequest,
 } from './session-scoped-tools.ts';
+import type { SessionScopedToolCallbackLease } from './session-scoped-tool-callback-registry.ts';
 import { type AutomationSystem, type SdkAutomationCallbackMatcher } from '../automations/index.ts';
 import {
   getPermissionMode,
@@ -228,21 +229,19 @@ export interface ClaudeAgentConfig {
   /** Enable 1M context window for Opus 4.7. Default: true. Set false to use 200K and conserve usage limits. */
   enable1MContext?: boolean;
   /**
-   * R52-B: immutable runtime owner token for session-scoped callback
-   * ownership. The constructor's registration and every owner-verified
-   * merge carry it; mismatched owners are rejected by the registry.
+   * R52-B/R53: immutable runtime owner token for session-scoped callback
+   * ownership. Optional at the type level (bare test constructions), but the
+   * constructor FAILS CLOSED without it — the registry's owner-bearing APIs
+   * have no token-less path.
    */
   sessionCallbackOwnerToken?: string;
   /**
-   * R51/R52: notified with the exact lease returned by the constructor's
-   * registration / per-turn merges so the SessionManager can re-bind its
-   * owned lease without re-reading the registry.
+   * R51/R53: notified with the exact named lease returned by the
+   * constructor's registration so the SessionManager can re-bind its owned
+   * lease without re-reading the registry. Shared contract — no anonymous
+   * redeclaration.
    */
-  onSessionCallbackLeaseChanged?: (lease: {
-    record: unknown;
-    guard: unknown;
-    ownerToken?: string;
-  }) => void;
+  onSessionCallbackLeaseChanged?: (lease: SessionScopedToolCallbackLease) => void;
 }
 
 // Permission request tracking
@@ -699,11 +698,15 @@ export class ClaudeAgent extends BaseAgent {
     });
 
     // Register session-scoped tool callbacks
-    // R52-B: the registration carries THIS runtime's immutable owner token —
-    // the SessionManager's construct-time owner-verified merge (and this
-    // agent's own per-turn merges) must match the lease this register
-    // publishes; a token-less register would mint a foreign owner and make
-    // the legitimate owner's next merge throw OWNER_MISMATCH.
+    // R52-B/R53: the registration carries THIS runtime's immutable owner
+    // token — the SessionManager's construct-time owner-verified merge (and
+    // this agent's own per-turn merges) must match the lease this register
+    // publishes. FAIL CLOSED: a construction without an owner token has no
+    // owner-attributable registration and must not publish one.
+    const ownerToken = this.config.sessionCallbackOwnerToken;
+    if (!ownerToken) {
+      throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: construction must carry the runtime owner token)`);
+    }
     registerSessionScopedToolCallbacks(sessionId, {
       onPlanSubmitted: (planPath) => {
         this.onDebug?.(`[ClaudeAgent] onPlanSubmitted received: ${planPath}`);
@@ -724,7 +727,7 @@ export class ClaudeAgent extends BaseAgent {
       getTurnGeneration: () => this.sessionTurnGeneration,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
-    }, this.config.sessionCallbackOwnerToken);
+    }, ownerToken);
 
     // Start config watcher for hot-reloading source changes
     // Only start in non-headless mode to avoid overhead in batch/script scenarios

@@ -1898,11 +1898,12 @@ describe('authoritative callback guard inventory (R38-2)', () => {
     }
 
     // The tool-callback builder and the browser-pane record go through the
-    // same authoritative mechanism. R52-B: both merges carry the runtime
-    // owner token so the owner-verified registry accepts them.
-    expect(source).toContain('mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), managed.runtimeOwnerToken)')
+    // same authoritative mechanism. R52-B/R53: both merges carry the runtime
+    // owner token (fail-closed accessor) so the owner-verified registry
+    // accepts them.
+    expect(source).toContain('mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), this.runtimeOwnerTokenOf(managed))')
     expect(source).toContain('mergeSessionScopedToolCallbacks(sid, {')
-    expect(source).toContain('managed.runtimeOwnerToken)')
+    expect(source).toContain('this.runtimeOwnerTokenOf(managed))')
     expect(source).toContain('this.guardManagedCallbackRecord(managed, \'browserPaneFns\', rawBrowserPaneFns.browserPaneFns)')
   })
 
@@ -2041,6 +2042,7 @@ describe('backend-registered callback guard boundary (R39-2)', () => {
       model: 'claude-test',
       isHeadless: true,
       skipConfigWatcher: true,
+      sessionCallbackOwnerToken: 'test-owner',
     })
     // Stub the underlying query — the guard is what is under test.
     ;(agent as unknown as { queryLlm: unknown }).queryLlm = async () => ({ text: 'wired-secret', model: 'stub' })
@@ -2100,7 +2102,7 @@ describe('backend-registered callback guard boundary (R39-2)', () => {
     const legacySessionId = 'legacy-cb-39'
     installSessionScopedToolCallbackGuard(legacySessionId, () => {
       throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
-    })
+    }, 'legacy-guard-owner')
 
     const { ClaudeAgent } = await import('@polo-ai/shared/agent')
     const agent = new ClaudeAgent({
@@ -2115,6 +2117,7 @@ describe('backend-registered callback guard boundary (R39-2)', () => {
       model: 'claude-test',
       isHeadless: true,
       skipConfigWatcher: true,
+      sessionCallbackOwnerToken: 'test-owner',
     })
 
     const callbacks = getSessionScopedToolCallbacks(legacySessionId)

@@ -9,7 +9,7 @@ import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1403,7 +1403,33 @@ export class SessionManager implements ISessionManager {
       if (!this.managedTrustedScope(managed)) {
         throw new Error(`SESSION_OUT_OF_TRUSTED_SCOPE (${callbackName})`)
       }
-    })
+    }, this.runtimeOwnerTokenOf(managed))
+  }
+
+  /**
+   * R53: the managed's runtime owner token, minting a MANAGER PLACEHOLDER
+   * when no runtime generation exists yet (session publication installs the
+   * pre-construction guard before any backend owns the id; the placeholder
+   * is replaced by the construction's fresh generation token). Fail-closed
+   * for callers that must never observe an undefined owner.
+   */
+  private runtimeOwnerTokenOf(managed: ManagedSession): string {
+    if (managed.runtimeOwnerToken === undefined) {
+      managed.runtimeOwnerToken = randomUUID()
+    }
+    return managed.runtimeOwnerToken
+  }
+
+  /** R53: irreversible 8-hex fingerprint — never log a full owner token. */
+  private ownerTokenFingerprint(managed: ManagedSession): string {
+    const token = managed.runtimeOwnerToken
+    if (token === undefined) return 'none'
+    return this.ownerTokenFingerprintOf(token)
+  }
+
+  /** R53: fingerprint form for an arbitrary token value (never the token). */
+  private ownerTokenFingerprintOf(token: string): string {
+    return createHash('sha256').update(token).digest('hex').slice(0, 8)
   }
 
   /** R38-2: the recorded guard inventory for one managed session (tests). */
@@ -4355,8 +4381,11 @@ export class SessionManager implements ISessionManager {
     }
     // R48: the registry returns the INSTALLED (guard-wrapped) record — the
     // lease this quarantine binds to. Identity checks against the raw input
-    // would never match a guarded record.
-    const installedLease = registerSessionScopedToolCallbacks(managed.id, refusingCallbacks as unknown as SessionScopedToolCallbacks)
+    // would never match a guarded record. R53: the refusing record is
+    // owner-bound to THIS quarantine entry's immutable token — nobody may
+    // merge into it (the refusing stubs are the point); a later legitimate
+    // owner's register takes the id over exclusively.
+    const installedLease = registerSessionScopedToolCallbacks(managed.id, refusingCallbacks as unknown as SessionScopedToolCallbacks, quarantineToken)
     this.unpublishedRuntimeQuarantine.set(managed.id, {
       managed,
       quarantineToken,
@@ -4697,11 +4726,7 @@ export class SessionManager implements ISessionManager {
    * earlier partial disposal were already settled at the lock's head.
    */
   private async constructAgentUnlocked(managed: ManagedSession): Promise<AgentInstance> {
-    // R52-B: the immutable RUNTIME OWNER TOKEN minted for THIS construction —
-    // carried by the backend's register/merge calls so stale runtimes cannot
-    // merge into a successor's lease.
-    managed.runtimeOwnerToken = randomUUID()
-    console.log('[owner-token] session', managed.id, 'token', managed.runtimeOwnerToken)
+    sessionLog.debug(`Constructing agent runtime for session ${managed.id} (owner ${this.ownerTokenFingerprint(managed)})`)
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
       sessionConnectionSlug: managed.llmConnection,
@@ -4729,6 +4754,17 @@ export class SessionManager implements ISessionManager {
     try {
       if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })
+
+      // R53: the RUNTIME OWNER TOKEN is minted exactly ONCE per runtime
+      // generation — only when a NEW backend is actually constructed. A
+      // reuse path (live agent) keeps the existing token so the single
+      // chain SM → coreConfig → backend → registry never re-binds a live
+      // backend to a foreign token. The previous runtime generation's
+      // callback lease ownership ended with its disposal: a stale lease
+      // must never ride into THIS construction's dispose path (issue 1's
+      // reused-ManagedSession residue).
+      managed.runtimeOwnerToken = randomUUID()
+      managed.callbackLease = undefined
 
       // Lock the connection after first resolution
       // This ensures the session always uses the same provider
@@ -4960,17 +4996,21 @@ export class SessionManager implements ISessionManager {
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
-        // R51/R52: per-turn callback merges replace the session's lease — the
-        // backend notifies with the EXACT returned lease; the handler verifies
-        // this managed is still the id's live owner before re-binding, so a
-        // stale runtime can never re-bind over a successor's lease.
-        onSessionCallbackLeaseChanged: (lease: { record: unknown; guard: unknown; ownerToken?: string }) => {
-          // R52: rebind the OWNER lease — the backend handed back the exact
-          // lease its register/merge returned; a successor owning the id has
-          // already evicted THIS managed from the map (no rebind happens).
-          if (this.sessions.get(managed.id) === managed) {
-            managed.callbackLease = lease as SessionScopedToolCallbackLease
+        // R51/R52/R53: per-turn callback merges replace the session's lease —
+        // the backend notifies with the EXACT returned lease; the handler
+        // re-binds ONLY when (a) this managed is still the id's live entry
+        // AND (b) the notified lease's owner is EXACTLY this managed's
+        // runtime owner token — backend lease owner, ManagedSession token
+        // and live registry owner stay ONE AND THE SAME, so a stale runtime
+        // can never re-bind over a successor's lease.
+        onSessionCallbackLeaseChanged: (lease: SessionScopedToolCallbackLease) => {
+          if (this.sessions.get(managed.id) !== managed) return
+          if (managed.runtimeOwnerToken === undefined) return
+          if (lease.ownerToken !== managed.runtimeOwnerToken) {
+            sessionLog.warn(`Ignored callback lease notification for session ${managed.id}: lease owner ${this.ownerTokenFingerprintOf(lease.ownerToken)} is not the live runtime owner`)
+            return
           }
+          managed.callbackLease = lease
         },
         // R52-B: the immutable RUNTIME OWNER TOKEN — the backend's
         // register/merge calls carry it; a mismatch with the live lease's
@@ -5435,7 +5475,7 @@ export class SessionManager implements ISessionManager {
         }
         mergeSessionScopedToolCallbacks(sid, {
           browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
-        }, managed.runtimeOwnerToken)
+        }, this.runtimeOwnerTokenOf(managed))
       }
 
       // Signal that the agent instance is ready (unblocks title generation)
@@ -5726,7 +5766,7 @@ export class SessionManager implements ISessionManager {
       // R37-2: the callbacks are built by ONE inventoried builder — the
       // table-driven inventory test exercises every entry through its
       // current-scope guard.
-      mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), managed.runtimeOwnerToken)
+      mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), this.runtimeOwnerTokenOf(managed))
 
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
       // R38-2: the DIRECT source-activation callback is registered through
