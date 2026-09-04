@@ -2782,7 +2782,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
 
       // The CLI call completes — but it NEVER advances or replaces the
       // desktop generation domain (it does not own process.env).
-      releaseCliProxy()
+      releaseCliProxy!()
       const cliResult = await cliWork
       expect(cliResult.authInjected).toBe(true)
 
@@ -2829,7 +2829,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
 
       // Call 1's start resolves LATE: superseded by call 2's epoch — it
       // closes its own listener and publishes NOTHING.
-      releaseProxy0()
+      releaseProxy0!()
       const result1 = await postInit1
       expect(result1.authInjected).toBe(false)
       expect(result1.authWarning).toContain('superseded')
