@@ -1198,7 +1198,7 @@
   "productSpace.target.removedLabel": "已从切换器移除",
   "productSpace.target.retry": "重试加载",
   "productSpace.target.stay": "留在{{name}}",
-  "productSpace.windowGuard.description": "请放大 Polo 窗口后继续使用工作台。Polo 客户端面向桌面窗口，不提供移动端工作台布局。",
+  "productSpace.windowGuard.description": "窗口宽度低于 640px。请放大 Polo 窗口后继续使用工作台。Polo 客户端面向桌面窗口，不提供移动端工作台布局。",
   "productSpace.windowGuard.eyebrow": "窗口保护",
   "productSpace.windowGuard.title": "窗口过窄",
   "sendToWorkspace.description_few": "将 {{count}} 个会话发送到远程 Workspace。",
