@@ -86,36 +86,33 @@ mock.module('@polo-ai/shared/config/storage', () => ({
   },
 }))
 
-// R53 harness seam: a CONTROLLED DEFERRED credential provider. When armed,
-// `resolveAuthEnvVars` parks on a gate the test releases (resolve/reject);
-// when disarmed it delegates to the real implementation. The REAL
-// ClaudeAgent.postInit drives all env mutations on top of this.
+// R53/R54 harness seam: CONTROLLED DEFERRED credential providerS. Each
+// armed slot parks ONE `resolveAuthEnvVars` call (FIFO — the first armed
+// slot serves the first provider call, so two overlapping postInit
+// transactions park on distinct slots); releasing a slot resolves or
+// rejects that call. With no slots armed the real implementation runs. The
+// REAL ClaudeAgent.postInit drives all env mutations on top of this.
 const llmConnectionsModule = await import('@polo-ai/shared/config/llm-connections')
-let r53CredentialGate: {
+let r53CredentialQueue: Array<{
   promise: Promise<void>
   release: () => void
   mode: 'resolve' | 'reject'
-} | null = null
+  result: Record<string, string>
+}> = []
 mock.module('@polo-ai/shared/config/llm-connections', () => ({
   ...llmConnectionsModule,
   resolveAuthEnvVars: async (...args: unknown[]) => {
-    if (!r53CredentialGate) {
+    const slot = r53CredentialQueue.shift()
+    if (!slot) {
       return (llmConnectionsModule as unknown as {
         resolveAuthEnvVars: (...delegateArgs: unknown[]) => Promise<unknown>
       }).resolveAuthEnvVars(...args)
     }
-    await r53CredentialGate.promise
-    if (r53CredentialGate.mode === 'reject') {
+    await slot.promise
+    if (slot.mode === 'reject') {
       throw new Error('credential provider exploded (r53 deferred provider)')
     }
-    return {
-      success: true as const,
-      warning: undefined,
-      envVars: {
-        ANTHROPIC_API_KEY: 'resolved-api-key',
-        ANTHROPIC_BASE_URL: 'https://resolved.example.com',
-      },
-    }
+    return { success: true as const, warning: undefined, envVars: slot.result }
   },
 }))
 const r49StalledAgent = {
@@ -2279,7 +2276,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     })
 
     afterEach(() => {
-      r53CredentialGate = null
+      r53CredentialQueue = []
       r53ConnectionFixture = null
       for (const key of MANAGED_KEYS) {
         const prior = envPriors[key]
@@ -2306,10 +2303,13 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       throw new Error('the desktop pre-await credential deletions never landed')
     }
 
-    const armCredentialGate = (mode: 'resolve' | 'reject'): () => void => {
+    const armCredentialGate = (
+      mode: 'resolve' | 'reject',
+      result: Record<string, string> = { ANTHROPIC_API_KEY: 'resolved-api-key', ANTHROPIC_BASE_URL: 'https://resolved.example.com' },
+    ): () => void => {
       let releaseGate!: () => void
       const gatePromise = new Promise<void>(resolve => { releaseGate = () => resolve() })
-      r53CredentialGate = { promise: gatePromise, release: releaseGate, mode }
+      r53CredentialQueue.push({ promise: gatePromise, release: releaseGate, mode, result })
       return releaseGate
     }
 
@@ -2392,6 +2392,71 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       releaseGate()
       await postInitPromise
       claude.destroy()
+    })
+
+    it('R54 ABA: a predecessor abort cannot revive its OAuth token under a successful API-key-only successor', async () => {
+      // Predecessor-A snapshots the OCCUPIED OAuth token; successor-B starts
+      // while keys are absent and snapshots ABSENCE.
+      const agentA = buildClaude('q-c54-aba-a')
+      const agentB = buildClaude('q-c54-aba-b')
+      const releaseA = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'a-key', ANTHROPIC_BASE_URL: 'https://a.example.com' })
+      const releaseB = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'b-key', ANTHROPIC_BASE_URL: 'https://b.example.com' })
+      const postInitA = agentA.postInit()
+      await waitForEnvDeleted()
+      const postInitB = agentB.postInit()
+      await new Promise(r => setTimeout(r, 30))
+
+      // The predecessor aborts: its rollback is SUPERSEDED (B owns the keys
+      // by generation) — the occupied OAuth token is NOT revived.
+      agentA.rollbackCredentialEnvTransaction()
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      releaseA()
+      await postInitA
+
+      // Any revival path lands mid-flight (the exact ABA window).
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = 'predecessor-oauth-token'
+
+      // The successor completes: its commit publishes the FULL expected
+      // credential set — the revived predecessor OAuth key is EXPLICITLY
+      // re-deleted and its API-key-only result is authoritative.
+      releaseB()
+      const resultB = await postInitB
+      expect(resultB.authInjected).toBe(true)
+      expect(process.env.ANTHROPIC_API_KEY).toBe('b-key')
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      expect(process.env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined()
+      expect(process.env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined()
+      expect(process.env.ANTHROPIC_BEDROCK_BASE_URL).toBeUndefined()
+      agentB.destroy()
+    })
+
+    it('R54 ABA: a successor abort after a superseded predecessor rollback restores only absence (OAuth-only)', async () => {
+      const agentA = buildClaude('q-c54-aba-c')
+      const agentB = buildClaude('q-c54-aba-d')
+      const releaseA = armCredentialGate('resolve', { CLAUDE_CODE_OAUTH_TOKEN: 'a-oauth', ANTHROPIC_BASE_URL: 'https://a.example.com' })
+      const releaseB = armCredentialGate('resolve', { CLAUDE_CODE_OAUTH_TOKEN: 'b-oauth', ANTHROPIC_BASE_URL: 'https://b.example.com' })
+      const postInitA = agentA.postInit()
+      await waitForEnvDeleted()
+      const postInitB = agentB.postInit()
+      await new Promise(r => setTimeout(r, 30))
+
+      // Predecessor rollback: superseded by B's ownership — never restores
+      // the occupied predecessor OAuth token.
+      agentA.rollbackCredentialEnvTransaction()
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      releaseA()
+      await postInitA
+
+      // Successor abort: B still OWNS the keys by generation — its rollback
+      // restores B's snapshot (ABSENCE), never the predecessor credential.
+      agentB.rollbackCredentialEnvTransaction()
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      expect(process.env.ANTHROPIC_API_KEY).toBeUndefined()
+      expect(process.env.ANTHROPIC_BASE_URL).toBeUndefined()
+      expect(process.env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined()
+      expect(process.env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined()
+      expect(process.env.ANTHROPIC_BEDROCK_BASE_URL).toBeUndefined()
+      agentB.destroy()
     })
 
     it('a destroyed agent refuses postInit at the entry (zero side effects)', async () => {

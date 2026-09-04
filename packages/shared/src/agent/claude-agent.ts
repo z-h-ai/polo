@@ -264,6 +264,34 @@ const DANGEROUS_COMMANDS = new Set([
 ]);
 
 // ============================================================
+// R54: PROCESS-GLOBAL CREDENTIAL ENV COORDINATION
+// ============================================================
+// The desktop postInit path mutates PROCESS-GLOBAL credential env keys. Two
+// overlapping transactions (a stale predecessor and its same-id successor)
+// previously produced an ABA race: the predecessor's rollback could revive a
+// credential the successor believed absent, and the successor's commit did
+// not re-publish the FULL expected credential set — leaving the PREDECESSOR's
+// OAuth token alive under a SUCCESSFUL successor. Coordination state:
+//
+// - `credentialEnvGenerationCounter` — monotonically increasing; every new
+//   transaction takes the next generation.
+// - `credentialEnvKeyOwnerGeneration` — per managed key, the generation that
+//   currently OWNS it (set at first touch). A stale transaction's rollback
+//   only restores keys it still owns by generation: a superseded rollback
+//   can NEVER revive a key its successor took over.
+// - A commit publishes the FULL expected credential set — every managed key
+//   the provider did not supply is EXPLICITLY re-deleted, so no predecessor
+//   revival survives a successor's success.
+const MANAGED_DESKTOP_CREDENTIAL_ENV_KEYS = [
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  ...CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
+];
+let credentialEnvGenerationCounter = 0;
+const credentialEnvKeyOwnerGeneration = new Map<string, number>();
+
+// ============================================================
 // Global Tool Permission System
 // Used by both bash commands (via agent instance) and MCP tools (via global functions)
 // ============================================================
@@ -507,16 +535,19 @@ export class ClaudeAgent extends BaseAgent {
    */
   private postInitAborted: boolean = false;
   /**
-   * R52: the in-flight credential env transaction — per-key prior values,
-   * the keys touched, and the values this transaction wrote. Rolled back
-   * per-key (only keys whose current value still equals what this
-   * transaction wrote) on abort/failure, so a same-id successor's committed
-   * values are never clobbered by a stale rollback.
+   * R52/R53/R54: the in-flight credential env transaction — per-key prior
+   * values, the keys touched, the values this transaction wrote, and THIS
+   * transaction's owner GENERATION. Rolled back per-key (only keys this
+   * transaction still OWNS by generation AND whose current value still
+   * equals what it wrote) on abort/failure, so a successor's committed
+   * values — and a successor's OWNERSHIP of the managed keys — are never
+   * clobbered by a stale rollback.
    */
   private credentialEnvTransaction?: {
     touched: Set<string>
     prior: Record<string, string | undefined>
     written: Record<string, string | undefined>
+    generation: number
   };
   // Permission whitelists are now managed by this.permissionManager (inherited from BaseAgent)
   // Source state tracking is now managed by this.sourceManager (inherited from BaseAgent)
@@ -771,45 +802,67 @@ export class ClaudeAgent extends BaseAgent {
 
     const invocationScoped = this.config.sessionStorage?.owner === 'cli';
 
-    // R52-C/R53: TRANSACTIONAL credential application — the transaction is
-    // LIVE from the first mutation until the final synchronous env commit
+    // R52-C/R53/R54: TRANSACTIONAL credential application — the transaction
+    // is LIVE from the first mutation until the final synchronous env commit
     // SUCCEEDS (commit) or until any abort/failure/throw rolls it back. Each
     // touched key records its POST-MUTATION value: a delete records
-    // `undefined`, a write records the committed value. Rollback restores a
-    // key ONLY while its current value still equals the recorded
+    // `undefined`, a write records the committed value. Each transaction
+    // takes the NEXT OWNER GENERATION and owns every key it first touches;
+    // a rollback restores a key ONLY while this transaction still owns the
+    // key by generation AND the current value still equals the recorded
     // post-mutation value — a successor's newer committed value is never
-    // clobbered, and a populated pre-existing key erased by the delete is
+    // clobbered, a superseded rollback never revives a key its successor
+    // took over, and a populated pre-existing key erased by the delete is
     // really restored.
     this.credentialEnvTransaction = {
       prior: envSnapshot,
       touched: new Set<string>(),
       written: {},
+      generation: ++credentialEnvGenerationCounter,
     };
     const txnTrack = (key: string): void => {
       const txn = this.credentialEnvTransaction!;
       txn.touched.add(key);
       if (!(key in txn.prior)) txn.prior[key] = process.env[key];
+      // R54: ownership of the key moves to THIS (newest) generation.
+      credentialEnvKeyOwnerGeneration.set(key, txn.generation);
     };
     const txnRestoreKey = (key: string): void => {
       const prior = this.credentialEnvTransaction!.prior[key]
       if (prior === undefined) delete process.env[key]
       else process.env[key] = prior
     }
-    // R53: the ONE rollback entry — every abort/failure/throw path funnels
-    // here; the transaction ends (cleared) only through rollback or commit.
+    // R53/R54: the ONE rollback entry — every abort/failure/throw path
+    // funnels here; the transaction ends (cleared) only through rollback or
+    // commit. R54: a key is restored only while this transaction still owns
+    // it by generation (a successor transaction has already taken the key
+    // over) AND the current value still equals the recorded post-mutation
+    // value.
     const rollbackTxn = (): void => {
       const txn = this.credentialEnvTransaction
       if (!txn) return
       for (const key of txn.touched) {
+        if (credentialEnvKeyOwnerGeneration.get(key) !== txn.generation) continue
         // Per-key CAS against the POST-MUTATION value recorded by THIS
         // transaction: `undefined` for deletes, the written value for writes.
         if (process.env[key] === txn.written[key]) txnRestoreKey(key)
       }
       this.credentialEnvTransaction = undefined
     }
-    // R53: the success finalizer — called ONLY after the final synchronous
-    // env commit has landed; the keys keep their committed values.
+    // R53/R54: the success finalizer — publishes the FULL expected credential
+    // set for the process-global (desktop) path: every managed key this
+    // transaction's provider did NOT supply (post-mutation expectation
+    // `undefined`) is EXPLICITLY re-deleted, so a predecessor's revived
+    // credential cannot survive this successor's success. Keys the provider
+    // DID supply keep their committed values. Called ONLY after the final
+    // synchronous env mutations have landed.
     const commitTxn = (): void => {
+      const txn = this.credentialEnvTransaction
+      if (!invocationScoped && txn) {
+        for (const key of MANAGED_DESKTOP_CREDENTIAL_ENV_KEYS) {
+          if (txn.written[key] === undefined && process.env[key] !== undefined) txnDeleteKey(key)
+        }
+      }
       this.credentialEnvTransaction = undefined
     }
     const txnDeleteKey = (key: string): void => {
@@ -951,19 +1004,22 @@ export class ClaudeAgent extends BaseAgent {
   }
 
   /**
-   * R52/R53: SYNCHRONOUS per-key rollback of the in-flight credential env
+   * R52/R53/R54: SYNCHRONOUS per-key rollback of the in-flight credential env
    * transaction. Invoked from the SessionManager's bounded-construction
    * timeout (and from this agent's abort listener) so a provider that
    * ignores the AbortSignal cannot leave erased or overwritten
-   * process-global credentials behind: only keys whose CURRENT value still
-   * equals the POST-MUTATION value THIS transaction recorded (undefined for
-   * deletes, the committed value for writes) are restored; keys a successor
-   * already committed are never touched.
+   * process-global credentials behind: only keys this transaction still
+   * OWNS by generation (a successor transaction has taken the key over)
+   * whose CURRENT value still equals the POST-MUTATION value THIS
+   * transaction recorded (undefined for deletes, the committed value for
+   * writes) are restored; keys a successor already committed — or already
+   * owns — are never touched and never revived.
    */
   rollbackCredentialEnvTransaction(): void {
     const txn = this.credentialEnvTransaction
     if (!txn) return
     for (const key of txn.touched) {
+      if (credentialEnvKeyOwnerGeneration.get(key) !== txn.generation) continue
       const prior = txn.prior[key]
       const written = txn.written[key]
       if (process.env[key] === written) {
