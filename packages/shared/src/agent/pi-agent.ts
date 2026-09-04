@@ -2190,13 +2190,20 @@ export class PiAgent extends BaseAgent {
       // R51: the per-turn merge REPLACES the session's callback lease — the
       // returned lease is handed back to the SessionManager so the OWNER's
       // disposal cleanup stays bound to the CURRENT record/guard pair.
-      const lease = mergeSessionScopedToolCallbacks(sessionId, {
-        onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
-        onAuthRequest: (request) => this.onAuthRequest?.(request),
-        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
-        getTurnGeneration: () => this.sessionTurnGeneration,
-        queryFn: (request) => this.queryLlm(request),
-      });
+      // R52-B: owner-verified merge — a stale runtime arriving after a
+      // same-id successor published its lease is REJECTED here instead of
+      // silently merging into the successor's record.
+      const lease = mergeSessionScopedToolCallbacks(
+        sessionId,
+        {
+          onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
+          onAuthRequest: (request) => this.onAuthRequest?.(request),
+          onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
+          getTurnGeneration: () => this.sessionTurnGeneration,
+          queryFn: (request) => this.queryLlm(request),
+        },
+        this.config.sessionCallbackOwnerToken,
+      );
       this.config.onSessionCallbackLeaseChanged?.(lease);
     }
     try {

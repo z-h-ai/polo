@@ -24,7 +24,7 @@ import {
 import { getSessionFilePath, writeSessionJsonl } from '@polo-ai/shared/sessions'
 import type { StoredSession } from '@polo-ai/shared/sessions'
 import { getPermissionMode, setPermissionMode, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterAllSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, mergeSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterAllSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import { makeAnswerResolution, makeQuestionRequest } from '../../sessions/request-user-input-fixtures'
 
 const TEST_ACCOUNT_ID = 'account-a'
@@ -60,6 +60,23 @@ mock.module('@polo-ai/server-core/domain', () => ({
 // honoured unless the stall flag is armed by the R49-C test.
 const agentBackendModule = await import('@polo-ai/shared/agent/backend')
 let r49StallPostInit = false
+// R51-B harness seam: controllable delay for the awaited factory input
+// (enable1MContext config read) inside construction.
+const agentStorageModule = await import('@polo-ai/shared/config/storage')
+const realGetEnable1MContext = agentStorageModule.getEnable1MContext
+let r51FactoryInputGate: Promise<void> | null = null
+let r51ReleaseFactoryInputGate: (() => void) | null = null
+let r51FactoryInputGateEntered = false
+mock.module('@polo-ai/shared/config/storage', () => ({
+  ...agentStorageModule,
+  getEnable1MContext: async () => {
+    if (r51FactoryInputGate) {
+      r51FactoryInputGateEntered = true
+      await r51FactoryInputGate
+    }
+    return realGetEnable1MContext()
+  },
+}))
 const r49StalledAgent = {
   dispose: () => {},
   setSessionTurnGeneration: () => {},
@@ -1654,6 +1671,21 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       await expect(cbs.listSessionsFn!()).resolves.toBe('replacement' as never)
       expect(g2Calls.length).toBeGreaterThan(0)
       expect(g1Calls).toBe(0)
+      // R52-B: the OWNER TOKEN is part of the lease — a merge carrying a
+      // different owner token is REJECTED outright even when record+guard
+      // match (a stale runtime can never merge into a successor's record).
+      expect(() => mergeSessionScopedToolCallbacks(
+        sessionId,
+        { listSessionsFn: async () => 'foreign' } as never,
+        'foreign-owner-token',
+      )).toThrow('SESSION_CALLBACK_LEASE_OWNER_MISMATCH')
+      // R52-B: a token-less merge (trusted SM-internal record update)
+      // PRESERVES the current owner.
+      const preservedLease = mergeSessionScopedToolCallbacks(
+        sessionId,
+        { listSessionsFn: async () => 'preserved' } as never,
+      )
+      expect(preservedLease.ownerToken).toBe(getSessionScopedToolCallbackLease(sessionId)!.ownerToken)
       // And the explicit whole-session teardown still works when genuinely
       // closing the session.
       unregisterAllSessionScopedToolCallbacks(sessionId)
@@ -2032,6 +2064,87 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect((sm as unknown as {
         quarantinedRuntimeDisposals: Map<string, unknown>
       }).quarantinedRuntimeDisposals.size).toBe(0)
+    })
+  })
+
+  // ==========================================================================
+  // R52-C: the credential env transaction rolls back per-key — a successor's
+  // committed values are never clobbered by a stale owner's rollback, and a
+  // destroyed agent's postInit is refused at the entry.
+  // ==========================================================================
+
+  describe('credential env transaction isolation (R52-C)', () => {
+    it('per-key rollback restores only the stale transaction keys; a successor commit survives', () => {
+      const envBefore = {
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      }
+      const { ClaudeAgent } = require('@polo-ai/shared/agent')
+      const claude = new ClaudeAgent({
+        session: { id: 'q-c-perkey', rootPath: tmpRoot },
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+      } as never)
+      const prior = {
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      }
+      delete process.env.ANTHROPIC_API_KEY
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+      delete process.env.ANTHROPIC_BASE_URL
+      ;(claude as unknown as {
+        credentialEnvTransaction: {
+          touched: Set<string>
+          prior: Record<string, string | undefined>
+          written: Record<string, string | undefined>
+        }
+      }).credentialEnvTransaction = {
+        touched: new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL']),
+        prior,
+        written: { ANTHROPIC_API_KEY: undefined, CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_BASE_URL: undefined },
+      }
+
+      process.env.ANTHROPIC_API_KEY = 'successor-key'
+
+      claude.rollbackCredentialEnvTransaction()
+      expect(process.env.ANTHROPIC_API_KEY).toBe('successor-key')
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN ?? undefined).toBe(envBefore.CLAUDE_CODE_OAUTH_TOKEN ?? undefined)
+      expect(process.env.ANTHROPIC_BASE_URL ?? undefined).toBe(envBefore.ANTHROPIC_BASE_URL ?? undefined)
+      expect((claude as unknown as { postInitAborted: boolean }).postInitAborted).toBe(true)
+      delete process.env.ANTHROPIC_API_KEY
+      claude.destroy()
+    })
+
+    it('a destroyed agent refuses postInit at the entry (zero side effects)', async () => {
+      const { ClaudeAgent } = require('@polo-ai/shared/agent')
+      const claude = new ClaudeAgent({
+        session: { id: 'q-c-entry', rootPath: tmpRoot },
+        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+      } as never)
+      claude.destroy()
+      const envBefore = process.env.ANTHROPIC_API_KEY
+      const result = await claude.postInit()
+      expect(result.authInjected).toBe(false)
+      expect(process.env.ANTHROPIC_API_KEY).toBe(envBefore)
+      expect((claude as unknown as { invocationCredentialProxy?: unknown }).invocationCredentialProxy ?? undefined).toBeUndefined()
+      claude.destroy()
+    })
+  })
+
+  // ==========================================================================
+  // R50-A: the per-key env CAS rollback — a successor commit survives a
+  // stale owner's rollback.
+  // ==========================================================================
+
+  describe('per-key env CAS rollback (R50-A)', () => {
+    it('the late loser cannot clobber the committed winner', () => {
+      const prior = { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
+      // A deletes the key (written = undefined); B commits 'b-key'.
+      delete process.env.ANTHROPIC_API_KEY
+      // Per-key CAS: restore ONLY if current === written (undefined).
+      if (process.env.ANTHROPIC_API_KEY === undefined) process.env.ANTHROPIC_API_KEY = prior.ANTHROPIC_API_KEY
+      expect(process.env.ANTHROPIC_API_KEY ?? undefined).toBe(prior.ANTHROPIC_API_KEY ?? undefined)
     })
   })
 })

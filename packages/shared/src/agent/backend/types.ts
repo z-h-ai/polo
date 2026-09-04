@@ -192,6 +192,15 @@ export interface CoreBackendConfig {
     guard: unknown;
   }) => void;
 
+  /**
+   * R52-B: the immutable RUNTIME OWNER TOKEN for this backend's construction.
+   * Carried by the backend's register/merge calls into the session-scoped
+   * callback registry — a mismatch with the live lease's owner REJECTS the
+   * merge outright (a stale runtime can never merge into a successor's
+   * record).
+   */
+  sessionCallbackOwnerToken?: string;
+
   /** Workspace configuration */
   workspace: Workspace;
 

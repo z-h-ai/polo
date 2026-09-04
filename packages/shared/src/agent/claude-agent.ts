@@ -19,6 +19,7 @@ import { getValidClaudeOAuthToken } from '../auth/state.ts';
 import {
   captureManagedAnthropicAuthEnvSnapshot,
   clearClaudeBedrockRoutingEnvVars,
+  CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
   restoreManagedAnthropicAuthEnvSnapshot,
   resolveAuthEnvVars,
 } from '../config/llm-connections.ts';
@@ -490,6 +491,18 @@ export class ClaudeAgent extends BaseAgent {
    * same-id successor runtime would inherit or be unable to clean up.
    */
   private postInitAborted: boolean = false;
+  /**
+   * R52: the in-flight credential env transaction — per-key prior values,
+   * the keys touched, and the values this transaction wrote. Rolled back
+   * per-key (only keys whose current value still equals what this
+   * transaction wrote) on abort/failure, so a same-id successor's committed
+   * values are never clobbered by a stale rollback.
+   */
+  private credentialEnvTransaction?: {
+    touched: Set<string>
+    prior: Record<string, string | undefined>
+    written: Record<string, string | undefined>
+  };
   // Permission whitelists are now managed by this.permissionManager (inherited from BaseAgent)
   // Source state tracking is now managed by this.sourceManager (inherited from BaseAgent)
   // Source MCP connections are managed by this.config.mcpPool (centralized in main process)
@@ -711,7 +724,10 @@ export class ClaudeAgent extends BaseAgent {
     if (aborted()) {
       return { authInjected: false, authWarning: 'Agent destroyed before post-init; credential side effects skipped' };
     }
-    options?.signal?.addEventListener('abort', () => { this.postInitAborted = true; }, { once: true });
+    options?.signal?.addEventListener('abort', () => {
+      this.postInitAborted = true;
+      this.rollbackCredentialEnvTransaction();
+    }, { once: true });
 
     const connection = getLlmConnection(slug);
     if (!connection) {
@@ -724,40 +740,67 @@ export class ClaudeAgent extends BaseAgent {
     const envSnapshot = captureManagedAnthropicAuthEnvSnapshot();
 
     const invocationScoped = this.config.sessionStorage?.owner === 'cli';
+
+    // R52-C: TRANSACTIONAL credential application — per-key prior values are
+    // recorded BEFORE any mutation; the deletions and writes commit ONLY on
+    // the success path; every abort/failure path rolls back exactly the keys
+    // this transaction touched (per-key CAS), restoring the precise
+    // pre-postInit state for a same-id successor.
+    this.credentialEnvTransaction = {
+      prior: envSnapshot,
+      touched: new Set<string>(),
+      written: {},
+    };
+    const txnTouch = (key: string): void => { this.credentialEnvTransaction!.touched.add(key) }
+    const txnRestoreKey = (key: string): void => {
+      const prior = this.credentialEnvTransaction!.prior[key]
+      if (prior === undefined) delete process.env[key]
+      else process.env[key] = prior
+    }
+    const txnWrite = (key: string): void => {
+      txnTouch(key)
+      this.credentialEnvTransaction!.written[key] = process.env[key]
+    }
+    const rollbackTxn = (): void => {
+      const txn = this.credentialEnvTransaction
+      if (!txn) return
+      for (const key of txn.touched) {
+        // Per-key CAS: restore ONLY keys whose current value still equals
+        // what THIS transaction wrote — a successor's newer committed value
+        // is never clobbered by a stale rollback.
+        if (process.env[key] === txn.written[key]) txnRestoreKey(key)
+      }
+      this.credentialEnvTransaction = undefined
+    }
+    const txnDeleteKey = (key: string): void => {
+      txnTouch(key)
+      txnWrite(key)
+      delete process.env[key]
+    }
+
     if (!invocationScoped) {
       // Desktop retains its historical process-wide compatibility behavior.
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      delete process.env.ANTHROPIC_BASE_URL;
-      clearClaudeBedrockRoutingEnvVars();
+      txnDeleteKey('ANTHROPIC_API_KEY')
+      txnDeleteKey('CLAUDE_CODE_OAUTH_TOKEN')
+      txnDeleteKey('ANTHROPIC_BASE_URL')
+      for (const key of CLAUDE_BEDROCK_ROUTING_ENV_KEYS) txnDeleteKey(key)
     }
 
     // Resolve auth env vars via shared utility
     const manager = getCredentialManager();
     const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
 
-    // R50/R51: the credential resolution may complete long after the
-    // construction attempt was timed out and disposed (the SessionManager's
-    // race only bounds the WAIT). The late outcome must apply zero side
-    // effects — the precise pre-postInit env snapshot is restored instead.
+    // R50/R51/R52: the credential resolution may complete long after the
+    // construction attempt was timed out and disposed. The late outcome must
+    // roll back THIS transaction's keys (per-key CAS) and apply zero side
+    // effects.
+    rollbackTxn()
     if (aborted()) {
-      restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
       return { authInjected: false, authWarning: 'Agent destroyed during post-init credential resolution; credential side effects rolled back' };
     }
 
     if (!result.success) {
-      return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
-    }
-
-    // R50: the credential resolution may complete long after the
-    // construction attempt was timed out and disposed (the SessionManager's
-    // race only bounds the WAIT). The late outcome must apply zero side
-    // effects — no env overwrite, no credential proxy listener.
-    if (this.postInitAborted) {
-      return { authInjected: false, authWarning: 'Agent destroyed during post-init credential resolution; credential side effects skipped' };
-    }
-
-    if (!result.success) {
+      rollbackTxn()
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
     }
 
@@ -782,7 +825,7 @@ export class ClaudeAgent extends BaseAgent {
       // R51: RE-CHECK after closing the old proxy — closing then starting a
       // post-abort listener would create an unreachable credential listener.
       if (aborted()) {
-        restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+        rollbackTxn()
         return { authInjected: false, authWarning: 'Agent destroyed after closing the previous invocation credential proxy; new listener not started' };
       }
       const credentialProxy = await startInvocationCredentialProxy({
@@ -799,7 +842,7 @@ export class ClaudeAgent extends BaseAgent {
       // immediately and apply nothing.
       if (aborted()) {
         await credentialProxy.close();
-        restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+        rollbackTxn()
         return { authInjected: false, authWarning: 'Agent destroyed while starting the invocation credential proxy; listener closed and credential side effects rolled back' };
       }
       this.invocationCredentialProxy = credentialProxy;
@@ -823,7 +866,7 @@ export class ClaudeAgent extends BaseAgent {
       // outcome is dropped and the precise pre-postInit env snapshot is
       // restored (a same-id successor owns the process credential state).
       if (aborted()) {
-        restoreManagedAnthropicAuthEnvSnapshot(envSnapshot);
+        rollbackTxn()
         return { authInjected: false, authWarning: 'Agent destroyed before applying credential env vars; credential side effects rolled back' };
       }
       this.config.envOverrides = {
@@ -845,6 +888,29 @@ export class ClaudeAgent extends BaseAgent {
     }
 
     return { authInjected: true };
+  }
+
+  /**
+   * R52: SYNCHRONOUS per-key rollback of the in-flight credential env
+   * transaction. Invoked from the SessionManager's bounded-construction
+   * timeout so a provider that ignores the AbortSignal cannot leave erased
+   * or overwritten process-global credentials behind: only keys whose
+   * CURRENT value still equals what THIS transaction wrote are restored;
+   * keys a successor already committed are never touched.
+   */
+  rollbackCredentialEnvTransaction(): void {
+    const txn = this.credentialEnvTransaction
+    if (!txn) return
+    for (const key of txn.touched) {
+      const prior = txn.prior[key]
+      const written = txn.written[key]
+      if (process.env[key] === written) {
+        if (prior === undefined) delete process.env[key]
+        else process.env[key] = prior
+      }
+    }
+    this.credentialEnvTransaction = undefined
+    this.postInitAborted = true
   }
 
   // Config watcher methods (startConfigWatcher, stopConfigWatcher) are now inherited from BaseAgent

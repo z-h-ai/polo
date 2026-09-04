@@ -884,7 +884,7 @@ export function migrateAuthType(
 // Auth Environment Variable Resolution
 // ============================================================
 
-const CLAUDE_BEDROCK_ROUTING_ENV_KEYS = [
+export const CLAUDE_BEDROCK_ROUTING_ENV_KEYS = [
   'CLAUDE_CODE_USE_BEDROCK',
   'AWS_BEARER_TOKEN_BEDROCK',
   'ANTHROPIC_BEDROCK_BASE_URL',
@@ -894,7 +894,7 @@ const CLAUDE_BEDROCK_ROUTING_ENV_KEY_SET = new Set<string>(
   CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
 )
 
-const MANAGED_ANTHROPIC_AUTH_ENV_KEYS = [
+export const MANAGED_ANTHROPIC_AUTH_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
