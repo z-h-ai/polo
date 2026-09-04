@@ -1,292 +1,249 @@
 /**
- * TopBar - Persistent top bar above all panels (Slack-style)
+ * TopBar - Global workbench bar above every Polo shell surface (frozen
+ * POO-41 `.workbench-bar` semantics).
  *
- * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+] [Help]
+ * Layout: [Brand lockup] [Home tab] ... [Runtime] [ProductSpace switcher] [Notifications] [Account]
  *
- * Fixed below the tab browser bar, 48px tall.
+ * Fixed below the tab browser bar, 64px tall. Rendered once per shell via a
+ * portal from AppShell so it stays visible on the Home view too — the single
+ * ProductSpace switcher entry point lives here (REQ-001).
  */
 
+import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
-import { Tooltip, TooltipTrigger, TooltipContent } from "@polo-ai/ui"
-import { PanelLeftRounded } from "../icons/PanelLeftRounded"
-import { TopBarButton } from "../ui/TopBarButton"
+import { useAtomValue } from "jotai"
+import { sessionMetaMapAtom } from "@/atoms/sessions"
+import { useOptionalAppShellContext } from "@/context/AppShellContext"
+import { useTabShell } from "@/context/TabShellContext"
+import { useTheme } from "@/context/ThemeContext"
+import { useNavigation } from "@/contexts/NavigationContext"
 import { cn } from "@/lib/utils"
-import { useActionLabel } from "@/actions"
+import { getSessionTitle } from "@/utils/session"
+import {
+  Check,
+  ChevronRight,
+  LogOut,
+  Settings,
+  SunMoon,
+  UserRound,
+} from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
+  DropdownMenuSub,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
+  StyledDropdownMenuSubTrigger,
+  StyledDropdownMenuSubContent,
 } from "@/components/ui/styled-dropdown"
-import type { SettingsMenuItem } from "../../../shared/menu-schema"
-import { SquarePenRounded } from "../icons/SquarePenRounded"
-import { useEffect, useRef, useState } from "react"
-import { BrowserTabStrip } from "../browser/BrowserTabStrip"
-import type { Workspace } from "../../../shared/types"
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
-import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
-import { getDocUrl } from "@polo-ai/shared/docs/doc-links"
-import { AppMenu } from "../AppMenu"
 import { ProductSpaceSwitcher } from "@/components/product-space/ProductSpaceSwitcher"
 
-const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
-const RIGHT_SLOT_TWO_BADGES_THRESHOLD = 300
+const MAX_NOTIFICATION_ITEMS = 6
 
-interface TopBarProps {
-  workspaces: Workspace[]
-  activeWorkspaceId: string | null
-  onSelectWorkspace: (workspaceId: string, openInNewWindow?: boolean) => void | Promise<void>
-  workspaceUnreadMap?: Record<string, boolean>
-  onWorkspaceCreated?: (workspace: Workspace) => void
-  onWorkspaceRemoved?: () => void
-  activeSessionId?: string | null
-  onNewChat: () => void
-  onNewWindow?: () => void
-  onOpenSettings: () => void
-  onOpenSettingsSubpage: (subpage: SettingsMenuItem['id']) => void
-  onOpenKeyboardShortcuts: () => void
-  onOpenStoredUserPreferences: () => void
-  onBack: () => void
-  onForward: () => void
-  canGoBack: boolean
-  canGoForward: boolean
-  onToggleSidebar: () => void
-  onToggleFocusMode: () => void
-  onAddSessionPanel: () => void
-  onAddBrowserPanel: () => void
-  /** When true, hides controls that don't apply in compact/mobile layout */
-  isCompact?: boolean
-}
-
-export function TopBar({
-  workspaces,
-  activeWorkspaceId,
-  onSelectWorkspace,
-  workspaceUnreadMap,
-  onWorkspaceCreated,
-  onWorkspaceRemoved,
-  activeSessionId,
-  onNewChat,
-  onNewWindow,
-  onOpenSettings,
-  onOpenSettingsSubpage,
-  onOpenKeyboardShortcuts,
-  onOpenStoredUserPreferences,
-  onBack,
-  onForward,
-  canGoBack,
-  canGoForward,
-  onToggleSidebar,
-  onToggleFocusMode,
-  onAddSessionPanel,
-  onAddBrowserPanel,
-  isCompact,
-}: TopBarProps) {
+export function TopBar() {
   const { t } = useTranslation()
-  const [maxVisibleBrowserBadges, setMaxVisibleBrowserBadges] = useState(3)
-  const rightSlotRef = useRef<HTMLDivElement | null>(null)
+  const appShell = useOptionalAppShellContext()
+  const { activeTab, openTabs, activateHome, activateTab } = useTabShell()
+  const { resolvedMode, setMode } = useTheme()
+  const { navigateToSession } = useNavigation()
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
 
-  const goBackHotkey = useActionLabel('nav.goBackAlt').hotkey
-  const goForwardHotkey = useActionLabel('nav.goForwardAlt').hotkey
+  const isHome = activeTab.type === "home"
 
-  useEffect(() => {
-    const slotEl = rightSlotRef.current
-    if (!slotEl) return
+  const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
+  const runningCount =
+    sessionMetas.filter((meta) => meta.isProcessing).length
+    + openTabs.filter((tab) => tab.type === "webapp").length
+  const unreadSessions = useMemo(() => (
+    sessionMetas
+      .filter((meta) => meta.hasUnread)
+      .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
+  ), [sessionMetas])
+  const visibleUnreadSessions = unreadSessions.slice(0, MAX_NOTIFICATION_ITEMS)
 
-    let frame = 0
+  const user = appShell?.currentAdminUser ?? null
+  const userLabel = user?.displayName || user?.username || ""
+  const userInitial = userLabel.trim().charAt(0)
 
-    const updateBadgeDensity = () => {
-      const slotWidth = slotEl.getBoundingClientRect().width
-      const nextMaxVisibleBadges = slotWidth >= RIGHT_SLOT_FULL_BADGES_THRESHOLD
-        ? 3
-        : slotWidth >= RIGHT_SLOT_TWO_BADGES_THRESHOLD
-          ? 2
-          : 1
+  const openPoloTab = openTabs.find((tab) => tab.type === "polo")
 
-      setMaxVisibleBrowserBadges((prev) => (prev === nextMaxVisibleBadges ? prev : nextMaxVisibleBadges))
-    }
-
-    const schedule = () => {
-      if (frame) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(updateBadgeDensity)
-    }
-
-    const observer = new ResizeObserver(schedule)
-    observer.observe(slotEl)
-    updateBadgeDensity()
-
-    return () => {
-      if (frame) cancelAnimationFrame(frame)
-      observer.disconnect()
-    }
-  }, [workspaces.length, activeWorkspaceId])
+  const openSessionFromNotification = (sessionId: string) => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    navigateToSession(sessionId)
+  }
 
   return (
     <div
       data-testid="workbench-topbar"
-      className="fixed left-0 right-0 z-panel flex items-center gap-[12px] px-[28px] titlebar-drag-region"
+      className="fixed left-0 right-0 z-panel flex items-center gap-3 border-b border-border/60 bg-background/92 px-[28px] backdrop-blur-[18px] titlebar-drag-region max-md:gap-1.5 max-md:px-3"
       style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
     >
-      <div className="flex h-full min-w-0 flex-1 items-center justify-between gap-[12px]">
-      {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
-      {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
-      {/* In compact mode the right slot is hidden, so we add right padding here
-          so the workspace pill doesn't run flush against the viewport edge. */}
-      <div
-        className="pointer-events-auto flex min-w-0 flex-1 items-center gap-0.5"
-        style={{ paddingLeft: 12, paddingRight: isCompact ? 12 : 0 }}
-      >
-        <div className="flex items-center gap-0.5">
-        {!isCompact && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <TopBarButton onClick={onToggleSidebar} aria-label={t("menu.toggleSidebar")}>
-              <PanelLeftRounded className="h-[18px] w-[18px] text-foreground/70" />
-            </TopBarButton>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("menu.toggleSidebar")}</TooltipContent>
-        </Tooltip>
-        )}
+      {/* === LEFT: Brand lockup + Home tab === */}
+      <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-3 max-md:gap-1.5">
+        <button
+          type="button"
+          data-testid="topbar-brand"
+          onClick={activateHome}
+          aria-label={t("topbar.brand.home")}
+          className="titlebar-no-drag flex min-w-[82px] items-center gap-[9px] rounded-[8px] outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[34px]"
+        >
+          <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[13px] font-extrabold text-background">
+            P
+          </span>
+          <span className="text-[14px] font-bold tracking-[-0.03em] text-foreground max-md:hidden">
+            Polo
+          </span>
+        </button>
 
-        <AppMenu
-          onNewChat={onNewChat}
-          onNewWindow={onNewWindow}
-          onOpenSettings={onOpenSettings}
-          onOpenSettingsSubpage={onOpenSettingsSubpage}
-          onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
-          onOpenStoredUserPreferences={onOpenStoredUserPreferences}
-          onToggleSidebar={onToggleSidebar}
-          onToggleFocusMode={onToggleFocusMode}
-        />
-        <ProductSpaceSwitcher compact={isCompact} />
-        </div>
-
-        {/* Back / Forward / Workspace selector (moved from center).
-            In compact mode the back/forward buttons are dropped — the iOS-style
-            drill-in chevron in PanelHeader plus the browser's native back gesture
-            cover that affordance, and the freed width lets the workspace pill
-            actually fit on phone-width viewports. */}
-        <div className={cn("ml-1 flex min-w-0 items-center gap-1", isCompact ? "flex-1" : "w-[clamp(220px,42vw,640px)]")}>
-          {!isCompact && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <TopBarButton onClick={onBack} disabled={!canGoBack} aria-label={t("common.back")}>
-                    <Icons.ChevronLeft className="h-[18px] w-[18px] text-foreground/70" strokeWidth={1.5} />
-                  </TopBarButton>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{t("common.back")} {goBackHotkey}</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <TopBarButton onClick={onForward} disabled={!canGoForward} aria-label={t("common.forward")}>
-                    <Icons.ChevronRight className="h-[18px] w-[18px] text-foreground/70" strokeWidth={1.5} />
-                  </TopBarButton>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{t("common.forward")} {goForwardHotkey}</TooltipContent>
-              </Tooltip>
-            </>
-          )}
-
-          <div className="min-w-0 flex-1">
-            {isCompact ? (
-              <CompactWorkspaceSwitcher
-                workspaces={workspaces}
-                activeWorkspaceId={activeWorkspaceId}
-                onSelect={onSelectWorkspace}
-                onWorkspaceCreated={onWorkspaceCreated}
-                onWorkspaceRemoved={onWorkspaceRemoved}
-                workspaceUnreadMap={workspaceUnreadMap}
-              />
-            ) : (
-              <WorkspaceSwitcher
-                variant="topbar"
-                workspaces={workspaces}
-                activeWorkspaceId={activeWorkspaceId}
-                onSelect={onSelectWorkspace}
-                onWorkspaceCreated={onWorkspaceCreated}
-                onWorkspaceRemoved={onWorkspaceRemoved}
-                workspaceUnreadMap={workspaceUnreadMap}
-              />
-            )}
-          </div>
-        </div>
+        <button
+          type="button"
+          data-testid="topbar-home-tab"
+          onClick={activateHome}
+          aria-label={t("topbar.home")}
+          aria-current={isHome ? "page" : undefined}
+          className="titlebar-no-drag inline-flex h-9 flex-none items-center justify-center gap-[9px] rounded-[9px] bg-background px-3 text-[12px] font-semibold text-foreground shadow-minimal outline-none hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-ring max-md:w-9 max-md:px-0"
+        >
+          <Icons.House className="size-[17px] flex-none" strokeWidth={1.7} />
+          <span className="max-md:hidden">{t("topbar.home")}</span>
+        </button>
       </div>
 
-      {/* === RIGHT: Browser strip + add + help === */}
-      {!isCompact && (
-      <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
-        <div className="min-w-0">
-          <BrowserTabStrip activeSessionId={activeSessionId} maxVisibleBadges={maxVisibleBrowserBadges} />
-        </div>
+      {/* === RIGHT: Runtime + Space control + Notifications + Account === */}
+      <div className="pointer-events-auto flex flex-none items-center gap-2 max-md:gap-1">
+        <button
+          type="button"
+          data-testid="topbar-runtime"
+          onClick={activateHome}
+          aria-label={t("topbar.runtime.label")}
+          className="titlebar-no-drag flex h-[34px] items-center gap-[7px] rounded-[9px] px-[9px] text-[12px] font-medium text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span
+            className={cn(
+              "size-[7px] flex-none rounded-full",
+              runningCount > 0
+                ? "bg-success ring-[3px] ring-success/15"
+                : "bg-foreground/40",
+            )}
+          />
+          <span className="whitespace-nowrap max-md:hidden">
+            {runningCount > 0
+              ? t("topbar.runtime.running", { count: runningCount })
+              : t("topbar.runtime.none")}
+          </span>
+        </button>
+
+        <ProductSpaceSwitcher />
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.addPanelMenu")} className="ml-1 h-[26px] w-[26px] rounded-lg">
-              <Icons.Plus className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
+            <button
+              type="button"
+              data-testid="topbar-notifications"
+              aria-label={t("topbar.notifications.label")}
+              className="titlebar-no-drag relative grid size-8 place-items-center rounded-[8px] text-foreground/50 outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Icons.Bell className="size-4" strokeWidth={1.7} />
+              {unreadSessions.length > 0 && (
+                <span className="absolute right-[6px] top-[6px] size-[5px] rounded-full border border-background bg-workbench-info" />
+              )}
+            </button>
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent align="end" minWidth="min-w-56">
-            <StyledDropdownMenuItem onClick={onAddSessionPanel}>
-              <SquarePenRounded className="h-3.5 w-3.5" />
-              {t("session.newSessionInPanel")}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={onAddBrowserPanel}>
-              <Icons.Globe className="h-3.5 w-3.5" />
-              {t("browser.newWindow")}
-            </StyledDropdownMenuItem>
+            {visibleUnreadSessions.length === 0 ? (
+              <div className="px-2 py-1.5 text-[12px] text-muted-foreground">
+                {t("topbar.notifications.empty")}
+              </div>
+            ) : (
+              visibleUnreadSessions.map((meta) => (
+                <StyledDropdownMenuItem
+                  key={meta.id}
+                  onClick={() => openSessionFromNotification(meta.id)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{getSessionTitle(meta)}</span>
+                  {visibleUnreadSessions.length > 1 && (
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                  )}
+                </StyledDropdownMenuItem>
+              ))
+            )}
           </StyledDropdownMenuContent>
         </DropdownMenu>
 
-        {/* Help button */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.helpAndDocs")} className="h-[26px] w-[26px] rounded-lg">
-              <Icons.HelpCircle className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
+            <button
+              type="button"
+              data-testid="topbar-account"
+              aria-label={t("topbar.account.label")}
+              className="titlebar-no-drag ml-[3px] grid size-7 place-items-center rounded-full bg-foreground text-[11px] font-semibold text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {userInitial || <UserRound className="size-3.5" strokeWidth={1.7} />}
+            </button>
           </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-48">
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('sources'))}>
-              <Icons.DatabaseZap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.sources")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
+          <StyledDropdownMenuContent align="end" minWidth="min-w-56">
+            {user && (
+              <div className="truncate px-2 py-1.5 text-[12px]">
+                <span className="font-medium text-foreground">{userLabel}</span>
+                {user.displayName && user.username ? (
+                  <span className="text-muted-foreground"> · {user.username}</span>
+                ) : null}
+              </div>
+            )}
+            {appShell && (
+              <>
+                <StyledDropdownMenuItem onClick={appShell.onOpenStoredUserPreferences}>
+                  <UserRound className="h-3.5 w-3.5" />
+                  {t("topbar.account.preferences")}
+                </StyledDropdownMenuItem>
+                <StyledDropdownMenuItem onClick={appShell.onOpenSettings}>
+                  <Settings className="h-3.5 w-3.5" />
+                  {t("menu.settings")}
+                </StyledDropdownMenuItem>
+                {appShell.workspaces.length > 0 && (
+                  <DropdownMenuSub>
+                    <StyledDropdownMenuSubTrigger>
+                      <Icons.Building2 className="h-3.5 w-3.5" />
+                      <span className="flex-1">{t("topbar.account.workspaces")}</span>
+                    </StyledDropdownMenuSubTrigger>
+                    <StyledDropdownMenuSubContent minWidth="min-w-48">
+                      {appShell.workspaces.map((workspace) => {
+                        const active = workspace.id === appShell.activeWorkspaceId
+                        return (
+                          <StyledDropdownMenuItem
+                            key={workspace.id}
+                            disabled={active}
+                            onClick={() => { void appShell.onSelectWorkspace(workspace.id) }}
+                          >
+                            <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+                            {active && <Check className="h-3.5 w-3.5" />}
+                          </StyledDropdownMenuItem>
+                        )
+                      })}
+                    </StyledDropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )}
+                <StyledDropdownMenuSeparator />
+              </>
+            )}
+            <StyledDropdownMenuItem
+              onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
+            >
+              <SunMoon className="h-3.5 w-3.5" />
+              {t("topbar.account.toggleTheme")}
             </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('skills'))}>
-              <Icons.Zap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.skills")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('statuses'))}>
-              <Icons.CheckCircle2 className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.statuses")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('permissions'))}>
-              <Icons.Settings className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.permissions.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('automations'))}>
-              <Icons.Webhook className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.automations")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('messaging'))}>
-              <Icons.MessageSquare className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.messaging.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://app.polo.z-h-ai.com/docs')}>
-              <Icons.ExternalLink className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("menu.allDocumentation")}</span>
-            </StyledDropdownMenuItem>
+            {user && appShell?.onAdminLogout && (
+              <>
+                <StyledDropdownMenuSeparator />
+                <StyledDropdownMenuItem onClick={() => { void appShell.onAdminLogout?.() }}>
+                  <LogOut className="h-3.5 w-3.5" />
+                  {t("topbar.account.logout")}
+                </StyledDropdownMenuItem>
+              </>
+            )}
           </StyledDropdownMenuContent>
         </DropdownMenu>
-      </div>
-      )}
       </div>
     </div>
   )

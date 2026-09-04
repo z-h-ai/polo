@@ -39,9 +39,12 @@ export function WindowWidthGuard() {
       className="fixed inset-0 z-[100] grid place-items-center bg-background p-6"
     >
       <div className="max-w-[330px] text-center">
-        <span className="mx-auto mb-[18px] grid size-[52px] place-items-center rounded-[12px] bg-info/10 text-info">
-          <Icons.PanelLeft className="size-[26px]" />
+        <span className="mx-auto mb-[18px] grid size-[52px] place-items-center rounded-[12px] bg-workbench-info/10 text-workbench-info">
+          <Icons.TriangleAlert className="size-[26px]" strokeWidth={1.7} />
         </span>
+        <p className="mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-muted-foreground">
+          {t('productSpace.windowGuard.eyebrow')}
+        </p>
         <h1 className="mb-2 text-xl font-semibold text-foreground">
           {t('productSpace.windowGuard.title')}
         </h1>

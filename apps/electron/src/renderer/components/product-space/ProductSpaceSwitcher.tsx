@@ -21,7 +21,7 @@ function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
     : `productSpace.role.${role}`
 }
 
-export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean }) {
+export function ProductSpaceSwitcher() {
   const { t } = useTranslation()
   const space = useOptionalProductSpaceContext()
   if (!space) return null
@@ -29,47 +29,28 @@ export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean })
   const active = space.activeProductSpace
   if (!active) return null
 
-  const activeInitial = spaceInitial(active.name, active.kind)
   const activeRestricted = active.kind === 'enterprise' && active.accessMode === 'read_only'
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        {compact ? (
-          <button
-            type="button"
-            data-testid="product-space-switcher"
-            aria-label={t('productSpace.switcher.label')}
-            className="titlebar-no-drag flex size-7 items-center justify-center rounded-[8px] hover:bg-foreground/5"
-          >
-            <span
-              className={cn(
-                'flex size-5 items-center justify-center rounded-full text-[11px] font-semibold text-primary-foreground',
-                active.kind === 'personal' ? 'bg-success' : 'bg-accent',
-              )}
-            >
-              {activeInitial}
+        <button
+          type="button"
+          data-testid="product-space-switcher"
+          aria-label={t('productSpace.switcher.label')}
+          className="titlebar-no-drag flex h-[36px] min-w-[130px] max-w-[190px] items-center gap-[8px] rounded-[9px] border border-border bg-background px-[10px] text-left hover:border-accent/40 aria-expanded:border-accent/40 focus-visible:[outline:3px_solid_color-mix(in_srgb,var(--accent)_24%,transparent)] focus-visible:[outline-offset:2px] max-md:min-w-0 max-md:max-w-[110px]"
+        >
+          <span className="size-2 shrink-0 rounded-full bg-accent" />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+            {active.name}
+          </span>
+          {activeRestricted ? (
+            <span className="shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground">
+              {t('productSpace.restricted')}
             </span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="product-space-switcher"
-            aria-label={t('productSpace.switcher.label')}
-            className="titlebar-no-drag flex h-[36px] min-w-[130px] max-w-[190px] items-center gap-[8px] rounded-[9px] border border-border bg-background px-[10px] text-left hover:border-accent/40 aria-expanded:border-accent/40 focus-visible:[outline:3px_solid_color-mix(in_srgb,var(--accent)_24%,transparent)] focus-visible:[outline-offset:2px]"
-          >
-            <span className="size-2 shrink-0 rounded-full bg-accent" />
-            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-              {active.name}
-            </span>
-            {activeRestricted ? (
-              <span className="shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground">
-                {t('productSpace.restricted')}
-              </span>
-            ) : null}
-            <ChevronDown className="size-[13px] shrink-0 text-muted-foreground" />
-          </button>
-        )}
+          ) : null}
+          <ChevronDown className="size-[13px] shrink-0 text-muted-foreground" />
+        </button>
       </DropdownMenuTrigger>
       <StyledDropdownMenuContent align="start" minWidth="min-w-56">
         <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
