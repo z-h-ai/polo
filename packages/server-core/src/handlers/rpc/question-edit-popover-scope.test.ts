@@ -2110,6 +2110,60 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       }).quarantinedRuntimeDisposals.size).toBe(0)
     })
 
+    it('R54 issue2: a candidate in BOTH quarantines joins the shared claim — zero extra resource calls before release, exactly-once settlement after', async () => {
+      const candidate = seedSession('q-r54-dual-quarantine')
+      candidate.agent = { dispose: () => {} } as never
+      let stopCalls = 0
+      let releaseStop!: () => void
+      const gated = new Promise<void>(resolve => { releaseStop = () => resolve() })
+      candidate.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await gated
+        },
+      } as never
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never, 'stale-owner')
+      // Unpublished-candidate entry AND (via the strict settle below) a
+      // runtime-disposal entry whose ORIGINAL stop op is parked on the gate.
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(candidate, 'dual quarantine probe')
+      candidate.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 120
+      ;(sm as unknown as { quarantineJoinTimeoutMs: number }).quarantineJoinTimeoutMs = 150
+      const seedSettle = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(candidate, 'dual quarantine seed')
+      seedSettle.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 250))
+      expect(stopCalls).toBe(1)
+
+      // Concurrent createSession: BOTH sweeps run — the unpublished cleanup
+      // must JOIN the shared per-managed claim instead of issuing its own
+      // resource calls against the still-pending original shutdown.
+      const createWork = sm.createSession('ws_test', {})
+      await new Promise(r => setTimeout(r, 500))
+      expect(stopCalls).toBe(1)
+
+      // Release the original: the claim retries exactly once and settles;
+      // BOTH quarantine maps drain. The post-release sweep JOINS the claim
+      // to completion before the accounting assertions.
+      releaseStop()
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      const created = await createWork
+      expect(created.id).toBeTruthy()
+      expect(stopCalls).toBe(2)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(0)
+      await sm.deleteSession(created.id)
+    })
+
     it('a permanently hung shutdown never blocks createSession (bounded join) and no stop is duplicated', async () => {
       const managed = seedSession('q-r53-hung-forever')
       let stopCalls = 0

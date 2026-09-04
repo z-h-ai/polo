@@ -4512,17 +4512,30 @@ export class SessionManager implements ISessionManager {
     if (this.unpublishedRuntimeQuarantine.size === 0) return
     for (const [sessionId, entry] of this.unpublishedRuntimeQuarantine) {
       try {
+        // R54 (issue 2): if a runtime-disposal quarantine entry exists for
+        // this managed (its strict stale-publication disposal parked on
+        // pending original shutdown ops), the unpublished cleanup JOINS the
+        // SAME per-managed settlement claim (bounded) BEFORE any resource
+        // API call — the previous ignoreQuarantineClaim bypass issued
+        // overlapping stop/disconnect calls against an original shutdown
+        // that was still running. The claim awaits the original ops and
+        // retries exactly once; after the join, any still-retained faces
+        // are claim-owned and the dispose below skips them.
+        const quarantined = this.findQuarantinedRuntimeDisposalEntry(entry.managed)
+        if (quarantined) {
+          this.claimQuarantinedSettlement(quarantined.token, quarantined.entry)
+          await this.joinQuarantinedClaimBounded(quarantined.entry)
+        }
         const result = await this.disposeManagedAgentRuntime(
           entry.managed,
           `quarantined unpublished runtime retry (${entry.reason})`,
           // R48: the runtime disposal never unregisters the id-wide
           // callback/guard state itself — the LEASE compare-and-unregister
-          // below is the single owner-aware removal. R53 (issue 6): THIS
-          // sweep is itself a single-flight retry path (entries keyed by
-          // session id, swept at createSession) — it may issue its face
-          // disposal even while a runtime-disposal quarantine entry exists
-          // for the same managed.
-          { bestEffort: true, shouldUnregisterCallbacks: () => false, ignoreQuarantineClaim: true },
+          // below is the single owner-aware removal. R54 (issue 2): no
+          // ignoreQuarantineClaim bypass — faces retained under a live
+          // claim are skipped by the claim-ownership guard instead of
+          // being issued a second time.
+          { bestEffort: true, shouldUnregisterCallbacks: () => false },
         )
         // Owner-token binding: only the exact registered entry settles here.
         if (result.failures.length === 0 && this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken === entry.quarantineToken) {
