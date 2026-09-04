@@ -64,9 +64,13 @@ let r49StallPostInit = false
 // (enable1MContext config read) inside construction.
 const agentStorageModule = await import('@polo-ai/shared/config/storage')
 const realGetEnable1MContext = agentStorageModule.getEnable1MContext
+const realGetLlmConnection = agentStorageModule.getLlmConnection
 let r51FactoryInputGate: Promise<void> | null = null
 let r51ReleaseFactoryInputGate: (() => void) | null = null
 let r51FactoryInputGateEntered = false
+// R53 fixture seam: when armed, `getLlmConnection` serves a canned connection
+// so a REAL ClaudeAgent.postInit can run its full credential chain in tests.
+let r53ConnectionFixture: { slug: string; connection: Record<string, unknown> } | null = null
 mock.module('@polo-ai/shared/config/storage', () => ({
   ...agentStorageModule,
   getEnable1MContext: async () => {
@@ -75,6 +79,43 @@ mock.module('@polo-ai/shared/config/storage', () => ({
       await r51FactoryInputGate
     }
     return realGetEnable1MContext()
+  },
+  getLlmConnection: (slug: string) => {
+    if (r53ConnectionFixture && r53ConnectionFixture.slug === slug) return r53ConnectionFixture.connection as never
+    return realGetLlmConnection(slug)
+  },
+}))
+
+// R53 harness seam: a CONTROLLED DEFERRED credential provider. When armed,
+// `resolveAuthEnvVars` parks on a gate the test releases (resolve/reject);
+// when disarmed it delegates to the real implementation. The REAL
+// ClaudeAgent.postInit drives all env mutations on top of this.
+const llmConnectionsModule = await import('@polo-ai/shared/config/llm-connections')
+let r53CredentialGate: {
+  promise: Promise<void>
+  release: () => void
+  mode: 'resolve' | 'reject'
+} | null = null
+mock.module('@polo-ai/shared/config/llm-connections', () => ({
+  ...llmConnectionsModule,
+  resolveAuthEnvVars: async (...args: unknown[]) => {
+    if (!r53CredentialGate) {
+      return (llmConnectionsModule as unknown as {
+        resolveAuthEnvVars: (...delegateArgs: unknown[]) => Promise<unknown>
+      }).resolveAuthEnvVars(...args)
+    }
+    await r53CredentialGate.promise
+    if (r53CredentialGate.mode === 'reject') {
+      throw new Error('credential provider exploded (r53 deferred provider)')
+    }
+    return {
+      success: true as const,
+      warning: undefined,
+      envVars: {
+        ANTHROPIC_API_KEY: 'resolved-api-key',
+        ANTHROPIC_BASE_URL: 'https://resolved.example.com',
+      },
+    }
   },
 }))
 const r49StalledAgent = {
@@ -2070,85 +2111,169 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
   })
 
   // ==========================================================================
-  // R52-C: the credential env transaction rolls back per-key — a successor's
-  // committed values are never clobbered by a stale owner's rollback, and a
-  // destroyed agent's postInit is refused at the entry.
+  // R53: the credential env transaction is driven through the REAL
+  // ClaudeAgent.postInit with a CONTROLLED DEFERRED credential provider —
+  // no forged private transaction state, no inlined implementation oracle.
+  // Every timing point (abort mid-resolution, provider throw, late resolve,
+  // successor commit) asserts the real process.env outcome, including the
+  // populated API/OAuth/base/Bedrock keys the desktop pre-await deletes.
   // ==========================================================================
 
-  describe('credential env transaction isolation (R52-C)', () => {
-    it('per-key rollback restores only the stale transaction keys; a successor commit survives', () => {
-      const envBefore = {
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-        CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
-        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+  describe('credential env transaction through real postInit (R53)', () => {
+    const CLAUDE_BEDROCK_ROUTING_ENV_KEYS = llmConnectionsModule.CLAUDE_BEDROCK_ROUTING_ENV_KEYS as readonly string[]
+    const MANAGED_KEYS = [
+      'ANTHROPIC_API_KEY',
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_BASE_URL',
+      ...CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
+    ]
+    let envPriors: Record<string, string | undefined> = {}
+
+    const seedPopulatedEnv = (): void => {
+      process.env.ANTHROPIC_API_KEY = 'pre-existing-api-key'
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = 'pre-existing-oauth-token'
+      process.env.ANTHROPIC_BASE_URL = 'https://pre-existing.example.com'
+      process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+      process.env.AWS_BEARER_TOKEN_BEDROCK = 'pre-existing-bedrock-bearer'
+      process.env.ANTHROPIC_BEDROCK_BASE_URL = 'https://pre-existing.bedrock.example.com'
+      envPriors = {}
+      for (const key of MANAGED_KEYS) envPriors[key] = process.env[key]
+    }
+
+    beforeEach(() => {
+      seedPopulatedEnv()
+      r53ConnectionFixture = {
+        slug: 'r53-fake-conn',
+        connection: { slug: 'r53-fake-conn', providerType: 'anthropic', authType: 'api_key', enabled: true },
       }
+    })
+
+    afterEach(() => {
+      r53CredentialGate = null
+      r53ConnectionFixture = null
+      for (const key of MANAGED_KEYS) {
+        const prior = envPriors[key]
+        if (prior === undefined) delete process.env[key]
+        else process.env[key] = prior
+      }
+    })
+
+    const buildClaude = (sessionId: string) => {
       const { ClaudeAgent } = require('@polo-ai/shared/agent')
-      const claude = new ClaudeAgent({
-        session: { id: 'q-c-perkey', rootPath: tmpRoot },
+      return new ClaudeAgent({
+        session: { id: sessionId, rootPath: tmpRoot },
         workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
         sessionCallbackOwnerToken: 'test-owner',
+        connectionSlug: 'r53-fake-conn',
       } as never)
-      const prior = {
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-        CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
-        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
-      }
-      delete process.env.ANTHROPIC_API_KEY
-      delete process.env.CLAUDE_CODE_OAUTH_TOKEN
-      delete process.env.ANTHROPIC_BASE_URL
-      ;(claude as unknown as {
-        credentialEnvTransaction: {
-          touched: Set<string>
-          prior: Record<string, string | undefined>
-          written: Record<string, string | undefined>
-        }
-      }).credentialEnvTransaction = {
-        touched: new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL']),
-        prior,
-        written: { ANTHROPIC_API_KEY: undefined, CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_BASE_URL: undefined },
-      }
+    }
 
-      process.env.ANTHROPIC_API_KEY = 'successor-key'
+    const waitForEnvDeleted = async (): Promise<void> => {
+      for (let i = 0; i < 300; i += 1) {
+        if (process.env.ANTHROPIC_API_KEY === undefined && process.env.AWS_BEARER_TOKEN_BEDROCK === undefined) return
+        await new Promise(r => setTimeout(r, 10))
+      }
+      throw new Error('the desktop pre-await credential deletions never landed')
+    }
 
-      claude.rollbackCredentialEnvTransaction()
-      expect(process.env.ANTHROPIC_API_KEY).toBe('successor-key')
-      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN === envBefore.CLAUDE_CODE_OAUTH_TOKEN).toBe(true)
-      expect(process.env.ANTHROPIC_BASE_URL === envBefore.ANTHROPIC_BASE_URL).toBe(true)
-      expect((claude as unknown as { postInitAborted: boolean }).postInitAborted).toBe(true)
-      delete process.env.ANTHROPIC_API_KEY
+    const armCredentialGate = (mode: 'resolve' | 'reject'): () => void => {
+      let releaseGate!: () => void
+      const gatePromise = new Promise<void>(resolve => { releaseGate = () => resolve() })
+      r53CredentialGate = { promise: gatePromise, release: releaseGate, mode }
+      return releaseGate
+    }
+
+    it('an abort mid-resolution synchronously restores every populated API/OAuth/base/Bedrock key', async () => {
+      const claude = buildClaude('q-c53-abort')
+      const releaseGate = armCredentialGate('resolve')
+      const controller = new AbortController()
+      const postInitPromise = claude.postInit({ signal: controller.signal })
+      await waitForEnvDeleted()
+      expect(process.env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined()
+      expect(process.env.ANTHROPIC_BEDROCK_BASE_URL).toBeUndefined()
+      // The SM-style abort fires the signal listener — the rollback is SYNCHRONOUS.
+      controller.abort(new Error('stalled post-init'))
+      for (const key of MANAGED_KEYS) {
+        expect(process.env[key]).toBe(envPriors[key])
+      }
+      releaseGate()
+      const result = await postInitPromise
+      expect(result.authInjected).toBe(false)
+      // The late successful outcome applied nothing further.
+      for (const key of MANAGED_KEYS) {
+        expect(process.env[key]).toBe(envPriors[key])
+      }
+      claude.destroy()
+    })
+
+    it('a provider THROW rolls the transaction back (previously the throw bypassed rollback)', async () => {
+      const claude = buildClaude('q-c53-throw')
+      const releaseGate = armCredentialGate('reject')
+      const postInitPromise = claude.postInit()
+      await waitForEnvDeleted()
+      // Release the parked provider: the deferred provider now REJECTS.
+      releaseGate()
+      await expect(postInitPromise).rejects.toThrow('credential provider exploded')
+      for (const key of MANAGED_KEYS) {
+        expect(process.env[key]).toBe(envPriors[key])
+      }
+      expect((claude as unknown as { credentialEnvTransaction?: unknown }).credentialEnvTransaction ?? undefined).toBeUndefined()
+      claude.destroy()
+    })
+
+    it('a late resolve after the abort applies zero side effects and stays restored', async () => {
+      const claude = buildClaude('q-c53-late')
+      const releaseGate = armCredentialGate('resolve')
+      const controller = new AbortController()
+      const postInitPromise = claude.postInit({ signal: controller.signal })
+      await waitForEnvDeleted()
+      controller.abort(new Error('stalled post-init'))
+      releaseGate()
+      const result = await postInitPromise
+      expect(result.authInjected).toBe(false)
+      expect(result.authWarning).toContain('rolled back')
+      for (const key of MANAGED_KEYS) {
+        expect(process.env[key]).toBe(envPriors[key])
+      }
+      expect((claude as unknown as { invocationCredentialProxy?: unknown }).invocationCredentialProxy ?? undefined).toBeUndefined()
+      claude.destroy()
+    })
+
+    it('per-key CAS: a successor commit survives the stale rollback; untouched keys are restored', async () => {
+      const claude = buildClaude('q-c53-successor')
+      const releaseGate = armCredentialGate('resolve')
+      const controller = new AbortController()
+      const postInitPromise = claude.postInit({ signal: controller.signal })
+      await waitForEnvDeleted()
+      // The successor commits NEW values into the erased keys while the
+      // stale transaction is parked on its provider.
+      process.env.ANTHROPIC_API_KEY = 'successor-api-key'
+      process.env.ANTHROPIC_BASE_URL = 'https://successor.example.com'
+      controller.abort(new Error('stalled post-init'))
+      // The successor's commits are NEVER clobbered by the stale rollback.
+      expect(process.env.ANTHROPIC_API_KEY).toBe('successor-api-key')
+      expect(process.env.ANTHROPIC_BASE_URL).toBe('https://successor.example.com')
+      // The keys the successor did NOT commit are restored to their
+      // populated pre-postInit values.
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('pre-existing-oauth-token')
+      expect(process.env.CLAUDE_CODE_USE_BEDROCK).toBe('1')
+      expect(process.env.AWS_BEARER_TOKEN_BEDROCK).toBe('pre-existing-bedrock-bearer')
+      expect(process.env.ANTHROPIC_BEDROCK_BASE_URL).toBe('https://pre-existing.bedrock.example.com')
+      releaseGate()
+      await postInitPromise
       claude.destroy()
     })
 
     it('a destroyed agent refuses postInit at the entry (zero side effects)', async () => {
-      const { ClaudeAgent } = require('@polo-ai/shared/agent')
-      const claude = new ClaudeAgent({
-        session: { id: 'q-c-entry', rootPath: tmpRoot },
-        workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
-        sessionCallbackOwnerToken: 'test-owner',
-      } as never)
+      const claude = buildClaude('q-c53-entry')
       claude.destroy()
-      const envBefore = process.env.ANTHROPIC_API_KEY
       const result = await claude.postInit()
       expect(result.authInjected).toBe(false)
-      expect(process.env.ANTHROPIC_API_KEY).toBe(envBefore)
+      for (const key of MANAGED_KEYS) {
+        expect(process.env[key]).toBe(envPriors[key])
+      }
       expect((claude as unknown as { invocationCredentialProxy?: unknown }).invocationCredentialProxy ?? undefined).toBeUndefined()
       claude.destroy()
-    })
-  })
-
-  // ==========================================================================
-  // R50-A: the per-key env CAS rollback — a successor commit survives a
-  // stale owner's rollback.
-  // ==========================================================================
-
-  describe('per-key env CAS rollback (R50-A)', () => {
-    it('the late loser cannot clobber the committed winner', () => {
-      const prior = { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-      // A deletes the key (written = undefined); B commits 'b-key'.
-      delete process.env.ANTHROPIC_API_KEY
-      // Per-key CAS: restore ONLY if current === written (undefined).
-      if (process.env.ANTHROPIC_API_KEY === undefined) process.env.ANTHROPIC_API_KEY = prior.ANTHROPIC_API_KEY
-      expect(process.env.ANTHROPIC_API_KEY ?? undefined).toBe(prior.ANTHROPIC_API_KEY ?? undefined)
     })
   })
 })
