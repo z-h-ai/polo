@@ -820,8 +820,19 @@ export class ClaudeAgent extends BaseAgent {
       written: {},
       generation: ++credentialEnvGenerationCounter,
     };
+    // R55: a transaction is CURRENT only while it is the newest one started.
+    // Ownership is MONOTONIC — a superseded transaction never retakes a key,
+    // never mutates one, and never publishes any expectation set. An
+    // out-of-order (late) provider resolution therefore cannot overwrite a
+    // successor's committed credentials or drag ownership backwards.
+    const txnIsCurrent = (): boolean =>
+      this.credentialEnvTransaction !== undefined
+      && this.credentialEnvTransaction.generation === credentialEnvGenerationCounter;
     const txnTrack = (key: string): void => {
       const txn = this.credentialEnvTransaction!;
+      // R55: the owner write is generation-gated — a superseded transaction
+      // never moves a key's ownership backwards.
+      if (txn.generation !== credentialEnvGenerationCounter) return;
       txn.touched.add(key);
       if (!(key in txn.prior)) txn.prior[key] = process.env[key];
       // R54: ownership of the key moves to THIS (newest) generation.
@@ -849,16 +860,18 @@ export class ClaudeAgent extends BaseAgent {
       }
       this.credentialEnvTransaction = undefined
     }
-    // R53/R54: the success finalizer — publishes the FULL expected credential
-    // set for the process-global (desktop) path: every managed key this
-    // transaction's provider did NOT supply (post-mutation expectation
-    // `undefined`) is EXPLICITLY re-deleted, so a predecessor's revived
-    // credential cannot survive this successor's success. Keys the provider
-    // DID supply keep their committed values. Called ONLY after the final
+    // R53/R54/R55: the success finalizer — publishes the FULL expected
+    // credential set for the process-global (desktop) path: every managed
+    // key this transaction's provider did NOT supply (post-mutation
+    // expectation `undefined`) is EXPLICITLY re-deleted, so a predecessor's
+    // revived credential cannot survive this successor's success. Keys the
+    // provider DID supply keep their committed values. R55: ONLY the CURRENT
+    // generation may publish — a superseded transaction publishes no
+    // expectation set (partial or full). Called ONLY after the final
     // synchronous env mutations have landed.
     const commitTxn = (): void => {
       const txn = this.credentialEnvTransaction
-      if (!invocationScoped && txn) {
+      if (!invocationScoped && txn && txn.generation === credentialEnvGenerationCounter) {
         for (const key of MANAGED_DESKTOP_CREDENTIAL_ENV_KEYS) {
           if (txn.written[key] === undefined && process.env[key] !== undefined) txnDeleteKey(key)
         }
@@ -866,11 +879,13 @@ export class ClaudeAgent extends BaseAgent {
       this.credentialEnvTransaction = undefined
     }
     const txnDeleteKey = (key: string): void => {
+      if (!txnIsCurrent()) return
       txnTrack(key)
       this.credentialEnvTransaction!.written[key] = undefined
       delete process.env[key]
     }
     const txnWriteKey = (key: string, value: string): void => {
+      if (!txnIsCurrent()) return
       txnTrack(key)
       this.credentialEnvTransaction!.written[key] = value
       process.env[key] = value
@@ -910,6 +925,17 @@ export class ClaudeAgent extends BaseAgent {
     if (!result.success) {
       rollbackTxn()
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
+    }
+
+    // R55 (obs cd1d10e2): MONOTONIC OWNERSHIP on the success path — if a
+    // newer transaction started while this one awaited its provider, this
+    // stale transaction is SUPERSEDED. It retakes no key (txnTrack/txnDelete/
+    // txnWrite are generation-gated), publishes no expectation set (partial
+    // or full — commitTxn is generation-gated), and its late outcome is
+    // dropped entirely: the successor owns the process credential state.
+    if (!txnIsCurrent()) {
+      this.credentialEnvTransaction = undefined
+      return { authInjected: false, authWarning: 'Credential resolution completed after a newer transaction took over the process credential state; stale outcome discarded' };
     }
 
     if (invocationScoped) {

@@ -2561,6 +2561,70 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       agentB.destroy()
     })
 
+    it('R55: a late out-of-order predecessor resolution cannot overwrite a committed successor (API-to-API)', async () => {
+      const agentA = buildClaude('q-c55-oo-a')
+      const agentB = buildClaude('q-c55-oo-b')
+      // A parks on slot 0 (older generation), B on slot 1 (newer).
+      const releaseA = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'stale-a-api', ANTHROPIC_BASE_URL: 'https://a.example.com' })
+      const releaseB = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'successor-b-api', ANTHROPIC_BASE_URL: 'https://b.example.com' })
+      const postInitA = agentA.postInit()
+      await waitForEnvDeleted()
+      const postInitB = agentB.postInit()
+      await new Promise(r => setTimeout(r, 30))
+
+      // The successor resolves and commits FIRST.
+      releaseB()
+      const resultB = await postInitB
+      expect(resultB.authInjected).toBe(true)
+      expect(process.env.ANTHROPIC_API_KEY).toBe('successor-b-api')
+
+      // The predecessor resolves LATE — after the successor committed. Its
+      // stale outcome is discarded: ownership stays with the newer
+      // generation and its stale API value never lands.
+      releaseA()
+      const resultA = await postInitA
+      expect(resultA.authInjected).toBe(false)
+      expect(resultA.authWarning).toContain('stale outcome discarded')
+      expect(process.env.ANTHROPIC_API_KEY).toBe('successor-b-api')
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      expect(process.env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined()
+      expect(process.env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined()
+      expect(process.env.ANTHROPIC_BEDROCK_BASE_URL).toBeUndefined()
+      agentA.destroy()
+      agentB.destroy()
+    })
+
+    it('R55: a stale API-only late resolution neither publishes its value nor erases the newer OAuth (full-set publish is generation-gated)', async () => {
+      const agentA = buildClaude('q-c55-oo-c')
+      const agentB = buildClaude('q-c55-oo-d')
+      const releaseA = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'stale-a-api' })
+      const releaseB = armCredentialGate('resolve', { CLAUDE_CODE_OAUTH_TOKEN: 'b-oauth', ANTHROPIC_BASE_URL: 'https://b.example.com' })
+      const postInitA = agentA.postInit()
+      await waitForEnvDeleted()
+      const postInitB = agentB.postInit()
+      await new Promise(r => setTimeout(r, 30))
+
+      // The newer OAuth-only transaction commits first: its full-set publish
+      // deletes the API key and keeps its own OAuth value.
+      releaseB()
+      const resultB = await postInitB
+      expect(resultB.authInjected).toBe(true)
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('b-oauth')
+      expect(process.env.ANTHROPIC_API_KEY).toBeUndefined()
+
+      // The stale API-only predecessor resolves late: its partial publish
+      // (stale API) and its FULL-SET deletion (which would erase the
+      // successor OAuth it did not supply) are BOTH suppressed.
+      releaseA()
+      const resultA = await postInitA
+      expect(resultA.authInjected).toBe(false)
+      expect(process.env.ANTHROPIC_API_KEY).toBeUndefined()
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('b-oauth')
+      expect(process.env.ANTHROPIC_BASE_URL).toBe('https://b.example.com')
+      agentA.destroy()
+      agentB.destroy()
+    })
+
     it('a destroyed agent refuses postInit at the entry (zero side effects)', async () => {
       const claude = buildClaude('q-c53-entry')
       claude.destroy()
