@@ -2144,14 +2144,28 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const createWork = sm.createSession('ws_test', {})
       await new Promise(r => setTimeout(r, 500))
       expect(stopCalls).toBe(1)
+      // R55 (obs 52d480fb): while the shared settlement is pending, BOTH
+      // quarantine entries still exist — the unpublished entry keeps its
+      // retry/refusal/storage-cleanup ownership.
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(1)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(1)
 
       // Release the original: the claim retries exactly once and settles;
-      // BOTH quarantine maps drain. The post-release sweep JOINS the claim
-      // to completion before the accounting assertions.
+      // BOTH quarantine maps drain together — the unpublished entry only
+      // after the shared claim reported success (a second createSession
+      // sweep joins the settled claim and finishes its own cleanup).
       releaseStop()
       await (sm as unknown as {
         sweepQuarantinedRuntimeDisposals: () => Promise<void>
       }).sweepQuarantinedRuntimeDisposals()
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+      await sm.createSession('ws_test', {})
       const created = await createWork
       expect(created.id).toBeTruthy()
       expect(stopCalls).toBe(2)
@@ -2162,6 +2176,64 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         unpublishedRuntimeQuarantine: Map<string, unknown>
       }).unpublishedRuntimeQuarantine.size).toBe(0)
       await sm.deleteSession(created.id)
+    })
+
+    it('R55 issue2: a failed shared claim keeps the unpublished entry; a later sweep re-claims and both maps drain together', async () => {
+      const candidate = seedSession('q-r55-failed-claim')
+      candidate.agent = { dispose: () => {} } as never
+      let stopCalls = 0
+      let failStop = true
+      candidate.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          if (failStop) throw new Error('stop exploded (first attempt)')
+        },
+      } as never
+      registerSessionScopedToolCallbacks(candidate.id, { listSessionsFn: async () => 'stale' } as never, 'stale-owner')
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(candidate, 'failed-claim probe')
+      candidate.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 150
+      ;(sm as unknown as { quarantineJoinTimeoutMs: number }).quarantineJoinTimeoutMs = 200
+      // Seed the runtime-disposal entry (stop #1 fails fast → strict failure).
+      const seedSettle = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(candidate, 'failed-claim seed')
+      seedSettle.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 250))
+      expect(stopCalls).toBe(1)
+
+      // First sweep: the claim's retry stop REJECTS → 'retryable' → the
+      // unpublished entry is KEPT (its cleanup ownership survives the failed
+      // shared settlement).
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      expect(stopCalls).toBe(2)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(1)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(1)
+
+      // The stop is healed: the next sweep re-claims, settles exactly once,
+      // and BOTH maps drain together.
+      failStop = false
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      await (sm as unknown as {
+        sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
+      }).sweepQuarantinedUnpublishedRuntimes()
+      expect(stopCalls).toBe(3)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(0)
     })
 
     it('R54 issue3: deleteSession claim-or-joins the retained entry — the shared claim starts at delete, the marker stays truthful, and the drain is exactly-once', async () => {

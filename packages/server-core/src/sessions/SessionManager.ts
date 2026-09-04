@@ -4531,10 +4531,28 @@ export class SessionManager implements ISessionManager {
         // that was still running. The claim awaits the original ops and
         // retries exactly once; after the join, any still-retained faces
         // are claim-owned and the dispose below skips them.
+        // R55 (obs 52d480fb): branch on the BOUNDED JOIN OUTCOME. While the
+        // shared settlement is still `pending` (original shutdown parked) or
+        // `retryable` (a claim attempt failed), THIS sweep keeps the
+        // unpublished quarantine entry — its retry/refusal/storage-cleanup
+        // ownership must not disappear while the shared settlement has not
+        // succeeded — and skips its dispose + post-settlement cleanup
+        // entirely. The entry is drained ONLY after the claim reported
+        // success AND the runtime-disposal entry and the incomplete marker
+        // have both drained (the claim finalizer deletes the entry and the
+        // claim body clears the marker), so the two quarantine maps share
+        // ONE synchronized, owner-token-guarded lifecycle.
         const quarantined = this.findQuarantinedRuntimeDisposalEntry(entry.managed)
         if (quarantined) {
           this.claimQuarantinedSettlement(quarantined.token, quarantined.entry)
-          await this.joinQuarantinedClaimBounded(quarantined.entry)
+          const joinOutcome = await this.joinQuarantinedClaimBounded(quarantined.entry)
+          if (joinOutcome !== 'settled') {
+            sessionLog.info(`Unpublished runtime ${sessionId} keeps its quarantine entry: the shared disposal settlement is ${joinOutcome} (original ops pending or retryable)`)
+            continue
+          }
+          // The claim settled: the runtime-disposal entry and the marker are
+          // already drained by the claim's finalizer — proceed with THIS
+          // sweep's own CAS/refusal/storage cleanup below.
         }
         const result = await this.disposeManagedAgentRuntime(
           entry.managed,
