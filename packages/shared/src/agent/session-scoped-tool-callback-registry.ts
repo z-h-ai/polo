@@ -14,7 +14,19 @@ import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
 import type { AuthRequest, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
+import { createHash } from 'node:crypto';
 import { debug } from '../utils/debug.ts';
+
+/**
+ * R54: the ONE irreversible owner-token fingerprint for every diagnostic
+ * surface (debug lines, warnings, mismatch errors). Owner tokens are
+ * AUTHORIZATION CAPABILITIES — they must never appear verbatim in stderr,
+ * Electron main logs or error messages. All register/merge/mismatch/quarantine
+ * diagnostics route through this helper.
+ */
+export function fingerprintOwnerToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex').slice(0, 8);
+}
 
 /**
  * Callbacks that can be registered per-session
@@ -209,7 +221,7 @@ export function registerSessionScopedToolCallbacks(
   };
   sessionScopedToolCallbackRegistry.set(sessionId, installed);
   sessionScopedToolCallbackLeases.set(sessionId, lease);
-  debug('session-scoped-tools', `Registered callbacks for session ${sessionId} (owner ${lease.ownerToken})`);
+  debug('session-scoped-tools', `Registered callbacks for session ${sessionId} (owner ${fingerprintOwnerToken(lease.ownerToken)})`);
   return lease;
 }
 
@@ -239,9 +251,9 @@ export function mergeSessionScopedToolCallbacks(
   const leaseOwnerMatches = current === undefined || current.ownerToken === ownerToken;
   const guardOwnerMatches = guardEntry === undefined || guardEntry.ownerToken === ownerToken;
   if (!leaseOwnerMatches || !guardOwnerMatches) {
-    const liveLeaseOwner = current?.ownerToken ?? 'none';
-    const liveGuardOwner = guardEntry?.ownerToken ?? 'none';
-    throw new Error(`SESSION_CALLBACK_LEASE_OWNER_MISMATCH (session ${sessionId}: live lease owner ${liveLeaseOwner} / live guard owner ${liveGuardOwner} != caller owner ${ownerToken})`);
+    // R54: the error identifies ONLY the session and the mismatch category —
+    // never the live or caller owner token values (authorization capabilities).
+    throw new Error(`SESSION_CALLBACK_LEASE_OWNER_MISMATCH (session ${sessionId}: the live lease/guard owner is not the caller's runtime owner token)`);
   }
   const existing = sessionScopedToolCallbackRegistry.get(sessionId) ?? {};
   const merged = {
@@ -259,7 +271,7 @@ export function mergeSessionScopedToolCallbacks(
     ownerToken,
   };
   sessionScopedToolCallbackLeases.set(sessionId, lease);
-  debug('session-scoped-tools', `Merged callbacks for session ${sessionId} (owner ${lease.ownerToken})`);
+  debug('session-scoped-tools', `Merged callbacks for session ${sessionId} (owner ${fingerprintOwnerToken(lease.ownerToken)})`);
   return lease;
 }
 

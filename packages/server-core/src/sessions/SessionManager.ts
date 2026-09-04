@@ -9,7 +9,7 @@ import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1443,9 +1443,9 @@ export class SessionManager implements ISessionManager {
     return this.ownerTokenFingerprintOf(token)
   }
 
-  /** R53: fingerprint form for an arbitrary token value (never the token). */
+  /** R53/R54: fingerprint form for an arbitrary token value (shared helper). */
   private ownerTokenFingerprintOf(token: string): string {
-    return createHash('sha256').update(token).digest('hex').slice(0, 8)
+    return fingerprintOwnerToken(token)
   }
 
   /** R38-2: the recorded guard inventory for one managed session (tests). */
@@ -4424,7 +4424,9 @@ export class SessionManager implements ISessionManager {
       quarantinedAt: Date.now(),
       originalOps: [...originalOps],
     })
-    sessionLog.warn(`Runtime disposal for session ${managed.id} quarantined for retry (token ${quarantineToken}) (${reason}): ${failures.join('; ')}`)
+    // R54: the quarantine token doubles as the refusing record's OWNER token
+    // — an authorization capability. Only its fingerprint is ever logged.
+    sessionLog.warn(`Runtime disposal for session ${managed.id} quarantined for retry (token ${fingerprintOwnerToken(quarantineToken)}) (${reason}): ${failures.join('; ')}`)
   }
 
   /**
@@ -4501,7 +4503,8 @@ export class SessionManager implements ISessionManager {
       reason,
       quarantinedAt: Date.now(),
     })
-    sessionLog.warn(`Unpublished candidate runtime for session ${managed.id} quarantined (token ${quarantineToken}): ${Object.keys(refusingCallbacks).length} callback entr(ies) now refuse execution and its runtime stays reachable for retryable cleanup (${reason})`)
+    // R54: fingerprint only — the token is a capability, never a log value.
+    sessionLog.warn(`Unpublished candidate runtime for session ${managed.id} quarantined (token ${fingerprintOwnerToken(quarantineToken)}): ${Object.keys(refusingCallbacks).length} callback entr(ies) now refuse execution and its runtime stays reachable for retryable cleanup (${reason})`)
   }
 
   /**

@@ -24,7 +24,7 @@ import {
 import { getSessionFilePath, writeSessionJsonl } from '@polo-ai/shared/sessions'
 import type { StoredSession } from '@polo-ai/shared/sessions'
 import { getPermissionMode, setPermissionMode } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, getSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterAllSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, getSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterAllSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import { makeAnswerResolution, makeQuestionRequest } from '../../sessions/request-user-input-fixtures'
 
 const TEST_ACCOUNT_ID = 'account-a'
@@ -2660,6 +2660,101 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       const callbacks = getSessionScopedToolCallbacks(sessionId)
       expect(callbacks).toBeDefined()
       unregisterSessionScopedToolCallbacks(sessionId)
+    })
+  })
+  // ==========================================================================
+  // R54 (issue 4): owner tokens are authorization CAPABILITIES — no debug
+  // line, warning or error message ever carries one verbatim. Verified by
+  // (a) a debug-enabled stderr/error capture around real register/merge/
+  // mismatch calls, and (b) a source inventory asserting no unfingerprinted
+  // ownerToken/quarantineToken interpolation reaches any log/error API.
+  // ==========================================================================
+
+  describe('owner-token diagnostic fingerprinting (R54 issue 4)', () => {
+    const SENTINEL_LIVE = 'sentinel-live-owner-capability'
+    const SENTINEL_CALLER = 'sentinel-caller-owner-capability'
+    const SENTINEL_QUARANTINE = 'sentinel-quarantine-token-capability'
+
+    it('the fingerprint helper is irreversible, short and deterministic', () => {
+      const fp = fingerprintOwnerToken(SENTINEL_LIVE)
+      expect(fp).not.toBe(SENTINEL_LIVE)
+      expect(fp).not.toContain('sentinel')
+      expect(fp).toMatch(/^[0-9a-f]{8}$/)
+      expect(fingerprintOwnerToken(SENTINEL_LIVE)).toBe(fp)
+      expect(fingerprintOwnerToken(SENTINEL_CALLER)).not.toBe(fp)
+    })
+
+    it('debug-enabled output and the OWNER_MISMATCH error never carry a raw capability token', async () => {
+      const { enableDebug } = await import('@polo-ai/shared/utils/debug.ts')
+      const sessionId = 'q-r54-fingerprint'
+      const captured: string[] = []
+      const record = (...parts: unknown[]): void => {
+        for (const part of parts) {
+          if (typeof part === 'string') captured.push(part)
+          else if (part instanceof Error) captured.push(part.message)
+          else {
+            try { captured.push(String(part)) } catch { /* ignore */ }
+          }
+        }
+      }
+      const originalLog = console.log
+      const originalWarn = console.warn
+      const originalError = console.error
+      const originalStderrWrite = process.stderr.write.bind(process.stderr)
+      console.log = record
+      console.warn = record
+      console.error = record
+      // R54: the debug util routes to process.stderr in the CLI/main env.
+      process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => {
+        record(typeof chunk === 'string' ? chunk : String(chunk))
+        return (originalStderrWrite as unknown as (c: unknown, ...r: unknown[]) => number)(chunk, ...rest)
+      }) as typeof process.stderr.write
+      enableDebug()
+      try {
+        installSessionScopedToolCallbackGuard(sessionId, () => {}, SENTINEL_LIVE)
+        registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'x' } as never, SENTINEL_LIVE)
+        mergeSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'y' } as never, SENTINEL_LIVE)
+        try {
+          mergeSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'z' } as never, SENTINEL_CALLER)
+          throw new Error('expected OWNER_MISMATCH')
+        } catch (error) {
+          record(error)
+        }
+      } finally {
+        console.log = originalLog
+        console.warn = originalWarn
+        console.error = originalError
+        process.stderr.write = originalStderrWrite as typeof process.stderr.write
+      }
+      const joined = captured.join('\n')
+      expect(joined).toContain('SESSION_CALLBACK_LEASE_OWNER_MISMATCH')
+      expect(joined).not.toContain(SENTINEL_LIVE)
+      expect(joined).not.toContain(SENTINEL_CALLER)
+      expect(joined).not.toContain(SENTINEL_QUARANTINE)
+      expect(joined).toContain(fingerprintOwnerToken(SENTINEL_LIVE))
+      unregisterSessionScopedToolCallbacks(sessionId)
+    })
+
+    it('source inventory: no unfingerprinted ownerToken/quarantineToken interpolation reaches any log or error API', async () => {
+      const { readFileSync } = await import('fs')
+      // bun test runs from the repo root; resolve from cwd for stability.
+      const sources = [
+        'packages/shared/src/agent/session-scoped-tool-callback-registry.ts',
+        'packages/shared/src/agent/claude-agent.ts',
+        'packages/server-core/src/sessions/SessionManager.ts',
+      ]
+      const logOrErrorLine = /(sessionLog\.(?:info|warn|error)|console\.(?:log|warn|error|info)|[^a-zA-Z]debug\(|throw new Error|new Error\()/
+      const forbiddenInterpolation = /\$\{(?![^}]*[Ff]ingerprint)[^}]*\b(ownerToken|quarantineToken)\b/
+      const offenders: string[] = []
+      for (const rel of sources) {
+        const source = readFileSync(resolvePath(process.cwd(), rel), 'utf-8')
+        for (const [index, line] of source.split('\n').entries()) {
+          if (logOrErrorLine.test(line) && forbiddenInterpolation.test(line)) {
+            offenders.push(`${rel}:${index + 1}: ${line.trim()}`)
+          }
+        }
+      }
+      expect(offenders).toEqual([])
     })
   })
 })
