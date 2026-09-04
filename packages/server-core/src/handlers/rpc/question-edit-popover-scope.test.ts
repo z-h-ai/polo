@@ -2708,7 +2708,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => {
         record(typeof chunk === 'string' ? chunk : String(chunk))
         return (originalStderrWrite as unknown as (c: unknown, ...r: unknown[]) => number)(chunk, ...rest)
-      }) as typeof process.stderr.write
+      }) as unknown as typeof process.stderr.write
       enableDebug()
       try {
         installSessionScopedToolCallbackGuard(sessionId, () => {}, SENTINEL_LIVE)
@@ -2724,7 +2724,7 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         console.log = originalLog
         console.warn = originalWarn
         console.error = originalError
-        process.stderr.write = originalStderrWrite as typeof process.stderr.write
+        process.stderr.write = originalStderrWrite as unknown as typeof process.stderr.write
       }
       const joined = captured.join('\n')
       expect(joined).toContain('SESSION_CALLBACK_LEASE_OWNER_MISMATCH')
