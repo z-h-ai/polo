@@ -21,7 +21,7 @@ import { useTheme } from "@/context/ThemeContext"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { cn } from "@/lib/utils"
 import { getSessionTitle } from "@/utils/session"
-import type { ExecutionSummary, ExecutionStatus } from "@polo-ai/shared/product-spaces"
+import type { ExecutionSummary } from "@polo-ai/shared/product-spaces"
 import {
   Check,
   ChevronRight,
@@ -49,41 +49,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ProductSpaceSwitcher } from "@/components/product-space/ProductSpaceSwitcher"
+import {
+  ACTIVE_EXECUTION_STATUSES,
+  createRegistryExecutionPoller,
+  snapshotBelongsToActiveScope,
+  type OwnedExecutionSnapshot,
+} from "./registry-execution-poller"
 
 const MAX_NOTIFICATION_ITEMS = 6
-
-const RUNTIME_REFRESH_INTERVAL_MS = 5000
-
-/** POO-41 active-execution semantics: preparing/running/waiting/stopping.
-    Terminal `stopped`/`failed` executions are never counted. */
-const ACTIVE_EXECUTION_STATUSES: ReadonlySet<ExecutionStatus> = new Set([
-  "preparing",
-  "running",
-  "waiting_for_network",
-  "stopping",
-])
-
-/** A registry snapshot is only consumable while its owning scope tuple is
-    still the active ProductSpace scope (trusted-boundary ownership). */
-interface OwnedExecutionSnapshot {
-  ownerAccountId: string
-  ownerProductSpaceId: string
-  executions: ExecutionSummary[]
-}
-
-function snapshotBelongsToActiveScope(
-  snapshot: OwnedExecutionSnapshot | null,
-  accountId: string | null,
-  activeProductSpaceId: string | null,
-): snapshot is OwnedExecutionSnapshot {
-  return Boolean(
-    snapshot
-    && accountId
-    && activeProductSpaceId
-    && snapshot.ownerAccountId === accountId
-    && snapshot.ownerProductSpaceId === activeProductSpaceId,
-  )
-}
 
 export function TopBar() {
   const { t } = useTranslation()
@@ -107,49 +80,36 @@ export function TopBar() {
   // dialog read ONLY from productSpaceListActiveExecutions (never from the
   // Catalog). The snapshot is owned by the (accountId, activeProductSpaceId)
   // tuple: a scope change clears it immediately and publishes nothing until
-  // THIS scope's own successful response arrives. Requests are single-flight
-  // (the next one is scheduled only after the previous settles) and carry a
-  // monotonic generation, so a slow or stale response can never overwrite a
-  // newer same-scope snapshot.
+  // THIS scope's own successful response arrives. Each scope owns a poller
+  // loop whose scheduling is fully dispose-guarded (see
+  // createRegistryExecutionPoller), so a late in-flight response from a
+  // previous scope can neither publish nor keep polling.
   useEffect(() => {
     setOwnedSnapshot(null)
     setSelectedExecutionId(null)
     if (!accountId || !activeProductSpaceId) {
       return
     }
-    let disposed = false
-    let timer: number | undefined
-    let generation = 0
-    const refresh = async () => {
-      const requestGeneration = ++generation
-      try {
+    const poller = createRegistryExecutionPoller({
+      accountId,
+      productSpaceId: activeProductSpaceId,
+      fetchExecutions: async (scopeAccountId, scopeProductSpaceId) => {
         const result = await window.electronAPI.productSpaceListActiveExecutions(
-          accountId,
-          activeProductSpaceId,
+          scopeAccountId,
+          scopeProductSpaceId,
         )
-        if (disposed || requestGeneration !== generation) return
-        if (result.success) {
-          setOwnedSnapshot({
-            ownerAccountId: accountId,
-            ownerProductSpaceId: activeProductSpaceId,
-            executions: result.executions,
-          })
-        }
-        // A failed same-scope call keeps the previously owned snapshot; a new
-        // scope has none, so it keeps rendering the honest empty state.
-      } catch {
-        // Transient registry failures keep the previous same-scope snapshot.
-      }
-    }
-    const scheduleNext = () => {
-      timer = window.setTimeout(() => {
-        void refresh().finally(scheduleNext)
-      }, RUNTIME_REFRESH_INTERVAL_MS)
-    }
-    void refresh().finally(scheduleNext)
+        return result.success ? result.executions : null
+      },
+      onSnapshot: (executions) => {
+        setOwnedSnapshot({
+          ownerAccountId: accountId,
+          ownerProductSpaceId: activeProductSpaceId,
+          executions,
+        })
+      },
+    })
     return () => {
-      disposed = true
-      if (timer !== undefined) window.clearTimeout(timer)
+      poller.dispose()
     }
   }, [accountId, activeProductSpaceId])
 
