@@ -119,6 +119,7 @@ describe('request_user_input callback generation binding (immutable closure)', (
       provider: 'pi' as any,
       model: '',
       isHeadless: true,
+      sessionCallbackOwnerToken: 'test-owner',
       workspace: createMockWorkspace({ rootPath: '/tmp/pi-bind-merge' }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       session: { id: sessionId } as any,
@@ -162,6 +163,7 @@ describe('request_user_input callback generation binding (immutable closure)', (
     const agent = new ClaudeAgent({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(createMockBackendConfig({ provider: 'anthropic' as any, model: 'test-model', isHeadless: true, workspace: createMockWorkspace({ rootPath: '/tmp/claude-bind' }) }) as any),
+      sessionCallbackOwnerToken: 'test-owner',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       session: { id: sessionId } as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
