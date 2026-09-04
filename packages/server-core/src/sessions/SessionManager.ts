@@ -4197,24 +4197,32 @@ export class SessionManager implements ISessionManager {
     const wantsCallbackCleanup = !strictFailure
       && (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks())
     if (wantsCallbackCleanup) {
-      // R49/R50: owner-aware atomic CAS against the OWNER-BOUND lease. When
-      // the CAS misses (a successor replaced the record/guard during the
-      // awaited disposals) the face is skipped and recorded — never
-      // force-erased.
-      if (callbackLeaseAtEntry !== undefined) {
-        callbacksUnregistered = unregisterSessionScopedToolCallbacksIf(sessionId, callbackLeaseAtEntry)
-        if (!callbacksUnregistered) {
-          sessionLog.info(`Callback lease for session ${sessionId} was replaced by a successor during ${reason}; cleanup skipped`)
-        }
-      } else if (managed.constructionCallbackGuardLease !== undefined) {
-        // R52-A: GUARD-ONLY owner lease — the factory threw (or the bounded
-        // wait expired) BEFORE any callback record was registered. Remove the
-        // guard by identity ONLY while the live record is still absent; a
-        // successor's later registration is never wrapped by this stale guard.
-        callbacksUnregistered = unregisterSessionScopedToolGuardIf(sessionId, managed.constructionCallbackGuardLease)
-        if (!callbacksUnregistered) {
-          sessionLog.info(`Guard-only lease for session ${sessionId} was replaced by a successor during ${reason}; cleanup skipped`)
-        }
+      // R49/R50/R53: the cleanup walks THREE escalating, owner-verified
+      // paths — each one refuses to touch a successor's state:
+      // 1. FULL LEASE CAS — the exact (record, guard, owner) snapshot this
+      //    runtime published and refreshed. The normal live-disposal path.
+      // 2. OWNER-TOKEN CAS — this construction DID register its record but
+      //    threw/was aborted before the lease was promoted onto the managed
+      //    (register-then-throw). Ownership is proven by the immutable
+      //    runtime token minted for THIS generation: both the live lease
+      //    owner and the live guard owner must equal it. Previously this
+      //    form leaked BOTH the record and the guard (the stale-lease
+      //    branch short-circuited the guard-only fallback).
+      // 3. GUARD-ONLY CAS — the factory threw BEFORE any record existed.
+      //    Only removes the guard while no record is registered and the
+      //    guard identity is unchanged, so a successor inserting between
+      //    the steps is never unguarded.
+      const guardLeaseAtEntry = managed.constructionCallbackGuardLease
+      const ownerTokenAtEntry = managed.runtimeOwnerToken
+      if (callbackLeaseAtEntry !== undefined && unregisterSessionScopedToolCallbacksIf(sessionId, callbackLeaseAtEntry)) {
+        callbacksUnregistered = true
+      } else if (ownerTokenAtEntry !== undefined && unregisterSessionScopedToolCallbacksIfOwner(sessionId, ownerTokenAtEntry)) {
+        callbacksUnregistered = true
+      } else if (guardLeaseAtEntry !== undefined && unregisterSessionScopedToolGuardIf(sessionId, guardLeaseAtEntry)) {
+        callbacksUnregistered = true
+      }
+      if (!callbacksUnregistered) {
+        sessionLog.info(`Callback state for session ${sessionId} was replaced by a successor during ${reason}; cleanup skipped`)
       }
     }
     if (strictFailure) {
@@ -4759,12 +4767,19 @@ export class SessionManager implements ISessionManager {
       // generation — only when a NEW backend is actually constructed. A
       // reuse path (live agent) keeps the existing token so the single
       // chain SM → coreConfig → backend → registry never re-binds a live
-      // backend to a foreign token. The previous runtime generation's
-      // callback lease ownership ended with its disposal: a stale lease
-      // must never ride into THIS construction's dispose path (issue 1's
-      // reused-ManagedSession residue).
+      // backend to a foreign token.
+      // R53 (issue 1): the previous generation's callback registry state is
+      // RECLAIMED here — this managed provably owned it (token equality),
+      // and a stale lease/guard must never ride into THIS construction's
+      // dispose path. A successor's state can never match the previous
+      // token, so the reclaim is successor-safe.
+      const previousRuntimeOwnerToken = managed.runtimeOwnerToken
       managed.runtimeOwnerToken = randomUUID()
       managed.callbackLease = undefined
+      managed.constructionCallbackGuardLease = undefined
+      if (previousRuntimeOwnerToken !== undefined) {
+        unregisterSessionScopedToolCallbacksIfOwner(managed.id, previousRuntimeOwnerToken)
+      }
 
       // Lock the connection after first resolution
       // This ensures the session always uses the same provider

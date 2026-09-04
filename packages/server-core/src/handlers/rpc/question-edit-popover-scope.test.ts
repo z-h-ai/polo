@@ -23,8 +23,8 @@ import {
 } from './trusted-product-space-account'
 import { getSessionFilePath, writeSessionJsonl } from '@polo-ai/shared/sessions'
 import type { StoredSession } from '@polo-ai/shared/sessions'
-import { getPermissionMode, setPermissionMode, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent'
-import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, mergeSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterAllSessionScopedToolCallbacks } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
+import { getPermissionMode, setPermissionMode } from '@polo-ai/shared/agent'
+import { getSessionScopedToolCallbacks, getSessionScopedToolCallbackLease, getSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacks, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterAllSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import { makeAnswerResolution, makeQuestionRequest } from '../../sessions/request-user-input-fixtures'
 
 const TEST_ACCOUNT_ID = 'account-a'
@@ -2274,6 +2274,95 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       }
       expect((claude as unknown as { invocationCredentialProxy?: unknown }).invocationCredentialProxy ?? undefined).toBeUndefined()
       claude.destroy()
+    })
+  })
+
+  // ==========================================================================
+  // R53 (issue 1): construction callback cleanup covers BOTH residue forms —
+  // a reused ManagedSession whose stale lease must never short-circuit the
+  // guard-only path, and a register-then-throw construction whose record was
+  // never promoted. Both must end ZERO-RESIDUE.
+  // ==========================================================================
+
+  describe('construction callback cleanup ownership (R53 issue 1)', () => {
+    it('a live runtime reused by getOrCreateAgent keeps its runtime owner token (no silent re-bind)', async () => {
+      const managed = seedSession('q-r53-reuse-token')
+      managed.agent = { dispose: () => {}, isProcessing: () => false } as never
+      const liveToken = 'reuse-generation-token'
+      managed.runtimeOwnerToken = liveToken
+      await (sm as unknown as {
+        getOrCreateAgent: (m: unknown) => Promise<unknown>
+      }).getOrCreateAgent(managed)
+      expect(managed.runtimeOwnerToken).toBe(liveToken)
+      expect(managed.agent).toBeTruthy()
+    })
+
+    it('a construction that registers then throws before promotion leaves NO record and NO guard', async () => {
+      const managed = seedSession('q-r53-reregister')
+      managed.runtimeOwnerToken = 'gen2-token'
+      const guard2 = () => { throw new Error('guard2 must never run') }
+      installSessionScopedToolCallbackGuard(managed.id, guard2, 'gen2-token')
+      managed.constructionCallbackGuardLease = getSessionScopedToolCallbackGuard(managed.id)
+      // The construction registered its record under its own token, but the
+      // lease promotion onto the managed never ran (the throw came first).
+      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'gen2' } as never, 'gen2-token')
+      expect(getSessionScopedToolCallbacks(managed.id)).toBeDefined()
+
+      await (sm as unknown as {
+        disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: unknown) => Promise<unknown>
+      }).disposeManagedAgentRuntime(managed, 'register-then-throw probe', { bestEffort: true })
+
+      // The OWNER-TOKEN CAS removed record + guard + lease atomically.
+      expect(getSessionScopedToolCallbacks(managed.id)).toBeUndefined()
+      expect(getSessionScopedToolCallbackGuard(managed.id)).toBeUndefined()
+      expect(getSessionScopedToolCallbackLease(managed.id)).toBeUndefined()
+    })
+
+    it('a reused ManagedSession with a stale lease has the previous generation reclaimed and its own guard cleaned', async () => {
+      const managed = seedSession('q-r53-reuse-stale')
+      // Generation 1: a live previous runtime whose registry state survived
+      // (e.g. its disposal skipped callback cleanup on a strict failure).
+      managed.runtimeOwnerToken = 'gen1-owner'
+      installSessionScopedToolCallbackGuard(managed.id, () => { throw new Error('guard1') }, 'gen1-owner')
+      managed.callbackLease = registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'gen1' } as never, 'gen1-owner')
+
+      // The NEW construction mints a fresh generation, clears the stale
+      // lease and RECLAIMS the previous generation's registry state, then
+      // installs its own guard — and THROWS before registering any record.
+      const previousToken = managed.runtimeOwnerToken
+      managed.runtimeOwnerToken = 'gen2-owner'
+      managed.callbackLease = undefined
+      managed.constructionCallbackGuardLease = undefined
+      expect(unregisterSessionScopedToolCallbacksIfOwner(managed.id, previousToken)).toBe(true)
+      expect(getSessionScopedToolCallbacks(managed.id)).toBeUndefined()
+      const guard2 = () => { throw new Error('guard2 must never run') }
+      installSessionScopedToolCallbackGuard(managed.id, guard2, 'gen2-owner')
+      managed.constructionCallbackGuardLease = getSessionScopedToolCallbackGuard(managed.id)
+
+      await (sm as unknown as {
+        disposeManagedAgentRuntime: (m: unknown, reason: string, opts?: unknown) => Promise<unknown>
+      }).disposeManagedAgentRuntime(managed, 'reused-managed probe', { bestEffort: true })
+
+      // Guard-only CAS removed the construction guard; nothing of either
+      // generation remains.
+      expect(getSessionScopedToolCallbackGuard(managed.id)).toBeUndefined()
+      expect(getSessionScopedToolCallbacks(managed.id)).toBeUndefined()
+      expect(getSessionScopedToolCallbackLease(managed.id)).toBeUndefined()
+    })
+
+    it('a successor generation is never erased by a stale construction cleanup (owner CAS refuses)', () => {
+      const sessionId = 'q-r53-successor-refuse'
+      // Generation 1 installed state, then "died" holding only its token.
+      installSessionScopedToolCallbackGuard(sessionId, () => {}, 'gen1-owner')
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'gen1' } as never, 'gen1-owner')
+      // The successor took over with its own token.
+      installSessionScopedToolCallbackGuard(sessionId, () => {}, 'gen2-owner')
+      registerSessionScopedToolCallbacks(sessionId, { listSessionsFn: async () => 'gen2' } as never, 'gen2-owner')
+      // The stale generation's owner CAS must refuse.
+      expect(unregisterSessionScopedToolCallbacksIfOwner(sessionId, 'gen1-owner')).toBe(false)
+      const callbacks = getSessionScopedToolCallbacks(sessionId)
+      expect(callbacks).toBeDefined()
+      unregisterSessionScopedToolCallbacks(sessionId)
     })
   })
 })
