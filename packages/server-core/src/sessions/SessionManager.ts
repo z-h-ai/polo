@@ -4558,17 +4558,6 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * R46/R47: retry the cleanup of every quarantined unpublished candidate.
-   * Runs at every createSession entry — a no-op while the registry is empty.
-   * R47 owner isolation:
-   * - callbacks/guard are unregistered COMPARE-AND-UNREGISTER style — only
-   *   while the current registration is still OUR refusing record AND no live
-   *   replacement session owns the id;
-   * - the candidate's storage record is deleted only when no live
-   *   replacement owns the id (absent-or-ours);
-   * - anything skipped or still failing keeps the entry retryable.
-   */
-  /**
    * R56 (issue 1): the ONE owner-token-guarded post-settlement cleanup for a
    * quarantined UNPUBLISHED candidate — compare-and-unregister of its
    * refusing record against the quarantine's OWN lease (a successor owner's
@@ -4620,6 +4609,20 @@ export class SessionManager implements ISessionManager {
     return false
   }
 
+  /**
+   * R46/R47: retry the cleanup of every quarantined unpublished candidate.
+   * Runs at every createSession entry — a no-op while the registry is empty.
+   * R47 owner isolation:
+   * - callbacks/guard are unregistered COMPARE-AND-UNREGISTER style — only
+   *   while the current registration is still OUR refusing record AND no live
+   *   replacement session owns the id;
+   * - the candidate's storage record is deleted only when no live
+   *   replacement owns the id (absent-or-ours);
+   * - anything skipped or still failing keeps the entry retryable.
+   * R54 (issue 2): a matching runtime-disposal settlement claim is
+   * claim-or-joined (bounded) BEFORE any resource API call; a pending or
+   * retryable outcome KEEPS this entry for a later sweep.
+   */
   private async sweepQuarantinedUnpublishedRuntimes(): Promise<void> {
     if (this.unpublishedRuntimeQuarantine.size === 0) return
     for (const [sessionId, entry] of this.unpublishedRuntimeQuarantine) {
