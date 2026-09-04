@@ -2842,6 +2842,63 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(r56ClosedProxies).toContain('proxy-1')
     })
 
+    it('R57: same-instance reverse desktop resolution — the stale call rolls back only ITS OWN transaction and cannot fake the successor success', async () => {
+      const claude = buildClaude('q-r57-same-instance')
+      const releaseA = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'stale-a-api', ANTHROPIC_BASE_URL: 'https://a.example.com' })
+      const releaseB = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'b-api', ANTHROPIC_BASE_URL: 'https://b.example.com' })
+      // Same agent instance: call 1 (older epoch) parks, call 2 (newer epoch) parks.
+      const postInit1 = claude.postInit()
+      await waitForEnvDeleted()
+      const postInit2 = claude.postInit()
+      await new Promise(r => setTimeout(r, 30))
+      // The newer call commits first.
+      releaseB()
+      const result2 = await postInit2
+      expect(result2.authInjected).toBe(true)
+      expect(process.env.ANTHROPIC_API_KEY).toBe('b-api')
+      // The stale call resolves late: discarded without touching the
+      // successor's transaction — no rollback of B, no fake success with an
+      // empty credential env.
+      releaseA()
+      const result1 = await postInit1
+      expect(result1.authInjected).toBe(false)
+      expect(process.env.ANTHROPIC_API_KEY).toBe('b-api')
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      expect(process.env.ANTHROPIC_BASE_URL).toBe('https://b.example.com')
+      claude.destroy()
+    })
+
+    it('R57: a completed predecessor late-abort neither rolls back the successor nor poisons the agent', async () => {
+      const claude = buildClaude('q-r17-late-abort')
+      const controller1 = new AbortController()
+      // Call 1 completes FIRST with an API-key-only set.
+      const releaseA = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'a-api' })
+      const postInit1 = claude.postInit({ signal: controller1.signal })
+      await waitForEnvDeleted()
+      releaseA()
+      const result1 = await postInit1
+      expect(result1.authInjected).toBe(true)
+      expect(process.env.ANTHROPIC_API_KEY).toBe('a-api')
+      // Call 2 starts and commits a newer OAuth-only set (full-set publish
+      // deletes the API key).
+      const releaseB = armCredentialGate('resolve', { CLAUDE_CODE_OAUTH_TOKEN: 'b-oauth', ANTHROPIC_BASE_URL: 'https://b.example.com' })
+      const postInit2 = claude.postInit()
+      await new Promise(r => setTimeout(r, 30))
+      releaseB()
+      const result2 = await postInit2
+      expect(result2.authInjected).toBe(true)
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('b-oauth')
+      expect(process.env.ANTHROPIC_API_KEY).toBeUndefined()
+      // Call 1's signal aborts LATE — after call 1 settled and call 2
+      // committed. The stale per-call listener is inert: no rollback of the
+      // successor state, and the agent is NOT permanently poisoned.
+      controller1.abort(new Error('late abort'))
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('b-oauth')
+      expect(process.env.ANTHROPIC_BASE_URL).toBe('https://b.example.com')
+      expect((claude as unknown as { postInitAborted: boolean }).postInitAborted).toBe(false)
+      claude.destroy()
+    })
+
     it('a destroyed agent refuses postInit at the entry (zero side effects)', async () => {
       const claude = buildClaude('q-c53-entry')
       claude.destroy()
