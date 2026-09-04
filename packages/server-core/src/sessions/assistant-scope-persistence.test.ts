@@ -1898,8 +1898,11 @@ describe('authoritative callback guard inventory (R38-2)', () => {
     }
 
     // The tool-callback builder and the browser-pane record go through the
-    // same authoritative mechanism.
-    expect(source).toContain('mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed))')
+    // same authoritative mechanism. R52-B: both merges carry the runtime
+    // owner token so the owner-verified registry accepts them.
+    expect(source).toContain('mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), managed.runtimeOwnerToken)')
+    expect(source).toContain('mergeSessionScopedToolCallbacks(sid, {')
+    expect(source).toContain('managed.runtimeOwnerToken)')
     expect(source).toContain('this.guardManagedCallbackRecord(managed, \'browserPaneFns\', rawBrowserPaneFns.browserPaneFns)')
   })
 

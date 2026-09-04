@@ -227,6 +227,22 @@ export interface ClaudeAgentConfig {
   connectionSlug?: string;
   /** Enable 1M context window for Opus 4.7. Default: true. Set false to use 200K and conserve usage limits. */
   enable1MContext?: boolean;
+  /**
+   * R52-B: immutable runtime owner token for session-scoped callback
+   * ownership. The constructor's registration and every owner-verified
+   * merge carry it; mismatched owners are rejected by the registry.
+   */
+  sessionCallbackOwnerToken?: string;
+  /**
+   * R51/R52: notified with the exact lease returned by the constructor's
+   * registration / per-turn merges so the SessionManager can re-bind its
+   * owned lease without re-reading the registry.
+   */
+  onSessionCallbackLeaseChanged?: (lease: {
+    record: unknown;
+    guard: unknown;
+    ownerToken?: string;
+  }) => void;
 }
 
 // Permission request tracking
@@ -632,6 +648,12 @@ export class ClaudeAgent extends BaseAgent {
       mcpPool: config.mcpPool,
       connectionSlug: config.connectionSlug,
       automationSystem: config.automationSystem,
+      // R52-B: owner-verified callback ownership — the constructor's
+      // session-scoped registration and every owner-verified merge carry
+      // THIS runtime's immutable token; the SM rebinds its lease through
+      // the change notification. Both must survive the config copy.
+      sessionCallbackOwnerToken: config.sessionCallbackOwnerToken,
+      onSessionCallbackLeaseChanged: config.onSessionCallbackLeaseChanged,
     };
 
     // Call BaseAgent constructor - initializes model, thinkingLevel, permissionManager, sourceManager, etc.
@@ -677,6 +699,11 @@ export class ClaudeAgent extends BaseAgent {
     });
 
     // Register session-scoped tool callbacks
+    // R52-B: the registration carries THIS runtime's immutable owner token —
+    // the SessionManager's construct-time owner-verified merge (and this
+    // agent's own per-turn merges) must match the lease this register
+    // publishes; a token-less register would mint a foreign owner and make
+    // the legitimate owner's next merge throw OWNER_MISMATCH.
     registerSessionScopedToolCallbacks(sessionId, {
       onPlanSubmitted: (planPath) => {
         this.onDebug?.(`[ClaudeAgent] onPlanSubmitted received: ${planPath}`);
@@ -697,7 +724,7 @@ export class ClaudeAgent extends BaseAgent {
       getTurnGeneration: () => this.sessionTurnGeneration,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
-    });
+    }, this.config.sessionCallbackOwnerToken);
 
     // Start config watcher for hot-reloading source changes
     // Only start in non-headless mode to avoid overhead in batch/script scenarios

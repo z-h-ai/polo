@@ -181,8 +181,7 @@ export function registerSessionScopedToolCallbacks(
     guard: sessionScopedToolCallbackGuards.get(sessionId),
     ownerToken: ownerToken ?? randomUUID(),
   };
-  sessionScopedToolCallbackRegistry.set(sessionId, installed);
-  sessionScopedToolCallbackLeases.set(sessionId, lease);
+  sessionScopedToolCallbackRegistry.set(sessionId, installed);  sessionScopedToolCallbackLeases.set(sessionId, lease);
   debug('session-scoped-tools', `Registered callbacks for session ${sessionId} (owner ${lease.ownerToken})`);
   return lease;
 }

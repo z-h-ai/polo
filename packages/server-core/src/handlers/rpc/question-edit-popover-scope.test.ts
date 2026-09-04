@@ -2109,8 +2109,8 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
 
       claude.rollbackCredentialEnvTransaction()
       expect(process.env.ANTHROPIC_API_KEY).toBe('successor-key')
-      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN ?? undefined).toBe(envBefore.CLAUDE_CODE_OAUTH_TOKEN ?? undefined)
-      expect(process.env.ANTHROPIC_BASE_URL ?? undefined).toBe(envBefore.ANTHROPIC_BASE_URL ?? undefined)
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN === envBefore.CLAUDE_CODE_OAUTH_TOKEN).toBe(true)
+      expect(process.env.ANTHROPIC_BASE_URL === envBefore.ANTHROPIC_BASE_URL).toBe(true)
       expect((claude as unknown as { postInitAborted: boolean }).postInitAborted).toBe(true)
       delete process.env.ANTHROPIC_API_KEY
       claude.destroy()

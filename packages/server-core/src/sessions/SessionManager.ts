@@ -4701,6 +4701,7 @@ export class SessionManager implements ISessionManager {
     // carried by the backend's register/merge calls so stale runtimes cannot
     // merge into a successor's lease.
     managed.runtimeOwnerToken = randomUUID()
+    console.log('[owner-token] session', managed.id, 'token', managed.runtimeOwnerToken)
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
       sessionConnectionSlug: managed.llmConnection,
@@ -5434,7 +5435,7 @@ export class SessionManager implements ISessionManager {
         }
         mergeSessionScopedToolCallbacks(sid, {
           browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
-        })
+        }, managed.runtimeOwnerToken)
       }
 
       // Signal that the agent instance is ready (unblocks title generation)
@@ -5725,7 +5726,7 @@ export class SessionManager implements ISessionManager {
       // R37-2: the callbacks are built by ONE inventoried builder — the
       // table-driven inventory test exercises every entry through its
       // current-scope guard.
-      mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed))
+      mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), managed.runtimeOwnerToken)
 
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
       // R38-2: the DIRECT source-activation callback is registered through
