@@ -93,6 +93,10 @@ mock.module('@polo-ai/shared/config/storage', () => ({
 // rejects that call. With no slots armed the real implementation runs. The
 // REAL ClaudeAgent.postInit drives all env mutations on top of this.
 const llmConnectionsModule = await import('@polo-ai/shared/config/llm-connections')
+// R56: bind the REAL functions BEFORE mock.module — bun may mutate the
+// captured namespace in place, so delegation must go through the bound
+// function reference, not the namespace.
+const realResolveAuthEnvVars = llmConnectionsModule.resolveAuthEnvVars
 let r53CredentialQueue: Array<{
   promise: Promise<void>
   release: () => void
@@ -104,9 +108,7 @@ mock.module('@polo-ai/shared/config/llm-connections', () => ({
   resolveAuthEnvVars: async (...args: unknown[]) => {
     const slot = r53CredentialQueue.shift()
     if (!slot) {
-      return (llmConnectionsModule as unknown as {
-        resolveAuthEnvVars: (...delegateArgs: unknown[]) => Promise<unknown>
-      }).resolveAuthEnvVars(...args)
+      return (realResolveAuthEnvVars as unknown as (...delegateArgs: unknown[]) => Promise<unknown>)(...args)
     }
     await slot.promise
     if (slot.mode === 'reject') {
@@ -134,6 +136,40 @@ mock.module('@polo-ai/shared/agent/backend', () => ({
   createBackendFromResolvedContext: (context: unknown) => {
     if (r49StallPostInit) return r49StalledAgent
     return agentBackendModule.createBackendFromResolvedContext(context as never)
+  },
+}))
+
+// R56 harness seam: a CONTROLLED invocation-credential-proxy factory. Each
+// armed slot serves ONE startInvocationCredentialProxy call (FIFO): the slot
+// may park (released by the test) or be pre-resolved. The returned fake
+// proxy records close() so listener leaks are directly assertable. With no
+// slots armed the real implementation runs.
+const credentialsModule = await import('@polo-ai/shared/credentials')
+const realStartInvocationCredentialProxy = (credentialsModule as unknown as {
+  startInvocationCredentialProxy: (...a: unknown[]) => Promise<unknown>
+}).startInvocationCredentialProxy
+let r56ProxySequence: Array<{
+  parked: Promise<void>
+  release: () => void
+  capability: string
+  name: string
+}> = []
+const r56ClosedProxies: string[] = []
+let r56ProxyStartsEntered = 0
+mock.module('@polo-ai/shared/credentials', () => ({
+  ...credentialsModule,
+  startInvocationCredentialProxy: async (...args: unknown[]) => {
+    const slot = r56ProxySequence.shift()
+    if (!slot) {
+      return realStartInvocationCredentialProxy(...args)
+    }
+    r56ProxyStartsEntered += 1
+    await slot.parked
+    return {
+      url: `http://127.0.0.1/${slot.name}`,
+      capability: slot.capability,
+      close: async () => { r56ClosedProxies.push(slot.name) },
+    } as never
   },
 }))
 
@@ -2455,6 +2491,9 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
     afterEach(() => {
       r53CredentialQueue = []
       r53ConnectionFixture = null
+      r56ProxySequence = []
+      r56ClosedProxies.length = 0
+      r56ProxyStartsEntered = 0
       for (const key of MANAGED_KEYS) {
         const prior = envPriors[key]
         if (prior === undefined) delete process.env[key]
@@ -2480,6 +2519,20 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       throw new Error('the desktop pre-await credential deletions never landed')
     }
 
+    const armProxyStart = (name: string, capability: string, preResolved = false): (() => void) | undefined => {
+      let release!: () => void
+      const parked = new Promise<void>(resolve => { release = () => resolve() })
+      if (preResolved) release()
+      r56ProxySequence.push({ parked, release, capability, name })
+      return preResolved ? undefined : release
+    }
+    const waitForProxyStartsEntered = async (count: number): Promise<void> => {
+      for (let i = 0; i < 300; i += 1) {
+        if (r56ProxyStartsEntered >= count) return
+        await new Promise(r => setTimeout(r, 10))
+      }
+      throw new Error('the invocation credential proxy start never entered')
+    }
     const armCredentialGate = (
       mode: 'resolve' | 'reject',
       result: Record<string, string> = { ANTHROPIC_API_KEY: 'resolved-api-key', ANTHROPIC_BASE_URL: 'https://resolved.example.com' },
@@ -2698,6 +2751,95 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(process.env.ANTHROPIC_BASE_URL).toBe('https://b.example.com')
       agentA.destroy()
       agentB.destroy()
+    })
+
+    it('R56: an interleaved invocation-scoped CLI initialisation never supersedes a desktop transaction', async () => {
+      // CLI agent: invocationScoped (sessionStorage owner 'cli').
+      const buildCliClaude = (sessionId: string) => {
+        const { ClaudeAgent } = require('@polo-ai/shared/agent')
+        return new ClaudeAgent({
+          session: { id: sessionId, rootPath: tmpRoot },
+          workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+          sessionCallbackOwnerToken: 'test-owner',
+          connectionSlug: 'r53-fake-conn',
+          sessionStorage: { owner: 'cli', getPlansPath: () => join(tmpRoot, 'plans'), getSessionPath: () => join(tmpRoot, 'sess'), getDataPath: () => join(tmpRoot, 'data'), getAttachmentsPath: () => join(tmpRoot, 'attachments'), flush: async () => {}, persistenceQueue: { cancel: () => {} } } as never,
+        } as never)
+      }
+      const desktopA = buildClaude('q-c56-cli-desktop')
+      const cliB = buildCliClaude('q-c56-cli-b')
+      const releaseDesktop = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'desktop-a-key', ANTHROPIC_BASE_URL: 'https://a.example.com' })
+      // The CLI call parks INSIDE its proxy start while the desktop
+      // transaction is mid-flight.
+      const releaseCliProxy = armProxyStart('cli-proxy-0', 'cli-cap-0')
+      const desktopWork = desktopA.postInit()
+      await waitForEnvDeleted()
+      // The CLI provider slot is pre-resolved so B flows through to its
+      // (parked) proxy start.
+      const releaseCliProvider = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'cli-unused' })
+      releaseCliProvider()
+      const cliWork = cliB.postInit()
+      await waitForProxyStartsEntered(1)
+
+      // The CLI call completes — but it NEVER advances or replaces the
+      // desktop generation domain (it does not own process.env).
+      releaseCliProxy()
+      const cliResult = await cliWork
+      expect(cliResult.authInjected).toBe(true)
+
+      // The desktop transaction resolves LATE: it is still the current
+      // desktop generation — it completes its COHERENT COMMIT.
+      releaseDesktop()
+      const desktopResult = await desktopWork
+      expect(desktopResult.authInjected).toBe(true)
+      expect(desktopResult.authWarning ?? '').not.toContain('stale outcome discarded')
+      expect(process.env.ANTHROPIC_API_KEY).toBe('desktop-a-key')
+      expect(process.env.ANTHROPIC_BASE_URL).toBe('https://a.example.com')
+      expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      cliB.destroy()
+      desktopA.destroy()
+    })
+
+    it('R56: reverse proxy-start completion — the superseded same-instance call publishes nothing and leaks no listener', async () => {
+      const buildCliClaude = (sessionId: string) => {
+        const { ClaudeAgent } = require('@polo-ai/shared/agent')
+        return new ClaudeAgent({
+          session: { id: sessionId, rootPath: tmpRoot },
+          workspace: { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot },
+          sessionCallbackOwnerToken: 'test-owner',
+          connectionSlug: 'r53-fake-conn',
+          sessionStorage: { owner: 'cli', getPlansPath: () => join(tmpRoot, 'plans'), getSessionPath: () => join(tmpRoot, 'sess'), getDataPath: () => join(tmpRoot, 'data'), getAttachmentsPath: () => join(tmpRoot, 'attachments'), flush: async () => {}, persistenceQueue: { cancel: () => {} } } as never,
+        } as never)
+      }
+      const claude = buildCliClaude('q-c56-proxy-race')
+      // Call 1 (older epoch): provider slot pre-resolved; the proxy START parks.
+      const releaseFirstProvider = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'x' })
+      releaseFirstProvider()
+      const releaseProxy0 = armProxyStart('proxy-0', 'capability-0')
+      const postInit1 = claude.postInit()
+      await waitForProxyStartsEntered(1)
+      // Call 2 (newer epoch): both its slots pre-resolved → runs to completion.
+      const releaseSecondProvider = armCredentialGate('resolve', { ANTHROPIC_API_KEY: 'y' })
+      releaseSecondProvider()
+      armProxyStart('proxy-1', 'capability-1', true)
+      const result2 = await claude.postInit()
+      expect(result2.authInjected).toBe(true)
+      expect(claude.config.envOverrides.ANTHROPIC_API_KEY).toBe('capability-1')
+      // The authoritative listener is open (call 2 closed only the old, null proxy).
+      expect(r56ClosedProxies).not.toContain('proxy-1')
+
+      // Call 1's start resolves LATE: superseded by call 2's epoch — it
+      // closes its own listener and publishes NOTHING.
+      releaseProxy0()
+      const result1 = await postInit1
+      expect(result1.authInjected).toBe(false)
+      expect(result1.authWarning).toContain('superseded')
+      expect(claude.config.envOverrides.ANTHROPIC_API_KEY).toBe('capability-1')
+      expect(claude.config.envOverrides.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1/proxy-1')
+      // No leaks: the stale listener was closed; the authoritative one was not.
+      expect(r56ClosedProxies).toContain('proxy-0')
+      expect(r56ClosedProxies).not.toContain('proxy-1')
+      claude.destroy()
+      expect(r56ClosedProxies).toContain('proxy-1')
     })
 
     it('a destroyed agent refuses postInit at the entry (zero side effects)', async () => {

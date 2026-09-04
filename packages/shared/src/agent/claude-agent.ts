@@ -549,6 +549,16 @@ export class ClaudeAgent extends BaseAgent {
     written: Record<string, string | undefined>
     generation: number
   };
+  /**
+   * R56 (obs bc4493fd): monotonically increasing per-instance postInit call
+   * epoch. `this.credentialEnvTransaction` is a MUTABLE field and does not
+   * identify a specific call — two overlapping postInit invocations on the
+   * SAME instance (e.g. a reverse proxy-start completion) cannot be told
+   * apart by re-reading it. Each call captures its epoch at entry; after
+   * every await the call requires the epoch to still be the newest one
+   * before publishing any process-level side effect.
+   */
+  private postInitEpoch: number = 0;
   // Permission whitelists are now managed by this.permissionManager (inherited from BaseAgent)
   // Source state tracking is now managed by this.sourceManager (inherited from BaseAgent)
   // Source MCP connections are managed by this.config.mcpPool (centralized in main process)
@@ -782,6 +792,14 @@ export class ClaudeAgent extends BaseAgent {
     // SessionManager's bounded construction wait; the instance flag is set by
     // destroy(). Both are checked after EVERY await below.
     const aborted = (): boolean => this.postInitAborted || options?.signal?.aborted === true;
+    // R56 (obs bc4493fd): THIS call's immutable identity — a newer postInit
+    // on the same instance supersedes it, regardless of the mutable
+    // credentialEnvTransaction field.
+    const myEpoch = ++this.postInitEpoch;
+    const isCallCurrent = (): boolean =>
+      this.postInitEpoch === myEpoch
+      && (this.credentialEnvTransaction === undefined
+        || this.credentialEnvTransaction.generation === credentialEnvGenerationCounter);
     if (aborted()) {
       return { authInjected: false, authWarning: 'Agent destroyed before post-init; credential side effects skipped' };
     }
@@ -802,29 +820,30 @@ export class ClaudeAgent extends BaseAgent {
 
     const invocationScoped = this.config.sessionStorage?.owner === 'cli';
 
-    // R52-C/R53/R54: TRANSACTIONAL credential application — the transaction
-    // is LIVE from the first mutation until the final synchronous env commit
-    // SUCCEEDS (commit) or until any abort/failure/throw rolls it back. Each
-    // touched key records its POST-MUTATION value: a delete records
-    // `undefined`, a write records the committed value. Each transaction
-    // takes the NEXT OWNER GENERATION and owns every key it first touches;
-    // a rollback restores a key ONLY while this transaction still owns the
-    // key by generation AND the current value still equals the recorded
-    // post-mutation value — a successor's newer committed value is never
-    // clobbered, a superseded rollback never revives a key its successor
-    // took over, and a populated pre-existing key erased by the delete is
-    // really restored.
-    this.credentialEnvTransaction = {
+    // R52-C/R53/R54/R56: TRANSACTIONAL credential application — the
+    // transaction is LIVE from the first mutation until the final
+    // synchronous env commit SUCCEEDS (commit) or until any abort/failure/
+    // throw rolls it back. Each touched key records its POST-MUTATION value:
+    // a delete records `undefined`, a write records the committed value.
+    // R56 (obs b13cd240): the generation domain covers ONLY process-global
+    // desktop transactions — invocation-scoped CLI calls do not own
+    // process.env, take NO desktop generation, and can therefore never
+    // advance or supersede desktop ownership (previously an unrelated
+    // session-scoped CLI initialisation starved an in-flight desktop
+    // transaction into a no-rollback discard). The per-call identity for
+    // CLI calls is the postInit epoch (issue 3).
+    this.credentialEnvTransaction = invocationScoped ? undefined : {
       prior: envSnapshot,
       touched: new Set<string>(),
       written: {},
       generation: ++credentialEnvGenerationCounter,
     };
-    // R55: a transaction is CURRENT only while it is the newest one started.
-    // Ownership is MONOTONIC — a superseded transaction never retakes a key,
-    // never mutates one, and never publishes any expectation set. An
-    // out-of-order (late) provider resolution therefore cannot overwrite a
-    // successor's committed credentials or drag ownership backwards.
+    // R55: a transaction is CURRENT only while it is the newest DESKTOP
+    // transaction started. Ownership is MONOTONIC — a superseded transaction
+    // never retakes a key, never mutates one, and never publishes any
+    // expectation set. An out-of-order (late) provider resolution therefore
+    // cannot overwrite a successor's committed credentials or drag ownership
+    // backwards.
     const txnIsCurrent = (): boolean =>
       this.credentialEnvTransaction !== undefined
       && this.credentialEnvTransaction.generation === credentialEnvGenerationCounter;
@@ -927,13 +946,14 @@ export class ClaudeAgent extends BaseAgent {
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
     }
 
-    // R55 (obs cd1d10e2): MONOTONIC OWNERSHIP on the success path — if a
-    // newer transaction started while this one awaited its provider, this
-    // stale transaction is SUPERSEDED. It retakes no key (txnTrack/txnDelete/
-    // txnWrite are generation-gated), publishes no expectation set (partial
-    // or full — commitTxn is generation-gated), and its late outcome is
-    // dropped entirely: the successor owns the process credential state.
-    if (!txnIsCurrent()) {
+    // R55/R56 (obs cd1d10e2 + b13cd240): MONOTONIC OWNERSHIP on the success
+    // path — a DESKTOP transaction is dropped without rollback ONLY when a
+    // newer process-global transaction has actually taken over the managed
+    // key domain (`txnIsCurrent` is false for a LIVE desktop transaction).
+    // Invocation-scoped calls carry no desktop transaction at all and are
+    // never discarded by desktop generations; their per-call identity is the
+    // postInit epoch (checked in the invocation branch, issue 3).
+    if (this.credentialEnvTransaction !== undefined && !txnIsCurrent()) {
       this.credentialEnvTransaction = undefined
       return { authInjected: false, authWarning: 'Credential resolution completed after a newer transaction took over the process credential state; stale outcome discarded' };
     }
@@ -956,11 +976,12 @@ export class ClaudeAgent extends BaseAgent {
       }
 
       await this.invocationCredentialProxy?.close();
-      // R51: RE-CHECK after closing the old proxy — closing then starting a
-      // post-abort listener would create an unreachable credential listener.
-      if (aborted()) {
+      // R51 + R56 (obs bc4493fd): RE-CHECK after closing the old proxy — a
+      // call that was aborted OR superseded by a newer postInit on this
+      // instance must not start a listener at all.
+      if (aborted() || !isCallCurrent()) {
         rollbackTxn()
-        return { authInjected: false, authWarning: 'Agent destroyed after closing the previous invocation credential proxy; new listener not started' };
+        return { authInjected: false, authWarning: 'Post-init superseded or destroyed after closing the previous invocation credential proxy; new listener not started' };
       }
       const credentialProxy = await startInvocationCredentialProxy({
         upstreamBaseUrl,
@@ -971,14 +992,19 @@ export class ClaudeAgent extends BaseAgent {
             : { name: 'x-api-key', format: 'raw' },
         ],
       });
-      // R50/R51: the proxy listener is a PROCESS-LEVEL side effect — if the
-      // agent was destroyed while the listener was starting, close it
-      // immediately and apply nothing.
-      if (aborted()) {
+      // R50/R51/R56 (obs bc4493fd): the proxy listener is a PROCESS-LEVEL
+      // side effect. If the agent was destroyed, aborted, OR this call was
+      // superseded while the listener was starting (reverse completion), the
+      // just-created listener is CLOSED and the call fails closed — a stale
+      // call never publishes its proxy or envOverrides over the successor's.
+      if (aborted() || !isCallCurrent()) {
         await credentialProxy.close();
         rollbackTxn()
-        return { authInjected: false, authWarning: 'Agent destroyed while starting the invocation credential proxy; listener closed and credential side effects rolled back' };
+        return { authInjected: false, authWarning: 'Post-init superseded or destroyed while starting the invocation credential proxy; listener closed and credential side effects rolled back' };
       }
+      // R56: ATOMIC PUBLISH — only the precisely-current call swaps the
+      // proxy; the predecessor listener was closed above, so no stale
+      // listener survives and the successor's stays authoritative.
       this.invocationCredentialProxy = credentialProxy;
 
       // The Claude subprocess receives only an invocation-scoped loopback URL
@@ -995,15 +1021,16 @@ export class ClaudeAgent extends BaseAgent {
       }
       this.config.envOverrides = nextOverrides;
     } else {
-      // R50/R51/R53: the process-global env overwrite is a late side effect
-      // guarded by the same abort check — a destroyed agent's late credential
-      // outcome is dropped and the precise pre-postInit env snapshot is
-      // restored (a same-id successor owns the process credential state).
-      // The writes are TRANSACTIONAL: recorded with their post-mutation
-      // values so the per-key rollback CAS is exact.
-      if (aborted()) {
+      // R50/R51/R53/R56: the process-global env overwrite is a late side
+      // effect guarded by the abort check AND the per-call epoch — a
+      // destroyed or same-instance-superseded call's late credential outcome
+      // is dropped and the precise pre-postInit env snapshot is restored (a
+      // same-id successor owns the process credential state). The writes are
+      // TRANSACTIONAL: recorded with their post-mutation values so the
+      // per-key rollback CAS is exact.
+      if (aborted() || !isCallCurrent()) {
         rollbackTxn()
-        return { authInjected: false, authWarning: 'Agent destroyed before applying credential env vars; credential side effects rolled back' };
+        return { authInjected: false, authWarning: 'Post-init superseded or destroyed before applying credential env vars; credential side effects rolled back' };
       }
       this.config.envOverrides = {
         ...this.config.envOverrides,
