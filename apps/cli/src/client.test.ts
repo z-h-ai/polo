@@ -1,4 +1,8 @@
 import { describe, it, expect, afterEach } from 'bun:test'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createPrivateKey, X509Certificate } from 'node:crypto'
 import { CliRpcClient } from './client.ts'
 import {
   serializeEnvelope,
@@ -414,26 +418,63 @@ describe('CliRpcClient', () => {
 })
 
 // ---------------------------------------------------------------------------
-// TLS cert helper — generates a real self-signed cert via openssl
+// TLS cert helper — hermetic self-signed fixture.
+//
+// The key and the cert are each written to their OWN file inside a private
+// temp directory, then read back and independently parse-validated
+// (createPrivateKey / X509Certificate). Never merge both PEMs through one
+// shared stream: under parallel test load a merged /dev/stdout stream
+// interleaves or truncates, and Bun.serve then rejects the corrupted key
+// with ERR_BORINGSSL DECODE_ERROR. The temp directory is removed in
+// `finally` on every path.
 // ---------------------------------------------------------------------------
 
 function generateSelfSignedCert(): { cert: string; key: string } | null {
+  let dir: string | null = null
   try {
+    dir = mkdtempSync(join(tmpdir(), 'polo-cli-tls-'))
+    const keyPath = join(dir, 'key.pem')
+    const certPath = join(dir, 'cert.pem')
+
+    // 1) The EC private key is generated straight into its own file.
     const keyResult = Bun.spawnSync({
-      cmd: ['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
-        '-keyout', '/dev/stdout', '-out', '/dev/stdout',
-        '-days', '1', '-nodes', '-subj', '/CN=localhost', '-batch'],
+      cmd: ['openssl', 'genpkey', '-algorithm', 'EC',
+        '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-out', keyPath],
+      stdout: 'pipe',
       stderr: 'pipe',
     })
     if (keyResult.exitCode !== 0) return null
 
-    const pem = keyResult.stdout.toString()
-    const certMatch = pem.match(/(-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----)/)
-    const keyMatch = pem.match(/(-----BEGIN (?:EC )?PRIVATE KEY-----[\s\S]+?-----END (?:EC )?PRIVATE KEY-----)/)
-    if (!certMatch || !keyMatch) return null
+    // 2) The 1-day self-signed cert is signed FROM that key file into its
+    //    own file — no output ever shares a stream with the key.
+    const certResult = Bun.spawnSync({
+      cmd: ['openssl', 'req', '-x509', '-key', keyPath, '-out', certPath,
+        '-days', '1', '-subj', '/CN=localhost', '-batch'],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (certResult.exitCode !== 0) return null
 
-    return { cert: certMatch[1], key: keyMatch[1] }
+    // 3) Read each PEM independently and reject anything that fails to parse
+    //    so Bun.serve never sees a structurally broken fixture.
+    const key = readFileSync(keyPath, 'utf8')
+    const cert = readFileSync(certPath, 'utf8')
+    try {
+      createPrivateKey(key)
+      new X509Certificate(cert)
+    } catch {
+      return null
+    }
+    return { cert, key }
   } catch {
     return null
+  } finally {
+    if (dir !== null) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // best-effort cleanup of a private temp directory
+      }
+    }
   }
 }
