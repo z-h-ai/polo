@@ -3038,4 +3038,138 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect(offenders).toEqual([])
     })
   })
+  describe('quarantine settlement finalizer binding + accounting (R57)', () => {
+    it('R57 issue1: an old parked settlement claim has ZERO contact with a same-id unpublished successor that replaced the entry', async () => {
+      const managedA = seedSession('q-r17-gen-bound')
+      managedA.agent = { dispose: () => {} } as never
+      let stopCalls = 0
+      let releaseStop!: () => void
+      const gated = new Promise<void>(resolve => { releaseStop = () => resolve() })
+      managedA.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await gated
+        },
+      } as never
+      registerSessionScopedToolCallbacks(managedA.id, { listSessionsFn: async () => 'a-refusing' } as never, 'a-token')
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(managedA, 'generation binding probe')
+      const entryA = (sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, { quarantineToken: string }>
+      }).unpublishedRuntimeQuarantine.get(managedA.id)
+      managedA.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 120
+      ;(sm as unknown as { quarantineJoinTimeoutMs: number }).quarantineJoinTimeoutMs = 150
+      const seedSettle = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managedA, 'generation binding seed')
+      seedSettle.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 250))
+      // Install the OLD claim while A's unpublished entry is current — the
+      // join stays parked on the original op.
+      const sweepWork = (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      await new Promise(r => setTimeout(r, 50))
+
+      // A later same-id unpublished successor B replaces the id-keyed entry
+      // and installs its OWN refusing callback lease.
+      const managedB = createManagedSession(
+        { id: managedA.id, name: 'successor candidate b', createdAt: Date.now() },
+        { id: WORKSPACE_ID, name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+        { messagesLoaded: true, productSpaceId: OTHER_SPACE_ID, accountId: TEST_ACCOUNT_ID },
+      )
+      ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(managedA.id, managedB)
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(managedB, 'successor candidate')
+      const entryB = (sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, { quarantineToken: string }>
+      }).unpublishedRuntimeQuarantine.get(managedA.id)
+      expect(entryB?.quarantineToken).not.toBe(entryA?.quarantineToken)
+
+      // Release: the old claim settles its OWN faces — and must NOT drain
+      // B's quarantine retry handle, refusing callbacks or storage record.
+      releaseStop()
+      await sweepWork
+      expect(stopCalls).toBe(2)
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.get(managedA.id)).toBe(entryB)
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(1)
+      const successorCallbacks = getSessionScopedToolCallbacks(managedA.id)
+      expect(() => successorCallbacks!.listSessionsFn!()).toThrow('SESSION_QUARANTINED_UNPUBLISHED')
+      unregisterSessionScopedToolCallbacks(managedA.id)
+    })
+
+    it('R57 issue2: a failed unpublished cleanup keeps the settlement retryable — the retry finishes only the cleanup phase without re-issuing resource calls', async () => {
+      const managed = seedSession('q-r17-cleanup-retry')
+      managed.agent = { dispose: () => {} } as never
+      let stopCalls = 0
+      let failStop = true
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          if (failStop) throw new Error('stop exploded (seed attempt)')
+        },
+      } as never
+      registerSessionScopedToolCallbacks(managed.id, { listSessionsFn: async () => 'refusing' } as never, 'stale-owner')
+      ;(sm as unknown as {
+        quarantineUnpublishedCandidateRuntime: (m: unknown, reason: string) => void
+      }).quarantineUnpublishedCandidateRuntime(managed, 'cleanup-retry probe')
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 200
+      const smAny = sm as unknown as { sessionStorage: { delete: (...args: unknown[]) => boolean | undefined } }
+      const realDelete = smAny.sessionStorage.delete.bind(sm.sessionStorage)
+      let failDelete = true
+      smAny.sessionStorage.delete = (...args: unknown[]) => (failDelete ? false : realDelete(...args))
+      try {
+        const seedSettle = (sm as unknown as {
+          settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+        }).settlePendingRuntimeDisposal(managed, 'cleanup-retry seed')
+        seedSettle.catch(() => undefined)
+        await new Promise(r => setTimeout(r, 300))
+        expect(stopCalls).toBe(1)
+        // The faces settle cleanly from here on — the ONLY failure under
+        // test is the unpublished CLEANUP phase.
+        failStop = false
+        // No live session owns the id (the never-published candidate was
+        // already removed from the availability map by the rollback).
+        ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.delete(managed.id)
+
+        await (sm as unknown as {
+          sweepQuarantinedRuntimeDisposals: () => Promise<void>
+        }).sweepQuarantinedRuntimeDisposals()
+        expect(stopCalls).toBe(2)
+        expect((sm as unknown as {
+          quarantinedRuntimeDisposals: Map<string, unknown>
+        }).quarantinedRuntimeDisposals.size).toBe(1)
+        expect((sm as unknown as {
+          unpublishedRuntimeQuarantine: Map<string, unknown>
+        }).unpublishedRuntimeQuarantine.size).toBe(1)
+        expect(managed.disposalIncomplete).toBeTruthy()
+
+        failDelete = false
+        await (sm as unknown as {
+          sweepQuarantinedRuntimeDisposals: () => Promise<void>
+        }).sweepQuarantinedRuntimeDisposals()
+        expect(stopCalls).toBe(2)
+        expect((sm as unknown as {
+          quarantinedRuntimeDisposals: Map<string, unknown>
+        }).quarantinedRuntimeDisposals.size).toBe(0)
+        expect((sm as unknown as {
+          unpublishedRuntimeQuarantine: Map<string, unknown>
+        }).unpublishedRuntimeQuarantine.size).toBe(0)
+        expect(managed.disposalIncomplete).toBeUndefined()
+      } finally {
+        smAny.sessionStorage.delete = realDelete
+      }
+    })
+  })
 })

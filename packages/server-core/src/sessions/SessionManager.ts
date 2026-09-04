@@ -850,6 +850,12 @@ interface QuarantinedRuntimeDisposalEntry {
   quarantinedAt: number
   originalOps: Promise<unknown>[]
   inFlight?: Promise<'settled' | 'retryable'>
+  /**
+   * R57 (issue 2, obs 5f80125a): cleanup phase — once the retained resource
+   * faces have settled, a retry claim NEVER re-issues resource calls and
+   * only finishes the remaining unpublished-candidate cleanup.
+   */
+  cleanupPhase?: 'faces-settled'
 }
 
 interface ManagedSession {
@@ -4330,22 +4336,57 @@ export class SessionManager implements ISessionManager {
     entry: QuarantinedRuntimeDisposalEntry,
   ): boolean {
     if (entry.inFlight) return false
+    // R57 (issue 1, obs a1d8fa51): the claim binds to the EXACT unpublished
+    // quarantine generation captured at INSTALLATION time — before any
+    // await. A same-id successor that replaces the id-keyed map entry (and
+    // installs its own refusing lease) while this claim is parked is NEVER
+    // looked up at settle time and NEVER touched by this old claim.
+    const unpublishedAtClaim = this.unpublishedRuntimeQuarantine.get(entry.managed.id)
+    const unpublishedBoundToThisRuntime = unpublishedAtClaim !== undefined
+      && unpublishedAtClaim.managed === entry.managed
+      ? unpublishedAtClaim
+      : undefined
     const claim: Promise<'settled' | 'retryable'> = (async () => {
-      // Wait out the timed-out ORIGINAL ops (released hung shutdowns etc.)
-      // before retrying — never overlap a still-running shutdown, and never
-      // call a resource API while any original op is still pending.
-      await Promise.all(entry.originalOps.map(p => p.catch(() => undefined)))
-      entry.originalOps = []
-      await this.disposeManagedAgentRuntime(entry.managed, `quarantined disposal retry (${entry.reason})`, { ignoreQuarantineClaim: true })
+      // R57 (issue 2, obs 5f80125a): cleanup phase tracking — once the
+      // retained faces have settled, a retry NEVER re-issues resource
+      // calls; only the remaining unpublished cleanup runs.
+      if (entry.cleanupPhase !== 'faces-settled') {
+        // Wait out the timed-out ORIGINAL ops (released hung shutdowns etc.)
+        // before retrying — never overlap a still-running shutdown, and never
+        // call a resource API while any original op is still pending.
+        await Promise.all(entry.originalOps.map(p => p.catch(() => undefined)))
+        entry.originalOps = []
+        await this.disposeManagedAgentRuntime(entry.managed, `quarantined disposal retry (${entry.reason})`, { ignoreQuarantineClaim: true })
+        entry.managed.disposalIncomplete = undefined
+        entry.cleanupPhase = 'faces-settled'
+      }
+      // The retained faces are settled — optimistically clear the marker;
+      // the retryable path below restores it if the cleanup cannot finish.
       entry.managed.disposalIncomplete = undefined
-      // R56 (issue 1): the successful settlement drains the MATCHING
-      // unpublished candidate INSIDE the claim — joiners observe BOTH maps
-      // and the marker fully drained when the claim resolves, without
-      // depending on another lifecycle trigger. Idempotent + owner-token
-      // guarded (a same-id successor's entry is never touched).
-      const settledUnpublished = this.unpublishedRuntimeQuarantine.get(entry.managed.id)
-      if (settledUnpublished) {
-        await this.cleanupSettledUnpublishedEntry(entry.managed.id, settledUnpublished)
+      // R56/R57 (issues 1+2): the successful settlement drains the EXACT
+      // unpublished candidate generation captured at claim installation —
+      // joiners observe BOTH maps and the marker fully drained when the
+      // claim resolves. Two distinct outcomes for the unpublished half:
+      // - a same-id successor REPLACED the map entry → its surfaces (retry
+      //   handle, refusing lease, storage record) belong to the successor —
+      //   this claim has zero contact with them and simply settles its own
+      //   (already-settled) faces;
+      // - the entry is still OURS but the cleanup FAILED (e.g. storage
+      //   delete returning false) → the settlement is RETRYABLE: the runtime
+      //   entry stays, the incomplete marker stays truthful, and a later
+      //   sweep re-claims to finish ONLY the cleanup phase.
+      if (unpublishedBoundToThisRuntime) {
+        const stillOurs = this.unpublishedRuntimeQuarantine.get(entry.managed.id) === unpublishedBoundToThisRuntime
+        if (stillOurs) {
+          const cleanupOk = await this.cleanupSettledUnpublishedEntry(entry.managed.id, unpublishedBoundToThisRuntime)
+          if (!cleanupOk) {
+            entry.managed.disposalIncomplete = {
+              reason: entry.reason,
+              failures: ['unpublished candidate quarantine cleanup incomplete (refusing callbacks/storage)'],
+            }
+            return 'retryable' as const
+          }
+        }
       }
       return 'settled' as const
     })()
@@ -4543,8 +4584,13 @@ export class SessionManager implements ISessionManager {
     sessionId: string,
     entry: { managed: ManagedSession; quarantineToken: string; installedLease: SessionScopedToolCallbackLease | undefined; reason: string },
   ): Promise<boolean> {
-    // Owner-token binding: only the exact registered entry settles here.
-    if (this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken !== entry.quarantineToken) {
+    // R57 (issue 1, obs a1d8fa51): EXACT GENERATION BINDING — only the
+    // precise map VALUE this finalizer was invoked with settles here. A
+    // same-id successor that replaced the entry (with its own quarantine
+    // token and refusing lease) while a claim was parked is never
+    // identified by id lookup: the old claim has ZERO contact with the
+    // successor's retry handle, refusing callbacks or storage record.
+    if (this.unpublishedRuntimeQuarantine.get(sessionId) !== entry) {
       return false
     }
     // R48: compare-and-unregister against the quarantine's LEASE — removes
