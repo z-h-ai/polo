@@ -2154,10 +2154,11 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         unpublishedRuntimeQuarantine: Map<string, unknown>
       }).unpublishedRuntimeQuarantine.size).toBe(1)
 
-      // Release the original: the claim retries exactly once and settles;
-      // BOTH quarantine maps drain together — the unpublished entry only
-      // after the shared claim reported success (a second createSession
-      // sweep joins the settled claim and finishes its own cleanup).
+      // Release the original: the claim retries exactly once and settles.
+      // R56 (issue 1): the successful settlement finalizer drains the
+      // matching unpublished candidate INSIDE the claim — ONE runtime sweep
+      // (no further sweep, no extra createSession lifecycle) empties BOTH
+      // maps and the marker together.
       releaseStop()
       await (sm as unknown as {
         sweepQuarantinedRuntimeDisposals: () => Promise<void>
@@ -2165,7 +2166,10 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       expect((sm as unknown as {
         quarantinedRuntimeDisposals: Map<string, unknown>
       }).quarantinedRuntimeDisposals.size).toBe(0)
-      await sm.createSession('ws_test', {})
+      expect((sm as unknown as {
+        unpublishedRuntimeQuarantine: Map<string, unknown>
+      }).unpublishedRuntimeQuarantine.size).toBe(0)
+      expect(candidate.disposalIncomplete).toBeUndefined()
       const created = await createWork
       expect(created.id).toBeTruthy()
       expect(stopCalls).toBe(2)
@@ -2218,15 +2222,14 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
         unpublishedRuntimeQuarantine: Map<string, unknown>
       }).unpublishedRuntimeQuarantine.size).toBe(1)
 
-      // The stop is healed: the next sweep re-claims, settles exactly once,
-      // and BOTH maps drain together.
+      // The stop is healed: the next sweep re-claims and settles exactly
+      // once. R56 (issue 1): the successful claim finalizer drains the
+      // matching unpublished entry inside the claim — no separate
+      // unpublished sweep is needed.
       failStop = false
       await (sm as unknown as {
         sweepQuarantinedRuntimeDisposals: () => Promise<void>
       }).sweepQuarantinedRuntimeDisposals()
-      await (sm as unknown as {
-        sweepQuarantinedUnpublishedRuntimes: () => Promise<void>
-      }).sweepQuarantinedUnpublishedRuntimes()
       expect(stopCalls).toBe(3)
       expect((sm as unknown as {
         quarantinedRuntimeDisposals: Map<string, unknown>

@@ -4338,6 +4338,15 @@ export class SessionManager implements ISessionManager {
       entry.originalOps = []
       await this.disposeManagedAgentRuntime(entry.managed, `quarantined disposal retry (${entry.reason})`, { ignoreQuarantineClaim: true })
       entry.managed.disposalIncomplete = undefined
+      // R56 (issue 1): the successful settlement drains the MATCHING
+      // unpublished candidate INSIDE the claim — joiners observe BOTH maps
+      // and the marker fully drained when the claim resolves, without
+      // depending on another lifecycle trigger. Idempotent + owner-token
+      // guarded (a same-id successor's entry is never touched).
+      const settledUnpublished = this.unpublishedRuntimeQuarantine.get(entry.managed.id)
+      if (settledUnpublished) {
+        await this.cleanupSettledUnpublishedEntry(entry.managed.id, settledUnpublished)
+      }
       return 'settled' as const
     })()
     entry.inFlight = claim
@@ -4518,6 +4527,53 @@ export class SessionManager implements ISessionManager {
    *   replacement owns the id (absent-or-ours);
    * - anything skipped or still failing keeps the entry retryable.
    */
+  /**
+   * R56 (issue 1): the ONE owner-token-guarded post-settlement cleanup for a
+   * quarantined UNPUBLISHED candidate — compare-and-unregister of its
+   * refusing record against the quarantine's OWN lease (a successor owner's
+   * registration is never touched) plus absent-or-ours storage cleanup.
+   * Invoked (a) inside a successful runtime-disposal settlement claim — so
+   * ONE successful claim drains BOTH quarantine maps and the marker without
+   * waiting for another lifecycle trigger — and (b) by the unpublished sweep
+   * for entries with no runtime-disposal claim of their own. Idempotent via
+   * the quarantine-token guard: a first finisher removes the map entry and
+   * every later caller no-ops.
+   */
+  private async cleanupSettledUnpublishedEntry(
+    sessionId: string,
+    entry: { managed: ManagedSession; quarantineToken: string; installedLease: SessionScopedToolCallbackLease | undefined; reason: string },
+  ): Promise<boolean> {
+    // Owner-token binding: only the exact registered entry settles here.
+    if (this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken !== entry.quarantineToken) {
+      return false
+    }
+    // R48: compare-and-unregister against the quarantine's LEASE — removes
+    // the callbacks/guard only while the installed record is still the
+    // quarantine's own.
+    const replacementOwnsId = this.sessions.has(sessionId)
+    let cleanupFailure: string | null = null
+    const callbacksRemoved = entry.installedLease !== undefined
+      ? unregisterSessionScopedToolCallbacksIf(sessionId, entry.installedLease)
+      : false
+    if (replacementOwnsId) {
+      sessionLog.info(`Quarantined unpublished runtime ${sessionId}: live replacement owns the id — storage/registrations preserved`)
+    } else {
+      try {
+        const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
+        if (deleted === false) cleanupFailure = 'storage delete returned false'
+      } catch (storageError) {
+        cleanupFailure = storageError instanceof Error ? storageError.message : String(storageError)
+      }
+    }
+    if (!cleanupFailure) {
+      this.unpublishedRuntimeQuarantine.delete(sessionId)
+      sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry${replacementOwnsId ? ' (storage/registrations preserved for the live replacement)' : ''}${callbacksRemoved ? '' : ' (callbacks were already owned by a successor)'}`)
+      return true
+    }
+    sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${cleanupFailure}); kept for retry`)
+    return false
+  }
+
   private async sweepQuarantinedUnpublishedRuntimes(): Promise<void> {
     if (this.unpublishedRuntimeQuarantine.size === 0) return
     for (const [sessionId, entry] of this.unpublishedRuntimeQuarantine) {
@@ -4565,37 +4621,12 @@ export class SessionManager implements ISessionManager {
           // being issued a second time.
           { bestEffort: true, shouldUnregisterCallbacks: () => false },
         )
-        // Owner-token binding: only the exact registered entry settles here.
-        if (result.failures.length === 0 && this.unpublishedRuntimeQuarantine.get(sessionId)?.quarantineToken === entry.quarantineToken) {
-          // R48: compare-and-unregister against the quarantine's LEASE —
-          // removes the callbacks/guard only while the installed record is
-          // still the quarantine's own; a successor owner's registration is
-          // never touched. The candidate's storage record is deleted only
-          // when no live replacement session owns the id (absent-or-ours).
-          const replacementOwnsId = this.sessions.has(sessionId)
-          let cleanupFailure: string | null = null
-          // R51: CAS against the quarantined runtime's OWNER LEASE (record +
-          // guard pair) — the sweep's dispose passes shouldUnregisterCallbacks:
-          // false, so the removal happens ONLY here.
-          const callbacksRemoved = entry.installedLease !== undefined
-            ? unregisterSessionScopedToolCallbacksIf(sessionId, entry.installedLease)
-            : false
-          if (replacementOwnsId) {
-            sessionLog.info(`Quarantined unpublished runtime ${sessionId}: live replacement owns the id — storage/registrations preserved`)
-          } else {
-            try {
-              const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
-              if (deleted === false) cleanupFailure = 'storage delete returned false'
-            } catch (storageError) {
-              cleanupFailure = storageError instanceof Error ? storageError.message : String(storageError)
-            }
-          }
-          if (!cleanupFailure) {
-            this.unpublishedRuntimeQuarantine.delete(sessionId)
-            sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry${replacementOwnsId ? ' (storage/registrations preserved for the live replacement)' : ''}${callbacksRemoved ? '' : ' (callbacks were already owned by a successor)'}`)
-          } else {
-            sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${cleanupFailure}); kept for retry`)
-          }
+        // R56 (issue 1): the cleanup itself lives in the shared
+        // owner-token-guarded finalizer (also invoked inside successful
+        // settlement claims) — the token guard makes an already-cleaned
+        // entry a no-op here, so the cleanup happens exactly once.
+        if (result.failures.length === 0) {
+          await this.cleanupSettledUnpublishedEntry(sessionId, entry)
         }
       } catch (sweepError) {
         sessionLog.warn(`Retry cleanup for quarantined unpublished runtime ${sessionId} failed; kept for retry:`, sweepError)
