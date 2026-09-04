@@ -4204,8 +4204,15 @@ export class SessionManager implements ISessionManager {
       managed.agentReadyResolve = undefined
       managed.backendRuntimeSignature = undefined
       managed.backendRestartSignature = undefined
-      // A fully successful disposal settles any earlier incomplete one.
-      managed.disposalIncomplete = undefined
+      // R53: a fully successful disposal settles any earlier incomplete one.
+      // R54 (issue 3): ONLY when no retained faces remain under a live
+      // quarantine claim — a disposal that skipped every face on behalf of
+      // a claim has settled nothing, and must not clear the marker as if it
+      // had. The claim's own settlement clears the marker when every
+      // retained face has settled (marker and map drain in sync).
+      if (this.findQuarantinedRuntimeDisposalEntry(managed) === undefined) {
+        managed.disposalIncomplete = undefined
+      }
     } else {
       // R46: the retained faces are tracked INDEPENDENTLY of managed.agent —
       // a successor agent must never be built over them silently.
@@ -7278,10 +7285,18 @@ export class SessionManager implements ISessionManager {
     this.browserHostByCanvas.delete(sessionId)
 
     // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
-    // R53 (issue 6): the disposal is BOUNDED and quarantine-aware — retained
-    // faces already owned by a per-entry settlement claim are joined with a
-    // bounded wait instead of the previous raw fire-and-forget stop() that
-    // overlapped a still-running shutdown with a SECOND stop call.
+    // R53/R54 (issues 6/3): the disposal is BOUNDED and quarantine-aware.
+    // R54: an EXISTING per-managed settlement claim is atomically claim-or-
+    // joined FIRST (bounded wait) so the shared claim starts here — the
+    // retained entry no longer idles until an unrelated future create
+    // triggers a sweep. Any faces still retained under the live claim are
+    // then skipped by the claim-ownership guard (no overlapping stop), and
+    // the incomplete marker stays truthful until the claim settles.
+    const quarantinedAtDelete = this.findQuarantinedRuntimeDisposalEntry(managed)
+    if (quarantinedAtDelete) {
+      this.claimQuarantinedSettlement(quarantinedAtDelete.token, quarantinedAtDelete.entry)
+      await this.joinQuarantinedClaimBounded(quarantinedAtDelete.entry)
+    }
     try {
       await this.disposeManagedAgentRuntime(managed, 'session deleted', { bestEffort: true })
     } catch (disposalError) {

@@ -2164,6 +2164,54 @@ describe('question + edit-popover RPC trusted scope (R40)', () => {
       await sm.deleteSession(created.id)
     })
 
+    it('R54 issue3: deleteSession claim-or-joins the retained entry — the shared claim starts at delete, the marker stays truthful, and the drain is exactly-once', async () => {
+      const managed = seedSession('q-r54-delete-claim')
+      let stopCalls = 0
+      let releaseStop!: () => void
+      const gated = new Promise<void>(resolve => { releaseStop = () => resolve() })
+      managed.poolServer = {
+        stop: async () => {
+          stopCalls += 1
+          await gated
+        },
+      } as never
+      managed.disposalIncomplete = { reason: 'seeded partial disposal', failures: ['pool-server: seeded'] }
+      ;(sm as unknown as { runtimeDisposalTimeoutMs: number }).runtimeDisposalTimeoutMs = 120
+      ;(sm as unknown as { quarantineJoinTimeoutMs: number }).quarantineJoinTimeoutMs = 150
+      // Seed the entry: strict settle parks stop #1 and quarantines the retained face.
+      const seedSettle = (sm as unknown as {
+        settlePendingRuntimeDisposal: (m: unknown, reason: string) => Promise<void>
+      }).settlePendingRuntimeDisposal(managed, 'delete-claim seed')
+      seedSettle.catch(() => undefined)
+      await new Promise(r => setTimeout(r, 250))
+      expect(stopCalls).toBe(1)
+      expect(managed.disposalIncomplete).toBeTruthy()
+
+      // DELETE claims the shared entry itself — no subsequent create needed.
+      await sm.deleteSession(managed.id)
+      // The claim is installed and awaiting the parked original: zero extra
+      // stop calls, and the incomplete marker was NOT cleared by the
+      // skipped-faces disposal (it stays truthful).
+      expect(stopCalls).toBe(1)
+      expect(managed.disposalIncomplete).toBeTruthy()
+      const entryAfterDelete = (sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, { inFlight?: Promise<unknown> }>
+      }).quarantinedRuntimeDisposals.values().next().value
+      expect(entryAfterDelete?.inFlight).toBeDefined()
+
+      // Release: the claim retries exactly once; marker and map drain in sync.
+      releaseStop()
+      await (sm as unknown as {
+        sweepQuarantinedRuntimeDisposals: () => Promise<void>
+      }).sweepQuarantinedRuntimeDisposals()
+      expect(stopCalls).toBe(2)
+      expect(managed.disposalIncomplete).toBeUndefined()
+      expect(managed.poolServer).toBeUndefined()
+      expect((sm as unknown as {
+        quarantinedRuntimeDisposals: Map<string, unknown>
+      }).quarantinedRuntimeDisposals.size).toBe(0)
+    })
+
     it('a permanently hung shutdown never blocks createSession (bounded join) and no stop is duplicated', async () => {
       const managed = seedSession('q-r53-hung-forever')
       let stopCalls = 0
