@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CatalogApp } from '@polo-ai/shared/admin'
-import type { ProductSpaceAppInstallState } from '@polo-ai/shared/protocol'
+import type {
+  LocalAppRuntimeStatus,
+  ProductSpaceAppInstallState,
+} from '@polo-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useCompactViewport } from '@/lib/use-compact-viewport'
@@ -45,6 +48,7 @@ interface AllAppsViewProps {
   errorCode: string | null
   offline: boolean
   getInstallState: (app: CatalogApp) => ProductSpaceAppInstallState | undefined
+  getStatus: (app: CatalogApp) => LocalAppRuntimeStatus | undefined
   scopeKeyForApp: (app: CatalogApp) => string
   onRefresh: () => void
   onOpen: (app: CatalogApp) => void
@@ -57,13 +61,18 @@ interface AllAppsViewProps {
  * Governance/version blocks must never be misreported as an authorization
  * loss, so every reason maps to its own status key and an unknown shape
  * falls back to a neutral "unavailable" instead of the revocation copy.
+ * Authorization-ending and withdrawal copy is space-aware: personal circles
+ * must not be told their "organization" removed access.
  */
 export function catalogAppBlockedStatusKey(
   app: Pick<CatalogApp, 'availability' | 'unavailableReason'>,
+  spaceKind: 'personal' | 'enterprise' | null = null,
 ): string {
   switch (app.unavailableReason) {
     case 'authorization_ended':
-      return 'homeApps.status.unauthorized'
+      return spaceKind === 'enterprise'
+        ? 'homeApps.status.unauthorized'
+        : 'homeApps.status.unauthorizedPersonal'
     case 'space_restricted':
       return 'homeApps.status.spaceRestricted'
     case 'version_unavailable':
@@ -75,20 +84,32 @@ export function catalogAppBlockedStatusKey(
   }
 }
 
+export function catalogAppWithdrawnStatusKey(
+  spaceKind: 'personal' | 'enterprise' | null = null,
+): string {
+  return spaceKind === 'enterprise'
+    ? 'homeApps.status.withdrawn'
+    : 'homeApps.status.withdrawnPersonal'
+}
+
 function AppAvailability({
   app,
   installState,
   offline,
+  spaceKind,
 }: {
   app: CatalogApp
   installState?: ProductSpaceAppInstallState
   offline: boolean
+  spaceKind: 'personal' | 'enterprise' | null
 }) {
   const { t } = useTranslation()
   let label = t('homeApps.status.available')
-  if (app.availability === 'withdrawn') label = t('homeApps.status.withdrawn')
-  else if (app.availability !== 'available') label = t(catalogAppBlockedStatusKey(app))
-  else if (offline) label = t('homeApps.status.offline')
+  if (app.availability === 'withdrawn') {
+    label = t(catalogAppWithdrawnStatusKey(spaceKind))
+  } else if (app.availability !== 'available') {
+    label = t(catalogAppBlockedStatusKey(app, spaceKind))
+  } else if (offline) label = t('homeApps.status.offline')
   else if (installState?.state === 'installing') label = t('homeApps.status.installing')
   else if (installState?.state === 'installed') label = t('homeApps.status.installed')
   return <span className="text-[11px] text-muted-foreground">{label}</span>
@@ -98,18 +119,30 @@ function AppDetail({
   app,
   installState,
   offline,
+  spaceKind,
+  getStatus,
   onOpen,
   onUninstall,
 }: {
   app: CatalogApp
   installState?: ProductSpaceAppInstallState
   offline: boolean
+  spaceKind: 'personal' | 'enterprise' | null
+  getStatus: (app: CatalogApp) => LocalAppRuntimeStatus | undefined
   onOpen: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
 }) {
   const { t } = useTranslation()
   const source = app.creatorName?.trim() || t('homeApps.allApps.unknownSource')
   const unavailable = app.availability !== 'available' || offline
+  // A withdrawn tombstone keeps its uninstall entry while an installation is
+  // still retained on this device (installation state, or the retained
+  // runtime status the Catalog hook keeps for withdrawn entries).
+  const uninstallable = installState?.state === 'installed'
+    || (
+      app.availability !== 'available'
+      && Boolean(getStatus(app)?.currentVersion)
+    )
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="all-apps-inspector-body">
       <div className="flex items-start gap-3">
@@ -144,7 +177,7 @@ function AppDetail({
             : t('homeApps.install.noPermissions')}
         </p>
       </div>
-      <AppAvailability app={app} installState={installState} offline={offline} />
+      <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -156,7 +189,7 @@ function AppDetail({
           {installState?.state === 'installing' && <Icons.LoaderCircle className="animate-spin" />}
           {t('common.open')}
         </Button>
-        {installState?.state === 'installed' && (
+        {uninstallable && (
           <Button
             type="button"
             size="sm"
@@ -180,6 +213,8 @@ function AllAppsRow({
   compact,
   installState,
   offline,
+  spaceKind,
+  getStatus,
   onSelect,
   onOpen,
   onUninstall,
@@ -190,6 +225,8 @@ function AllAppsRow({
   compact: boolean
   installState?: ProductSpaceAppInstallState
   offline: boolean
+  spaceKind: 'personal' | 'enterprise' | null
+  getStatus: (app: CatalogApp) => LocalAppRuntimeStatus | undefined
   onSelect: (scopeKey: string) => void
   onOpen: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
@@ -197,6 +234,11 @@ function AllAppsRow({
   const { t } = useTranslation()
   const source = app.creatorName?.trim() || t('homeApps.allApps.unknownSource')
   const unavailable = app.availability !== 'available' || offline
+  const uninstallable = installState?.state === 'installed'
+    || (
+      app.availability !== 'available'
+      && Boolean(getStatus(app)?.currentVersion)
+    )
   return (
     <article
       className={cn(
@@ -223,7 +265,7 @@ function AllAppsRow({
             </span>
           </span>
           <span className="hidden shrink-0 sm:block">
-            <AppAvailability app={app} installState={installState} offline={offline} />
+            <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} />
           </span>
         </button>
         <Button
@@ -243,6 +285,8 @@ function AllAppsRow({
             app={app}
             installState={installState}
             offline={offline}
+            spaceKind={spaceKind}
+            getStatus={getStatus}
             onOpen={onOpen}
             onUninstall={onUninstall}
           />
@@ -262,6 +306,7 @@ export function AllAppsView({
   errorCode,
   offline,
   getInstallState,
+  getStatus,
   scopeKeyForApp,
   onRefresh,
   onOpen,
@@ -410,6 +455,8 @@ export function AllAppsView({
                         compact={compact}
                         installState={getInstallState(app)}
                         offline={offline}
+                        spaceKind={spaceKind}
+                        getStatus={getStatus}
                         onSelect={setSelectedScopeKey}
                         onOpen={onOpen}
                         onUninstall={onUninstall}
@@ -431,6 +478,8 @@ export function AllAppsView({
                 app={selectedApp}
                 installState={getInstallState(selectedApp)}
                 offline={offline}
+                spaceKind={spaceKind}
+                getStatus={getStatus}
                 onOpen={onOpen}
                 onUninstall={onUninstall}
               />

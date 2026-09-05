@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -39,11 +39,36 @@ import {
 } from '@/lib/home-quick-access'
 import { publishProductSpaceAppLaunch } from '@/lib/product-space-app-launch-handoff'
 
-export function selectOrganizationAppsForDisplay(
+/**
+ * Full "当前空间全部 Apps" projection: current Catalog Apps plus the
+ * withdrawn tombstones the Catalog hook retains for explanation. A stopped
+ * distribution must never disappear without a trace — installed members keep
+ * a visible, non-launchable row with its frozen withdrawn status and, when
+ * still installed, its uninstall entry. Same artifact identities appearing
+ * in both lists collapse to the live entry; rows keep Catalog order.
+ */
+export function selectAllAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
 ): CatalogApp[] {
   if (!catalog) return []
-  return [...catalog.apps].sort((left, right) => left.sortOrder - right.sortOrder)
+  const identityKey = (app: CatalogApp): string => JSON.stringify([
+    app.organizationId ?? null,
+    app.catalogEntryId ?? app.id ?? null,
+    app.artifactInstanceId ?? null,
+    app.catalogVersion?.versionId ?? null,
+    app.catalogVersion?.version ?? null,
+  ])
+  const merged = new Map<string, CatalogApp>()
+  for (const app of [...catalog.apps, ...(catalog.withdrawnApps ?? [])]) {
+    const key = identityKey(app)
+    const existing = merged.get(key)
+    if (!existing
+      || (existing.availability === 'withdrawn' && app.availability !== 'withdrawn')
+    ) {
+      merged.set(key, app)
+    }
+  }
+  return [...merged.values()].sort((left, right) => left.sortOrder - right.sortOrder)
 }
 
 export function formatBytes(t: TFunction, sizeBytes: number): string {
@@ -122,6 +147,13 @@ export function HomePage() {
   )
   const quickContextKeyRef = useRef(quickContextKey)
   quickContextKeyRef.current = quickContextKey
+  // Shared stale-write predicate for every quick-access write-back: a save
+  // may only commit state while the SAME context and mutation generation are
+  // still current.
+  const isCurrentQuickMutation = useCallback((contextKey: string, generation: number): boolean => (
+    quickContextKeyRef.current === contextKey
+    && quickMutationGenerationRef.current === generation
+  ), [])
   const scopeKeyForApp = catalog.scopeKeyForApp
 
   const availableApps = useMemo(
@@ -131,7 +163,7 @@ export function HomePage() {
     [catalog.state.catalog],
   )
   const allApps = useMemo(
-    () => selectOrganizationAppsForDisplay(catalog.state.catalog),
+    () => selectAllAppsForDisplay(catalog.state.catalog),
     [catalog.state.catalog],
   )
   const quickApps = useMemo(
@@ -159,9 +191,8 @@ export function HomePage() {
         // backwards after a user change, and a stale context's hydration
         // result may never enter the current context's view.
         if (
-          quickContextKeyRef.current !== contextKey
+          !isCurrentQuickMutation(contextKey, mutationGeneration)
           || quickLoadGenerationRef.current !== generation
-          || quickMutationGenerationRef.current !== mutationGeneration
         ) return
         quickHydratedContextRef.current = contextKey
         setQuickEntries(entries)
@@ -169,7 +200,7 @@ export function HomePage() {
       .catch(() => {
         // Quick access is non-critical; keep the section usable.
       })
-  }, [quickContextKey])
+  }, [isCurrentQuickMutation, quickContextKey])
 
   // Prune quick-access entries that no longer resolve to an available App
   // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids). Runs
@@ -195,17 +226,14 @@ export function HomePage() {
     setQuickEntries(pruned)
     void saveHomeQuickAccess(contextKey, pruned)
       .then(saved => {
-        if (
-          quickContextKeyRef.current !== contextKey
-          || quickMutationGenerationRef.current !== generation
-        ) return
+        if (!isCurrentQuickMutation(contextKey, generation)) return
         quickHydratedContextRef.current = contextKey
         setQuickEntries(saved)
       })
       .catch(() => {
         // Persistence failure must not break the home section.
       })
-  }, [availableApps, quickContextKey, quickEntries, scopeKeyForApp])
+  }, [availableApps, isCurrentQuickMutation, quickContextKey, quickEntries, scopeKeyForApp])
 
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
@@ -257,10 +285,7 @@ export function HomePage() {
       .then(saved => {
         // A context switch (or a newer mutation) invalidates this write-back:
         // the saved entries of the old context must never enter the new one.
-        if (
-          quickContextKeyRef.current !== contextKey
-          || quickMutationGenerationRef.current !== generation
-        ) return
+        if (!isCurrentQuickMutation(contextKey, generation)) return
         setQuickEntries(saved)
       })
       .catch(() => {
@@ -390,6 +415,7 @@ export function HomePage() {
             offline={catalog.state.accessMode === 'offline'}
             scopeKeyForApp={catalog.scopeKeyForApp}
             getInstallState={catalog.getInstallState}
+            getStatus={catalog.getStatus}
             onRefresh={() => { void catalog.sync(true) }}
             onOpen={(target) => { void openCatalogApp(target) }}
             onUninstall={setUninstallTarget}

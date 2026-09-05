@@ -35,15 +35,20 @@ export function ProductSpaceProvider({
   value: ProductSpaceContextValue
 }) {
   // The sealed launch handoff store is bound to the authoritative live
-  // ProductSpace identity: every account or space transition (including
-  // sign-out) invalidates all pending handoffs before any consumer can
-  // take them across a context boundary.
+  // ProductSpace identity AND this provider's lifetime. The cleanup runs
+  // BEFORE the next context binds: on an account/space switch it clears the
+  // old pending handoffs first, and on unmount (sign-out, window teardown)
+  // it leaves no live context behind — sealed handles can no longer be taken
+  // and old closures can no longer publish for a signed-out account.
   useEffect(() => {
     syncProductSpaceLaunchHandoffContext(
       value.accountId && value.activeProductSpaceId
         ? { accountId: value.accountId, productSpaceId: value.activeProductSpaceId }
         : null,
     )
+    return () => {
+      syncProductSpaceLaunchHandoffContext(null)
+    }
   }, [value.accountId, value.activeProductSpaceId])
   return (
     <ProductSpaceContext.Provider value={value}>

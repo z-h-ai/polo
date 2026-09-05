@@ -17,6 +17,7 @@ const { cleanup, fireEvent, render, screen } = await import('@testing-library/re
 const {
   AllAppsView,
   catalogAppBlockedStatusKey,
+  catalogAppWithdrawnStatusKey,
   groupAllAppsForDisplay,
 } = await import('../AllAppsView')
 
@@ -43,6 +44,7 @@ function renderView(apps: CatalogApp[], options: {
   installedId?: string
   loading?: boolean
   errorCode?: string | null
+  retainedCurrentVersionIds?: string[]
 } = {}) {
   const handlers = {
     onRefresh: jest.fn(),
@@ -63,6 +65,15 @@ function renderView(apps: CatalogApp[], options: {
       errorCode: options.errorCode ?? null,
       offline: false,
       scopeKeyForApp,
+      getStatus: (target: CatalogApp) => (
+        options.retainedCurrentVersionIds?.includes(target.id)
+          ? {
+              appId: target.id,
+              status: 'installed' as const,
+              currentVersion: '1.0.0',
+            }
+          : undefined
+      ),
       getInstallState: (target: CatalogApp) => target.id === options.installedId ? {
         app: {
           accountId: 'account-a',
@@ -149,14 +160,31 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
   })
 
   it('maps every unavailableReason to its own frozen blocked status', () => {
+    // Personal circles must never be told their "organization" removed
+    // access; enterprise keeps the organization phrasing.
     const cases: Array<{
       reason: 'authorization_ended' | 'space_restricted' | 'version_unavailable' | 'version_blocked'
-      copy: string
+      copy: Record<'personal' | 'enterprise', string>
     }> = [
-      { reason: 'authorization_ended', copy: 'Access removed by your organization' },
-      { reason: 'space_restricted', copy: 'Restricted for this space' },
-      { reason: 'version_unavailable', copy: 'Version unavailable' },
-      { reason: 'version_blocked', copy: 'Version blocked' },
+      {
+        reason: 'authorization_ended',
+        copy: {
+          personal: 'Access to this App has ended',
+          enterprise: 'Access removed by your organization',
+        },
+      },
+      {
+        reason: 'space_restricted',
+        copy: { personal: 'Restricted for this space', enterprise: 'Restricted for this space' },
+      },
+      {
+        reason: 'version_unavailable',
+        copy: { personal: 'Version unavailable', enterprise: 'Version unavailable' },
+      },
+      {
+        reason: 'version_blocked',
+        copy: { personal: 'Version blocked', enterprise: 'Version blocked' },
+      },
     ]
     for (const spaceKind of ['personal', 'enterprise'] as const) {
       for (const { reason, copy } of cases) {
@@ -164,7 +192,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
           [app('blocked-a', { availability: 'unavailable', unavailableReason: reason })],
           { spaceKind },
         )
-        expect(screen.getByText(copy)).toBeTruthy()
+        expect(screen.getByText(copy[spaceKind])).toBeTruthy()
         cleanup()
       }
       renderView(
@@ -179,7 +207,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     }
   })
 
-  it('keys blocked status copy by the authoritative reason, not availability alone', () => {
+  it('keys blocked status copy by the authoritative reason and space kind', () => {
     expect(catalogAppBlockedStatusKey({
       availability: 'unavailable',
       unavailableReason: 'version_blocked',
@@ -191,6 +219,69 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     expect(catalogAppBlockedStatusKey({
       availability: 'unavailable',
     })).toBe('homeApps.status.unavailableGeneric')
+    expect(catalogAppBlockedStatusKey({
+      availability: 'unavailable',
+      unavailableReason: 'authorization_ended',
+    }, 'personal')).toBe('homeApps.status.unauthorizedPersonal')
+    expect(catalogAppBlockedStatusKey({
+      availability: 'unavailable',
+      unavailableReason: 'authorization_ended',
+    }, 'enterprise')).toBe('homeApps.status.unauthorized')
+    expect(catalogAppWithdrawnStatusKey('personal')).toBe('homeApps.status.withdrawnPersonal')
+    expect(catalogAppWithdrawnStatusKey('enterprise')).toBe('homeApps.status.withdrawn')
+  })
+
+  it('keeps withdrawn tombstones visible, non-launchable, and uninstallable when installed', () => {
+    for (const spaceKind of ['personal', 'enterprise'] as const) {
+      const handlers = renderView([
+        app('live-a'),
+        app('gone-installed', {
+          name: 'Gone Installed',
+          availability: 'withdrawn',
+          sortOrder: 5,
+        }),
+        app('gone-plain', {
+          name: 'Gone Plain',
+          availability: 'withdrawn',
+          sortOrder: 6,
+        }),
+      ], {
+        spaceKind,
+        retainedCurrentVersionIds: ['gone-installed'],
+      })
+
+      expect(screen.getAllByTestId('all-apps-row')).toHaveLength(3)
+      expect(screen.getByText('Gone Installed')).toBeTruthy()
+      expect(screen.getByText('Gone Plain')).toBeTruthy()
+      // Frozen withdrawn copy per space kind, on every tombstone row.
+      expect(screen.getAllByText(spaceKind === 'personal'
+        ? 'This App is no longer distributed'
+        : 'Removed by your organization')).toHaveLength(2)
+
+      // Open stays disabled for every tombstone, live app stays openable.
+      const goneInstalledAction = screen.getByTestId('all-apps-action-gone-installed') as HTMLButtonElement
+      const gonePlainAction = screen.getByTestId('all-apps-action-gone-plain') as HTMLButtonElement
+      expect(goneInstalledAction.disabled).toBe(true)
+      expect(gonePlainAction.disabled).toBe(true)
+      expect((screen.getByTestId('all-apps-action-live-a') as HTMLButtonElement).disabled).toBe(false)
+
+      // The retained installation keeps its uninstall entry; the plain
+      // tombstone does not.
+      fireEvent.click(screen.getAllByTestId('all-apps-row')[1]!.querySelector('button')!)
+      expect(screen.getByTestId('all-apps-inspector-uninstall')).toBeTruthy()
+      fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+      expect(handlers.onUninstall).toHaveBeenCalledWith(expect.objectContaining({ id: 'gone-installed' }))
+      cleanup()
+    }
+  })
+
+  it('hides the uninstall entry for tombstones without a retained installation', () => {
+    renderView([
+      app('gone-plain', { name: 'Gone Plain', availability: 'withdrawn', sortOrder: 5 }),
+    ], { spaceKind: 'enterprise' })
+    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
+    expect(screen.getByTestId('all-apps-inspector-primary')).toBeTruthy()
+    expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
   })
 
   it('renders loading and failure states without inventing runtime state', () => {
@@ -207,6 +298,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         errorCode: null,
         offline: false,
         getInstallState: () => undefined,
+        getStatus: () => undefined,
         scopeKeyForApp,
         onRefresh: () => {},
         onOpen: () => {},

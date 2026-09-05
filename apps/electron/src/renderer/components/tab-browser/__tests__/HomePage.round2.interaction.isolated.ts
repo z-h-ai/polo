@@ -103,7 +103,7 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { formatBytes, HomePage } = await import('../HomePage')
+const { formatBytes, HomePage, selectAllAppsForDisplay } = await import('../HomePage')
 const {
   catalogStateMessage,
   homeAppOperationErrorText,
@@ -628,7 +628,7 @@ describe('HomePage all-Apps view (POO-43)', () => {
     expect(openApp).not.toHaveBeenCalled()
   })
 
-  it('segments a maximum Catalog without surfacing withdrawn entries', async () => {
+  it('keeps withdrawn tombstones visible and non-launchable in a maximum Catalog', async () => {
     const visibleApps: CatalogApp[] = Array.from(
       { length: 10_000 },
       (_, index) => ({
@@ -696,12 +696,117 @@ describe('HomePage all-Apps view (POO-43)', () => {
 
     await renderAllApps()
 
-    expect(document.querySelectorAll(
-      '[data-testid="all-apps-row"]',
-    )).toHaveLength(60)
-    expect(screen.queryByText('Installed Withdrawn')).toBeNull()
-    expect(screen.queryByText('Withdrawn 0')).toBeNull()
+    // Tombstones stay visible with their retained explanation: the installed
+    // one sorts first via its retained row, pagination still applies.
+    expect(screen.getByText('Installed Withdrawn')).toBeTruthy()
+    expect(screen.getAllByTestId('all-apps-row')).toHaveLength(60)
+    expect(screen.getByTestId('all-apps-count').textContent).toContain('20000')
+    expect(screen.getByText('Removed by your organization')).toBeTruthy()
 
+    // The withdrawn tombstone is NEVER launchable, even when installed.
+    const tombstoneAction = screen.getByTestId(
+      'all-apps-action-withdrawn-9999',
+    ) as HTMLButtonElement
+    expect(tombstoneAction.disabled).toBe(true)
+    // A live App on the same page stays launchable.
+    expect((screen.getByTestId('all-apps-action-visible-0') as HTMLButtonElement).disabled)
+      .toBe(false)
+
+    // The retained installation keeps its uninstall entry in the inspector.
+    fireEvent.click(screen.getAllByTestId('all-apps-row')[0]!.querySelector('button')!)
+    expect(screen.getByTestId('all-apps-inspector-uninstall')).toBeTruthy()
+  })
+
+  it('merges withdrawn tombstones into all-Apps with identity dedup and live preference', () => {
+    const live: CatalogApp = {
+      id: 'entry-dup',
+      catalogEntryId: 'entry-dup',
+      artifactInstanceId: 'artifact-dup',
+      catalogVersion: { versionId: 'version-2', version: '2.0.0' },
+      organizationId: 'organization-a',
+      name: 'Dup App',
+      description: '',
+      deliveryMode: 'resolve_launch',
+      sortOrder: 3,
+      availability: 'available',
+    }
+    const tombstoneOfSameArtifact: CatalogApp = {
+      ...live,
+      name: 'Dup App (old)',
+      availability: 'withdrawn',
+      sortOrder: 1,
+    }
+    const plainTombstone: CatalogApp = {
+      id: 'entry-gone',
+      catalogEntryId: 'entry-gone',
+      artifactInstanceId: 'artifact-gone',
+      catalogVersion: { versionId: 'version-1', version: '1.0.0' },
+      organizationId: 'organization-a',
+      name: 'Gone App',
+      description: '',
+      deliveryMode: 'resolve_launch',
+      sortOrder: 2,
+      availability: 'withdrawn',
+    }
+    const merged = selectAllAppsForDisplay(enterpriseCatalogWith(
+      [live],
+      { withdrawnApps: [tombstoneOfSameArtifact, plainTombstone] },
+    ))
+
+    // Same artifact identity collapses to the LIVE entry; the pure tombstone
+    // is retained; Catalog order is preserved.
+    expect(merged.map(app => app.id)).toEqual(['entry-gone', 'entry-dup'])
+    expect(merged.find(app => app.id === 'entry-dup')?.availability).toBe('available')
+    expect(merged.find(app => app.id === 'entry-gone')?.availability).toBe('withdrawn')
+    expect(selectAllAppsForDisplay(null)).toEqual([])
+  })
+
+  it('opens the uninstall dialog for an installed withdrawn tombstone', async () => {
+    const installedTombstone: CatalogApp = {
+      id: 'gone-installed',
+      catalogEntryId: 'gone-installed',
+      artifactInstanceId: 'artifact-gone-installed',
+      catalogVersion: { versionId: 'version-gone', version: '1.5.0' },
+      organizationId: 'organization-a',
+      name: 'Gone Installed',
+      description: '',
+      deliveryMode: 'resolve_launch',
+      sortOrder: 5,
+      availability: 'withdrawn',
+    }
+    const uninstallProductSpaceBundle = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([], { withdrawnApps: [installedTombstone] }),
+      {
+        uninstallProductSpaceBundle,
+        getStatus: (target: CatalogApp) => target.id === 'gone-installed'
+          ? {
+              appId: target.id,
+              status: 'installed' as const,
+              currentVersion: '1.5.0',
+            }
+          : undefined,
+      },
+    )
+
+    await renderAllApps()
+    expect(screen.getByText('Gone Installed')).toBeTruthy()
+    expect((screen.getByTestId('all-apps-action-gone-installed') as HTMLButtonElement).disabled)
+      .toBe(true)
+
+    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
+    fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+    await waitFor(() => {
+      expect(screen.getByText('Uninstall Gone Installed?')).toBeTruthy()
+    })
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Uninstall' }))
+    await waitFor(() => {
+      expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+        installedTombstone,
+        true,
+      )
+    })
   })
 
 })
