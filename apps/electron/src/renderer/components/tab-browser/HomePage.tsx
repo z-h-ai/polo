@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -247,54 +247,66 @@ export function HomePage() {
     openApp(POLO_APP_DEFINITION)
   }
 
-  // Live committed-context refs: re-bound on every render, so an async
-  // continuation can re-verify the CURRENT context against its click-time
-  // snapshot after the adminGetStatus() await. contextVersion is the
-  // authoritative MONOTONIC lease — it increases on every committed
-  // account/space change and never repeats, so an A→B→A round-trip (where
-  // account/enterprise/contextKey all return to their click-time values)
-  // still fails the re-verification.
-  const liveContextRef = useRef<{
+  // Authoritative committed-context lease for enterprise workflow jumps:
+  // account + enterprise + context key + the MONOTONIC contextVersion (it
+  // increases on every committed account/space change and never repeats, so
+  // an A→B→A round-trip that restores account/enterprise/contextKey still
+  // fails the re-verification).
+  interface EnterpriseWorkflowContextLease {
     accountId: string | undefined
     enterpriseId: string | null
     contextKey: string | undefined
     contextVersion: number | undefined
-  }>({ accountId: undefined, enterpriseId: null, contextKey: undefined, contextVersion: undefined })
-  liveContextRef.current = {
-    accountId: catalog.state.catalog?.accountId,
-    enterpriseId: activeProductSpace?.kind === 'enterprise'
-      ? activeProductSpace.enterpriseId
-      : null,
-    contextKey: catalog.productSpace?.productSpaceContextKey,
-    contextVersion: catalog.productSpace?.contextVersion,
   }
+  const liveLeaseRef = useRef<EnterpriseWorkflowContextLease>({
+    accountId: undefined,
+    enterpriseId: null,
+    contextKey: undefined,
+    contextVersion: undefined,
+  })
+  // The live lease is synced ONLY at the committed boundary (layout effect):
+  // render — including concurrently discarded ProductSpace renders — never
+  // writes the ref, so a committed A continuation always observes the truly
+  // committed lease.
+  useLayoutEffect(() => {
+    liveLeaseRef.current = {
+      accountId: catalog.state.catalog?.accountId,
+      enterpriseId: activeProductSpace?.kind === 'enterprise'
+        ? activeProductSpace.enterpriseId
+        : null,
+      contextKey: catalog.productSpace?.productSpaceContextKey,
+      contextVersion: catalog.productSpace?.contextVersion,
+    }
+  })
 
-  // Click-time snapshot of the committed context: the adminGetStatus() await
-  // must not outlive it. If the account, ProductSpace, or the monotonic
-  // context lease changes while the status IPC is pending, the stale
-  // continuation fails closed instead of opening another enterprise's
-  // workflow — even when the round-trip returns to the click-time identity.
+  // Click-time lease snapshot of the committed context: the adminGetStatus()
+  // await must not outlive it. After the await, the snapshot is compared
+  // against the committed live lease — any change to account, enterprise, or
+  // the monotonic context lease fails closed, even when a round-trip returns
+  // to the click-time identity.
   const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
     if (activeProductSpace?.kind !== 'enterprise') return
-    const clickAccountId = catalog.state.catalog?.accountId
-    const clickEnterpriseId = activeProductSpace.enterpriseId
-    const clickContextKey = catalog.productSpace?.productSpaceContextKey
-    const clickContextVersion = catalog.productSpace?.contextVersion
+    const clickLease: EnterpriseWorkflowContextLease = {
+      accountId: catalog.state.catalog?.accountId,
+      enterpriseId: activeProductSpace.enterpriseId as string,
+      contextKey: catalog.productSpace?.productSpaceContextKey,
+      contextVersion: catalog.productSpace?.contextVersion,
+    }
     try {
       const status = await window.electronAPI.adminGetStatus()
-      const live = liveContextRef.current
+      const live = liveLeaseRef.current
       if (
         !status.loggedIn
         || !status.adminUrl
-        || status.userId !== clickAccountId
-        || live.accountId !== clickAccountId
-        || live.enterpriseId !== clickEnterpriseId
-        || live.contextKey !== clickContextKey
-        || live.contextVersion !== clickContextVersion
+        || status.userId !== clickLease.accountId
+        || live.accountId !== clickLease.accountId
+        || live.enterpriseId !== clickLease.enterpriseId
+        || live.contextKey !== clickLease.contextKey
+        || live.contextVersion !== clickLease.contextVersion
       ) throw new Error(t('homeApps.errors.staleContext'))
       await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(
         status.adminUrl,
-        clickEnterpriseId,
+        clickLease.enterpriseId ?? '',
         workflow,
       ))
     } catch (error) {
