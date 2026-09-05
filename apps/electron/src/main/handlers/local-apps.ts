@@ -317,6 +317,24 @@ function productSpaceBundleScope(app: ProductSpaceAppIdentity): CatalogLocalAppS
  * authority, and duplicate identities are rejected. O(authority + requests):
  * the authority tuple set is read exactly once, never per item.
  */
+/**
+ * Collision-free JSON tuple over the FULL ProductSpace App identity
+ * (accountId + productSpaceId + catalogEntryId + artifactInstanceId +
+ * versionId + version). Shared by the withdrawn-authority and fresh-Catalog
+ * duplicate-detection passes so both paths can never drift on the identity
+ * contract.
+ */
+function productSpaceAppIdentityKey(app: ProductSpaceAppIdentity): string {
+  return JSON.stringify([
+    app.accountId,
+    app.productSpaceId,
+    app.catalogEntryId,
+    app.artifactInstanceId,
+    app.versionId,
+    app.version,
+  ])
+}
+
 function validateWithdrawnProductSpaceAppBatch(apps: ProductSpaceAppIdentity[]): void {
   const first = apps[0]!
   const authorityTuples = loadProductSpaceCatalogAuthorityTupleSet(
@@ -337,14 +355,7 @@ function validateWithdrawnProductSpaceAppBatch(apps: ProductSpaceAppIdentity[]):
         'Withdrawn ProductSpace App identity is not in the trusted Catalog authority',
       )
     }
-    const identityKey = JSON.stringify([
-      app.accountId,
-      app.productSpaceId,
-      app.catalogEntryId,
-      app.artifactInstanceId,
-      app.versionId,
-      app.version,
-    ])
+    const identityKey = productSpaceAppIdentityKey(app)
     if (seenIdentityKeys.has(identityKey)) {
       throw new LocalAppRuntimeError(
         'INVALID_REQUEST',
@@ -479,14 +490,7 @@ async function loadAuthoritativeProductSpaceApps(
   )
   const seenIdentityKeys = new Set<string>()
   for (const app of apps) {
-    const identityKey = JSON.stringify([
-      app.accountId,
-      app.productSpaceId,
-      app.catalogEntryId,
-      app.artifactInstanceId,
-      app.versionId,
-      app.version,
-    ])
+    const identityKey = productSpaceAppIdentityKey(app)
     if (seenIdentityKeys.has(identityKey)) {
       throw new LocalAppRuntimeError(
         'INVALID_REQUEST',

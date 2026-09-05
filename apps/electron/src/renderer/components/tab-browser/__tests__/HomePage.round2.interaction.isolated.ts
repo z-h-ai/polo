@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement } from 'react'
+import { createElement, type ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type {
@@ -177,8 +177,14 @@ function homeTree() {
   })
 }
 
+let homeRerender: (tree: ReactElement) => void = () => {}
 function renderHome() {
-  return render(homeTree())
+  const view = render(homeTree())
+  homeRerender = tree => view.rerender(tree)
+  return view
+}
+function viewRerender() {
+  homeRerender(homeTree())
 }
 
 async function renderAllApps() {
@@ -594,6 +600,101 @@ describe('HomePage quick access (POO-43)', () => {
     // The replaced app is NOT silently re-pinned by the stale binding.
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(quickAccessByContext.get(contextKey)).toEqual([])
+  })
+
+  it('fails closed when the committed enterprise switches while adminGetStatus is pending (members + publishing)', async () => {
+    // Enterprise A (members) at click time...
+    const enterpriseA = enterpriseCatalogWith([])
+    appCatalogHook = hookWithCatalog(enterpriseA)
+    appCatalogHook.productSpace.activeProductSpace = {
+      id: 'enterprise-a',
+      enterpriseId: 'enterprise-a',
+      kind: 'enterprise',
+      name: 'Enterprise A',
+      role: 'manager',
+      accessMode: 'active',
+    }
+
+    // ...with a pending adminGetStatus that the test controls.
+    let releaseStatusA!: (value: any) => void
+    adminGetStatus.mockImplementationOnce(() => {
+      return new Promise(resolve => {
+        releaseStatusA = resolve
+      })
+    })
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+    await waitFor(() => expect(releaseStatusA).toBeDefined())
+
+    // The committed context switches to enterprise B while the status IPC
+    // for A is still pending.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([], {
+      organizationId: 'organization-b',
+    }))
+    appCatalogHook.productSpace.activeProductSpace = {
+      id: 'enterprise-b',
+      enterpriseId: 'enterprise-b',
+      kind: 'enterprise',
+      name: 'Enterprise B',
+      role: 'manager',
+      accessMode: 'active',
+    }
+    viewRerender()
+
+    // Release A's status: the stale continuation must fail closed.
+    releaseStatusA!({ loggedIn: true, userId: 'account-a', adminUrl: 'https://admin.example.com' })
+    await waitFor(() => {
+      expect(openUrl).not.toHaveBeenCalled()
+    })
+    expect(openUrl).not.toHaveBeenCalledWith(
+      'https://admin.example.com/enterprise/enterprise-a/members',
+    )
+    expect(screen.getByTestId('enterprise-member-management-link')).toBeTruthy()
+
+    // The fresh B closures still open B's own workflow (members)...
+    adminGetStatus.mockResolvedValueOnce({
+      loggedIn: true,
+      userId: 'account-a',
+      adminUrl: 'https://admin.example.com',
+    })
+    fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/enterprise/enterprise-b/members',
+      )
+    })
+
+    // ...and the publishing entry re-verifies the same way after a switch.
+    let releaseStatusB2!: (value: any) => void
+    adminGetStatus.mockImplementationOnce(() => {
+      return new Promise(resolve => {
+        releaseStatusB2 = resolve
+      })
+    })
+    fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+    await waitFor(() => expect(releaseStatusB2).toBeDefined())
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([], {
+      organizationId: 'organization-c',
+    }))
+    appCatalogHook.productSpace.activeProductSpace = {
+      id: 'enterprise-c',
+      enterpriseId: 'enterprise-c',
+      kind: 'enterprise',
+      name: 'Enterprise C',
+      role: 'manager',
+      accessMode: 'active',
+    }
+    viewRerender()
+    releaseStatusB2!({ loggedIn: true, userId: 'account-a', adminUrl: 'https://admin.example.com' })
+    await waitFor(() => {
+      expect(openUrl).not.toHaveBeenCalledWith(
+        'https://admin.example.com/organization-apps?organizationId=enterprise-b',
+      )
+    })
+    expect(openUrl).not.toHaveBeenCalledWith(
+      'https://admin.example.com/organization-apps?organizationId=enterprise-c',
+    )
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {

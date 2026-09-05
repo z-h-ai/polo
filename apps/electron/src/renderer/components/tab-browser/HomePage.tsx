@@ -247,18 +247,45 @@ export function HomePage() {
     openApp(POLO_APP_DEFINITION)
   }
 
+  // Live committed-context refs: re-bound on every render, so an async
+  // continuation can re-verify the CURRENT context against its click-time
+  // snapshot after the adminGetStatus() await.
+  const liveContextRef = useRef<{
+    accountId: string | undefined
+    enterpriseId: string | null
+    contextKey: string | undefined
+  }>({ accountId: undefined, enterpriseId: null, contextKey: undefined })
+  liveContextRef.current = {
+    accountId: catalog.state.catalog?.accountId,
+    enterpriseId: activeProductSpace?.kind === 'enterprise'
+      ? activeProductSpace.enterpriseId
+      : null,
+    contextKey: catalog.productSpace?.productSpaceContextKey,
+  }
+
+  // Click-time snapshot of the committed context: the adminGetStatus() await
+  // must not outlive it. If the account, ProductSpace, or context lease
+  // changes while the status IPC is pending, the stale continuation fails
+  // closed instead of opening another enterprise's workflow.
   const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
     if (activeProductSpace?.kind !== 'enterprise') return
+    const clickAccountId = catalog.state.catalog?.accountId
+    const clickEnterpriseId = activeProductSpace.enterpriseId
+    const clickContextKey = catalog.productSpace?.productSpaceContextKey
     try {
       const status = await window.electronAPI.adminGetStatus()
+      const live = liveContextRef.current
       if (
         !status.loggedIn
         || !status.adminUrl
-        || status.userId !== catalog.state.catalog?.accountId
+        || status.userId !== clickAccountId
+        || live.accountId !== clickAccountId
+        || live.enterpriseId !== clickEnterpriseId
+        || live.contextKey !== clickContextKey
       ) throw new Error(t('homeApps.errors.staleContext'))
       await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(
         status.adminUrl,
-        activeProductSpace.enterpriseId,
+        clickEnterpriseId,
         workflow,
       ))
     } catch (error) {
