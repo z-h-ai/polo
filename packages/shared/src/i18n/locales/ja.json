@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "アプリのリリースバージョン形式が無効です。最後に検証された更新情報は保持されました。",
   "homeApps.organization.loadError": "組織アプリを読み込めませんでした。",
   "homeApps.organization.networkError": "Polo がサーバーに接続できないため、組織アプリを利用できません。",
-  "homeApps.organization.offlineWarning": "オフラインです。インストールおよび準備済みのアプリは引き続き開けます。",
+  "homeApps.organization.offlineWarning": "オフラインです。キャッシュされたカタログの閲覧のみ可能で、再接続して検証されるまで App は開けません。",
   "homeApps.organization.refreshWarning": "カタログを更新できませんでした。最後に検証されたカタログを表示しています。",
   "homeApps.quick.add": "ショートカットを追加",
   "homeApps.quick.allApps": "すべてのアプリ",

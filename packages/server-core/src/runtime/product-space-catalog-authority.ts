@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 
@@ -245,40 +245,69 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
   return tombstones
 }
 
-function findAuthorityEntry(
-  record: ProductSpaceCatalogAuthorityRecord | null,
-  predicate: (entry: ProductSpaceCatalogAuthorityEntry) => boolean,
-): boolean {
-  if (!record) return false
-  return record.entries.some(predicate) || record.tombstones.some(predicate)
+/**
+ * Exact identity tuple key: catalogEntryId + artifactInstanceId + versionId
+ * + version. Authority checks are ALL-or-nothing on this full tuple — a
+ * renderer-declared identity matches only when every field was recorded from
+ * a verified Main-side Catalog fetch.
+ */
+export function productSpaceCatalogAuthorityTupleKey(
+  catalogEntryId: string,
+  artifactInstanceId: string,
+  versionId: string,
+  version: string,
+): string {
+  return JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version])
 }
 
 /**
- * Withdrawn-management binding check: BOTH identifiers must come from the
- * recorded authority for this exact account and ProductSpace. A renderer
- * cannot self-declare a withdrawn identity.
+ * One-shot snapshot of the authority's full identity tuples for one account
+ * and ProductSpace. Callers validate an entire request batch linearly
+ * against this set (O(authority + requests)) instead of re-scanning the
+ * record per item.
  */
-export function hasProductSpaceCatalogAuthorityBinding(
+export function loadProductSpaceCatalogAuthorityTupleSet(
+  accountId: string,
+  productSpaceId: string,
+): Set<string> {
+  const record = loadFile().records[productSpaceCatalogAuthorityKey(accountId, productSpaceId)] ?? null
+  const tuples = new Set<string>()
+  if (!record) return tuples
+  for (const entry of record.entries) {
+    tuples.add(productSpaceCatalogAuthorityTupleKey(
+      entry.catalogEntryId,
+      entry.artifactInstanceId,
+      entry.versionId,
+      entry.version,
+    ))
+  }
+  for (const entry of record.tombstones) {
+    tuples.add(productSpaceCatalogAuthorityTupleKey(
+      entry.catalogEntryId,
+      entry.artifactInstanceId,
+      entry.versionId,
+      entry.version,
+    ))
+  }
+  return tuples
+}
+
+/** Exact full-tuple binding check (single identity). */
+export function hasProductSpaceCatalogAuthorityTuple(
   accountId: string,
   productSpaceId: string,
   catalogEntryId: string,
   artifactInstanceId: string,
+  versionId: string,
+  version: string,
 ): boolean {
-  const record = loadFile().records[productSpaceCatalogAuthorityKey(accountId, productSpaceId)] ?? null
-  return findAuthorityEntry(record, entry => (
-    entry.catalogEntryId === catalogEntryId
-    && entry.artifactInstanceId === artifactInstanceId
-  ))
-}
-
-/** Artifact-instance existence check for restricted withdrawn state reads. */
-export function hasProductSpaceCatalogAuthorityArtifact(
-  accountId: string,
-  productSpaceId: string,
-  artifactInstanceId: string,
-): boolean {
-  const record = loadFile().records[productSpaceCatalogAuthorityKey(accountId, productSpaceId)] ?? null
-  return findAuthorityEntry(record, entry => entry.artifactInstanceId === artifactInstanceId)
+  return loadProductSpaceCatalogAuthorityTupleSet(accountId, productSpaceId)
+    .has(productSpaceCatalogAuthorityTupleKey(
+      catalogEntryId,
+      artifactInstanceId,
+      versionId,
+      version,
+    ))
 }
 
 export function getProductSpaceCatalogAuthorityRecord(
@@ -290,6 +319,11 @@ export function getProductSpaceCatalogAuthorityRecord(
 
 export function resetProductSpaceCatalogAuthorityForTests(): void {
   processCache = null
+  try {
+    if (existsSync(authorityPath())) unlinkSync(authorityPath())
+  } catch {
+    // Best-effort test cleanup.
+  }
 }
 
 export const PRODUCT_SPACE_CATALOG_AUTHORITY_SCHEMA_VERSION = AUTHORITY_SCHEMA_VERSION

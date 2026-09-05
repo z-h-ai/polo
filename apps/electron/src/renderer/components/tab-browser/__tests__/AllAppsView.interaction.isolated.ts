@@ -45,6 +45,7 @@ function renderView(apps: CatalogApp[], options: {
   loading?: boolean
   errorCode?: string | null
   retainedInstalledIds?: string[]
+  offline?: boolean
 } = {}) {
   const handlers = {
     onRefresh: jest.fn(),
@@ -63,7 +64,7 @@ function renderView(apps: CatalogApp[], options: {
       refreshing: false,
       warningCode: null,
       errorCode: options.errorCode ?? null,
-      offline: false,
+      offline: options.offline ?? false,
       scopeKeyForApp,
       getInstallState: (target: CatalogApp) => target.id === options.installedId
         || options.retainedInstalledIds?.includes(target.id) ? {
@@ -274,6 +275,23 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
     expect(screen.getByTestId('all-apps-inspector-primary')).toBeTruthy()
     expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
+  })
+
+  it('keeps offline copy consistent with the frozen contract: viewable, never openable', () => {
+    for (const spaceKind of ['personal', 'enterprise'] as const) {
+      renderView([app('a'), app('b')], { spaceKind, offline: true })
+      // The warning only promises the cached catalog view — never offline
+      // opens (row status labels also mention offline; pick the banner).
+      const warning = screen.getAllByText(/offline/i)
+        .find(element => element.textContent?.includes('cached catalog'))
+      expect(warning).toBeTruthy()
+      expect(warning!.textContent).toMatch(/can't open/i)
+      // Every open button is disabled while offline (personal + enterprise).
+      for (const action of screen.getAllByTestId(/^all-apps-action-/)) {
+        expect((action as HTMLButtonElement).disabled).toBe(true)
+      }
+      cleanup()
+    }
   })
 
   it('renders loading and failure states without inventing runtime state', () => {

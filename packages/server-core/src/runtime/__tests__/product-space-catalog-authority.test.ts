@@ -4,12 +4,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   getProductSpaceCatalogAuthorityRecord,
-  hasProductSpaceCatalogAuthorityArtifact,
-  hasProductSpaceCatalogAuthorityBinding,
+  hasProductSpaceCatalogAuthorityTuple,
+  loadProductSpaceCatalogAuthorityTupleSet,
   productSpaceCatalogAuthorityKey,
+  productSpaceCatalogAuthorityTupleKey,
   recordProductSpaceCatalogAuthoritativeEntries,
   resetProductSpaceCatalogAuthorityForTests,
 } from '../product-space-catalog-authority'
+
+function tuple(
+  catalogEntryId = 'entry-a',
+  artifactInstanceId = 'artifact-a',
+  versionId = 'version-1',
+  version = '1.0.0',
+): [string, string, string, string] {
+  return [catalogEntryId, artifactInstanceId, versionId, version]
+}
 
 process.env.POLO_AI_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'polo-catalog-authority-'))
 
@@ -55,8 +65,9 @@ describe('ProductSpace Catalog authority', () => {
     // Credential stripping: no checksum (delivery-adjacent) survives.
     expect(JSON.stringify(record.entries[0])).not.toContain('checksum')
     expect(JSON.stringify(record)).not.toContain('downloadUrl')
-    expect(hasProductSpaceCatalogAuthorityBinding('account-a', 'space-a', 'entry-a', 'artifact-a')).toBe(true)
-    expect(hasProductSpaceCatalogAuthorityArtifact('account-a', 'space-a', 'artifact-a')).toBe(true)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    expect(loadProductSpaceCatalogAuthorityTupleSet('account-a', 'space-a'))
+      .toEqual(new Set([productSpaceCatalogAuthorityTupleKey(...tuple())]))
   })
 
   it('emits tombstones only when a stable identity disappears — never on version upgrades', () => {
@@ -86,7 +97,9 @@ describe('ProductSpace Catalog authority', () => {
       version: '2.0.0',
       availability: 'withdrawn',
     })
-    expect(hasProductSpaceCatalogAuthorityBinding('account-a', 'space-a', 'entry-a', 'artifact-a')).toBe(true)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple('entry-a', 'artifact-a', 'version-2', '2.0.0'))).toBe(true)
+    // The OLD version's tuple is gone once the entry upgraded.
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
   })
 
   it('clears a tombstone when the identity re-appears', () => {
@@ -99,9 +112,8 @@ describe('ProductSpace Catalog authority', () => {
 
   it('never shares records or bindings across accounts or ProductSpaces', () => {
     recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
-    expect(hasProductSpaceCatalogAuthorityBinding('account-a', 'space-b', 'entry-a', 'artifact-a')).toBe(false)
-    expect(hasProductSpaceCatalogAuthorityBinding('account-b', 'space-a', 'entry-a', 'artifact-a')).toBe(false)
-    expect(hasProductSpaceCatalogAuthorityArtifact('account-a', 'space-b', 'artifact-a')).toBe(false)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-b', ...tuple())).toBe(false)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-a', ...tuple())).toBe(false)
     expect(getProductSpaceCatalogAuthorityRecord('account-b', 'space-a')).toBeNull()
     expect(productSpaceCatalogAuthorityKey('account-a', 'space-a'))
       .toBe(JSON.stringify(['product-space-catalog', 1, 'account-a', 'space-a']))

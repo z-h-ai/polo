@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { createContext, useContext, useMemo, useRef } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef } from 'react'
 import type { ProductSpaceSummary, ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import type { PendingSpaceSwitch } from '@/hooks/useProductSpaceContext'
 import {
@@ -56,8 +56,26 @@ export function ProductSpaceProvider({
   if (storeRef.current === null) {
     storeRef.current = createProductSpaceLaunchHandoffStore()
   }
+  const store = storeRef.current
+  // Every committed account/ProductSpace change advances the store's
+  // non-reusable context generation: handles sealed under a previous
+  // generation stay dead even when the context returns to its sealing
+  // identity (A→B→A can never revive a pre-transition launch). Liveness is
+  // still enforced per call from the committed context below, so this
+  // effect's passive timing cannot open a cross-context window.
+  const committedContextKey = `${value.accountId}|${value.activeProductSpaceId}`
+  useEffect(() => {
+    store.commitContext(committedContextKey)
+  }, [store, committedContextKey])
+  // Dispose on unmount / sign-out: pending launches and listeners are
+  // cleared and every handler captured before unmount becomes unusable.
+  useEffect(() => {
+    return () => {
+      store.dispose()
+    }
+  }, [store])
   return (
-    <LaunchHandoffStoreContext.Provider value={storeRef.current}>
+    <LaunchHandoffStoreContext.Provider value={store}>
       <ProductSpaceContext.Provider value={value}>
         {children}
       </ProductSpaceContext.Provider>

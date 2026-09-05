@@ -122,4 +122,39 @@ describe('ProductSpace App launch handoff store', () => {
       launch,
     })
   })
+
+  it('never revives a handle after A→B→A without probing in B', () => {
+    const store = createProductSpaceLaunchHandoffStore()
+    store.commitContext('account-a|space-a')
+    const request = store.publish(liveA, 'account-a', launch)
+
+    // Switch to B (committed), then back to A — WITHOUT anyone probing the
+    // old handle in B.
+    store.commitContext('account-a|space-b')
+    store.commitContext('account-a|space-a')
+
+    expect(store.take(liveA, request.handoffId, context)).toBeNull()
+  })
+
+  it('fails publish and take closed after dispose', () => {
+    const store = createProductSpaceLaunchHandoffStore()
+    store.commitContext('account-a|space-a')
+    const request = store.publish(liveA, 'account-a', launch)
+
+    let observed: unknown = 'not-run'
+    const unsubscribe = store.onLaunch(() => {
+      observed = 'listener-fired'
+    })
+    unsubscribe()
+
+    store.dispose()
+    expect(store.take(liveA, request.handoffId, context)).toBeNull()
+    expect(() => store.publish(liveA, 'account-a', launch)).toThrow('disposed')
+    // Listeners were cleared with the dispose: none fire afterwards.
+    expect(observed).toBe('not-run')
+    const seen: unknown[] = []
+    store.onLaunch(() => seen.push(1))
+    expect(() => store.publish(liveA, 'account-a', launch)).toThrow('disposed')
+    expect(seen).toEqual([])
+  })
 })

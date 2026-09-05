@@ -213,6 +213,47 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     view.unmount()
   })
 
+  it('does not revive the pre-transition handle when the context returns A→B→A without probing in B', () => {
+    const view = renderProvider(providerValue())
+    fireEvent.click(screen.getByTestId('handoff-probe-publish'))
+    const sealedUnderA = probePublishedRequest!
+
+    // A→B then back to A — the old handle is NEVER touched in B.
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b' }),
+      children: createElement(ProbeChild),
+    }))
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue(),
+      children: createElement(ProbeChild),
+    }))
+
+    // The committed context is A again and publishing works — but the
+    // pre-transition handle stays permanently dead (generation fence).
+    probeActions!.publish()
+    expect(probePublishError).toBeNull()
+    const fresh = probePublishedRequest!
+    expect(probeActions!.take(sealedUnderA.handoffId)).toBeNull()
+    expect(probeActions!.take(fresh.handoffId)).not.toBeNull()
+    view.unmount()
+  })
+
+  it('leaves pre-unmount closures without any usable handle after unmount disposes the store', () => {
+    const view = renderProvider(providerValue())
+    fireEvent.click(screen.getByTestId('handoff-probe-publish'))
+    const sealed = probePublishedRequest!
+    const staleClosure = probeActions!
+
+    view.unmount()
+
+    // The Provider's own store was disposed on unmount: a closure captured
+    // before unmount can no longer drain the sealed handle, and publishing
+    // through it fails closed.
+    expect(staleClosure.take(sealed.handoffId)).toBeNull()
+    staleClosure.publish()
+    expect((probePublishError as Error | null)?.message).toContain('disposed')
+  })
+
   it('keeps the committed A space working when a speculative B tree is rendered elsewhere', () => {
     // Root 1: the committed A context with a sealed handle.
     const committedRoot = renderProvider(providerValue())

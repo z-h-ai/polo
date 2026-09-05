@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "某个应用的发布版本格式无效，已保留上次验证的更新信息。",
   "homeApps.organization.loadError": "无法加载组织 App。",
   "homeApps.organization.networkError": "Polo 无法连接服务器，暂时无法加载组织 App。",
-  "homeApps.organization.offlineWarning": "当前处于离线状态，仍可打开已安装且准备完成的 App。",
+  "homeApps.organization.offlineWarning": "当前处于离线状态，仅可查看已缓存的目录；恢复在线并完成验证前无法打开 App。",
   "homeApps.organization.refreshWarning": "无法刷新 App 目录，正在显示上次验证的目录。",
   "homeApps.quick.add": "添加快捷入口",
   "homeApps.quick.allApps": "全部 Apps",

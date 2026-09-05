@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "Una versión de aplicación tiene un formato no válido. Se conservó la última información de actualización verificada.",
   "homeApps.organization.loadError": "No se pudieron cargar las aplicaciones de la organización.",
   "homeApps.organization.networkError": "Las aplicaciones de la organización no están disponibles porque Polo no pudo conectarse al servidor.",
-  "homeApps.organization.offlineWarning": "Estás sin conexión. Aún puedes abrir las aplicaciones instaladas y preparadas.",
+  "homeApps.organization.offlineWarning": "Estás sin conexión. Solo se puede ver el catálogo en caché; las Apps no se pueden abrir hasta volver a conectarte y verificar.",
   "homeApps.organization.refreshWarning": "No se pudo actualizar el catálogo. Se muestra el último catálogo verificado.",
   "homeApps.quick.add": "Añadir acceso directo",
   "homeApps.quick.allApps": "Todas las Apps",

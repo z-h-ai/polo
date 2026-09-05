@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "Egy alkalmazás kiadási verziójának formátuma érvénytelen. Az utolsó ellenőrzött frissítési adatok megmaradtak.",
   "homeApps.organization.loadError": "A szervezeti alkalmazások nem tölthetők be.",
   "homeApps.organization.networkError": "A szervezeti alkalmazások nem érhetők el, mert a Polo nem tudott kapcsolódni a szerverhez.",
-  "homeApps.organization.offlineWarning": "Offline állapotban van. A telepített és előkészített alkalmazások továbbra is megnyithatók.",
+  "homeApps.organization.offlineWarning": "Offline állapotban vagy. Csak a gyorsítótárazott katalógus tekinthető meg; az Appok újracsatlakozás és megerősítés után nyithatók meg.",
   "homeApps.organization.refreshWarning": "A katalógus nem frissíthető. Az utolsó ellenőrzött katalógus látható.",
   "homeApps.quick.add": "Parancsikon hozzáadása",
   "homeApps.quick.allApps": "Összes alkalmazás",

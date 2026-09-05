@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "Eine App-Version hat ein ungültiges Format. Die zuletzt geprüften Update-Informationen wurden beibehalten.",
   "homeApps.organization.loadError": "Organisations-Apps konnten nicht geladen werden.",
   "homeApps.organization.networkError": "Organisations-Apps sind nicht verfügbar, weil Polo den Server nicht erreichen konnte.",
-  "homeApps.organization.offlineWarning": "Sie sind offline. Installierte und vorbereitete Apps können weiterhin geöffnet werden.",
+  "homeApps.organization.offlineWarning": "Du bist offline. Nur der zwischengespeicherte Katalog kann angesehen werden; Apps können erst nach erneuter Verbindung und Bestätigung geöffnet werden.",
   "homeApps.organization.refreshWarning": "Der Katalog konnte nicht aktualisiert werden. Der zuletzt geprüfte Katalog wird angezeigt.",
   "homeApps.quick.add": "Verknüpfung hinzufügen",
   "homeApps.quick.allApps": "Alle Apps",

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
+import { join } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
@@ -14,6 +15,12 @@ import {
   stopRegisteredProductSpaceExecutionsForAccount,
 } from '../../runtime/product-space-executions'
 import { getAccountTransitionEpoch } from './trusted-product-space-account'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import {
+  getProductSpaceCatalogAuthorityRecord,
+  resetProductSpaceCatalogAuthorityForTests,
+} from '../../runtime/product-space-catalog-authority'
 
 type StoredTokens = {
   accessToken: string
@@ -111,6 +118,12 @@ const adminClientBehavior = {
     throw new Error('getAppCatalog behavior not configured')
   },
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  listProductSpaces: async (_accessToken: string): Promise<any> => {
+    throw new Error('listProductSpaces behavior not configured')
+  },
+  getProductSpaceCatalog: async (_accessToken: string, _context: unknown): Promise<any> => {
+    throw new Error('getProductSpaceCatalog behavior not configured')
+  },
   createOrganization: async (_accessToken: string, _input: unknown): Promise<any> => {
     throw new Error('createOrganization behavior not configured')
   },
@@ -199,6 +212,20 @@ class MockAdminClient {
   async listOrganizations(accessToken: string) {
     adminClientCalls.push({ method: 'listOrganizations', args: [], accessToken })
     return adminClientBehavior.listOrganizations(accessToken)
+  }
+
+  async listProductSpaces(accessToken: string) {
+    adminClientCalls.push({ method: 'listProductSpaces', args: [], accessToken })
+    return adminClientBehavior.listProductSpaces(accessToken)
+  }
+
+  async getProductSpaceCatalog(accessToken: string, context: unknown) {
+    adminClientCalls.push({
+      method: 'getProductSpaceCatalog',
+      args: [context],
+      accessToken,
+    })
+    return adminClientBehavior.getProductSpaceCatalog(accessToken, context)
   }
 
   async createOrganization(accessToken: string, input: unknown) {
@@ -509,6 +536,7 @@ function createHarness() {
     authLogout: requiredHandler(handlers, RPC_CHANNELS.auth.LOGOUT),
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     syncAppCatalog: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_APP_CATALOG),
+    productSpaceCatalog: requiredHandler(handlers, RPC_CHANNELS.productSpace.CATALOG),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
@@ -665,6 +693,146 @@ beforeEach(() => {
     apps: [],
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+  adminClientBehavior.listProductSpaces = async () => ({
+    productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+  })
+  adminClientBehavior.getProductSpaceCatalog = async () => ({
+    contractVersion: 1,
+    productSpaceId: 'space-a',
+    catalogRevision: 'rev-1',
+    entries: [],
+  })
+})
+
+process.env.POLO_AI_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'polo-admin-authority-'))
+
+function authorityTestEntry(catalogRevision: string) {
+  return {
+    kind: 'app',
+    catalogEntryId: `entry-${catalogRevision}`,
+    artifactInstanceId: `artifact-${catalogRevision}`,
+    version: { versionId: `version-${catalogRevision}`, version: '1.0.0' },
+    name: 'Authority App',
+    description: '',
+    availability: 'available',
+    sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
+    permissions: [],
+  }
+}
+
+function waitFor<T>(predicate: () => T | undefined, timeoutMs = 2_000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now()
+    const poll = () => {
+      const value = predicate()
+      if (value !== undefined) return resolve(value)
+      if (Date.now() - startedAt > timeoutMs) return reject(new Error('waitFor timeout'))
+      setTimeout(poll, 10)
+    }
+    poll()
+  })
+}
+
+describe('ProductSpace Catalog latest-request fence and authority commit', () => {
+  const context = {
+    clientId: 'renderer',
+    workspaceId: null,
+    webContentsId: null,
+    signal: new AbortController().signal,
+  }
+  let productSpaceCatalog: HandlerFn
+  let logout: HandlerFn
+
+  beforeEach(async () => {
+    resetProductSpaceCatalogAuthorityForTests()
+    const harness = createHarness()
+    productSpaceCatalog = harness.productSpaceCatalog
+    logout = harness.logout
+    await harness.login(context, 'admin', 'admin-password')
+  })
+
+  it('commits the authority in the session-current zone and emits withdrawn entries', async () => {
+    let calls = 0
+    const gated = [
+      { release: undefined as undefined | ((value: any) => void) },
+      { release: undefined as undefined | ((value: any) => void) },
+    ]
+    adminClientBehavior.getProductSpaceCatalog = async (_token: unknown, ctx: unknown) => {
+      const index = calls++
+      console.log('[fence-test] getProductSpaceCatalog call', index, JSON.stringify(ctx))
+      return new Promise(resolve => {
+        gated[index].release = resolve
+      })
+    }
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => gated[0].release)
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => gated[1].release)
+    expect(gated[0].release).toBeDefined()
+    expect(gated[1].release).toBeDefined()
+
+    // R2 (latest) resolves first, then the slow R1 arrives.
+    // Fresh responses carry NO notModified key (the real AdminClient omits
+    // it; only the notModified short-circuit includes the key).
+    gated[1].release!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-2',
+      entries: [authorityTestEntry('rev-2')],
+    })
+    gated[0].release!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+
+    const r2 = await pendingR2 as any
+    const r1 = await pendingR1 as any
+    if (r2.catalogRevision !== 'rev-2') {
+      throw new Error(`R2 unexpected: ${JSON.stringify(r2)}`)
+    }
+    expect(r2.success).toBe(true)
+    expect(r2.entries).toHaveLength(1)
+    expect(r2).not.toHaveProperty('__authorityCommit')
+    expect(r2.withdrawnEntries).toEqual([])
+    // The slower older request is superseded and never writes the authority.
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+
+    const record = getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')!
+    expect(record).not.toBeNull()
+    expect(record!.catalogRevision).toBe('rev-2')
+    expect(record!.entries).toHaveLength(1)
+    expect(record!.entries[0]!.catalogEntryId).toBe('entry-rev-2')
+  })
+
+  it('never writes the authority when the session changes during the fetch', async () => {
+    let release!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      return new Promise(resolve => {
+        release = resolve
+      })
+    }
+    const pending = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => release)
+
+    // The account session changes mid-await.
+    await logout(context)
+
+    release({
+      notModified: false,
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-mid-await',
+      entries: [authorityTestEntry('rev-mid-await')],
+    })
+
+    const response = await pending as any
+    expect(response.success).toBe(false)
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+  })
 })
 
 describe('registerAdminHandlers', () => {
@@ -686,6 +854,7 @@ describe('registerAdminHandlers', () => {
       'login',
       'logout',
       'previewOrganizationJoin',
+      'productSpaceCatalog',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',

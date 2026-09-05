@@ -44,6 +44,18 @@ export interface ProductSpaceLaunchHandoffStore {
     expected: ProductSpaceAppLaunchContext,
   ): PendingProductSpaceAppLaunch | null
   onLaunch(listener: ProductSpaceAppLaunchListener): () => void
+  /**
+   * Advances the committed-context generation. Every committed
+   * account/ProductSpace change permanently invalidates every handle sealed
+   * under the previous generation — an A→B→A round-trip can never revive a
+   * pre-transition launch, even for the returned-to context.
+   */
+  commitContext(contextKey: string): void
+  /**
+   * Clears all pending launches and listeners; every handler obtained from
+   * this store becomes permanently unusable (Provider unmount / sign-out).
+   */
+  dispose(): void
 }
 
 const MAX_PENDING_LAUNCHES = 64
@@ -83,8 +95,15 @@ function createLaunchContext(
 }
 
 export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandoffStore {
-  const pendingLaunches = new Map<string, { accountId: string; launch: ResolveLaunchResponse }>()
+  const pendingLaunches = new Map<string, {
+    accountId: string
+    launch: ResolveLaunchResponse
+    contextGeneration: number
+  }>()
   const listeners = new Set<ProductSpaceAppLaunchListener>()
+  let committedContextKey: string | null = null
+  let contextGeneration = 0
+  let disposed = false
 
   function pruneExpired(): void {
     for (const [key, pending] of pendingLaunches) {
@@ -94,6 +113,9 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
 
   return {
     publish(live, accountId, launch): ProductSpaceAppLaunchRequest {
+      if (disposed) {
+        throw new Error('ProductSpace App launch handoff store is disposed')
+      }
       if (!live.accountId || !live.productSpaceId) {
         throw new Error('ProductSpace App launch handoff requires an active ProductSpace')
       }
@@ -110,7 +132,11 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
         handoffId: createHandoffId(),
         context: createLaunchContext(accountId, launch),
       }
-      pendingLaunches.set(request.handoffId, { accountId, launch })
+      pendingLaunches.set(request.handoffId, {
+        accountId,
+        launch,
+        contextGeneration,
+      })
       while (pendingLaunches.size > MAX_PENDING_LAUNCHES) {
         const oldestKey = pendingLaunches.keys().next().value as string | undefined
         if (!oldestKey) break
@@ -121,12 +147,17 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
     },
 
     take(live, handoffId, expected): PendingProductSpaceAppLaunch | null {
+      if (disposed) return null
       const pending = pendingLaunches.get(handoffId)
       if (!pending) return null
       // A handle is single-attempt as well as single-use. A stale or forged
       // consumer must not be able to probe the tuple and retry later.
       pendingLaunches.delete(handoffId)
       const { launch } = pending
+      // Generation fence: a handle sealed under a previous committed context
+      // is dead even when the context later returns to its sealing identity
+      // (A→B→A can never revive it).
+      if (pending.contextGeneration !== contextGeneration) return null
       // Liveness is the COMMITTED context supplied by the consumer's React
       // context read — a handle sealed under another account or space can
       // never be taken, and no module state had to be mutated for it.
@@ -153,8 +184,32 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
     },
 
     onLaunch(listener: ProductSpaceAppLaunchListener): () => void {
+      if (disposed) return () => {}
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+
+    commitContext(contextKey: string): void {
+      // Re-arm is allowed for the SAME provider instance re-running its
+      // commit effect (StrictMode double-invocation); a disposed store stays
+      // dead for every externally captured handler because re-arm is only
+      // reachable through the Provider's own effect.
+      if (disposed) {
+        disposed = false
+        committedContextKey = null
+      }
+      if (contextKey === committedContextKey) return
+      committedContextKey = contextKey
+      contextGeneration += 1
+      // Every committed context change permanently invalidates handles from
+      // all previous generations.
+      pendingLaunches.clear()
+    },
+
+    dispose(): void {
+      disposed = true
+      pendingLaunches.clear()
+      listeners.clear()
     },
   }
 }

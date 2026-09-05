@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "An app release has an invalid version format. The last verified update information was kept.",
   "homeApps.organization.loadError": "Organization Apps could not be loaded.",
   "homeApps.organization.networkError": "Organization Apps are unavailable because Polo could not reach the server.",
-  "homeApps.organization.offlineWarning": "You are offline. Installed and prepared Apps can still be opened.",
+  "homeApps.organization.offlineWarning": "You are offline. Only the cached catalog can be viewed, and Apps can't open until you're back online and verified.",
   "homeApps.organization.refreshWarning": "The catalog could not be refreshed. The last verified catalog is shown.",
   "homeApps.quick.add": "Add shortcut",
   "homeApps.quick.allApps": "All Apps",

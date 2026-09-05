@@ -506,6 +506,9 @@ export function registerAdminHandlers(
   const log = deps.platform.logger
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
+  // Latest-request fence per account|ProductSpace for the unified Catalog
+  // (same supersession shape as the legacy Catalog sync above).
+  const latestProductSpaceCatalogSyncByScope = new Map<string, number>()
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
   // Keep tuple members structured for account-wide authorization changes.
   // Entity IDs may contain every delimiter used by older prefix encodings.
@@ -1739,12 +1742,31 @@ export function registerAdminHandlers(
           const context = list.productSpaces.find(
             space => space.id === (productSpaceId as never),
           )
-          if (!context) {
+          if (!context || context.accessMode !== 'active') {
             throw new AdminError(
               'The requested ProductSpace is not available for this account',
               'FORBIDDEN',
             )
           }
+          // Main-owned latest-request fence (same shape as the legacy
+          // Catalog sync): overlapping refreshes for one account+space are
+          // monotonic per invocation; only the latest request may commit —
+          // a slower older response is superseded and never writes the
+          // authority. catalogRevision is opaque and never ordered.
+          const catalogSyncKey = `${userId}|${context.id}`
+          const syncInvocation = Math.max(
+            latestProductSpaceCatalogSyncByScope.get(catalogSyncKey) ?? 0,
+            0,
+          ) + 1
+          latestProductSpaceCatalogSyncByScope.set(catalogSyncKey, syncInvocation)
+          const isLatestCatalogSync = () =>
+            latestProductSpaceCatalogSyncByScope.get(catalogSyncKey) === syncInvocation
+          const supersededCatalogResult = () => ({
+            success: false as const,
+            errorCode: 'REQUEST_SUPERSEDED',
+            message: 'A newer ProductSpace catalog request replaced this one',
+          })
+
           const result = await client.getProductSpaceCatalog(
             accessToken,
             context,
@@ -1753,44 +1775,65 @@ export function registerAdminHandlers(
               : undefined,
           )
           if ('notModified' in result) {
+            if (!isLatestCatalogSync()) return supersededCatalogResult()
             return { notModified: true as const, catalogRevision: knownRevision as string }
           }
-          // Main records the verified Catalog into the persisted authority
-          // (credential-stripped identity + carried withdrawn tombstones).
-          // The tombstones ride along to the renderer for explain-and-clean;
-          // the authority itself never authorizes launch/install/start.
-          const withdrawnEntries = recordProductSpaceCatalogAuthoritativeEntries(
-            userId,
-            context.id,
-            result.catalogRevision,
-            result.entries,
-          )
+          if (!isLatestCatalogSync()) return supersededCatalogResult()
+          // The authority write happens in onCurrentSuccess (the
+          // session-current commit zone below) — never on a stale session or
+          // a superseded request.
           return {
+            __authorityCommit: {
+              accountId: userId,
+              productSpaceId: context.id,
+              catalogRevision: result.catalogRevision,
+              entries: result.entries,
+            },
             notModified: false as const,
             contractVersion: result.contractVersion,
             productSpaceId: result.productSpaceId,
             catalogRevision: result.catalogRevision,
             entries: result.entries,
-            ...(withdrawnEntries.length > 0
-              ? {
-                  withdrawnEntries: withdrawnEntries.map(entry => ({
-                    kind: 'app' as const,
-                    catalogEntryId: entry.catalogEntryId,
-                    artifactInstanceId: entry.artifactInstanceId,
-                    version: {
-                      versionId: entry.versionId,
-                      version: entry.version,
-                    },
-                    name: entry.name,
-                    description: entry.description,
-                    ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
-                    availability: 'withdrawn' as const,
-                    sources: entry.sources,
-                    permissions: entry.permissions,
-                  })),
-                }
-              : {}),
-          }
+          } as never
+        },
+        result => {
+          const commit = (result as {
+            __authorityCommit?: {
+              accountId: string
+              productSpaceId: string
+              catalogRevision: string
+              entries: ReadonlyArray<Record<string, unknown>>
+            }
+          }).__authorityCommit
+          if (!commit) return
+          delete (result as { __authorityCommit?: unknown }).__authorityCommit
+          // Session-current commit zone: record the verified Catalog into
+          // the persisted authority and attach the withdrawn tombstones for
+          // the renderer response. The authority itself never authorizes
+          // launch/install/start.
+          const withdrawnEntries = recordProductSpaceCatalogAuthoritativeEntries(
+            commit.accountId,
+            commit.productSpaceId,
+            commit.catalogRevision,
+            commit.entries,
+          )
+          ;(result as {
+            withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+          }).withdrawnEntries = withdrawnEntries.map(entry => ({
+            kind: 'app' as const,
+            catalogEntryId: entry.catalogEntryId,
+            artifactInstanceId: entry.artifactInstanceId,
+            version: {
+              versionId: entry.versionId,
+              version: entry.version,
+            },
+            name: entry.name,
+            description: entry.description,
+            ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
+            availability: 'withdrawn' as const,
+            sources: entry.sources,
+            permissions: entry.permissions,
+          }))
         },
       )
     },

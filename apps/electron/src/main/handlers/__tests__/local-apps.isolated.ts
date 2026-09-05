@@ -27,19 +27,46 @@ let accountAccessDenied = false
 let appAccessDenied = false
 let catalog: AppCatalogCacheEntry = createCatalog(1)
 
-// Trusted Catalog authority fixture: Main-owned bindings the renderer may
-// reference for withdrawn management (seeded per test).
-const authorityBindings = new Set<string>()
-const authorityArtifacts = new Set<string>()
+// Trusted Catalog authority fixture: Main-owned FULL identity tuples
+// (catalogEntryId + artifactInstanceId + versionId + version) the renderer
+// may reference for withdrawn management, keyed by account|space (seeded
+// per test).
+const authorityTuplesByScope = new Map<string, Set<string>>()
+
+function authorityScopeKey(accountId = 'account-a', productSpaceId = 'organization-a'): string {
+  return `${accountId}|${productSpaceId}`
+}
 
 function seedAuthorityBinding(
   accountId = 'account-a',
   productSpaceId = 'organization-a',
   catalogEntryId = 'catalog-entry-a',
   artifactInstanceId = 'artifact-instance-a',
+  versionId = 'version-a',
+  version = '2.3.4',
 ): void {
-  authorityBindings.add([accountId, productSpaceId, catalogEntryId, artifactInstanceId].join('|'))
-  authorityArtifacts.add([accountId, productSpaceId, artifactInstanceId].join('|'))
+  const scope = authorityScopeKey(accountId, productSpaceId)
+  const set = authorityTuplesByScope.get(scope) ?? new Set<string>()
+  set.add(JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version]))
+  authorityTuplesByScope.set(scope, set)
+}
+
+function seedAuthorityTuples(
+  productSpaceId = 'organization-a',
+  count: number,
+  prefix = 'authority',
+): void {
+  const set = authorityTuplesByScope.get(authorityScopeKey('account-a', productSpaceId))
+    ?? new Set<string>()
+  for (let index = 0; index < count; index += 1) {
+    set.add(JSON.stringify([
+      `${prefix}-entry-${index}`,
+      `${prefix}-artifact-${index}`,
+      `${prefix}-version-${index}`,
+      '1.0.0',
+    ]))
+  }
+  authorityTuplesByScope.set(authorityScopeKey('account-a', productSpaceId), set)
 }
 
 const getCachedAppCatalog = mock(() => catalog)
@@ -249,17 +276,14 @@ mock.module('@polo-ai/shared/config', () => ({
 }))
 
 mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () => ({
-  hasProductSpaceCatalogAuthorityBinding: (
-    accountId: string,
-    productSpaceId: string,
+  loadProductSpaceCatalogAuthorityTupleSet: (accountId: string, productSpaceId: string) =>
+    authorityTuplesByScope.get(authorityScopeKey(accountId, productSpaceId)) ?? new Set<string>(),
+  productSpaceCatalogAuthorityTupleKey: (
     catalogEntryId: string,
     artifactInstanceId: string,
-  ) => authorityBindings.has([accountId, productSpaceId, catalogEntryId, artifactInstanceId].join('|')),
-  hasProductSpaceCatalogAuthorityArtifact: (
-    accountId: string,
-    productSpaceId: string,
-    artifactInstanceId: string,
-  ) => authorityArtifacts.has([accountId, productSpaceId, artifactInstanceId].join('|')),
+    versionId: string,
+    version: string,
+  ) => JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version]),
 }))
 
 mock.module('@polo-ai/shared/credentials', () => ({
@@ -390,8 +414,7 @@ describe('local app main-process authorization boundary', () => {
     accountAccessDenied = false
     appAccessDenied = false
     catalog = createCatalog(1)
-    authorityBindings.clear()
-    authorityArtifacts.clear()
+    authorityTuplesByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1
@@ -573,14 +596,32 @@ describe('local app main-process authorization boundary', () => {
       ...productSpaceAppIdentity(),
       productSpaceId: 'organization-b' as never,
     }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
-    // The state read is artifact-scoped by design: a fabricated
-    // catalogEntryId on a REAL authority artifact projects that artifact's
-    // state (the binding strictness is enforced on the uninstall channel).
+    // Fabricated SQL/XSS-shaped catalogEntryId on a REAL artifact instance —
+    // the FULL tuple check rejects it (the state channel is not
+    // artifact-scoped anymore).
     await expect(getWithdrawnStates(context, [{
       ...productSpaceAppIdentity(),
       catalogEntryId: "x' OR 1=1 --" as never,
-    }])).resolves.toBeTruthy()
-    expect(scopedStatuses).toHaveBeenCalledTimes(1)
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      catalogEntryId: '<script>alert(1)</script>' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Forged versionId / version on a REAL catalog+artifact binding.
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      versionId: 'forged-version' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      version: '999.0.0' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Duplicate identities in one batch are rejected too.
+    await expect(getWithdrawnStates(context, [
+      productSpaceAppIdentity(),
+      productSpaceAppIdentity(),
+    ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(scopedStatuses).not.toHaveBeenCalled()
   })
 
   it('fails the withdrawn install-state channel closed on empty, cross-space, or signed-out batches', async () => {
@@ -605,12 +646,19 @@ describe('local app main-process authorization boundary', () => {
     expect(scopedStatuses).not.toHaveBeenCalled()
   })
 
-  it('uninstalls a withdrawn retained installation through the authority binding without fresh-Catalog validation', async () => {
+  it('uninstalls a withdrawn retained installation through the full-tuple authority binding without fresh-Catalog validation', async () => {
     // A withdrawn tombstone identity that exists ONLY in the Main authority
     // (the fresh Catalog mock still lists catalog-entry-a with a DIFFERENT
     // identity) — uninstall must succeed through the restricted
-    // stop/uninstall/local-data path.
-    seedAuthorityBinding('account-a', 'organization-a', 'catalog-entry-w', 'artifact-w')
+    // stop/uninstall/local-data path when the FULL tuple matches.
+    seedAuthorityBinding(
+      'account-a',
+      'organization-a',
+      'catalog-entry-w',
+      'artifact-w',
+      'version-w',
+      '2.0.0',
+    )
     const withdrawnIdentity = {
       accountId: 'account-a',
       productSpaceId: 'organization-a',
@@ -633,11 +681,24 @@ describe('local app main-process authorization boundary', () => {
 
   it('rejects fabricated withdrawn uninstall identities before the registry can run', async () => {
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
-    // Fabricated version tuple on a REAL artifact instance — the binding is
-    // fine but the renderer-invented catalog entry is not in the authority.
+    // Fabricated SQL/XSS-shaped catalogEntryId on a REAL artifact instance —
+    // the FULL tuple check rejects it before any registry call.
     await expect(uninstall(context, {
       ...productSpaceAppIdentity(),
       catalogEntryId: "x'; DROP TABLE catalog --" as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      catalogEntryId: '<img src=x onerror=alert(1)>' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Forged versionId / version on a REAL catalog+artifact binding.
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      versionId: 'forged-version' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      version: '999.0.0' as never,
     }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     // Unknown artifact instance: the destructive path (preserveData=false)
     // must be refused before the registry can delete any app directory.
@@ -645,17 +706,117 @@ describe('local app main-process authorization boundary', () => {
       ...productSpaceAppIdentity(),
       artifactInstanceId: '../../another-installed-app' as never,
     }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
-    // A REAL authority binding for another space stays invalid here.
-    seedAuthorityBinding('account-a', 'organization-b', 'catalog-entry-b', 'artifact-b')
+    // A REAL full-tuple authority binding for another space stays invalid here.
+    seedAuthorityBinding('account-a', 'organization-b', 'catalog-entry-b', 'artifact-b', 'version-b', '1.0.0')
     await expect(uninstall(context, {
       ...productSpaceAppIdentity(),
       productSpaceId: 'organization-b' as never,
       catalogEntryId: 'catalog-entry-b' as never,
       artifactInstanceId: 'artifact-b' as never,
+      versionId: 'version-b' as never,
+      version: '1.0.0' as never,
     }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
 
     expect(getProductSpaceCatalog).not.toHaveBeenCalled()
     expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+  })
+
+  it('validates a full 10,000-identity withdrawn batch against a 20,000-tuple authority in one pass', async () => {
+    // Product upper bound: 10,000 request identities against an authority
+    // holding 10,000 live + 10,000 tombstone tuples. A per-item authority
+    // scan would be ~200,000,000 comparisons on the Main thread; the
+    // one-shot tuple set keeps the whole batch linear.
+    seedAuthorityTuples('organization-a', 20_000)
+    const identities = Array.from({ length: 10_000 }, (_, index) => ({
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: `authority-entry-${index}`,
+      artifactInstanceId: `authority-artifact-${index}`,
+      versionId: `authority-version-${index}`,
+      version: '1.0.0',
+    }))
+    const set = authorityTuplesByScope.get(authorityScopeKey('account-a', 'organization-a'))!
+    for (const identity of identities) {
+      set.add(JSON.stringify([
+        identity.catalogEntryId,
+        identity.artifactInstanceId,
+        identity.versionId,
+        identity.version,
+      ]))
+    }
+    scopedStatuses.mockImplementation(async (scopes: CatalogLocalAppScope[]) =>
+      scopes.map(item => ({
+        appId: item.catalogAppId,
+        scope: item,
+        status: 'not_installed' as const,
+      })))
+
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    const startedAt = Date.now()
+    const states = await getWithdrawnStates(context, identities) as unknown[]
+    const elapsedMs = Date.now() - startedAt
+
+    expect(states).toHaveLength(10_000)
+    expect(elapsedMs).toBeLessThan(5_000)
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+  })
+
+  it('re-fails the withdrawn state response closed when the account or space changes during the registry await', async () => {
+    let releaseStatuses!: (statuses: LocalAppRuntimeStatus[]) => void
+    scopedStatuses.mockImplementationOnce(async (scopes: CatalogLocalAppScope[]) => {
+      void scopes
+      return await new Promise<LocalAppRuntimeStatus[]>(resolve => {
+        releaseStatuses = resolve
+      })
+    })
+    const statusRow: LocalAppRuntimeStatus = {
+      appId: 'artifact-instance-a',
+      scope: {
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'artifact-instance-a',
+      },
+      status: 'installed',
+      currentVersion: '2.3.4',
+    }
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+
+    // Space switch while the registry read is pending.
+    const pendingSpaceSwitch = getWithdrawnStates(context, [productSpaceAppIdentity()])
+    for (let i = 0; i < 300 && !releaseStatuses; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(releaseStatuses).toBeTruthy()
+    setRuntimeActiveProductSpace('organization-b')
+    releaseStatuses!([statusRow])
+    await expect(pendingSpaceSwitch).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    // Sign-out while the registry read is pending.
+    setRuntimeActiveProductSpace('organization-a')
+    let releaseSecond!: (statuses: LocalAppRuntimeStatus[]) => void
+    scopedStatuses.mockImplementationOnce(async (scopes: CatalogLocalAppScope[]) => {
+      void scopes
+      return await new Promise<LocalAppRuntimeStatus[]>(resolve => {
+        releaseSecond = resolve
+      })
+    })
+    const pendingSignOut = getWithdrawnStates(context, [productSpaceAppIdentity()])
+    for (let i = 0; i < 300 && !releaseSecond; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(releaseSecond).toBeTruthy()
+    signedInAccountId = null
+    releaseSecond!([statusRow])
+    await expect(pendingSignOut).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    // No stale projection escaped either window.
+    expect(scopedStatuses).toHaveBeenCalledTimes(2)
+    signedInAccountId = 'account-a'
   })
 
   it('fails withdrawn uninstall closed when signed out or outside the active ProductSpace', async () => {
@@ -1930,8 +2091,7 @@ describe('local app production status projection (R34-3)', () => {
     accessMode = 'online'
     appAccessDenied = false
     catalog = createCatalog(1)
-    authorityBindings.clear()
-    authorityArtifacts.clear()
+    authorityTuplesByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1

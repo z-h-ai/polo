@@ -746,7 +746,7 @@
   "homeApps.organization.invalidVersionWarning": "Wersja aplikacji ma nieprawidłowy format. Zachowano ostatnie zweryfikowane informacje o aktualizacji.",
   "homeApps.organization.loadError": "Nie udało się wczytać aplikacji organizacji.",
   "homeApps.organization.networkError": "Aplikacje organizacji są niedostępne, ponieważ Polo nie mogło połączyć się z serwerem.",
-  "homeApps.organization.offlineWarning": "Jesteś offline. Nadal możesz otwierać zainstalowane i przygotowane aplikacje.",
+  "homeApps.organization.offlineWarning": "Jesteś offline. Można przeglądać tylko zapisany katalog; Apps można otworzyć dopiero po ponownym połączeniu i weryfikacji.",
   "homeApps.organization.refreshWarning": "Nie udało się odświeżyć katalogu. Wyświetlany jest ostatni zweryfikowany katalog.",
   "homeApps.quick.add": "Dodaj skrót",
   "homeApps.quick.allApps": "Wszystkie aplikacje",

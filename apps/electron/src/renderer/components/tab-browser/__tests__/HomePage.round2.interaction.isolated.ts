@@ -100,6 +100,8 @@ mock.module('@/lib/product-space-app-launch-handoff', () => ({
     publish: storePublish,
     take: jest.fn(() => null),
     onLaunch: () => () => {},
+    commitContext: jest.fn(),
+    dispose: jest.fn(),
   }),
 }))
 

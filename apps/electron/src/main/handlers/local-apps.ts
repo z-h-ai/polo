@@ -59,8 +59,8 @@ import {
   ProductSpaceExecutionScopeSchema,
 } from '@polo-ai/shared/product-spaces'
 import {
-  hasProductSpaceCatalogAuthorityArtifact,
-  hasProductSpaceCatalogAuthorityBinding,
+  loadProductSpaceCatalogAuthorityTupleSet,
+  productSpaceCatalogAuthorityTupleKey,
 } from '@polo-ai/server-core/runtime/product-space-catalog-authority'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
@@ -307,6 +307,51 @@ function productSpaceBundleScope(app: ProductSpaceAppIdentity): CatalogLocalAppS
     accountId: app.accountId,
     organizationId: app.productSpaceId,
     catalogAppId: app.artifactInstanceId,
+  }
+}
+
+/**
+ * One-pass restricted withdrawn-management validation for an entire batch:
+ * every identity's FULL tuple (catalogEntryId + artifactInstanceId +
+ * versionId + version) must exist in the Main-owned persisted Catalog
+ * authority, and duplicate identities are rejected. O(authority + requests):
+ * the authority tuple set is read exactly once, never per item.
+ */
+function validateWithdrawnProductSpaceAppBatch(apps: ProductSpaceAppIdentity[]): void {
+  const first = apps[0]!
+  const authorityTuples = loadProductSpaceCatalogAuthorityTupleSet(
+    first.accountId,
+    first.productSpaceId,
+  )
+  const seenIdentityKeys = new Set<string>()
+  for (const app of apps) {
+    const tupleKey = productSpaceCatalogAuthorityTupleKey(
+      app.catalogEntryId,
+      app.artifactInstanceId,
+      app.versionId,
+      app.version,
+    )
+    if (!authorityTuples.has(tupleKey)) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'Withdrawn ProductSpace App identity is not in the trusted Catalog authority',
+      )
+    }
+    const identityKey = JSON.stringify([
+      app.accountId,
+      app.productSpaceId,
+      app.catalogEntryId,
+      app.artifactInstanceId,
+      app.versionId,
+      app.version,
+    ])
+    if (seenIdentityKeys.has(identityKey)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'Duplicate withdrawn ProductSpace App identities are not allowed',
+      )
+    }
+    seenIdentityKeys.add(identityKey)
   }
 }
 
@@ -768,27 +813,22 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'A withdrawn ProductSpace App batch must target one account and ProductSpace',
         )
       }
-      // RESTRICTED withdrawn-management gate: every identity must come from
-      // the Main-owned persisted Catalog authority. A renderer cannot declare
-      // an identity withdrawn — fabricated catalog/version tuples or
-      // unknown artifact instances are rejected before any registry read, so
-      // arbitrary local Apps can be neither probed nor targeted. The fresh
-      // Catalog stays the only authority for install/start/open.
-      for (const app of apps) {
-        if (!hasProductSpaceCatalogAuthorityArtifact(
-          app.accountId,
-          app.productSpaceId,
-          app.artifactInstanceId,
-        )) {
-          throw new LocalAppRuntimeError(
-            'NOT_AUTHORIZED',
-            'Withdrawn ProductSpace App identity is not in the trusted Catalog authority',
-          )
-        }
-      }
+      // RESTRICTED withdrawn-management gate: every identity's FULL tuple
+      // (catalogEntryId + artifactInstanceId + versionId + version) must
+      // come from the Main-owned persisted Catalog authority. A renderer
+      // cannot declare an identity withdrawn — fabricated catalog/version
+      // tuples or unknown artifact instances are rejected before any
+      // registry read, so arbitrary local Apps can be neither probed nor
+      // targeted. The fresh Catalog stays the only authority for
+      // install/start/open.
+      validateWithdrawnProductSpaceAppBatch(apps)
       await assertProductSpaceAccountCurrent(first)
       const scopes = apps.map(productSpaceBundleScope)
       const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
+      // Post-await fence (same shape as the fresh state channel): the
+      // account/space gates are re-verified AFTER the registry await, so a
+      // switch or sign-out during the pending read fails the response closed.
+      await assertProductSpaceAccountCurrent(first)
       if (statuses.length !== scopes.length) {
         throw new LocalAppRuntimeError(
           'NOT_AUTHORIZED',
@@ -862,25 +902,17 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     async (_ctx, rawApp: unknown, options?: LocalAppUninstallOptions) => {
       // Withdrawn-inclusive uninstall: a withdrawn App is no longer listed in
       // the fresh Catalog, so the authoritative-tuple revalidation cannot
-      // apply. Instead the catalogEntryId/artifactInstanceId binding MUST
-      // come from the Main-owned persisted Catalog authority — a renderer
-      // cannot self-declare withdrawn, and fabricated identities are
-      // rejected BEFORE the registry can touch any installation directory.
-      // This path is limited to stop/uninstall/local-data cleanup; it never
-      // accepts renderer download or launch data, and install/start/open
-      // stay behind the fresh-Catalog availability checks.
+      // apply. Instead the FULL identity tuple (catalogEntryId +
+      // artifactInstanceId + versionId + version) MUST come from the
+      // Main-owned persisted Catalog authority — a renderer cannot
+      // self-declare withdrawn, and fabricated or forged-version identities
+      // are rejected BEFORE the registry can touch any installation
+      // directory. This path is limited to stop/uninstall/local-data
+      // cleanup; it never accepts renderer download or launch data, and
+      // install/start/open stay behind the fresh-Catalog availability
+      // checks.
       const app = validateProductSpaceAppIdentity(rawApp)
-      if (!hasProductSpaceCatalogAuthorityBinding(
-        app.accountId,
-        app.productSpaceId,
-        app.catalogEntryId,
-        app.artifactInstanceId,
-      )) {
-        throw new LocalAppRuntimeError(
-          'NOT_AUTHORIZED',
-          'ProductSpace App identity is not in the trusted Catalog authority',
-        )
-      }
+      validateWithdrawnProductSpaceAppBatch([app])
       await assertProductSpaceAccountCurrent(app)
       const scope = productSpaceBundleScope(app)
       await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
