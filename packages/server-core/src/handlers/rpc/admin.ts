@@ -78,6 +78,22 @@ import {
 } from '@polo-ai/shared/product-spaces'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
+import {
+  beginAccountTransition,
+  settleAccountTransition,
+  setSyncTrustedProductSpaceAccountId,
+  setTrustedProductSpaceAccountProvider,
+  setTrustedProductSpaceListFetcher,
+  type TrustedProductSpaceListResult,
+} from './trusted-product-space-account'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
+  isSwitchInProgress,
+  revokeRuntimeProductSpaceFence,
+} from '../../runtime/product-space-executions'
 import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
@@ -190,22 +206,6 @@ export function __productSpaceCatalogSyncScopeCountForTests(): number {
 export function __isLatestProductSpaceCatalogSyncForTests(scopeKey: string, invocation: number): boolean {
   return isLatestProductSpaceCatalogSync(scopeKey, invocation)
 }
-import {
-  beginAccountTransition,
-  settleAccountTransition,
-  setSyncTrustedProductSpaceAccountId,
-  setTrustedProductSpaceAccountProvider,
-  setTrustedProductSpaceListFetcher,
-  type TrustedProductSpaceListResult,
-} from './trusted-product-space-account'
-import {
-  getRuntimeActiveProductSpace,
-  isRuntimeFenceBoundToAccount,
-  isRuntimeOfflineReadOnly,
-  isRuntimeProductSpaceRestricted,
-  isSwitchInProgress,
-  revokeRuntimeProductSpaceFence,
-} from '../../runtime/product-space-executions'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,

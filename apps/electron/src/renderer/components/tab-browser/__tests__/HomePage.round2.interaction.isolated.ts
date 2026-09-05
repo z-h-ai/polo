@@ -272,6 +272,9 @@ function hookWithCatalog(
         catalog.accountId,
         catalog.organizationId,
       ),
+      // Monotonic lease used by the enterprise-workflow re-verification;
+      // defaults to a stable value, tests override to simulate transitions.
+      contextVersion: 0,
       activeProductSpace: {
         id: catalog.organizationId,
         kind: 'enterprise',
@@ -695,6 +698,73 @@ describe('HomePage quick access (POO-43)', () => {
     expect(openUrl).not.toHaveBeenCalledWith(
       'https://admin.example.com/organization-apps?organizationId=enterprise-c',
     )
+  })
+
+  it('fails closed after an A→B→A round-trip while adminGetStatus was pending (members + publishing)', async () => {
+    // The monotonic contextVersion is the lease: an A→B→A round-trip
+    // restores account/enterprise/contextKey but NEVER the lease, so the
+    // stale continuation cannot re-pass the re-verification.
+    const makeHook = (spaceId: string, lease: number) => {
+      const hook = hookWithCatalog(enterpriseCatalogWith([]))
+      hook.productSpace.activeProductSpace = {
+        id: spaceId,
+        enterpriseId: spaceId,
+        kind: 'enterprise' as const,
+        name: `Enterprise ${spaceId}`,
+        role: 'manager' as const,
+        accessMode: 'active' as const,
+      } as never
+      hook.productSpace.contextVersion = lease
+      return hook
+    }
+
+    appCatalogHook = makeHook('enterprise-a', 1)
+
+    let releaseStatusA!: (value: any) => void
+    adminGetStatus.mockImplementationOnce(() => {
+      return new Promise(resolve => {
+        releaseStatusA = resolve
+      })
+    })
+
+    renderHome()
+    // Click members under enterprise A (lease 1); status IPC goes pending.
+    fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+    await waitFor(() => expect(releaseStatusA).toBeDefined())
+
+    // A→B→A: identities return to A but the lease advances 1 → 2 → 3.
+    appCatalogHook = makeHook('enterprise-b', 2)
+    viewRerender()
+    appCatalogHook = makeHook('enterprise-a', 3)
+    viewRerender()
+
+    // Release A's pending status: the stale continuation must fail closed.
+    releaseStatusA!({ loggedIn: true, userId: 'account-a', adminUrl: 'https://admin.example.com' })
+    await waitFor(() => {
+      expect(openUrl).not.toHaveBeenCalledWith(
+        'https://admin.example.com/enterprise/enterprise-a/members',
+      )
+    })
+    expect(openUrl).not.toHaveBeenCalled()
+
+    // Publishing under the SAME stale A closure is also refused...
+    fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+    expect(openUrl).not.toHaveBeenCalledWith(
+      'https://admin.example.com/organization-apps?organizationId=enterprise-a',
+    )
+
+    // ...while the FRESH A closure (lease 3) publishes normally.
+    adminGetStatus.mockResolvedValueOnce({
+      loggedIn: true,
+      userId: 'account-a',
+      adminUrl: 'https://admin.example.com',
+    })
+    fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/organization-apps?organizationId=enterprise-a',
+      )
+    })
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {
