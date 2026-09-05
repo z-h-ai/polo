@@ -170,6 +170,20 @@ export const CHANNEL_MAP = {
   organizationRevokeJoinLink: invoke(RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
   organizationUpdateMember: invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
   organizationRemoveMember: invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
+  productSpaceList: invoke(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES),
+  productSpaceListActiveExecutions: invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS),
+  productSpaceStopAllExecutions: invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS),
+  productSpaceStopExecution: invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION),
+  productSpaceRestrictActiveSpace: invoke(RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE),
+  productSpaceGetRestrictionState: invoke(RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE),
+  productSpaceGetCatalog: invoke(RPC_CHANNELS.productSpace.CATALOG),
+  productSpacePrepareSwitch: invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH),
+  productSpaceStopSwitchExecutions: invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS),
+  productSpaceCommitSwitch: invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH),
+  productSpaceCancelSwitch: invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH),
+  productSpaceRestoreOfflineView: invoke(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW),
+  productSpaceRevokeActiveContext: invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT),
+  productSpaceCleanupLegacyState: invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE),
   creatorArtifactGetCapabilities: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES),
   creatorArtifactList: invoke(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS),
   creatorArtifactGet: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT),
@@ -260,6 +274,12 @@ export const CHANNEL_MAP = {
   ),
   updateOrganizationContextStorage: invoke(
     RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  ),
+  getProductSpaceContextStorage: invoke(
+    RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  ),
+  updateProductSpaceContextStorage: invoke(
+    RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
   ),
 
   // Session Drafts

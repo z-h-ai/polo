@@ -214,6 +214,20 @@ mock.module('../../local-app-runtime', () => {
 })
 
 const { registerLocalAppHandlers } = await import('../local-apps')
+const {
+  setSyncTrustedProductSpaceAccountId,
+  setTrustedProductSpaceAccountProvider,
+} = await import(
+  '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+)
+const {
+  resetProductSpaceExecutionRegistryForTests: resetExecutionRegistry,
+  setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
+  setRuntimeOfflineReadOnly,
+  listRegisteredProductSpaceExecutions,
+  withSwitchLock,
+} = await import('@polo-ai/server-core/runtime/product-space-executions')
 
 function createCatalog(count: number): AppCatalogCacheEntry {
   return {
@@ -267,8 +281,10 @@ describe('local app main-process authorization boundary', () => {
   const handlers = new Map<string, Handler>()
   const context = {
     clientId: 'renderer',
+    webContentsId: 1 as number | null,
     signal: new AbortController().signal,
   }
+  let windowWorkspaceId: string | null = 'ws-window-a'
 
   beforeEach(() => {
     signedInAccountId = 'account-a'
@@ -276,6 +292,8 @@ describe('local app main-process authorization boundary', () => {
     accountAccessDenied = false
     appAccessDenied = false
     catalog = createCatalog(1)
+    windowWorkspaceId = 'ws-window-a'
+    context.webContentsId = 1
     getAppReleaseDownload.mockClear()
     handlers.clear()
     for (const handlerMock of [
@@ -323,7 +341,182 @@ describe('local app main-process authorization boundary', () => {
         return []
       },
     } satisfies RpcServer
-    registerLocalAppHandlers(server)
+    registerLocalAppHandlers(server, {
+      windowManager: {
+        getWorkspaceForWindow: (webContentsId: number) => (
+          context.webContentsId === webContentsId ? windowWorkspaceId : null
+        ),
+      },
+    } as never)
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    // The lock-free trusted-account mirror authenticates the start path's
+    // critical section; it tracks the same signed-in account.
+    setSyncTrustedProductSpaceAccountId(signedInAccountId)
+    if (signedInAccountId) {
+      setRuntimeActiveProductSpaceAccount(signedInAccountId)
+    }
+    setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
+    resetExecutionRegistry()
+  })
+
+  it('registers a restart as a fresh running execution so switching stays blocked', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+      currentVersion: 'v1.2.3',
+    }))
+    const restart = handlers.get(RPC_CHANNELS.localApps.RESTART)!
+    await restart(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(1)
+    expect(registered[0]!.scope.productSpaceId as string).toBe('organization-a')
+    expect(registered[0]!.scope.executionId as string).toContain('organization-a')
+    expect(await registered[0]!.isActive()).toBe(true)
+  })
+
+  it('binds each start to the calling window workspace and refuses workspace-less starts', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, scope())
+    windowWorkspaceId = 'ws-window-b'
+    await start(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(2)
+    expect(registered.map(execution => execution.scope.workspaceId as string).sort())
+      .toEqual(['ws-window-a', 'ws-window-b'])
+    expect(new Set(registered.map(execution => execution.scope.executionId as string)).size).toBe(2)
+
+    // A caller without a Workspace context can never be attributed to an
+    // immutable scope, so the start is refused instead of placeholder-bound.
+    context.webContentsId = null
+    await expect(start(context, scope()))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(2)
+    context.webContentsId = 1
+  })
+
+  it('isolates the same app across workspaces and ProductSpaces', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Workspace A inside the active space.
+    await start(context, scope())
+    // Workspace B inside the same active space.
+    windowWorkspaceId = 'ws-window-b'
+    await start(context, scope())
+
+    let registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(2)
+    for (const execution of registered) {
+      expect(execution.scope.accountId as string).toBe('account-a')
+      expect(execution.scope.productSpaceId as string).toBe('organization-a')
+    }
+
+    // A second ProductSpace fence: the same catalog scope from the first
+    // space is refused — cross-space starts are impossible.
+    setRuntimeActiveProductSpace('organization-b')
+    await expect(start(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(2)
+    expect(registered.every(execution => execution.scope.productSpaceId === 'organization-a')).toBe(true)
+  })
+
+  it('a Local App start keeps the switch lock free while resolving the account and loses to a concurrent account replacement', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    // Gate the trusted-account provider: the start must resolve the account
+    // BEFORE acquiring the switch lock (global lock order).
+    let releaseProvider!: () => void
+    const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve('account-a') })
+    setTrustedProductSpaceAccountProvider(() => gatedProvider)
+    // Gate the runtime boot so the start sits inside the switch lock.
+    let releaseBoot!: () => void
+    const gatedBoot = new Promise<{ appId: string; scope: CatalogLocalAppScope; version: string; url: string; port: number }>(resolve => {
+      releaseBoot = () => resolve({
+        appId: scope().catalogAppId,
+        scope: scope(),
+        version: '1.2.3',
+        url: 'http://127.0.0.1:9876',
+        port: 9876,
+      })
+    })
+    scopedStart.mockImplementationOnce(() => gatedBoot)
+
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const starting = start(context, scope())
+    for (let i = 0; i < 300 && !scopedStart.mock.calls.length; i += 1) {
+      // Wait until the account was resolved and the critical section began.
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    // While the start resolves the account (and boots the runtime under the
+    // switch lock), the account replacement's revoke path must be able to
+    // take the switch lock — the start must NOT hold it across Admin-lock
+    // work. Bounded assertion.
+    releaseProvider()
+    const lockAcquiredDuringBoot = await Promise.race([
+      withSwitchLock(async () => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
+    ])
+    expect(lockAcquiredDuringBoot).toBe(true)
+
+    // The replacement wins concurrently: mirror flips to account B and the
+    // fence account is rebound — the in-flight start must fail closed.
+    setSyncTrustedProductSpaceAccountId('account-b')
+    releaseBoot()
+    await expect(starting).rejects.toMatchObject({ code: 'SWITCH_IN_PROGRESS' })
+    // The booted runtime was stopped again and nothing was registered under
+    // the replaced account.
+    expect(scopedRegistry.stop).toHaveBeenCalled()
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
+  })
+
+  it('a workspace stop only unregisters the calling workspace execution', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    await start(context, scope())
+    windowWorkspaceId = 'ws-window-b'
+    await start(context, scope())
+
+    const byWorkspace = () => Object.fromEntries(
+      listRegisteredProductSpaceExecutions()
+        .filter(execution => execution.kind === 'local_app')
+        .map(execution => [execution.scope.workspaceId as string, execution]),
+    )
+
+    // ws-a stops the app: only ws-a's execution record is unregistered, and
+    // ws-b's execution stays registered for its own lifecycle. (The
+    // underlying POO-12 runtime process is still one per installation —
+    // documented residual — so ws-b's liveness probe reads the shared
+    // runtime, but its registration and lifecycle ownership are isolated.)
+    windowWorkspaceId = 'ws-window-a'
+    context.webContentsId = 1
+    await stop(context, scope())
+    let registered = byWorkspace()
+    expect(registered['ws-window-a']).toBeUndefined()
+    expect(registered['ws-window-b']).toBeDefined()
+
+    // ws-b's own stop cleans up its record too.
+    windowWorkspaceId = 'ws-window-b'
+    context.webContentsId = 2
+    await stop(context, scope())
+    registered = byWorkspace()
+    expect(registered['ws-window-b']).toBeUndefined()
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
   })
 
   it('requests a short-lived download grant for the currently authorized release', async () => {
@@ -668,6 +861,31 @@ describe('local app main-process authorization boundary', () => {
     catalog.authorizationStatus = 'denied'
     await expect(resolveRemoteUrl(context, scope()))
       .rejects.toThrow('no longer authorized')
+  })
+
+  it('resolves no remote URL for a scope outside the committed active space', async () => {
+    // The renderer presents a stale scope from a space it switched away
+    // from: the Main active-space gate must reject it before any
+    // authorization entry is read.
+    setRuntimeActiveProductSpace('organization-b')
+    const resolveRemoteUrl = handlers.get(
+      RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    )!
+    await expect(resolveRemoteUrl(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+  })
+
+  it('resolves no remote URL while the offline read-only view is active', async () => {
+    setRuntimeOfflineReadOnly(true)
+    try {
+      const resolveRemoteUrl = handlers.get(
+        RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+      )!
+      await expect(resolveRemoteUrl(context, scope()))
+        .rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
+    } finally {
+      setRuntimeOfflineReadOnly(false)
+    }
   })
 
   it('fails every public Catalog app RPC while session-ending access is denied', async () => {
@@ -1281,5 +1499,135 @@ describe('local app main-process authorization boundary', () => {
       currentVersion: '1.2.3',
     }))
     expect(result[prototypeNamedIds.length]).not.toHaveProperty('versionError')
+  })
+})
+
+describe('local app production status projection (R34-3)', () => {
+  const handlers = new Map<string, Handler>()
+  const context = {
+    clientId: 'renderer',
+    webContentsId: 1 as number | null,
+    signal: new AbortController().signal,
+  }
+  let windowWorkspaceId: string | null = 'ws-window-a'
+
+  beforeEach(() => {
+    signedInAccountId = 'account-a'
+    accessMode = 'online'
+    appAccessDenied = false
+    catalog = createCatalog(1)
+    windowWorkspaceId = 'ws-window-a'
+    context.webContentsId = 1
+    handlers.clear()
+    for (const handlerMock of [
+      getCachedAppCatalog,
+      getAppCatalogAccessMode,
+      assertAppAuthorized,
+      scopedStart,
+      scopedRegistry.stop,
+      scopedRuntimeStatus,
+    ]) {
+      handlerMock.mockClear()
+    }
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'not_installed',
+    }))
+    scopedRegistry.stop.mockImplementation(async (item: CatalogLocalAppScope) => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'stopped' as const,
+    }))
+    const server = {
+      handle(channel, handler) {
+        handlers.set(channel, handler as Handler)
+      },
+      push() {},
+      async invokeClient() {
+        return null
+      },
+      hasClientCapability() {
+        return false
+      },
+      findClientsWithCapability() {
+        return []
+      },
+    } satisfies RpcServer
+    registerLocalAppHandlers(server, {
+      windowManager: {
+        getWorkspaceForWindow: (webContentsId: number) => (
+          context.webContentsId === webContentsId ? windowWorkspaceId : null
+        ),
+      },
+    } as never)
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    setSyncTrustedProductSpaceAccountId(signedInAccountId)
+    if (signedInAccountId) {
+      setRuntimeActiveProductSpaceAccount(signedInAccountId)
+    }
+    setRuntimeOfflineReadOnly(false)
+    setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
+    resetExecutionRegistry()
+  })
+
+  it('a starting Local App stays registered and active and projects preparing until it runs', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'starting' as const,
+    }))
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(1)
+    // R34-3: 'starting' is a genuine non-terminal startup state — the
+    // execution stays active and projects 'preparing' for LIST/PREPARE.
+    expect(await registered[0]!.isActive()).toBe(true)
+    expect(registered[0]!.getStatus?.()).toBe('preparing')
+
+    // Once the runtime reaches 'running' the projection follows truthfully.
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+    }))
+    expect(await registered[0]!.isActive()).toBe(true)
+    expect(registered[0]!.getStatus?.()).toBe('running')
+  })
+
+  it('a dispatched Local App stop projects stopping until the runtime reaches a terminal state', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+    }))
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(1)
+    const execution = registered[0]!
+
+    // The stop is dispatched while the runtime still reports 'running'.
+    const stopPromise = execution.stop!()
+    expect(execution.getStatus?.()).toBe('stopping')
+    expect(await execution.isActive()).toBe(true)
+
+    // The runtime reaches its terminal state: the drain can confirm.
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'stopped' as const,
+    }))
+    expect(await stopPromise).toBe('stopped')
+    expect(await execution.isActive()).toBe(false)
   })
 })

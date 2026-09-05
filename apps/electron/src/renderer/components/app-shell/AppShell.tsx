@@ -2,6 +2,7 @@ import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
+import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Archive,
@@ -88,6 +89,7 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
+import { reportTargetProjectionFailure } from '@/lib/target-projection'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
@@ -920,6 +922,7 @@ function AppShellContent({
       setSources(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load sources:', err)
+      reportTargetProjectionFailure({ source: 'sources', message: String(err) })
     })
   }, [activeWorkspaceId])
 
@@ -1327,6 +1330,7 @@ function AppShellContent({
       setSkills(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load skills:', err)
+      reportTargetProjectionFailure({ source: 'skills', message: String(err) })
     })
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 
@@ -2206,30 +2210,13 @@ function AppShellContent({
   return (
     <AppShellProvider value={appShellContextValue}>
         {/* === TOP BAR === */}
-        <TopBar
-          workspaces={workspaces}
-          activeWorkspaceId={activeWorkspaceId}
-          onSelectWorkspace={onSelectWorkspace}
-          workspaceUnreadMap={workspaceUnreadMap}
-          onWorkspaceCreated={() => onRefreshWorkspaces?.()}
-          onWorkspaceRemoved={() => onRefreshWorkspaces?.()}
-          activeSessionId={effectiveSessionId}
-          onNewChat={() => handleNewChat()}
-          onNewWindow={() => window.electronAPI.menuNewWindow()}
-          onOpenSettings={onOpenSettings}
-          onOpenSettingsSubpage={handleSettingsClick}
-          onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
-          onOpenStoredUserPreferences={onOpenStoredUserPreferences}
-          onBack={goBack}
-          onForward={goForward}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          onToggleSidebar={handleToggleSidebar}
-          onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          onAddSessionPanel={() => handleNewChat(true)}
-          onAddBrowserPanel={() => { void handleNewBrowserWindow() }}
-          isCompact={isAutoCompact}
-        />
+        {/* Portaled to document.body so the global workbench bar stays visible
+            on every shell surface (Home view included) — REQ-001. Context
+            still flows through AppShellProvider. */}
+        {createPortal(
+          <TopBar />,
+          document.body,
+        )}
 
       {/* === OUTER LAYOUT: Unified Panel Stack | Right Sidebar === */}
       <div

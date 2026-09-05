@@ -5,6 +5,11 @@ import { dirname, join } from 'path'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
+import { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } from '../../runtime/product-space-executions'
+import { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } from './trusted-product-space-account'
+
+const TEST_ACCOUNT_ID = 'account-a'
+const TEST_SPACE_ID = 'space-personal'
 
 // The delete-first silent convergence must settle the REAL sessions:SEND_MESSAGE
 // RPC normally (no expected-cancellation rejection reaches the client), leave
@@ -47,6 +52,14 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
     tmpRoot = mkdtempSync(join(tmpdir(), 'rpc-delete-first-'))
     sm = new SessionManager()
     events = []
+    // The merged platform fences the session-event boundary and the
+    // execution registration on the committed ProductSpace (POO-42):
+    // establish the same runtime space context the desktop always has and
+    // bind seeded sessions to it.
+    setSyncTrustedProductSpaceAccountId(TEST_ACCOUNT_ID)
+    setRuntimeActiveProductSpaceAccount(TEST_ACCOUNT_ID)
+    setRuntimeActiveProductSpace(TEST_SPACE_ID)
+    setTrustedProductSpaceAccountProvider(async () => TEST_ACCOUNT_ID)
     sm.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
       events.push(event)
     }) as never)
@@ -75,6 +88,8 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
 
   afterEach(() => {
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    // The fence stays up across tests (background turns may still confirm);
+    // leaving it set is safe — other files re-establish their own context.
     const queue = (sm as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
     try { queue.cancel('rpc-del-first') } catch { /* ignore */ }
     rmSync(tmpRoot, { recursive: true, force: true })
@@ -96,6 +111,7 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
     const managed = createManagedSession(
       { id: sessionId, name: stored.name, createdAt: stored.createdAt },
       { id: 'ws_test', name: 'WS', rootPath: tmpRoot, createdAt: Date.now() } as never,
+      { productSpaceId: TEST_SPACE_ID, accountId: TEST_ACCOUNT_ID },
     )
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, managed)
     return managed
@@ -125,7 +141,7 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
     const deletePromise = sm.deleteSession('rpc-del-first')
     await waitForConditionInternal(() => lockAcquisitions >= 1, 5000)
 
-    const rpcPromise = sendMessage({ clientId: 'rpc-client' }, 'rpc-del-first', 'racing rpc message') as Promise<{ accepted: boolean; messageId: string }>
+    const rpcPromise = sendMessage({ clientId: 'rpc-client', workspaceId: 'ws_test' }, 'rpc-del-first', 'racing rpc message') as Promise<{ accepted: boolean; messageId: string }>
     await waitForConditionInternal(() => lockAcquisitions >= 2, 5000)
 
     releaseLock()
@@ -177,7 +193,7 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
 
     // The send is already in flight (it holds the managed object) when the
     // declaration lands.
-    const rpcPromise = sendMessage({ clientId: 'rpc-client' }, 'rpc-del-first', 'racing rpc message') as Promise<{ accepted: boolean; messageId: string }>
+    const rpcPromise = sendMessage({ clientId: 'rpc-client', workspaceId: 'ws_test' }, 'rpc-del-first', 'racing rpc message') as Promise<{ accepted: boolean; messageId: string }>
     await waitForConditionInternal(() => lockAcquisitions >= 2, 5000)
 
     releaseLock()
@@ -218,7 +234,7 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
       setSessionTurnGeneration: () => {},
     })
 
-    const result = (await sendMessage({ clientId: 'rpc-client' }, 'rpc-normal', 'a real message')) as { accepted: boolean; messageId: string }
+    const result = (await sendMessage({ clientId: 'rpc-client', workspaceId: 'ws_test' }, 'rpc-normal', 'a real message')) as { accepted: boolean; messageId: string }
     expect(result.accepted).toBe(true)
     expect(result.messageId).toEqual(expect.any(String))
     expect(result.messageId.length).toBeGreaterThan(0)

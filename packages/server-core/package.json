@@ -17,6 +17,9 @@
     "./services": "./src/services/index.ts",
     "./handlers/rpc": "./src/handlers/rpc/index.ts",
     "./handlers/rpc/*": "./src/handlers/rpc/*.ts",
+    "./runtime/product-space-executions": "./src/runtime/product-space-executions.ts",
+    "./runtime/trusted-start-gate": "./src/runtime/trusted-start-gate.ts",
+    "./runtime/legacy-state-cleaners": "./src/runtime/legacy-state-cleaners.ts",
     "./sessions": "./src/sessions/index.ts",
     "./webui": "./src/webui/index.ts"
   },

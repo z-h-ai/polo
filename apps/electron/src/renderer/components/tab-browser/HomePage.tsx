@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAppCatalog } from '@/hooks/useAppCatalog'
+import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
 import {
   BUILTIN_APP_IDS,
@@ -185,7 +186,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
   useEffect(() => {
     setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
   }, [
-    catalog.organization?.organizationContextKey,
+    catalog.productSpace?.productSpaceContextKey,
     catalog.state.catalog?.appConfigVersion,
   ])
   useEffect(() => {
@@ -197,12 +198,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
     setLogsTarget(null)
     setLogs('')
     setLogsLoading(false)
-  }, [catalog.organization?.organizationContextKey])
-  const activeOrganization = catalog.organization?.organizationSummaries.find(
-    item => item.id === catalog.organization?.activeOrganizationId,
-  )
+  }, [catalog.productSpace?.productSpaceContextKey])
+  const activeProductSpace = catalog.productSpace?.activeProductSpace
   const recentContextKey = createHomeRecentContextKey(
-    catalog.organization?.organizationContextKey,
+    catalog.productSpace?.productSpaceContextKey,
   )
 
   useEffect(() => {
@@ -439,22 +438,31 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
   return (
     <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-6 py-8 text-foreground sm:px-8"
+      className="h-full min-h-0 overflow-y-auto bg-background px-11 pb-[72px] pt-[46px] text-foreground"
       data-testid="home-app-hub"
     >
-      <div className="mx-auto w-full max-w-[1120px] space-y-10">
+      <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
+        {catalog.productSpace && (
+          <HomeSpaceContext
+            spaceName={activeProductSpace?.name
+              || t('homeApps.organization.current')}
+            spaceKind={activeProductSpace?.kind ?? null}
+            creatorCircles={catalog.creatorCircles}
+            spaceKey={catalog.productSpace.productSpaceContextKey}
+          />
+        )}
         <section aria-labelledby="recent-apps-heading">
-          <div className="mb-4 flex items-end justify-between gap-4">
+          <div className="mb-[18px] flex items-end justify-between gap-4">
             <div>
-              <h1 id="recent-apps-heading" className="text-lg font-semibold">
+              <h1 id="recent-apps-heading" className="text-[22px] font-bold leading-[1.25] tracking-[-0.03em]">
                 {t('homeApps.recent.title')}
               </h1>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-[7px] text-[13px] leading-[1.5] text-muted-foreground">
                 {t('homeApps.recent.description')}
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
+          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
             {resolvedRecent.map(item => (
               <AppIcon
                 key={item.key}
@@ -465,11 +473,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
           </div>
           {remainingBuiltinApps.length > 0 && (
             <div
-              className="rounded-xl border border-foreground/10 bg-foreground/2 p-4"
+              className="rounded-[17px] border border-foreground/10 bg-foreground/2 p-[16px]"
               data-testid="builtin-app-launcher"
             >
-              <h2 className="text-sm font-medium">{t('homeApps.builtin.title')}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <h2 className="text-[14px] font-medium">{t('homeApps.builtin.title')}</h2>
+              <p className="mt-[4px] text-[12px] text-muted-foreground">
                 {t('homeApps.builtin.description')}
               </p>
               <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
@@ -485,19 +493,19 @@ export function HomePage({ onAddApp }: HomePageProps) {
           )}
         </section>
 
-        {catalog.organization && (
+        {catalog.productSpace && (
           <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
-            <div className="mb-4 flex items-center justify-between gap-4">
+            <div className="mb-[18px] flex items-start justify-between gap-4">
               <div>
-                <h2 id="organization-apps-heading" className="text-base font-semibold">
+                <h2 id="organization-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
                   {t('homeApps.organization.title', {
-                    name: activeOrganization?.name || t('homeApps.organization.current'),
+                    name: activeProductSpace?.name || t('homeApps.organization.current'),
                   })}
                 </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {activeOrganization?.type === 'creator_space'
-                    ? t('homeApps.organization.creatorDescription')
-                    : t('homeApps.organization.enterpriseDescription')}
+                <p className="mt-[6px] text-[14px] text-muted-foreground">
+                  {activeProductSpace?.kind === 'enterprise'
+                    ? t('homeApps.organization.enterpriseDescription')
+                    : t('homeApps.organization.creatorDescription')}
                 </p>
               </div>
               <Button
@@ -566,9 +574,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
                   {t('homeApps.organization.empty')}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {activeOrganization?.type === 'creator_space'
-                    ? t('homeApps.organization.emptyCreator')
-                    : t('homeApps.organization.emptyEnterprise')}
+                  {activeProductSpace?.kind === 'enterprise'
+                    ? t('homeApps.organization.emptyEnterprise')
+                    : t('homeApps.organization.emptyCreator')}
                 </p>
               </div>
             ) : (
@@ -623,15 +631,15 @@ export function HomePage({ onAddApp }: HomePageProps) {
         )}
 
         <section aria-labelledby="external-apps-heading">
-          <div className="mb-4">
-            <h2 id="external-apps-heading" className="text-base font-semibold">
+          <div className="mb-[18px]">
+            <h2 id="external-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
               {t('homeApps.external.title')}
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-[6px] text-[14px] text-muted-foreground">
               {t('homeApps.external.description')}
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
+          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
             {externalApps.map(app => (
               <AppIcon
                 key={app.id}

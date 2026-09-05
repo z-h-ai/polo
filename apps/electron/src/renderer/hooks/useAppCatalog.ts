@@ -21,7 +21,11 @@ import {
   type LocalAppRuntimeStatus,
   type LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
-import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import {
+  isProductSpaceContractUnsupported,
+  reportProductSpaceContractFailure,
+} from '@/lib/product-space-contract-failure'
 import {
   emitAdminCatalogSessionAuthFailure,
 } from '@/lib/admin-auth-failure'
@@ -38,10 +42,53 @@ export interface AppCatalogState {
   statusLoadingScopeKeys: Record<string, true>
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
+  /**
+   * CreatorCircle relations visible in the active space's Catalog, derived
+   * from the entries' creator_circle sources (REQ-022: the "我的圈子"
+   * relation entry). Empty for enterprise spaces and when nothing was
+   * derived yet.
+   */
+  creatorCircles: CreatorCircleRelation[]
   host: {
     platform: 'darwin' | 'win32' | 'linux'
     arch: 'arm64' | 'x64'
   } | null
+}
+
+export interface CreatorCircleRelation {
+  circleId: string
+  name: string
+}
+
+/**
+ * Distinct creator_circle sources across the space's Catalog entries — the
+ * account's visible CreatorCircle relations (REQ-022). Deduplicated by
+ * circleId; entries without such sources contribute nothing.
+ */
+export function selectCreatorCircleRelations(
+  entries: ReadonlyArray<Record<string, unknown>>,
+): CreatorCircleRelation[] {
+  const byCircleId = new Map<string, CreatorCircleRelation>()
+  for (const rawEntry of entries) {
+    const sources = rawEntry.sources
+    if (!Array.isArray(sources)) continue
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue
+      const candidate = source as { kind?: unknown; circleId?: unknown; name?: unknown }
+      if (candidate.kind !== 'creator_circle') continue
+      const circleId = typeof candidate.circleId === 'string' && candidate.circleId
+        ? candidate.circleId
+        : (typeof candidate.name === 'string' ? candidate.name : '')
+      if (!circleId) continue
+      if (!byCircleId.has(circleId)) {
+        byCircleId.set(circleId, {
+          circleId,
+          name: typeof candidate.name === 'string' && candidate.name ? candidate.name : circleId,
+        })
+      }
+    }
+  }
+  return [...byCircleId.values()]
 }
 
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
@@ -230,12 +277,86 @@ interface ContextSnapshot {
   syncGeneration?: number
 }
 
+/**
+ * Projects a validated ProductSpace Catalog into the home App grid view
+ * model. Delivery data is deliberately absent: launching requires a fresh
+ * resolve-launch grant, so the projection never carries runnable URLs.
+ */
+function mapProductSpaceCatalogToCacheEntry(
+  productSpaceId: string,
+  accountId: string,
+  catalogResult: {
+    catalogRevision?: string
+    entries: ReadonlyArray<Record<string, unknown>>
+    withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+  },
+): AppCatalogCacheEntry {
+  const apps: CatalogApp[] = []
+  const withdrawnApps: CatalogApp[] = []
+  const mapEntry = (
+    rawEntry: Record<string, unknown>,
+    index: number,
+    availability: 'available' | 'withdrawn' | 'unavailable',
+  ): CatalogApp | null => {
+    const entry = rawEntry as {
+      kind?: string
+      catalogEntryId?: string
+      name?: string
+      description?: string
+      iconUrl?: string
+      availability?: string
+      sources?: ReadonlyArray<{ kind: string; name?: string }>
+      // Delivery metadata is not part of the ProductSpace Catalog contract;
+      // the strict server schema strips unknown fields, so these are only
+      // present in fixtures that exercise the local-app runtime seams.
+      deliveryMode?: CatalogApp['deliveryMode']
+      remoteUrl?: string
+      currentRelease?: CatalogApp['currentRelease']
+      permissions?: string[]
+    }
+    if (entry.kind !== 'app' || !entry.catalogEntryId || !entry.name) return null
+    return {
+      id: entry.catalogEntryId,
+      organizationId: productSpaceId,
+      name: entry.name,
+      description: entry.description ?? '',
+      iconUrl: entry.iconUrl,
+      creatorName: entry.sources?.[0]?.name,
+      deliveryMode: entry.deliveryMode ?? 'remote_url',
+      remoteUrl: entry.remoteUrl,
+      currentRelease: entry.currentRelease,
+      permissions: entry.permissions,
+      sortOrder: entry.deliveryMode === 'local_bundle' ? (entry as { sortOrder?: number }).sortOrder ?? index : index,
+      availability,
+    }
+  }
+  for (const [index, rawEntry] of catalogResult.entries.entries()) {
+    const app = mapEntry(rawEntry, index, 'available')
+    if (app) apps.push(app)
+  }
+  for (const [index, rawEntry] of (catalogResult.withdrawnEntries ?? []).entries()) {
+    const app = mapEntry(rawEntry, apps.length + index, 'withdrawn')
+    if (app) withdrawnApps.push(app)
+  }
+  return {
+    accountId,
+    organizationId: productSpaceId,
+    appConfigVersion: catalogResult.catalogRevision ?? '',
+    authorizationStatus: 'authorized',
+    syncedAt: Date.now(),
+    apps,
+    trustedReleases: {},
+    warnings: [],
+    withdrawnApps,
+  }
+}
+
 export function useAppCatalog() {
-  const organization = useOptionalOrganizationContext()
-  const organizationContextKey = organization?.organizationContextKey ?? null
+  const productSpace = useOptionalProductSpaceContext()
+  const catalogContextKey = productSpace?.productSpaceContextKey ?? null
   const [state, setState] = useState<AppCatalogState>({
     catalog: null,
-    loading: Boolean(organization),
+    loading: Boolean(productSpace),
     refreshing: false,
     warningCode: null,
     errorCode: null,
@@ -244,11 +365,13 @@ export function useAppCatalog() {
     statusLoadingScopeKeys: {},
     accessMode: null,
     statuses: {},
+    creatorCircles: [],
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
-  const contextKeyRef = useRef<string | null>(organizationContextKey)
-  contextKeyRef.current = organizationContextKey
+  const contextKeyRef = useRef<string | null>(catalogContextKey)
+  contextKeyRef.current = catalogContextKey
+  const knownCatalogRevisionRef = useRef<string | null>(null)
   // Context generation invalidates lifecycle results only when account/org
   // authorization changes. Sync generation is intentionally separate so an
   // ordinary same-context Catalog refresh cannot discard a successful start.
@@ -274,19 +397,19 @@ export function useAppCatalog() {
   const currentSnapshotForApp = useCallback((app: CatalogApp): ContextSnapshot => {
     const catalog = catalogRef.current
     if (
-      !organizationContextKey
+      !catalogContextKey
       || !catalog
-      || catalog.accountId !== organization?.accountId
+      || catalog.accountId !== productSpace?.accountId
       || app.organizationId !== catalog.organizationId
     ) {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
     return {
-      contextKey: organizationContextKey,
+      contextKey: catalogContextKey,
       contextGeneration: contextGenerationRef.current,
       catalog,
     }
-  }, [organization?.accountId, organizationContextKey])
+  }, [productSpace?.accountId, catalogContextKey])
 
   const scopeForApp = useCallback((app: CatalogApp): CatalogLocalAppScope => (
     scopeForCatalogApp(currentSnapshotForApp(app).catalog, app)
@@ -462,9 +585,9 @@ export function useAppCatalog() {
 
   const sync = useCallback(async (force = false) => {
     if (
-      !organization
-      || !organizationContextKey
-      || !organization.activeOrganizationId
+      !productSpace
+      || !catalogContextKey
+      || !productSpace.activeProductSpaceId
     ) {
       catalogRef.current = null
       setState(current => ({
@@ -479,12 +602,13 @@ export function useAppCatalog() {
         statusLoadingScopeKeys: {},
         accessMode: null,
         statuses: {},
+        creatorCircles: [],
       }))
       return
     }
     const syncGeneration = ++syncGenerationRef.current
     const contextGeneration = contextGenerationRef.current
-    const contextKey = organizationContextKey
+    const contextKey = catalogContextKey
     setState(current => ({
       ...current,
       loading: !current.catalog,
@@ -492,14 +616,18 @@ export function useAppCatalog() {
       errorCode: null,
     }))
     try {
-      let result = await window.electronAPI.adminSyncAppCatalog(
-        organization.activeOrganizationId,
-        { force },
+      // Unified ProductSpace Catalog (S01). The response was already parsed
+      // against the shared ProductSpace schema at the server boundary; a
+      // catalog for another space is rejected there and never hydrated here.
+      // The legacy Organization Catalog is not consulted as a fallback.
+      let catalogResult = await window.electronAPI.productSpaceGetCatalog(
+        productSpace.activeProductSpaceId,
+        force ? undefined : knownCatalogRevisionRef.current ?? undefined,
       )
       for (
         let retry = 0;
-        !result.success
-          && result.errorCode === 'REQUEST_SUPERSEDED'
+        !catalogResult.success
+          && catalogResult.errorCode === 'REQUEST_SUPERSEDED'
           && retry < CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT;
         retry += 1
       ) {
@@ -508,9 +636,9 @@ export function useAppCatalog() {
           || contextGeneration !== contextGenerationRef.current
           || contextKeyRef.current !== contextKey
         ) return
-        result = await window.electronAPI.adminSyncAppCatalog(
-          organization.activeOrganizationId,
-          { force },
+        catalogResult = await window.electronAPI.productSpaceGetCatalog(
+          productSpace.activeProductSpaceId,
+          force ? undefined : knownCatalogRevisionRef.current ?? undefined,
         )
       }
       if (
@@ -518,33 +646,35 @@ export function useAppCatalog() {
         || contextGeneration !== contextGenerationRef.current
         || contextKeyRef.current !== contextKey
       ) return
-      if (!result.success) {
-        emitAdminCatalogSessionAuthFailure(result)
-        const returnedCatalog = result.catalog
-        const matchingReturnedCatalog = returnedCatalog
-          && returnedCatalog.accountId === organization.accountId
-          && returnedCatalog.organizationId
-            === organization.activeOrganizationId
-          ? returnedCatalog
-          : null
-        // A persisted denied snapshot can accompany a temporary network error
-        // during cold token refresh. Its trusted accessMode is authoritative
-        // for Catalog hydration even though NETWORK_ERROR is not itself an
-        // authorization error.
-        const hasDeniedCatalogSnapshot = (
-          result.accessMode === 'denied'
-          && matchingReturnedCatalog !== null
-        )
-        if (
-          hasDeniedCatalogSnapshot
-          || isCatalogAccessDenied(result.errorCode, result.status)
-        ) {
+      if (!catalogResult.success) {
+        // PC-F11: a contract-incompatible Catalog is never a local load
+        // error — it goes through the global contract channel.
+        if (isProductSpaceContractUnsupported(catalogResult)) {
+          reportProductSpaceContractFailure({
+            errorCode: 'product_space_contract_unsupported',
+            source: 'catalog',
+          })
+          return
+        }
+        emitAdminCatalogSessionAuthFailure(catalogResult)
+        const failureCode = catalogResult.errorCode || 'request_failed'
+        // Authorization loss keeps a denied catalog tombstone: visible for
+        // explanation, never launchable. A returned denied snapshot is
+        // authoritative even alongside a transient network error.
+        const hasDeniedSnapshot = catalogResult.accessMode === 'denied'
+          && 'catalog' in catalogResult
+          && Boolean(catalogResult.catalog)
+        if (hasDeniedSnapshot || isCatalogAccessDenied(failureCode, catalogResult.status)) {
           const deniedContextGeneration = ++contextGenerationRef.current
-          const deniedCatalog = matchingReturnedCatalog
-            ? markCatalogAccessDenied(matchingReturnedCatalog)
-            : catalogRef.current
-              ? markCatalogAccessDenied(catalogRef.current)
-              : null
+          const deniedSnapshot = catalogResult.accessMode === 'denied'
+            && 'catalog' in catalogResult
+            && catalogResult.catalog
+            ? catalogResult.catalog
+            : null
+          const deniedCatalog = deniedSnapshot
+            ?? (catalogRef.current
+              ? markAppCatalogAccessDenied(catalogRef.current)
+              : null)
           catalogRef.current = deniedCatalog
           setState(current => ({
             ...current,
@@ -552,9 +682,10 @@ export function useAppCatalog() {
             loading: false,
             refreshing: false,
             warningCode: null,
-            errorCode: result.errorCode || 'request_failed',
+            errorCode: failureCode,
             statusLoadingScopeKeys: {},
             accessMode: 'denied',
+            creatorCircles: [],
           }))
           if (deniedCatalog) {
             await refreshRuntimeStatuses(
@@ -574,10 +705,36 @@ export function useAppCatalog() {
           ...current,
           loading: false,
           refreshing: false,
-          errorCode: result.errorCode || 'request_failed',
+          errorCode: failureCode,
+          // A failed refresh invalidates stale circle relations (fail-closed):
+          // the relation entry must not re-echo the previous Catalog.
+          creatorCircles: [],
         }))
         return
       }
+      if (catalogResult.notModified && catalogRef.current) {
+        setState(current => ({
+          ...current,
+          loading: false,
+          refreshing: false,
+          errorCode: null,
+          accessMode: catalogResult.accessMode ?? 'online',
+        }))
+        return
+      }
+      const result = {
+        catalog: mapProductSpaceCatalogToCacheEntry(
+          productSpace.activeProductSpaceId,
+          productSpace.accountId,
+          catalogResult,
+        ),
+        accessMode: catalogResult.accessMode ?? 'online',
+        warningCode: catalogResult.warningCode ?? null,
+      }
+      // REQ-022: creator_circle sources of the active space's Catalog are
+      // the account's visible CreatorCircle relations.
+      const creatorCircles = selectCreatorCircleRelations(catalogResult.entries)
+      knownCatalogRevisionRef.current = result.catalog.appConfigVersion
       catalogRef.current = result.catalog
       const snapshot: ContextSnapshot = {
         contextKey,
@@ -613,6 +770,7 @@ export function useAppCatalog() {
           errorCode: null,
           accessMode: result.accessMode,
           statusLoadingScopeKeys,
+          creatorCircles,
         }
       })
       await refreshRuntimeStatuses(
@@ -643,6 +801,7 @@ export function useAppCatalog() {
           errorCode,
           statusLoadingScopeKeys: {},
           accessMode: 'denied',
+          creatorCircles: [],
         }))
         if (deniedCatalog) {
           await refreshRuntimeStatuses(
@@ -662,12 +821,13 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode,
+          creatorCircles: [],
         }))
       }
     }
   }, [
-    organization,
-    organizationContextKey,
+    productSpace,
+    catalogContextKey,
     refreshRuntimeStatuses,
   ])
 
@@ -691,10 +851,11 @@ export function useAppCatalog() {
     lifecycleActionGenerationRef.current.clear()
     statusReadGenerationRef.current.clear()
     catalogRef.current = null
+    knownCatalogRevisionRef.current = null
     setState(current => ({
       ...current,
       catalog: null,
-      loading: Boolean(organizationContextKey),
+      loading: Boolean(catalogContextKey),
       refreshing: false,
       warningCode: null,
       errorCode: null,
@@ -703,13 +864,14 @@ export function useAppCatalog() {
       statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
+      creatorCircles: [],
     }))
     void sync()
     return () => {
       contextGenerationRef.current += 1
       syncGenerationRef.current += 1
     }
-  }, [organizationContextKey, sync])
+  }, [catalogContextKey, sync])
 
   const busyScopes = useMemo(() => Object.entries(state.statuses)
     .filter(([, status]) => (
@@ -1067,8 +1229,9 @@ export function useAppCatalog() {
   }, [scopeKeyForApp, state.statuses])
 
   return {
-    organization,
+    productSpace,
     state,
+    creatorCircles: state.creatorCircles,
     sync,
     install,
     start,

@@ -328,6 +328,16 @@ const { registerAdminHandlers } = await import(
   '@polo-ai/server-core/handlers/rpc/admin'
 )
 const { registerLocalAppHandlers } = await import('../local-apps')
+const {
+  getRuntimeActiveProductSpace,
+  listRegisteredProductSpaceExecutions,
+  registerProductSpaceExecution,
+  setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
+  stopRegisteredProductSpaceExecutionsForAccount,
+} = await import(
+  '@polo-ai/server-core/runtime/product-space-executions'
+)
 
 function createSignedInTokens(): StoredTokens {
   return {
@@ -421,7 +431,13 @@ function registerProductionHandlers(
       },
     },
     onAdminSessionEnding: options.onAdminSessionEnding
-      ?? ((accountId: string) => runtimeRegistry!.stopAccount(accountId)),
+      ?? (async (accountId: string) => {
+        // Mirrors the production wiring in main/index.ts: session ending
+        // stops EVERY registered execution of the account — assistant
+        // sessions and Local Apps alike.
+        await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+        await runtimeRegistry!.stopAccount(accountId)
+      }),
     onAdminCatalogScopeDenied: options.onAdminCatalogScopeDenied
       ?? ((accountId: string, organizationId: string) =>
         runtimeRegistry!.stopOrganization(accountId, organizationId)),
@@ -457,13 +473,19 @@ function registerProductionHandlers(
       runtimeRegistry!.resumeAccount(accountId),
   } satisfies HandlerDeps
   registerAdminHandlers(server, deps)
-  registerLocalAppHandlers(server)
+  registerLocalAppHandlers(server, {
+    windowManager: {
+      getWorkspaceForWindow: () => 'ws-window',
+    },
+  } as never)
+  setRuntimeActiveProductSpace(scope.organizationId)
+  setRuntimeActiveProductSpaceAccount(scope.accountId)
   return {
     handlers,
     context: {
       clientId: 'renderer',
       workspaceId: null,
-      webContentsId: null,
+      webContentsId: 1,
       signal: new AbortController().signal,
     },
   }
@@ -546,6 +568,9 @@ describe('Admin session and scoped local app production wiring', () => {
       'organization\0creator',
       `org:${'x'.repeat(508)}`,
     ]) {
+      // The committed active fence follows the space under test.
+      setRuntimeActiveProductSpace(organizationId)
+      setRuntimeActiveProductSpaceAccount(scope.accountId)
       const entityScope = { ...scope, organizationId }
       catalog = {
         ...createCatalog(),
@@ -711,6 +736,55 @@ describe('Admin session and scoped local app production wiring', () => {
     finishRemoteLogout.resolve()
     await expect(pendingLogout).resolves.toEqual({ success: true })
     expect(tokens).toBeNull()
+  })
+
+  it('session ending stops registered assistant executions and revokes the fence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-admin-ending-executions-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: () => {
+        throw new Error('assistant-execution test must not create a runtime manager')
+      },
+    })
+    tokens = createSignedInTokens()
+
+    const { handlers, context } = registerProductionHandlers(root)
+    const logout = handlers.get(RPC_CHANNELS.admin.LOGOUT)!
+
+    // A prior-account assistant execution is running when the session ends.
+    let assistantActive = true
+    let stopCalls = 0
+    registerProductSpaceExecution({
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-assistant-a',
+        accountId: scope.accountId,
+        productSpaceId: scope.organizationId,
+        workspaceId: 'ws-window',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'assistant',
+      ref: 'session-a',
+      generation: 0,
+      isActive: () => assistantActive,
+      stop: async () => {
+        stopCalls += 1
+        assistantActive = false
+        return 'stopped'
+      },
+    })
+
+    await expect(logout(context)).resolves.toEqual({ success: true })
+
+    // The assistant execution received a real stop and is gone from the
+    // registry, and the account+ProductSpace fence is revoked — a replaced
+    // account can never inherit it.
+    expect(stopCalls).toBe(1)
+    expect(assistantActive).toBe(false)
+    expect(listRegisteredProductSpaceExecutions()).toEqual([])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
   })
 
   it('downgrades online Catalog access when token refresh is offline', async () => {

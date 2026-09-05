@@ -22,6 +22,7 @@ import {
   type AppDefinition,
   type TabInstance,
 } from '../../shared/tab-browser-types'
+import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
 export interface WebAppNavigationControls {
   canGoBack: boolean
@@ -39,6 +40,12 @@ interface TabShellContextValue {
   activeTabId: string
   isReady: boolean
   activeWebAppNavigation: WebAppNavigationControls | null
+  /**
+   * Session partition for tab webapps, scoped to the account+ProductSpace so
+   * webapp cookies/storage from one space never surface in another. Null
+   * keeps the shared legacy partition (local-account windows).
+   */
+  webAppPartition: string | null
   activateHome: () => void
   activateTab: (tabId: string) => void
   openApp: (app: AppDefinition) => void
@@ -54,6 +61,14 @@ const TabShellContext = createContext<TabShellContextValue | null>(null)
 
 interface TabShellProviderProps {
   workspaceId?: string | null
+  /**
+   * Verified ProductSpace scope (account + space ids). Tab and installed-app
+   * persistence is partitioned by this scope: the same local Workspace
+   * entered from a different ProductSpace never restores the other space's
+   * tabs, URLs or app launchers. Null only for the legacy local-account
+   * window, which keeps the global store.
+   */
+  productSpaceScope?: { accountId: string; productSpaceId: string } | null
   children: React.ReactNode
 }
 
@@ -69,7 +84,7 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
   return hasPolo ? restored : [POLO_TAB, ...restored]
 }
 
-export function TabShellProvider({ workspaceId, children }: TabShellProviderProps) {
+export function TabShellProvider({ workspaceId, productSpaceScope, children }: TabShellProviderProps) {
   const [installedApps, setInstalledAppsState] = useAtom(installedAppsAtom)
   const [openTabs, setOpenTabs] = useAtom(openTabsAtom)
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
@@ -83,17 +98,40 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
   const [isReady, setIsReady] = useState(false)
   const [webAppNavigation, setWebAppNavigation] = useState<Record<string, WebAppNavigationControls>>({})
   const hydratedRef = useRef(false)
-  const workspaceSuffix = workspaceId || 'default'
+  // The persistence scope: account+ProductSpace first, workspace second.
+  // Storage keys (tabs) and the webview partition are both derived from this
+  // scope, so a space switch can never rehydrate the other space's tab
+  // strip, webapp URLs or WebView state.
+  const storageScope = productSpaceScope
+    ? `${tabAppPartitionForScope({
+        accountId: productSpaceScope.accountId,
+        productSpaceId: productSpaceScope.productSpaceId,
+        workspaceId: workspaceId || 'default',
+      })}::${workspaceId || 'default'}`
+    : (workspaceId || 'default')
+  // Deterministic, Electron-safe session partition for the ProductSpace
+  // scope — identical to what Main re-derives to install the webview
+  // permission policy.
+  const webAppPartition = productSpaceScope
+    ? tabAppPartitionForScope({
+        accountId: productSpaceScope.accountId,
+        productSpaceId: productSpaceScope.productSpaceId,
+        workspaceId: workspaceId || 'default',
+      })
+    : null
 
   useEffect(() => {
     let cancelled = false
 
     async function hydrate() {
+      // The Main side derives the installed-apps partition from trusted
+      // state (account + fence + window workspace) — the renderer never
+      // names the scope.
       const persistedApps = await window.electronAPI.getTabBrowserApps().catch(() => [])
       if (cancelled) return
 
       const apps = normalizeInstalledApps(persistedApps)
-      const rawTabs = getLocalStorage<TabInstance[]>(KEYS.tabs, [POLO_TAB], workspaceSuffix)
+      const rawTabs = getLocalStorage<TabInstance[]>(KEYS.tabs, [POLO_TAB], storageScope)
       const tabs = restoreTabs(rawTabs, apps)
       setInstalledApps(apps)
       setOpenTabs(tabs)
@@ -106,20 +144,22 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
     return () => {
       cancelled = true
     }
-  }, [setActiveTabId, setInstalledApps, setOpenTabs, workspaceSuffix])
+  }, [setActiveTabId, setInstalledApps, setOpenTabs, storageScope])
 
   useEffect(() => {
     if (!hydratedRef.current) return
     const timer = window.setTimeout(() => {
-      setLocalStorage(KEYS.tabs, openTabs, workspaceSuffix)
+      setLocalStorage(KEYS.tabs, openTabs, storageScope)
     }, 150)
     return () => window.clearTimeout(timer)
-  }, [openTabs, workspaceSuffix])
+  }, [openTabs, storageScope])
 
   const persistApps = useCallback(async (apps: AppDefinition[]) => {
     const normalized = normalizeInstalledApps(apps)
     setInstalledAppsState(normalized)
-    await window.electronAPI.saveTabBrowserApps(normalized.filter((app) => !BUILTIN_APP_IDS.has(app.id)))
+    await window.electronAPI.saveTabBrowserApps(
+      normalized.filter((app) => !BUILTIN_APP_IDS.has(app.id)),
+    )
   }, [setInstalledAppsState])
 
   const addApp = useCallback(async (app: AppDefinition) => {
@@ -160,6 +200,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
     activeTabId,
     isReady,
     activeWebAppNavigation,
+    webAppPartition,
     activateHome: () => activateTabWrite(HOME_TAB_ID),
     activateTab: activateTabWrite,
     openApp: openAppTab,
@@ -193,6 +234,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
     removeApp,
     registerWebAppNavigation,
     updateTabInfo,
+    webAppPartition,
   ])
 
   return (

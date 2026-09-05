@@ -907,6 +907,151 @@ export interface ElectronAPI {
     import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
     | null
   >
+  getProductSpaceContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+  updateProductSpaceContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/product-space-context'
+    ).ProductSpaceContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+
+  // ProductSpace consumption (member spaces and the local runtime gate)
+  productSpaceList(): Promise<
+    | { success: true; contractVersion: number; personalProductSpaceId: string; productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[] }
+    | { success: false; errorCode: string; message: string; contractUnsupported?: boolean }
+  >
+  productSpaceListActiveExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; executions: import('@polo-ai/shared/product-spaces').ExecutionSummary[] }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceStopAllExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; result: import('@polo-ai/shared/product-spaces').StopAllExecutionsResult }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceGetCatalog(
+    productSpaceId: string,
+    knownRevision?: string,
+  ): Promise<
+    | {
+      success: true
+      notModified: boolean
+      contractVersion?: number
+      productSpaceId?: string
+      catalogRevision?: string
+      accessMode?: 'online' | 'offline'
+      warningCode?: string | null
+      entries: ReadonlyArray<Record<string, unknown>>
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+      accessMode?: 'denied'
+      catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
+    }
+  >
+  productSpacePrepareSwitch(
+    targetProductSpaceId: string,
+  ): Promise<
+    | {
+      success: true
+      token: string
+      from: string | null
+      to: string
+      executions: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceStopSwitchExecutions(
+    token: string,
+  ): Promise<
+    | { success: true; executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }> }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceCommitSwitch(
+    token: string,
+    targetProductSpaceId: string,
+  ): Promise<
+    | { success: true; from: string | null; to: string }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceStopExecution(
+    token: string,
+    executionId: string,
+  ): Promise<
+    | { success: true; executionId: string; status: 'stopped' }
+    | { success: false; errorCode: string; message?: string; status?: 'stopping' | 'failed' }
+  >
+  productSpaceRestrictActiveSpace(
+    accountId: string,
+    productSpaceId: string,
+    restricted: boolean,
+  ): Promise<
+    | { success: true; restricted?: boolean }
+    | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
+  >
+  /** R34-2: Main's authoritative restriction state for one space. */
+  productSpaceGetRestrictionState(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; restricted: boolean }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceCancelSwitch(token: string): Promise<
+    | { success: false; errorCode: string; message?: string }
+    | {
+      success: true
+      /** Authoritative linearization verdict for the cancelled switch. */
+      outcome: 'cancelled' | 'already_committed' | 'no_transaction'
+      /** Present only for `already_committed`: the committed target space. */
+      committedTargetProductSpaceId?: string
+      /** Present only for `already_committed`: the CURRENT authoritative fence. */
+      activeProductSpaceId?: string | null
+    }
+  >
+  productSpaceRestoreOfflineView(): Promise<
+    | {
+      success: true
+      snapshot: {
+        contractVersion: number
+        personalProductSpaceId: string
+        productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[]
+        activeProductSpaceId: string
+      }
+    }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceRevokeActiveContext(): Promise<{ success: boolean }>
+  productSpaceCleanupLegacyState(): Promise<{
+    success: boolean
+    results: Record<string, boolean>
+  }>
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>

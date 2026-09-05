@@ -17,7 +17,10 @@ import { runErrorDiagnostics } from './diagnostics.ts';
 import { loadStoredConfig, loadConfigDefaults, type Workspace, type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
 import { getValidClaudeOAuthToken } from '../auth/state.ts';
 import {
+  captureManagedAnthropicAuthEnvSnapshot,
   clearClaudeBedrockRoutingEnvVars,
+  CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
+  restoreManagedAnthropicAuthEnvSnapshot,
   resolveAuthEnvVars,
 } from '../config/llm-connections.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
@@ -40,11 +43,11 @@ import {
   getLastPlanFilePath,
   clearPlanFileState,
   registerSessionScopedToolCallbacks,
-  unregisterSessionScopedToolCallbacks,
   getSessionScopedTools,
   cleanupSessionScopedTools,
   type AuthRequest,
 } from './session-scoped-tools.ts';
+import type { SessionScopedToolCallbackLease } from './session-scoped-tool-callback-registry.ts';
 import { type AutomationSystem, type SdkAutomationCallbackMatcher } from '../automations/index.ts';
 import {
   getPermissionMode,
@@ -52,7 +55,6 @@ import {
   setPermissionMode,
   cyclePermissionMode,
   initializeModeState,
-  cleanupModeState,
   blockWithReason,
   type PermissionMode,
   PERMISSION_MODE_CONFIG,
@@ -226,6 +228,20 @@ export interface ClaudeAgentConfig {
   connectionSlug?: string;
   /** Enable 1M context window for Opus 4.7. Default: true. Set false to use 200K and conserve usage limits. */
   enable1MContext?: boolean;
+  /**
+   * R52-B/R53: immutable runtime owner token for session-scoped callback
+   * ownership. Optional at the type level (bare test constructions), but the
+   * constructor FAILS CLOSED without it — the registry's owner-bearing APIs
+   * have no token-less path.
+   */
+  sessionCallbackOwnerToken?: string;
+  /**
+   * R51/R53: notified with the exact named lease returned by the
+   * constructor's registration so the SessionManager can re-bind its owned
+   * lease without re-reading the registry. Shared contract — no anonymous
+   * redeclaration.
+   */
+  onSessionCallbackLeaseChanged?: (lease: SessionScopedToolCallbackLease) => void;
 }
 
 // Permission request tracking
@@ -246,6 +262,34 @@ const DANGEROUS_COMMANDS = new Set([
   'curl', 'wget', 'ssh', 'scp', 'rsync',
   'git push', 'git reset', 'git rebase', 'git checkout',
 ]);
+
+// ============================================================
+// R54: PROCESS-GLOBAL CREDENTIAL ENV COORDINATION
+// ============================================================
+// The desktop postInit path mutates PROCESS-GLOBAL credential env keys. Two
+// overlapping transactions (a stale predecessor and its same-id successor)
+// previously produced an ABA race: the predecessor's rollback could revive a
+// credential the successor believed absent, and the successor's commit did
+// not re-publish the FULL expected credential set — leaving the PREDECESSOR's
+// OAuth token alive under a SUCCESSFUL successor. Coordination state:
+//
+// - `credentialEnvGenerationCounter` — monotonically increasing; every new
+//   transaction takes the next generation.
+// - `credentialEnvKeyOwnerGeneration` — per managed key, the generation that
+//   currently OWNS it (set at first touch). A stale transaction's rollback
+//   only restores keys it still owns by generation: a superseded rollback
+//   can NEVER revive a key its successor took over.
+// - A commit publishes the FULL expected credential set — every managed key
+//   the provider did not supply is EXPLICITLY re-deleted, so no predecessor
+//   revival survives a successor's success.
+const MANAGED_DESKTOP_CREDENTIAL_ENV_KEYS = [
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  ...CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
+];
+let credentialEnvGenerationCounter = 0;
+const credentialEnvKeyOwnerGeneration = new Map<string, number>();
 
 // ============================================================
 // Global Tool Permission System
@@ -482,6 +526,39 @@ export class ClaudeAgent extends BaseAgent {
   private branchFromSdkTurnId: string | null = null;
   private isHeadless: boolean = false;
   private pendingPermissions: Map<string, PendingPermission> = new Map();
+  /**
+   * R50: set as the FIRST act of destroy(). postInit consults this after
+   * every await and before every process-level side effect (credential proxy
+   * creation, env var overwrites) — a construction attempt that was timed out
+   * and disposed must never apply late credential side effects that a
+   * same-id successor runtime would inherit or be unable to clean up.
+   */
+  private postInitAborted: boolean = false;
+  /**
+   * R52/R53/R54: the in-flight credential env transaction — per-key prior
+   * values, the keys touched, the values this transaction wrote, and THIS
+   * transaction's owner GENERATION. Rolled back per-key (only keys this
+   * transaction still OWNS by generation AND whose current value still
+   * equals what it wrote) on abort/failure, so a successor's committed
+   * values — and a successor's OWNERSHIP of the managed keys — are never
+   * clobbered by a stale rollback.
+   */
+  private credentialEnvTransaction?: {
+    touched: Set<string>
+    prior: Record<string, string | undefined>
+    written: Record<string, string | undefined>
+    generation: number
+  };
+  /**
+   * R56 (obs bc4493fd): monotonically increasing per-instance postInit call
+   * epoch. `this.credentialEnvTransaction` is a MUTABLE field and does not
+   * identify a specific call — two overlapping postInit invocations on the
+   * SAME instance (e.g. a reverse proxy-start completion) cannot be told
+   * apart by re-reading it. Each call captures its epoch at entry; after
+   * every await the call requires the epoch to still be the newest one
+   * before publishing any process-level side effect.
+   */
+  private postInitEpoch: number = 0;
   // Permission whitelists are now managed by this.permissionManager (inherited from BaseAgent)
   // Source state tracking is now managed by this.sourceManager (inherited from BaseAgent)
   // Source MCP connections are managed by this.config.mcpPool (centralized in main process)
@@ -611,6 +688,12 @@ export class ClaudeAgent extends BaseAgent {
       mcpPool: config.mcpPool,
       connectionSlug: config.connectionSlug,
       automationSystem: config.automationSystem,
+      // R52-B: owner-verified callback ownership — the constructor's
+      // session-scoped registration and every owner-verified merge carry
+      // THIS runtime's immutable token; the SM rebinds its lease through
+      // the change notification. Both must survive the config copy.
+      sessionCallbackOwnerToken: config.sessionCallbackOwnerToken,
+      onSessionCallbackLeaseChanged: config.onSessionCallbackLeaseChanged,
     };
 
     // Call BaseAgent constructor - initializes model, thinkingLevel, permissionManager, sourceManager, etc.
@@ -656,6 +739,15 @@ export class ClaudeAgent extends BaseAgent {
     });
 
     // Register session-scoped tool callbacks
+    // R52-B/R53: the registration carries THIS runtime's immutable owner
+    // token — the SessionManager's construct-time owner-verified merge (and
+    // this agent's own per-turn merges) must match the lease this register
+    // publishes. FAIL CLOSED: a construction without an owner token has no
+    // owner-attributable registration and must not publish one.
+    const ownerToken = this.config.sessionCallbackOwnerToken;
+    if (!ownerToken) {
+      throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: construction must carry the runtime owner token)`);
+    }
     registerSessionScopedToolCallbacks(sessionId, {
       onPlanSubmitted: (planPath) => {
         this.onDebug?.(`[ClaudeAgent] onPlanSubmitted received: ${planPath}`);
@@ -676,7 +768,7 @@ export class ClaudeAgent extends BaseAgent {
       getTurnGeneration: () => this.sessionTurnGeneration,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
-    });
+    }, ownerToken);
 
     // Start config watcher for hot-reloading source changes
     // Only start in non-headless mode to avoid overhead in batch/script scenarios
@@ -690,95 +782,350 @@ export class ClaudeAgent extends BaseAgent {
    * Fetches credentials and sets process.env before the SDK subprocess spawns.
    * The subprocess spawns lazily on first chat(), so postInit() is early enough.
    */
-  override async postInit(): Promise<PostInitResult> {
+  override async postInit(options?: { signal?: AbortSignal }): Promise<PostInitResult> {
     const slug = this.config.connectionSlug;
     if (!slug) {
       return { authInjected: false, authWarning: 'No connection slug available', authWarningLevel: 'error' };
     }
-
-    const connection = getLlmConnection(slug);
-    if (!connection) {
-      return { authInjected: false, authWarning: `Connection not found: ${slug}`, authWarningLevel: 'error' };
+    // R50/R51/R57 (obs 21c38fb2): an aborted (timed-out-and-disposed)
+    // construction applies zero process-level side effects. `aborted()` is
+    // CALL-LOCAL: an abort of THIS call's signal deactivates only this call
+    // (below); the permanent `postInitAborted` flag is set ONLY by
+    // destroy()/the SessionManager timeout rollback — never by a per-call
+    // signal. Both are checked after EVERY await below.
+    // R56 (obs bc4493fd): THIS call's immutable identity — a newer postInit
+    // on the same instance supersedes it, regardless of the mutable
+    // credentialEnvTransaction field.
+    const myEpoch = ++this.postInitEpoch;
+    // R57 (obs a730f4cb): the call is current only while BOTH its epoch is
+    // the newest on this instance AND the instance's active transaction is
+    // still EXACTLY this call's own captured object (identity + generation
+    // + call epoch). `undefined` on the instance field never makes a DESKTOP
+    // call current.
+    const isCallCurrent = (): boolean => this.postInitEpoch === myEpoch;
+    // R57 (obs 21c38fb2): PER-CALL abort handling state — the listener itself
+    // is installed inside the try (after the call-local transaction exists)
+    // and deactivates ONLY this still-active call (rolling back ITS OWN
+    // captured transaction and closing only the proxy THIS call created); it
+    // never sets the permanent postInitAborted flag (agent destruction is a
+    // separate, instance-level state) and never rolls back a successor's
+    // transaction.
+    let callDeactivated = false;
+    let callProxy: InvocationCredentialProxy | null = null;
+    // Assigned when the per-call listener is installed inside the try; the
+    // finally below always runs the latest removal.
+    let removeCallAbortListener: () => void = () => {};
+    const aborted = (): boolean => callDeactivated || this.postInitAborted || options?.signal?.aborted === true;
+    if (aborted()) {
+      return { authInjected: false, authWarning: 'Agent destroyed before post-init; credential side effects skipped' };
     }
 
-    const invocationScoped = this.config.sessionStorage?.owner === 'cli';
-    if (!invocationScoped) {
-      // Desktop retains its historical process-wide compatibility behavior.
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      delete process.env.ANTHROPIC_BASE_URL;
-      clearClaudeBedrockRoutingEnvVars();
-    }
+    try {
+      const connection = getLlmConnection(slug);
+      if (!connection) {
+        return { authInjected: false, authWarning: `Connection not found: ${slug}`, authWarningLevel: 'error' };
+      }
 
-    // Resolve auth env vars via shared utility
-    const manager = getCredentialManager();
-    const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+      // R51: TRANSACTIONAL credential application — snapshot the exact
+      // pre-postInit env state; every abort below restores this precise
+      // snapshot instead of leaving an erased/overwritten process-global state.
+      const envSnapshot = captureManagedAnthropicAuthEnvSnapshot();
 
-    if (!result.success) {
-      return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
-    }
+      const invocationScoped = this.config.sessionStorage?.owner === 'cli';
 
-    if (invocationScoped) {
-      const apiKey = result.envVars.ANTHROPIC_API_KEY;
-      const oauthToken = result.envVars.CLAUDE_CODE_OAUTH_TOKEN;
-      const credential = oauthToken || apiKey;
-      const upstreamBaseUrl =
-        result.envVars.ANTHROPIC_BASE_URL
-        || connection.baseUrl
-        || 'https://api.anthropic.com';
-      const upstreamHeaders: Record<string, string> = {};
-      if (credential && credential !== 'not-needed') {
-        if (oauthToken || connection.authType === 'bearer_token') {
-          upstreamHeaders.Authorization = `Bearer ${credential}`;
+      // R52-C/R53/R54/R56/R57: TRANSACTIONAL credential application — the
+      // transaction is LIVE from the first mutation until the final
+      // synchronous env commit SUCCEEDS (commit) or until any abort/failure/
+      // throw rolls it back. Each touched key records its POST-MUTATION value:
+      // a delete records `undefined`, a write records the committed value.
+      // R56 (obs b13cd240): the generation domain covers ONLY process-global
+      // desktop transactions — invocation-scoped CLI calls do not own
+      // process.env, take NO desktop generation, and can therefore never
+      // advance or supersede desktop ownership.
+      // R57 (obs a730f4cb): the transaction object is CALL-LOCAL — this call
+      // captures its own immutable object; track/write/delete/rollback/commit
+      // operate ONLY on the captured object and require the TRIPLE MATCH
+      // (instance active-object identity + generation + call epoch). The
+      // instance field exposes the active transaction for lifecycle
+      // cancellation only; a stale call compare-and-clears ITS OWN object and
+      // never rolls back or clears a successor's. `undefined` on the instance
+      // field never makes a desktop call current.
+      const txn: {
+        touched: Set<string>
+        prior: Record<string, string | undefined>
+        written: Record<string, string | undefined>
+        generation: number
+      } | undefined = invocationScoped ? undefined : {
+        prior: envSnapshot,
+        touched: new Set<string>(),
+        written: {},
+        generation: ++credentialEnvGenerationCounter,
+      };
+      this.credentialEnvTransaction = txn;
+      // R55/R57: a transaction is CURRENT only while it is the newest DESKTOP
+      // transaction AND still the instance's active object AND this call is
+      // still the newest on the instance (triple match). Ownership is
+      // MONOTONIC — a superseded transaction never retakes a key, never
+      // mutates one, and never publishes any expectation set.
+      const txnIsCurrent = (): boolean =>
+        txn !== undefined
+        && this.credentialEnvTransaction === txn
+        && this.postInitEpoch === myEpoch
+        && txn.generation === credentialEnvGenerationCounter;
+      const txnTrack = (key: string): void => {
+        if (!txn || !txnIsCurrent()) return;
+        txn.touched.add(key);
+        if (!(key in txn.prior)) txn.prior[key] = process.env[key];
+        // R54: ownership of the key moves to THIS (newest) generation.
+        credentialEnvKeyOwnerGeneration.set(key, txn.generation);
+      };
+      const txnRestoreKey = (key: string): void => {
+        const prior = txn!.prior[key]
+        if (prior === undefined) delete process.env[key]
+        else process.env[key] = prior
+      }
+      // R53/R54/R57: the ONE rollback entry — every abort/failure/throw path
+      // funnels here; the transaction ends (cleared) only through rollback or
+      // commit. Operates ONLY on the CAPTURED object: a key is restored only
+      // while this transaction still owns it by generation AND the current
+      // value still equals the recorded post-mutation value; the instance
+      // field is compare-and-cleared to THIS object — a successor's active
+      // transaction is never cleared or rolled back by a stale call.
+      const rollbackTxn = (): void => {
+        if (!txn) return
+        for (const key of txn.touched) {
+          if (credentialEnvKeyOwnerGeneration.get(key) !== txn.generation) continue
+          // Per-key CAS against the POST-MUTATION value recorded by THIS
+          // transaction: `undefined` for deletes, the written value for writes.
+          if (process.env[key] === txn.written[key]) txnRestoreKey(key)
+        }
+        if (this.credentialEnvTransaction === txn) this.credentialEnvTransaction = undefined
+      }
+      // R57 (obs 21c38fb2): the PER-CALL abort listener — installed only now
+      // that the call-local transaction exists; removed in this call's
+      // finally.
+      const onCallAbort = (): void => {
+        if (this.postInitEpoch !== myEpoch) return;
+        callDeactivated = true;
+        rollbackTxn();
+        const proxy = callProxy;
+        if (proxy) void proxy.close();
+      };
+      options?.signal?.addEventListener('abort', onCallAbort, { once: true });
+      removeCallAbortListener = (): void => {
+        options?.signal?.removeEventListener('abort', onCallAbort);
+      };
+      // R53/R54/R55/R57: the success finalizer — publishes the FULL expected
+      // credential set for the process-global (desktop) path: every managed
+      // key this transaction's provider did NOT supply (post-mutation
+      // expectation `undefined`) is EXPLICITLY re-deleted. ONLY the CURRENT
+      // (triple-matched) transaction may publish — a superseded transaction
+      // publishes no expectation set (partial or full).
+      const commitTxn = (): void => {
+        if (!invocationScoped && txn && txnIsCurrent()) {
+          for (const key of MANAGED_DESKTOP_CREDENTIAL_ENV_KEYS) {
+            if (txn.written[key] === undefined && process.env[key] !== undefined) txnDeleteKey(key)
+          }
+        }
+        if (this.credentialEnvTransaction === txn) this.credentialEnvTransaction = undefined
+      }
+      const txnDeleteKey = (key: string): void => {
+        if (!txn || !txnIsCurrent()) return
+        txnTrack(key)
+        txn.written[key] = undefined
+        delete process.env[key]
+      }
+      const txnWriteKey = (key: string, value: string): void => {
+        if (!txn || !txnIsCurrent()) return
+        txnTrack(key)
+        txn.written[key] = value
+        process.env[key] = value
+      }
+
+      if (!invocationScoped) {
+        // Desktop retains its historical process-wide compatibility behavior.
+        txnDeleteKey('ANTHROPIC_API_KEY')
+        txnDeleteKey('CLAUDE_CODE_OAUTH_TOKEN')
+        txnDeleteKey('ANTHROPIC_BASE_URL')
+        for (const key of CLAUDE_BEDROCK_ROUTING_ENV_KEYS) txnDeleteKey(key)
+      }
+
+      // Resolve auth env vars via shared utility. R53: the resolution is
+      // wrapped — a THROW must roll the transaction back too (previously the
+      // throw bypassed rollback entirely, leaving the erased/overwritten keys
+      // behind for every later construction).
+      const manager = getCredentialManager();
+      let result: Awaited<ReturnType<typeof resolveAuthEnvVars>>;
+      try {
+        result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+      } catch (resolutionError) {
+        rollbackTxn();
+        throw resolutionError;
+      }
+
+      // R50/R51/R52/R53: the credential resolution may complete long after the
+      // construction attempt was timed out and disposed. The late outcome must
+      // roll back THIS transaction's keys (per-key CAS) and apply zero side
+      // effects. The transaction stays LIVE on every path below until the
+      // final synchronous commit.
+      if (aborted()) {
+        rollbackTxn()
+        return { authInjected: false, authWarning: 'Agent destroyed during post-init credential resolution; credential side effects rolled back' };
+      }
+
+      if (!result.success) {
+        rollbackTxn()
+        return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
+      }
+
+      // R55/R56/R57 (obs cd1d10e2 + b13cd240 + a730f4cb): MONOTONIC OWNERSHIP
+      // on the success path — a DESKTOP transaction is dropped without
+      // rollback ONLY when a newer process-global transaction has actually
+      // taken over the managed key domain (this call's captured object is no
+      // longer the instance's active transaction, or its generation is
+      // superseded). Invocation-scoped calls carry no desktop transaction at
+      // all and are never discarded by desktop generations; their per-call
+      // identity is the postInit epoch (checked in the invocation branch).
+      // The clear is COMPARE-AND-CLEAR of this call's own object — a
+      // successor's active transaction is never touched.
+      if (!invocationScoped && !txnIsCurrent()) {
+        if (this.credentialEnvTransaction === txn) this.credentialEnvTransaction = undefined
+        return { authInjected: false, authWarning: 'Credential resolution completed after a newer transaction took over the process credential state; stale outcome discarded' };
+      }
+
+      if (invocationScoped) {
+        const apiKey = result.envVars.ANTHROPIC_API_KEY;
+        const oauthToken = result.envVars.CLAUDE_CODE_OAUTH_TOKEN;
+        const credential = oauthToken || apiKey;
+        const upstreamBaseUrl =
+          result.envVars.ANTHROPIC_BASE_URL
+          || connection.baseUrl
+          || 'https://api.anthropic.com';
+        const upstreamHeaders: Record<string, string> = {};
+        if (credential && credential !== 'not-needed') {
+          if (oauthToken || connection.authType === 'bearer_token') {
+            upstreamHeaders.Authorization = `Bearer ${credential}`;
+          } else {
+            upstreamHeaders['x-api-key'] = credential;
+          }
+        }
+
+        await this.invocationCredentialProxy?.close();
+        // R51 + R56 (obs bc4493fd): RE-CHECK after closing the old proxy — a
+        // call that was aborted OR superseded by a newer postInit on this
+        // instance must not start a listener at all.
+        if (aborted() || !isCallCurrent()) {
+          rollbackTxn()
+          return { authInjected: false, authWarning: 'Post-init superseded or destroyed after closing the previous invocation credential proxy; new listener not started' };
+        }
+        const credentialProxy = await startInvocationCredentialProxy({
+          upstreamBaseUrl,
+          headers: upstreamHeaders,
+          credentialHeaders: [
+            oauthToken || connection.authType === 'bearer_token'
+              ? { name: 'authorization', format: 'bearer' }
+              : { name: 'x-api-key', format: 'raw' },
+          ],
+        });
+        // R50/R51/R56/R57 (obs bc4493fd + 21c38fb2): the proxy listener is a
+        // PROCESS-LEVEL side effect owned by THIS call — tracked so a
+        // per-call abort can close it. If the agent was destroyed, aborted,
+        // OR this call was superseded while the listener was starting
+        // (reverse completion), the just-created listener is CLOSED and the
+        // call fails closed — a stale call never publishes its proxy or
+        // envOverrides over the successor's.
+        callProxy = credentialProxy;
+        if (aborted() || !isCallCurrent()) {
+          await credentialProxy.close();
+          rollbackTxn()
+          return { authInjected: false, authWarning: 'Post-init superseded or destroyed while starting the invocation credential proxy; listener closed and credential side effects rolled back' };
+        }
+        // R56: ATOMIC PUBLISH — only the precisely-current call swaps the
+        // proxy; the predecessor listener was closed above, so no stale
+        // listener survives and the successor's stays authoritative.
+        this.invocationCredentialProxy = credentialProxy;
+
+        // The Claude subprocess receives only an invocation-scoped loopback URL
+        // and opaque capability. Real credentials remain in this runtime.
+        const nextOverrides = { ...this.config.envOverrides };
+        delete nextOverrides.ANTHROPIC_API_KEY;
+        delete nextOverrides.CLAUDE_CODE_OAUTH_TOKEN;
+        delete nextOverrides.ANTHROPIC_BASE_URL;
+        nextOverrides.ANTHROPIC_BASE_URL = this.invocationCredentialProxy.url;
+        if (oauthToken) {
+          nextOverrides.CLAUDE_CODE_OAUTH_TOKEN = this.invocationCredentialProxy.capability;
         } else {
-          upstreamHeaders['x-api-key'] = credential;
+          nextOverrides.ANTHROPIC_API_KEY = this.invocationCredentialProxy.capability;
+        }
+        this.config.envOverrides = nextOverrides;
+      } else {
+        // R50/R51/R53/R56: the process-global env overwrite is a late side
+        // effect guarded by the abort check AND the per-call epoch — a
+        // destroyed or same-instance-superseded call's late credential outcome
+        // is dropped and the precise pre-postInit env snapshot is restored (a
+        // same-id successor owns the process credential state). The writes are
+        // TRANSACTIONAL: recorded with their post-mutation values so the
+        // per-key rollback CAS is exact.
+        if (aborted() || !isCallCurrent()) {
+          rollbackTxn()
+          return { authInjected: false, authWarning: 'Post-init superseded or destroyed before applying credential env vars; credential side effects rolled back' };
+        }
+        this.config.envOverrides = {
+          ...this.config.envOverrides,
+          ...result.envVars,
+        };
+        for (const [key, value] of Object.entries(result.envVars)) {
+          txnWriteKey(key, value);
         }
       }
 
-      await this.invocationCredentialProxy?.close();
-      this.invocationCredentialProxy = await startInvocationCredentialProxy({
-        upstreamBaseUrl,
-        headers: upstreamHeaders,
-        credentialHeaders: [
-          oauthToken || connection.authType === 'bearer_token'
-            ? { name: 'authorization', format: 'bearer' }
-            : { name: 'x-api-key', format: 'raw' },
-        ],
-      });
-
-      // The Claude subprocess receives only an invocation-scoped loopback URL
-      // and opaque capability. Real credentials remain in this runtime.
-      const nextOverrides = { ...this.config.envOverrides };
-      delete nextOverrides.ANTHROPIC_API_KEY;
-      delete nextOverrides.CLAUDE_CODE_OAUTH_TOKEN;
-      delete nextOverrides.ANTHROPIC_BASE_URL;
-      nextOverrides.ANTHROPIC_BASE_URL = this.invocationCredentialProxy.url;
-      if (oauthToken) {
-        nextOverrides.CLAUDE_CODE_OAUTH_TOKEN = this.invocationCredentialProxy.capability;
-      } else {
-        nextOverrides.ANTHROPIC_API_KEY = this.invocationCredentialProxy.capability;
+      // Pass mini model to SDK subprocess so built-in tools like WebFetch
+      // use the correct summarization model (instead of hardcoded Haiku).
+      // This is critical for custom providers where the default Haiku model ID
+      // doesn't exist on the provider's endpoint.
+      if (this.config.miniModel) {
+        this.config.envOverrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
+        if (!invocationScoped) txnWriteKey('ANTHROPIC_DEFAULT_HAIKU_MODEL', this.config.miniModel);
       }
-      this.config.envOverrides = nextOverrides;
-    } else {
-      this.config.envOverrides = {
-        ...this.config.envOverrides,
-        ...result.envVars,
-      };
-      for (const [key, value] of Object.entries(result.envVars)) {
-        process.env[key] = value;
+
+      // R53: SUCCESS COMMIT — the final synchronous env mutations have landed;
+      // the transaction ends here with its values kept.
+      commitTxn()
+      return { authInjected: true };
+    } finally {
+      // R57 (obs 21c38fb2): the per-call abort listener is removed the moment
+      // THIS call settles — a stale listener can never outlive its own call,
+      // roll back a successor transaction or poison the agent permanently.
+      removeCallAbortListener();
+    }
+  }
+
+  /**
+   * R52/R53/R54: SYNCHRONOUS per-key rollback of the in-flight credential env
+   * transaction. Invoked from the SessionManager's bounded-construction
+   * timeout (and from this agent's abort listener) so a provider that
+   * ignores the AbortSignal cannot leave erased or overwritten
+   * process-global credentials behind: only keys this transaction still
+   * OWNS by generation (a successor transaction has taken the key over)
+   * whose CURRENT value still equals the POST-MUTATION value THIS
+   * transaction recorded (undefined for deletes, the committed value for
+   * writes) are restored; keys a successor already committed — or already
+   * owns — are never touched and never revived.
+   */
+  rollbackCredentialEnvTransaction(): void {
+    const txn = this.credentialEnvTransaction
+    if (!txn) return
+    for (const key of txn.touched) {
+      if (credentialEnvKeyOwnerGeneration.get(key) !== txn.generation) continue
+      const prior = txn.prior[key]
+      const written = txn.written[key]
+      if (process.env[key] === written) {
+        if (prior === undefined) delete process.env[key]
+        else process.env[key] = prior
       }
     }
-
-    // Pass mini model to SDK subprocess so built-in tools like WebFetch
-    // use the correct summarization model (instead of hardcoded Haiku).
-    // This is critical for custom providers where the default Haiku model ID
-    // doesn't exist on the provider's endpoint.
-    if (this.config.miniModel) {
-      this.config.envOverrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
-      if (!invocationScoped) process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
-    }
-
-    return { authInjected: true };
+    this.credentialEnvTransaction = undefined
+    this.postInitAborted = true
   }
 
   // Config watcher methods (startConfigWatcher, stopConfigWatcher) are now inherited from BaseAgent
@@ -2755,6 +3102,10 @@ This is a branched conversation. All prior messages in this conversation are par
    * Calls super.destroy() for base cleanup, then Claude-specific cleanup.
    */
   destroy(): void {
+    // R50: mark the lifecycle ended FIRST — an in-flight postInit whose
+    // credential resolution completes after this point must apply zero
+    // process-level side effects (env overwrites, credential proxies).
+    this.postInitAborted = true;
     // Claude-specific cleanup first
     this.currentQueryAbortController?.abort();
     this.pendingPermissions.clear();
@@ -2773,9 +3124,11 @@ This is a branched conversation. All prior messages in this conversation are par
     const configSessionId = this.config.session?.id;
     if (configSessionId) {
       clearPlanFileState(configSessionId);
-      unregisterSessionScopedToolCallbacks(configSessionId);
       cleanupSessionScopedTools(configSessionId);
-      cleanupModeState(configSessionId);
+      // R48: the id-wide session-scoped callback/guard unregistration and the
+      // permission-mode state deletion belong to the SessionManager's
+      // owner-aware lifecycle coordination — a same-id successor's
+      // registrations and mode state must survive a backend disposal.
     }
 
     // Clear session

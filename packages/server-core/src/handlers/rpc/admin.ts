@@ -71,6 +71,15 @@ import {
   type LlmConnection,
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
+import {
+  beginAccountTransition,
+  settleAccountTransition,
+  setSyncTrustedProductSpaceAccountId,
+  setTrustedProductSpaceAccountProvider,
+  setTrustedProductSpaceListFetcher,
+  type TrustedProductSpaceListResult,
+} from './trusted-product-space-account'
+import { revokeRuntimeProductSpaceFence } from '../../runtime/product-space-executions'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -89,6 +98,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
   RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+  RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
+  RPC_CHANNELS.productSpace.CATALOG,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -156,6 +167,8 @@ interface AdminSessionSnapshot {
 interface AdminSessionEndingTransition {
   session: AdminSessionSnapshot
   cleanup: Promise<void>
+  /** R39-1: the immutable transition epoch THIS flow began and owns. */
+  transitionEpoch: number
 }
 
 interface AdminRequestContext {
@@ -285,6 +298,11 @@ class AdminSessionCoordinator {
   }
 
   createSnapshot(tokens: StoredAdminTokens): AdminSessionSnapshot {
+    // Every authenticated-session snapshot (login commit, startup restore,
+    // validate/refresh capture) refreshes the synchronous authenticated-
+    // account mirror consumed by sync gates such as the webview attach
+    // check; session endings clear it explicitly.
+    setSyncTrustedProductSpaceAccountId(tokens.userId)
     return {
       generation: this.generation,
       tokens: { ...tokens },
@@ -336,6 +354,14 @@ class AdminSessionCoordinator {
       const ending = this.createSnapshot(current!)
       this.endingSession = ending
       this.closeAuthorizationForEnding(current!.userId)
+      // R31: the lock-free account-transition epoch is published inside the
+      // successful transition-ownership section — after the current-session
+      // CAS matched, before getOrStartAccountCleanup can snapshot
+      // executions. Rejected/non-owner transitions never advance it, and it
+      // is monotonic (never reset) for failed/aborted owned transitions.
+      // R39-1: the epoch returned here is the IMMUTABLE owner token for
+      // this flow — settlement must use it, never the mutable global.
+      const transitionEpoch = beginAccountTransition()
       const cleanup = this.getOrStartAccountCleanup(
         current!.userId,
         ending.generation,
@@ -344,7 +370,7 @@ class AdminSessionCoordinator {
       // The caller awaits and reports this promise after any remote side
       // effect. Observe it now so a fast rejection cannot become unhandled.
       void cleanup.catch(() => {})
-      return { session: ending, cleanup }
+      return { session: ending, cleanup, transitionEpoch }
     })
   }
 
@@ -445,6 +471,19 @@ function staleAdminValidationResult(): {
     errorCode: 'SESSION_CHANGED',
     message: 'Admin session changed',
   }
+}
+
+let initialSyncAccountRestorePromise: Promise<void> | null = null
+
+/**
+ * Resolves once the synchronous authenticated-account mirror has been
+ * committed from the persisted Admin credentials (authenticated or the
+ * explicitly confirmed signed_out). Electron main awaits this BEFORE
+ * creating the first window so the webview attach gate never has to decide
+ * on the fail-closed `unknown` state in practice.
+ */
+export function whenInitialSyncTrustedProductSpaceAccountRestored(): Promise<void> {
+  return initialSyncAccountRestorePromise ?? Promise.resolve()
 }
 
 export function registerAdminHandlers(
@@ -565,6 +604,115 @@ export function registerAdminHandlers(
   const sessions = new AdminSessionCoordinator(
     closeCatalogAuthorizationForAccount,
   )
+
+  // One-shot trusted credential restore for the synchronous authenticated-
+  // account mirror: reads the persisted Admin credentials once and commits
+  // either `authenticated(accountId)` or the explicitly confirmed
+  // `signed_out`. Main awaits this before creating the first window so the
+  // webview attach gate never decides on the fail-closed `unknown` state in
+  // practice; until it resolves the gate refuses every partition.
+  let initialSyncAccountRestore: Promise<void> | null = null
+  const captureInitialSyncTrustedProductSpaceAccount = (): Promise<void> => {
+    initialSyncAccountRestore ??= (async () => {
+      try {
+        const manager = getCredentialManager()
+        // Discriminative read: `signed_out` is committed ONLY when the
+        // credential store confirms the admin token does not exist. A
+        // store that exists but cannot be read, decrypted or validated
+        // stays `unknown` (the sync gate refuses everything) so a corrupt
+        // credentials.enc is never mistaken for a signed-out device.
+        const presence = await manager.inspectAdminCredentialPresence()
+        if (presence.status === 'unreadable_or_invalid') {
+          deps.platform.logger.warn(
+            '[Admin] persisted Admin credentials are unreadable or invalid; the sync gate stays fail-closed:',
+            presence.reason,
+          )
+          return
+        }
+        if (presence.status === 'absent') {
+          setSyncTrustedProductSpaceAccountId(null)
+          return
+        }
+        // Credential found: resolve the live session snapshot for its user.
+        const snapshot = await sessions.capture(manager)
+        if (!snapshot) {
+          deps.platform.logger.warn(
+            '[Admin] persisted Admin credentials exist but no session snapshot could be captured; the sync gate stays fail-closed',
+          )
+          return
+        }
+        setSyncTrustedProductSpaceAccountId(snapshot.tokens.userId)
+      } catch (error) {
+        deps.platform.logger.warn(
+          '[Admin] initial ProductSpace account restore failed; the sync gate stays fail-closed:',
+          error instanceof Error ? error.message : String(error),
+        )
+        // Deliberately NOT committed to signed_out: an unreadable credential
+        // store is `unknown`, and the sync gate refuses everything.
+      }
+    })()
+    initialSyncAccountRestorePromise = initialSyncAccountRestore
+    return initialSyncAccountRestore
+  }
+  void captureInitialSyncTrustedProductSpaceAccount()
+
+  // The ProductSpace runtime derives the account from this trusted session
+  // snapshot instead of trusting RPC arguments. Registered by the admin
+  // handler module because only it owns the session coordinator.
+  setTrustedProductSpaceAccountProvider(async (): Promise<string | null> => {
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const snapshot = await sessions.capture(manager)
+      if (!snapshot) {
+        void adminUrl
+        return null
+      }
+      return snapshot.tokens.userId
+    } catch {
+      return null
+    }
+  })
+
+  // The Main-side switch transaction verifies the target space against the
+  // account's contract-validated visible list (server-authoritative). The
+  // failure mode is typed: an Admin server speaking an incompatible
+  // ProductSpace contract is preserved as `product_space_contract_unsupported`
+  // so PREPARE/target-revalidation/COMMIT all fail closed into
+  // contract-blocked — it must never masquerade as a transient outage.
+  setTrustedProductSpaceListFetcher(async (): Promise<TrustedProductSpaceListResult> => {
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(adminUrl, manager, sessions, deps)
+      if (!tokenResult.tokens) return { ok: false, errorCode: 'service_unavailable' }
+      const client = createAuthenticatedAdminClient(adminUrl, manager, sessions, {
+        session: tokenResult.session,
+      })
+      const list = await client.listProductSpaces(tokenResult.tokens.accessToken)
+      return {
+        ok: true,
+        list: {
+          personalProductSpaceId: list.personalProductSpaceId,
+          productSpaces: list.productSpaces.map(space => ({
+            id: space.id,
+            kind: space.kind,
+            name: space.name,
+            accessMode: space.accessMode,
+          })),
+        },
+      }
+    } catch (error) {
+      if (
+        error instanceof AdminError
+        && error.errorCode === 'product_space_contract_unsupported'
+      ) {
+        return { ok: false, errorCode: 'product_space_contract_unsupported' }
+      }
+      return { ok: false, errorCode: 'service_unavailable' }
+    }
+  })
+
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (
@@ -1554,6 +1702,58 @@ export function registerAdminHandlers(
     )
   })
 
+  server.handle(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES, async () => {
+    return callOrganization(
+      'listProductSpaces',
+      (client, accessToken) => client.listProductSpaces(accessToken),
+    )
+  })
+
+  // Unified ProductSpace Catalog (S01). The requested space is validated
+  // against a freshly fetched trusted list before the catalog is read, and
+  // the response passes the shared ProductSpace boundary parser — a catalog
+  // for another space can never be hydrated.
+  server.handle(
+    RPC_CHANNELS.productSpace.CATALOG,
+    async (_ctx, productSpaceId: unknown, knownRevision: unknown) => {
+      if (typeof productSpaceId !== 'string' || !productSpaceId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
+      }
+      return callOrganization(
+        'getProductSpaceCatalog',
+        async (client, accessToken) => {
+          const list = await client.listProductSpaces(accessToken)
+          const context = list.productSpaces.find(
+            space => space.id === (productSpaceId as never),
+          )
+          if (!context) {
+            throw new AdminError(
+              'The requested ProductSpace is not available for this account',
+              'FORBIDDEN',
+            )
+          }
+          const result = await client.getProductSpaceCatalog(
+            accessToken,
+            context,
+            typeof knownRevision === 'string' && knownRevision
+              ? knownRevision
+              : undefined,
+          )
+          if ('notModified' in result) {
+            return { notModified: true as const, catalogRevision: knownRevision as string }
+          }
+          return {
+            notModified: false as const,
+            contractVersion: result.contractVersion,
+            productSpaceId: result.productSpaceId,
+            catalogRevision: result.catalogRevision,
+            entries: result.entries,
+          }
+        },
+      )
+    },
+  )
+
   server.handle(RPC_CHANNELS.admin.CREATE_ORGANIZATION, async (_ctx, rawInput: unknown) => {
     const input = CreateOrganizationRpcInputSchema.safeParse(rawInput)
     if (!input.success) return adminInputError('VALIDATION_ERROR')
@@ -2037,6 +2237,21 @@ function invalidateAllCreatorArtifactCaches(): void {
   creatorArtifactOrganizationGenerations.clear()
 }
 
+/**
+ * One-shot direct-switch cleanup step: invalidates every cached creator
+ * artifact / skill view. There is no client-side skill-enablement cache —
+ * enablement state is server-authoritative — so this covers the local skill
+ * caches that do exist.
+ */
+export function clearLegacySkillCaches(): boolean {
+  try {
+    invalidateAllCreatorArtifactCaches()
+    return true
+  } catch {
+    return false
+  }
+}
+
 function invalidateCreatorArtifactCache(userId: string, organizationId?: string): void {
   if (organizationId) {
     // Publication and membership changes alter what every member may see.
@@ -2155,8 +2370,20 @@ async function endAdminSession(
     accountId => deps?.onAdminSessionEnding?.(accountId),
   )
   if (!transition) return false
-  const { session: ending, cleanup } = transition
+  const { session: ending, cleanup, transitionEpoch: ownedTransitionEpoch } = transition
+  // R38-1/R39-1: this flow OWNS the immutable transition epoch returned by
+  // beginEnding. It never reads the mutable global active epoch, so a newer
+  // transition queued concurrently can never be aborted by this older flow.
+  // R31: the transition epoch was already published inside beginEnding's
+  // ownership section — synchronously before its cleanup could snapshot
+  // executions. Publication at the caller would be too late.
 
+  // R39-1: settlement happens in this outer finally using ONLY the owned
+  // epoch: commit after the credential/session transition committed, abort
+  // on every earlier exit or thrown dependency. The settle CAS protects a
+  // newer transition from being cleared by this older flow.
+  let didEnd = false
+  try {
   // Catalog authorization and the host lifecycle fence are already active.
   // Slow remote/process cleanup stays outside the lock so a replacement login
   // can proceed; final token deletion is guarded by the ending snapshot CAS.
@@ -2177,6 +2404,18 @@ async function endAdminSession(
     )
   }
 
+  // The ProductSpace fence is Main state that outlives the renderer's own
+  // revoke attempt: end the session's runtime scope too, so a logout can
+  // never return while a committed fence (or offline view) survives.
+  try {
+    await revokeRuntimeProductSpaceFence()
+  } catch (error) {
+    deps?.platform.logger.warn(
+      '[Admin] ProductSpace fence revoke failed while ending the session:',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+
   const ended = await sessions.finishEndingIfCurrent(
     manager,
     ending,
@@ -2193,8 +2432,20 @@ async function endAdminSession(
       return true
     },
   )
-  const didEnd = ended.applied && ended.value === true
-  if (didEnd) invalidateAllCreatorArtifactCaches()
+  didEnd = ended.applied && ended.value === true
+  if (didEnd) {
+    // The Admin credentials are gone: the synchronous authenticated-account
+    // mirror drops to signed-out (a replacement login re-commits it).
+    setSyncTrustedProductSpaceAccountId(null)
+    invalidateAllCreatorArtifactCaches()
+  }
+  } finally {
+    // R39-1: owner-matched settlement from the outer finally — commit only
+    // after the credential/session transition committed; abort on every
+    // earlier exit or thrown dependency. The epoch CAS makes this a no-op
+    // if a newer transition has superseded this owner.
+    settleAccountTransition(ownedTransitionEpoch, didEnd ? 'commit' : 'abort')
+  }
   return didEnd
 }
 
@@ -2210,6 +2461,12 @@ async function completeAdminLogin(args: {
   >
   onSyncFailure: (error: unknown) => void
 }): Promise<AdminSessionSnapshot | null> {
+  // R38-1/R39-1: handle for the transition this replacement login may
+  // begin. Settlement is owner-matched and happens on EVERY path below:
+  // commit only after the credential/session snapshot committed, abort on
+  // stale-attempt exit, cleanup rejection, or any thrown dependency.
+  let replacementTransitionEpoch: number | null = null
+  let replacementCommitted = false
   const replacement = await args.sessions.runExclusive(async () => {
     if (!args.sessions.isLatestLoginAttempt(args.loginAttempt)) return null
 
@@ -2224,19 +2481,45 @@ async function completeAdminLogin(args: {
     const transitionGeneration = args.sessions.advanceGeneration()
     if (previousTokens && switchingAccounts) {
       args.sessions.closeAuthorizationForEnding(previousTokens.userId)
-      // The coordinator deduplicates this against an already-running logout
-      // cleanup. Starting it under the transition lock gates account A
-      // immediately, but deliberately not awaiting it lets account B commit.
-      void args.sessions.getOrStartAccountCleanup(
-        previousTokens.userId,
-        transitionGeneration,
-        () => args.deps.onAdminSessionEnding?.(previousTokens.userId),
-      ).catch(error => {
+      // Account replacement must be total before account B becomes usable:
+      // every registered execution of account A (assistant sessions and
+      // Local Apps alike) must reach a terminal state, and account A's
+      // ProductSpace fence must be revoked — BEFORE account B's tokens land
+      // or its session starts. A failed stop or revoke propagates: the
+      // replacement is refused with a retryable local error and the login
+      // can be retried once the runtime is clean. The coordinator
+      // deduplicates this against an already-running logout cleanup.
+      //
+      // The lock-free account-transition epoch is advanced SYNCHRONOUSLY
+      // before the first cleanup await: in-flight execution starts that
+      // captured the previous epoch fail closed even while the mirror still
+      // shows account A and the fence revoke is queued behind the switch
+      // lock. The epoch is monotonic — an aborted replacement keeps stale
+      // starts refused while fresh starts simply capture the new epoch.
+      replacementTransitionEpoch = beginAccountTransition()
+      try {
+        await args.sessions.getOrStartAccountCleanup(
+          previousTokens.userId,
+          transitionGeneration,
+          async () => {
+            await args.deps.onAdminSessionEnding?.(previousTokens.userId)
+            await revokeRuntimeProductSpaceFence()
+          },
+        )
+      } catch (error) {
+        // R38-1: the owner explicitly aborts — the prior account boundary
+        // is restored as valid instead of leaving the runtime stuck on
+        // account_transition_pending forever.
+        settleAccountTransition(replacementTransitionEpoch, 'abort')
         args.deps.platform.logger.warn(
-          '[Admin] previous account cleanup failed during login replacement:',
+          '[Admin] previous account cleanup failed during login replacement; refusing the replacement:',
           error instanceof Error ? error.message : String(error),
         )
-      })
+        throw new AdminError(
+          'The previous account is still shutting down. Retry the sign-in.',
+          'account_transition_pending',
+        )
+      }
       await deleteAdminManagedConnections(
         args.manager,
         previousAdminConnectionSlugs,
@@ -2269,25 +2552,41 @@ async function completeAdminLogin(args: {
     }
     return args.sessions.createSnapshot(nextTokens)
   })
-  if (!replacement) return null
-
+  // R39-1: owner-matched settlement — commit only when the credential/
+  // session snapshot committed; abort on stale attempt or any thrown
+  // dependency. The outer catch guarantees the abort on every throw.
   try {
-    const synced = await syncAdminConnections({
-      adminUrl: args.adminUrl,
-      manager: args.manager,
-      sessions: args.sessions,
-      session: replacement,
-    })
-    return synced.session
+    if (replacement) replacementCommitted = true
+    if (replacementTransitionEpoch !== null) {
+      settleAccountTransition(replacementTransitionEpoch, replacementCommitted ? 'commit' : 'abort')
+    }
+    if (!replacement) return null
+
+    try {
+      const synced = await syncAdminConnections({
+        adminUrl: args.adminUrl,
+        manager: args.manager,
+        sessions: args.sessions,
+        session: replacement,
+      })
+      return synced.session
+    } catch (error) {
+      if (error instanceof AdminSessionChangedError) return null
+      // Authentication has already succeeded and the one-time code may already
+      // be consumed. Keep the persisted session, but fail closed for model
+      // authorization so a previous account's managed connections cannot be used.
+      args.onSyncFailure(error)
+      return await args.sessions.isCurrent(args.manager, replacement)
+        ? replacement
+        : null
+    }
   } catch (error) {
-    if (error instanceof AdminSessionChangedError) return null
-    // Authentication has already succeeded and the one-time code may already
-    // be consumed. Keep the persisted session, but fail closed for model
-    // authorization so a previous account's managed connections cannot be used.
-    args.onSyncFailure(error)
-    return await args.sessions.isCurrent(args.manager, replacement)
-      ? replacement
-      : null
+    // R39-1: a dependency thrown after begin must abort the owned
+    // transition (the settle CAS makes a repeated settlement a no-op).
+    if (replacementTransitionEpoch !== null && !replacementCommitted) {
+      settleAccountTransition(replacementTransitionEpoch, 'abort')
+    }
+    throw error
   }
 }
 

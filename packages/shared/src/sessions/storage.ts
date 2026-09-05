@@ -198,6 +198,10 @@ export interface CreateSessionOptions {
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
+    /** Immutable ProductSpace binding assigned at creation time */
+    productSpaceId?: string;
+    /** Immutable trusted Admin account binding assigned at creation time (R32-2) */
+    accountId?: string;
 }
 
 export async function createSessionWithStorage(
@@ -246,6 +250,8 @@ export async function createSessionWithStorage(
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
     isFlagged: options?.isFlagged,
+    productSpaceId: options?.productSpaceId,
+    accountId: options?.accountId,
   };
 
   // Save empty session

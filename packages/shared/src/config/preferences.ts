@@ -22,6 +22,17 @@ import {
   AdminEntityIdSchema,
   ListOrganizationsResponseSchema,
 } from '../admin/schemas.ts';
+import {
+  ListProductSpacesResponseSchema,
+} from '../product-spaces/schemas.ts';
+import type { ProductSpaceSummary } from '../product-spaces/types.ts';
+import {
+  type ProductSpaceContextStorage,
+  type ProductSpaceContextStorageByAccount,
+  type ProductSpaceContextStoragePatch,
+  type ProductSpaceLegacyCleanupLedgerPreference,
+  type VerifiedProductSpaceContextPreference,
+} from './product-space-context.ts';
 export type {
   HomeRecentAppKind,
   HomeRecentAppPreference,
@@ -34,6 +45,12 @@ export type {
   UnavailableOrganizationTombstonePreference,
   VerifiedOrganizationContextPreference,
 } from './organization-context.ts';
+export type {
+  ProductSpaceContextStorage,
+  ProductSpaceContextStorageByAccount,
+  ProductSpaceContextStoragePatch,
+  VerifiedProductSpaceContextPreference,
+} from './product-space-context.ts';
 
 export interface UserLocation {
   city?: string;
@@ -65,6 +82,8 @@ export interface UserPreferences {
   homeRecentApps?: HomeRecentAppsByContext;
   // Device-local, last verified Admin organization state, isolated by account.
   organizationContextStorage?: OrganizationContextStorageByAccount;
+  // Device-local, last verified ProductSpace contract state, isolated by account.
+  productSpaceContextStorage?: ProductSpaceContextStorageByAccount;
   // Whether to include Co-Authored-By trailer on git commits (default: true)
   includeCoAuthoredBy?: boolean;
   // When the preferences were last updated
@@ -317,6 +336,182 @@ export function updateOrganizationContextStorage(
     organizationContextStorage: byAccount,
   });
   return next.verifiedContext || next.unavailableTombstone ? next : null;
+}
+
+/**
+ * One-shot direct-switch cleanup: drops the entire device-local legacy
+ * Organization authorization context for every account. Workspace metadata
+ * and user exports are structurally out of reach for this function.
+ */
+export function clearAllOrganizationContextStorage(): boolean {
+  try {
+    const currentPreferences = loadPreferences();
+    if (!currentPreferences.organizationContextStorage) return true;
+    savePreferences({
+      ...currentPreferences,
+      organizationContextStorage: {},
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeVerifiedProductSpaceContext(
+  value: unknown,
+): VerifiedProductSpaceContextPreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Partial<VerifiedProductSpaceContextPreference>;
+  const list = ListProductSpacesResponseSchema.safeParse(candidate.list);
+  if (
+    !list.success
+    || (candidate.activeProductSpaceId !== null
+      && typeof candidate.activeProductSpaceId !== 'string')
+    || !Number.isSafeInteger(candidate.verifiedAt)
+    || (candidate.verifiedAt ?? -1) < 0
+  ) {
+    return undefined;
+  }
+  const activeProductSpaceId = candidate.activeProductSpaceId ?? null;
+  const activeIsListed = activeProductSpaceId
+    && list.data.productSpaces.some(
+      (space: ProductSpaceSummary) => space.id === activeProductSpaceId,
+    );
+  if (activeProductSpaceId && !activeIsListed) return undefined;
+  return {
+    list: list.data,
+    activeProductSpaceId: activeProductSpaceId ?? null,
+    verifiedAt: candidate.verifiedAt!,
+  };
+}
+
+function sanitizeLegacyCleanupLedger(
+  value: unknown,
+): ProductSpaceLegacyCleanupLedgerPreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Partial<ProductSpaceLegacyCleanupLedgerPreference>;
+  if (
+    !Number.isSafeInteger(candidate.completedAt)
+    || (candidate.completedAt ?? -1) < 0
+    || !candidate.results
+    || typeof candidate.results !== 'object'
+    || Array.isArray(candidate.results)
+  ) {
+    return undefined;
+  }
+  const results = Object.entries(candidate.results).filter(
+    (entry): entry is [string, boolean] =>
+      typeof entry[0] === 'string' && typeof entry[1] === 'boolean',
+  );
+  if (results.length === 0) return undefined;
+  return {
+    completedAt: candidate.completedAt!,
+    results: Object.fromEntries(results),
+  };
+}
+
+function sanitizeProductSpaceContextStorage(
+  value: unknown,
+): ProductSpaceContextStorage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as ProductSpaceContextStorage;
+  const verifiedContext = sanitizeVerifiedProductSpaceContext(
+    candidate.verifiedContext,
+  );
+  const legacyCleanup = sanitizeLegacyCleanupLedger(candidate.legacyCleanup);
+  return verifiedContext || legacyCleanup
+    ? {
+        ...(verifiedContext ? { verifiedContext } : {}),
+        ...(legacyCleanup ? { legacyCleanup } : {}),
+      }
+    : null;
+}
+
+function assertProductSpaceContextAccountId(accountId: string): void {
+  if (!AdminEntityIdSchema.safeParse(accountId).success) {
+    throw new Error('ProductSpace context account is invalid');
+  }
+}
+
+function getStoredProductSpaceContext(
+  preferences: UserPreferences,
+  accountId: string,
+): unknown {
+  const byAccount = preferences.productSpaceContextStorage;
+  return byAccount && Object.prototype.hasOwnProperty.call(byAccount, accountId)
+    ? byAccount[accountId]
+    : undefined;
+}
+
+export function getProductSpaceContextStorage(
+  accountId: string,
+): ProductSpaceContextStorage | null {
+  assertProductSpaceContextAccountId(accountId);
+  return sanitizeProductSpaceContextStorage(
+    getStoredProductSpaceContext(loadPreferences(), accountId),
+  );
+}
+
+export function updateProductSpaceContextStorage(
+  accountId: string,
+  patch: ProductSpaceContextStoragePatch,
+): ProductSpaceContextStorage | null {
+  assertProductSpaceContextAccountId(accountId);
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('ProductSpace context patch is invalid');
+  }
+
+  const currentPreferences = loadPreferences();
+  const current = sanitizeProductSpaceContextStorage(
+    getStoredProductSpaceContext(currentPreferences, accountId),
+  ) ?? {};
+  const next: ProductSpaceContextStorage = { ...current };
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'verifiedContext')) {
+    if (patch.verifiedContext === null) {
+      delete next.verifiedContext;
+    } else {
+      const verified = sanitizeVerifiedProductSpaceContext(
+        patch.verifiedContext,
+      );
+      if (!verified) throw new Error('Verified ProductSpace context is invalid');
+      next.verifiedContext = verified;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'legacyCleanup')) {
+    if (patch.legacyCleanup === null) {
+      delete next.legacyCleanup;
+    } else {
+      const ledger = sanitizeLegacyCleanupLedger(patch.legacyCleanup);
+      if (!ledger) throw new Error('ProductSpace cleanup ledger is invalid');
+      next.legacyCleanup = ledger;
+    }
+  }
+
+  const byAccount = {
+    ...(currentPreferences.productSpaceContextStorage ?? {}),
+  };
+  if (next.verifiedContext || next.legacyCleanup) {
+    Object.defineProperty(byAccount, accountId, {
+      configurable: true,
+      enumerable: true,
+      value: next,
+      writable: true,
+    });
+  } else {
+    delete byAccount[accountId];
+  }
+  savePreferences({
+    ...currentPreferences,
+    productSpaceContextStorage: byAccount,
+  });
+  return next.verifiedContext || next.legacyCleanup ? next : null;
 }
 
 export function getPreferencesPath(): string {

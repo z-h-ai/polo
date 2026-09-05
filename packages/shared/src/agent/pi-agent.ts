@@ -121,7 +121,6 @@ import { refreshChatGptTokens } from '../auth/chatgpt-oauth.ts';
 import {
   registerSessionScopedToolCallbacks,
   mergeSessionScopedToolCallbacks,
-  unregisterSessionScopedToolCallbacks,
   setLastPlanFilePath,
   getSessionScopedToolCallbacks,
 } from './session-scoped-tools.ts';
@@ -2188,13 +2187,29 @@ export class PiAgent extends BaseAgent {
       // value immutably, even if a newer turn re-stamps the field before the
       // callback executes.
       const generationAtRegistration = this.sessionTurnGeneration
-      mergeSessionScopedToolCallbacks(sessionId, {
-        onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
-        onAuthRequest: (request) => this.onAuthRequest?.(request),
-        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
-        getTurnGeneration: () => this.sessionTurnGeneration,
-        queryFn: (request) => this.queryLlm(request),
-      });
+      // R51: the per-turn merge REPLACES the session's callback lease — the
+      // returned lease is handed back to the SessionManager so the OWNER's
+      // disposal cleanup stays bound to the CURRENT record/guard pair.
+      // R52-B/R53: owner-verified merge — a stale runtime arriving after a
+      // same-id successor published its lease is REJECTED here instead of
+      // silently merging into the successor's record. FAIL CLOSED: no
+      // token-less merge path exists.
+      const ownerToken = this.config.sessionCallbackOwnerToken
+      if (!ownerToken) {
+        throw new Error(`SESSION_CALLBACK_OWNER_TOKEN_REQUIRED (session ${sessionId}: per-turn merge must carry the runtime owner token)`)
+      }
+      const lease = mergeSessionScopedToolCallbacks(
+        sessionId,
+        {
+          onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
+          onAuthRequest: (request) => this.onAuthRequest?.(request),
+          onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
+          getTurnGeneration: () => this.sessionTurnGeneration,
+          queryFn: (request) => this.queryLlm(request),
+        },
+        ownerToken,
+      );
+      this.config.onSessionCallbackLeaseChanged?.(lease);
     }
     try {
       // Ensure subprocess is spawned and ready
@@ -2595,10 +2610,11 @@ export class PiAgent extends BaseAgent {
   destroy(): void {
     this.stopConfigWatcher();
 
-    // Unregister session-scoped tool callbacks
-    if (this.config.session?.id) {
-      unregisterSessionScopedToolCallbacks(this.config.session.id);
-    }
+    // R48: session-scoped callback/guard registration is ID-WIDE state owned
+    // by the SessionManager's lifecycle coordination — a backend disposal
+    // must never unconditionally delete it. Same-id successors (replacement
+    // owners) register their own guarded record; the SessionManager removes
+    // registrations via its owner-aware compare-and-unregister.
 
     this._sessionToolContext = null;
     // Pool clients are owned by the main process — don't close them here.
@@ -2612,10 +2628,6 @@ export class PiAgent extends BaseAgent {
 
   async disposeForRestart(): Promise<void> {
     this.stopConfigWatcher();
-
-    if (this.config.session?.id) {
-      unregisterSessionScopedToolCallbacks(this.config.session.id);
-    }
 
     this._sessionToolContext = null;
     await this.killSubprocessGracefully();

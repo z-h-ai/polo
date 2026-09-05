@@ -1,0 +1,441 @@
+/**
+ * The ProductSpace runtime derives the executing account from the trusted
+ * Admin session, never from RPC arguments. The admin handler module installs
+ * the provider because only it owns the Admin session coordinator.
+ */
+import { getRuntimeActiveProductSpaceScope, getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
+
+export type TrustedProductSpaceAccountProvider = () => Promise<string | null>
+
+let provider: TrustedProductSpaceAccountProvider | null = null
+
+export function setTrustedProductSpaceAccountProvider(
+  next: TrustedProductSpaceAccountProvider,
+): void {
+  provider = next
+}
+
+export async function resolveTrustedProductSpaceAccountId(): Promise<string | null> {
+  if (!provider) return null
+  try {
+    return await provider()
+  } catch {
+    return null
+  }
+}
+
+export interface TrustedProductSpaceListSnapshot {
+  personalProductSpaceId: string
+  productSpaces: Array<{
+    id: string
+    kind: 'personal' | 'enterprise'
+    name: string
+    accessMode: 'active' | 'read_only'
+  }>
+}
+
+export type TrustedProductSpaceListFetcher = () => Promise<TrustedProductSpaceListResult>
+
+/**
+ * The failure mode of the trusted list fetch is part of the switch contract:
+ * a transient outage (`service_unavailable`) may keep the current view, but a
+ * server speaking an incompatible ProductSpace contract
+ * (`product_space_contract_unsupported`) must reach the switch transaction
+ * verbatim so every stage fails closed into contract-blocked instead of
+ * masquerading as a retryable outage.
+ */
+export type TrustedProductSpaceListErrorCode =
+  | 'service_unavailable'
+  | 'product_space_contract_unsupported'
+
+export type TrustedProductSpaceListResult =
+  | { ok: true; list: TrustedProductSpaceListSnapshot }
+  | { ok: false; errorCode: TrustedProductSpaceListErrorCode }
+
+let listFetcher: TrustedProductSpaceListFetcher | null = null
+
+/**
+ * Installs the trusted list fetcher. The installed implementation classifies
+ * its own failures into the typed result — the contract-incompatibility code
+ * must survive into the switch transaction.
+ */
+export function setTrustedProductSpaceListFetcher(next: TrustedProductSpaceListFetcher): void {
+  listFetcher = next
+}
+
+/**
+ * Fetches the account's visible ProductSpaces from the trusted Admin API
+ * (contract-validated). Installed by the admin handler module; used by the
+ * Main-side switch transaction to verify the target space.
+ */
+export async function fetchTrustedProductSpaceList(): Promise<TrustedProductSpaceListResult> {
+  if (!listFetcher) return { ok: false, errorCode: 'service_unavailable' }
+  try {
+    return await listFetcher()
+  } catch {
+    // A throwing fetcher is a broken installation, not a contract signal.
+    return { ok: false, errorCode: 'service_unavailable' }
+  }
+}
+
+/**
+ * A synchronous, Main-trusted mirror of the authenticated Admin account,
+ * maintained by the Admin session lifecycle — set when a login commits its
+ * tokens or a startup credential restore resolves, cleared when an ended
+ * session deletes them. It is deliberately independent of the runtime
+ * fence: revoking the fence (contract loss, logout's revoke step, startup
+ * re-bootstrap) clears the fence AND the fence account while the Admin
+ * session stays authenticated, so consumers that must decide synchronously
+ * — the webview attach gate — can distinguish a genuinely signed-out
+ * window from a signed-in one whose ProductSpace scope is momentarily gone.
+ *
+ * The mirror starts in `unknown`: process start has not yet read the
+ * persisted credentials, so neither "signed in" nor "signed out" is known.
+ * Sync gates must treat `unknown` as fail-closed. The first trusted
+ * credential restore (or a login) moves it to `authenticated` / `signed_out`.
+ */
+export type SyncTrustedProductSpaceAccountState =
+  | { status: 'unknown' }
+  | { status: 'signed_out' }
+  | { status: 'authenticated'; accountId: string }
+
+let syncAccountState: SyncTrustedProductSpaceAccountState = { status: 'unknown' }
+
+export function setSyncTrustedProductSpaceAccountState(
+  state: SyncTrustedProductSpaceAccountState,
+): void {
+  bumpTrustedAccountGenerationOnTransition(
+    state.status === 'authenticated' ? state.accountId : null,
+  )
+  // R38-1: a mirror refresh does NOT settle a transition — only the owner
+  // epoch may settle (see settleAccountTransition). Unrelated snapshots
+  // must never clear an older cleanup's boundary early.
+  syncAccountState = state
+}
+
+/**
+ * Commits a resolved account: a non-null id is `authenticated`, null is the
+ * explicitly confirmed `signed_out` (never `unknown`).
+ */
+export function setSyncTrustedProductSpaceAccountId(accountId: string | null): void {
+  bumpTrustedAccountGenerationOnTransition(accountId)
+  // R38-1: a mirror refresh does NOT settle a transition — only the owner
+  // epoch may settle (see settleAccountTransition). Unrelated snapshots
+  // must never clear an older cleanup's boundary early.
+  syncAccountState = accountId
+    ? { status: 'authenticated', accountId }
+    : { status: 'signed_out' }
+}
+
+/**
+ * Monotonic lock-free account-transition epoch. The transition owner
+ * (account replacement / logout) advances it SYNCHRONOUSLY before its first
+ * cleanup await — before any execution enumeration or fence revoke — so
+ * in-flight execution starts that captured the previous epoch fail closed
+ * even while the synchronous mirror still shows the old account and the
+ * fence revoke is still queued behind the switch lock. The epoch never
+ * advances backwards: an aborted transition leaves it high, which keeps
+ * stale starts refused while fresh starts simply capture the new epoch —
+ * no transition state can get stuck and no stale start is ever reopened.
+ */
+let accountTransitionEpoch = 0
+
+/**
+ * R37-1: true from `beginAccountTransition()` until the transition OWNER
+ * settles it by compare-and-set (commit or explicit abort). While true,
+ * every scope capture fails closed — callbacks and session boundaries must
+ * not run against an account whose cleanup has already begun, even while
+ * the old fence and mirror still agree.
+ */
+let accountTransitionInProgress = false
+
+/**
+ * R38-1: the OWNER of the in-flight transition. Settlement (commit or
+ * abort) is a compare-and-set against this token: a mirror refresh or
+ * snapshot that did not start the transition can never clear it, and an
+ * older transition cannot clear a newer one.
+ */
+interface AccountTransitionOwner {
+  epoch: number
+  accountGeneration: number
+}
+
+let activeAccountTransition: AccountTransitionOwner | null = null
+
+export function isAccountTransitionInProgress(): boolean {
+  return accountTransitionInProgress
+}
+
+/**
+ * The epoch of the transition currently in flight, or null when no
+ * transition is unsettled. Owners use it to address their settlement.
+ */
+export function getActiveAccountTransitionEpoch(): number | null {
+  return activeAccountTransition?.epoch ?? null
+}
+
+/**
+ * Begins a transition and takes OWNERSHIP of it (R38-1). The returned epoch
+ * is the only handle that may settle this transition.
+ */
+export function beginAccountTransition(): number {
+  const epoch = ++accountTransitionEpoch
+  activeAccountTransition = {
+    epoch,
+    accountGeneration: getTrustedAccountGeneration(),
+  }
+  accountTransitionInProgress = true
+  return epoch
+}
+
+/**
+ * R38-1: settles the transition owned by `epoch`. Only the exact owner may
+ * settle — a mirror refresh that did not start the transition never clears
+ * it, and an older transition can never clear a newer one. `commit` marks
+ * the new boundary as live (replacement/login completed); `abort` restores
+ * a valid prior boundary after failed cleanup instead of leaving the
+ * runtime stuck on `account_transition_pending`.
+ */
+export function settleAccountTransition(epoch: number, outcome: 'commit' | 'abort'): boolean {
+  const active = activeAccountTransition
+  if (!active || active.epoch !== epoch) return false
+  activeAccountTransition = null
+  accountTransitionInProgress = false
+  void outcome
+  return true
+}
+
+export function getAccountTransitionEpoch(): number {
+  return accountTransitionEpoch
+}
+
+/**
+ * Monotonic generation of the trusted Admin account binding. It advances on
+ * every account TRANSITION (login, logout, account replacement — never on a
+ * same-account token refresh capture). Switch transactions capture it around
+ * their contract-list fetch so the short final critical section can prove
+ * the fetched list still belongs to the current trusted account WITHOUT
+ * acquiring the Admin session lock under the switch lock.
+ */
+let trustedAccountGeneration = 0
+
+export function getTrustedAccountGeneration(): number {
+  return trustedAccountGeneration
+}
+
+function bumpTrustedAccountGenerationOnTransition(nextAccountId: string | null): void {
+  if (getSyncTrustedProductSpaceAccountId() !== nextAccountId) {
+    trustedAccountGeneration += 1
+  }
+}
+
+export function getSyncTrustedProductSpaceAccountState(): SyncTrustedProductSpaceAccountState {
+  return syncAccountState
+}
+
+export function getSyncTrustedProductSpaceAccountId(): string | null {
+  return syncAccountState.status === 'authenticated' ? syncAccountState.accountId : null
+}
+
+/**
+ * R34-1: ONE atomic trusted session-scope capture shared by every session
+ * creation, branch and import path (handler layer and SessionManager alike).
+ * The committed runtime fence already carries its OWN account binding — the
+ * capture returns a scope only when the fence is committed, bound to an
+ * account, and that fence account is exactly the current synchronous
+ * trusted mirror. Anything else fails closed (null): a session record can
+ * never be born with a partial or split scope from a concurrent
+ * fence/account replacement.
+ */
+export function captureTrustedSessionScope(): {
+  accountId: string
+  productSpaceId: string
+} | null {
+  // R37-1/R37-3: the capture brackets its reads with the account transition
+  // epoch and refuses an in-flight transition outright. A beginEnding that
+  // has already published its epoch fails closed even while the old fence
+  // and mirror still agree.
+  const transitionEpochBefore = getAccountTransitionEpoch()
+  const accountGenerationBefore = getTrustedAccountGeneration()
+  const runtimeScope = getRuntimeActiveProductSpaceScope()
+  const syncAccountId = getSyncTrustedProductSpaceAccountId()
+  const transitionEpochAfter = getAccountTransitionEpoch()
+  if (transitionEpochAfter !== transitionEpochBefore) return null
+  if (isAccountTransitionInProgress()) return null
+  if (getTrustedAccountGeneration() !== accountGenerationBefore) return null
+  if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) {
+    return null
+  }
+  return { accountId: runtimeScope.accountId, productSpaceId: runtimeScope.productSpaceId }
+}
+
+/**
+ * R37-4: an atomic publication token for long-running session mutations
+ * (CREATE/branch/import). It captures the complete trusted scope together
+ * with the transition epoch, account-binding generation and fence
+ * generation so the mutation can prove — immediately before persistence and
+ * publication — that the account, ProductSpace and fence it captured are
+ * all still current.
+ */
+export interface TrustedPublicationToken {
+  accountId: string
+  productSpaceId: string
+  transitionEpoch: number
+  accountGeneration: number
+  fenceGeneration: number
+}
+
+export function captureTrustedPublicationToken(): TrustedPublicationToken | null {
+  const scope = captureTrustedSessionScope()
+  if (!scope) return null
+  return {
+    ...scope,
+    transitionEpoch: getAccountTransitionEpoch(),
+    accountGeneration: getTrustedAccountGeneration(),
+    fenceGeneration: getRuntimeFenceGeneration(),
+  }
+}
+
+export function isTrustedPublicationTokenCurrent(token: TrustedPublicationToken): boolean {
+  return (
+    !isAccountTransitionInProgress()
+    && getAccountTransitionEpoch() === token.transitionEpoch
+    && getTrustedAccountGeneration() === token.accountGeneration
+    && getRuntimeFenceGeneration() === token.fenceGeneration
+    && (() => {
+      const runtimeScope = getRuntimeActiveProductSpaceScope()
+      return Boolean(
+        runtimeScope
+        && runtimeScope.accountId === token.accountId
+        && runtimeScope.productSpaceId === token.productSpaceId,
+      )
+    })()
+  )
+}
+
+/**
+ * R35-1: the complete trusted session scope for aggregate boundaries.
+ * Identical atomic fence/mirror capture as `captureTrustedSessionScope`, but
+ * it ALSO requires a Main-resolved caller Workspace and returns the full
+ * immutable `{accountId, productSpaceId, workspaceId}` triple — a boundary
+ * that cannot attribute its caller (or run against a committed fence bound
+ * to the current account) fails closed with null.
+ */
+export function captureCompleteTrustedSessionScope(
+  callerWorkspaceId: string | null | undefined,
+): {
+  accountId: string
+  productSpaceId: string
+  workspaceId: string
+} | null {
+  if (!callerWorkspaceId) return null
+  const scope = captureTrustedSessionScope()
+  if (!scope) return null
+  return { ...scope, workspaceId: callerWorkspaceId }
+}
+
+/**
+ * R36-1: the ONE fail-closed scope-record comparator shared by every
+ * session predicate. A session record is inside a trusted scope only when
+ * it carries the scope's immutable account, the committed ProductSpace and
+ * (when the scope carries a caller Workspace) exactly that Workspace.
+ * Records without an account binding never match — there is no legacy
+ * exception.
+ */
+export function trustedScopeMatchesSessionRecord(
+  record: { accountId?: string | null; productSpaceId?: string | null; workspaceId?: string | null },
+  scope: { accountId: string; productSpaceId: string; workspaceId?: string | null },
+): boolean {
+  if (!record.accountId || record.accountId !== scope.accountId) return false
+  if (!record.productSpaceId || record.productSpaceId !== scope.productSpaceId) return false
+  if (scope.workspaceId && record.workspaceId !== scope.workspaceId) return false
+  return true
+}
+
+/**
+ * R38-3: an await-spanning trusted session-scope token. Captured ONCE at
+ * RPC entry, it can be revalidated after EVERY await and immediately before
+ * any disclosure, mutation, watcher registration, event publication or
+ * destructive cleanup — the transition epoch, account-binding generation,
+ * fence generation and the complete committed scope must all still be
+ * current, or the boundary fails closed.
+ */
+export interface TrustedSessionScopeToken {
+  accountId: string
+  productSpaceId: string
+  workspaceId: string
+  transitionEpoch: number
+  accountGeneration: number
+  fenceGeneration: number
+}
+
+export function captureCompleteTrustedSessionScopeToken(
+  callerWorkspaceId: string | null | undefined,
+): TrustedSessionScopeToken | null {
+  const scope = captureCompleteTrustedSessionScope(callerWorkspaceId)
+  if (!scope) return null
+  return {
+    ...scope,
+    transitionEpoch: getAccountTransitionEpoch(),
+    accountGeneration: getTrustedAccountGeneration(),
+    fenceGeneration: getRuntimeFenceGeneration(),
+  }
+}
+
+export function isTrustedSessionScopeTokenCurrent(token: TrustedSessionScopeToken): boolean {
+  if (isAccountTransitionInProgress()) return false
+  if (getAccountTransitionEpoch() !== token.transitionEpoch) return false
+  if (getTrustedAccountGeneration() !== token.accountGeneration) return false
+  if (getRuntimeFenceGeneration() !== token.fenceGeneration) return false
+  const runtimeScope = getRuntimeActiveProductSpaceScope()
+  return Boolean(
+    runtimeScope
+    && runtimeScope.accountId === token.accountId
+    && runtimeScope.productSpaceId === token.productSpaceId,
+  )
+}
+
+/**
+ * R39-3: workspace-less variant of the await-spanning token for aggregate
+ * handlers (e.g. the unread summary) that are account/space-scoped but
+ * deliberately span all Workspaces of the trusted scope.
+ */
+export interface TrustedAggregateScopeToken {
+  accountId: string
+  productSpaceId: string
+  transitionEpoch: number
+  accountGeneration: number
+  fenceGeneration: number
+}
+
+export function captureTrustedScopeToken(): TrustedAggregateScopeToken | null {
+  const scope = captureTrustedSessionScope()
+  if (!scope) return null
+  return {
+    ...scope,
+    transitionEpoch: getAccountTransitionEpoch(),
+    accountGeneration: getTrustedAccountGeneration(),
+    fenceGeneration: getRuntimeFenceGeneration(),
+  }
+}
+
+/**
+ * R42: the typed fail-closed trusted-scope refusal. Domain-coded so that
+ * compensation paths (durable question-state restore, resume un-arm,
+ * edit-popover teardown) can carry diagnostic suffixes — restore/un-arm/
+ * rollback incompleteness — WITHOUT losing their refusal identity: callers
+ * classify by TYPE via {@link isProductSpaceScopeRefusal}, never by exact
+ * Error.message equality, so a refusal with a cleanup suffix can never be
+ * misread as an ordinary transient failure and swallowed into a retryable
+ * result.
+ */
+export class ProductSpaceScopeRefusalError extends Error {
+  constructor(detail?: string) {
+    super(detail ? `PRODUCT_SPACE_CONTEXT_REQUIRED (${detail})` : 'PRODUCT_SPACE_CONTEXT_REQUIRED')
+    this.name = 'ProductSpaceScopeRefusalError'
+  }
+}
+
+export function isProductSpaceScopeRefusal(error: unknown): boolean {
+  return error instanceof ProductSpaceScopeRefusalError
+}

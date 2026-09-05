@@ -34,6 +34,47 @@ import {
   MAX_CATALOG_STATUS_SCOPES,
   validateCatalogLocalAppScope,
 } from '../local-app-runtime'
+import {
+  getRuntimeActiveProductSpace,
+  isSwitchInProgress,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
+  listRegisteredProductSpaceExecutions,
+  registerProductSpaceExecution,
+  unregisterProductSpaceExecution,
+  withSwitchLock,
+  type RegisteredProductSpaceExecution,
+} from '@polo-ai/server-core/runtime/product-space-executions'
+import {
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceExecutionScopeSchema,
+} from '@polo-ai/shared/product-spaces'
+import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
+import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
+import type { HandlerDeps } from './handler-deps'
+
+/**
+ * Trusted active ProductSpace gate for every renderer-reachable Local App
+ * business RPC: the scope's space must equal the Main runtime's committed
+ * active fence. Only the controlled legacy cleanup path may touch other
+ * spaces, and it never goes through this gate.
+ */
+function assertScopeInsideActiveProductSpace(scope: CatalogLocalAppScope): void {
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
+    throw new LocalAppRuntimeError(
+      'PRODUCT_SPACE_CONTEXT_REQUIRED',
+      'No committed ProductSpace is active on this device',
+    )
+  }
+  if (scope.organizationId !== activeProductSpaceId) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'Local App requests cannot target another ProductSpace',
+    )
+  }
+}
 
 function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
   if (
@@ -49,7 +90,9 @@ function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
       'Renderer local app RPC only permits authorized Catalog scopes',
     )
   }
-  return validateCatalogLocalAppScope(reference)
+  const scope = validateCatalogLocalAppScope(reference)
+  assertScopeInsideActiveProductSpace(scope)
+  return scope
 }
 
 async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promise<void> {
@@ -430,7 +473,41 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_LOGS,
 ] as const
 
-export function registerLocalAppHandlers(server: RpcServer): void {
+export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManager?: HandlerDeps['windowManager'] }): void {
+  void server
+  // The calling window's Workspace is resolved from the trusted Main-side
+  // window registry — never from renderer arguments.
+  const callerWorkspaceId = (ctx: { webContentsId?: number | null }): string | null => {
+    if (ctx.webContentsId == null) return null
+    return deps?.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+  }
+  setLegacyLocalAppCleaner(async () => {
+    const registry = getScopedLocalAppRuntimeRegistry()
+    const failedRefs: string[] = []
+    // Enumerate EVERY persisted scope on this device — not only executions in
+    // the current registry — so stale Organization-era installation/runtime
+    // state cannot survive the direct switch.
+    let persistedScopes: CatalogLocalAppScope[] = []
+    try {
+      persistedScopes = await registry.listAllCatalogScopes()
+    } catch {
+      failedRefs.push('persisted-scope-enumeration')
+    }
+    for (const scope of persistedScopes) {
+      try {
+        await registry.stop(scope)
+        // Invalidate installation/runtime state while preserving user data.
+        await registry.uninstall(scope, { preserveData: true })
+      } catch {
+        failedRefs.push(`${scope.organizationId}:${scope.catalogAppId}`)
+      }
+    }
+    for (const execution of listRegisteredProductSpaceExecutions()) {
+      if (execution.kind !== 'local_app') continue
+      unregisterProductSpaceExecution(execution.scope.executionId)
+    }
+    return { ok: failedRefs.length === 0, failedRefs }
+  })
   server.handle(RPC_CHANNELS.localApps.GET_HOST_INFO, () => ({
     platform: hostPlatform(),
     arch: hostArchitecture(),
@@ -503,36 +580,243 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     ),
   )
 
-  const startCatalogApp = async (scope: CatalogLocalAppScope) => {
-    const { accessMode } = await requireAuthorizedCatalogApp(scope)
-    const registry = getScopedLocalAppRuntimeRegistry()
-    if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
-      throw new LocalAppRuntimeError(
-        'NOT_AUTHORIZED',
-        'Only installed and prepared organization apps can start while offline',
-      )
+  let localAppStartSequence = 0
+
+  const registryStopQuietly = async (scope: CatalogLocalAppScope): Promise<void> => {
+    try {
+      await getScopedLocalAppRuntimeRegistry().stop(scope)
+    } catch {
+      // Best-effort rollback of a superseded start.
     }
-    return registry.start(scope)
   }
 
-  server.handle(RPC_CHANNELS.localApps.START, (_ctx, reference: unknown) =>
+  const unregisterLocalAppExecutions = (
+    scope: CatalogLocalAppScope,
+    options?: { workspaceId?: string | null },
+  ): void => {
+    for (const execution of listRegisteredProductSpaceExecutions()) {
+      if (execution.kind !== 'local_app') continue
+      if (execution.scope.productSpaceId !== scope.organizationId) continue
+      // A workspace-scoped management operation may only unregister the
+      // calling workspace's execution; UNINSTALL removes the whole
+      // installation and therefore every workspace's execution record.
+      if (
+        options?.workspaceId
+        && execution.scope.workspaceId !== options.workspaceId
+      ) continue
+      if (
+        execution.scope.subject.kind === 'artifact_instance'
+        && execution.scope.subject.artifactInstanceId === scope.catalogAppId
+      ) {
+        unregisterProductSpaceExecution(execution.scope.executionId)
+      }
+    }
+  }
+
+  const registerLocalAppExecution = async (
+    scope: CatalogLocalAppScope,
+    name: string,
+    workspaceId: string | null,
+    trustedAccountId: string,
+  ): Promise<string> => {
+    const accountId = trustedAccountId
+    if (!accountId) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'A trusted Admin session is required to start a ProductSpace app',
+      )
+    }
+    if (!workspaceId) {
+      // The shared contract requires an immutable accountId+ProductSpace+
+      // Workspace scope: an app start without a resolvable caller Workspace
+      // can never be attributed, so it is refused instead of placeholder-bound.
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'The calling window has no Workspace context for this app start',
+      )
+    }
+    const registry = getScopedLocalAppRuntimeRegistry()
+    // Every start is a distinct execution with its own immutable scope.
+    const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
+    // R33-3/R34-3: real owner-scoped status projection. The runtime status
+    // is probed asynchronously (isActive), so the last observed lifecycle is
+    // cached for the synchronous getStatus provider; a dispatched stop
+    // projects 'stopping' until the terminal outcome. The Local App runtime
+    // has no waiting_for_network state — its pre-running startup state is
+    // 'starting', which projects as 'preparing'.
+    let lastObservedStatus: 'preparing' | 'running' = 'running'
+    let stopDispatched = false
+    // R34 minor: the scope is validated through the shared runtime schema —
+    // no double assertions, no malformed identifiers can reach the registry.
+    const executionScope = ProductSpaceExecutionScopeSchema.parse({
+      contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+      executionId,
+      accountId,
+      productSpaceId: scope.organizationId,
+      workspaceId,
+      subject: {
+        kind: 'artifact_instance',
+        artifactType: 'app',
+        artifactInstanceId: scope.catalogAppId,
+        versionId: scope.catalogAppId,
+        version: name,
+      },
+    })
+    const execution: RegisteredProductSpaceExecution = {
+      scope: executionScope,
+      kind: 'local_app',
+      name,
+      ref: executionId,
+      generation: 0,
+      isActive: async () => {
+        try {
+          const status = await registry.getRuntimeStatus(scope)
+          // R34-3: 'starting' is a genuine non-terminal startup state — a
+          // preparing App must stay registered, visible to LIST/PREPARE and
+          // blocking switches exactly like a running one. Only a terminal
+          // runtime status (stopped/broken/not_installed/...) ends the
+          // execution; the probe failure branch below stays fail-closed.
+          lastObservedStatus = status.status === 'running' ? 'running' : 'preparing'
+          return status.status === 'running' || status.status === 'starting'
+        } catch {
+          // Liveness probe failure fails closed: treat as still active.
+          return true
+        }
+      },
+      getStatus: () => (stopDispatched ? 'stopping' : lastObservedStatus),
+      stop: async () => {
+        stopDispatched = true
+        try {
+          await registry.stop(scope)
+          return 'stopped'
+        } catch {
+          return 'failed'
+        }
+      },
+    }
+    try {
+      registerProductSpaceExecution(execution)
+    } catch (error) {
+      // Registration failure must not leave an unregistered running runtime.
+      await registry.stop(scope).catch(() => {})
+      throw error
+    }
+    return executionId
+  }
+
+  // Every entry that can reach running/preparing shares this atomic
+  // start-and-register path.
+  const startAndRegisterLocalApp = async (
+    scope: CatalogLocalAppScope,
+    startRuntime: () => Promise<{ version: string }>,
+    workspaceId: string | null,
+  ) => {
+    // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
+    // trusted Admin account) BEFORE the switch lock — the Admin session
+    // lock must never be acquired while holding the switch lock, because
+    // account replacement holds the Admin lock while revoking the fence
+    // through the switch lock.
+    const gate = await captureTrustedStartGate()
+    if (!gate) {
+      throw new LocalAppRuntimeError(
+        'PRODUCT_SPACE_CONTEXT_REQUIRED',
+        'The committed ProductSpace belongs to a different account',
+      )
+    }
+    // Runs under the same mutex as PREPARE_SWITCH/COMMIT_SWITCH: a switch
+    // transaction cannot interleave with a starting app, and the app cannot
+    // slip past a switch that begins while its runtime boots. The critical
+    // section is all in-memory: the shared trusted-start gate (mirror
+    // account, account generation, transition epoch, account-bound fence)
+    // and fence checks never acquire the Admin session lock.
+    return withSwitchLock(async () => {
+      const activeProductSpaceId = getRuntimeActiveProductSpace()
+      if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
+        throw new LocalAppRuntimeError(
+          'PRODUCT_SPACE_CONTEXT_REQUIRED',
+          'No committed ProductSpace is active on this device',
+        )
+      }
+      // R32-3: a read_only-restricted space starts no Local App work.
+      if (isRuntimeProductSpaceRestricted(activeProductSpaceId)) {
+        throw new LocalAppRuntimeError(
+          'PRODUCT_SPACE_CONTEXT_REQUIRED',
+          'The ProductSpace is restricted to read-only access',
+        )
+      }
+      // A fence committed for another (replaced) account is never startable,
+      // and a concurrent account transition fails the start closed.
+      if (!isTrustedStartGateCurrent(gate)) {
+        throw new LocalAppRuntimeError(
+          'PRODUCT_SPACE_CONTEXT_REQUIRED',
+          'The committed ProductSpace belongs to a different account',
+        )
+      }
+      if (isSwitchInProgress()) {
+        throw new LocalAppRuntimeError(
+          'SWITCH_IN_PROGRESS',
+          'Apps cannot start while a ProductSpace switch is being committed',
+        )
+      }
+      assertScopeInsideActiveProductSpace(scope)
+      const result = await startRuntime()
+
+      // Re-verify under the lock after the runtime booted: if a switch or an
+      // account replacement began while the start was in flight, the runtime
+      // is stopped again and never registered — no orphan execution of the
+      // origin space or the replaced account survives.
+      if (
+        isSwitchInProgress()
+        || getRuntimeActiveProductSpace() !== scope.organizationId
+        || !isTrustedStartGateCurrent(gate)
+      ) {
+        await registryStopQuietly(scope)
+        throw new LocalAppRuntimeError(
+          'SWITCH_IN_PROGRESS',
+          'A ProductSpace switch superseded this start',
+        )
+      }
+      await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId)
+      return result
+    })
+  }
+
+  const startCatalogApp = (ctx: { webContentsId?: number | null }, scope: CatalogLocalAppScope) => {
+    return (async () => {
+      const { accessMode } = await requireAuthorizedCatalogApp(scope)
+      const registry = getScopedLocalAppRuntimeRegistry()
+      if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Only installed and prepared organization apps can start while offline',
+        )
+      }
+      return startAndRegisterLocalApp(scope, () => registry.start(scope), callerWorkspaceId(ctx))
+    })()
+  }
+
+  server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) =>
     withCatalogScope(
       reference,
-      startCatalogApp,
+      scope => startCatalogApp(ctx, scope),
     ))
 
-  server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
+  server.handle(RPC_CHANNELS.localApps.STOP, (ctx, reference: unknown) =>
     withCatalogManagementScope(
       reference,
-      async (scope, catalogReference) =>
-        projectLocalAppStatusForCatalogAccess(
-          await getScopedLocalAppRuntimeRegistry().stop(scope),
+      async (scope, catalogReference) => {
+        const status = await getScopedLocalAppRuntimeRegistry().stop(scope)
+        // Only the calling workspace's execution record dies with this stop.
+        unregisterLocalAppExecutions(scope, { workspaceId: callerWorkspaceId(ctx) })
+        return projectLocalAppStatusForCatalogAccess(
+          status,
           catalogReference.canAccessDeliveryMetadata
             && canAccessCatalogDeliveryMetadata(scope),
-        ),
+        )
+      },
     ))
 
-  server.handle(RPC_CHANNELS.localApps.RESTART, (_ctx, reference: unknown) =>
+  server.handle(RPC_CHANNELS.localApps.RESTART, (ctx, reference: unknown) =>
     withCatalogScope(
       reference,
       async scope => {
@@ -544,7 +828,8 @@ export function registerLocalAppHandlers(server: RpcServer): void {
             'Only installed and prepared organization apps can restart while offline',
           )
         }
-        return registry.restart(scope)
+        unregisterLocalAppExecutions(scope, { workspaceId: callerWorkspaceId(ctx) })
+        return startAndRegisterLocalApp(scope, () => registry.restart(scope), callerWorkspaceId(ctx))
       },
     ))
 
@@ -553,7 +838,12 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     (_ctx, reference: unknown, options?: LocalAppUninstallOptions) =>
       withCatalogManagementScope(
         reference,
-        scope => getScopedLocalAppRuntimeRegistry().uninstall(scope, options),
+        async scope => {
+          const result = await getScopedLocalAppRuntimeRegistry()
+            .uninstall(scope, options)
+          unregisterLocalAppExecutions(scope)
+          return result
+        },
       ),
   )
 
@@ -701,7 +991,10 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(
     RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
     async (_ctx, rawScope: unknown) => {
-      const scope = validateCatalogLocalAppScope(rawScope)
+      // Same trusted active-ProductSpace gate as every other renderer
+      // business scope: null fence, offline read-only, and cross-space
+      // scopes are all rejected before any authorization entry is read.
+      const scope = requireRendererCatalogScope(rawScope)
       const { app } = await requireAuthorizedCatalogEntry(scope)
       if (app.deliveryMode !== 'remote_url' || !app.remoteUrl) {
         throw new LocalAppRuntimeError(

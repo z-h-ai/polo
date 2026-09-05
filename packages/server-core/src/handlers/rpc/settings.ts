@@ -6,12 +6,14 @@ import {
   getDefaultThinkingLevel,
   getHomeRecentApps,
   getOrganizationContextStorage,
+  getProductSpaceContextStorage,
   getPreferencesPath,
   getSessionDraft,
   loadPreferences,
   setDefaultThinkingLevel,
   setHomeRecentApps,
   updateOrganizationContextStorage,
+  updateProductSpaceContextStorage,
   setSessionDraft,
   deleteSessionDraft,
   getWorkspaceByNameOrId,
@@ -22,6 +24,9 @@ import type {
 import type {
   OrganizationContextStoragePatch,
 } from '@polo-ai/shared/config/organization-context'
+import type {
+  ProductSpaceContextStoragePatch,
+} from '@polo-ai/shared/config/product-space-context'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
@@ -40,6 +45,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
   RPC_CHANNELS.drafts.GET,
   RPC_CHANNELS.drafts.SET,
   RPC_CHANNELS.drafts.DELETE,
@@ -268,6 +275,20 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
       accountId: string,
       patch: OrganizationContextStoragePatch,
     ) => updateOrganizationContextStorage(accountId, patch),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+    async (_ctx, accountId: string) => getProductSpaceContextStorage(accountId),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
+    async (
+      _ctx,
+      accountId: string,
+      patch: ProductSpaceContextStoragePatch,
+    ) => updateProductSpaceContextStorage(accountId, patch),
   )
 
   // ============================================================

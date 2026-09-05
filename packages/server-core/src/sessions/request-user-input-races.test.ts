@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
@@ -27,6 +27,15 @@ const { SessionManager, createManagedSession } = await import('./SessionManager.
 const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
+// The merged platform fences the session-event boundary and the execution
+// registration on the committed ProductSpace (POO-42): establish the same
+// runtime space context the desktop runtime always has, and bind seeded
+// sessions to it.
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('../runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } = await import('../handlers/rpc/trusted-product-space-account')
+
+const TEST_ACCOUNT_ID = 'account-a'
+const TEST_SPACE_ID = 'space-personal'
 
 // Each scenario here protects a distinct race/fault invariant and runs
 // through the REAL handler / sendMessage paths:
@@ -64,6 +73,10 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
     events = []
     flushCalls = 0
     failFlush = false
+    setSyncTrustedProductSpaceAccountId(TEST_ACCOUNT_ID)
+    setRuntimeActiveProductSpaceAccount(TEST_ACCOUNT_ID)
+    setRuntimeActiveProductSpace(TEST_SPACE_ID)
+    setTrustedProductSpaceAccountProvider(async () => TEST_ACCOUNT_ID)
     sm.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
       events.push(event)
     }) as never)
@@ -71,6 +84,8 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
 
   afterEach(async () => {
     releaseShouldFail = false
+    // The runtime fence is intentionally NOT reset here: background turns
+    // may still confirm after a test ends. It is reset in afterAll below.
     // Cancel every pending debounced persistence write and give any
     // already-in-flight write time to finish BEFORE deleting the tmpRoot —
     // otherwise the write fires after rmSync and surfaces as an unhandled
@@ -82,6 +97,12 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
     seededSessionIds.clear()
     await new Promise(r => setTimeout(r, 650))
     rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  afterAll(() => {
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(null)
+    setSyncTrustedProductSpaceAccountId(null)
   })
 
   function buildWorkspace() {
@@ -119,6 +140,7 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
     const managed = createManagedSession(
       { id: sessionId, name: stored.name, createdAt: stored.createdAt },
       buildWorkspace(),
+      { productSpaceId: TEST_SPACE_ID, accountId: TEST_ACCOUNT_ID },
     )
     ;(managed as unknown as { isProcessing: boolean }).isProcessing = opts.isProcessing ?? false
     if (opts.withAgent) {

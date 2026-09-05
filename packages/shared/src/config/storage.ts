@@ -106,6 +106,17 @@ export interface StoredConfig {
       createdAt: number;
       order: number;
     }>;
+    // Account+ProductSpace scoped partitions (key = ProductSpace context
+    // key). Scoped windows never read the legacy global list above.
+    installedAppsByScope?: Record<string, Array<{
+      id: string;
+      name: string;
+      url: string;
+      iconUrl?: string;
+      type: 'builtin' | 'webapp';
+      createdAt: number;
+      order: number;
+    }>>;
   };
   // One-shot migration markers. Used by migrations that should run at most
   // once per user (e.g. restoring a previously-removed model to connection

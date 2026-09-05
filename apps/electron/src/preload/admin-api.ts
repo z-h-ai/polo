@@ -33,6 +33,20 @@ type AdminPreloadApi = Pick<
   | 'organizationRevokeJoinLink'
   | 'organizationUpdateMember'
   | 'organizationRemoveMember'
+  | 'productSpaceList'
+  | 'productSpaceListActiveExecutions'
+  | 'productSpaceStopAllExecutions'
+  | 'productSpaceStopExecution'
+  | 'productSpaceRestrictActiveSpace'
+  | 'productSpaceGetRestrictionState'
+  | 'productSpaceGetCatalog'
+  | 'productSpacePrepareSwitch'
+  | 'productSpaceStopSwitchExecutions'
+  | 'productSpaceCommitSwitch'
+  | 'productSpaceCancelSwitch'
+  | 'productSpaceRestoreOfflineView'
+  | 'productSpaceRevokeActiveContext'
+  | 'productSpaceCleanupLegacyState'
 >
 
 export function buildAdminPreloadApi(
@@ -96,5 +110,43 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER, organizationId, memberId, input),
     organizationRemoveMember: (organizationId, memberId, reason) =>
       client.invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER, organizationId, memberId, reason),
+    productSpaceList: () => {
+      const fallback = client.invoke(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES)
+      return fallback.then(result => {
+        if (result.success) return result
+        return {
+          success: false,
+          errorCode: result.errorCode ?? 'SERVER_ERROR',
+          message: result.message ?? 'ProductSpace list request failed',
+          contractUnsupported: result.errorCode === 'product_space_contract_unsupported',
+        }
+      })
+    },
+    productSpaceListActiveExecutions: (accountId, productSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, accountId, productSpaceId),
+    productSpaceStopExecution: (token, executionId) =>
+      client.invoke(RPC_CHANNELS.productSpace.STOP_EXECUTION, token, executionId),
+    productSpaceRestrictActiveSpace: (accountId, productSpaceId, restricted) =>
+      client.invoke(RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE, accountId, productSpaceId, restricted),
+    productSpaceGetRestrictionState: (accountId, productSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE, accountId, productSpaceId),
+    productSpaceStopAllExecutions: (accountId, productSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, accountId, productSpaceId),
+    productSpaceGetCatalog: (productSpaceId, knownRevision) =>
+      client.invoke(RPC_CHANNELS.productSpace.CATALOG, productSpaceId, knownRevision),
+    productSpacePrepareSwitch: targetProductSpaceId =>
+      client.invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, targetProductSpaceId),
+    productSpaceStopSwitchExecutions: token =>
+      client.invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, token),
+    productSpaceCommitSwitch: (token, targetProductSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH, token, targetProductSpaceId),
+    productSpaceCancelSwitch: token =>
+      client.invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, token),
+    productSpaceRestoreOfflineView: () =>
+      client.invoke(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW),
+    productSpaceRevokeActiveContext: () =>
+      client.invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT),
+    productSpaceCleanupLegacyState: () =>
+      client.invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE),
   }
 }

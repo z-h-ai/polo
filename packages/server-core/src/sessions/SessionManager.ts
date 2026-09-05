@@ -7,8 +7,9 @@ import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger 
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
-import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@polo-ai/shared/agent'
+import { createHash, randomUUID } from 'node:crypto'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, cleanupModeState, type PermissionMode, unregisterSessionScopedToolCallbacks, registerSessionScopedToolCallbacks, installSessionScopedToolCallbackGuard, mergeSessionScopedToolCallbacks, type SessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, type SpawnSessionRequest, type SpawnSessionResult } from '@polo-ai/shared/agent'
+import { fingerprintOwnerToken, getSessionScopedToolCallbacks, getSessionScopedToolCallbackGuard, getSessionScopedToolCallbackLease, unregisterSessionScopedToolCallbacksIf, unregisterSessionScopedToolCallbacksIfOwner, unregisterSessionScopedToolGuardIf, type SessionScopedToolCallbackLease, type SessionScopedToolCallbackGuard } from '@polo-ai/shared/agent/session-scoped-tool-callback-registry'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -23,6 +24,40 @@ import {
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
+import {
+  getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceScope,
+  isRuntimeOfflineReadOnly,
+} from '../runtime/product-space-executions'
+import {
+  getAccountTransitionEpoch,
+  getTrustedAccountGeneration,
+  getSyncTrustedProductSpaceAccountId,
+  captureCompleteTrustedSessionScopeToken,
+  captureTrustedSessionScope,
+  captureTrustedPublicationToken,
+  isTrustedPublicationTokenCurrent,
+  isTrustedSessionScopeTokenCurrent,
+  isAccountTransitionInProgress,
+  isProductSpaceScopeRefusal,
+  trustedScopeMatchesSessionRecord,
+  ProductSpaceScopeRefusalError,
+  type TrustedSessionScopeToken,
+} from '../handlers/rpc/trusted-product-space-account'
+
+// R34-1: the trusted session scope is captured through THE shared atomic
+// helper (see trusted-product-space-account). Unlike the previous local
+// copy, it verifies the committed fence's own account binding against the
+// synchronous trusted mirror — a fence bound to a replaced account can
+// never host a new session scope.
+import {
+  registerAssistantExecutionForSend,
+  cancelAssistantStartReservation,
+  confirmAssistantStartProcessing,
+  releaseAssistantStartExecution,
+  releaseAssistantStartExecutionVersion,
+  type AssistantStartReservation,
+} from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
@@ -150,6 +185,28 @@ function buildBackendHostRuntimeContext(): BackendHostRuntimeContext {
     appRootPath: _platform.appRootPath,
     resourcesPath: _platform.resourcesPath,
     isPackaged: _platform.isPackaged,
+  }
+}
+
+/**
+ * R45: typed aggregate for agent runtime disposal failures. Strict-mode
+ * `disposeManagedAgentRuntime` calls throw this instead of returning a
+ * swallowed result, so a half-disposed runtime (stale agent process still
+ * alive) can never be reported as a successful refresh/rollback/convergence.
+ * The failed references are deliberately KEPT on the ManagedSession and the
+ * bookkeeping/callback state is left untouched for a retry.
+ */
+class AgentRuntimeDisposalError extends Error {
+  readonly reason: string
+  readonly failures: string[]
+  readonly callbacksUnregistered: boolean
+
+  constructor(reason: string, failures: string[], callbacksUnregistered: boolean) {
+    super(`agent runtime disposal failed during ${reason}: ${failures.join('; ')}`)
+    this.name = 'AgentRuntimeDisposalError'
+    this.reason = reason
+    this.failures = failures
+    this.callbacksUnregistered = callbacksUnregistered
   }
 }
 
@@ -779,6 +836,28 @@ async function resolveToolDisplayMeta(
 /** Agent type - unified backend interface for all providers */
 type AgentInstance = AgentBackend
 
+/**
+ * R53 (issue 6): one manager-owned retryable runtime disposal — keyed by the
+ * immutable quarantine token, holding the retained managed (faces intact),
+ * the timed-out ORIGINAL ops still awaited before any retry, and the
+ * single-flight settlement claim.
+ */
+interface QuarantinedRuntimeDisposalEntry {
+  managed: ManagedSession
+  quarantineToken: string
+  failures: string[]
+  reason: string
+  quarantinedAt: number
+  originalOps: Promise<unknown>[]
+  inFlight?: Promise<'settled' | 'retryable'>
+  /**
+   * R57 (issue 2, obs 5f80125a): cleanup phase — once the retained resource
+   * faces have settled, a retry claim NEVER re-issues resource calls and
+   * only finishes the remaining unpublished-candidate cleanup.
+   */
+  cleanupPhase?: 'faces-settled'
+}
+
 interface ManagedSession {
   id: string
   /** Host experience that owns this session (e.g. 'edit-popover' Edit Popover sessions). */
@@ -790,6 +869,11 @@ interface ManagedSession {
    */
   popoverOwner?: string
   workspace: Workspace
+  /** Immutable ProductSpace binding assigned at creation time. */
+  productSpaceId?: string
+  /** Immutable trusted Admin account bound at creation (R32-2). Space-bound
+   *  legacy records without it are quarantined (fail-closed). */
+  accountId?: string
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
@@ -960,6 +1044,38 @@ interface ManagedSession {
    * branch with their own options instead of claiming a second turn.
    */
   turnStartReserved?: boolean
+  /**
+   * R50/R51: the OWNER-BOUND callback lease of THIS session's runtime — the
+   * exact (record, guard) pair the backend registered/merged, kept current
+   * via `onSessionCallbackLeaseChanged` and refreshed at every owner
+   * mutation (construct end, publish points). Disposal cleanup CASses
+   * against THIS lease; the sessionId's CURRENT registry lookup is never an
+   * ownership proof (a same-id successor's record/guard is never touched by
+   * a stale disposal).
+   */
+  callbackLease?: SessionScopedToolCallbackLease
+  /**
+   * R51: the guard installed at CONSTRUCTION time (before the backend
+   * factory) — covers the guard-only window where the factory threw or the
+   * postInit bounded wait expired BEFORE any callback record was registered.
+   */
+  constructionCallbackGuardLease?: SessionScopedToolCallbackGuard
+  /**
+   * R52-B: the immutable RUNTIME OWNER TOKEN for the current backend
+   * construction — carried by every register/merge call the backend makes,
+   * so a stale runtime's merges against a successor's lease are REJECTED
+   * outright instead of silently overwriting the successor's callbacks.
+   */
+  runtimeOwnerToken?: string
+  /**
+   * R46: a strict runtime disposal that PARTIALLY failed (some surfaces
+   * disposed, others retained with their references on this session). The
+   * retained poolServer/mcpPool refs live on THIS object independent of
+   * `managed.agent` — `settlePendingRuntimeDisposal` must retry them before
+   * any early return or replacement construction can orphan them. Cleared
+   * only by a fully successful disposal.
+   */
+  disposalIncomplete?: { reason: string; failures: string[] }
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
@@ -1206,6 +1322,7 @@ function managedToSession(
     workspaceName: m.workspace.name,
     messages: [],
     isProcessing: m.isProcessing,
+    productSpaceId: m.productSpaceId,
     sessionFolderPath: storage.getSessionPath(m.workspace.rootPath, m.id),
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
@@ -1223,8 +1340,462 @@ interface PendingDelta {
 export class SessionManager implements ISessionManager {
   private readonly runtimeProfile: 'default' | 'cli-one-shot'
   private readonly runtimeWorkspace?: Workspace
+  /**
+   * R46: quarantine for UNPUBLISHED session candidates whose runtime could
+   * not be disposed during the stale-publication rollback. The live runtime
+   * (agent, retained pool/mcp faces, registered callbacks) would otherwise
+   * become unreachable the moment createSession throws — the map entry is
+   * only installed after the publication CAS. Entries are owner-token-bound,
+   * reject every callback execution, are never published as usable sessions,
+   * and stay retryable via `sweepQuarantinedUnpublishedRuntimes` until a
+   * disposal succeeds.
+   */
+  private readonly unpublishedRuntimeQuarantine = new Map<string, {
+    managed: ManagedSession
+    quarantineToken: string
+    installedCallbacks: SessionScopedToolCallbacks
+    installedLease: SessionScopedToolCallbackLease | undefined
+    reason: string
+    quarantinedAt: number
+  }>()
   readonly sessionStorage: SessionStorage
+  /**
+   * R38-2: the AUTHORITATIVE managed-callback inventory. Every agent/self-
+   * management callback registration MUST route through
+   * `guardManagedCallback`, which records the callback name here and wraps
+   * it with the caller's stable transition/account/fence scope guard. The
+   * inventory test fails when a callback is registered outside this
+   * mechanism.
+   */
+  private managedCallbackInventory = new Map<string, Set<string>>()
+
+  private recordManagedCallbackInventory(managed: ManagedSession, name: string): void {
+    const names = this.managedCallbackInventory.get(managed.id) ?? new Set<string>()
+    names.add(name)
+    this.managedCallbackInventory.set(managed.id, names)
+  }
+
+  /**
+   * R38-2: wraps ONE callback with the managed session's current trusted
+   * scope guard. The wrapped function resolves the caller's stable
+   * transition/account/fence scope at invocation start and refuses anything
+   * outside it; target-specific checks (managedScopeTarget) stay inside the
+   * wrapped body where applicable.
+   */
+  private guardManagedCallback<F extends (...args: any[]) => any>(managed: ManagedSession, name: string, fn: F): F {
+    this.recordManagedCallbackInventory(managed, name)
+    const guarded = ((...args: any[]) => {
+      if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+      return fn(...args)
+    }) as F
+    return guarded
+  }
+
+  /**
+   * R38-2: wraps a RECORD of callbacks (e.g. browserPaneFns) so every
+   * method is registered through the authoritative guard inventory.
+   */
+  private guardManagedCallbackRecord<F extends Record<string, ((...args: any[]) => any) | undefined>>(
+    managed: ManagedSession,
+    prefix: string,
+    record: F,
+  ): F {
+    const wrapped = Object.fromEntries(
+      Object.entries(record).map(([key, value]) => [
+        key,
+        typeof value === 'function'
+          ? this.guardManagedCallback(managed, `${prefix}.${key}`, value)
+          : value,
+      ]),
+    ) as F
+    return wrapped
+  }
+
+  /**
+   * R39-2: installs THE authoritative per-session registration guard in the
+   * shared tool-callback registry. Every callback registered or merged for
+   * this session (BackendConfig, core/plan/auth/query, messaging, browser
+   * panes, self-management, direct activation, and future records) is
+   * atomically wrapped so the caller's CURRENT stable transition/account/
+   * fence scope is enforced at invocation — deny-by-default for missing,
+   * stale, legacy, replaced or in-transition callers.
+   */
+  private installManagedSessionCallbackGuard(managed: ManagedSession): void {
+    installSessionScopedToolCallbackGuard(managed.id, (callbackName: string) => {
+      if (!this.managedTrustedScope(managed)) {
+        throw new Error(`SESSION_OUT_OF_TRUSTED_SCOPE (${callbackName})`)
+      }
+    }, this.runtimeOwnerTokenOf(managed))
+  }
+
+  /**
+   * R53: the managed's runtime owner token, minting a MANAGER PLACEHOLDER
+   * when no runtime generation exists yet (session publication installs the
+   * pre-construction guard before any backend owns the id; the placeholder
+   * is replaced by the construction's fresh generation token). Fail-closed
+   * for callers that must never observe an undefined owner.
+   */
+  private runtimeOwnerTokenOf(managed: ManagedSession): string {
+    if (managed.runtimeOwnerToken === undefined) {
+      managed.runtimeOwnerToken = randomUUID()
+    }
+    return managed.runtimeOwnerToken
+  }
+
+  /** R53: irreversible 8-hex fingerprint — never log a full owner token. */
+  private ownerTokenFingerprint(managed: ManagedSession): string {
+    const token = managed.runtimeOwnerToken
+    if (token === undefined) return 'none'
+    return this.ownerTokenFingerprintOf(token)
+  }
+
+  /** R53/R54: fingerprint form for an arbitrary token value (shared helper). */
+  private ownerTokenFingerprintOf(token: string): string {
+    return fingerprintOwnerToken(token)
+  }
+
+  /** R38-2: the recorded guard inventory for one managed session (tests). */
+  getManagedCallbackInventoryForTests(sessionId: string): string[] {
+    return [...(this.managedCallbackInventory.get(sessionId) ?? [])].sort()
+  }
+
+  /**
+   * R37-2: the inventoried builder for every registered self-management /
+   * agent callback. Each entry must resolve the CURRENT trusted scope at
+   * invocation start (the table-driven inventory test enforces this for
+   * every entry, so future additions cannot silently bypass the guard).
+   */
+  private buildManagedSessionToolCallbacks(managed: ManagedSession): Parameters<typeof mergeSessionScopedToolCallbacks>[1] {
+    return {
+      setSessionLabelsFn: this.guardManagedCallback(managed, 'self.setSessionLabelsFn', async (sessionId: string | undefined, labels: string[]) => {
+        const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+        if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+        await this.setSessionLabels(target.id, labels)
+      }),
+      setSessionStatusFn: this.guardManagedCallback(managed, 'self.setSessionStatusFn', async (sessionId: string | undefined, status: string) => {
+        const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+        if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+        await this.setSessionStatus(target.id, status as SessionStatus)
+      }),
+      getSessionInfoFn: this.guardManagedCallback(managed, 'self.getSessionInfoFn', (sessionId?: string) => {
+        const target = this.managedScopeTarget(managed, sessionId ?? managed.id)
+        // Fail closed: an out-of-scope target discloses nothing.
+        const session = target
+        if (!session) return null
+        return {
+          id: session.id,
+          name: session.name ?? session.id,
+          labels: session.labels ?? [],
+          status: session.sessionStatus ?? 'todo',
+          permissionMode: session.permissionMode ?? 'ask',
+          createdAt: session.createdAt ?? 0,
+          workingDirectory: session.workingDirectory,
+          llmConnection: session.llmConnection,
+          model: session.model,
+          isActive: session.agent != null,
+        }
+      }),
+      listSessionsFn: this.guardManagedCallback(managed, 'self.listSessionsFn', (options) => {
+        // R36-1: the listing routes through the SAME fail-closed current-
+        // scope resolution as every other callback — an out-of-scope
+        // managed session (legacy, replaced account, missing fence, or
+        // in-flight replacement) lists NOTHING, not even itself.
+        return this.listSessionsInManagedScope(managed, options)
+      }),
+      resolveLabelsFn: this.guardManagedCallback(managed, 'self.resolveLabelsFn', (labels: string[]) => {
+        const labelConfig = loadLabelConfig(managed.workspace.rootPath)
+        return resolveSessionLabels(labels, labelConfig.labels)
+      }),
+      resolveStatusFn: this.guardManagedCallback(managed, 'self.resolveStatusFn', (status: string) => {
+        const statusConfig = loadStatusConfig(managed.workspace.rootPath)
+        const allStatuses = statusConfig.statuses
+        const available = allStatuses.map(s => s.id)
+
+        // Exact ID match
+        const byId = allStatuses.find(s => s.id === status)
+        if (byId) return { resolved: byId.id, available }
+        // Case-insensitive label → ID
+        const byLabel = allStatuses.find(s => s.label.toLowerCase() === status.toLowerCase())
+        if (byLabel) return { resolved: byLabel.id, available }
+
+        return { resolved: null, available }
+      }),
+      sendAgentMessageFn: this.guardManagedCallback(managed, 'self.sendAgentMessageFn', async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
+        // R35-1: cross-session sends resolve the target through the
+        // managed session's complete trusted scope; anything outside it is
+        // refused before a single byte is sent.
+        const target = this.managedScopeTarget(managed, sessionId)
+        if (!target) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+        // Build FileAttachment[] from paths (same pattern as spawn_session)
+        let fileAttachments: FileAttachment[] | undefined
+        if (attachments?.length) {
+          const builtAttachments: FileAttachment[] = []
+          for (const a of attachments) {
+            try {
+              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+              const safePath = await validateFilePath(a.path, extraDirs)
+              const attachment = readFileAttachment(safePath)
+              if (attachment) {
+                if (a.name) attachment.name = a.name
+                builtAttachments.push(attachment)
+              }
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : String(error)
+              sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
+            }
+          }
+          if (builtAttachments.length > 0) fileAttachments = builtAttachments
+        }
+
+        await this.sendMessage(target.id, message, fileAttachments)
+      }),
+      activateSourceInSessionFn: this.guardManagedCallback(managed, 'self.activateSourceInSessionFn', async (sourceSlug: string) => {
+        // R38-2: route through the DIRECT agent callback, which is itself
+        // guard-wrapped at its assignment site (see onSourceActivationRequest
+        // below) — the tool wrapper only adds the tool-result contract.
+        const cb = managed.agent?.onSourceActivationRequest
+        if (!cb) {
+          return { ok: false, reason: 'Agent has no activation callback wired' }
+        }
+        const ok = await cb(sourceSlug)
+        if (!ok) {
+          return {
+            ok: false,
+            reason: 'Activation failed — source may be unusable (disabled/unauthenticated) or server build failed. Check session logs.',
+          }
+        }
+        // Both backends need the current turn to end before new tools are visible:
+        // Claude SDK freezes mcpServers at query() start; Pi only picks up new proxy
+        // tool defs on the next handlePrompt (`toolsChanged` flag in pi-agent-server).
+        // Mark a pending restart on the agent — ClaudeAgent/PiAgent consume it after
+        // the next tool_result, yield source_activated, and forceAbort. The
+        // `source_activated` handler in this class then schedules a server-side
+        // resend of the original user message with a "[{slug} activated]" suffix —
+        // landing in a fresh turn with tools live (polo-ai-oss#804).
+        const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
+        if (userMessage) {
+          managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
+        }
+        return { ok: true, availability: 'next-turn' as const }
+      }),
+    }
+  }
+
+  /**
+   * R37-2: the ONE guarded implementation behind `onSpawnSession`. It
+   * resolves the CALLER's current trusted scope first — a stale, legacy,
+   * replaced-account, split-fence or in-transition agent may not spawn
+   * sessions under anyone's scope — then creates and messages the spawned
+   * session exactly as before.
+   */
+  private async spawnSessionFromManagedAgent(
+    managed: ManagedSession,
+    request: SpawnSessionRequest,
+  ): Promise<SpawnSessionResult> {
+    // R37-2: spawn resolves the CALLER's current trusted scope first — a
+    // stale/legacy/replaced/split-fence/in-transition agent may not spawn
+    // sessions under anyone's scope.
+    if (!this.managedTrustedScope(managed)) throw new Error('SESSION_OUT_OF_TRUSTED_SCOPE')
+    sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+
+    const session = await this.createSession(managed.workspace.id, {
+      name: request.name,
+      llmConnection: request.llmConnection ?? managed.llmConnection,
+      model: request.model ?? managed.model,
+      enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
+      permissionMode: request.permissionMode ?? managed.permissionMode,
+      thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
+      labels: request.labels ?? managed.labels,
+      workingDirectory: request.workingDirectory,
+      hidden: managed.hidden,
+      // Spawned sessions NEVER inherit the Edit Popover grant — the
+      // origin is scoped to the exact popover session that earned it
+      // (fail closed).
+      origin: managed.origin === 'edit-popover' ? undefined : managed.origin,
+    })
+
+    // Build FileAttachment[] from paths (if any)
+    let fileAttachments: FileAttachment[] | undefined
+    if (request.attachments?.length) {
+      const attachments: FileAttachment[] = []
+      for (const a of request.attachments) {
+        try {
+          const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+          if (request.workingDirectory) extraDirs.push(request.workingDirectory)
+          const safePath = await validateFilePath(a.path, extraDirs)
+          const attachment = readFileAttachment(safePath)
+          if (attachment) {
+            if (a.name) attachment.name = a.name
+            attachments.push(attachment)
+          } else {
+            sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
+        }
+      }
+      if (attachments.length > 0) fileAttachments = attachments
+    }
+
+    // Notify renderer to hydrate full session metadata (including name)
+    // before streaming events arrive. Without this, the renderer creates
+    // a synthetic empty session and shows "New Chat" in the sidebar.
+    this.sendEvent({ type: 'session_created', sessionId: session.id }, managed.workspace.id)
+
+    // Fire and forget — send the message but don't await completion
+    this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+      sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
+    })
+
+    return {
+      sessionId: session.id,
+      name: session.name || request.name || session.id,
+      status: 'started' as const,
+      connection: session.llmConnection,
+      model: session.model,
+    }
+
+  }
+
+  /**
+   * R36-1: the list_sessions implementation bound to the managed session's
+   * CURRENT complete Main-owned scope. An out-of-scope managed session
+   * (legacy/unbound, replaced account, missing fence, or in-flight
+   * fence/account replacement) lists NOTHING — not even itself. In-scope,
+   * only sessions matching the same trusted account, committed ProductSpace
+   * and Workspace are listed.
+   */
+  private listSessionsInManagedScope(
+    managed: ManagedSession,
+    options?: { status?: string; label?: string; search?: string; sortBy?: 'recent' | 'name' | 'status'; limit?: number; offset?: number },
+  ): { total: number; returned: number; sessions: Array<{ id: string; name: string; labels: string[]; status: string; createdAt: number }> } {
+    const scope = this.managedTrustedScope(managed)
+    if (!scope) {
+      return { total: 0, returned: 0, sessions: [] }
+    }
+    const DEFAULT_LIMIT = 20
+    const MAX_LIMIT = 100
+    const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
+    const offset = options?.offset ?? 0
+
+    let sessions = this.getSessions(managed.workspace.id).filter(s => (
+      trustedScopeMatchesSessionRecord(s, scope)
+    ))
+
+    // Filter
+    if (options?.status) {
+      sessions = sessions.filter(s => s.sessionStatus === options.status)
+    }
+    if (options?.label) {
+      sessions = sessions.filter(s => s.labels?.includes(options.label!))
+    }
+    if (options?.search) {
+      const needle = options.search.toLowerCase()
+      sessions = sessions.filter(s => s.name?.toLowerCase().includes(needle))
+    }
+
+    // Sort
+    const sortBy = options?.sortBy ?? 'recent'
+    if (sortBy === 'recent') {
+      sessions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    } else if (sortBy === 'name') {
+      sessions.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+    } else if (sortBy === 'status') {
+      sessions.sort((a, b) => (a.sessionStatus ?? '').localeCompare(b.sessionStatus ?? ''))
+    }
+
+    const total = sessions.length
+
+    // Paginate
+    const page = sessions.slice(offset, offset + limit)
+
+    return {
+      total,
+      returned: page.length,
+      sessions: page.map(s => ({
+        id: s.id,
+        name: s.name ?? s.id,
+        labels: s.labels ?? [],
+        status: s.sessionStatus ?? 'todo',
+        createdAt: s.createdAt ?? 0,
+      })),
+    }
+  }
+
   private sessions: Map<string, ManagedSession> = new Map()
+
+  /**
+   * R36-1: resolves the CURRENT complete Main-owned trusted scope for one
+   * managed session at EVERY callback invocation. The managed session
+   * itself must still sit inside the committed fence: a legacy record
+   * without an account binding, a session bound to a replaced account, a
+   * missing fence, or an in-flight fence/account replacement (fence account
+   * and synchronous mirror disagreeing) makes the scope null — fail closed
+   * even for SELF targets. There is no self bypass and no legacy exception.
+   */
+  private managedTrustedScope(managed: ManagedSession): {
+    accountId: string
+    productSpaceId: string
+    workspaceId: string
+  } | null {
+    // R37-1: the resolution brackets its reads with the account transition
+    // epoch and refuses an in-flight transition outright — a beginEnding
+    // that has already published its epoch fails closed even while the old
+    // fence and mirror still agree.
+    const transitionEpochBefore = getAccountTransitionEpoch()
+    const accountGenerationBefore = getTrustedAccountGeneration()
+    const runtimeScope = getRuntimeActiveProductSpaceScope()
+    const syncAccountId = getSyncTrustedProductSpaceAccountId()
+    const transitionEpochAfter = getAccountTransitionEpoch()
+    if (transitionEpochAfter !== transitionEpochBefore) return null
+    if (isAccountTransitionInProgress()) return null
+    if (getTrustedAccountGeneration() !== accountGenerationBefore) return null
+    if (!runtimeScope || !syncAccountId || runtimeScope.accountId !== syncAccountId) return null
+    if (!trustedScopeMatchesSessionRecord({
+      accountId: managed.accountId,
+      productSpaceId: managed.productSpaceId,
+      workspaceId: managed.workspace.id,
+    }, {
+      accountId: runtimeScope.accountId,
+      productSpaceId: runtimeScope.productSpaceId,
+      workspaceId: managed.workspace.id,
+    })) {
+      return null
+    }
+    // Final CAS immediately before returning the scope.
+    if (
+      getAccountTransitionEpoch() !== transitionEpochAfter
+      || getTrustedAccountGeneration() !== accountGenerationBefore
+    ) {
+      return null
+    }
+    return {
+      accountId: runtimeScope.accountId,
+      productSpaceId: runtimeScope.productSpaceId,
+      workspaceId: managed.workspace.id,
+    }
+  }
+
+  /**
+   * R35-1/R36-1: resolves a self-management tool TARGET session through the
+   * managed session's CURRENT complete Main-owned scope. The managed
+   * session and the target — including a SELF target — must both match the
+   * same immutable trusted account, committed ProductSpace and Workspace;
+   * anything else does not exist for this caller (null → fail closed).
+   */
+  private managedScopeTarget(managed: ManagedSession, targetId: string): ManagedSession | null {
+    const scope = this.managedTrustedScope(managed)
+    if (!scope) return null
+    const target = this.sessions.get(targetId)
+    if (!target) return null
+    if (!trustedScopeMatchesSessionRecord({
+      accountId: target.accountId,
+      productSpaceId: target.productSpaceId,
+      workspaceId: target.workspace.id,
+    }, scope)) return null
+    return target
+  }
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -2482,7 +3053,7 @@ export class SessionManager implements ISessionManager {
    * Aggregate unread state across all workspaces.
    * Excludes hidden and archived sessions from counts/indicators.
    */
-  getUnreadSummary(): UnreadSummary {
+  getUnreadSummary(scope?: { productSpaceId: string; accountId: string } | null): UnreadSummary {
     const byWorkspace: Record<string, number> = {}
     const hasUnreadByWorkspace: Record<string, boolean> = {}
 
@@ -2491,7 +3062,19 @@ export class SessionManager implements ISessionManager {
       hasUnreadByWorkspace[workspace.id] = false
     }
 
+    // R33-1: the aggregate is bound to the COMPLETE trusted scope — space
+    // AND account. `undefined` derives the scope from the runtime fence
+    // (internal badge callers); an explicit null fails closed to an empty
+    // summary; a replaced account never sees its predecessor's unread state.
+    const effectiveScope = scope === undefined
+      ? captureTrustedSessionScope()
+      : scope
+    if (!effectiveScope) {
+      return { totalUnreadSessions: 0, byWorkspace, hasUnreadByWorkspace }
+    }
     for (const session of this.sessions.values()) {
+      if (session.productSpaceId !== effectiveScope.productSpaceId) continue
+      if (!session.accountId || session.accountId !== effectiveScope.accountId) continue
       if (session.hidden || session.isArchived) continue
       if (!session.hasUnread) continue
 
@@ -2617,7 +3200,15 @@ export class SessionManager implements ISessionManager {
       // The retry reuses the persisted answer message — no duplicate user turn.
       // A TERMINAL completed record only clears durably — it must never
       // re-execute an already-completed answer turn.
-      if (storedSession.pendingAgentResume) {
+      // R43: the durable resume-quarantine barrier is consulted FIRST — a
+      // quarantined resume (its compensation failed under a lost scope) is
+      // dropped WITHOUT arming and WITHOUT scheduling anything, even when
+      // the header record itself could never be flipped to TERMINAL.
+      if (storedSession.pendingAgentResume
+        && await this.isResumeQuarantinedByBarrier(managed.workspace.rootPath, managed.id, storedSession.pendingAgentResume.messageId)) {
+        sessionLog.warn(`pendingAgentResume for session ${managed.id} is durably QUARANTINED — dropping without arming (the old answer turn can never execute)`)
+        managed.pendingAgentResume = undefined
+      } else if (storedSession.pendingAgentResume) {
         if (storedSession.pendingAgentResume.completed) {
           managed.pendingAgentResume = storedSession.pendingAgentResume
           sessionLog.info(`Restoring TERMINAL pendingAgentResume for session ${managed.id} — clearing without resuming`)
@@ -2678,10 +3269,29 @@ export class SessionManager implements ISessionManager {
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
+    // R46/R50: retry the cleanup of any quarantined unpublished candidate and
+    // any timed-out runtime disposal first — no-ops while empty.
+    await this.sweepQuarantinedUnpublishedRuntimes()
+    await this.sweepQuarantinedRuntimeDisposals()
     const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
+
+    // R33-1: the complete immutable scope {accountId, productSpaceId} is
+    // captured in ONE atomic read before anything else. Creating under a
+    // committed fence with an incomplete scope fails closed — a session is
+    // never born partially bound or with the space/account read in two
+    // separate steps that a concurrent replacement could split.
+    const trustedScope = captureTrustedSessionScope()
+    if (getRuntimeActiveProductSpace() && !trustedScope) {
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
+    // R37-4: the publication token binds the captured scope to the current
+    // transition epoch, account-binding generation and fence generation, so
+    // the session is persisted and published ONLY while that exact
+    // account/ProductSpace/fence state is still current.
+    const publicationToken = trustedScope ? captureTrustedPublicationToken() : null
 
     // Fail closed: the generic creation path can
     // NEVER grant the Edit Popover origin. The type system already excludes
@@ -2784,6 +3394,33 @@ export class SessionManager implements ISessionManager {
       }
 
       const sourceManaged = this.sessions.get(options.branchFromSessionId)
+      // The branch source must live inside the committed active ProductSpace:
+      // an old-space session can never seed a new-space branch.
+      const activeProductSpaceId = getRuntimeActiveProductSpace()
+      const sourceSpaceId = sourceManaged?.productSpaceId
+      if (activeProductSpaceId && sourceSpaceId !== activeProductSpaceId) {
+        sessionLog.warn('Branch validation failed: source session belongs to another ProductSpace', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          sourceProductSpaceId: sourceSpaceId,
+          activeProductSpaceId,
+        })
+        throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
+      }
+      // R33-1: the branch source must also belong to the CURRENT trusted
+      // account. A replaced account can never branch (and thereby adopt the
+      // message history of) a session bound to its predecessor.
+      if (activeProductSpaceId) {
+        const branchTrustedAccountId = getSyncTrustedProductSpaceAccountId()
+        if (!branchTrustedAccountId || sourceManaged?.accountId !== branchTrustedAccountId) {
+          sessionLog.warn('Branch validation failed: source session belongs to another account', {
+            workspaceId,
+            branchFromSessionId: options.branchFromSessionId,
+            sourceAccountId: sourceManaged?.accountId,
+          })
+          throw new Error('Invalid branch request: source session belongs to a different account')
+        }
+      }
       if (sourceManaged) {
         if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
           sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
@@ -2807,6 +3444,34 @@ export class SessionManager implements ISessionManager {
           branchFromSessionId: options.branchFromSessionId,
         })
         throw new Error(`Invalid branch request: source session ${options.branchFromSessionId} not found`)
+      }
+      // Cold sources carry the same immutable binding in their header.
+      if (activeProductSpaceId && sourceSession.productSpaceId !== activeProductSpaceId) {
+        sessionLog.warn('Branch validation failed: cold source session belongs to another ProductSpace', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          sourceProductSpaceId: sourceSession.productSpaceId,
+          activeProductSpaceId,
+        })
+        throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
+      }
+      // R33-1: a cold source's immutable account binding must equally match
+      // the current trusted account — an unbound (legacy) or replaced-account
+      // cold record is never adopted into a fresh branch.
+      if (activeProductSpaceId) {
+        const coldTrustedAccountId = getSyncTrustedProductSpaceAccountId()
+        if (
+          !coldTrustedAccountId
+          || !sourceSession.accountId
+          || sourceSession.accountId !== coldTrustedAccountId
+        ) {
+          sessionLog.warn('Branch validation failed: cold source session belongs to another account', {
+            workspaceId,
+            branchFromSessionId: options.branchFromSessionId,
+            sourceAccountId: sourceSession.accountId,
+          })
+          throw new Error('Invalid branch request: source session belongs to a different account')
+        }
       }
 
       const sourceBackendContext = resolveBackendContext({
@@ -2947,6 +3612,17 @@ export class SessionManager implements ISessionManager {
       })
     }
 
+    // R37-4: pre-write publication CAS — the captured account/fence state
+    // must still be current BEFORE any storage is created. This rejects
+    // scope drift that happened during branch validation (including its
+    // awaited source flush) before a single byte is written.
+    if (publicationToken && !isTrustedPublicationTokenCurrent(publicationToken)) {
+      sessionLog.warn('Session creation lost the pre-write publication race: scope/fence changed during validation', {
+        workspaceId,
+      })
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
+
     // Use storage layer to create and persist the session
     const storedSession = await this.sessionStorage.create(workspaceRootPath, {
       name: options?.name,
@@ -2960,6 +3636,8 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
+      productSpaceId: trustedScope?.productSpaceId,
+      accountId: trustedScope?.accountId,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -3042,6 +3720,8 @@ export class SessionManager implements ISessionManager {
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
       llmConnection: options?.llmConnection,
+      productSpaceId: trustedScope?.productSpaceId,
+      accountId: trustedScope?.accountId,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
@@ -3100,6 +3780,58 @@ export class SessionManager implements ISessionManager {
       }
     }
 
+    // R37-4/R38-4: FINAL publication CAS — immediately before installing
+    // ANY global runtime state and publishing, the captured
+    // account/ProductSpace/fence state must still be current. A replacement,
+    // fence change or epoch bump during branch validation, storage writes,
+    // message loading or backend preflight rolls the created session back
+    // and publishes nothing.
+    if (publicationToken && !isTrustedPublicationTokenCurrent(publicationToken)) {
+      sessionLog.warn('Session creation lost its publication race: scope/fence changed during awaited work', {
+        workspaceId,
+        sessionId: storedSession.id,
+      })
+      let rollbackFailure: string | null = null
+      if (managed.agent) {
+        try {
+          await this.disposeManagedAgentRuntime(managed, 'stale_publication_scope')
+        } catch (rollbackError) {
+          rollbackFailure = `agent rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+          // R46: the disposal failed, so the live runtime references survive
+          // on this never-published candidate — hand it into the manager-
+          // owned quarantine registry (owner-token-bound, callback-refusing,
+          // retryable) instead of letting it become unreachable when this
+          // method throws.
+          this.quarantineUnpublishedCandidateRuntime(managed, 'stale_publication_scope rollback disposal failed')
+        }
+      }
+      // R39-4: cleanup is conditioned on OWNER IDENTITY — no concurrent
+      // valid same-ID owner having published in the meantime. When we own
+      // the rollback, mode/automation state is ALWAYS cleaned (even if the
+      // disk delete fails); only the disk delete failure is surfaced as a
+      // rollback-incomplete error.
+      if (!this.sessions.has(storedSession.id)) {
+        cleanupModeState(storedSession.id)
+        this.automationSystems.get(workspaceRootPath)?.clearInitialSessionMetadata(storedSession.id)
+        if (!rollbackFailure) {
+          let deleted: boolean
+          try {
+            deleted = this.sessionStorage.delete(workspaceRootPath, storedSession.id)
+          } catch (deleteError) {
+            rollbackFailure = `storage delete threw: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`
+            deleted = false
+          }
+          if (deleted === false) {
+            rollbackFailure = 'storage delete returned false'
+          }
+        }
+      }
+      if (rollbackFailure) {
+        throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${rollbackFailure})`)
+      }
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
+
     // Initialize mode-manager state immediately to avoid UI/enforcement races
     // before the agent instance is lazily created.
     setPermissionMode(storedSession.id, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
@@ -3108,6 +3840,11 @@ export class SessionManager implements ISessionManager {
     }
 
     this.sessions.set(storedSession.id, managed)
+    // R39-2: the registration guard is installed BEFORE the session (and
+    // later its agent) can register any tool callback.
+    this.installManagedSessionCallbackGuard(managed)
+    // R50/R51: rebind the owner lease to the published guard identity.
+    managed.callbackLease = getSessionScopedToolCallbackLease(storedSession.id)
 
     // Initialize session metadata in AutomationSystem for diffing
     const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -3141,6 +3878,7 @@ export class SessionManager implements ISessionManager {
   async createEditPopoverSession(
     workspaceId: string,
     options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+    scopeToken?: TrustedSessionScopeToken | null,
   ): Promise<Session> {
     // Fail closed: the owner is a REQUIRED,
     // server-validated non-empty stable identity. A missing/blank owner
@@ -3156,6 +3894,31 @@ export class SessionManager implements ISessionManager {
     // Never trust a caller-provided origin routing — destructured off and
     // replaced by the server-side stamp below.
     const { popoverOwner: _ignored, ...createOptions } = options
+    // R41-2: ONE trusted scope token identifies the WHOLE privileged
+    // operation — captured BEFORE the first create await (the RPC entry
+    // token when provided, otherwise captured here), and threaded through
+    // the generic creation AND the durable origin stamp. A token captured
+    // only after the awaited createSession would silently re-brand the
+    // operation with a REPLACED scope: a create that completed under
+    // ProductSpace A followed by an A→B switch inside the continuation gap
+    // must never stamp the A-bound session while B is active.
+    const entryToken = scopeToken ?? captureCompleteTrustedSessionScopeToken(workspaceId)
+    const assertStampScopeCurrent = (): void => {
+      if (!entryToken || !isTrustedSessionScopeTokenCurrent(entryToken)) {
+        sessionLog.warn(`Edit Popover session creation for workspace ${workspaceId} refused: the trusted scope captured at entry is no longer current`)
+        throw new ProductSpaceScopeRefusalError()
+      }
+    }
+    // The created record must carry EXACTLY the entry scope's immutable
+    // identity — a same-token anomaly (record bound to a different
+    // account/space/workspace than the authorizing token) is refused too.
+    const managedMatchesEntryScope = (candidate: ManagedSession): boolean =>
+      !entryToken
+      || (candidate.accountId === entryToken.accountId
+        && candidate.productSpaceId === entryToken.productSpaceId
+        && candidate.workspace.id === entryToken.workspaceId)
+    assertStampScopeCurrent()
+
     const session = await this.createSession(workspaceId, createOptions)
     const managed = this.sessions.get(session.id)
     if (!managed) {
@@ -3163,81 +3926,761 @@ export class SessionManager implements ISessionManager {
       // defense in depth.
       return session
     }
-    // Stamp server-side, then make it durable. ONLY a successful persist+flush
-    // leaves the session privileged: a transient disk failure must never hand
-    // the renderer a "created" session that silently lacks its eligibility —
-    // such a session loses request_user_input on desktop turns and stays
-    // invisible to owner-scoped recovery forever. The just-created hidden
-    // orphan is torn down (runtime + memory + disk, best-effort) and the RPC
-    // REJECTS as transient so the restore/send entry can retry cleanly
-    //.
-    managed.origin = 'edit-popover'
-    managed.popoverOwner = popoverOwner
-    try {
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-    } catch (error) {
-      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; removing the orphan session:`, error)
-      await rollbackFailedBranchCreation({
-        managed,
-        workspaceRootPath: managed.workspace.rootPath,
-        sessionId: managed.id,
-        deleteFromRuntimeSessions: (orphanId) => {
-          const orphan = this.sessions.get(orphanId)
+
+    // R42: the immutable CREATION-OWNER identity. Every teardown step below
+    // is conditioned on the exact ManagedSession object still occupying the
+    // id — a replacement owner (same id re-created by a later flow) must
+    // keep its memory entry, storage record, mode state, automation
+    // metadata and callback registrations untouched.
+    const owner = { sessionId: session.id, managed }
+    const stillOwns = (): boolean => this.sessions.get(owner.sessionId) === owner.managed
+
+    // R42: owner-aware teardown whose result ENUMERATES every cleanup
+    // surface (agent runtime + session-scoped callbacks, mode state,
+    // automation metadata, memory, storage) with per-surface
+    // cleaned / skipped-new-owner / failed status. Failures are reported to
+    // the caller honestly — never masked by a post-check that only inspects
+    // the already-deleted object.
+    const teardownOwned = async (reason: string): Promise<string | null> => {
+      const outcomes: Array<{ surface: string; status: 'cleaned' | 'skipped-new-owner' | 'failed'; detail?: string }> = []
+      const push = (surface: string, status: 'cleaned' | 'skipped-new-owner' | 'failed', detail?: string): void => {
+        outcomes.push({ surface, status, detail })
+      }
+
+      // R42/R43: ownership is decided ONCE at teardown entry, and RE-VERIFIED
+      // before EVERY id-wide cleanup step — a replacement owner that lands
+      // while an awaited disposal is parked must find every later step
+      // skipped, never its own registrations destroyed.
+      const ownedAtStart = stillOwns()
+      const ownsNow = (): boolean => stillOwns()
+
+      if (!ownedAtStart) {
+        // A replacement owner occupies the id: its memory entry, storage
+        // record, mode state, automation metadata and session-scoped
+        // callback registrations are the NEW owner's and must survive.
+        // (Execution start reservations are reservation-OBJECT scoped and
+        // were never taken by this creation, so there is no id-wide
+        // execution surface to clean.)
+        for (const surface of ['agent-runtime+session-callbacks', 'mode-state', 'automation-metadata', 'memory', 'storage']) {
+          push(surface, 'skipped-new-owner')
+        }
+      } else {
+        // Agent runtime — object-scoped disposal of OUR creation, with the
+        // id-wide callback/guard unregistration gated live on ownership.
+        // Disposal failures are STRUCTURED: they reach this enumeration as
+        // `failed` (never a fake success while the old process may live).
+        // R45: best-effort is explicit here — the whole session is being
+        // discarded and every other surface is enumerated below.
+        const runtime = await this.disposeManagedAgentRuntime(managed, reason, {
+          shouldUnregisterCallbacks: ownsNow,
+          bestEffort: true,
+        })
+        if (runtime.failures.length > 0) {
+          push('agent-runtime', 'failed', runtime.failures.join('; '))
+        } else {
+          push('agent-runtime', 'cleaned')
+        }
+        push('session-callbacks', runtime.callbacksUnregistered ? 'cleaned' : 'skipped-new-owner')
+        // mode state — id-wide: re-verified.
+        if (ownsNow()) {
+          try {
+            cleanupModeState(owner.sessionId)
+            push('mode-state', 'cleaned')
+          } catch (teardownError) {
+            push('mode-state', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+          }
+        } else {
+          push('mode-state', 'skipped-new-owner')
+        }
+        // automation metadata — id-wide: re-verified.
+        if (ownsNow()) {
+          try {
+            this.automationSystems.get(managed.workspace.rootPath)?.clearInitialSessionMetadata(owner.sessionId)
+            push('automation-metadata', 'cleaned')
+          } catch (teardownError) {
+            push('automation-metadata', 'failed', teardownError instanceof Error ? teardownError.message : String(teardownError))
+          }
+        } else {
+          push('automation-metadata', 'skipped-new-owner')
+        }
+        // memory — id-wide: only OUR exact object is ever removed.
+        if (this.sessions.get(owner.sessionId) === owner.managed) {
+          const orphan = this.sessions.get(owner.sessionId)
           if (orphan?.autoRetryTimer) {
             clearTimeout(orphan.autoRetryTimer)
             orphan.autoRetryTimer = undefined
           }
           if (orphan) orphan.autoRetryPending = undefined
-          this.sessions.delete(orphanId)
-        },
-        deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
-      })
-      throw new Error(`Edit Popover session creation is temporarily unavailable (durable origin stamp failed): ${error instanceof Error ? error.message : String(error)}`)
+          this.sessions.delete(owner.sessionId)
+          push('memory', 'cleaned')
+        } else {
+          push('memory', 'skipped-new-owner')
+        }
+        // storage — identity-scoped: deleted only while the id is still OURS.
+        // After our own memory step the map entry is absent — that absence is
+        // THIS teardown's own doing and the storage record remains ours to
+        // delete; a PRESENT different object is a replacement owner whose
+        // record must never be touched.
+        const storageOwnershipProbe = this.sessions.get(owner.sessionId)
+        if (storageOwnershipProbe === undefined || storageOwnershipProbe === owner.managed) {
+          try {
+            const deleted = this.sessionStorage.delete(managed.workspace.rootPath, owner.sessionId)
+            if (deleted === false) {
+              push('storage', 'failed', 'storage delete returned false')
+            } else {
+              push('storage', 'cleaned')
+            }
+          } catch (storageError) {
+            push('storage', 'failed', storageError instanceof Error ? storageError.message : String(storageError))
+          }
+        } else {
+          push('storage', 'skipped-new-owner')
+        }
+      }
+
+      for (const outcome of outcomes) {
+        if (outcome.status === 'failed') {
+          sessionLog.error(`Edit Popover creation teardown of ${owner.sessionId}: ${outcome.surface} FAILED${outcome.detail ? `: ${outcome.detail}` : ''}`)
+        } else if (outcome.status === 'skipped-new-owner') {
+          sessionLog.info(`Edit Popover creation teardown of ${owner.sessionId}: ${outcome.surface} preserved for the replacement owner`)
+        }
+      }
+      const failures = outcomes.filter(o => o.status === 'failed')
+      return failures.length > 0
+        ? failures.map(f => `${f.surface}: ${f.detail ?? 'failed'}`).join('; ')
+        : null
+    }
+    const scopeRefusal = (incomplete: string | null): ProductSpaceScopeRefusalError =>
+      new ProductSpaceScopeRefusalError(incomplete ? `rollback incomplete: ${incomplete}` : undefined)
+
+    // Continuation-gap gate: the awaited createSession may have completed
+    // under a scope that was replaced while this frame was suspended — or
+    // the id may have been taken over by a replacement owner.
+    try {
+      assertStampScopeCurrent()
+      if (!stillOwns()) {
+        throw new ProductSpaceScopeRefusalError('the created session id is now owned by a replacement')
+      }
+      if (!managedMatchesEntryScope(managed)) {
+        throw new Error('created session is not bound to the entry trusted scope')
+      }
+    } catch (error) {
+      sessionLog.error(`Edit Popover session ${managed.id} lost its entry scope after creation; tearing the creation down:`, error)
+      const incomplete = await teardownOwned('trusted-scope lost after creation')
+      throw scopeRefusal(incomplete)
+    }
+
+    // Stamp server-side, then make it durable. ONLY a successful persist+flush
+    // leaves the session privileged: a transient disk failure must never hand
+    // the renderer a "created" session that silently lacks its eligibility —
+    // such a session loses request_user_input on desktop turns and stays
+    // invisible to owner-scoped recovery forever. The just-created hidden
+    // orphan is torn down (runtime + memory + disk, every surface identity-
+    // conditioned) and the RPC REJECTS so the restore/send entry can retry
+    // cleanly.
+    managed.origin = 'edit-popover'
+    managed.popoverOwner = popoverOwner
+    try {
+      assertStampScopeCurrent()
+      if (!stillOwns()) {
+        throw new ProductSpaceScopeRefusalError('the created session id is now owned by a replacement')
+      }
+      if (!managedMatchesEntryScope(managed)) {
+        throw new Error('created session is not bound to the entry trusted scope')
+      }
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      // R41-2: post-flush CAS — the stamp is published only while the entry
+      // scope still rules and the record still carries its exact identity.
+      assertStampScopeCurrent()
+      if (!stillOwns()) {
+        throw new ProductSpaceScopeRefusalError('the created session id is now owned by a replacement')
+      }
+      if (!managedMatchesEntryScope(managed)) {
+        throw new Error('created session is not bound to the entry trusted scope')
+      }
+    } catch (error) {
+      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; tearing the creation down:`, error)
+      const incomplete = await teardownOwned('durable origin stamp failed')
+      if (isProductSpaceScopeRefusal(error)) {
+        throw scopeRefusal(incomplete)
+      }
+      throw new Error(`Edit Popover session creation is temporarily unavailable (durable origin stamp failed${incomplete ? `, rollback incomplete: ${incomplete}` : ''}): ${error instanceof Error ? error.message : String(error)}`)
     }
     return managedToSession(managed, this.sessionStorage)
   }
 
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+  /**
+   * R43: dispose the session's live runtime surfaces with a STRUCTURED
+   * result instead of swallowing failures. Every disposal failure is
+   * reported (the failed reference is deliberately KEPT so a retry can
+   * target the still-live resource).
+   *
+   * R45: disposal failures can no longer be IGNORED by production callers —
+   * with `bestEffort` unset (the default, strict mode) any failure THROWS a
+   * typed {@link AgentRuntimeDisposalError}, and the session's runtime
+   * bookkeeping AND session-scoped callback/guard registrations are left
+   * untouched so the stale runtime stays consistent for a retry (never
+   * unregistered while it still lives). Only an explicit
+   * `bestEffort: true` — the edit-popover creation teardown, where the whole
+   * session is being discarded and every other surface is enumerated anyway
+   * — keeps the R43 behaviour: failures returned, cleanup continued.
+   * The id-wide session-scoped tool callback/guard unregistration remains
+   * gated by `shouldUnregisterCallbacks` (re-evaluated AFTER the awaited
+   * disposals): a teardown whose owner was replaced while it was parked must
+   * not unregister the replacement owner's registrations.
+   */
+  private async disposeManagedAgentRuntime(
+    managed: ManagedSession,
+    reason: string,
+    opts?: { shouldUnregisterCallbacks?: () => boolean; bestEffort?: boolean; ignoreQuarantineClaim?: boolean },
+  ): Promise<{ failures: string[]; callbacksUnregistered: boolean }> {
     const sessionId = managed.id
+    const failures: string[] = []
+    const note = (what: string, error: unknown): void => {
+      const detail = error instanceof Error ? error.message : String(error)
+      failures.push(`${what}: ${detail}`)
+      sessionLog.warn(`Failed to dispose ${what} for ${sessionId} during ${reason}: ${detail}`)
+    }
+    // R49/R50: capture the OWNER-BOUND lease — `managed.callbackLease` is
+    // the exact (record, guard) pair THIS session's runtime registered and
+    // refreshed at every owner mutation. The sessionId's CURRENT registry
+    // lookup is never an ownership proof: a same-id successor that published
+    // before this disposal started must not be captured here, and one that
+    // publishes during the awaited disposals fails the CAS below.
+    const callbackLeaseAtEntry = managed.callbackLease
 
-    if (managed.agent) {
+    const originalOps: Promise<unknown>[] = []
+
+    // R53 (issue 6): when a quarantine claim already owns this managed's
+    // retained faces, the caller must NOT issue overlapping resource API
+    // calls — the claim's retry awaits the originals first and retries
+    // exactly once (the entry only exists while faces are still retained;
+    // it is deleted after a full settle). Only the claim ITSELF
+    // (ignoreQuarantineClaim) may issue.
+    const claimOwnsFaces = opts?.ignoreQuarantineClaim !== true
+      && this.findQuarantinedRuntimeDisposalEntry(managed) !== undefined
+
+    if (managed.agent && !claimOwnsFaces) {
       try {
         if (managed.agent.disposeForRestart) {
-          await managed.agent.disposeForRestart()
+          // R50: bounded — a hung disposeForRestart must not pin the
+          // lifecycle lock tail or the question-state lock.
+          const restarted = await this.boundedRuntimeDisposal(sessionId, 'agent-dispose-for-restart', async () => {
+            await managed.agent!.disposeForRestart!()
+            return 'disposed' as const
+          }, failures)
+          if (restarted.status === 'timeout') originalOps.push(restarted.original)
+          if (restarted.status === 'settled') managed.agent = null
+          // On timeout the failure is recorded and the reference retained.
         } else {
           managed.agent.dispose()
+          managed.agent = null
         }
       } catch (error) {
-        sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
+        note('agent', error)
       }
     }
 
-    if (managed.poolServer) {
+    if (managed.poolServer && !claimOwnsFaces) {
+      // R50: bounded — on timeout the reference is RETAINED and the runtime
+      // is moved to the manager-owned retryable disposal quarantine.
+      const stopped = await this.boundedRuntimeDisposal(sessionId, 'pool-server', async () => {
+        await managed.poolServer!.stop()
+        return 'stopped' as const
+      }, failures)
+      if (stopped.status === 'timeout') originalOps.push(stopped.original)
+      if (stopped.status === 'settled') managed.poolServer = undefined
+    }
+
+    if (managed.mcpPool && !claimOwnsFaces) {
+      // R50: bounded — same retained-on-timeout semantics as pool-server.
+      const disconnected = await this.boundedRuntimeDisposal(sessionId, 'mcp-pool', async () => {
+        await managed.mcpPool!.disconnectAll()
+        return 'disconnected' as const
+      }, failures)
+      if (disconnected.status === 'timeout') originalOps.push(disconnected.original)
+      if (disconnected.status === 'settled') managed.mcpPool = undefined
+    }
+
+    const strictFailure = failures.length > 0 && opts?.bestEffort !== true
+    if (!strictFailure) {
+      managed.envOverrides = undefined
+      managed.agentReady = undefined
+      managed.agentReadyResolve = undefined
+      managed.backendRuntimeSignature = undefined
+      managed.backendRestartSignature = undefined
+      // R53: a fully successful disposal settles any earlier incomplete one.
+      // R54 (issue 3): ONLY when no retained faces remain under a live
+      // quarantine claim — a disposal that skipped every face on behalf of
+      // a claim has settled nothing, and must not clear the marker as if it
+      // had. The claim's own settlement clears the marker when every
+      // retained face has settled (marker and map drain in sync).
+      if (this.findQuarantinedRuntimeDisposalEntry(managed) === undefined) {
+        managed.disposalIncomplete = undefined
+      }
+    } else {
+      // R46: the retained faces are tracked INDEPENDENTLY of managed.agent —
+      // a successor agent must never be built over them silently.
+      managed.disposalIncomplete = { reason, failures: [...failures] }
+      // R50/R52: move the retained live faces into the manager-owned
+      // retryable quarantine — delete/refresh/create proceed while the
+      // still-shutting-down resources are retried by the sweep (exactly-once
+      // per entry). The timed-out ops' ORIGINAL promises travel with the
+      // entry so the sweep waits for them instead of overlapping retries.
+      this.quarantineIncompleteRuntimeDisposal(managed, failures, reason, originalOps)
+    }
+
+    let callbacksUnregistered = false
+    const wantsCallbackCleanup = !strictFailure
+      && (!opts?.shouldUnregisterCallbacks || opts.shouldUnregisterCallbacks())
+    if (wantsCallbackCleanup) {
+      // R49/R50/R53: the cleanup walks THREE escalating, owner-verified
+      // paths — each one refuses to touch a successor's state:
+      // 1. FULL LEASE CAS — the exact (record, guard, owner) snapshot this
+      //    runtime published and refreshed. The normal live-disposal path.
+      // 2. OWNER-TOKEN CAS — this construction DID register its record but
+      //    threw/was aborted before the lease was promoted onto the managed
+      //    (register-then-throw). Ownership is proven by the immutable
+      //    runtime token minted for THIS generation: both the live lease
+      //    owner and the live guard owner must equal it. Previously this
+      //    form leaked BOTH the record and the guard (the stale-lease
+      //    branch short-circuited the guard-only fallback).
+      // 3. GUARD-ONLY CAS — the factory threw BEFORE any record existed.
+      //    Only removes the guard while no record is registered and the
+      //    guard identity is unchanged, so a successor inserting between
+      //    the steps is never unguarded.
+      const guardLeaseAtEntry = managed.constructionCallbackGuardLease
+      const ownerTokenAtEntry = managed.runtimeOwnerToken
+      if (callbackLeaseAtEntry !== undefined && unregisterSessionScopedToolCallbacksIf(sessionId, callbackLeaseAtEntry)) {
+        callbacksUnregistered = true
+      } else if (ownerTokenAtEntry !== undefined && unregisterSessionScopedToolCallbacksIfOwner(sessionId, ownerTokenAtEntry)) {
+        callbacksUnregistered = true
+      } else if (guardLeaseAtEntry !== undefined && unregisterSessionScopedToolGuardIf(sessionId, guardLeaseAtEntry)) {
+        callbacksUnregistered = true
+      }
+      if (!callbacksUnregistered) {
+        sessionLog.info(`Callback state for session ${sessionId} was replaced by a successor during ${reason}; cleanup skipped`)
+      }
+    }
+    if (strictFailure) {
+      throw new AgentRuntimeDisposalError(reason, failures, callbacksUnregistered)
+    }
+    return { failures, callbacksUnregistered }
+  }
+
+  /**
+   * R46: retry every retained runtime face from an earlier partially failed
+   * strict disposal BEFORE the caller takes any early return or constructs a
+   * replacement runtime — otherwise the retained poolServer/mcpPool
+   * references would be orphaned (overwritten) and their processes leaked.
+   * Strict: a retry that fails again keeps the state and propagates the
+   * typed error, so no successor runtime is ever built over retained faces.
+   *
+   * R53 (issue 6): the retry is routed through the SAME per-entry single
+   * -flight claim every other consumer uses — the claim awaits the timed-out
+   * original ops before any resource API call, and THIS caller's join is
+   * bounded. If the settlement has not completed within the bound (or failed
+   * again), the strict typed error propagates instead of building anything
+   * over retained faces.
+   */
+  private async settlePendingRuntimeDisposal(managed: ManagedSession, reason: string): Promise<void> {
+    if (!managed.disposalIncomplete) return
+    const quarantined = this.findQuarantinedRuntimeDisposalEntry(managed)
+    if (quarantined) {
+      sessionLog.info(`Retrying the incompletely disposed runtime surfaces for session ${managed.id} (${managed.disposalIncomplete.reason}) before ${reason}`)
+      this.claimQuarantinedSettlement(quarantined.token, quarantined.entry)
+      const outcome = await this.joinQuarantinedClaimBounded(quarantined.entry)
+      if (outcome === 'settled' && !managed.disposalIncomplete) return
+      throw new AgentRuntimeDisposalError(reason, quarantined.entry.failures, false)
+    }
+    // No quarantine entry (seeded/hand-built state): strict direct retry.
+    sessionLog.info(`Retrying the incompletely disposed runtime surfaces for session ${managed.id} (${managed.disposalIncomplete.reason}) before ${reason}`)
+    await this.disposeManagedAgentRuntime(managed, `${reason}: retrying incomplete disposal`)
+    managed.disposalIncomplete = undefined
+    sessionLog.info(`Retried incomplete disposal for session ${managed.id} is now fully settled`)
+  }
+
+  /**
+   * R53 (issue 6): manager-owned RETRYABLE quarantine for runtimes whose
+   * disposal timed out — keyed by the IMMUTABLE quarantine token (not the
+   * live session id), so same-id successors never evict a stale runtime's
+   * retry handle and multiple stale runtimes that shared an id all stay
+   * reachable.
+   *
+   * Settlement is a GLOBAL PER-ENTRY SINGLE-FLIGHT claim (`inFlight`): every
+   * retry consumer (create/delete/refresh sweeps) claims-or-joins THE SAME
+   * claim. The claim awaits the timed-out ORIGINAL ops before ANY resource
+   * API call (a still-running shutdown is never overlapped, and timed-out
+   * retries initiated by delete/refresh are tracked by merging their
+   * original ops into the entry). A FAILED claim CLEARS `inFlight` (guard
+   * semantics) so a later sweep can claim again; a successful one deletes
+   * the entry exactly once. Every CALLER's join is BOUNDED
+   * (`quarantineJoinTimeoutMs`) — the lifecycle lock and createSession
+   * return within the contract even while a shutdown is permanently hung.
+   */
+  private readonly quarantinedRuntimeDisposals = new Map<string, QuarantinedRuntimeDisposalEntry>()
+
+  /** R53 (issue 6): bound on ONE caller's join of a quarantine claim. */
+  private quarantineJoinTimeoutMs = 2_000
+
+  /**
+   * R53 (issue 6): the ONE per-entry settlement claim. Installs `inFlight`
+   * atomically if none is active; the claim awaits the entry's original ops
+   * before retrying any resource API, reports `settled`/`retryable`, and
+   * CLEARS `inFlight` on completion so a failed settlement can be re-claimed
+   * by a later sweep. Returns whether this caller installed a NEW claim.
+   */
+  private claimQuarantinedSettlement(
+    token: string,
+    entry: QuarantinedRuntimeDisposalEntry,
+  ): boolean {
+    if (entry.inFlight) return false
+    // R57 (issue 1, obs a1d8fa51): the claim binds to the EXACT unpublished
+    // quarantine generation captured at INSTALLATION time — before any
+    // await. A same-id successor that replaces the id-keyed map entry (and
+    // installs its own refusing lease) while this claim is parked is NEVER
+    // looked up at settle time and NEVER touched by this old claim.
+    const unpublishedAtClaim = this.unpublishedRuntimeQuarantine.get(entry.managed.id)
+    const unpublishedBoundToThisRuntime = unpublishedAtClaim !== undefined
+      && unpublishedAtClaim.managed === entry.managed
+      ? unpublishedAtClaim
+      : undefined
+    const claim: Promise<'settled' | 'retryable'> = (async () => {
+      // R57 (issue 2, obs 5f80125a): cleanup phase tracking — once the
+      // retained faces have settled, a retry NEVER re-issues resource
+      // calls; only the remaining unpublished cleanup runs.
+      if (entry.cleanupPhase !== 'faces-settled') {
+        // Wait out the timed-out ORIGINAL ops (released hung shutdowns etc.)
+        // before retrying — never overlap a still-running shutdown, and never
+        // call a resource API while any original op is still pending.
+        await Promise.all(entry.originalOps.map(p => p.catch(() => undefined)))
+        entry.originalOps = []
+        await this.disposeManagedAgentRuntime(entry.managed, `quarantined disposal retry (${entry.reason})`, { ignoreQuarantineClaim: true })
+        entry.managed.disposalIncomplete = undefined
+        entry.cleanupPhase = 'faces-settled'
+      }
+      // The retained faces are settled — optimistically clear the marker;
+      // the retryable path below restores it if the cleanup cannot finish.
+      entry.managed.disposalIncomplete = undefined
+      // R56/R57 (issues 1+2): the successful settlement drains the EXACT
+      // unpublished candidate generation captured at claim installation —
+      // joiners observe BOTH maps and the marker fully drained when the
+      // claim resolves. Two distinct outcomes for the unpublished half:
+      // - a same-id successor REPLACED the map entry → its surfaces (retry
+      //   handle, refusing lease, storage record) belong to the successor —
+      //   this claim has zero contact with them and simply settles its own
+      //   (already-settled) faces;
+      // - the entry is still OURS but the cleanup FAILED (e.g. storage
+      //   delete returning false) → the settlement is RETRYABLE: the runtime
+      //   entry stays, the incomplete marker stays truthful, and a later
+      //   sweep re-claims to finish ONLY the cleanup phase.
+      if (unpublishedBoundToThisRuntime) {
+        const stillOurs = this.unpublishedRuntimeQuarantine.get(entry.managed.id) === unpublishedBoundToThisRuntime
+        if (stillOurs) {
+          const cleanupOk = await this.cleanupSettledUnpublishedEntry(entry.managed.id, unpublishedBoundToThisRuntime)
+          if (!cleanupOk) {
+            entry.managed.disposalIncomplete = {
+              reason: entry.reason,
+              failures: ['unpublished candidate quarantine cleanup incomplete (refusing callbacks/storage)'],
+            }
+            return 'retryable' as const
+          }
+        }
+      }
+      return 'settled' as const
+    })()
+    entry.inFlight = claim
+    void claim.then(
+      outcome => {
+        if (entry.inFlight === claim) entry.inFlight = undefined
+        if (outcome === 'settled') {
+          // Removed only after EVERY retained face settled.
+          this.quarantinedRuntimeDisposals.delete(token)
+          sessionLog.info(`Quarantined runtime disposal for session ${entry.managed.id} settled on retry`)
+        }
+      },
+      retryError => {
+        // Guard-style clearing: the failed claim becomes re-claimable.
+        if (entry.inFlight === claim) entry.inFlight = undefined
+        sessionLog.warn(`Retry cleanup for quarantined runtime disposal ${entry.managed.id} failed; kept for retry:`, retryError)
+      },
+    )
+    return true
+  }
+
+  /**
+   * R53 (issue 6): BOUNDED join of an entry's settlement claim. Never
+   * rejects; reports `pending` when the caller's bound expired (the claim
+   * keeps working in the background and a later sweep re-joins it).
+   */
+  private joinQuarantinedClaimBounded(entry: QuarantinedRuntimeDisposalEntry): Promise<'settled' | 'retryable' | 'pending'> {
+    const claim = entry.inFlight
+    if (!claim) return Promise.resolve('settled')
+    const bound = new Promise<'pending'>(resolve => {
+      setTimeout(() => resolve('pending'), this.quarantineJoinTimeoutMs).unref?.()
+    })
+    return Promise.race([
+      claim.then(outcome => outcome, () => 'retryable' as const),
+      bound,
+    ])
+  }
+
+  private findQuarantinedRuntimeDisposalEntry(managed: ManagedSession): { token: string; entry: QuarantinedRuntimeDisposalEntry } | undefined {
+    for (const [token, entry] of this.quarantinedRuntimeDisposals) {
+      if (entry.managed === managed) return { token, entry }
+    }
+    return undefined
+  }
+
+  private async sweepQuarantinedRuntimeDisposals(): Promise<void> {
+    if (this.quarantinedRuntimeDisposals.size === 0) return
+    for (const [token, entry] of [...this.quarantinedRuntimeDisposals]) {
+      // R53 (issue 6): claim-or-join THE single per-entry settlement, with a
+      // BOUNDED wait — a permanently hung shutdown can never pin this caller
+      // (createSession entry, delete/refresh cleanup or a lifecycle-lock
+      // head); the claim continues in the background and a later sweep
+      // re-joins it.
+      this.claimQuarantinedSettlement(token, entry)
+      await this.joinQuarantinedClaimBounded(entry)
+    }
+  }
+
+  private quarantineIncompleteRuntimeDisposal(
+    managed: ManagedSession,
+    failures: string[],
+    reason: string,
+    originalOps: Promise<unknown>[] = [],
+  ): void {
+    if (!managed.disposalIncomplete) return
+    // R52-D/R53: dedupe by managed identity — the SAME runtime is never
+    // double-quarantined; distinct stale runtimes that shared an id remain
+    // independently reachable (token-keyed entries). R53 (issue 6): a retry
+    // (from create/delete/refresh) that timed out AGAIN merges its new
+    // original ops into the EXISTING entry — every timed-out original op
+    // stays tracked and is awaited before any later retry.
+    for (const entry of this.quarantinedRuntimeDisposals.values()) {
+      if (entry.managed === managed) {
+        entry.originalOps.push(...originalOps)
+        return
+      }
+    }
+    const quarantineToken = randomUUID()
+    this.quarantinedRuntimeDisposals.set(quarantineToken, {
+      managed,
+      quarantineToken,
+      failures: [...failures],
+      reason,
+      quarantinedAt: Date.now(),
+      originalOps: [...originalOps],
+    })
+    // R54: the quarantine token doubles as the refusing record's OWNER token
+    // — an authorization capability. Only its fingerprint is ever logged.
+    sessionLog.warn(`Runtime disposal for session ${managed.id} quarantined for retry (token ${fingerprintOwnerToken(quarantineToken)}) (${reason}): ${failures.join('; ')}`)
+  }
+
+  /**
+   * R49: bounded post-init for successor construction. The construction
+   * critical section (lifecycle lock tail + the caller's question-state lock)
+   * must never be pinned by a backend whose credential/OAuth/post-init chain
+   * never settles: the race makes the wait bounded and abort-like (the
+   * timeout rejects at the construction boundary, which disposes the
+   * unpublished candidate — no late publication survives). Test seam: the
+   * bound is instance-configurable.
+   */
+  private agentPostInitTimeoutMs = 30_000
+
+  private async runAgentPostInit(managed: ManagedSession, agent: AgentInstance): Promise<PostInitResult> {
+    const timeoutMs = this.agentPostInitTimeoutMs
+    // R51: the abort signal is threaded INTO postInit so the backend's
+    // credential/OAuth chain can observe the bounded wait (check-after-await
+    // + rollbacks inside the backend). The abort ALSO settles the wait here:
+    // even a backend that ignores the signal cannot pin the lifecycle lock
+    // tail or the question-state lock beyond the bound.
+    const controller = new AbortController()
+    const timedOut = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        reject(new Error(`agent postInit timed out after ${timeoutMs}ms (construction abandoned; the session stays retryable)`))
+      }, { once: true })
+    })
+    const timer = setTimeout(() => controller.abort(new Error('stalled post-init')), timeoutMs)
+    timer.unref?.()
+    try {
+      return await Promise.race([agent.postInit({ signal: controller.signal }), timedOut])
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`agent postInit timed out after ${timeoutMs}ms (construction abandoned; the session stays retryable): ${error instanceof Error && error.message !== 'stalled post-init' ? error.message : 'stalled post-init'}`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * R46/R47: quarantine a NEVER-PUBLISHED session candidate whose runtime
+   * could not be disposed during the stale-publication rollback. The entry
+   * keeps the live runtime reachable through THIS manager (owner-token-bound)
+   * and replaces the candidate's session-scoped callback registration with an
+   * EXPLICITLY ENUMERABLE refusing record — one concrete throwing function per
+   * key of the current registration — so the production guard installation
+   * (`applySessionScopedToolCallbackGuard` iterates `Object.entries`) actually
+   * wraps real refusing stubs instead of silently installing an empty object
+   * (a non-enumerable Proxy would). A later legitimate owner registering the
+   * same id simply overwrites the refusing record.
+   */
+  private quarantineUnpublishedCandidateRuntime(managed: ManagedSession, reason: string): void {
+    const quarantineToken = randomUUID()
+    const existingCallbacks = getSessionScopedToolCallbacks(managed.id)
+    const refusingCallbacks: Record<string, () => never> = {}
+    for (const key of Object.keys(existingCallbacks ?? {})) {
+      refusingCallbacks[key] = () => {
+        throw new Error(`SESSION_QUARANTINED_UNPUBLISHED (${reason})`)
+      }
+    }
+    // R48: the registry returns the INSTALLED (guard-wrapped) record — the
+    // lease this quarantine binds to. Identity checks against the raw input
+    // would never match a guarded record. R53: the refusing record is
+    // owner-bound to THIS quarantine entry's immutable token — nobody may
+    // merge into it (the refusing stubs are the point); a later legitimate
+    // owner's register takes the id over exclusively.
+    const installedLease = registerSessionScopedToolCallbacks(managed.id, refusingCallbacks as unknown as SessionScopedToolCallbacks, quarantineToken)
+    this.unpublishedRuntimeQuarantine.set(managed.id, {
+      managed,
+      quarantineToken,
+      installedCallbacks: installedLease.record,
+      installedLease,
+      reason,
+      quarantinedAt: Date.now(),
+    })
+    // R54: fingerprint only — the token is a capability, never a log value.
+    sessionLog.warn(`Unpublished candidate runtime for session ${managed.id} quarantined (token ${fingerprintOwnerToken(quarantineToken)}): ${Object.keys(refusingCallbacks).length} callback entr(ies) now refuse execution and its runtime stays reachable for retryable cleanup (${reason})`)
+  }
+
+  /**
+   * R56 (issue 1): the ONE owner-token-guarded post-settlement cleanup for a
+   * quarantined UNPUBLISHED candidate — compare-and-unregister of its
+   * refusing record against the quarantine's OWN lease (a successor owner's
+   * registration is never touched) plus absent-or-ours storage cleanup.
+   * Invoked (a) inside a successful runtime-disposal settlement claim — so
+   * ONE successful claim drains BOTH quarantine maps and the marker without
+   * waiting for another lifecycle trigger — and (b) by the unpublished sweep
+   * for entries with no runtime-disposal claim of their own. Idempotent via
+   * the quarantine-token guard: a first finisher removes the map entry and
+   * every later caller no-ops.
+   */
+  private async cleanupSettledUnpublishedEntry(
+    sessionId: string,
+    entry: { managed: ManagedSession; quarantineToken: string; installedLease: SessionScopedToolCallbackLease | undefined; reason: string },
+  ): Promise<boolean> {
+    // R57 (issue 1, obs a1d8fa51): EXACT GENERATION BINDING — only the
+    // precise map VALUE this finalizer was invoked with settles here. A
+    // same-id successor that replaced the entry (with its own quarantine
+    // token and refusing lease) while a claim was parked is never
+    // identified by id lookup: the old claim has ZERO contact with the
+    // successor's retry handle, refusing callbacks or storage record.
+    if (this.unpublishedRuntimeQuarantine.get(sessionId) !== entry) {
+      return false
+    }
+    // R48: compare-and-unregister against the quarantine's LEASE — removes
+    // the callbacks/guard only while the installed record is still the
+    // quarantine's own.
+    const replacementOwnsId = this.sessions.has(sessionId)
+    let cleanupFailure: string | null = null
+    const callbacksRemoved = entry.installedLease !== undefined
+      ? unregisterSessionScopedToolCallbacksIf(sessionId, entry.installedLease)
+      : false
+    if (replacementOwnsId) {
+      sessionLog.info(`Quarantined unpublished runtime ${sessionId}: live replacement owns the id — storage/registrations preserved`)
+    } else {
       try {
-        await managed.poolServer.stop()
-      } catch (error) {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
+        const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
+        if (deleted === false) cleanupFailure = 'storage delete returned false'
+      } catch (storageError) {
+        cleanupFailure = storageError instanceof Error ? storageError.message : String(storageError)
       }
     }
+    if (!cleanupFailure) {
+      this.unpublishedRuntimeQuarantine.delete(sessionId)
+      sessionLog.info(`Quarantined unpublished runtime for session ${sessionId} cleaned up on retry${replacementOwnsId ? ' (storage/registrations preserved for the live replacement)' : ''}${callbacksRemoved ? '' : ' (callbacks were already owned by a successor)'}`)
+      return true
+    }
+    sessionLog.error(`Quarantined unpublished runtime ${sessionId}: runtime disposed but storage cleanup failed (${cleanupFailure}); kept for retry`)
+    return false
+  }
 
-    if (managed.mcpPool) {
+  /**
+   * R46/R47: retry the cleanup of every quarantined unpublished candidate.
+   * Runs at every createSession entry — a no-op while the registry is empty.
+   * R47 owner isolation:
+   * - callbacks/guard are unregistered COMPARE-AND-UNREGISTER style — only
+   *   while the current registration is still OUR refusing record AND no live
+   *   replacement session owns the id;
+   * - the candidate's storage record is deleted only when no live
+   *   replacement owns the id (absent-or-ours);
+   * - anything skipped or still failing keeps the entry retryable.
+   * R54 (issue 2): a matching runtime-disposal settlement claim is
+   * claim-or-joined (bounded) BEFORE any resource API call; a pending or
+   * retryable outcome KEEPS this entry for a later sweep.
+   */
+  private async sweepQuarantinedUnpublishedRuntimes(): Promise<void> {
+    if (this.unpublishedRuntimeQuarantine.size === 0) return
+    for (const [sessionId, entry] of this.unpublishedRuntimeQuarantine) {
       try {
-        await managed.mcpPool.disconnectAll()
-      } catch (error) {
-        sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
+        // R54 (issue 2): if a runtime-disposal quarantine entry exists for
+        // this managed (its strict stale-publication disposal parked on
+        // pending original shutdown ops), the unpublished cleanup JOINS the
+        // SAME per-managed settlement claim (bounded) BEFORE any resource
+        // API call — the previous ignoreQuarantineClaim bypass issued
+        // overlapping stop/disconnect calls against an original shutdown
+        // that was still running. The claim awaits the original ops and
+        // retries exactly once; after the join, any still-retained faces
+        // are claim-owned and the dispose below skips them.
+        // R55 (obs 52d480fb): branch on the BOUNDED JOIN OUTCOME. While the
+        // shared settlement is still `pending` (original shutdown parked) or
+        // `retryable` (a claim attempt failed), THIS sweep keeps the
+        // unpublished quarantine entry — its retry/refusal/storage-cleanup
+        // ownership must not disappear while the shared settlement has not
+        // succeeded — and skips its dispose + post-settlement cleanup
+        // entirely. The entry is drained ONLY after the claim reported
+        // success AND the runtime-disposal entry and the incomplete marker
+        // have both drained (the claim finalizer deletes the entry and the
+        // claim body clears the marker), so the two quarantine maps share
+        // ONE synchronized, owner-token-guarded lifecycle.
+        const quarantined = this.findQuarantinedRuntimeDisposalEntry(entry.managed)
+        if (quarantined) {
+          this.claimQuarantinedSettlement(quarantined.token, quarantined.entry)
+          const joinOutcome = await this.joinQuarantinedClaimBounded(quarantined.entry)
+          if (joinOutcome !== 'settled') {
+            sessionLog.info(`Unpublished runtime ${sessionId} keeps its quarantine entry: the shared disposal settlement is ${joinOutcome} (original ops pending or retryable)`)
+            continue
+          }
+          // The claim settled: the runtime-disposal entry and the marker are
+          // already drained by the claim's finalizer — proceed with THIS
+          // sweep's own CAS/refusal/storage cleanup below.
+        }
+        const result = await this.disposeManagedAgentRuntime(
+          entry.managed,
+          `quarantined unpublished runtime retry (${entry.reason})`,
+          // R48: the runtime disposal never unregisters the id-wide
+          // callback/guard state itself — the LEASE compare-and-unregister
+          // below is the single owner-aware removal. R54 (issue 2): no
+          // ignoreQuarantineClaim bypass — faces retained under a live
+          // claim are skipped by the claim-ownership guard instead of
+          // being issued a second time.
+          { bestEffort: true, shouldUnregisterCallbacks: () => false },
+        )
+        // R56 (issue 1): the cleanup itself lives in the shared
+        // owner-token-guarded finalizer (also invoked inside successful
+        // settlement claims) — the token guard makes an already-cleaned
+        // entry a no-op here, so the cleanup happens exactly once.
+        if (result.failures.length === 0) {
+          await this.cleanupSettledUnpublishedEntry(sessionId, entry)
+        }
+      } catch (sweepError) {
+        sessionLog.warn(`Retry cleanup for quarantined unpublished runtime ${sessionId} failed; kept for retry:`, sweepError)
       }
     }
-
-    managed.agent = null
-    managed.poolServer = undefined
-    managed.mcpPool = undefined
-    managed.envOverrides = undefined
-    managed.agentReady = undefined
-    managed.agentReadyResolve = undefined
-    managed.backendRuntimeSignature = undefined
-    managed.backendRestartSignature = undefined
-    unregisterSessionScopedToolCallbacks(sessionId)
   }
 
   /**
@@ -3263,14 +4706,80 @@ export class SessionManager implements ISessionManager {
    *     `agent.updateRuntimeConfig` and falls back to dispose if the backend
    *     can't apply the update.
    */
-  private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
-    // Serialize against any in-flight refresh on this session. The waiter
-    // doesn't propagate the prior call's errors — those are logged at the
-    // origin call site.
-    const inflight = this.agentRefreshLocks.get(managed.id)
-    if (inflight) {
-      await inflight.catch(() => undefined)
+  /**
+   * R47/R48: the ONE per-session agent-runtime lifecycle mutex. Every
+   * lifecycle operation (runtime refresh AND incomplete-disposal settlement
+   * before replacement construction) runs inside this critical section.
+   *
+   * R48: the lock is an IMMEDIATELY INSTALLED per-session promise TAIL — each
+   * caller atomically appends its own work to the tail it observed
+   * (`newTail = currentTail.then(work, work)`) before its first await, so N
+   * concurrent callers queue strictly one-at-a-time (maxActive === 1): a
+   * later caller observes an EARLIER caller's tail and can never run
+   * concurrently with it. Cleanup compares and clears only the caller's OWN
+   * tail — queued waiters never delete each other's slot.
+   */
+  /** R50/R53: bound for ONE runtime disposal await (instance-configurable test seam). */
+  private runtimeDisposalTimeoutMs = 10_000
+
+  /**
+   * R52-D: bounds ONE runtime disposal await. Outcomes:
+   * - `{ status: 'settled', value }` — the disposal completed.
+   * - `{ status: 'timeout', original }` — the wait expired; the ORIGINAL op
+   *   promise is returned so the caller can retain it in the retryable
+   *   quarantine and never overlap a still-running shutdown with a retry.
+   * Both paths record the failure detail into `failures`.
+   */
+  private async boundedRuntimeDisposal<T>(sessionId: string, what: string, op: () => Promise<T>, failures: string[]): Promise<{ status: 'settled'; value: T } | { status: 'timeout'; original: Promise<T> }> {
+    const timeoutMs = this.runtimeDisposalTimeoutMs
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOutError = new Error(`${what} disposal timed out after ${timeoutMs}ms; the live resource was retained in the retryable disposal quarantine`)
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(timedOutError), timeoutMs)
+      timer.unref?.()
+    })
+    const original = op()
+    try {
+      const value = await Promise.race([original, timeout])
+      return { status: 'settled', value }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      failures.push(`${what}: ${detail}`)
+      sessionLog.warn(`Runtime disposal of ${what} for session ${sessionId} failed during cleanup: ${detail}`)
+      return { status: 'timeout', original }
+    } finally {
+      if (timer) clearTimeout(timer)
     }
+  }
+
+  private async withAgentRuntimeLifecycleLock<T>(managed: ManagedSession, work: () => Promise<T>): Promise<T> {
+    const priorTail = this.agentRefreshLocks.get(managed.id) ?? Promise.resolve()
+    const ownTail = priorTail.then(work, work)
+    // The slot stores the void-normalized tail (settles right after `ownTail`)
+    // so any value type can flow through the critical section.
+    const ownTailSlot = ownTail.then(() => undefined, () => undefined)
+    this.agentRefreshLocks.set(managed.id, ownTailSlot)
+    try {
+      return await ownTail
+    } finally {
+      if (this.agentRefreshLocks.get(managed.id) === ownTailSlot) {
+        this.agentRefreshLocks.delete(managed.id)
+      }
+    }
+  }
+
+  /**
+   * R48: lock-ASSUMING body of the runtime refresh. Callers must hold the
+   * lifecycle lock (`tryRefreshAgentRuntime` wraps it; `getOrCreateAgent`
+   * calls it inside its own settlement→construction critical section).
+   */
+  private async refreshAgentRuntimeUnlocked(managed: ManagedSession, reason: string): Promise<void> {
+    // R47: the incomplete-disposal settlement happens INSIDE the per-session
+    // refresh critical section, BEFORE the no-agent early return — a strict
+    // disposal whose pool/MCP faces failed leaves `managed.agent` null with
+    // retained live surfaces, and this early return used to skip their
+    // retry forever while reporting success to the caller.
+    await this.settlePendingRuntimeDisposal(managed, `runtime refresh (${reason})`)
 
     if (!managed.agent) return
 
@@ -3306,7 +4815,7 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    const work = this.runAgentRuntimeRefresh(
+    await this.runAgentRuntimeRefresh(
       managed,
       backendContext,
       runtimeSignature,
@@ -3314,21 +4823,13 @@ export class SessionManager implements ISessionManager {
       restartRequired,
       reason,
     )
-    // Track the work so concurrent callers serialize. Swallow errors on the
-    // tracked promise — the awaiter shouldn't get someone else's exception;
-    // errors are logged inside `runAgentRuntimeRefresh`.
-    const tracked = work.then(() => undefined, () => undefined)
-    this.agentRefreshLocks.set(managed.id, tracked)
-    try {
-      await work
-    } finally {
-      // Concurrent callers awaited `tracked` before reaching this point and
-      // each registered their own work serially, so the slot is always ours
-      // to clear when our own work resolves.
-      if (this.agentRefreshLocks.get(managed.id) === tracked) {
-        this.agentRefreshLocks.delete(managed.id)
-      }
-    }
+  }
+
+  private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+    // Serialize against any in-flight refresh on this session. The waiter
+    // doesn't propagate the prior call's errors — those are logged at the
+    // origin call site.
+    return this.withAgentRuntimeLifecycleLock(managed, () => this.refreshAgentRuntimeUnlocked(managed, reason))
   }
 
   private async runAgentRuntimeRefresh(
@@ -3339,6 +4840,12 @@ export class SessionManager implements ISessionManager {
     restartRequired: boolean,
     reason: string,
   ): Promise<void> {
+    // R46: retry retained runtime faces from an earlier partially failed
+    // disposal BEFORE any early return or replacement construction can
+    // orphan them. This runs INSIDE the serialized refresh work, so the
+    // retry cannot reopen the concurrent-refresh race window.
+    await this.settlePendingRuntimeDisposal(managed, `runtime refresh (${reason})`)
+
     if (restartRequired) {
       sessionLog.info(`Restart-required field changed for session ${managed.id}; recreating backend runtime (${reason})`)
       await this.disposeManagedAgentRuntime(managed, 'restart-required runtime change')
@@ -3413,12 +4920,32 @@ export class SessionManager implements ISessionManager {
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
    */
+  /**
+   * R48: the public constructor entry holds the lifecycle lock ONCE across
+   * the entire settle → refresh decision → successor construction/publication
+   * sequence (backend resolution, pool/server creation, `managed.agent`
+   * assignment, postInit, callback wiring). The bodies are lock-ASSUMING
+   * (`refreshAgentRuntimeUnlocked` / `constructAgentUnlocked`) so the
+   * non-reentrant lock is never re-entered inside the critical section.
+   */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
-    // Refresh runtime config in-place when the connection has drifted since
-    // the agent was created. May null out `managed.agent` if the in-place
-    // refresh fails, in which case the create branch below rebuilds it.
-    await this.tryRefreshAgentRuntime(managed, 'send-path refresh')
+    return this.withAgentRuntimeLifecycleLock(managed, async () => {
+      await this.settlePendingRuntimeDisposal(managed, 'agent creation')
+      await this.refreshAgentRuntimeUnlocked(managed, 'send-path refresh')
+      return this.constructAgentUnlocked(managed)
+    })
+  }
 
+  /**
+   * R48: lock-assuming successor construction. Runs strictly inside the
+   * per-session lifecycle lock: backend resolution, pool/server creation,
+   * the `managed.agent` assignment, postInit and callback wiring all happen
+   * before the lock releases — a concurrent refresh can never dispose or
+   * replace the successor mid-construction, and the retained faces from an
+   * earlier partial disposal were already settled at the lock's head.
+   */
+  private async constructAgentUnlocked(managed: ManagedSession): Promise<AgentInstance> {
+    sessionLog.debug(`Constructing agent runtime for session ${managed.id} (owner ${this.ownerTokenFingerprint(managed)})`)
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
       sessionConnectionSlug: managed.llmConnection,
@@ -3435,8 +4962,35 @@ export class SessionManager implements ISessionManager {
     const runtimeSignature = buildBackendRuntimeSignature(sigInput)
     const restartSignature = buildRestartRequiredSignature(sigInput)
 
-    if (!managed.agent) {
+    // R49: bounded-construction boundary — any failure inside this region
+    // (including a stalled postInit hitting the timeout) disposes the
+    // never-published candidate (best-effort, owner-aware) and rethrows, so
+    // neither the lifecycle lock tail nor the question-state lock stays
+    // pinned and no late agent/pool/callback publication survives.
+    // R52: the candidate handle is hoisted so the catch below can stop the
+    // orphaned config watcher of a factory that threw mid-construction.
+    let createdAgent: AgentInstance | null = null
+    try {
+      if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })
+
+      // R53: the RUNTIME OWNER TOKEN is minted exactly ONCE per runtime
+      // generation — only when a NEW backend is actually constructed. A
+      // reuse path (live agent) keeps the existing token so the single
+      // chain SM → coreConfig → backend → registry never re-binds a live
+      // backend to a foreign token.
+      // R53 (issue 1): the previous generation's callback registry state is
+      // RECLAIMED here — this managed provably owned it (token equality),
+      // and a stale lease/guard must never ride into THIS construction's
+      // dispose path. A successor's state can never match the previous
+      // token, so the reclaim is successor-safe.
+      const previousRuntimeOwnerToken = managed.runtimeOwnerToken
+      managed.runtimeOwnerToken = randomUUID()
+      managed.callbackLease = undefined
+      managed.constructionCallbackGuardLease = undefined
+      if (previousRuntimeOwnerToken !== undefined) {
+        unregisterSessionScopedToolCallbacksIfOwner(managed.id, previousRuntimeOwnerToken)
+      }
 
       // Lock the connection after first resolution
       // This ensures the session always uses the same provider
@@ -3535,7 +5089,10 @@ export class SessionManager implements ISessionManager {
         previousPermissionMode: managed.previousPermissionMode,
       }
 
-      const onSdkSessionIdUpdate = (sdkSessionId: string) => {
+      // R39-2: BackendConfig callbacks are registered through the same
+      // authoritative guard — the backend can invoke them at any time and
+      // must never act for a stale/split/in-transition caller.
+      const onSdkSessionIdUpdate = this.guardManagedCallback(managed, 'backend.onSdkSessionIdUpdate', (sdkSessionId: string) => {
         managed.sdkSessionId = sdkSessionId
         // Retire branch-only fork metadata now that child session is established
         if (managed.branchFromSdkSessionId) {
@@ -3548,16 +5105,16 @@ export class SessionManager implements ISessionManager {
         }
         this.persistSession(managed)
         void this.sessionStorage.flush(managed.id)
-      }
+      })
 
-      const onSdkSessionIdCleared = () => {
+      const onSdkSessionIdCleared = this.guardManagedCallback(managed, 'backend.onSdkSessionIdCleared', () => {
         managed.sdkSessionId = undefined
         sessionLog.info(`SDK session ID cleared for ${managed.id} (resume recovery)`)
         this.persistSession(managed)
         void this.sessionStorage.flush(managed.id)
-      }
+      })
 
-      const onBranchForkInvalidated = () => {
+      const onBranchForkInvalidated = this.guardManagedCallback(managed, 'backend.onBranchForkInvalidated', () => {
         managed.sdkSessionId = undefined
         managed.branchFromSdkSessionId = undefined
         managed.branchFromSdkCwd = undefined
@@ -3565,9 +5122,9 @@ export class SessionManager implements ISessionManager {
         sessionLog.info(`Branch fork invalidated for ${managed.id}: cleared all fork metadata`)
         this.persistSession(managed)
         void this.sessionStorage.flush(managed.id)
-      }
+      })
 
-      const getRecoveryMessages = () => {
+      const getRecoveryMessages = this.guardManagedCallback(managed, 'backend.getRecoveryMessages', () => {
         const relevantMessages = managed.messages
           .filter(m => m.role === 'user' || m.role === 'assistant')
           .filter(m => !m.isIntermediate)
@@ -3576,9 +5133,9 @@ export class SessionManager implements ISessionManager {
           type: m.role as 'user' | 'assistant',
           content: m.content,
         }))
-      }
+      })
 
-      const getBranchFallbackMessages = () => {
+      const getBranchFallbackMessages = this.guardManagedCallback(managed, 'backend.getBranchFallbackMessages', () => {
         if (!managed.branchFromMessageId) return []
         return managed.messages
           .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -3587,9 +5144,9 @@ export class SessionManager implements ISessionManager {
             type: m.role as 'user' | 'assistant',
             content: m.content,
           }))
-      }
+      })
 
-      const getBranchSeedMessages = () => {
+      const getBranchSeedMessages = this.guardManagedCallback(managed, 'backend.getBranchSeedMessages', () => {
         if (managed.branchContextStrategy !== 'seeded-fresh-session') return []
         if (managed.branchSeedApplied) return []
 
@@ -3601,9 +5158,9 @@ export class SessionManager implements ISessionManager {
           type: m.role as 'user' | 'assistant',
           content: m.content,
         }))
-      }
+      })
 
-      const markBranchSeedApplied = () => {
+      const markBranchSeedApplied = this.guardManagedCallback(managed, 'backend.markBranchSeedApplied', () => {
         if (managed.branchContextStrategy !== 'seeded-fresh-session') return
         if (managed.branchSeedApplied) return
         managed.branchSeedApplied = true
@@ -3611,28 +5168,49 @@ export class SessionManager implements ISessionManager {
           sessionId: managed.id,
           strategy: managed.branchContextStrategy,
         })
-      }
+      })
 
-      const getTransferredSessionSummary = () => {
+      const getTransferredSessionSummary = this.guardManagedCallback(managed, 'backend.getTransferredSessionSummary', () => {
         const summary = managed.transferredSessionSummaryApplied ? null : (managed.transferredSessionSummary ?? null)
         sessionLog.info(`[transfer-context] getTransferredSessionSummary for ${managed.id}: applied=${managed.transferredSessionSummaryApplied}, has_summary=${!!managed.transferredSessionSummary}, returning=${summary ? `${summary.length} chars` : 'null'}`)
         return summary
-      }
+      })
 
-      const markTransferredSessionSummaryApplied = () => {
+      const markTransferredSessionSummaryApplied = this.guardManagedCallback(managed, 'backend.markTransferredSessionSummaryApplied', () => {
         if (managed.transferredSessionSummaryApplied || !managed.transferredSessionSummary) return
         managed.transferredSessionSummaryApplied = true
         this.persistSession(managed)
         sessionLog.info('Transferred session summary applied', {
           sessionId: managed.id,
         })
-      }
+      })
 
       // ============================================================
       // Construct backend via factory
       // ============================================================
 
-      managed.agent = createBackendFromResolvedContext({
+      // R51-B: resolve every AWAITED factory input BEFORE any guard/record
+      // state is installed — the dynamic import + config read yield the event
+      // loop, and a same-id successor could replace the guard/record in that
+      // window. After the resolution the construction verifies it still owns
+      // the id (convergence) BEFORE installing its guard.
+      const enable1MContext = await (async () => { const { getEnable1MContext } = await import('@polo-ai/shared/config/storage'); return getEnable1MContext(); })()
+      if (this.sessions.get(managed.id) && this.sessions.get(managed.id) !== managed) {
+        throw new Error('successor session published during construction inputs resolution; stale construction abandoned')
+      }
+
+      // R50-B: install THE authoritative registration guard BEFORE the
+      // backend factory constructs the agent — the factory's core callback
+      // registration therefore snapshots THIS guard identity, and the same
+      // construction lease stays stable through postInit/wiring (no
+      // post-factory replacement that would break lease-based cleanup).
+      this.installManagedSessionCallbackGuard(managed)
+      // R51-B: bind the guard-only lease immediately — if the factory throws
+      // before registering any callback record, disposal can still CAS-remove
+      // the guard by identity.
+      managed.constructionCallbackGuardLease = getSessionScopedToolCallbackGuard(managed.id)
+
+      createdAgent = createBackendFromResolvedContext({
         context: backendContext,
         hostRuntime: buildBackendHostRuntimeContext(),
         coreConfig: {
@@ -3644,6 +5222,26 @@ export class SessionManager implements ISessionManager {
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
+        // R51/R52/R53: per-turn callback merges replace the session's lease —
+        // the backend notifies with the EXACT returned lease; the handler
+        // re-binds ONLY when (a) this managed is still the id's live entry
+        // AND (b) the notified lease's owner is EXACTLY this managed's
+        // runtime owner token — backend lease owner, ManagedSession token
+        // and live registry owner stay ONE AND THE SAME, so a stale runtime
+        // can never re-bind over a successor's lease.
+        onSessionCallbackLeaseChanged: (lease: SessionScopedToolCallbackLease) => {
+          if (this.sessions.get(managed.id) !== managed) return
+          if (managed.runtimeOwnerToken === undefined) return
+          if (lease.ownerToken !== managed.runtimeOwnerToken) {
+            sessionLog.warn(`Ignored callback lease notification for session ${managed.id}: lease owner ${this.ownerTokenFingerprintOf(lease.ownerToken)} is not the live runtime owner`)
+            return
+          }
+          managed.callbackLease = lease
+        },
+        // R52-B: the immutable RUNTIME OWNER TOKEN — the backend's
+        // register/merge calls carry it; a mismatch with the live lease's
+        // owner rejects the merge outright.
+        sessionCallbackOwnerToken: managed.runtimeOwnerToken,
         getRecoveryMessages,
         getBranchFallbackMessages,
         getBranchSeedMessages,
@@ -3659,9 +5257,11 @@ export class SessionManager implements ISessionManager {
         automationSystem: this.automationSystems.get(managed.workspace.rootPath),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
-        enable1MContext: await (async () => { const { getEnable1MContext } = await import('@polo-ai/shared/config/storage'); return getEnable1MContext(); })(),
+        enable1MContext,
         // Image resize callback — prevents oversized images from entering conversation history
-        onImageResize: async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
+        // R39-2: image resize reads/writes the session tmp directory —
+        // registered through the authoritative guard inventory.
+        onImageResize: this.guardManagedCallback(managed, 'backend.onImageResize', async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
           try {
             const buffer = await readFile(filePath)
             const result = await resizeImageForAPI(buffer, { maxSizeBytes })
@@ -3688,7 +5288,7 @@ export class SessionManager implements ISessionManager {
             sessionLog.error('Image resize failed:', err)
             return null
           }
-        },
+        }),
         // Source configs for postInit() — backends set up their own bridge/config
         initialSources: {
           enabledSources,
@@ -3698,14 +5298,34 @@ export class SessionManager implements ISessionManager {
         },
         },
       }) as AgentInstance
+      managed.agent = createdAgent
+
+      // R50/R51: the backend's constructor registered its core callback
+      // record under the guard installed above (BEFORE the factory) — bind
+      // that exact lease to THIS managed owner. The construction lease
+      // identity is NOT replaced afterwards (the previous post-factory
+      // reinstall was removed), so lease-based cleanup stays exact for this
+      // construction.
+      managed.callbackLease = getSessionScopedToolCallbackLease(managed.id)
 
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
+
+      // ============================================================
+      // R39-2: backend-invokable method guards. Claude/Pi register
+      // registry callbacks (queryFn/spawnSessionFn) that delegate to these
+      // agent METHODS — wrapping the methods here guards the actual
+      // invoked path, closing the backend-registration bypass.
+      // ============================================================
+      const backendInvokable = managed.agent as unknown as Record<string, ((...args: never[]) => unknown) | undefined>
+      backendInvokable.queryLlm = this.guardManagedCallback(managed, 'agent.queryLlm', backendInvokable.queryLlm!.bind(managed.agent))
+      backendInvokable.preExecuteSpawnSession = this.guardManagedCallback(managed, 'agent.preExecuteSpawnSession', backendInvokable.preExecuteSpawnSession!.bind(managed.agent))
 
       // ============================================================
       // Post-construction: debug callback, auth callback, postInit()
       // ============================================================
 
-      managed.agent.onDebug = (msg: string) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onDebug = this.guardManagedCallback(managed, 'agent.onDebug', (msg: string) => {
         const marker = '__PERMISSION_BLOCK__'
         if (msg.includes(marker)) {
           const idx = msg.indexOf(marker)
@@ -3728,10 +5348,11 @@ export class SessionManager implements ISessionManager {
         }
 
         sessionLog.info(msg)
-      }
+      })
 
       // Unified auth callback — replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
-      managed.agent.onBackendAuthRequired = (reason: string) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onBackendAuthRequired = this.guardManagedCallback(managed, 'agent.onBackendAuthRequired', (reason: string) => {
         sessionLog.warn(`Backend auth required for session ${managed.id}: ${reason}`)
         this.sendEvent({
           type: 'info',
@@ -3739,10 +5360,15 @@ export class SessionManager implements ISessionManager {
           message: `Authentication required: ${reason}`,
           level: 'error',
         }, managed.workspace.id)
-      }
+      })
 
       // Run post-init (auth injection) — each backend handles its own
-      const postInitResult = await managed.agent.postInit()
+      // R49: BOUNDED — a backend whose credential/OAuth/post-init chain
+      // never settles can no longer pin the lifecycle lock tail and the
+      // question-state lock: the timeout rejects inside the construction
+      // boundary, which disposes the unpublished candidate and releases
+      // both locks for delete/retry.
+      const postInitResult = await this.runAgentPostInit(managed, managed.agent)
       if (postInitResult.authWarning) {
         sessionLog.warn(`Auth warning for session ${managed.id}: ${postInitResult.authWarning}`)
         this.sendEvent({
@@ -3840,7 +5466,9 @@ export class SessionManager implements ISessionManager {
         }
 
         sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
-        mergeSessionScopedToolCallbacks(sid, {
+        // R38-2: every browser-pane method is registered through the
+        // authoritative guard inventory (per-method caller-scope guard).
+        const rawBrowserPaneFns = {
           browserPaneFns: {
             openPanel: async (options) => {
               const instanceId = options?.background
@@ -4070,14 +5698,18 @@ export class SessionManager implements ISessionManager {
               return bpm.detectSecurityChallenge(instanceId)
             },
           } satisfies BrowserPaneFns,
-        })
+        }
+        mergeSessionScopedToolCallbacks(sid, {
+          browserPaneFns: this.guardManagedCallbackRecord(managed, 'browserPaneFns', rawBrowserPaneFns.browserPaneFns),
+        }, this.runtimeOwnerTokenOf(managed))
       }
 
       // Signal that the agent instance is ready (unblocks title generation)
       managed.agentReadyResolve?.()
 
       // Set up permission handler to forward requests to renderer
-      managed.agent.onPermissionRequest = (request: {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onPermissionRequest = this.guardManagedCallback(managed, 'agent.onPermissionRequest', (request: {
         requestId: string;
         toolName: string;
         command?: string;
@@ -4153,7 +5785,7 @@ export class SessionManager implements ISessionManager {
             sessionId: managed.id,
           }
         }, managed.workspace.id)
-      }
+      })
 
       // Note: Credential requests now flow through onAuthRequest (unified auth flow)
       // The legacy onCredentialRequest callback has been removed from PoloAi
@@ -4161,7 +5793,8 @@ export class SessionManager implements ISessionManager {
       // which destroys/recreates the agent to get fresh credentials
 
       // Set up mode change handlers
-      managed.agent.onPermissionModeChange = (mode) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onPermissionModeChange = this.guardManagedCallback(managed, 'agent.onPermissionModeChange', (mode: PermissionMode) => {
         if (managed.permissionMode === mode) {
           return
         }
@@ -4186,10 +5819,11 @@ export class SessionManager implements ISessionManager {
           previousPermissionMode: diagnostics.previousPermissionMode,
           transitionDisplay: diagnostics.transitionDisplay,
         }, managed.workspace.id)
-      }
+      })
 
       // Wire up onPlanSubmitted to add plan message to conversation
-      managed.agent.onPlanSubmitted = async (planPath) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onPlanSubmitted = this.guardManagedCallback(managed, 'agent.onPlanSubmitted', async (planPath) => {
         sessionLog.info(`Plan submitted for session ${managed.id}:`, planPath)
         try {
           // Read the plan file content
@@ -4250,10 +5884,11 @@ export class SessionManager implements ISessionManager {
         } catch (error) {
           sessionLog.error(`Failed to read plan file:`, error)
         }
-      }
+      })
 
       // Wire up onAuthRequest to add auth message to conversation and pause execution
-      managed.agent.onAuthRequest = (request) => {
+      // R38-2: registered through the authoritative guard inventory.
+      managed.agent.onAuthRequest = this.guardManagedCallback(managed, 'agent.onAuthRequest', (request) => {
         sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
 
         // Create auth-request message
@@ -4316,7 +5951,7 @@ export class SessionManager implements ISessionManager {
 
         // OAuth flow is client-driven via performOAuth() (preload).
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
-      }
+      })
 
       // Wire up onQuestionRequested: persist the pending question, notify renderers,
       // then handoff so the agent turn stops while the user answers.
@@ -4332,216 +5967,38 @@ export class SessionManager implements ISessionManager {
       // AGENT TOOL-SET WIRING: the embedded engine's request_user_input tool
       // call reaches the durable handoff DIRECTLY through the agent's
       // onQuestionRequested field — one owner/channel per engine.
-      managed.agent.onQuestionRequested = (questions, generationAtRequest) =>
+      // R38-2: registered through the authoritative guard inventory — an
+      // out-of-scope (stale/replaced/split-fence/in-transition) caller
+      // fails closed and the rejection surfaces to the model as a tool
+      // error instead of a dangling handoff.
+      managed.agent.onQuestionRequested = this.guardManagedCallback(managed, 'agent.onQuestionRequested', (questions, generationAtRequest) =>
         this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
+      )
 
-      // Wire up onSpawnSession to create independent sessions from agent tool calls
-      managed.agent.onSpawnSession = async (request) => {
-        sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
-
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode: request.permissionMode ?? managed.permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-          hidden: managed.hidden,
-          // Spawned sessions NEVER inherit the Edit Popover grant — the
-          // origin is scoped to the exact popover session that earned it
-          // (fail closed).
-          origin: managed.origin === 'edit-popover' ? undefined : managed.origin,
-        })
-
-        // Build FileAttachment[] from paths (if any)
-        let fileAttachments: FileAttachment[] | undefined
-        if (request.attachments?.length) {
-          const attachments: FileAttachment[] = []
-          for (const a of request.attachments) {
-            try {
-              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-              if (request.workingDirectory) extraDirs.push(request.workingDirectory)
-              const safePath = await validateFilePath(a.path, extraDirs)
-              const attachment = readFileAttachment(safePath)
-              if (attachment) {
-                if (a.name) attachment.name = a.name
-                attachments.push(attachment)
-              } else {
-                sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
-            }
-          }
-          if (attachments.length > 0) fileAttachments = attachments
-        }
-
-        // Notify renderer to hydrate full session metadata (including name)
-        // before streaming events arrive. Without this, the renderer creates
-        // a synthetic empty session and shows "New Chat" in the sidebar.
-        this.sendEvent({ type: 'session_created', sessionId: session.id }, managed.workspace.id)
-
-        // Fire and forget — send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
-        }
-      }
-
-      // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
-      mergeSessionScopedToolCallbacks(managed.id, {
-        setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
-          await this.setSessionLabels(sessionId ?? managed.id, labels)
-        },
-        setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
-          await this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
-        },
-        getSessionInfoFn: (sessionId?: string) => {
-          const targetId = sessionId ?? managed.id
-          const session = this.sessions.get(targetId)
-          if (!session) return null
-          return {
-            id: session.id,
-            name: session.name ?? session.id,
-            labels: session.labels ?? [],
-            status: session.sessionStatus ?? 'todo',
-            permissionMode: session.permissionMode ?? 'ask',
-            createdAt: session.createdAt ?? 0,
-            workingDirectory: session.workingDirectory,
-            llmConnection: session.llmConnection,
-            model: session.model,
-            isActive: session.agent != null,
-          }
-        },
-        listSessionsFn: (options) => {
-          const DEFAULT_LIMIT = 20
-          const MAX_LIMIT = 100
-          const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
-          const offset = options?.offset ?? 0
-
-          let sessions = this.getSessions(managed.workspace.id)
-
-          // Filter
-          if (options?.status) {
-            sessions = sessions.filter(s => s.sessionStatus === options.status)
-          }
-          if (options?.label) {
-            sessions = sessions.filter(s => s.labels?.includes(options.label!))
-          }
-          if (options?.search) {
-            const needle = options.search.toLowerCase()
-            sessions = sessions.filter(s => s.name?.toLowerCase().includes(needle))
-          }
-
-          // Sort
-          const sortBy = options?.sortBy ?? 'recent'
-          if (sortBy === 'recent') {
-            sessions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-          } else if (sortBy === 'name') {
-            sessions.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-          } else if (sortBy === 'status') {
-            sessions.sort((a, b) => (a.sessionStatus ?? '').localeCompare(b.sessionStatus ?? ''))
-          }
-
-          const total = sessions.length
-
-          // Paginate
-          const page = sessions.slice(offset, offset + limit)
-
-          return {
-            total,
-            returned: page.length,
-            sessions: page.map(s => ({
-              id: s.id,
-              name: s.name ?? s.id,
-              labels: s.labels ?? [],
-              status: s.sessionStatus ?? 'todo',
-              createdAt: s.createdAt ?? 0,
-            })),
-          }
-        },
-        resolveLabelsFn: (labels: string[]) => {
-          const labelConfig = loadLabelConfig(managed.workspace.rootPath)
-          return resolveSessionLabels(labels, labelConfig.labels)
-        },
-        resolveStatusFn: (status: string) => {
-          const statusConfig = loadStatusConfig(managed.workspace.rootPath)
-          const allStatuses = statusConfig.statuses
-          const available = allStatuses.map(s => s.id)
-
-          // Exact ID match
-          const byId = allStatuses.find(s => s.id === status)
-          if (byId) return { resolved: byId.id, available }
-          // Case-insensitive label → ID
-          const byLabel = allStatuses.find(s => s.label.toLowerCase() === status.toLowerCase())
-          if (byLabel) return { resolved: byLabel.id, available }
-
-          return { resolved: null, available }
-        },
-        sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
-          // Build FileAttachment[] from paths (same pattern as spawn_session)
-          let fileAttachments: FileAttachment[] | undefined
-          if (attachments?.length) {
-            const builtAttachments: FileAttachment[] = []
-            for (const a of attachments) {
-              try {
-                const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-                const safePath = await validateFilePath(a.path, extraDirs)
-                const attachment = readFileAttachment(safePath)
-                if (attachment) {
-                  if (a.name) attachment.name = a.name
-                  builtAttachments.push(attachment)
-                }
-              } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error)
-                sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
-              }
-            }
-            if (builtAttachments.length > 0) fileAttachments = builtAttachments
-          }
-
-          await this.sendMessage(sessionId, message, fileAttachments)
-        },
-        activateSourceInSessionFn: async (sourceSlug: string) => {
-          const cb = managed.agent?.onSourceActivationRequest
-          if (!cb) {
-            return { ok: false, reason: 'Agent has no activation callback wired' }
-          }
-          const ok = await cb(sourceSlug)
-          if (!ok) {
-            return {
-              ok: false,
-              reason: 'Activation failed — source may be unusable (disabled/unauthenticated) or server build failed. Check session logs.',
-            }
-          }
-          // Both backends need the current turn to end before new tools are visible:
-          // Claude SDK freezes mcpServers at query() start; Pi only picks up new proxy
-          // tool defs on the next handlePrompt (`toolsChanged` flag in pi-agent-server).
-          // Mark a pending restart on the agent — ClaudeAgent/PiAgent consume it after
-          // the next tool_result, yield source_activated, and forceAbort. The
-          // `source_activated` handler in this class then schedules a server-side
-          // resend of the original user message with a "[{slug} activated]" suffix —
-          // landing in a fresh turn with tools live (polo-ai-oss#804).
-          const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
-          if (userMessage) {
-            managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
-          }
-          return { ok: true, availability: 'next-turn' as const }
-        },
+      // Wire up onSpawnSession to create independent sessions from agent tool calls.
+      // R37-2: the handler delegates to ONE guarded private implementation so
+      // the callback inventory test can exercise it like every other callback.
+      managed.agent.onSpawnSession = this.guardManagedCallback(managed, 'agent.onSpawnSession', async (request) => {
+        return this.spawnSessionFromManagedAgent(managed, request)
       })
 
+
+      // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
+      // R35-1: every callback that accepts a TARGET session resolves it
+      // through the managed session's complete trusted scope — the target
+      // must belong to the SAME trusted account, committed ProductSpace and
+      // Workspace, or the operation fails closed. Self-targeted calls
+      // (no id / own id) always remain usable.
+      // R37-2: the callbacks are built by ONE inventoried builder — the
+      // table-driven inventory test exercises every entry through its
+      // current-scope guard.
+      mergeSessionScopedToolCallbacks(managed.id, this.buildManagedSessionToolCallbacks(managed), this.runtimeOwnerTokenOf(managed))
+
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
-      managed.agent.onSourceActivationRequest = async (sourceSlug: string): Promise<boolean> => {
+      // R38-2: the DIRECT source-activation callback is registered through
+      // the authoritative guard inventory — Claude and Pi invoke it directly,
+      // bypassing activateSourceInSessionFn, so the guard must live here.
+      managed.agent.onSourceActivationRequest = this.guardManagedCallback(managed, 'agent.onSourceActivationRequest', async (sourceSlug: string): Promise<boolean> => {
         sessionLog.info(`Source activation request for session ${managed.id}:`, sourceSlug)
 
         const workspaceRootPath = managed.workspace.rootPath
@@ -4623,7 +6080,7 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
 
         return true
-      }
+      })
 
       // NOTE: Source reloading is now handled by ConfigWatcher callbacks
       // which detect filesystem changes and update all affected sessions.
@@ -4650,7 +6107,28 @@ export class SessionManager implements ISessionManager {
       managed.backendRestartSignature = restartSignature
       end()
     }
-    return managed.agent
+      // R50/R51: refresh the owner-bound lease — the wiring above may have
+      // merged/replaced the installed record; the lease stays bound to THIS
+      // managed owner with the CURRENT guard identity.
+      managed.callbackLease = getSessionScopedToolCallbackLease(managed.id)
+      return managed.agent
+    } catch (constructionError) {
+      // R49/R52: the candidate was never published — stop its orphaned
+      // config watcher (the backend factory may have started one before
+      // failing) so the process cannot hang on a live file watcher.
+      try {
+        ;(createdAgent as unknown as { stopConfigWatcher?: () => void } | null)?.stopConfigWatcher?.()
+      } catch { /* best-effort */ }
+      // R49: the candidate was never published — dispose its runtime faces
+      // (best-effort, owner-aware lease CAS) and rethrow so delete/retry can
+      // proceed.
+      await this.disposeManagedAgentRuntime(
+        managed,
+        `successor construction failed: ${constructionError instanceof Error ? constructionError.message : String(constructionError)}`,
+        { bestEffort: true },
+      )
+      throw constructionError
+    }
   }
 
   async flagSession(sessionId: string): Promise<void> {
@@ -5313,9 +6791,25 @@ export class SessionManager implements ISessionManager {
    * Mark all non-hidden, non-archived sessions in a workspace as read.
    * Called from "Mark All Read" context menu on "All Sessions".
    */
-  async markAllSessionsRead(workspaceId: string): Promise<void> {
+  async markAllSessionsRead(
+    workspaceId: string,
+    scope?: { productSpaceId: string; accountId: string; workspaceId?: string } | null,
+  ): Promise<void> {
+    // R33-1/R35-1: the mutation is bound to the COMPLETE trusted scope
+    // (space AND account AND, when provided, the Main-owned caller
+    // Workspace); `undefined` derives it from the runtime fence, and
+    // anything incomplete fails closed and mutates nothing.
+    const effectiveScope: { productSpaceId: string; accountId: string; workspaceId?: string } | null = scope === undefined
+      ? captureTrustedSessionScope()
+      : scope
+    if (!effectiveScope) return
     const updates: Promise<void>[] = []
     for (const managed of this.sessions.values()) {
+      if (managed.productSpaceId !== effectiveScope.productSpaceId) continue
+      if (!managed.accountId || managed.accountId !== effectiveScope.accountId) continue
+      // R35-1: an aggregate scope carrying the caller's Workspace can never
+      // spill into another Workspace's sessions.
+      if (effectiveScope.workspaceId && managed.workspace.id !== effectiveScope.workspaceId) continue
       if (managed.workspace.id !== workspaceId) continue
       if (managed.hidden || managed.isArchived) continue
       if (managed.isProcessing) continue
@@ -5892,15 +7386,22 @@ export class SessionManager implements ISessionManager {
     this.browserHostByCanvas.delete(sessionId)
 
     // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
-    if (managed.agent) {
-      managed.agent.dispose()
+    // R53/R54 (issues 6/3): the disposal is BOUNDED and quarantine-aware.
+    // R54: an EXISTING per-managed settlement claim is atomically claim-or-
+    // joined FIRST (bounded wait) so the shared claim starts here — the
+    // retained entry no longer idles until an unrelated future create
+    // triggers a sweep. Any faces still retained under the live claim are
+    // then skipped by the claim-ownership guard (no overlapping stop), and
+    // the incomplete marker stays truthful until the claim settles.
+    const quarantinedAtDelete = this.findQuarantinedRuntimeDisposalEntry(managed)
+    if (quarantinedAtDelete) {
+      this.claimQuarantinedSettlement(quarantinedAtDelete.token, quarantinedAtDelete.entry)
+      await this.joinQuarantinedClaimBounded(quarantinedAtDelete.entry)
     }
-
-    // Stop pool server (HTTP MCP server for external SDK subprocesses)
-    if (managed.poolServer) {
-      managed.poolServer.stop().catch(err => {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      })
+    try {
+      await this.disposeManagedAgentRuntime(managed, 'session deleted', { bestEffort: true })
+    } catch (disposalError) {
+      sessionLog.warn(`Session ${sessionId} disposal during delete retained faces:`, disposalError)
     }
 
     // Cancel any pending source-activation auto-retry timer (polo-ai-oss#804).
@@ -5922,8 +7423,10 @@ export class SessionManager implements ISessionManager {
     // Delete from disk too
     this.sessionStorage.delete(workspaceRootPath, sessionId)
 
-    // Notify all windows for this workspace that the session was deleted
-    this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
+    // Notify all windows for this workspace that the session was deleted.
+    // The record left the map in the locked declaration, so the boundary
+    // fence consults the record's pre-removal immutable scope.
+    this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id, managed.productSpaceId)
     this.emitUnreadSummaryChanged()
 
     // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
@@ -6065,6 +7568,52 @@ export class SessionManager implements ISessionManager {
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
+    // Every entry that can push a session into processing must have the
+    // session's immutable execution scope registered — including restored
+    // (cold) sessions on their first send. In the merged turn-start
+    // reservation model, that is exactly the caller that CLAIMS the turn
+    // start (below): a follower that will steer or queue never transitions
+    // to processing and therefore never registers — registering it anyway
+    // would supersede the owner's live reservation (R31-3 ownership CAS)
+    // and fail the owner's later confirm. The trusted account is resolved
+    // BEFORE the question-state lock (GLOBAL LOCK ORDER: the Admin session
+    // lock must never be acquired while holding the switch lock — account
+    // replacement holds the Admin lock while revoking the fence through the
+    // switch lock), and the short critical section re-verifies fence,
+    // switch state and the lock-free trusted-account mirror/generation: an
+    // offline read-only view, an in-flight switch, a concurrent account
+    // replacement or a registration failure refuses the send instead of
+    // leaving an unregistered execution. Sessions created before the
+    // ProductSpace contract (never bound, e.g. CLI runtimes) carry no space
+    // semantics and keep their legacy behavior. The returned start
+    // reservation keeps the execution active for account cleanup through
+    // the whole bootstrap and gates the atomic transition to processing in
+    // the locked commit. From successful acquisition until the transition
+    // (or an owned release) the whole lifecycle is exception-safe (R31-4):
+    // every pre-confirm throw cancels THIS send's reservation and
+    // unregisters only its owned execution. A follower that claims a
+    // freshly freed reservation IN-LOCK registers there (see the locked
+    // section) before it may confirm.
+    let startReservation: AssistantStartReservation | null = null
+    let ownedStartVersion: number | null = null
+    const registerOwnedStart = async (): Promise<void> => {
+      if (!managed.productSpaceId || startReservation) return
+      startReservation = await registerAssistantExecutionForSend({
+        sessionManager: this,
+        sessionId,
+        workspaceId: managed.workspace.id,
+        productSpaceId: managed.productSpaceId,
+        name: managed.name || sessionId,
+      })
+      ownedStartVersion = startReservation.registrationVersion
+    }
+    const releaseOwnedStart = (): void => {
+      if (startReservation) {
+        releaseAssistantStartExecution(startReservation)
+        startReservation = null
+      }
+    }
+
     // NOTE: the pending answer→resume supersede is
     // NOT performed here. Firing it at entry — before the replacement message
     // is durable — permanently destroys the recovery when this send later
@@ -6098,6 +7647,13 @@ export class SessionManager implements ISessionManager {
     if (claimedAtEntry) {
       managed.turnStartReserved = true
       this.applyTurnInvocationSource(managed, invocationSource)
+      // NOTE: the owner's execution registration runs INSIDE the locked
+      // section (see the owner path below), not here: awaiting it between
+      // the claim and the lock would open a window where an answer/another
+      // sender jumps the lock queue and breaks the claim's serialization
+      // guarantees. Entering the lock queue first preserves POO-53's
+      // linearization semantics; registering before the in-lock confirm
+      // preserves the ProductSpace fence.
     }
 
     // Single cleanup boundary: EVERYTHING between the synchronous claim and the actual
@@ -6193,6 +7749,18 @@ export class SessionManager implements ISessionManager {
         // mid-turn and get queued keep their own options for their own future
         // turn.
         this.applyTurnInvocationSource(managed, invocationSource)
+
+        // ProductSpace execution registration (R33-1/R37-4): the owner
+        // registers its immutable execution scope HERE — inside the lock,
+        // before the bootstrap flush — so the reservation is live and
+        // visible to account cleanup for the whole bootstrap window, yet no
+        // await ever separates the claim from the lock entry (the
+        // linearization guarantee). A follower that will steer or queue
+        // never reaches this path and never registers, so it can never
+        // supersede the owner's live reservation (R31-3 ownership CAS).
+        if (managed.productSpaceId && holdsReservation) {
+          await registerOwnedStart()
+        }
 
         // Add user message with stored attachments for persistence
         // Skip if existingMessageId is provided (message was already created when queued)
@@ -6319,6 +7887,27 @@ export class SessionManager implements ISessionManager {
           sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
         }
 
+        // Atomic transition to processing (R30-B, ProductSpace fence): the
+        // start reservation must still be live and owned by THIS send, no
+        // account transition may have begun, and the trusted
+        // account/account-bound fence must be unchanged — otherwise the send
+        // fails closed, unregisters and never reaches `agent.chat`, so no
+        // processing session agent can survive without a registered
+        // ProductSpace execution. Runs INSIDE the question-state lock, in
+        // the same critical section as the commit below: a fenced/refused
+        // start can never be observed as a processing turn.
+        if (managed.productSpaceId && startReservation) {
+          const confirmed = confirmAssistantStartProcessing({
+            sessionId,
+            reservation: startReservation,
+          })
+          startReservation = null
+          if (!confirmed) {
+            releaseAssistantStartExecutionVersion(sessionId, ownedStartVersion)
+            throw new Error('EXECUTION_REGISTRATION_REFUSED')
+          }
+        }
+
         // COMMIT — the locked section entry re-validated session identity and
         // the lock serializes against the delete's own locked declaration,
         // so nothing can have deleted the session mid-section: starting the
@@ -6359,6 +7948,14 @@ export class SessionManager implements ISessionManager {
       if (holdsReservation) {
         this.releaseTurnStartReservation(managed, sessionId, turnStarted)
       }
+      // R31-4 (ProductSpace fence): every path that still holds an
+      // unconfirmed start reservation — an early return above or any
+      // pre-confirm throw inside the locked section — releases THIS send's
+      // reservation and unregisters only its owned execution, so a retry
+      // starts clean and a newer send's registration is never touched
+      // (version CAS). After a confirmed commit the reservation is consumed
+      // and this is a no-op.
+      releaseOwnedStart()
     }
 
     // Reset auth retry flag for this new message (allows one retry per message)
@@ -6384,6 +7981,14 @@ export class SessionManager implements ISessionManager {
 
     // Start perf span for entire sendMessage flow
     const sendSpan = perf.span('session.sendMessage', { sessionId })
+
+    // R31-5: the lifecycle state machine spans from the transition to
+    // processing through ACTUAL agent/chat start — every post-confirm/
+    // pre-chat failure clears this generation's processing state and
+    // releases its owned execution instead of leaving isProcessing=true
+    // with a live registry record. (Chat-loop errors keep their historical
+    // handling in the inner handler below.)
+    try {
 
     const workspaceRootPath = managed.workspace.rootPath
     const enabledSlugs = managed.enabledSourceSlugs ?? []
@@ -6770,6 +8375,22 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
         this.onProcessingStopped(sessionId, 'interrupted')
       }
+    }
+    } catch (error) {
+      // R31-5: only PRE-CHAT failures reach here — the inner handler owns
+      // chat-loop errors. A post-confirm/pre-agent failure must clear THIS
+      // generation's processing state, release its owned execution (version
+      // CAS protects a newer send) and close the span before propagating.
+      releaseAssistantStartExecutionVersion(sessionId, ownedStartVersion)
+      sendSpan.mark('agent.error')
+      sendSpan.end()
+      if (managed.processingGeneration === myGeneration) {
+        sessionLog.error('Error during pre-agent send bootstrap:', error)
+        this.onProcessingStopped(sessionId, 'error')
+      } else {
+        sessionLog.warn('Pre-agent send failure superseded by a newer send; releasing owned execution only')
+      }
+      throw error
     }
   }
 
@@ -7222,13 +8843,34 @@ export class SessionManager implements ISessionManager {
    * @param taskId - The task or shell ID
    * @returns Task output content, or null if task not found
    */
-  async getTaskOutput(taskId: string): Promise<string | null> {
-    // O(1) lookup via taskOutputIndex
+  async getTaskOutput(
+    taskId: string,
+    scope?: { productSpaceId: string; accountId: string; workspaceId: string } | null,
+  ): Promise<string | null> {
+    // O(1) lookup via taskOutputIndex — the OWNER session is resolved first
+    // (R35-1) and then proven to sit inside the caller's complete trusted
+    // scope before any output byte is read.
     const sessionId = this.taskOutputIndex.get(taskId)
     if (!sessionId) {
       sessionLog.info(`No output found for task: ${taskId} (task may still be running)`)
       return null
     }
+    if (!scope) {
+      // Fail closed: without a complete trusted scope the output is never
+      // disclosed, not even for a same-scope caller.
+      return null
+    }
+
+    // Space AND account AND workspace fence: task output belongs to its
+    // owning session's complete immutable scope (R35-1, routed through the
+    // shared fail-closed comparator in R36-1).
+    const owner = this.sessions.get(sessionId)
+    if (!owner) return null
+    if (!trustedScopeMatchesSessionRecord({
+      accountId: owner.accountId,
+      productSpaceId: owner.productSpaceId,
+      workspaceId: owner.workspace.id,
+    }, scope)) return null
 
     const managed = this.sessions.get(sessionId)
     const info = managed?.backgroundTaskOutputs.get(taskId)
@@ -7597,7 +9239,33 @@ export class SessionManager implements ISessionManager {
   async getEditPopoverPendingSession(
     workspaceId: string,
     popoverOwner: string,
+    scopeToken?: TrustedSessionScopeToken | null,
   ): Promise<{ sessionId: string; request: QuestionRequest } | null> {
+    // R40-3: when the RPC boundary captured a trusted scope token, BOTH the
+    // live candidates and the cold on-disk headers are filtered against that
+    // exact account/ProductSpace/Workspace scope, and the token is
+    // revalidated after every await — before adopting a hydrated session
+    // into memory and before disclosure. A window bound to ProductSpace A
+    // can never disclose or hydrate A's hidden pending question once the
+    // runtime switched to B (or the account was replaced).
+    const scope = scopeToken
+      ? { accountId: scopeToken.accountId, productSpaceId: scopeToken.productSpaceId, workspaceId: scopeToken.workspaceId }
+      : null
+    const assertScopeCurrent = (): boolean => {
+      if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
+        sessionLog.warn(`getEditPopoverPendingSession refused: the trusted scope changed while the lookup was in flight (workspace ${workspaceId})`)
+        return false
+      }
+      return true
+    }
+    const inScope = (record: { accountId?: string | null; productSpaceId?: string | null; workspaceId?: string | null }): boolean =>
+      !scope || trustedScopeMatchesSessionRecord(record, scope)
+    // Cold metadata carries no workspaceId field (the Workspace dimension is
+    // already enforced by scanning ONLY the caller-equal workspace root), so
+    // the header comparison uses the account/ProductSpace dimensions.
+    const inColdScope = (record: { accountId?: string | null; productSpaceId?: string | null }): boolean =>
+      !scope || trustedScopeMatchesSessionRecord(record, { accountId: scope.accountId, productSpaceId: scope.productSpaceId })
+
     const matches: Array<{ sessionId: string; createdAt: number; request: QuestionRequest }> = []
 
     // In-memory first: live sessions (popover may still be mounted, or was
@@ -7606,6 +9274,9 @@ export class SessionManager implements ISessionManager {
       if (managed.origin !== 'edit-popover' || managed.isArchived) continue
       if (managed.workspace.id !== workspaceId) continue
       if ((managed.popoverOwner ?? '') !== popoverOwner) continue
+      // R40-3: a live candidate outside the caller's trusted scope (old
+      // space, replaced account) is invisible to this lookup.
+      if (!inScope({ accountId: managed.accountId, productSpaceId: managed.productSpaceId, workspaceId: managed.workspace.id })) continue
       const pending = managed.pendingQuestion
       if (pending) {
         matches.push({ sessionId: managed.id, createdAt: pending.createdAt, request: pending })
@@ -7641,6 +9312,10 @@ export class SessionManager implements ISessionManager {
     for (const meta of metas) {
       if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
       if ((meta.popoverOwner ?? '') !== popoverOwner) continue
+      // R40-3: cold candidates are bound to the scope captured at the
+      // lookup's entry — space-bound legacy headers without an account
+      // binding never match (fail-closed quarantine).
+      if (!inColdScope(meta)) continue
       const pending = meta.pendingQuestion
       if (pending && (!best || pending.createdAt > best.createdAt)) {
         best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending, meta }
@@ -7648,17 +9323,26 @@ export class SessionManager implements ISessionManager {
     }
     if (!best) return null
 
-    // Hydrate the cold session from the FULL metadata: createManagedSession spreads every header field, so hidden /
-    // origin / popoverOwner / systemPromptPreset survive. Registering from a
-    // bare {id, createdAt} would answer into a managed session that lost its
-    // host identity, and the next persist would write that degraded metadata
-    // back — breaking later recovery by the same owner and downgrading the
-    // eligibility matrix to an ordinary desktop session.
-    if (!this.sessions.has(best.sessionId)) {
-      this.sessions.set(best.sessionId, createManagedSession(best.meta, workspace))
-    }
+    // R40-3: the cold scan is followed by an adoption boundary — revalidate
+    // the token BEFORE hydrating (水合发布前重验): a scope that drifted
+    // during the scan adopts nothing.
+    if (!assertScopeCurrent()) return null
+
+    // R41-3: hydrate into an UNPUBLISHED candidate — the awaited load must
+    // never run against a session that is already reachable through
+    // this.sessions. loadMessagesFromDisk schedules recovery work through
+    // setImmediate (queued-message replay, answer→resume restore); while
+    // the candidate is unregistered, every one of those callbacks hits its
+    // map-identity guard and no-ops, so a ProductSpace switch INSIDE the
+    // load window can leave neither a map entry, nor queued work, nor an
+    // armed pending resume, nor stale events.
+    // Hydrating from the FULL metadata (createManagedSession spreads every
+    // header field) keeps hidden / origin / popoverOwner / systemPromptPreset
+    // intact — registering a bare {id, createdAt} would answer into a
+    // session that lost its host identity.
+    const candidate = createManagedSession(best.meta, workspace)
     try {
-      await this.getSession(best.sessionId)
+      await this.ensureMessagesLoaded(candidate)
     } catch (error) {
       // TRANSIENT: a hydration failure (disk I/O)
       // is not an authoritative "no pending question" — re-throw so the RPC
@@ -7666,18 +9350,42 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`getEditPopoverPendingSession: failed to hydrate session ${best.sessionId}:`, error)
       throw new Error(`Edit Popover pending-question lookup is temporarily unavailable (hydration failed): ${error instanceof Error ? error.message : String(error)}`)
     }
-    const hydrated = this.sessions.get(best.sessionId)
-    const pending = hydrated?.pendingQuestion
-    // Re-validate the scope on the hydrated session (defense in depth): the
-    // identity must have survived hydration intact.
+    // R41-3: post-await CAS — a transition begun during the load discloses
+    // nothing and adopts nothing. Neutralize the candidate so any straggler
+    // recovery callback stays inert even after this frame returns.
+    if (!assertScopeCurrent()) {
+      candidate.pendingAgentResume = undefined
+      candidate.messageQueue.length = 0
+      return null
+    }
+    const pending = candidate.pendingQuestion
+    // Re-validate the scope on the hydrated candidate (defense in depth):
+    // the identity must have survived hydration intact.
     if (!pending
-      || hydrated?.origin !== 'edit-popover'
-      || (hydrated.popoverOwner ?? '') !== popoverOwner
-      || hydrated.workspace.id !== workspaceId
-      || hydrated.hidden !== true
-      || hydrated.systemPromptPreset !== 'mini') {
+      || candidate.origin !== 'edit-popover'
+      || (candidate.popoverOwner ?? '') !== popoverOwner
+      || candidate.workspace.id !== workspaceId
+      || candidate.hidden !== true
+      || candidate.systemPromptPreset !== 'mini'
+      || !inScope({ accountId: candidate.accountId, productSpaceId: candidate.productSpaceId, workspaceId: candidate.workspace.id })) {
       sessionLog.warn(`getEditPopoverPendingSession: hydrated session ${best.sessionId} lost its Edit Popover identity — refusing to adopt`)
       return null
+    }
+    // R41-3: adoption is owner-identity-aware — install only when no live
+    // owner registered the same id concurrently; otherwise just refresh the
+    // live copy's authoritative pending question.
+    const existing = this.sessions.get(best.sessionId)
+    if (!existing) {
+      this.sessions.set(best.sessionId, candidate)
+      // The load's own resume-restoration callbacks fired while the
+      // candidate was still unregistered (map-guard no-ops), so a non-terminal
+      // answer→resume recovered from the cold header is re-armed here —
+      // now safely published.
+      if (candidate.pendingAgentResume && !candidate.pendingAgentResume.completed) {
+        this.scheduleResumeRetry(candidate, 0)
+      }
+    } else if (inScope({ accountId: existing.accountId, productSpaceId: existing.productSpaceId, workspaceId: existing.workspace.id })) {
+      existing.pendingQuestion = candidate.pendingQuestion
     }
     return { sessionId: best.sessionId, request: pending }
   }
@@ -7798,7 +9506,11 @@ export class SessionManager implements ISessionManager {
    * fails, so a transient_failure result is genuinely retryable.
    * Cancellation performs the same atomic cleanup but never starts the agent.
    */
-  async respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult> {
+  async respondToQuestion(
+    sessionId: string,
+    resolution: QuestionResolution,
+    scopeToken?: TrustedSessionScopeToken | null,
+  ): Promise<QuestionResolutionResult> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       sessionLog.warn(`Cannot respond to question - session ${sessionId} not found`)
@@ -7813,7 +9525,7 @@ export class SessionManager implements ISessionManager {
     // genuine retry owner. Followers can never derive an outcome from
     // rollback-able in-memory state.
     const requestId = resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
-    return this.respondToQuestionInner(managed, sessionId, resolution, requestId)
+    return this.respondToQuestionInner(managed, sessionId, resolution, requestId, scopeToken)
   }
 
   private async respondToQuestionInner(
@@ -7821,16 +9533,31 @@ export class SessionManager implements ISessionManager {
     sessionId: string,
     resolution: QuestionResolution,
     requestId: string,
+    scopeToken?: TrustedSessionScopeToken | null,
   ): Promise<QuestionResolutionResult> {
+    // R40-1: when the RPC boundary captured a trusted scope token, it must
+    // still be current at EVERY checkpoint below: after the message-load
+    // await, inside the question-state lock BEFORE the durable
+    // answer/cancel commit, and immediately before the agent resume. A
+    // ProductSpace switch or account replacement that lands mid-await
+    // fails closed with zero persistence and zero resume side effects —
+    // the stale scope can no longer operate its old space's assistant.
+    const assertScopeCurrent = (): void => {
+      if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
+        sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} refused: the trusted scope changed while the resolution was in flight`)
+        throw new ProductSpaceScopeRefusalError()
+      }
+    }
     try {
       await this.ensureMessagesLoaded(managed)
+      assertScopeCurrent()
 
       // The durable commit runs under the session's question-state lock
       // so it can never interleave with a
       // stop/archive clear's staged flush — whichever lands first settles the
       // question and the other observes the settled world.
       const outcome = await this.withQuestionStateLock(sessionId, () =>
-        this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId),
+        this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId, assertScopeCurrent),
       )
 
       if (outcome.resume) {
@@ -7841,12 +9568,51 @@ export class SessionManager implements ISessionManager {
         // whole agent turn.
         // resumePendingAgentTurn never rejects: a failure is user-visible
         // (error event), persisted in pendingAgentResume, and retried.
+        // R40-1/R41-1/R42: the pre-resume revalidation happens BEFORE the
+        // resume — a scope drift that lands between the locked commit and
+        // this check must ALSO durably un-arm the owed answer→resume (the
+        // switch transaction owns the old space's question lifecycle), so
+        // the old space keeps no live recovery and never restarts agent
+        // work. The refusal is TYPED: even when the un-arm itself fails, the
+        // caller still sees a scope refusal (never a transient result).
+        if (scopeToken && !isTrustedSessionScopeTokenCurrent(scopeToken)) {
+          sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} refused before the resume: the trusted scope changed`)
+          const liveManaged = this.sessions.get(sessionId)
+          if (liveManaged && liveManaged === managed && managed.pendingAgentResume) {
+            try {
+              await this.withQuestionStateLock(sessionId, () =>
+                this.clearPendingAgentResume(managed, 'trusted-scope drift before the answer resume'),
+              )
+            } catch (unarmError) {
+              sessionLog.error(`Failed to durably un-arm the answer→resume for session ${sessionId} after a scope drift:`, unarmError)
+              // R42: degrade to the durable TERMINAL quarantine so hydration
+              // can never produce an EXECUTABLE pending resume; surface the
+              // typed refusal with the honest incompleteness either way.
+              const quarantineFailure = await this.quarantinePendingResumeTerminal(managed)
+              throw new ProductSpaceScopeRefusalError(
+                quarantineFailure
+                  ? `resume un-arm incomplete: ${unarmError instanceof Error ? unarmError.message : String(unarmError)}; ${quarantineFailure}`
+                  : `resume un-arm incomplete: ${unarmError instanceof Error ? unarmError.message : String(unarmError)}`,
+              )
+            }
+          }
+          throw new ProductSpaceScopeRefusalError()
+        }
         await this.resumePendingAgentTurn(managed)
         sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
       }
 
       return outcome.result
     } catch (error) {
+      // Authorization refusals are NOT transient failures: they must reach
+      // the RPC caller as a rejection (fail closed), never as a retryable
+      // result that invites resubmission into a dead scope. R42: the
+      // classification is TYPED — refusals carrying diagnostic suffixes
+      // (restore/un-arm incompleteness) keep their refusal identity and are
+      // rethrown verbatim.
+      if (isProductSpaceScopeRefusal(error)) {
+        throw error
+      }
       sessionLog.error(`Failed to resolve question ${requestId} for session ${sessionId}:`, error)
       return {
         status: 'transient_failure',
@@ -7859,13 +9625,19 @@ export class SessionManager implements ISessionManager {
    * The durable answer/cancel commit. Caller MUST hold the session's
    * question-state lock. Returns whether the
    * agent resume is owed so the caller can run it outside the lock.
+   * `assertScopeCurrent` (R40-1) revalidates the RPC entry's trusted scope
+   * token immediately BEFORE any mutation — the lock wait may have spanned
+   * a ProductSpace switch or account replacement, and a stale scope must
+   * observe zero persistence, zero events and zero resume arming.
    */
   private async commitQuestionResolutionLocked(
     managed: ManagedSession,
     sessionId: string,
     resolution: QuestionResolution,
     requestId: string,
+    assertScopeCurrent?: () => void,
   ): Promise<{ result: QuestionResolutionResult; resume: boolean }> {
+    assertScopeCurrent?.()
     // SESSION IDENTITY RE-VALIDATION: the
     // resolution may have waited for the lock past a delete/replace — the
     // managed object held by this closure can be an orphaned leftover. A
@@ -7910,6 +9682,8 @@ export class SessionManager implements ISessionManager {
       // exactly as before so the skip can be retried.
       const prevMessages = managed.messages.slice()
       const prevLastMessageRole = managed.lastMessageRole
+      const prevLastMessageAt = managed.lastMessageAt
+      const prevPendingAgentResume = managed.pendingAgentResume
       try {
         managed.messages.push(cancelMessage)
         managed.lastMessageRole = 'user'
@@ -7917,8 +9691,23 @@ export class SessionManager implements ISessionManager {
 
         this.persistSession(managed)
         await this.flushSession(managed.id)
+        // R41-1: post-flush CAS — the awaited flush may park through a
+        // ProductSpace switch. A stale scope must not publish events, the
+        // cancelled result, or the durable mutation: restore the
+        // pre-resolution snapshot PERSISTENTLY (the flush may already have
+        // committed it to disk) and refuse.
+        assertScopeCurrent?.()
       } catch (error) {
-        this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole }, pending)
+        if (isProductSpaceScopeRefusal(error)) {
+          await this.durablyRestoreQuestionResolutionSnapshot(
+            managed,
+            { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
+            pending,
+            requestId,
+          )
+          throw error
+        }
+        this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume }, pending)
         throw error
       }
 
@@ -7987,7 +9776,31 @@ export class SessionManager implements ISessionManager {
 
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      // R41-1: post-flush CAS — same as the cancel branch: a scope drift
+      // across the flush boundary must never publish events, the accepted
+      // result, or an ARMED answer→resume for the old space. The pre-
+      // resolution snapshot (including the un-armed pendingAgentResume) is
+      // restored durably before refusing.
+      assertScopeCurrent?.()
     } catch (error) {
+      if (isProductSpaceScopeRefusal(error)) {
+        // R42: the first flush may already have made the armed resume
+        // durable — hand it to the restore helper so its failure path can
+        // durably quarantine THAT exact record.
+        const durablyArmedResume: ManagedSession['pendingAgentResume'] = {
+          messageId: answerMessage.id,
+          attempts: 0,
+          invocationSource: pending.invocationSource ?? 'internal',
+        }
+        await this.durablyRestoreQuestionResolutionSnapshot(
+          managed,
+          { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
+          pending,
+          requestId,
+          durablyArmedResume,
+        )
+        throw error
+      }
       this.rollbackQuestionResolution(
         managed,
         { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
@@ -8219,6 +10032,230 @@ export class SessionManager implements ISessionManager {
     } catch (rollbackError) {
       sessionLog.error(`Failed to re-persist rolled-back question state for session ${managed.id}:`, rollbackError)
     }
+  }
+
+  /**
+   * R41-1: the awaited resolution flush may DURABLY commit the answer/cancel
+   * before a ProductSpace switch lands. The stale scope must keep neither
+   * the mutation nor the armed resume: restore the exact pre-resolution
+   * snapshot — messages, badges, pendingQuestion AND pendingAgentResume —
+   * in memory AND on disk (one awaited durable restore), then the caller
+   * refuses with a TYPED ProductSpaceScopeRefusalError. Runs inside the
+   * session's question-state lock.
+   *
+   * R42: when the restore flush itself fails, the compensation must never
+   * degrade into an executable residue: the answer→resume that the FIRST
+   * flush may have made durable is quarantined with a DURABLE TERMINAL
+   * marker (hydration clears terminal records without ever resuming) before
+   * the typed refusal — carrying the honest incompleteness — is thrown.
+   */
+  private async durablyRestoreQuestionResolutionSnapshot(
+    managed: ManagedSession,
+    snapshot: {
+      messages: Message[]
+      lastMessageRole?: ManagedSession['lastMessageRole']
+      lastMessageAt?: number
+      pendingAgentResume?: ManagedSession['pendingAgentResume']
+    },
+    pending: QuestionRequest,
+    requestId: string,
+    durablyArmedResume?: ManagedSession['pendingAgentResume'],
+  ): Promise<void> {
+    managed.messages = snapshot.messages
+    managed.lastMessageRole = snapshot.lastMessageRole
+    if (snapshot.lastMessageAt !== undefined) {
+      managed.lastMessageAt = snapshot.lastMessageAt
+    }
+    managed.pendingQuestion = pending
+    managed.pendingAgentResume = snapshot.pendingAgentResume
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      sessionLog.info(`Restored the pre-resolution question state for session ${managed.id} after a trusted-scope drift (request ${requestId})`)
+    } catch (restoreError) {
+      sessionLog.error(`Failed to durably restore the pre-resolution question state for session ${managed.id} (request ${requestId}):`, restoreError)
+      // The snapshot restore replaced the in-memory state, but the FIRST
+      // flush may already have made the ARMED resume durable — quarantine
+      // that exact record, not the (already un-armed) live state.
+      // R43: the durable BARRIER is written FIRST (it is the guarantee);
+      // the TERMINAL header marker is hygiene that follows it.
+      let barrierFailure: string | null = null
+      let terminalFailure: string | null = null
+      if (durablyArmedResume && !durablyArmedResume.completed) {
+        try {
+          await this.writeResumeQuarantineBarrier(managed, durablyArmedResume, 'pre-resolution restore failed; resume permanently non-executable')
+        } catch (barrierError) {
+          barrierFailure = `quarantine barrier write failed: ${barrierError instanceof Error ? barrierError.message : String(barrierError)}`
+        }
+        managed.pendingAgentResume = { ...durablyArmedResume, completed: true }
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          sessionLog.warn(`Quarantined the durably armed answer→resume for session ${managed.id} with a TERMINAL marker (restore failed; the answer turn can never execute)`)
+        } catch (quarantineError) {
+          terminalFailure = `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
+        }
+      }
+      const detail = `pre-resolution restore incomplete: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`
+      const extra = [barrierFailure, terminalFailure].filter((f): f is string => Boolean(f))
+      throw new ProductSpaceScopeRefusalError(extra.length > 0 ? `${detail}; ${extra.join('; ')}` : detail)
+    }
+  }
+
+  /**
+   * R43: the durable fail-closed quarantine barrier. A dedicated per-session
+   * record OUTSIDE the session JSONL, written through an independent direct
+   * fs path (never the debounced persistence queue), BEFORE any cosmetic
+   * TERMINAL header cleanup is attempted. Hydration (`loadMessagesFromDisk`)
+   * must consult this barrier BEFORE arming any pendingAgentResume — so even
+   * when the restore AND the TERMINAL header writes all fail, the old
+   * space's answer turn can never be scheduled or executed after a restart.
+   *
+   * R45: the barrier file name is a sha256 digest of the session id — a
+   * bundle-v1 header id carrying traversal/separator characters can never
+   * resolve the barrier outside the quarantine directory.
+   */
+  private resumeQuarantineBarrierPath(workspaceRootPath: string, sessionId: string): string {
+    const digest = createHash('sha256').update(sessionId).digest('hex')
+    return join(workspaceRootPath, '.polo-resume-quarantine', `${digest}.json`)
+  }
+
+  /**
+   * R45: strict, versioned schema validation for a barrier record. Anything
+   * malformed, foreign (sessionId mismatch) or truncated is quarantined
+   * (fail-closed) by the caller.
+   */
+  private isValidResumeQuarantineBarrier(
+    parsed: unknown,
+    expectedSessionId: string,
+  ): boolean {
+    if (typeof parsed !== 'object' || parsed === null) return false
+    const candidate = parsed as Record<string, unknown>
+    if (candidate.version !== 1) return false
+    if (candidate.sessionId !== expectedSessionId) return false
+    if (typeof candidate.messageId !== 'string' || candidate.messageId.length === 0) return false
+    if (typeof candidate.quarantinedAt !== 'number' || !Number.isFinite(candidate.quarantinedAt)) return false
+    return true
+  }
+
+  private async writeResumeQuarantineBarrier(
+    managed: ManagedSession,
+    resume: NonNullable<ManagedSession['pendingAgentResume']>,
+    reason: string,
+  ): Promise<void> {
+    const barrierPath = this.resumeQuarantineBarrierPath(managed.workspace.rootPath, managed.id)
+    await mkdir(dirname(barrierPath), { recursive: true })
+    const payload = {
+      version: 1 as const,
+      sessionId: managed.id,
+      messageId: resume.messageId,
+      invocationSource: resume.invocationSource ?? 'internal',
+      quarantinedAt: Date.now(),
+      reason,
+    }
+    // R45: atomic private-mode write — private temp file + fsync + rename,
+    // so a crash or a concurrent writer can never expose a truncated JSON
+    // document at the barrier path.
+    const tempPath = join(
+      dirname(barrierPath),
+      `.${basename(barrierPath)}.${randomUUID()}.tmp`,
+    )
+    const handle = await open(tempPath, 'w', 0o600)
+    try {
+      await handle.writeFile(JSON.stringify(payload), 'utf-8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    try {
+      await rename(tempPath, barrierPath)
+    } catch (renameError) {
+      try { await unlink(tempPath) } catch { /* temp already gone */ }
+      throw renameError
+    }
+    sessionLog.warn(`Durable resume-quarantine barrier written for session ${managed.id} (message ${resume.messageId}): ${reason}`)
+  }
+
+  /**
+   * R45: FAIL-CLOSED barrier consultation. Only a PROVEN absence (ENOENT)
+   * allows the resume to arm — a barrier that exists but cannot be read
+   * (EACCES/EISDIR/…), parses as malformed/truncated JSON, or fails its
+   * strict version/schema validation quarantines the session.
+   *
+   * R46: matching is EXACT per answer turn. A valid barrier for a DIFFERENT
+   * messageId (an older answer's compensation) does NOT quarantine a newer,
+   * legitimate resume — the session is not poisoned forever by one stale
+   * barrier; only the barrier's own answer turn stays non-executable.
+   */
+  private async isResumeQuarantinedByBarrier(
+    workspaceRootPath: string,
+    sessionId: string,
+    messageId: string | undefined,
+  ): Promise<boolean> {
+    const barrierPath = this.resumeQuarantineBarrierPath(workspaceRootPath, sessionId)
+    let raw: string
+    try {
+      raw = await readFile(barrierPath, 'utf-8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return false
+      }
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} is unreadable (${error instanceof Error ? error.message : String(error)}) — failing closed`)
+      return true
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} is malformed — failing closed (${error instanceof Error ? error.message : String(error)})`)
+      return true
+    }
+    if (!this.isValidResumeQuarantineBarrier(parsed, sessionId)) {
+      sessionLog.warn(`Resume-quarantine barrier for session ${sessionId} failed schema validation — failing closed`)
+      return true
+    }
+    const quarantinedMessageId = (parsed as { messageId?: unknown }).messageId as string
+    if (messageId && quarantinedMessageId !== messageId) {
+      // R46: valid barrier, different answer turn — the newer resume is
+      // legitimate and must still be armed (exact-answer matching).
+      sessionLog.info(`Resume-quarantine barrier for session ${sessionId} covers message ${quarantinedMessageId} only; resume ${messageId} is a different answer turn and stays armed`)
+      return false
+    }
+    return true
+  }
+
+  /**
+   * R42: the durable quarantine for an armed answer→resume whose ordinary
+   * compensation (restore / un-arm) failed. R43: the BARRIER is written
+   * FIRST — it is the fail-closed guarantee (consulted by hydration before
+   * any arm); flipping the header record to TERMINAL is hygiene that follows
+   * it. Returns null when the quarantine is fully durable (barrier written
+   * AND terminal marker persisted), or the honest failure detail when any
+   * part could not be persisted.
+   */
+  private async quarantinePendingResumeTerminal(managed: ManagedSession): Promise<string | null> {
+    if (!managed.pendingAgentResume || managed.pendingAgentResume.completed) {
+      return null
+    }
+    const resume = managed.pendingAgentResume
+    let barrierFailure: string | null = null
+    try {
+      await this.writeResumeQuarantineBarrier(managed, resume, 'answer→resume compensation failed; resume permanently non-executable')
+    } catch (barrierError) {
+      barrierFailure = `quarantine barrier write failed: ${barrierError instanceof Error ? barrierError.message : String(barrierError)}`
+    }
+    managed.pendingAgentResume = { ...resume, completed: true }
+    let terminalFailure: string | null = null
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      sessionLog.warn(`Quarantined the armed answer→resume for session ${managed.id} with a durable TERMINAL marker (scope lost; the answer turn can never execute)`)
+    } catch (quarantineError) {
+      terminalFailure = `terminal quarantine incomplete: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`
+      sessionLog.error(`Failed to persist the TERMINAL quarantine marker for session ${managed.id}:`, quarantineError)
+    }
+    const failures = [barrierFailure, terminalFailure].filter((f): f is string => Boolean(f))
+    return failures.length > 0 ? failures.join('; ') : null
   }
 
   /**
@@ -9241,7 +11278,7 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  private sendEvent(event: SessionEvent, workspaceId?: string): void {
+  private sendEvent(event: SessionEvent, workspaceId?: string, sessionProductSpaceId?: string | null): void {
     if (!this.eventSink) {
       sessionLog.warn('Cannot send event - no event sink')
       return
@@ -9250,6 +11287,26 @@ export class SessionManager implements ISessionManager {
     if (!workspaceId) {
       sessionLog.warn(`Cannot send ${event.type} event - no workspaceId`)
       return
+    }
+
+    // Space fence on the event boundary: a session event may only reach a
+    // client while its ProductSpace is the committed active space. A null
+    // fence means the business surface is not ready — nothing is delivered.
+    const activeProductSpaceId = getRuntimeActiveProductSpace()
+    if (!activeProductSpaceId) return
+    if ('sessionId' in event) {
+      // A terminal deletion removes the session from the map BEFORE its
+      // cleanup emits `session_deleted` — the fence then consults the
+      // pre-removal scope captured by the deletion path (the managed
+      // record's immutable binding), so the UI is informed without ever
+      // bypassing the space fence.
+      const managed = this.sessions.get(event.sessionId)
+      const sessionScope = sessionProductSpaceId !== undefined
+        ? sessionProductSpaceId
+        : managed?.productSpaceId
+      if (sessionScope === undefined || sessionScope !== activeProductSpaceId) {
+        return
+      }
     }
 
     this.eventSink(RPC_CHANNELS.sessions.EVENT, { to: 'workspace', workspaceId }, event)
@@ -9622,6 +11679,18 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
 
+    // R33-1: a clean import is bound to the trusted destination scope in
+    // ONE atomic capture. Without a complete committed scope the import
+    // fails BEFORE writing — an unbound (immediately quarantined, unusable)
+    // record is never created.
+    const importScope = captureTrustedSessionScope()
+    if (!importScope) {
+      throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+    }
+    // R37-4: the publication token binds the import to the current
+    // transition epoch, account-binding generation and fence generation.
+    const importPublicationToken = captureTrustedPublicationToken()
+
     sessionLog.info(`[import] Target workspace: "${workspace.name}" at ${workspace.rootPath}`)
 
     const warnings: string[] = []
@@ -9693,6 +11762,10 @@ export class SessionManager implements ISessionManager {
         transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
         messages: bundle.session.messages,
         tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
+        // R33-1: the imported record carries the trusted destination scope —
+        // never an unbound (quarantined-at-birth) header.
+        productSpaceId: importScope.productSpaceId,
+        accountId: importScope.accountId,
       }
 
       // Fork-specific: set up SDK branching if branchInfo provided
@@ -9795,12 +11868,42 @@ export class SessionManager implements ISessionManager {
       })
       managed.messages = bundleMessages.map(storedToMessage)
 
+      // R38-4: global runtime state (permission mode) is installed only
+      // AFTER the final publication CAS — a stale publication must leave no
+      // mode state behind.
+      if (importPublicationToken && !isTrustedPublicationTokenCurrent(importPublicationToken)) {
+        sessionLog.warn('Session import lost its publication race: scope/fence changed during awaited work', {
+          workspaceId,
+          sessionId,
+        })
+        const staleManaged = managed
+        // R38-4: the delete is conditioned on no concurrent valid same-ID
+        // owner having committed in the meantime — our record was never
+        // registered, so any registered record belongs to that owner.
+        let rollbackFailure: string | null = null
+        if (!this.sessions.has(sessionId)) {
+          const deleted = this.sessionStorage.delete(workspaceRootPath, sessionId)
+          if (deleted === false) {
+            rollbackFailure = 'storage delete returned false'
+          }
+        }
+        if (rollbackFailure) {
+          throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${rollbackFailure})`)
+        }
+        throw new Error('PRODUCT_SPACE_CONTEXT_REQUIRED')
+      }
+
       setPermissionMode(sessionId, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
       if (managed.previousPermissionMode) {
         hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
       }
 
       this.sessions.set(sessionId, managed)
+      // R39-2: the registration guard is installed atomically with the
+      // in-memory publication.
+      this.installManagedSessionCallbackGuard(managed)
+      // R50/R51: rebind the owner lease to the published guard identity.
+      managed.callbackLease = getSessionScopedToolCallbackLease(sessionId)
 
       // Initialize automation metadata
       const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -9822,11 +11925,27 @@ export class SessionManager implements ISessionManager {
       return { sessionId, warnings: warnings.length > 0 ? warnings : undefined }
     } finally {
       if (!importCommitted) {
-        this.sessions.delete(sessionId)
-        try {
-          this.sessionStorage.delete(workspaceRootPath, sessionId)
-        } catch (cleanupError) {
-          sessionLog.error(`[import] Failed to roll back reservation ${sessionId}:`, cleanupError)
+        // R39-4: owner-conditioned rollback. This import never registered
+        // its record (the CAS threw before sessions.set), so an in-memory
+        // record under this ID belongs to a concurrent valid same-ID owner
+        // and MUST NOT be deleted — neither from the map nor from disk.
+        // Only the orphaned disk reservation left by THIS owner is rolled
+        // back, and delete(false)/delete(throw) are surfaced explicitly.
+        if (!this.sessions.has(sessionId)) {
+          const cleanupRollbackFailure: string[] = []
+          let deleted: boolean
+          try {
+            deleted = this.sessionStorage.delete(workspaceRootPath, sessionId)
+          } catch (cleanupError) {
+            cleanupRollbackFailure.push(`storage delete threw: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
+            deleted = false
+          }
+          if (deleted === false) {
+            cleanupRollbackFailure.push('storage delete returned false')
+          }
+          if (cleanupRollbackFailure.length > 0) {
+            throw new Error(`PRODUCT_SPACE_CONTEXT_REQUIRED (rollback incomplete: ${cleanupRollbackFailure.join('; ')})`)
+          }
         }
       }
     }

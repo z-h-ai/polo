@@ -285,6 +285,10 @@ export default function AppearanceSettingsPage() {
                       value={(i18n.resolvedLanguage ?? i18n.language) as LanguageCode}
                       onValueChange={(value) => {
                         i18n.changeLanguage(value)
+                        // Persist the explicit user choice — the renderer no
+                        // longer uses i18next LanguageDetector auto-caching.
+                        // eslint-disable-next-line polo-ai/no-localstorage -- i18next language cache key; read back at boot in main.tsx
+                        window.localStorage.setItem('i18nextLng', value)
                         window.electronAPI?.changeLanguage?.(value)
                       }}
                       options={Object.entries(LANGUAGES).map(([code, config]) => ({

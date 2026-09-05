@@ -585,7 +585,7 @@ export function parseActiveExecutionsForProductSpace(
   return executions
 }
 
-/** Parses stop-all output only after every requested execution reached a terminal state. */
+/** Parses stop-all output, preserving an explicit nonterminal survivor contract (R36-2): allStopped=false with real active rows is valid and stays nonterminal for every consumer. */
 export function parseStopAllExecutionsResultForProductSpace(
   input: unknown,
   expectedAccountId: z.output<typeof AccountIdSchema>,
@@ -620,10 +620,13 @@ export function parseStopAllExecutionsResultForProductSpace(
       throw new ProductSpaceExecutionScopeError('stop-all response changed an expected execution scope')
     }
   }
-  if (!result.allStopped || result.executions.some(execution => (
-    execution.status !== 'stopped' && execution.status !== 'failed'
+  if (!result.allStopped && result.executions.every(execution => (
+    execution.status === 'stopped' || execution.status === 'failed'
   ))) {
-    throw new ProductSpaceExecutionScopeError('stop-all response contains non-terminal executions')
+    throw new ProductSpaceExecutionScopeError('allStopped must be true when every execution reached a terminal status')
   }
+  // R36-2: a nonterminal stop-all result is the explicit superseded/survivor
+  // contract — rows may carry their REAL active status while allStopped is
+  // false, and the phase verdict stays nonterminal for every consumer.
   return result
 }

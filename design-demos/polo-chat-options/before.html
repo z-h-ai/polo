@@ -327,7 +327,7 @@
       const resolve = summary => { setAnswerSummary(summary); setResolved(true); setMode("freeform"); };
       return <PoloShell theme={theme} onThemeToggle={()=>setTheme(value=>value==="dark"?"light":"dark")} onReset={reset}>
         <ChatConversation resolved={resolved} answerSummary={answerSummary} onReset={reset}>
-          {mode === "question" && !resolved ? <QuestionRequest requestKey={requestKey} onResolved={resolve}/> : <FreeformComposer onAsk={reset}/>} 
+          {mode === "question" && !resolved ? <QuestionRequest requestKey={requestKey} onResolved={resolve}/> : <FreeformComposer onAsk={reset}/>}
         </ChatConversation>
       </PoloShell>;
     }

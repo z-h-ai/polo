@@ -82,6 +82,19 @@ import {
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
 } from './schemas.ts';
+import {
+  createProductSpaceCatalogPath,
+  ListProductSpacesResponseSchema,
+  parseProductSpaceCatalogResponseForProductSpace,
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceResponsePathError,
+  ProductSpaceResponseScopeError,
+} from '../product-spaces/index.ts';
+import type { ListProductSpacesResponse } from '../product-spaces/types.ts';
+import type {
+  TrustedProductSpaceCatalog,
+  TrustedProductSpaceSummary,
+} from '../product-spaces/schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -153,6 +166,7 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
 };
 
 const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+  product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
   ACCOUNT_DISABLED: 'Admin account is disabled',
   TOKEN_REVOKED: 'Admin session is no longer valid',
@@ -205,6 +219,7 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   upload_expired: 'The upload address has expired',
   checksum_mismatch: 'The downloaded ZIP failed its checksum check',
   content_digest_mismatch: 'The extracted Skill content failed its integrity check',
+  account_transition_pending: 'The previous account is still shutting down. Retry the sign-in.',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
@@ -361,6 +376,81 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  /**
+   * Reads the ProductSpace v1 contract list. A response written for a
+   * different contractVersion fails closed with a dedicated error code so the
+   * client can block business surfaces instead of guessing.
+   */
+  async listProductSpaces(accessToken: string): Promise<ListProductSpacesResponse> {
+    const response = await this.request<unknown>(
+      '/api/me/product-spaces',
+      { method: 'GET', accessToken },
+    );
+    const parsed = ListProductSpacesResponseSchema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    const rawVersion = response
+      && typeof response === 'object'
+      && !Array.isArray(response)
+      ? (response as Record<string, unknown>).contractVersion
+      : undefined;
+    if (
+      rawVersion !== undefined
+      && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+    ) {
+      throw new AdminError(
+        'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+        'product_space_contract_unsupported',
+      );
+    }
+    throw new AdminError('ProductSpace list response is invalid', 'SERVER_ERROR');
+  }
+
+  /**
+   * Reads the unified ProductSpace Catalog and validates it against the
+   * trusted space summary at the client boundary. A valid DTO for another
+   * ProductSpace is rejected, never hydrated.
+   */
+  async getProductSpaceCatalog(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    knownRevision?: string,
+  ): Promise<TrustedProductSpaceCatalog | { notModified: true }> {
+    const query = new URLSearchParams();
+    if (knownRevision) query.set('revision', knownRevision);
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const response = await this.request<unknown>(
+      `${createProductSpaceCatalogPath(context.id)}${suffix}`,
+      { method: 'GET', accessToken, allowNotModified: true },
+    );
+    if (response === undefined) return { notModified: true };
+    try {
+      return parseProductSpaceCatalogResponseForProductSpace(response, context);
+    } catch (error) {
+      if (error instanceof ProductSpaceResponseScopeError || error instanceof ProductSpaceResponsePathError) {
+        throw new AdminError(
+          'ProductSpace catalog response failed the space boundary check',
+          'SERVER_ERROR',
+          { cause: error },
+        );
+      }
+      const rawVersion = response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        ? (response as Record<string, unknown>).contractVersion
+        : undefined;
+      if (
+        rawVersion !== undefined
+        && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+      ) {
+        throw new AdminError(
+          'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+          'product_space_contract_unsupported',
+        );
+      }
+      throw new AdminError('ProductSpace catalog response is invalid', 'SERVER_ERROR', { cause: error });
+    }
   }
 
   async getAppCatalog(

@@ -87,6 +87,8 @@ import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
+import { endAccountProductSpaceRuntimes } from './account-lifecycle'
+import { whenInitialSyncTrustedProductSpaceAccountRestored } from '@polo-ai/server-core/handlers/rpc'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
@@ -955,7 +957,10 @@ app.whenReady().then(async () => {
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
             onAdminSessionEnding: (accountId: string) =>
-              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
+              endAccountProductSpaceRuntimes(
+                accountId,
+                getScopedLocalAppRuntimeRegistry(),
+              ),
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
@@ -1347,6 +1352,16 @@ app.whenReady().then(async () => {
         console.log(`POLO_AI_SERVER_TOKEN=${instance.token}`)
       }
     }
+
+    // Restore the synchronous authenticated-account mirror from the
+    // persisted Admin credentials BEFORE any window exists, so the webview
+    // attach gate never has to decide on the fail-closed `unknown` state in
+    // practice. Bounded: on a stalled restore the gate stays `unknown` and
+    // refuses every partition (fail-closed) instead of blocking startup.
+    await Promise.race([
+      whenInitialSyncTrustedProductSpaceAccountRestored(),
+      new Promise(resolve => setTimeout(resolve, 5_000)),
+    ])
 
     // Create initial windows (restores from saved state or opens first workspace)
     // In headless mode the server runs without any UI — skip window creation.

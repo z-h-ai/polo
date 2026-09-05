@@ -62,7 +62,10 @@ export interface ISessionManager {
   setSessionStatus(sessionId: string, status: SessionStatus): Promise<void>
   markSessionRead(sessionId: string): Promise<void>
   markSessionUnread(sessionId: string): Promise<void>
-  markAllSessionsRead(workspaceId: string): Promise<void>
+  markAllSessionsRead(
+    workspaceId: string,
+    scope?: { productSpaceId: string; accountId: string; workspaceId?: string } | null,
+  ): Promise<void>
   setActiveViewingSession(sessionId: string | null, workspaceId: string): void
   clearActiveViewingSession(workspaceId: string): void
 
@@ -94,8 +97,12 @@ export interface ISessionManager {
     rpcContext?: { callerClientId?: string },
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
+  cancelAllProcessing(): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
-  getTaskOutput(taskId: string): Promise<string | null>
+  getTaskOutput(
+    taskId: string,
+    scope?: { productSpaceId: string; accountId: string; workspaceId: string } | null,
+  ): Promise<string | null>
   addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void
   removeMessageAnnotation(sessionId: string, messageId: string, annotationId: string): void
   updateMessageAnnotation(
@@ -124,20 +131,37 @@ export interface ISessionManager {
   // ---------------------------------------------------------------------------
 
   getPendingQuestion(sessionId: string): QuestionRequest | null
-  respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
+  /**
+   * R40-1: `scopeToken` is the trusted session-scope token captured at the
+   * RESPOND_TO_QUESTION RPC entry. When present, it is revalidated inside
+   * the question-state lock before the durable answer/cancel commit and
+   * again before the agent resume — a scope drift mid-await fails closed
+   * (the RPC rejects, zero persistence, zero resume side effects).
+   */
+  respondToQuestion(sessionId: string, resolution: QuestionResolution, scopeToken?: import('../handlers/rpc/trusted-product-space-account').TrustedSessionScopeToken | null): Promise<QuestionResolutionResult>
   /**
    * Locate the Edit Popover session that still owns an active pending
    * question for the given workspace + popover owner (hidden session — not
    * reachable through the session list). Exact match only; returns null when
    * no scoped popover session is waiting for an answer.
+   * R40-3: `scopeToken` (captured at the RPC entry) filters BOTH live and
+   * cold candidates by the complete trusted scope and is revalidated after
+   * every await — before hydration adoption and before disclosure.
    */
-  getEditPopoverPendingSession(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null>
+  getEditPopoverPendingSession(workspaceId: string, popoverOwner: string, scopeToken?: import('../handlers/rpc/trusted-product-space-account').TrustedSessionScopeToken | null): Promise<{ sessionId: string; request: QuestionRequest } | null>
   /**
    * Dedicated, trusted creation path for the renderer Edit Popover session:
    * stamps the server-verified 'edit-popover' origin + owner identity. The
    * generic createSession path strips any caller-provided 'edit-popover'.
+   * R41-2: `scopeToken` (captured at the RPC entry, BEFORE the first create
+   * await) identifies the whole privileged operation — it gates the
+   * continuation gap after createSession, the durable stamp and the
+   * post-flush publication, together with an exact managed
+   * account/ProductSpace/Workspace identity match; any mismatch tears the
+   * hidden session down with owner-identity-aware cleanup whose incomplete
+   * outcome is reported.
    */
-  createEditPopoverSession(workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions): Promise<import('@polo-ai/shared/protocol').Session>
+  createEditPopoverSession(workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions, scopeToken?: import('../handlers/rpc/trusted-product-space-account').TrustedSessionScopeToken | null): Promise<import('@polo-ai/shared/protocol').Session>
 
   // ---------------------------------------------------------------------------
   // Plans
@@ -214,7 +238,7 @@ export interface ISessionManager {
   getSessionPath(sessionId: string): string | null
   refreshTitle(sessionId: string): Promise<{ success: boolean; title?: string; error?: string }>
   refreshBadge(): void
-  getUnreadSummary(): UnreadSummary
+  getUnreadSummary(scope?: { productSpaceId: string; accountId: string } | null): UnreadSummary
 
   // ---------------------------------------------------------------------------
   // Workspace

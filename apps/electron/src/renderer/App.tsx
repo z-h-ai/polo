@@ -78,13 +78,14 @@ import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { TabShellProvider } from '@/context/TabShellContext'
 import { TabShell } from '@/components/tab-browser/TabShell'
-import { OrganizationOnboarding } from '@/components/organization/OrganizationOnboarding'
-import { OrganizationManagementDialog } from '@/components/organization/OrganizationManagementDialog'
 import {
-  OrganizationProvider,
-  type OrganizationContextValue,
-} from '@/context/OrganizationContext'
-import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
+  ProductSpaceProvider,
+  type ProductSpaceContextValue,
+} from '@/context/ProductSpaceContext'
+import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
+import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
+import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
+import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
 import {
   emitAdminAuthFailure,
   emitAdminCatalogSessionAuthFailure,
@@ -93,13 +94,23 @@ import {
   subscribeToAdminAuthFailures,
   type AdminErrorLike,
 } from '@/lib/admin-auth-failure'
+import { Button } from '@/components/ui/button'
 import {
-  createOrganizationDeepLinkNavigationCoordinator,
-  type OrganizationDeepLinkAppState,
-  type OrganizationDeepLinkNavigationCoordinator,
-} from '@/lib/app-organization-deep-link'
+  isProductSpaceContractUnsupported,
+  reportProductSpaceContractFailure,
+  subscribeToProductSpaceContractFailures,
+} from '@/lib/product-space-contract-failure'
+import { onTargetProjectionFailure } from '@/lib/target-projection'
 
-type AppState = OrganizationDeepLinkAppState
+/** App-level states for the ProductSpace-first client shell. */
+type AppState =
+  | 'loading'
+  | 'onboarding'
+  | 'reauth'
+  | 'contract-blocked'
+  | 'space-error'
+  | 'workspace-picker'
+  | 'ready'
 
 /** Type for the Jotai store returned by useStore() */
 type JotaiStore = ReturnType<typeof getDefaultStore>
@@ -111,6 +122,8 @@ type SessionListRefreshOptions = {
 }
 
 const SESSION_REFRESH_LOG_ID_LIMIT = 25
+/** Window in which a failed post-switch load can roll back to the origin space. */
+const ROLLBACK_WINDOW_MS = 120_000
 
 function summarizeIds(ids: Iterable<string>, limit = SESSION_REFRESH_LOG_ID_LIMIT) {
   const all = Array.from(ids)
@@ -263,9 +276,11 @@ function handleBackgroundTaskEvent(
 function SessionLoadErrorScreen({
   message,
   onRetry,
+  onRollback,
 }: {
   message: string
   onRetry: () => void
+  onRollback?: () => void
 }) {
   const { t } = useTranslation()
 
@@ -286,6 +301,16 @@ function SessionLoadErrorScreen({
         >
           {t("errors.retryLoadingSessions")}
         </button>
+        {onRollback ? (
+          <button
+            type="button"
+            data-testid="product-space-rollback"
+            onClick={onRollback}
+            className="mt-2 block w-full text-sm text-foreground/60 underline-offset-2 hover:underline"
+          >
+            {t("productSpace.rollback.button")}
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -306,6 +331,13 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>('loading')
   const appStateRef = useRef<AppState>(appState)
   appStateRef.current = appState
+  // Space scope mirror for callbacks that must read the active ProductSpace
+  // without being re-created on every context change.
+  const productSpaceScopeRef = useRef<{
+    accountId: string | null
+    activeId: string | null
+    personalId: string | null
+  }>({ accountId: null, activeId: null, personalId: null })
   const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
 
   // Per-session Jotai atom setters for isolated updates
@@ -381,20 +413,31 @@ export default function App() {
     currentAdminUserIdRef.current = nextAccountId
     setCurrentAdminUser(user)
   }, [])
-  const organizationDeepLinkCoordinatorRef = useRef<OrganizationDeepLinkNavigationCoordinator | null>(null)
-  const invalidateOrganizationDeepLinkNavigation = useCallback(() => {
-    organizationDeepLinkCoordinatorRef.current?.invalidate()
+  // REQ-010/POO-41 frozen guard: below 640px the workbench/hub is replaced
+  // by the fullscreen narrow-window guard.
+  const narrowViewport = useNarrowViewport()
+  const productSpaceRefreshGenerationRef = useRef(0)
+  const invalidateProductSpaceDeepLinkRefresh = useCallback(() => {
+    productSpaceRefreshGenerationRef.current += 1
   }, [])
-  const organization = useOrganizationContextState()
+  const productSpace = useProductSpaceContextState()
+  // Stable access for callbacks defined before the hook value settles; the
+  // object identity changes every render but the ref always tracks the latest.
+  const productSpaceRef = useRef(productSpace)
+  productSpaceRef.current = productSpace
   const {
-    bootstrap: bootstrapOrganization,
-    clearAccount: clearOrganizationAccount,
-    receiveJoinToken: receiveOrganizationJoinToken,
-    selectOrganization,
-    showCreate: showOrganizationCreate,
-  } = organization
-  const [organizationManagementOpen, setOrganizationManagementOpen] = useState(false)
-
+    bootstrap: bootstrapProductSpace,
+    clearAccount: clearProductSpaceAccount,
+    refreshProductSpaces,
+    retryBootstrap: retryProductSpaceBootstrap,
+    requestSwitch,
+    confirmStopAndSwitch,
+    retryFailedStops,
+    retryTargetLoad,
+    cancelSwitch,
+    stopSwitchExecution,
+    dismissTargetAccessLost,
+  } = productSpace
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
     return llmConnections.find(c => c.slug === defaultLlmConnectionSlug) ?? null
@@ -614,6 +657,8 @@ export default function App() {
 
     // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
     // closes after the snapshot has been applied synchronously.
+    // The runtime enforces the committed ProductSpace: sessions bound to
+    // other spaces never cross the sessions:list boundary.
     let loadedSessions: Session[] = []
     try {
       await applySnapshotUnderGuard(
@@ -675,10 +720,56 @@ export default function App() {
         return
       }
 
+      // A target projection that fails right after a committed switch is a
+      // half-switched surface: the trusted reverse transaction back to the
+      // frozen origin space runs automatically — the user never has to
+      // discover a manual rollback. If the reverse transaction itself fails,
+      // the safe error screen with the manual rollback action remains.
+      const committedSwitch = lastCommittedSwitchRef.current
+      if (
+        committedSwitch
+        && Date.now() - committedSwitch.at < ROLLBACK_WINDOW_MS
+      ) {
+        const rolledBack = await productSpaceRef.current.rollbackToOrigin(committedSwitch.from)
+          .catch(() => false)
+        if (rolledBack) {
+          lastCommittedSwitchRef.current = null
+          setSessionLoadError(null)
+          setSessionsLoaded(false)
+          void loadSessionsFromServer()
+          return
+        }
+      }
+
       setSessionLoadError(formatSessionLoadFailure(err))
       setSessionsLoaded(true)
     }
   }, [initializeSessions, initialSessionId, reconcilePermissionModeState, windowWorkspaceId])
+
+  // Any OTHER failing target projection (skills, sources, …) triggers the
+  // same automatic reverse transaction — never a half-loaded ready shell.
+  useEffect(() => {
+    return onTargetProjectionFailure(() => {
+      const committedSwitch = lastCommittedSwitchRef.current
+      if (!committedSwitch) return
+      if (Date.now() - committedSwitch.at >= ROLLBACK_WINDOW_MS) return
+      const entry = committedSwitch
+      lastCommittedSwitchRef.current = null
+      void productSpaceRef.current.rollbackToOrigin(entry.from)
+        .then(rolledBack => {
+          if (!rolledBack) throw new Error('rollback failed')
+          setSessionLoadError(null)
+          setSessionsLoaded(false)
+          void loadSessionsFromServer()
+        })
+        .catch(() => {
+          // The automatic rollback failed: restore the window so the safe
+          // error screen with the manual rollback action takes over.
+          lastCommittedSwitchRef.current = entry
+          toast.error(t('productSpace.rollback.failed'))
+        })
+    })
+  }, [loadSessionsFromServer])
 
   const refreshSessionListMetadataFromServer = useCallback(async (options: SessionListRefreshOptions = {}): Promise<Map<string, SessionMeta> | null> => {
     const {
@@ -804,63 +895,63 @@ export default function App() {
           }
         : null
       if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
-        invalidateOrganizationDeepLinkNavigation()
+        invalidateProductSpaceDeepLinkRefresh()
       }
       commitCurrentAdminUser(user)
       return user
     } catch {
       if (currentAdminUserIdRef.current !== null) {
-        invalidateOrganizationDeepLinkNavigation()
+        invalidateProductSpaceDeepLinkRefresh()
       }
       commitCurrentAdminUser(null)
       return null
     }
-  }, [commitCurrentAdminUser, invalidateOrganizationDeepLinkNavigation])
+  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
 
-  const continueAfterOrganization = useCallback((workspaceId: string | null) => {
+  const continueAfterProductSpace = useCallback((workspaceId: string | null) => {
     setAppState(workspaceId ? 'ready' : 'workspace-picker')
   }, [])
 
-  const routeThroughOrganization = useCallback(async (
+  const routeThroughProductSpace = useCallback(async (
     accountId: string | null,
     workspaceId: string | null,
   ) => {
     if (!accountId) {
-      continueAfterOrganization(workspaceId)
+      continueAfterProductSpace(workspaceId)
       return
     }
 
     try {
-      const next = await bootstrapOrganization(accountId)
+      const next = await bootstrapProductSpace(accountId)
       if (currentAdminUserIdRef.current !== accountId || next === null) return
       if (next === 'ready') {
-        continueAfterOrganization(workspaceId)
+        continueAfterProductSpace(workspaceId)
+      } else if (next === 'contract-blocked') {
+        setAppState('contract-blocked')
       } else {
-        setAppState('organization')
+        setAppState('space-error')
       }
     } catch (error) {
       if (currentAdminUserIdRef.current !== accountId) return
       if (isAdminAuthFailureResult(error as AdminErrorLike)) {
-        invalidateOrganizationDeepLinkNavigation()
+        invalidateProductSpaceDeepLinkRefresh()
         commitCurrentAdminUser(null)
         setAppState('onboarding')
       } else {
-        setAppState('organization')
+        setAppState('space-error')
       }
     }
   }, [
-    bootstrapOrganization,
+    bootstrapProductSpace,
     commitCurrentAdminUser,
-    continueAfterOrganization,
-    invalidateOrganizationDeepLinkNavigation,
+    continueAfterProductSpace,
+    invalidateProductSpaceDeepLinkRefresh,
   ])
 
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
-    // Completing authentication starts a fresh organization bootstrap. Invalidate
-    // any preview callback that began under the anonymous account before awaiting
-    // status/workspace reads, so it cannot reset the completed login flow.
-    invalidateOrganizationDeepLinkNavigation()
+    // Completing authentication starts a fresh ProductSpace bootstrap.
+    invalidateProductSpaceDeepLinkRefresh()
     let targetWorkspaceId: string | null = windowWorkspaceId
     let signedInUser: Awaited<ReturnType<typeof refreshAdminUser>> = null
     try {
@@ -879,13 +970,13 @@ export default function App() {
       }
     } catch (error) {
       console.error('[App] Failed to load workspaces after onboarding:', error)
-      // The organization route still runs; workspace state can recover later.
+      // The space route still runs; workspace state can recover later.
     }
-    await routeThroughOrganization(signedInUser?.userId ?? null, targetWorkspaceId)
+    await routeThroughProductSpace(signedInUser?.userId ?? null, targetWorkspaceId)
   }, [
-    invalidateOrganizationDeepLinkNavigation,
+    invalidateProductSpaceDeepLinkRefresh,
     refreshAdminUser,
-    routeThroughOrganization,
+    routeThroughProductSpace,
     setWindowWorkspaceId,
     windowWorkspaceId,
   ])
@@ -929,10 +1020,8 @@ export default function App() {
   }, [showAdminKicked])
 
   const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
-    invalidateOrganizationDeepLinkNavigation()
-    clearOrganizationAccount(currentAdminUserIdRef.current, {
-      preservePendingJoinToken: true,
-    })
+    invalidateProductSpaceDeepLinkRefresh()
+    clearProductSpaceAccount(currentAdminUserIdRef.current)
     commitCurrentAdminUser(null)
     if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
       enterAdminKicked()
@@ -940,16 +1029,16 @@ export default function App() {
       enterAdminLogin()
     }
   }, [
-    clearOrganizationAccount,
+    clearProductSpaceAccount,
     commitCurrentAdminUser,
     enterAdminKicked,
     enterAdminLogin,
-    invalidateOrganizationDeepLinkNavigation,
+    invalidateProductSpaceDeepLinkRefresh,
   ])
 
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
-    invalidateOrganizationDeepLinkNavigation()
+    invalidateProductSpaceDeepLinkRefresh()
     let validation = await window.electronAPI.adminValidate()
     if (isAdminSessionChangedResult(validation)) {
       validation = await window.electronAPI.adminValidate()
@@ -974,7 +1063,7 @@ export default function App() {
   }, [
     enterAdminKicked,
     enterAdminLogin,
-    invalidateOrganizationDeepLinkNavigation,
+    invalidateProductSpaceDeepLinkRefresh,
   ])
 
   // Reauth reset handler - open reset confirmation dialog
@@ -985,12 +1074,12 @@ export default function App() {
   const startupInitializationGenerationRef = useRef(0)
   const startupInitializationHandlersRef = useRef({
     handleAdminAuthFailure,
-    routeThroughOrganization,
+    routeThroughProductSpace,
     setWindowWorkspaceId,
   })
   startupInitializationHandlersRef.current = {
     handleAdminAuthFailure,
-    routeThroughOrganization,
+    routeThroughProductSpace,
     setWindowWorkspaceId,
   }
 
@@ -1041,7 +1130,7 @@ export default function App() {
             displayName: validation.user.displayName,
           }
           if (currentAdminUserIdRef.current !== signedInUser.userId) {
-            invalidateOrganizationDeepLinkNavigation()
+            invalidateProductSpaceDeepLinkRefresh()
           }
           commitCurrentAdminUser(signedInUser)
           signedInAccountId = signedInUser.userId
@@ -1059,7 +1148,7 @@ export default function App() {
         // LLM connection setup is admin-managed. If local setup is incomplete only
         // because no user-managed LLM connection exists, enter the app and let the
         // existing runtime unavailable-connection handling surface send-time errors.
-        await startupInitializationHandlersRef.current.routeThroughOrganization(
+        await startupInitializationHandlersRef.current.routeThroughProductSpace(
           signedInAccountId,
           wsId,
         )
@@ -1078,7 +1167,7 @@ export default function App() {
         startupInitializationGenerationRef.current += 1
       }
     }
-  }, [commitCurrentAdminUser, invalidateOrganizationDeepLinkNavigation])
+  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
@@ -1092,34 +1181,36 @@ export default function App() {
     return subscribeToAdminAuthFailures(handleAdminAuthFailure)
   }, [handleAdminAuthFailure])
 
-  const organizationDeepLinkHandlersRef = useRef({
-    receiveJoinToken: receiveOrganizationJoinToken,
-    showAdminLogin: enterAdminLogin,
+  // PC-F11 single gate: any ProductSpace DTO reporting contract
+  // incompatibility tears down the fence and projections through the hook's
+  // trusted transition and renders the upgrade gate.
+  useEffect(() => {
+    return subscribeToProductSpaceContractFailures(() => {
+      productSpace.enterContractBlocked(currentAdminUserIdRef.current)
+    })
+  }, [productSpace.enterContractBlocked])
+
+  const productSpaceDeepLinkHandlersRef = useRef({
+    refreshProductSpaces: () => {},
   })
-  organizationDeepLinkHandlersRef.current = {
-    receiveJoinToken: receiveOrganizationJoinToken,
-    showAdminLogin: enterAdminLogin,
+  productSpaceDeepLinkHandlersRef.current = {
+    refreshProductSpaces: () => {
+      void refreshProductSpaces()
+    },
   }
 
+  // Enterprise creation and invite completion deep links ask the client to
+  // refresh its space list. The current ProductSpace never changes as a side
+  // effect of a refresh; the switcher simply shows the new enterprise.
   useEffect(() => {
-    const coordinator = createOrganizationDeepLinkNavigationCoordinator({
-      receiveJoinToken: token => (
-        organizationDeepLinkHandlersRef.current.receiveJoinToken(token)
-      ),
-      getCurrentAccountId: () => currentAdminUserIdRef.current,
-      getCurrentAppState: () => appStateRef.current,
-      showOrganization: () => setAppState('organization'),
-      showAdminLogin: () => organizationDeepLinkHandlersRef.current.showAdminLogin(),
+    const cleanup = window.electronAPI.onDeepLinkNavigate(navigation => {
+      const isRefreshSignal = navigation.productSpaceRefresh === true
+        || typeof navigation.joinToken === 'string'
+      if (!isRefreshSignal) return
+      productSpaceDeepLinkHandlersRef.current.refreshProductSpaces()
     })
-    organizationDeepLinkCoordinatorRef.current = coordinator
-    const cleanup = window.electronAPI.onDeepLinkNavigate(coordinator.handleNavigation)
-
     return () => {
       cleanup()
-      coordinator.dispose()
-      if (organizationDeepLinkCoordinatorRef.current === coordinator) {
-        organizationDeepLinkCoordinatorRef.current = null
-      }
     }
   }, [])
 
@@ -1685,7 +1776,7 @@ export default function App() {
       const validation = await window.electronAPI.adminValidate()
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
         setRuntimeChatAccessIssue('account-disabled')
-        invalidateOrganizationDeepLinkNavigation()
+        invalidateProductSpaceDeepLinkRefresh()
         commitCurrentAdminUser(null)
         return true
       }
@@ -1697,7 +1788,7 @@ export default function App() {
         message: getErrorText(error),
       })) {
         setRuntimeChatAccessIssue('account-disabled')
-        invalidateOrganizationDeepLinkNavigation()
+        invalidateProductSpaceDeepLinkRefresh()
         commitCurrentAdminUser(null)
         return true
       }
@@ -1707,7 +1798,7 @@ export default function App() {
   }, [
     currentAdminUser,
     commitCurrentAdminUser,
-    invalidateOrganizationDeepLinkNavigation,
+    invalidateProductSpaceDeepLinkRefresh,
     runtimeChatAccessIssue,
   ])
 
@@ -2288,11 +2379,11 @@ export default function App() {
       currentAdminUserIdRef.current === logoutSnapshot.accountId
       && currentAdminUserGenerationRef.current === logoutSnapshot.generation
     )
-    invalidateOrganizationDeepLinkNavigation()
+    invalidateProductSpaceDeepLinkRefresh()
     try {
       const result = await window.electronAPI.logout()
       if (!result.success || !isCurrentLogout()) return
-      invalidateOrganizationDeepLinkNavigation()
+      invalidateProductSpaceDeepLinkRefresh()
       // Reset all state
       // Clear session atoms - initialize with empty array clears all per-session atoms
       initializeSessions([])
@@ -2300,7 +2391,7 @@ export default function App() {
       setWindowWorkspaceId(null)
       setRuntimeChatAccessIssue(null)
       setLlmConnectionsLoaded(false)
-      clearOrganizationAccount(logoutSnapshot.accountId)
+      clearProductSpaceAccount(logoutSnapshot.accountId)
       commitCurrentAdminUser(null)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
@@ -2321,8 +2412,8 @@ export default function App() {
     commitCurrentAdminUser,
     onboarding,
     initializeSessions,
-    clearOrganizationAccount,
-    invalidateOrganizationDeepLinkNavigation,
+    clearProductSpaceAccount,
+    invalidateProductSpaceDeepLinkRefresh,
     setWindowWorkspaceId,
   ])
 
@@ -2335,12 +2426,26 @@ export default function App() {
       currentAdminUserIdRef.current === logoutSnapshot.accountId
       && currentAdminUserGenerationRef.current === logoutSnapshot.generation
     )
-    invalidateOrganizationDeepLinkNavigation()
+    invalidateProductSpaceDeepLinkRefresh()
+    // The Main fence and any prepared switch transaction must be revoked
+    // BEFORE credentials are invalidated — otherwise a stale fence survives
+    // the logout. A failed revoke aborts the logout (fail-closed): credential
+    // cleanup never completes against a live runtime scope.
+    try {
+      const revoke = await window.electronAPI.productSpaceRevokeActiveContext()
+      if (!revoke?.success) {
+        toast.error(t('productSpace.logout.revokeFailed'))
+        return
+      }
+    } catch {
+      toast.error(t('productSpace.logout.revokeFailed'))
+      return
+    }
     try {
       const result = await window.electronAPI.adminLogout()
       if (!result.success || !isCurrentLogout()) return
-      invalidateOrganizationDeepLinkNavigation()
-      clearOrganizationAccount(logoutSnapshot.accountId)
+      invalidateProductSpaceDeepLinkRefresh()
+      clearProductSpaceAccount(logoutSnapshot.accountId)
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
@@ -2365,8 +2470,8 @@ export default function App() {
     commitCurrentAdminUser,
     handleAdminRelogin,
     initializeSessions,
-    clearOrganizationAccount,
-    invalidateOrganizationDeepLinkNavigation,
+    clearProductSpaceAccount,
+    invalidateProductSpaceDeepLinkRefresh,
     setWindowWorkspaceId,
   ])
 
@@ -2548,76 +2653,144 @@ export default function App() {
     openNewChat,
   ])
 
-  const handleOrganizationFlowComplete = useCallback((accountId: string | null) => {
-    if (!accountId || currentAdminUserIdRef.current !== accountId) return
-    continueAfterOrganization(windowWorkspaceId)
-  }, [continueAfterOrganization, windowWorkspaceId])
+  const handleSelectProductSpace = useCallback((productSpaceId: string) => {
+    void requestSwitch(productSpaceId)
+  }, [requestSwitch])
 
-  const handleSelectOrganization = useCallback((organizationId: string) => {
-    selectOrganization(organizationId)
-    setOrganizationManagementOpen(false)
-  }, [selectOrganization])
+  const handleRefreshProductSpaces = useCallback(() => {
+    void refreshProductSpaces()
+  }, [refreshProductSpaces])
 
-  const handleShowOrganizationCreate = useCallback(() => {
-    showOrganizationCreate()
-    setOrganizationManagementOpen(false)
-    setAppState('organization')
-  }, [showOrganizationCreate])
-
-  const organizationContextValue = useMemo<OrganizationContextValue | null>(() => {
+  const productSpaceContextValue = useMemo<ProductSpaceContextValue | null>(() => {
     if (
       !currentAdminUser?.userId
-      || !organization.activeOrganizationId
-      || !organization.organizationMembershipRole
-      || !organization.organizationContextKey
+      || !productSpace.activeProductSpaceId
+      || !productSpace.activeProductSpace
+      || !productSpace.personalProductSpaceId
+      || !productSpace.productSpaceContextKey
     ) {
       return null
     }
     return {
       accountId: currentAdminUser.userId,
-      activeOrganizationId: organization.activeOrganizationId,
-      organizationSummaries: organization.organizationSummaries,
-      organizationMembershipRole: organization.organizationMembershipRole,
-      organizationContextKey: organization.organizationContextKey,
-      contextVersion: organization.contextVersion,
-      onSelectOrganization: handleSelectOrganization,
-      onManageOrganization: () => setOrganizationManagementOpen(true),
-      onCreateOrganization: handleShowOrganizationCreate,
+      activeProductSpaceId: productSpace.activeProductSpaceId,
+      activeProductSpace: productSpace.activeProductSpace,
+      productSpaces: productSpace.productSpaces,
+      allProductSpaces: productSpace.allProductSpaces,
+      personalProductSpaceId: productSpace.personalProductSpaceId,
+      productSpaceContextKey: productSpace.productSpaceContextKey,
+      contextVersion: productSpace.contextVersion,
+      pendingSwitch: productSpace.pendingSwitch,
+      onSelectProductSpace: handleSelectProductSpace,
+      onRefreshProductSpaces: handleRefreshProductSpaces,
+      onConfirmStopAndSwitch: () => {
+        void confirmStopAndSwitch()
+      },
+      onRetryFailedStops: () => {
+        void retryFailedStops()
+      },
+      onRetryTargetLoad: () => {
+        void retryTargetLoad()
+      },
+      onCancelSwitch: cancelSwitch,
+      onDismissTargetAccessLost: dismissTargetAccessLost,
+      onStopSwitchExecution: (executionId: string) => {
+        void stopSwitchExecution(executionId)
+      },
     }
   }, [
+    cancelSwitch,
+    stopSwitchExecution,
+    confirmStopAndSwitch,
     currentAdminUser?.userId,
-    handleSelectOrganization,
-    handleShowOrganizationCreate,
-    organization.activeOrganizationId,
-    organization.contextVersion,
-    organization.organizationContextKey,
-    organization.organizationMembershipRole,
-    organization.organizationSummaries,
+    dismissTargetAccessLost,
+    handleRefreshProductSpaces,
+    handleSelectProductSpace,
+    productSpace.activeProductSpace,
+    productSpace.activeProductSpaceId,
+    productSpace.allProductSpaces,
+    productSpace.contextVersion,
+    productSpace.personalProductSpaceId,
+    productSpace.productSpaceContextKey,
+    productSpace.productSpaces,
+    productSpace.pendingSwitch,
+    retryFailedStops,
+    retryTargetLoad,
   ])
-  const startupCatalogOrganizationId = organizationContextValue?.activeOrganizationId
-  const startupCatalogContextKey = organizationContextValue?.organizationContextKey
-  const activeOrganizationAvailable = Boolean(
-    organization.activeOrganization
-    && organization.activeOrganization.status !== 'suspended'
-    && organization.activeOrganization.membership.status === 'active',
-  )
+  const startupCatalogSpaceId = productSpaceContextValue?.activeProductSpaceId
+  const startupCatalogContextKey = productSpaceContextValue?.productSpaceContextKey
+
+  productSpaceScopeRef.current = {
+    accountId: productSpaceContextValue?.accountId ?? null,
+    activeId: productSpaceContextValue?.activeProductSpaceId ?? null,
+    personalId: productSpaceContextValue?.personalProductSpaceId ?? null,
+  }
+
+  // A committed space switch remounts the whole shell through the context key
+  // and reloads the session list so only target-space history is visible.
+  const loadedSpaceContextVersionRef = useRef<number | null>(null)
+  const previousActiveSpaceRef = useRef<string | null>(null)
+  const lastCommittedSwitchRef = useRef<{ from: string; to: string; at: number } | null>(null)
+  useEffect(() => {
+    if (appState !== 'ready') return
+    if (!productSpaceContextValue) return
+    if (
+      loadedSpaceContextVersionRef.current !== null
+      && loadedSpaceContextVersionRef.current === productSpaceContextValue.contextVersion
+    ) return
+    const fromSpace = previousActiveSpaceRef.current
+    previousActiveSpaceRef.current = productSpaceContextValue.activeProductSpaceId
+    if (
+      fromSpace
+      && fromSpace !== productSpaceContextValue.activeProductSpaceId
+      && productSpace.flowState === 'ready'
+    ) {
+      lastCommittedSwitchRef.current = {
+        from: fromSpace,
+        to: productSpaceContextValue.activeProductSpaceId,
+        at: Date.now(),
+      }
+    }
+    loadedSpaceContextVersionRef.current = productSpaceContextValue.contextVersion
+    // A committed switch must not leave any origin-space projection behind:
+    // previews, watchers, pending permission/credential prompts and session
+    // atoms are dropped together with the keyed shell remount.
+    linkInterceptor.closePreview()
+    setPendingPermissions(new Map())
+    setPendingCredentials(new Map())
+    void window.electronAPI.unwatchSessionFiles().catch(() => {})
+    setSessionsLoaded(false)
+    void loadSessionsFromServer()
+  }, [appState, productSpaceContextValue, loadSessionsFromServer, linkInterceptor.closePreview])
 
   useEffect(() => {
-    if (!startupCatalogOrganizationId) return
+    if (!startupCatalogSpaceId) return
     let cancelled = false
-    void window.electronAPI.adminSyncAppCatalog(
-      startupCatalogOrganizationId,
+    void window.electronAPI.productSpaceGetCatalog(
+      startupCatalogSpaceId,
     ).then((result) => {
-      if (!cancelled && !result.success) {
+      if (cancelled) return
+      if (!result.success) {
+        // PC-F11 is a single global gate: a contract-incompatible Catalog
+        // reported by this warmup — even when no useAppCatalog consumer is
+        // mounted (e.g. a restored assistant tab) — must revoke the fence
+        // and enter the upgrade screen. Network failures stay local.
+        if (isProductSpaceContractUnsupported(result)) {
+          reportProductSpaceContractFailure({
+            errorCode: 'product_space_contract_unsupported',
+            source: 'catalog-warmup',
+          })
+          return
+        }
         emitAdminCatalogSessionAuthFailure(result)
       }
     }).catch(() => {
-      // Home surfaces refresh failures and the server retains the last confirmed cache.
+      // Home surfaces refresh failures; the unified Catalog has no legacy fallback.
     })
     return () => {
       cancelled = true
     }
-  }, [startupCatalogContextKey, startupCatalogOrganizationId])
+  }, [startupCatalogContextKey, startupCatalogSpaceId])
 
   // Platform actions for @polo-ai/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
@@ -2645,6 +2818,12 @@ export default function App() {
       window.electronAPI.setTrafficLightsVisible(visible)
     },
   }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
+
+  // Narrow-window guard (POO-41 frozen): below 640px the workbench/hub is
+  // hidden and the fullscreen guard renders instead of any product UI.
+  if (narrowViewport) {
+    return <WindowWidthGuard />
+  }
 
   // Loading state - show splash screen
   if (appState === 'loading') {
@@ -2709,46 +2888,66 @@ export default function App() {
     )
   }
 
-  if (appState === 'organization') {
+  // PC-F11 contract gate — the client cannot safely understand the server
+  // ProductSpace contract, so business surfaces stay blocked.
+  if (appState === 'contract-blocked') {
     return (
       <DismissibleLayerProvider>
         <ModalProvider>
           <WindowCloseHandler />
-          <OrganizationOnboarding
-            flowState={organization.flowState}
-            organizations={organization.organizationSummaries}
-            joinPreview={organization.joinPreview}
-            error={organization.error}
-            onCreate={async input => {
-              const requestAccountId = currentAdminUserIdRef.current
-              const created = await organization.createOrganization(input)
-              if (created) handleOrganizationFlowComplete(requestAccountId)
-            }}
-            onAcceptJoin={async () => {
-              const requestAccountId = currentAdminUserIdRef.current
-              const outcome = await organization.acceptJoin()
-              if (outcome.completed) handleOrganizationFlowComplete(requestAccountId)
-            }}
-            onDismissJoin={() => {
-              const requestAccountId = currentAdminUserIdRef.current
-              const next = organization.dismissJoin()
-              if (next === 'ready') handleOrganizationFlowComplete(requestAccountId)
-            }}
-            onSelect={organizationId => {
-              const requestAccountId = currentAdminUserIdRef.current
-              selectOrganization(organizationId)
-              handleOrganizationFlowComplete(requestAccountId)
-            }}
-            onShowCreate={showOrganizationCreate}
-            onShowSelect={organization.showSelect}
-            onRetry={() => {
-              if (!currentAdminUser?.userId) return
-              const requestAccountId = currentAdminUser.userId
-              void bootstrapOrganization(requestAccountId).then(next => {
-                if (next === 'ready') handleOrganizationFlowComplete(requestAccountId)
-              }).catch(() => {})
-            }}
-          />
+          <ProductSpaceContractGate />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Space list failed to load and no verified device-local context exists.
+  // POO-41 safe-degraded state: reload the space or sign out.
+  if (appState === 'space-error') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <div
+            className="flex h-full items-center justify-center p-6"
+            data-testid="product-space-error-screen"
+          >
+            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
+              <h2 className="text-lg font-semibold text-foreground">
+                {t('productSpace.error.loadTitle')}
+              </h2>
+              <p className="mt-2 text-sm text-foreground/60">
+                {t('productSpace.error.loadDesc')}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  data-testid="product-space-error-logout"
+                  onClick={() => {
+                    void handleAdminLogout()
+                  }}
+                >
+                  {t('productSpace.error.logout')}
+                </Button>
+                <Button
+                  type="button"
+                  data-testid="product-space-error-retry"
+                  onClick={() => {
+                    void retryProductSpaceBootstrap().then(next => {
+                      if (next === 'ready') {
+                        continueAfterProductSpace(windowWorkspaceId)
+                      } else if (next === 'contract-blocked') {
+                        setAppState('contract-blocked')
+                      }
+                    }).catch(() => {})
+                  }}
+                >
+                  {t('productSpace.error.retry')}
+                </Button>
+              </div>
+            </div>
+          </div>
         </ModalProvider>
       </DismissibleLayerProvider>
     )
@@ -2775,6 +2974,74 @@ export default function App() {
   // Show splash until exit animation completes
   const showSplash = !splashHidden
 
+  // PC-F11 at runtime: if the ProductSpace contract became unsupported while
+  // the shell was open, the hook has already revoked the Main fence and torn
+  // down its context; the contract gate is the only allowed surface.
+  if (appState === 'ready' && productSpace.flowState === 'contract-blocked') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ProductSpaceContractGate />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Membership loss whose personal-space fallback failed: the last complete
+  // verified projection is kept, but the safe error page replaces the shell
+  // so Apps, assistant, files and writes stay blocked (never a providerless
+  // ready shell).
+  if (appState === 'ready' && productSpace.flowState === 'error') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <div
+            className="flex h-full items-center justify-center p-6"
+            data-testid="product-space-error-screen"
+          >
+            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
+              <h2 className="text-lg font-semibold text-foreground">
+                {t('productSpace.error.loadTitle')}
+              </h2>
+              <p className="mt-2 text-sm text-foreground/60">
+                {t('productSpace.error.loadDesc')}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  data-testid="product-space-error-logout"
+                  onClick={() => {
+                    void handleAdminLogout()
+                  }}
+                >
+                  {t('productSpace.error.logout')}
+                </Button>
+                <Button
+                  type="button"
+                  data-testid="product-space-error-retry"
+                  onClick={() => {
+                    void retryProductSpaceBootstrap().then(next => {
+                      if (next === 'ready') {
+                        continueAfterProductSpace(windowWorkspaceId)
+                      } else if (next === 'contract-blocked') {
+                        setAppState('contract-blocked')
+                      }
+                    }).catch(() => {})
+                  }}
+                >
+                  {t('productSpace.error.retry')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Ready state - main app with splash overlay during data loading
   return (
     <PlatformProvider actions={platformActions}>
@@ -2795,10 +3062,18 @@ export default function App() {
             />
           )}
 
-          <MaybeOrganizationProvider value={organizationContextValue}>
+          <MaybeProductSpaceProvider value={productSpaceContextValue}>
             <TabShellProvider
-              key={organizationContextValue?.organizationContextKey ?? 'local-account'}
+              key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
               workspaceId={windowWorkspaceId}
+              productSpaceScope={
+                productSpaceContextValue?.accountId && productSpaceContextValue?.activeProductSpaceId
+                  ? {
+                      accountId: productSpaceContextValue.accountId,
+                      productSpaceId: productSpaceContextValue.activeProductSpaceId,
+                    }
+                  : null
+              }
             >
               <TabShell
               renderPolo={() => (
@@ -2814,7 +3089,7 @@ export default function App() {
                   isSessionsReady={sessionsLoaded}
                   remoteWorkspaceId={windowRemoteWorkspaceId}
                 >
-                  <div className="flex h-full min-h-0 flex-col text-foreground" data-testid="polo-app-root">
+                  <div data-testid="polo-app-root" className="flex h-full min-h-0 flex-col text-foreground">
                     {showTransportConnectionBanner && connectionState && (
                       <TransportConnectionBanner
                         state={connectionState}
@@ -2826,6 +3101,34 @@ export default function App() {
                         <SessionLoadErrorScreen
                           message={sessionLoadError}
                           onRetry={() => { void loadSessionsFromServer() }}
+                          onRollback={
+                            lastCommittedSwitchRef.current
+                              && Date.now() - lastCommittedSwitchRef.current.at < ROLLBACK_WINDOW_MS
+                              ? () => {
+                                // Trusted reverse transaction through the
+                                // ProductSpace context: Main restores the
+                                // origin fence, then the full origin
+                                // projection (selection, context key, shell)
+                                // is republished before sessions reload.
+                                // The rollback target is the real frozen
+                                // origin of the failing transaction — never
+                                // a personal-space default.
+                                const entry = lastCommittedSwitchRef.current
+                                if (!entry) return
+                                void productSpace.rollbackToOrigin(entry.from)
+                                  .then(rolledBack => {
+                                    if (!rolledBack) throw new Error('rollback failed')
+                                    lastCommittedSwitchRef.current = null
+                                    setSessionLoadError(null)
+                                    setSessionsLoaded(false)
+                                    void loadSessionsFromServer()
+                                  })
+                                  .catch(() => {
+                                    toast.error(t('productSpace.rollback.failed'))
+                                  })
+                              }
+                              : undefined
+                          }
                         />
                       ) : (
                         <AppShell
@@ -2845,28 +3148,21 @@ export default function App() {
                 </NavigationProvider>
               )}
               />
+              {/* File preview overlay — lives INSIDE the ProductSpace-keyed
+                  boundary so a committed switch unmounts any origin-space file
+                  preview together with the rest of the origin projection. */}
+              {linkInterceptor.previewState && (
+                <FilePreviewRenderer
+                  state={linkInterceptor.previewState}
+                  onClose={linkInterceptor.closePreview}
+                  loadDataUrl={linkInterceptor.readFileDataUrl}
+                  loadPdfData={linkInterceptor.readFileBinary}
+                  isDark={isDark}
+                />
+              )}
             </TabShellProvider>
-            {organizationContextValue && activeOrganizationAvailable ? (
-              <OrganizationManagementDialog
-                open={organizationManagementOpen}
-                onOpenChange={setOrganizationManagementOpen}
-                onOrganizationsChanged={organization.refreshOrganizations}
-                workspaceId={windowWorkspaceId}
-                sessionId={sessionSelection.selected}
-              />
-            ) : null}
-          </MaybeOrganizationProvider>
-
-          {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
-          {linkInterceptor.previewState && (
-            <FilePreviewRenderer
-              state={linkInterceptor.previewState}
-              onClose={linkInterceptor.closePreview}
-              loadDataUrl={linkInterceptor.readFileDataUrl}
-              loadPdfData={linkInterceptor.readFileBinary}
-              isDark={isDark}
-            />
-          )}
+            <ProductSpaceSwitchDialog />
+          </MaybeProductSpaceProvider>
         </TooltipProvider>
         </ModalProvider>
         </DismissibleLayerProvider>
@@ -2877,15 +3173,15 @@ export default function App() {
   )
 }
 
-function MaybeOrganizationProvider({
+function MaybeProductSpaceProvider({
   value,
   children,
 }: {
-  value: OrganizationContextValue | null
+  value: ProductSpaceContextValue | null
   children: React.ReactNode
 }) {
   return value
-    ? <OrganizationProvider value={value}>{children}</OrganizationProvider>
+    ? <ProductSpaceProvider value={value}>{children}</ProductSpaceProvider>
     : <>{children}</>
 }
 

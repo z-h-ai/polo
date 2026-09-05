@@ -20,7 +20,7 @@ import type {
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
-import { createOrganizationContextKey } from '@/lib/organization-storage'
+import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 
 GlobalRegistrator.register()
 
@@ -93,7 +93,7 @@ function syncResult(
   }
 }
 
-let organizationContext = organization('organization-a')
+let productSpaceContextState = productSpaceContext('organization-a')
 let syncCatalog = mock(async (
   organizationId: string,
   _options?: { force?: boolean },
@@ -143,31 +143,24 @@ let setAvailableRelease = mock(async (
   status: 'not_installed',
 }))
 
-function organization(organizationId: string, accountId = 'account-a') {
+function productSpaceContext(organizationId: string, accountId = 'account-a') {
   return {
     accountId,
-    activeOrganizationId: organizationId,
-    organizationContextKey: createOrganizationContextKey(
+    activeProductSpaceId: organizationId,
+    productSpaceContextKey: createProductSpaceContextKey(
       accountId,
       organizationId,
     ),
-    organizationSummaries: [{
+    activeProductSpace: {
       id: organizationId,
-      type: 'creator_space' as const,
+      kind: 'enterprise' as const,
       name: organizationId,
-      purpose: '',
-      membership: {
-        id: `membership-${organizationId}`,
-        role: 'member' as const,
-        status: 'active' as const,
-      },
-      memberCount: 1,
-    }],
+    },
   }
 }
 
-mock.module('@/context/OrganizationContext', () => ({
-  useOptionalOrganizationContext: () => organizationContext,
+mock.module('@/context/ProductSpaceContext', () => ({
+  useOptionalProductSpaceContext: () => productSpaceContextState,
 }))
 
 const {
@@ -180,7 +173,7 @@ const { useAppCatalog } = await import('../useAppCatalog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 
 beforeEach(() => {
-  organizationContext = organization('organization-a')
+  productSpaceContextState = productSpaceContext('organization-a')
   syncCatalog = mock(async (
     organizationId: string,
     _options?: { force?: boolean },
@@ -232,10 +225,54 @@ beforeEach(() => {
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      adminSyncAppCatalog: (
-        organizationId: string,
-        options?: { force?: boolean },
-      ) => syncCatalog(organizationId, options),
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        _knownRevision?: string,
+      ) => syncCatalog(productSpaceId).then((result: AppCatalogSyncResult) => {
+        if (!result.success) {
+          return {
+            success: false as const,
+            errorCode: result.errorCode ?? 'request_failed',
+            message: result.message ?? 'catalog unavailable',
+            status: result.status,
+            ...(result.accessMode === 'denied' && result.catalog
+              ? { accessMode: 'denied' as const, catalog: result.catalog }
+              : {}),
+          }
+        }
+        return {
+          success: true as const,
+          notModified: false as const,
+          catalogRevision: result.catalog.appConfigVersion,
+          productSpaceId,
+          accessMode: result.accessMode,
+          warningCode: result.warningCode,
+          entries: result.catalog.apps.map(app => ({
+            kind: 'app',
+            catalogEntryId: app.id,
+            name: app.name,
+            description: app.description,
+            availability: app.availability === 'available' ? 'available' : 'unavailable',
+            deliveryMode: app.deliveryMode,
+            remoteUrl: app.remoteUrl,
+            currentRelease: app.currentRelease,
+            permissions: app.permissions,
+            sortOrder: app.sortOrder,
+          })),
+          withdrawnEntries: (result.catalog.withdrawnApps ?? []).map(app => ({
+            kind: 'app',
+            catalogEntryId: app.id,
+            name: app.name,
+            description: app.description,
+            availability: 'withdrawn',
+            deliveryMode: app.deliveryMode,
+            remoteUrl: app.remoteUrl,
+            currentRelease: app.currentRelease,
+            permissions: app.permissions,
+            sortOrder: app.sortOrder,
+          })),
+        }
+      }),
       localApps: {
         getHostInfo: async () => ({ platform: 'darwin', arch: 'arm64' }),
         getRuntimeStatuses: (
@@ -269,6 +306,169 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+})
+
+describe('useAppCatalog creator circle relations', () => {
+  it('clears derived creator circles when a Catalog refresh fails', async () => {
+    // The wrapper stub maps entries from catalog.apps; for this test the
+    // product-space RPC is replaced directly so raw entries (with
+    // creator_circle sources) reach the hook.
+    const entriesWithCircle = [{
+      kind: 'app',
+      catalogEntryId: 'circle-app',
+      name: 'Circle App',
+      description: '',
+      availability: 'available',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://example.com/circle-app',
+      sortOrder: 0,
+      sources: [{
+        kind: 'creator_circle',
+        circleId: 'circle-1',
+        name: '桥岸圈子',
+      }],
+    }]
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-circles',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: entriesWithCircle,
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-circles')
+    })
+    // The creator_circle source is derived into a visible relation.
+    expect(result.current.creatorCircles).toEqual([
+      { circleId: 'circle-1', name: '桥岸圈子' },
+    ])
+
+    // The refresh fails: stale relations are invalidated (fail-closed) and
+    // the relation entry must not re-echo the previous Catalog.
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: false as const,
+      errorCode: 'NETWORK_ERROR',
+      message: 'catalog unavailable',
+    })
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.errorCode).toBe('NETWORK_ERROR')
+    })
+    expect(result.current.creatorCircles).toEqual([])
+  })
+
+  it('clears derived creator circles when a Catalog refresh throws', async () => {
+    const entriesWithCircle = [{
+      kind: 'app',
+      catalogEntryId: 'circle-app',
+      name: 'Circle App',
+      description: '',
+      availability: 'available',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://example.com/circle-app',
+      sortOrder: 0,
+      sources: [{
+        kind: 'creator_circle',
+        circleId: 'circle-1',
+        name: '桥岸圈子',
+      }],
+    }]
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-circles',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: entriesWithCircle,
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-circles')
+    })
+    expect(result.current.creatorCircles).toEqual([
+      { circleId: 'circle-1', name: '桥岸圈子' },
+    ])
+
+    // THROWN failure (the fetch promise rejects — distinct from the
+    // success:false errorCode path): stale relations are still invalidated.
+    catalogApi.productSpaceGetCatalog = async () => {
+      throw new Error('socket down')
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.errorCode).toBe('request_failed')
+    })
+    expect(result.current.creatorCircles).toEqual([])
+  })
+
+  it('clears derived creator circles on a thrown authorization failure', async () => {
+    const entriesWithCircle = [{
+      kind: 'app',
+      catalogEntryId: 'circle-app',
+      name: 'Circle App',
+      description: '',
+      availability: 'available',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://example.com/circle-app',
+      sortOrder: 0,
+      sources: [{
+        kind: 'creator_circle',
+        circleId: 'circle-1',
+        name: '桥岸圈子',
+      }],
+    }]
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-circles',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: entriesWithCircle,
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-circles')
+    })
+    expect(result.current.creatorCircles).toEqual([
+      { circleId: 'circle-1', name: '桥岸圈子' },
+    ])
+
+    // THROWN authorization failure (FORBIDDEN, catalog-scoped): the denied
+    // fail-closed branch must also invalidate the stale relations.
+    catalogApi.productSpaceGetCatalog = async () => {
+      throw Object.assign(new Error('Admin request is not permitted'), {
+        code: 'FORBIDDEN',
+      })
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.accessMode).toBe('denied')
+    })
+    expect(result.current.creatorCircles).toEqual([])
+  })
 })
 
 describe('useAppCatalog scoped async state', () => {
@@ -664,7 +864,7 @@ describe('useAppCatalog scoped async state', () => {
     ))
     const { result, rerender } = renderHook(() => useAppCatalog())
 
-    organizationContext = organization('organization-b')
+    productSpaceContextState = productSpaceContext('organization-b')
     rerender()
     await act(async () => {
       organizationB.resolve(syncResult('organization-b', 'newer'))
@@ -717,10 +917,10 @@ describe('useAppCatalog scoped async state', () => {
       status: 'installed',
       currentVersion: '1.0.0',
     })))
-    organizationContext = organization(organizationAId, accountA)
+    productSpaceContextState = productSpaceContext(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
 
-    organizationContext = organization(organizationBId, accountB)
+    productSpaceContextState = productSpaceContext(organizationBId, accountB)
     rerender()
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -792,7 +992,7 @@ describe('useAppCatalog scoped async state', () => {
             currentVersion: '1.0.0',
           })))
     ))
-    organizationContext = organization(organizationAId, accountA)
+    productSpaceContextState = productSpaceContext(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -802,7 +1002,7 @@ describe('useAppCatalog scoped async state', () => {
       expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
     })
 
-    organizationContext = organization(organizationBId, accountB)
+    productSpaceContextState = productSpaceContext(organizationBId, accountB)
     rerender()
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -870,7 +1070,7 @@ describe('useAppCatalog scoped async state', () => {
       undefined,
       organizationId === organizationAId ? accountA : accountB,
     ))
-    organizationContext = organization(organizationAId, accountA)
+    productSpaceContextState = productSpaceContext(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -884,7 +1084,7 @@ describe('useAppCatalog scoped async state', () => {
       promiseA = result.current.start(result.current.state.catalog!.apps[0]!)
     })
 
-    organizationContext = organization(organizationBId, accountB)
+    productSpaceContextState = productSpaceContext(organizationBId, accountB)
     rerender()
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({

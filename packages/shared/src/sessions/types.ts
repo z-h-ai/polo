@@ -47,7 +47,7 @@ export interface PendingAgentResume {
  */
 export const SESSION_PERSISTENT_FIELDS = [
   // Identity
-  'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd',
+  'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd', 'productSpaceId', 'accountId',
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
@@ -133,6 +133,11 @@ export interface SessionConfig {
   sdkSessionId?: string;
   /** Workspace root path this session belongs to */
   workspaceRootPath: string;
+  /** Immutable ProductSpace binding assigned at creation time */
+  productSpaceId?: string;
+  /** Immutable trusted Admin account binding assigned at creation time (R32-2).
+   *  Space-bound legacy records without it are quarantined (fail-closed). */
+  accountId?: string;
   /** Optional user-defined name */
   name?: string;
   createdAt: number;
@@ -440,6 +445,11 @@ export interface SessionMetadata {
   origin?: SessionOrigin;
   /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
   popoverOwner?: string;
+  /** Immutable ProductSpace binding (from the JSONL header). */
+  productSpaceId?: string;
+  /** Immutable trusted Admin account binding (from the JSONL header).
+   *  Space-bound legacy records without it are quarantined (fail-closed). */
+  accountId?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */

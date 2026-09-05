@@ -48,6 +48,18 @@ export interface Session {
   workspaceId: string
   workspaceName: string
   name?: string
+  /**
+   * Immutable ProductSpace binding recorded when the session was created.
+   * Assigned once by the runtime from the trusted account context; renderer
+   * values can never reclassify an existing session.
+   */
+  productSpaceId?: string
+  /**
+   * Immutable trusted Admin account binding recorded when the session was
+   * created (R32-2). Assigned by the runtime from the trusted account
+   * context; space-bound records without it are quarantined.
+   */
+  accountId?: string
   /** Preview of first user message (from JSONL header, for lazy-loaded sessions) */
   preview?: string
   lastMessageAt: number
@@ -729,6 +741,8 @@ export interface DeepLinkNavigation {
   callbackId?: string
   /** Opaque organization invitation/public-join token from poloai://join/<token>. */
   joinToken?: string
+  /** ProductSpace list refresh signal from poloai://product-spaces/refresh. */
+  productSpaceRefresh?: true
 }
 
 // ---------------------------------------------------------------------------

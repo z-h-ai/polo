@@ -68,6 +68,15 @@ type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 const sharedAgent = await import('@polo-ai/shared/agent')
 const { setInvocationLlmConnections } = await import('@polo-ai/shared/config')
+// The merged platform fences the session-event boundary and the execution
+// registration on the committed ProductSpace (POO-42): establish the same
+// runtime space context the desktop runtime always has, so the production
+// createSession path binds its sessions and events are delivered.
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('../runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } = await import('../handlers/rpc/trusted-product-space-account')
+
+const TEST_ACCOUNT_ID = 'account-a'
+const TEST_SPACE_ID = 'space-personal'
 // The pi bundle staging reuses the PRODUCTION build invocation (single
 // definition in scripts/build/common.ts) via a computed specifier: the
 // scripts/ tree is outside this package's tsconfig graph, exactly like the
@@ -112,6 +121,10 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
     materializeClaudeRuntime(claudeRoot)
     sm = new SessionManager({ workspace: buildWorkspacePre() })
     events = []
+    setSyncTrustedProductSpaceAccountId(TEST_ACCOUNT_ID)
+    setRuntimeActiveProductSpaceAccount(TEST_ACCOUNT_ID)
+    setRuntimeActiveProductSpace(TEST_SPACE_ID)
+    setTrustedProductSpaceAccountProvider(async () => TEST_ACCOUNT_ID)
     sm.setEventSink(((_channel: string, _target: unknown, event: Record<string, unknown>) => {
       events.push(event)
       renderer.deliver(event)
@@ -131,6 +144,9 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
   })
 
   afterAll(() => {
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(null)
+    setSyncTrustedProductSpaceAccountId(null)
     if (piStagingLayout) {
       rmSync(piStagingLayout, { recursive: true, force: true })
       piStagingLayout = null
