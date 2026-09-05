@@ -6,7 +6,16 @@ export interface PendingProductSpaceAppLaunch {
   launch: ResolveLaunchResponse
 }
 
+/** Non-secret message published to the POO-47 Runtime boundary. */
+export interface ProductSpaceAppLaunchRequest {
+  handoffId: string
+  context: ProductSpaceAppLaunchContext
+}
+
+type ProductSpaceAppLaunchListener = (request: ProductSpaceAppLaunchRequest) => void
+
 const pendingLaunches = new Map<string, PendingProductSpaceAppLaunch>()
+const listeners = new Set<ProductSpaceAppLaunchListener>()
 const MAX_PENDING_LAUNCHES = 64
 
 function isAppLaunch(launch: ResolveLaunchResponse) {
@@ -16,41 +25,79 @@ function isAppLaunch(launch: ResolveLaunchResponse) {
     && Date.parse(launch.expiresAt) > Date.now()
 }
 
-/**
- * Stages the credential-bearing resolve-launch response for POO-47 without
- * putting launch tokens or signed bundle URLs into localStorage/tab state.
- */
-export function stageProductSpaceAppLaunch(
-  appId: string,
+function createHandoffId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `product-space-launch:${crypto.randomUUID()}`
+  }
+  return `product-space-launch:${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function createLaunchContext(
   accountId: string,
   launch: ResolveLaunchResponse,
-): void {
-  if (!appId || !accountId || !isAppLaunch(launch)) {
+): ProductSpaceAppLaunchContext {
+  if (launch.subject.kind !== 'artifact_instance' || launch.delivery.kind === 'built_in') {
+    throw new Error('Invalid ProductSpace App launch handoff')
+  }
+  return {
+    accountId,
+    productSpaceId: launch.productSpaceId,
+    catalogEntryId: launch.catalogEntryId,
+    artifactInstanceId: launch.subject.artifactInstanceId,
+    versionId: launch.subject.versionId,
+    version: launch.subject.version,
+    deliveryKind: launch.delivery.kind,
+    resolvedAt: launch.resolvedAt,
+    expiresAt: launch.expiresAt,
+  }
+}
+
+/**
+ * Seals credentials in memory and publishes only an opaque handle plus the
+ * immutable identity to POO-47. POO-43 deliberately does not create a Tab or
+ * consume runtime state.
+ */
+export function publishProductSpaceAppLaunch(
+  accountId: string,
+  launch: ResolveLaunchResponse,
+): ProductSpaceAppLaunchRequest {
+  if (!accountId || !isAppLaunch(launch)) {
     throw new Error('Invalid ProductSpace App launch handoff')
   }
   for (const [key, pending] of pendingLaunches) {
-    if (Date.parse(pending.launch.expiresAt) <= Date.now()) {
-      pendingLaunches.delete(key)
-    }
+    if (Date.parse(pending.launch.expiresAt) <= Date.now()) pendingLaunches.delete(key)
   }
-  pendingLaunches.set(appId, { accountId, launch })
+  const request = {
+    handoffId: createHandoffId(),
+    context: createLaunchContext(accountId, launch),
+  }
+  pendingLaunches.set(request.handoffId, { accountId, launch })
   while (pendingLaunches.size > MAX_PENDING_LAUNCHES) {
     const oldestKey = pendingLaunches.keys().next().value as string | undefined
     if (!oldestKey) break
     pendingLaunches.delete(oldestKey)
   }
+  for (const listener of listeners) listener(request)
+  return request
 }
 
-/**
- * One-shot POO-47 consumer. Every persisted identity must still match the
- * staged response; mismatch or expiry consumes nothing and returns null.
- */
+/** POO-47 subscribes here and consumes the sealed launch by opaque handle. */
+export function onProductSpaceAppLaunch(
+  listener: ProductSpaceAppLaunchListener,
+): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
 export function takeProductSpaceAppLaunch(
-  appId: string,
+  handoffId: string,
   expected: ProductSpaceAppLaunchContext,
 ): PendingProductSpaceAppLaunch | null {
-  const pending = pendingLaunches.get(appId)
+  const pending = pendingLaunches.get(handoffId)
   if (!pending) return null
+  // A handle is single-attempt as well as single-use. A stale or forged
+  // consumer must not be able to probe the tuple and retry later.
+  pendingLaunches.delete(handoffId)
   const { launch } = pending
   if (
     !isAppLaunch(launch)
@@ -65,10 +112,10 @@ export function takeProductSpaceAppLaunch(
     || launch.resolvedAt !== expected.resolvedAt
     || launch.expiresAt !== expected.expiresAt
   ) return null
-  pendingLaunches.delete(appId)
   return pending
 }
 
 export function resetProductSpaceAppLaunchHandoffsForTests(): void {
   pendingLaunches.clear()
+  listeners.clear()
 }

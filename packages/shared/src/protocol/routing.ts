@@ -136,6 +136,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // localApps — downloaded bundles and processes live on this device
   RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
+  RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+  RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
   RPC_CHANNELS.localApps.STOP,

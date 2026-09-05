@@ -126,6 +126,9 @@ export const CHANNEL_MAP = {
   // Local App Bundle runtime
   'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
   'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
+  'localApps.installProductSpaceBundle': invoke(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE),
+  'localApps.getProductSpaceInstallStates': invoke(RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES),
+  'localApps.uninstallProductSpaceBundle': invoke(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE),
   'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
   'localApps.start': invoke(RPC_CHANNELS.localApps.START),
   'localApps.stop': invoke(RPC_CHANNELS.localApps.STOP),

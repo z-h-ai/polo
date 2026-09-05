@@ -5,18 +5,11 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
 import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
-import type {
-  HomeQuickAccessApp,
-} from '@polo-ai/shared/config/home-quick-access'
+import type { HomeQuickAccessApp } from '@polo-ai/shared/config/home-quick-access'
 import {
   MAX_HOME_QUICK_ACCESS_APPS,
 } from '@polo-ai/shared/config/home-quick-access'
-import {
-  createLocalAppScopeKey,
-  type LocalAppRuntimeStatus,
-} from '@polo-ai/shared/protocol'
 import { AppIcon } from './AppIcon'
-import type { CatalogPrimaryAction } from './OrganizationAppCard'
 import { AllAppsView } from './AllAppsView'
 import { ManageHomeAppsDialog } from './ManageHomeAppsDialog'
 import { Button } from '@/components/ui/button'
@@ -31,10 +24,7 @@ import {
 import { useAppCatalog } from '@/hooks/useAppCatalog'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
-import {
-  POLO_APP_DEFINITION,
-  type AppDefinition,
-} from '../../../shared/tab-browser-types'
+import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
   getHomeAppErrorCode,
@@ -47,30 +37,13 @@ import {
   saveHomeQuickAccess,
   toggleHomeQuickAccessApp,
 } from '@/lib/home-quick-access'
-import { stageProductSpaceAppLaunch } from '@/lib/product-space-app-launch-handoff'
+import { publishProductSpaceAppLaunch } from '@/lib/product-space-app-launch-handoff'
 
 export function selectOrganizationAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
-  statuses: Readonly<Record<string, LocalAppRuntimeStatus>>,
-  statusErrorScopeKeys: Readonly<Record<string, true>> = {},
 ): CatalogApp[] {
   if (!catalog) return []
-  const withdrawnWithLocalData = (catalog.withdrawnApps ?? []).filter(app => {
-    if (app.deliveryMode !== 'local_bundle') return false
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: app.id,
-    })
-    const status = statuses[scopeKey]
-    return Boolean(
-      (status && status.status !== 'not_installed')
-      || statusErrorScopeKeys[scopeKey],
-    )
-  })
-  return [...catalog.apps, ...withdrawnWithLocalData]
-    .sort((left, right) => left.sortOrder - right.sortOrder)
+  return [...catalog.apps].sort((left, right) => left.sortOrder - right.sortOrder)
 }
 
 export function formatBytes(t: TFunction, sizeBytes: number): string {
@@ -94,40 +67,27 @@ export function formatBytes(t: TFunction, sizeBytes: number): string {
   } ${t(unitKeys[unit]!)}`
 }
 
-function catalogTabDefinition(
-  accountId: string,
-  app: CatalogApp,
-  launch: ResolveLaunchResponse,
-): AppDefinition {
-  if (
-    launch.subject.kind !== 'artifact_instance'
-    || launch.subject.artifactType !== 'app'
-    || launch.delivery.kind === 'built_in'
-  ) {
-    throw new Error('Invalid App launch handoff')
-  }
-  return {
-    id: `catalog:${launch.productSpaceId}:${launch.subject.artifactInstanceId}`,
-    name: app.name,
-    // POO-47 consumes bundle handoffs and replaces this safe placeholder with
-    // its runtime URL. Web Apps can already use the resolved URL directly.
-    url: launch.delivery.kind === 'web_url' ? launch.delivery.url : 'about:blank',
-    iconUrl: app.iconUrl,
-    type: 'webapp',
-    createdAt: 0,
-    order: app.sortOrder,
-    launchContext: {
-      accountId,
-      productSpaceId: launch.productSpaceId,
-      catalogEntryId: launch.catalogEntryId,
-      artifactInstanceId: launch.subject.artifactInstanceId,
-      versionId: launch.subject.versionId,
-      version: launch.subject.version,
-      deliveryKind: launch.delivery.kind,
-      resolvedAt: launch.resolvedAt,
-      expiresAt: launch.expiresAt,
-    },
-  }
+type BundleAppLaunch = ResolveLaunchResponse & {
+  subject: Extract<ResolveLaunchResponse['subject'], { kind: 'artifact_instance' }>
+  delivery: Extract<ResolveLaunchResponse['delivery'], { kind: 'bundle' }>
+}
+
+function isBundleAppLaunch(launch: ResolveLaunchResponse): launch is BundleAppLaunch {
+  return launch.subject.kind === 'artifact_instance'
+    && launch.subject.artifactType === 'app'
+    && launch.delivery.kind === 'bundle'
+}
+
+export function createEnterpriseWorkflowUrl(
+  adminUrl: string,
+  enterpriseId: string,
+  workflow: 'members' | 'publishing',
+): string {
+  const url = workflow === 'members'
+    ? new URL(`/enterprise/${encodeURIComponent(enterpriseId)}/members`, adminUrl)
+    : new URL('/organization-apps', adminUrl)
+  if (workflow === 'publishing') url.searchParams.set('organizationId', enterpriseId)
+  return url.toString()
 }
 
 export function HomePage() {
@@ -143,16 +103,11 @@ export function HomePage() {
   const [manageOpen, setManageOpen] = useState(false)
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
-    appConfigVersion: string
+    launch: BundleAppLaunch
   } | null>(null)
   const installTargetApp = installTarget?.app ?? null
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [preserveData, setPreserveData] = useState(true)
-  const [logsTarget, setLogsTarget] = useState<CatalogApp | null>(null)
-  const [logs, setLogs] = useState('')
-  const [logsLoading, setLogsLoading] = useState(false)
-  const logsRequestGenerationRef = useRef(0)
-  const logsTargetScopeKeyRef = useRef<string | null>(null)
 
   const activeProductSpace = catalog.productSpace?.activeProductSpace
   const quickContextKey = createHomeQuickAccessContextKey(
@@ -167,16 +122,8 @@ export function HomePage() {
     [catalog.state.catalog],
   )
   const allApps = useMemo(
-    () => selectOrganizationAppsForDisplay(
-      catalog.state.catalog,
-      catalog.state.statuses,
-      catalog.state.statusErrorScopeKeys,
-    ),
-    [
-      catalog.state.catalog,
-      catalog.state.statusErrorScopeKeys,
-      catalog.state.statuses,
-    ],
+    () => selectOrganizationAppsForDisplay(catalog.state.catalog),
+    [catalog.state.catalog],
   )
   const quickApps = useMemo(
     () => resolveHomeQuickAccessApps(quickEntries, availableApps, scopeKeyForApp),
@@ -235,19 +182,29 @@ export function HomePage() {
       })
   }, [availableApps, quickContextKey, quickEntries, scopeKeyForApp])
 
-  useEffect(() => {
-    // Logs are scoped to the exact account/space/App tuple. Advancing this
-    // independent request generation prevents an older space context from
-    // publishing into a later dialog.
-    logsRequestGenerationRef.current += 1
-    logsTargetScopeKeyRef.current = null
-    setLogsTarget(null)
-    setLogs('')
-    setLogsLoading(false)
-  }, [catalog.productSpace?.productSpaceContextKey])
-
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
+  }
+
+  const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
+    if (activeProductSpace?.kind !== 'enterprise') return
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      if (
+        !status.loggedIn
+        || !status.adminUrl
+        || status.userId !== catalog.state.catalog?.accountId
+      ) throw new Error(t('homeApps.errors.staleContext'))
+      await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(
+        status.adminUrl,
+        activeProductSpace.enterpriseId,
+        workflow,
+      ))
+    } catch (error) {
+      toast.error(t('homeSpace.workflows.openFailed'), {
+        description: error instanceof Error ? error.message : t('homeApps.errors.openGeneric'),
+      })
+    }
   }
 
   const toggleQuickAccess = (
@@ -290,9 +247,17 @@ export function HomePage() {
       const accountId = catalog.state.catalog?.accountId
       if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
       const launch = await catalog.resolveLaunch(app)
-      const definition = catalogTabDefinition(accountId, app, launch)
-      stageProductSpaceAppLaunch(definition.id, accountId, launch)
-      openApp(definition)
+      if (isBundleAppLaunch(launch)) {
+        const installState = catalog.getInstallState(app)
+        if (
+          installState?.state !== 'installed'
+          || installState.currentVersion !== launch.subject.version
+        ) {
+          setInstallTarget({ app, launch })
+          return
+        }
+      }
+      publishProductSpaceAppLaunch(accountId, launch)
     } catch (error) {
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
         description: homeAppOperationErrorText(t, error, 'open'),
@@ -300,55 +265,21 @@ export function HomePage() {
     }
   }
 
-  const handlePrimaryAction = async (
-    app: CatalogApp,
-    action: CatalogPrimaryAction,
-  ) => {
-    if (action === 'install' || action === 'update') {
-      const appConfigVersion = catalog.state.catalog?.appConfigVersion
-      if (!appConfigVersion) {
-        toast.error(t('homeApps.errors.staleContext'))
-        return
-      }
-      setInstallTarget({ app, appConfigVersion })
-      return
-    }
-    if (action === 'cancel') {
-      try {
-        await catalog.cancelInstall(app)
-        toast.success(t('homeApps.toast.installCancelled', { name: app.name }))
-      } catch (error) {
-        toast.error(t('homeApps.errors.cancelInstall'), {
-          description: homeAppOperationErrorText(t, error, 'cancel'),
-        })
-      }
-      return
-    }
-    if (action === 'retry') {
-      const status = catalog.getStatus(app)
-      if (!status?.currentVersion) {
-        const appConfigVersion = catalog.state.catalog?.appConfigVersion
-        if (!appConfigVersion) {
-          toast.error(t('homeApps.errors.staleContext'))
-          return
-        }
-        setInstallTarget({ app, appConfigVersion })
-        return
-      }
-    }
-    if (action === 'open' || action === 'retry') {
-      await openCatalogApp(app)
-    }
-  }
-
   const confirmInstall = async () => {
     const target = installTarget
     if (!target) return
     setInstallTarget(null)
-    const { app, appConfigVersion } = target
+    const { app } = target
     try {
-      await catalog.install(app, appConfigVersion)
+      await catalog.installProductSpaceBundle(app)
       toast.success(t('homeApps.toast.installed', { name: app.name }))
+      const accountId = catalog.state.catalog?.accountId
+      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
+      const launch = await catalog.resolveLaunch(app)
+      if (!isBundleAppLaunch(launch)) {
+        throw new Error(t('homeApps.errors.staleContext'))
+      }
+      publishProductSpaceAppLaunch(accountId, launch)
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
@@ -358,23 +289,12 @@ export function HomePage() {
     }
   }
 
-  const handleStop = async (app: CatalogApp) => {
-    try {
-      await catalog.stop(app)
-      toast.success(t('homeApps.toast.stopped', { name: app.name }))
-    } catch (error) {
-      toast.error(t('homeApps.errors.stopTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'stop'),
-      })
-    }
-  }
-
   const confirmUninstall = async () => {
     const app = uninstallTarget
     if (!app) return
     setUninstallTarget(null)
     try {
-      await catalog.uninstall(app, preserveData)
+      await catalog.uninstallProductSpaceBundle(app, preserveData)
       toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
     } catch (error) {
       toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
@@ -383,39 +303,6 @@ export function HomePage() {
     } finally {
       setPreserveData(true)
     }
-  }
-
-  const showLogs = async (app: CatalogApp) => {
-    const scopeKey = catalog.scopeKeyForApp(app)
-    const requestGeneration = logsRequestGenerationRef.current + 1
-    logsRequestGenerationRef.current = requestGeneration
-    logsTargetScopeKeyRef.current = scopeKey
-    const isCurrentRequest = () => (
-      logsRequestGenerationRef.current === requestGeneration
-      && logsTargetScopeKeyRef.current === scopeKey
-    )
-    setLogsTarget(app)
-    setLogs('')
-    setLogsLoading(true)
-    try {
-      const nextLogs = await catalog.getLogs(app)
-      if (isCurrentRequest()) setLogs(nextLogs)
-    } catch (error) {
-      if (isCurrentRequest()) {
-        setLogs(homeAppOperationErrorText(t, error, 'logs'))
-      }
-    } finally {
-      if (isCurrentRequest()) setLogsLoading(false)
-    }
-  }
-
-  const compatibleWithHost = (app: CatalogApp): boolean => {
-    if (app.deliveryMode !== 'local_bundle') return true
-    const release = app.currentRelease
-    const host = catalog.state.host
-    if (!release || !host) return true
-    return (!release.platform || release.platform === host.platform)
-      && (!release.arch || release.arch === host.arch)
   }
 
   const selectedQuickIds = useMemo(
@@ -430,11 +317,8 @@ export function HomePage() {
       definition: {
         id: `catalog-tile:${scopeKey}`,
         name: app.name,
-        url: 'about:blank',
         iconUrl: app.iconUrl,
         type: 'webapp' as const,
-        createdAt: 0,
-        order: app.sortOrder,
       },
     }
   }
@@ -452,6 +336,14 @@ export function HomePage() {
             spaceKind={activeProductSpace?.kind ?? null}
             creatorCircles={catalog.creatorCircles}
             spaceKey={catalog.productSpace.productSpaceContextKey}
+            enterpriseRole={activeProductSpace?.kind === 'enterprise'
+              ? activeProductSpace.role
+              : undefined}
+            enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
+              ? activeProductSpace.accessMode
+              : undefined}
+            onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
+            onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
           />
         )}
         {view === 'all-apps' && catalog.productSpace ? (
@@ -465,20 +357,11 @@ export function HomePage() {
             warningCode={catalog.state.warningCode}
             errorCode={catalog.state.errorCode}
             offline={catalog.state.accessMode === 'offline'}
-            statusErrorCode={catalog.state.statusErrorCode}
-            statusLoadingScopeKeys={catalog.state.statusLoadingScopeKeys}
-            statusErrorScopeKeys={catalog.state.statusErrorScopeKeys}
             scopeKeyForApp={catalog.scopeKeyForApp}
-            getStatus={catalog.getStatus}
-            compatibleWithHost={compatibleWithHost}
+            getInstallState={catalog.getInstallState}
             onRefresh={() => { void catalog.sync(true) }}
-            onRetryStatuses={() => { void catalog.refreshRuntimeStatuses() }}
-            onPrimaryAction={(target, action) => {
-              void handlePrimaryAction(target, action)
-            }}
-            onStop={(target) => { void handleStop(target) }}
+            onOpen={(target) => { void openCatalogApp(target) }}
             onUninstall={setUninstallTarget}
-            onViewLogs={(target) => { void showLogs(target) }}
             onBack={() => setView('home')}
           />
         ) : (
@@ -526,39 +409,32 @@ export function HomePage() {
               )}
             </div>
 
-            {catalog.state.loading && !catalog.state.catalog ? (
-              <div
-                className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10"
-                data-testid="home-quick-access-loading"
-              >
-                <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : catalog.state.errorCode && !catalog.state.catalog ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center">
-                <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {t('homeApps.quick.loadFailed')}
-                </p>
-                <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                  {catalogStateMessage(t, catalog.state.errorCode, 'error')}
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => { void catalog.sync(true) }}
+            <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
+              <AppIcon
+                app={POLO_APP_DEFINITION}
+                onOpen={openPoloAssistant}
+                testId="home-quick-entry-polo"
+              />
+              {catalog.state.loading && !catalog.state.catalog ? (
+                <div
+                  className="col-span-2 flex min-h-28 items-center justify-center rounded-xl border border-foreground/10 sm:col-span-3 md:col-span-5"
+                  data-testid="home-quick-access-loading"
                 >
-                  {t('homeApps.actions.tryAgain')}
-                </Button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
-                <AppIcon
-                  app={POLO_APP_DEFINITION}
-                  onOpen={openPoloAssistant}
-                  testId="home-quick-entry-polo"
-                />
+                  <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : catalog.state.errorCode && !catalog.state.catalog ? (
+                <div className="col-span-2 flex min-h-32 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center sm:col-span-3 md:col-span-5">
+                  <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
+                  <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
+                  <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                    {catalogStateMessage(t, catalog.state.errorCode, 'error')}
+                  </p>
+                  <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => { void catalog.sync(true) }}>
+                    {t('homeApps.actions.tryAgain')}
+                  </Button>
+                </div>
+              ) : (
+                <>
                 {quickApps.map(app => {
                   const tile = quickTileFor(app)
                   return (
@@ -587,8 +463,9 @@ export function HomePage() {
                     </span>
                   </button>
                 )}
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </section>
         )}
       </div>
@@ -609,7 +486,7 @@ export function HomePage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
+              {installTargetApp && catalog.getInstallState(installTargetApp)?.state === 'installed'
                 ? t('homeApps.install.updateTitle', {
                     name: installTargetApp.name,
                   })
@@ -621,21 +498,21 @@ export function HomePage() {
               {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
-          {installTargetApp?.currentRelease && (
+          {installTargetApp && installTarget && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.version')}
                   </p>
-                  <p className="mt-1 font-medium">{installTargetApp.currentRelease.version}</p>
+                  <p className="mt-1 font-medium">{installTarget.launch.subject.version}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.downloadSize')}
                   </p>
                   <p className="mt-1 font-medium">
-                    {formatBytes(t, installTargetApp.currentRelease.sizeBytes)}
+                    {formatBytes(t, installTarget.launch.delivery.sizeBytes)}
                   </p>
                 </div>
               </div>
@@ -665,7 +542,7 @@ export function HomePage() {
               {t('common.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
-              {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
+              {installTargetApp && catalog.getInstallState(installTargetApp)?.state === 'installed'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
             </Button>
@@ -717,33 +594,6 @@ export function HomePage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(logsTarget)} onOpenChange={(open) => {
-        if (!open) {
-          logsRequestGenerationRef.current += 1
-          logsTargetScopeKeyRef.current = null
-          setLogsTarget(null)
-          setLogs('')
-          setLogsLoading(false)
-        }
-      }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t('homeApps.logs.title', {
-                name: logsTarget?.name ?? t('homeApps.appFallback'),
-              })}
-            </DialogTitle>
-            <DialogDescription>
-              {t('homeApps.logs.description')}
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="max-h-[420px] min-h-40 overflow-auto rounded-lg bg-foreground/5 p-3 text-xs leading-relaxed">
-            {logsLoading
-              ? t('homeApps.logs.loading')
-              : logs || t('homeApps.logs.empty')}
-          </pre>
-        </DialogContent>
-      </Dialog>
     </main>
   )
 }

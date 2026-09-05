@@ -44,6 +44,60 @@ const getAppReleaseDownload = mock(async (
   platform: 'darwin' as const,
   arch: 'arm64' as const,
 }))
+const listProductSpaces = mock(async () => ({
+  contractVersion: 1,
+  defaultProductSpaceId: 'organization-a',
+  productSpaces: [{
+    id: 'organization-a',
+    kind: 'enterprise' as const,
+    enterpriseId: 'enterprise-a',
+    name: 'Organization A',
+    role: 'manager' as const,
+    accessMode: 'active' as const,
+  }],
+}))
+const getProductSpaceCatalog = mock(async () => ({
+  contractVersion: 1,
+  productSpaceId: 'organization-a',
+  catalogRevision: 'revision-a',
+  entries: [{
+    kind: 'app' as const,
+    catalogEntryId: 'catalog-entry-a',
+    artifactInstanceId: 'artifact-instance-a',
+    version: {
+      versionId: 'version-a',
+      version: '2.3.4',
+      checksum: 'b'.repeat(64),
+    },
+    name: 'ProductSpace App',
+    description: '',
+    availability: 'available' as const,
+    sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+    permissions: [],
+  }],
+}))
+const resolveProductSpaceLaunch = mock(async () => ({
+  contractVersion: 1,
+  productSpaceId: 'organization-a',
+  catalogEntryId: 'catalog-entry-a',
+  resolvedAt: '2099-01-01T00:00:00.000Z',
+  expiresAt: '2099-01-01T00:10:00.000Z',
+  subject: {
+    kind: 'artifact_instance' as const,
+    artifactType: 'app' as const,
+    artifactInstanceId: 'artifact-instance-a',
+    versionId: 'version-a',
+    version: '2.3.4',
+  },
+  payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
+  delivery: {
+    kind: 'bundle' as const,
+    downloadUrl: 'https://catalog.example/product-space-app.zip',
+    expiresAt: '2099-01-01T00:10:00.000Z',
+    checksum: 'b'.repeat(64),
+    sizeBytes: 456,
+  },
+}))
 const scopedInstall = mock(async (request: {
   scope: CatalogLocalAppScope
   version: string
@@ -156,6 +210,9 @@ const scopedRegistry = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: class {
     getAppReleaseDownload = getAppReleaseDownload
+    listProductSpaces = listProductSpaces
+    getProductSpaceCatalog = getProductSpaceCatalog
+    resolveProductSpaceLaunch = resolveProductSpaceLaunch
   },
   analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
   createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
@@ -277,6 +334,17 @@ function confirmedRelease() {
   }
 }
 
+function productSpaceAppIdentity() {
+  return {
+    accountId: 'account-a',
+    productSpaceId: 'organization-a',
+    catalogEntryId: 'catalog-entry-a',
+    artifactInstanceId: 'artifact-instance-a',
+    versionId: 'version-a',
+    version: '2.3.4',
+  }
+}
+
 describe('local app main-process authorization boundary', () => {
   const handlers = new Map<string, Handler>()
   const context = {
@@ -295,6 +363,9 @@ describe('local app main-process authorization boundary', () => {
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1
     getAppReleaseDownload.mockClear()
+    listProductSpaces.mockClear()
+    getProductSpaceCatalog.mockClear()
+    resolveProductSpaceLaunch.mockClear()
     handlers.clear()
     for (const handlerMock of [
       getCachedAppCatalog,
@@ -356,7 +427,65 @@ describe('local app main-process authorization boundary', () => {
       setRuntimeActiveProductSpaceAccount(signedInAccountId)
     }
     setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
+    setRuntimeOfflineReadOnly(false)
     resetExecutionRegistry()
+  })
+
+  it('installs a bundle only after revalidating the exact ProductSpace Catalog tuple', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!
+    const installed = await install(context, { app: productSpaceAppIdentity() })
+
+    expect(listProductSpaces).toHaveBeenCalledWith('account-a-access')
+    expect(getProductSpaceCatalog).toHaveBeenCalledTimes(1)
+    expect(resolveProductSpaceLaunch).toHaveBeenCalledWith(
+      'account-a-access',
+      expect.objectContaining({ id: 'organization-a' }),
+      expect.objectContaining({ productSpaceId: 'organization-a' }),
+      'catalog-entry-a',
+      expect.objectContaining({ platform: expect.any(String), arch: expect.any(String) }),
+    )
+    expect(scopedInstall).toHaveBeenCalledWith(expect.objectContaining({
+      scope: {
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'artifact-instance-a',
+      },
+      version: '2.3.4',
+      checksum: 'b'.repeat(64),
+    }), expect.objectContaining({ signal: context.signal }))
+    expect(installed).toMatchObject({
+      appId: 'artifact-instance-a',
+      currentVersion: '2.3.4',
+    })
+  })
+
+  it('fails closed before install when an artifact version tuple is stale', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!
+    await expect(install(context, {
+      app: { ...productSpaceAppIdentity(), versionId: 'stale-version' },
+    })).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
+    expect(resolveProductSpaceLaunch).not.toHaveBeenCalled()
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('projects installation state without exposing Runtime lifecycle controls', async () => {
+    scopedStatuses.mockImplementationOnce(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+      currentVersion: '2.3.4',
+      runningVersion: '2.3.4',
+    })))
+    const getStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+    )!
+    const states = await getStates(context, [productSpaceAppIdentity()])
+    expect(states).toEqual([{
+      app: productSpaceAppIdentity(),
+      state: 'installed',
+      currentVersion: '2.3.4',
+    }])
   })
 
   it('registers a restart as a fresh running execution so switching stays blocked', async () => {

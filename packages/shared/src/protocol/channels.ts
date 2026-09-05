@@ -166,6 +166,9 @@ export const RPC_CHANNELS = {
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
+    INSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:installProductSpaceBundle',
+    GET_PRODUCT_SPACE_INSTALL_STATES: 'local-apps:getProductSpaceInstallStates',
+    UNINSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:uninstallProductSpaceBundle',
     CANCEL_INSTALL: 'local-apps:cancelInstall',
     START: 'local-apps:start',
     STOP: 'local-apps:stop',

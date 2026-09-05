@@ -133,6 +133,31 @@ export interface LocalAppCatalogInstallRequest {
   permissions: string[]
 }
 
+/**
+ * Immutable identity copied from one validated ProductSpace Catalog entry.
+ * Main re-fetches the authoritative Catalog and compares every field before
+ * reading installation state, installing, or uninstalling a bundle.
+ */
+export interface ProductSpaceAppIdentity {
+  accountId: string
+  productSpaceId: string
+  catalogEntryId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+}
+
+export interface ProductSpaceBundleInstallRequest {
+  app: ProductSpaceAppIdentity
+}
+
+export interface ProductSpaceAppInstallState {
+  app: ProductSpaceAppIdentity
+  state: 'not_installed' | 'installing' | 'installed'
+  currentVersion?: string
+  progressPercent?: number
+}
+
 export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {
   scope: LegacyLocalAppScope
 }

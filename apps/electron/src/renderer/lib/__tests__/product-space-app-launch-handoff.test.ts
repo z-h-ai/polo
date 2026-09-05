@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
   resetProductSpaceAppLaunchHandoffsForTests,
-  stageProductSpaceAppLaunch,
+  onProductSpaceAppLaunch,
+  publishProductSpaceAppLaunch,
   takeProductSpaceAppLaunch,
 } from '../product-space-app-launch-handoff'
 
@@ -42,20 +43,26 @@ beforeEach(resetProductSpaceAppLaunchHandoffsForTests)
 
 describe('ProductSpace App launch handoff', () => {
   it('hands credentials to POO-47 once without placing them in tab context', () => {
-    stageProductSpaceAppLaunch('app-a', 'account-a', launch)
-    expect(context).not.toHaveProperty('launchToken')
-    expect(takeProductSpaceAppLaunch('app-a', context)).toEqual({
+    const published: unknown[] = []
+    const unsubscribe = onProductSpaceAppLaunch(request => published.push(request))
+    const request = publishProductSpaceAppLaunch('account-a', launch)
+    unsubscribe()
+    expect(request.context).not.toHaveProperty('launchToken')
+    expect(request).not.toHaveProperty('launch')
+    expect(published).toEqual([request])
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toEqual({
       accountId: 'account-a',
       launch,
     })
-    expect(takeProductSpaceAppLaunch('app-a', context)).toBeNull()
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
   })
 
   it('fails closed when a persisted tab names another artifact instance', () => {
-    stageProductSpaceAppLaunch('app-a', 'account-a', launch)
-    expect(takeProductSpaceAppLaunch('app-a', {
+    const request = publishProductSpaceAppLaunch('account-a', launch)
+    expect(takeProductSpaceAppLaunch(request.handoffId, {
       ...context,
       artifactInstanceId: 'artifact-b',
     })).toBeNull()
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
   })
 })

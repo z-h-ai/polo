@@ -19,6 +19,9 @@ GlobalRegistrator.register()
 setupI18n()
 
 const openApp = jest.fn()
+const publishProductSpaceAppLaunch = jest.fn()
+const adminGetStatus = jest.fn()
+const openUrl = jest.fn()
 let appCatalogHook: any
 let installedApps = [...BUILTIN_APP_DEFINITIONS]
 const quickAccessByContext = new Map<string, any[]>()
@@ -28,16 +31,6 @@ const setHomeQuickAccess = jest.fn(async (contextKey: string, apps: any[]) => {
   quickAccessByContext.set(contextKey, apps)
   return apps
 })
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, resolve, reject }
-}
 
 function signedOutCatalogHook() {
   return {
@@ -55,6 +48,7 @@ function signedOutCatalogHook() {
       statuses: {},
       creatorCircles: [],
       host: null,
+      installStates: {},
     },
     sync: async () => {},
     install: async () => {},
@@ -73,8 +67,12 @@ function signedOutCatalogHook() {
     },
     resolveRemoteUrl: async () => 'https://trusted.example.com',
     getStatus: () => undefined,
+    getInstallState: () => undefined,
+    installProductSpaceBundle: async () => {},
+    uninstallProductSpaceBundle: async () => {},
     scopeKeyForApp: () => 'unused',
     refreshRuntimeStatuses: async () => {},
+    refreshProductSpaceInstallStates: async () => {},
   }
 }
 
@@ -92,8 +90,11 @@ mock.module('@/hooks/useAppCatalog', () => ({
   useAppCatalog: () => appCatalogHook,
 }))
 
+mock.module('@/lib/product-space-app-launch-handoff', () => ({
+  publishProductSpaceAppLaunch,
+}))
+
 const {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -110,6 +111,9 @@ const {
 beforeEach(async () => {
   localStorage.clear()
   openApp.mockClear()
+  publishProductSpaceAppLaunch.mockClear()
+  adminGetStatus.mockReset()
+  openUrl.mockReset()
   appCatalogHook = signedOutCatalogHook()
   installedApps = [...BUILTIN_APP_DEFINITIONS]
   quickAccessByContext.clear()
@@ -120,6 +124,8 @@ beforeEach(async () => {
     value: {
       getHomeQuickAccess,
       setHomeQuickAccess,
+      adminGetStatus,
+      openUrl,
     },
   })
   await i18n.changeLanguage('en')
@@ -177,6 +183,20 @@ function resolvedLaunch(app: CatalogApp, url = 'https://fresh.example.com') {
     },
     payer: { kind: 'personal' as const, accountId: 'account-a' },
     delivery: { kind: 'web_url' as const, url, launchToken: 'launch-token-value' },
+  }
+}
+
+function resolvedBundleLaunch(app: CatalogApp) {
+  const base = resolvedLaunch(app)
+  return {
+    ...base,
+    delivery: {
+      kind: 'bundle' as const,
+      downloadUrl: 'https://fresh.example.com/app.zip',
+      expiresAt: base.expiresAt,
+      checksum: 'a'.repeat(64),
+      sizeBytes: 1_024,
+    },
   }
 }
 
@@ -326,10 +346,64 @@ describe('HomePage quick access (POO-43)', () => {
     fireEvent.click(await screen.findByText('Open App A'))
 
     await waitFor(() => {
-      expect(openApp).toHaveBeenCalledWith(expect.objectContaining({
-        name: 'Open App A',
-        url: 'https://fresh.example.com',
-      }))
+      expect(publishProductSpaceAppLaunch).toHaveBeenCalledWith(
+        'account-a',
+        resolvedLaunch(appA),
+      )
+    })
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('keeps Polo visible while the current Catalog is loading or failed', () => {
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([]),
+      {},
+      { catalog: null, loading: true },
+    )
+    const loading = renderHome()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-quick-access-loading')).toBeTruthy()
+    loading.unmount()
+
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([]),
+      {},
+      { catalog: null, loading: false, errorCode: 'NETWORK_ERROR' },
+    )
+    renderHome()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByText('Could not load the App catalog')).toBeTruthy()
+  })
+
+  it('opens enterprise workflows with the committed enterprise context', async () => {
+    const catalog = enterpriseCatalogWith([])
+    appCatalogHook = hookWithCatalog(catalog)
+    appCatalogHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      enterpriseId: 'enterprise-a',
+      kind: 'enterprise',
+      name: 'Enterprise A',
+      role: 'manager',
+      accessMode: 'active',
+    }
+    adminGetStatus.mockResolvedValue({
+      loggedIn: true,
+      userId: 'account-a',
+      adminUrl: 'https://admin.example.com/base',
+    })
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/enterprise/enterprise-a/members',
+      )
+    })
+    fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/organization-apps?organizationId=enterprise-a',
+      )
     })
   })
 
@@ -422,199 +496,41 @@ describe('HomePage all-Apps view (POO-43)', () => {
     expect(openApp).not.toHaveBeenCalled()
   })
 
-  it('shows a retry action when a runtime-status batch cannot be read', async () => {
-    const localApp: CatalogApp = {
-      id: 'unknown-status-app',
+  it('installs a resolved bundle and publishes a sealed POO-47 handoff without opening a Tab', async () => {
+    const bundleApp: CatalogApp = {
+      id: 'bundle-entry',
+      catalogEntryId: 'bundle-entry',
+      artifactInstanceId: 'bundle-artifact',
+      catalogVersion: { versionId: 'bundle-version-id', version: '3.0.0' },
       organizationId: 'organization-a',
-      name: 'Unknown Status App',
+      name: 'Bundle App',
       description: '',
-      deliveryMode: 'local_bundle',
+      deliveryMode: 'resolve_launch',
       sortOrder: 0,
       availability: 'available',
     }
-    const catalog = enterpriseCatalogWith([localApp])
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: localApp.id,
-    })
-    const refreshRuntimeStatuses = jest.fn(async () => {})
+    const launch = resolvedBundleLaunch(bundleApp)
+    const resolveLaunch = jest.fn(async () => launch)
+    const installProductSpaceBundle = jest.fn(async () => {})
     appCatalogHook = hookWithCatalog(
-      catalog,
-      { refreshRuntimeStatuses },
-      {
-        statusErrorCode: 'status_read_failed',
-        statusErrorScopeKeys: { [scopeKey]: true },
-      },
+      enterpriseCatalogWith([bundleApp]),
+      { resolveLaunch, installProductSpaceBundle },
     )
 
     await renderAllApps()
+    fireEvent.click(screen.getByTestId('all-apps-action-bundle-entry'))
+    await waitFor(() => expect(screen.getByText('Install Bundle App')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 
-    expect(screen.getByText('Some app statuses could not be refreshed.')).toBeTruthy()
-    expect(screen.getByText('Status unavailable')).toBeTruthy()
-    expect(screen.getByTestId('all-apps-action-unknown-status-app')
-      .hasAttribute('disabled')).toBe(true)
-    fireEvent.click(screen.getByText('Try again'))
-    expect(refreshRuntimeStatuses).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(installProductSpaceBundle).toHaveBeenCalledWith(bundleApp)
+      expect(resolveLaunch).toHaveBeenCalledTimes(2)
+      expect(publishProductSpaceAppLaunch).toHaveBeenCalledWith('account-a', launch)
+    })
+    expect(openApp).not.toHaveBeenCalled()
   })
 
-  it('disables install while the initial runtime status is loading', async () => {
-    const localApp: CatalogApp = {
-      id: 'loading-status-app',
-      organizationId: 'organization-a',
-      name: 'Loading Status App',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const catalog = enterpriseCatalogWith([localApp])
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: localApp.id,
-    })
-    appCatalogHook = hookWithCatalog(
-      catalog,
-      {},
-      { statusLoadingScopeKeys: { [scopeKey]: true } },
-    )
-
-    await renderAllApps()
-
-    expect(screen.getAllByText('Loading status…')).toHaveLength(2)
-    expect(screen.getByTestId('all-apps-action-loading-status-app')
-      .hasAttribute('disabled')).toBe(true)
-  })
-
-  it('keeps a retained withdrawn app manageable when its first status batch fails', async () => {
-    const withdrawnApp: CatalogApp = {
-      id: 'retained-withdrawn',
-      organizationId: 'organization-a',
-      name: 'Retained Withdrawn',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'withdrawn',
-    }
-    const catalog = enterpriseCatalogWith([], {
-      appConfigVersion: 'v1',
-      withdrawnApps: [withdrawnApp],
-    })
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: withdrawnApp.id,
-    })
-    appCatalogHook = hookWithCatalog(
-      catalog,
-      {},
-      {
-        statusErrorCode: 'status_read_failed',
-        statusErrorScopeKeys: { [scopeKey]: true },
-      },
-    )
-
-    await renderAllApps()
-
-    expect(screen.getByTestId('all-apps-row')).toBeTruthy()
-    expect(screen.getByText('Retained Withdrawn')).toBeTruthy()
-    expect(screen.getByText('Status unavailable')).toBeTruthy()
-    expect(screen.getByTestId('all-apps-action-retained-withdrawn')
-      .hasAttribute('disabled')).toBe(true)
-    const management = screen.getByLabelText(
-      'More actions for Retained Withdrawn',
-    )
-    expect(management).toBeTruthy()
-    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-    await waitFor(() => {
-      expect(screen.getByText('Uninstall')).toBeTruthy()
-      expect(screen.getByText('Stop')).toBeTruthy()
-      expect(screen.queryByText('View logs')).toBeNull()
-    })
-  })
-
-  it('keeps an installed app manageable from a denied NETWORK_ERROR cold snapshot', async () => {
-    const deniedApp = {
-      id: 'denied-installed',
-      organizationId: 'organization-a',
-      name: 'Denied Installed',
-      description: '',
-      deliveryMode: 'local_bundle' as const,
-      sortOrder: 0,
-      availability: 'unavailable' as const,
-    }
-    const catalog: DeniedAppCatalogSnapshot = {
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      appConfigVersion: 'denied',
-      authorizationStatus: 'denied',
-      apps: [deniedApp],
-      syncedAt: 1,
-    }
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: deniedApp.id,
-    })
-    const status = {
-      appId: deniedApp.id,
-      scope: {
-        kind: 'catalog' as const,
-        accountId: catalog.accountId,
-        organizationId: catalog.organizationId,
-        catalogAppId: deniedApp.id,
-      },
-      status: 'running' as const,
-      currentVersion: '1.0.0',
-      runningVersion: '1.0.0',
-    }
-    const stop = jest.fn(async () => {})
-    const getLogs = jest.fn(async () => 'retained log output')
-    appCatalogHook = hookWithCatalog(
-      catalog,
-      { stop, getLogs, getStatus: () => status },
-      {
-        accessMode: 'denied',
-        errorCode: 'NETWORK_ERROR',
-        statuses: { [scopeKey]: status },
-      },
-    )
-
-    await renderAllApps()
-
-    expect(screen.getByText('Denied Installed')).toBeTruthy()
-    expect(screen.getByText('Access removed by your organization')).toBeTruthy()
-    expect(screen.getByTestId('all-apps-action-denied-installed')
-      .hasAttribute('disabled')).toBe(true)
-
-    const management = screen.getByLabelText('More actions for Denied Installed')
-    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-    await waitFor(() => {
-      expect(screen.getByText('Stop')).toBeTruthy()
-      expect(screen.getByText('Uninstall')).toBeTruthy()
-      expect(screen.getByText('View logs')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByText('View logs'))
-    await waitFor(() => {
-      expect(screen.getByText('retained log output')).toBeTruthy()
-    })
-    expect(getLogs).toHaveBeenCalledWith(deniedApp)
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-
-    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
-    fireEvent.click(screen.getByText('Stop'))
-    await waitFor(() => {
-      expect(stop).toHaveBeenCalledWith(deniedApp)
-    })
-  })
-
-  it('segments a maximum catalog and excludes withdrawn apps without local data', async () => {
+  it('segments a maximum Catalog without surfacing withdrawn entries', async () => {
     const visibleApps: CatalogApp[] = Array.from(
       { length: 10_000 },
       (_, index) => ({
@@ -685,237 +601,11 @@ describe('HomePage all-Apps view (POO-43)', () => {
     expect(document.querySelectorAll(
       '[data-testid="all-apps-row"]',
     )).toHaveLength(60)
-    expect(screen.getByText('Installed Withdrawn')).toBeTruthy()
+    expect(screen.queryByText('Installed Withdrawn')).toBeNull()
     expect(screen.queryByText('Withdrawn 0')).toBeNull()
 
-    fireEvent.click(screen.getByText('Load more'))
-    expect(document.querySelectorAll(
-      '[data-testid="all-apps-row"]',
-    )).toHaveLength(120)
   })
 
-  it('keeps deferred log results isolated by full App scope and request generation', async () => {
-    const appA: CatalogApp = {
-      id: 'broken-app-a',
-      organizationId: 'organization-a',
-      name: 'Broken App A',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const appB: CatalogApp = {
-      ...appA,
-      id: 'broken-app-b',
-      name: 'Broken App B',
-      sortOrder: 1,
-    }
-    const catalog = enterpriseCatalogWith([appA, appB], {
-      appConfigVersion: 'logs-race',
-    })
-    const scopeKeyForApp = (app: CatalogApp) => createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: app.id,
-    })
-    const statuses = Object.fromEntries([appA, appB].map(app => [
-      scopeKeyForApp(app),
-      {
-        appId: app.id,
-        scope: {
-          kind: 'catalog' as const,
-          accountId: catalog.accountId,
-          organizationId: catalog.organizationId,
-          catalogAppId: app.id,
-        },
-        status: 'broken' as const,
-        currentVersion: '1.0.0',
-        error: {
-          code: 'START_FAILED',
-          message: 'health check failed',
-        },
-      },
-    ]))
-    const appALogs = createDeferred<string>()
-    const appBLogs = createDeferred<string>()
-    const getLogs = jest.fn((app: CatalogApp) => (
-      app.id === appA.id ? appALogs.promise : appBLogs.promise
-    ))
-    appCatalogHook = hookWithCatalog(
-      catalog,
-      { getLogs },
-      { statuses },
-    )
-    appCatalogHook.getStatus = (app: CatalogApp) => statuses[scopeKeyForApp(app)]
-
-    await renderAllApps()
-
-    fireEvent.pointerDown(
-      screen.getByLabelText('More actions for Broken App A'),
-      { button: 0, ctrlKey: false },
-    )
-    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
-    fireEvent.click(screen.getByText('View logs'))
-    expect(screen.getByText('Broken App A logs')).toBeTruthy()
-    expect(screen.getByText('Loading logs…')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    await waitFor(() => {
-      expect(screen.queryByText('Broken App A logs')).toBeNull()
-    })
-    fireEvent.pointerDown(
-      screen.getByLabelText('More actions for Broken App B'),
-      { button: 0, ctrlKey: false },
-    )
-    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
-    fireEvent.click(screen.getByText('View logs'))
-    expect(screen.getByText('Broken App B logs')).toBeTruthy()
-    expect(screen.getByText('Loading logs…')).toBeTruthy()
-
-    await act(async () => {
-      appALogs.resolve('stale App A logs')
-      await appALogs.promise
-    })
-    expect(screen.queryByText('stale App A logs')).toBeNull()
-    expect(screen.getByText('Loading logs…')).toBeTruthy()
-
-    await act(async () => {
-      appBLogs.resolve('current App B logs')
-      await appBLogs.promise
-    })
-    await waitFor(() => {
-      expect(screen.getByText('current App B logs')).toBeTruthy()
-    })
-    expect(screen.queryByText('stale App A logs')).toBeNull()
-    expect(getLogs).toHaveBeenNthCalledWith(1, appA)
-    expect(getLogs).toHaveBeenNthCalledWith(2, appB)
-  })
-
-  it('closes deferred logs when switching between legacy-colliding contexts', async () => {
-    const accountA = 'account:west'
-    const organizationAId = '组织'
-    const accountB = 'account'
-    const organizationBId = 'west:组织'
-    expect(`${accountA}:${organizationAId}`)
-      .toBe(`${accountB}:${organizationBId}`)
-
-    const pendingLogs = createDeferred<string>()
-    const brokenApp = (
-      accountId: string,
-      organizationId: string,
-    ): {
-      app: CatalogApp
-      hook: any
-    } => {
-      const app: CatalogApp = {
-        id: 'shared-broken-app',
-        organizationId,
-        name: `Broken ${accountId}`,
-        description: '',
-        deliveryMode: 'local_bundle',
-        sortOrder: 0,
-        availability: 'available',
-      }
-      const catalog = enterpriseCatalogWith([app], {
-        accountId,
-        organizationId,
-        appConfigVersion: `catalog-${accountId}`,
-      })
-      const scopeKey = createLocalAppScopeKey({
-        kind: 'catalog',
-        accountId,
-        organizationId,
-        catalogAppId: app.id,
-      })
-      const status = {
-        appId: app.id,
-        scope: {
-          kind: 'catalog' as const,
-          accountId,
-          organizationId,
-          catalogAppId: app.id,
-        },
-        status: 'broken' as const,
-        currentVersion: '1.0.0',
-        error: {
-          code: 'START_FAILED',
-          message: 'health check failed',
-        },
-      }
-      return {
-        app,
-        hook: {
-          ...signedOutCatalogHook(),
-          productSpace: {
-            accountId,
-            activeProductSpaceId: organizationId,
-            productSpaceContextKey: createProductSpaceContextKey(
-              accountId,
-              organizationId,
-            ),
-            activeProductSpace: {
-              id: organizationId,
-              kind: 'enterprise',
-              name: organizationId,
-            },
-          },
-          state: {
-            ...signedOutCatalogHook().state,
-            catalog,
-            accessMode: 'online',
-            statuses: { [scopeKey]: status },
-          },
-          getStatus: () => status,
-          scopeKeyForApp: () => scopeKey,
-          getLogs: () => pendingLogs.promise,
-        },
-      }
-    }
-    const contextA = brokenApp(accountA, organizationAId)
-    const contextB = brokenApp(accountB, organizationBId)
-    expect(contextA.hook.productSpace.productSpaceContextKey)
-      .not.toBe(contextB.hook.productSpace.productSpaceContextKey)
-
-    appCatalogHook = contextA.hook
-    const view = renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.pointerDown(
-      screen.getByLabelText(`More actions for ${contextA.app.name}`),
-      { button: 0, ctrlKey: false },
-    )
-    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
-    fireEvent.click(screen.getByText('View logs'))
-    expect(screen.getByText(`${contextA.app.name} logs`)).toBeTruthy()
-
-    appCatalogHook = contextB.hook
-    view.rerender(createElement(
-      I18nextProvider,
-      { i18n },
-      createElement(HomePage),
-    ))
-    await waitFor(() => {
-      expect(screen.queryByText(`${contextA.app.name} logs`)).toBeNull()
-    })
-    // Fail-closed space transition: the in-place all-Apps view resets home
-    // and the deferred log dialog never publishes across contexts.
-    expect(screen.queryByTestId('all-apps-view')).toBeNull()
-
-    await act(async () => {
-      pendingLogs.resolve('stale account A logs')
-      await pendingLogs.promise
-    })
-    expect(screen.queryByText('stale account A logs')).toBeNull()
-
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    expect(screen.getByText(contextB.app.name)).toBeTruthy()
-  })
 })
 
 describe('HomePage copy and formatting', () => {

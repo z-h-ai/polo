@@ -200,7 +200,7 @@ export interface ListOrganizationsResponse {
   organizations: OrganizationSummary[];
 }
 
-export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle';
+export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle' | 'resolve_launch';
 
 export interface AppReleaseSummary {
   id?: string;

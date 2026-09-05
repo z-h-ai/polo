@@ -25,7 +25,6 @@ export interface AppDefinition {
   type: AppDefinitionType
   createdAt: number
   order: number
-  launchContext?: ProductSpaceAppLaunchContext
 }
 
 export interface TabInstance {
@@ -36,7 +35,6 @@ export interface TabInstance {
   favicon?: string
   isLoading?: boolean
   url?: string
-  launchContext?: ProductSpaceAppLaunchContext
 }
 
 export const HOME_TAB_ID = 'home'

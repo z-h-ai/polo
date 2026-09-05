@@ -4,9 +4,9 @@ import { cn } from '@/lib/utils'
 import { POLO_APP_ID, type AppDefinition } from '../../../shared/tab-browser-types'
 
 interface AppIconProps {
-  app: AppDefinition
-  onOpen: (app: AppDefinition) => void
-  onRemove?: (app: AppDefinition) => void
+  app: Pick<AppDefinition, 'id' | 'name' | 'iconUrl' | 'type'>
+  onOpen: (app: Pick<AppDefinition, 'id' | 'name' | 'iconUrl' | 'type'>) => void
+  onRemove?: (app: Pick<AppDefinition, 'id' | 'name' | 'iconUrl' | 'type'>) => void
   className?: string
   testId?: string
 }

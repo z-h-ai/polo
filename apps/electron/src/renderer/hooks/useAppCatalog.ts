@@ -21,6 +21,8 @@ import {
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
   type LocalAppStartResult,
+  type ProductSpaceAppIdentity,
+  type ProductSpaceAppInstallState,
 } from '@polo-ai/shared/protocol'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
@@ -43,6 +45,8 @@ export interface AppCatalogState {
   statusLoadingScopeKeys: Record<string, true>
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
+  /** Installation-only projection. Runtime lifecycle remains owned by POO-47. */
+  installStates: Record<string, ProductSpaceAppInstallState>
   /**
    * CreatorCircle relations visible in the active space's Catalog, derived
    * from the entries' creator_circle sources (REQ-022: the "我的圈子"
@@ -271,6 +275,26 @@ function scopeForCatalogApp(
   }
 }
 
+function identityForProductSpaceApp(
+  catalog: AppCatalogCacheEntry,
+  app: CatalogApp,
+): ProductSpaceAppIdentity {
+  if (
+    app.organizationId !== catalog.organizationId
+    || !app.catalogEntryId
+    || !app.artifactInstanceId
+    || !app.catalogVersion
+  ) throw new Error(i18n.t('homeApps.errors.staleContext'))
+  return {
+    accountId: catalog.accountId,
+    productSpaceId: catalog.organizationId,
+    catalogEntryId: app.catalogEntryId,
+    artifactInstanceId: app.artifactInstanceId,
+    versionId: app.catalogVersion.versionId,
+    version: app.catalogVersion.version,
+  }
+}
+
 interface ContextSnapshot {
   contextKey: string
   contextGeneration: number
@@ -314,12 +338,6 @@ function mapProductSpaceCatalogToCacheEntry(
       availability?: string
       sources?: ReadonlyArray<{ kind: string; name?: string }>
       unavailableReason?: string
-      // Delivery metadata is not part of the ProductSpace Catalog contract;
-      // the strict server schema strips unknown fields, so these are only
-      // present in fixtures that exercise the local-app runtime seams.
-      deliveryMode?: CatalogApp['deliveryMode']
-      remoteUrl?: string
-      currentRelease?: CatalogApp['currentRelease']
       permissions?: string[]
     }
     if (entry.kind !== 'app' || !entry.catalogEntryId || !entry.name) return null
@@ -345,11 +363,11 @@ function mapProductSpaceCatalogToCacheEntry(
       description: entry.description ?? '',
       iconUrl: entry.iconUrl,
       creatorName: sourceNames.join(' · ') || undefined,
-      deliveryMode: entry.deliveryMode ?? 'remote_url',
-      remoteUrl: entry.remoteUrl,
-      currentRelease: entry.currentRelease,
+      // ProductSpace delivery is intentionally unknown until resolve-launch.
+      // It must never be inferred from fixture-only Catalog fields.
+      deliveryMode: 'resolve_launch',
       permissions: entry.permissions,
-      sortOrder: entry.deliveryMode === 'local_bundle' ? (entry as { sortOrder?: number }).sortOrder ?? index : index,
+      sortOrder: index,
       availability: effectiveAvailability,
     }
   }
@@ -388,6 +406,7 @@ export function useAppCatalog() {
     statusLoadingScopeKeys: {},
     accessMode: null,
     statuses: {},
+    installStates: {},
     creatorCircles: [],
     host: null,
   })
@@ -441,6 +460,52 @@ export function useAppCatalog() {
   const scopeKeyForApp = useCallback((app: CatalogApp): string => (
     createLocalAppScopeKey(scopeForApp(app))
   ), [scopeForApp])
+
+  const refreshProductSpaceInstallStates = useCallback(async (
+    apps: CatalogApp[],
+    suppliedSnapshot?: ContextSnapshot,
+  ) => {
+    const catalog = suppliedSnapshot?.catalog ?? catalogRef.current
+    const contextKey = suppliedSnapshot?.contextKey ?? contextKeyRef.current
+    if (!catalog || !contextKey) return
+    const snapshot = suppliedSnapshot ?? {
+      contextKey,
+      contextGeneration: contextGenerationRef.current,
+      catalog,
+    }
+    if (!isCurrentSnapshot(snapshot)) return
+    try {
+      // Installation state is secondary to Catalog visibility. A malformed
+      // or stale identity fails this cache read closed without turning a
+      // successfully loaded Catalog into a page-level failure.
+      const identities = apps.map(app => identityForProductSpaceApp(catalog, app))
+      if (identities.length === 0) {
+        setState(current => ({ ...current, installStates: {} }))
+        return
+      }
+      const states = await window.electronAPI.localApps.getProductSpaceInstallStates(identities)
+      if (!isCurrentSnapshot(snapshot)) return
+      const requested = new Map(identities.map(identity => [identity.catalogEntryId, identity]))
+      const next: Record<string, ProductSpaceAppInstallState> = {}
+      for (const installState of states) {
+        const expected = requested.get(installState.app.catalogEntryId)
+        if (!expected || JSON.stringify(expected) !== JSON.stringify(installState.app)) {
+          throw new Error(i18n.t('homeApps.errors.staleContext'))
+        }
+        next[installState.app.catalogEntryId] = installState
+      }
+      if (Object.keys(next).length !== identities.length) {
+        throw new Error(i18n.t('homeApps.errors.staleContext'))
+      }
+      setState(current => isCurrentSnapshot(snapshot)
+        ? { ...current, installStates: next }
+        : current)
+    } catch {
+      if (isCurrentSnapshot(snapshot)) {
+        setState(current => ({ ...current, installStates: {} }))
+      }
+    }
+  }, [isCurrentSnapshot])
 
   const refreshRuntimeStatuses = useCallback(async (
     apps?: CatalogApp[],
@@ -625,6 +690,7 @@ export function useAppCatalog() {
         statusLoadingScopeKeys: {},
         accessMode: null,
         statuses: {},
+        installStates: {},
         creatorCircles: [],
       }))
       return
@@ -708,6 +774,7 @@ export function useAppCatalog() {
             errorCode: failureCode,
             statusLoadingScopeKeys: {},
             accessMode: 'denied',
+            installStates: {},
             creatorCircles: [],
           }))
           if (deniedCatalog) {
@@ -802,6 +869,7 @@ export function useAppCatalog() {
         snapshot,
         'replace',
       )
+      await refreshProductSpaceInstallStates(result.catalog.apps, snapshot)
     } catch (error) {
       if (
         syncGeneration !== syncGenerationRef.current
@@ -824,6 +892,7 @@ export function useAppCatalog() {
           errorCode,
           statusLoadingScopeKeys: {},
           accessMode: 'denied',
+          installStates: {},
           creatorCircles: [],
         }))
         if (deniedCatalog) {
@@ -851,6 +920,7 @@ export function useAppCatalog() {
   }, [
     productSpace,
     catalogContextKey,
+    refreshProductSpaceInstallStates,
     refreshRuntimeStatuses,
   ])
 
@@ -887,6 +957,7 @@ export function useAppCatalog() {
       statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
+      installStates: {},
       creatorCircles: [],
     }))
     void sync()
@@ -1299,6 +1370,64 @@ export function useAppCatalog() {
     return launch
   }, [currentSnapshotForApp, requireCurrent, state.accessMode])
 
+  const installProductSpaceBundle = useCallback((app: CatalogApp) => {
+    const snapshot = currentSnapshotForApp(app)
+    const identity = identityForProductSpaceApp(snapshot.catalog, app)
+    const operationKey = `product-space:${identity.catalogEntryId}`
+    return runExclusive(operationKey, 'install', async () => {
+      if (state.accessMode !== 'online' || app.availability !== 'available') {
+        throw new Error(i18n.t('homeApps.errors.unavailable'))
+      }
+      requireCurrent(snapshot)
+      const installed = await window.electronAPI.localApps.installProductSpaceBundle({
+        app: identity,
+      })
+      requireCurrent(snapshot)
+      if (
+        installed.scope?.kind !== 'catalog'
+        || installed.scope.accountId !== identity.accountId
+        || installed.scope.organizationId !== identity.productSpaceId
+        || installed.scope.catalogAppId !== identity.artifactInstanceId
+        || installed.currentVersion !== identity.version
+      ) throw new Error(i18n.t('homeApps.errors.staleContext'))
+      await refreshProductSpaceInstallStates(snapshot.catalog.apps, snapshot)
+      return installed
+    })
+  }, [
+    currentSnapshotForApp,
+    refreshProductSpaceInstallStates,
+    requireCurrent,
+    runExclusive,
+    state.accessMode,
+  ])
+
+  const uninstallProductSpaceBundle = useCallback((
+    app: CatalogApp,
+    preserveData = true,
+  ) => {
+    const snapshot = currentSnapshotForApp(app)
+    const identity = identityForProductSpaceApp(snapshot.catalog, app)
+    const operationKey = `product-space:${identity.catalogEntryId}`
+    return runExclusive(operationKey, 'uninstall', async () => {
+      requireCurrent(snapshot)
+      await window.electronAPI.localApps.uninstallProductSpaceBundle(
+        identity,
+        { preserveData },
+      )
+      requireCurrent(snapshot)
+      await refreshProductSpaceInstallStates(snapshot.catalog.apps, snapshot)
+    })
+  }, [
+    currentSnapshotForApp,
+    refreshProductSpaceInstallStates,
+    requireCurrent,
+    runExclusive,
+  ])
+
+  const getInstallState = useCallback((app: CatalogApp) => (
+    app.catalogEntryId ? state.installStates[app.catalogEntryId] : undefined
+  ), [state.installStates])
+
   const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
     try {
       return state.statuses[scopeKeyForApp(app)]
@@ -1319,6 +1448,9 @@ export function useAppCatalog() {
     cancelInstall,
     getLogs,
     resolveLaunch,
+    installProductSpaceBundle,
+    uninstallProductSpaceBundle,
+    getInstallState,
     resolveRemoteUrl,
     getStatus,
     scopeForApp,

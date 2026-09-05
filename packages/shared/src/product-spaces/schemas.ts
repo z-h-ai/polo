@@ -482,6 +482,11 @@ function assertLaunchSubjectMatchesCatalogEntry(
     || response.subject.versionId !== entry.version.versionId
     || response.subject.version !== entry.version.version
   ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
+  if (
+    entry.version.checksum
+    && response.delivery.kind === 'bundle'
+    && response.delivery.checksum !== entry.version.checksum
+  ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
 }
 
 /** Reusable validation for trusted list-active and stop-all runtime responses. */

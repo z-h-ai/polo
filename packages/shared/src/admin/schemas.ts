@@ -193,7 +193,7 @@ export const CatalogAppSchema = z.object({
   description: z.string().max(4_096),
   iconUrl: httpUrl.optional(),
   creatorName: z.string().max(512).optional(),
-  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+  deliveryMode: z.enum(['remote_url', 'local_bundle', 'resolve_launch']),
   remoteUrl: httpUrl.optional(),
   currentRelease: AppReleaseSummarySchema.optional(),
   permissions: z.array(nonBlankString(512)).max(1_000).optional(),
@@ -270,7 +270,7 @@ export const DeniedCatalogAppSchema = z.object({
   description: z.string().max(4_096),
   iconUrl: httpUrl.optional(),
   creatorName: z.string().max(512).optional(),
-  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+  deliveryMode: z.enum(['remote_url', 'local_bundle', 'resolve_launch']),
   sortOrder: z.number().int(),
   availability: z.literal('unavailable'),
 }).strict()

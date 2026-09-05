@@ -26,6 +26,9 @@ import type {
   LocalAppLogsOptions,
   LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
+  ProductSpaceAppIdentity,
+  ProductSpaceAppInstallState,
+  ProductSpaceBundleInstallRequest,
 } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
@@ -48,6 +51,11 @@ import {
 } from '@polo-ai/server-core/runtime/product-space-executions'
 import {
   PRODUCT_SPACE_CONTRACT_VERSION,
+  AccountIdSchema,
+  ArtifactInstanceIdSchema,
+  ArtifactVersionIdSchema,
+  CatalogEntryIdSchema,
+  ProductSpaceIdSchema,
   ProductSpaceExecutionScopeSchema,
 } from '@polo-ai/shared/product-spaces'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
@@ -257,6 +265,141 @@ function hostArchitecture(): 'arm64' | 'x64' {
   return process.arch === 'arm64' ? 'arm64' : 'x64'
 }
 
+function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentity {
+  if (!value || typeof value !== 'object') {
+    throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace App identity is required')
+  }
+  const input = value as Partial<ProductSpaceAppIdentity>
+  const accountId = AccountIdSchema.safeParse(input.accountId)
+  const productSpaceId = ProductSpaceIdSchema.safeParse(input.productSpaceId)
+  const catalogEntryId = CatalogEntryIdSchema.safeParse(input.catalogEntryId)
+  const artifactInstanceId = ArtifactInstanceIdSchema.safeParse(input.artifactInstanceId)
+  const versionId = ArtifactVersionIdSchema.safeParse(input.versionId)
+  if (
+    !accountId.success
+    || !productSpaceId.success
+    || !catalogEntryId.success
+    || !artifactInstanceId.success
+    || !versionId.success
+    || typeof input.version !== 'string'
+    || input.version.trim().length === 0
+    || input.version.length > 512
+  ) {
+    throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace App identity is invalid')
+  }
+  return {
+    accountId: accountId.data,
+    productSpaceId: productSpaceId.data,
+    catalogEntryId: catalogEntryId.data,
+    artifactInstanceId: artifactInstanceId.data,
+    versionId: versionId.data,
+    version: input.version,
+  }
+}
+
+function productSpaceBundleScope(app: ProductSpaceAppIdentity): CatalogLocalAppScope {
+  return {
+    kind: 'catalog',
+    accountId: app.accountId,
+    organizationId: app.productSpaceId,
+    catalogAppId: app.artifactInstanceId,
+  }
+}
+
+function assertProductSpaceAppOperationCurrent(app: ProductSpaceAppIdentity): void {
+  assertScopeInsideActiveProductSpace(productSpaceBundleScope(app))
+  if (
+    !isRuntimeFenceBoundToAccount(app.accountId)
+    || isRuntimeProductSpaceRestricted(app.productSpaceId)
+    || isSwitchInProgress()
+  ) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'ProductSpace App management requires the current unrestricted ProductSpace',
+    )
+  }
+}
+
+async function assertProductSpaceAccountCurrent(app: ProductSpaceAppIdentity): Promise<{
+  accessToken: string
+}> {
+  assertProductSpaceAppOperationCurrent(app)
+  const tokens = await getCredentialManager().getAdminTokens()
+  if (!tokens || tokens.userId !== app.accountId) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'ProductSpace App management belongs to another or signed-out account',
+    )
+  }
+  return { accessToken: tokens.accessToken }
+}
+
+async function loadAuthoritativeProductSpaceApps(
+  rawApps: unknown,
+): Promise<{
+  apps: ProductSpaceAppIdentity[]
+  accessToken: string
+  client: AdminClient
+  context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+  catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+}> {
+  if (!Array.isArray(rawApps) || rawApps.length === 0 || rawApps.length > MAX_CATALOG_STATUS_SCOPES) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      `Between 1 and ${MAX_CATALOG_STATUS_SCOPES} ProductSpace App identities are required`,
+    )
+  }
+  const apps = rawApps.map(validateProductSpaceAppIdentity)
+  const first = apps[0]!
+  if (apps.some(app => (
+    app.accountId !== first.accountId
+    || app.productSpaceId !== first.productSpaceId
+  ))) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'A ProductSpace App batch must target one account and ProductSpace',
+    )
+  }
+  const { accessToken } = await assertProductSpaceAccountCurrent(first)
+  const adminUrl = getAdminUrl()
+  if (!adminUrl) {
+    throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Polo Admin is not configured')
+  }
+  const client = new AdminClient(adminUrl)
+  const list = await client.listProductSpaces(accessToken)
+  const context = list.productSpaces.find(space => space.id === first.productSpaceId)
+  if (!context || context.accessMode !== 'active') {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'The requested ProductSpace is not active',
+    )
+  }
+  const catalog = await client.getProductSpaceCatalog(accessToken, context)
+  if ('notModified' in catalog) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'A fresh ProductSpace Catalog is required',
+    )
+  }
+  for (const app of apps) {
+    const entry = catalog.entries.find(candidate => candidate.catalogEntryId === app.catalogEntryId)
+    if (
+      !entry
+      || entry.kind !== 'app'
+      || entry.artifactInstanceId !== app.artifactInstanceId
+      || entry.version.versionId !== app.versionId
+      || entry.version.version !== app.version
+    ) {
+      throw new LocalAppRuntimeError(
+        'RELEASE_CHANGED',
+        'The ProductSpace Catalog App identity changed',
+      )
+    }
+  }
+  await assertProductSpaceAccountCurrent(first)
+  return { apps, accessToken, client, context, catalog }
+}
+
 function matchesConfirmedRelease(
   request: LocalAppCatalogInstallRequest,
   app: CatalogApp,
@@ -460,6 +603,9 @@ function deriveCatalogReleaseStatus(
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
+  RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+  RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
   RPC_CHANNELS.localApps.STOP,
@@ -512,6 +658,123 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     platform: hostPlatform(),
     arch: hostArchitecture(),
   }))
+
+  server.handle(
+    RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+    async (_ctx, rawApps: unknown): Promise<ProductSpaceAppInstallState[]> => {
+      const { apps } = await loadAuthoritativeProductSpaceApps(rawApps)
+      const scopes = apps.map(productSpaceBundleScope)
+      const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
+      await assertProductSpaceAccountCurrent(apps[0]!)
+      if (statuses.length !== scopes.length) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'ProductSpace installation state response is incomplete',
+        )
+      }
+      return statuses.map((status, index) => {
+        const app = apps[index]!
+        const expectedScope = scopes[index]!
+        if (
+          status.scope?.kind !== 'catalog'
+          || status.scope.accountId !== expectedScope.accountId
+          || status.scope.organizationId !== expectedScope.organizationId
+          || status.scope.catalogAppId !== expectedScope.catalogAppId
+        ) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'ProductSpace installation state belongs to another App',
+          )
+        }
+        const installing = status.status === 'downloading'
+          || status.status === 'installing'
+          || status.installationStatus !== undefined
+        return {
+          app,
+          state: installing
+            ? 'installing'
+            : status.currentVersion
+            ? 'installed'
+            : 'not_installed',
+          ...(status.currentVersion ? { currentVersion: status.currentVersion } : {}),
+          ...(typeof status.progress?.percent === 'number'
+            ? { progressPercent: status.progress.percent }
+            : {}),
+        }
+      })
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
+    async (ctx, rawRequest: ProductSpaceBundleInstallRequest) => {
+      const rawApp = rawRequest && typeof rawRequest === 'object'
+        ? (rawRequest as Partial<ProductSpaceBundleInstallRequest>).app
+        : null
+      const loaded = await loadAuthoritativeProductSpaceApps([rawApp])
+      const app = loaded.apps[0]!
+      const entry = loaded.catalog.entries.find(
+        candidate => candidate.catalogEntryId === app.catalogEntryId,
+      )!
+      if (entry.availability !== 'available') {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'This ProductSpace App is not available for installation',
+        )
+      }
+      const launch = await loaded.client.resolveProductSpaceLaunch(
+        loaded.accessToken,
+        loaded.context,
+        loaded.catalog,
+        entry.catalogEntryId,
+        { platform: hostPlatform(), arch: hostArchitecture() },
+      )
+      await assertProductSpaceAccountCurrent(app)
+      if (
+        launch.subject.kind !== 'artifact_instance'
+        || launch.subject.artifactType !== 'app'
+        || launch.subject.artifactInstanceId !== app.artifactInstanceId
+        || launch.subject.versionId !== app.versionId
+        || launch.subject.version !== app.version
+        || launch.productSpaceId !== app.productSpaceId
+        || launch.catalogEntryId !== app.catalogEntryId
+        || Date.parse(launch.expiresAt) <= Date.now()
+      ) {
+        throw new LocalAppRuntimeError(
+          'RELEASE_CHANGED',
+          'The resolved ProductSpace App launch identity changed',
+        )
+      }
+      if (launch.delivery.kind !== 'bundle') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'This ProductSpace App does not use bundle installation',
+        )
+      }
+      return getScopedLocalAppRuntimeRegistry().install({
+        scope: productSpaceBundleScope(app),
+        version: launch.subject.version,
+        downloadUrl: launch.delivery.downloadUrl,
+        checksum: launch.delivery.checksum,
+        sizeBytes: launch.delivery.sizeBytes,
+        platform: hostPlatform(),
+        arch: hostArchitecture(),
+      }, { signal: ctx.signal })
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
+    async (_ctx, rawApp: unknown, options?: LocalAppUninstallOptions) => {
+      const { apps } = await loadAuthoritativeProductSpaceApps([rawApp])
+      const app = apps[0]!
+      await getScopedLocalAppRuntimeRegistry().uninstall(
+        productSpaceBundleScope(app),
+        options,
+      )
+      await assertProductSpaceAccountCurrent(app)
+    },
+  )
 
   server.handle(
     RPC_CHANNELS.localApps.INSTALL,
