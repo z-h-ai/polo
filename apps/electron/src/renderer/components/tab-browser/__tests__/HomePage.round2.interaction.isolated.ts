@@ -27,10 +27,11 @@ let installedApps = [...BUILTIN_APP_DEFINITIONS]
 const quickAccessByContext = new Map<string, any[]>()
 const getHomeQuickAccess = jest.fn(async (contextKey: string) =>
   quickAccessByContext.get(contextKey) ?? [])
-const setHomeQuickAccess = jest.fn(async (contextKey: string, apps: any[]) => {
+async function defaultSetHomeQuickAccess(contextKey: string, apps: any[]) {
   quickAccessByContext.set(contextKey, apps)
   return apps
-})
+}
+const setHomeQuickAccess = jest.fn(defaultSetHomeQuickAccess)
 
 function signedOutCatalogHook() {
   return {
@@ -119,6 +120,7 @@ beforeEach(async () => {
   quickAccessByContext.clear()
   getHomeQuickAccess.mockClear()
   setHomeQuickAccess.mockClear()
+  setHomeQuickAccess.mockImplementation(defaultSetHomeQuickAccess)
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
@@ -318,6 +320,102 @@ describe('HomePage quick access (POO-43)', () => {
     }])
     expect(screen.getByText('Prune App A')).toBeTruthy()
     expect(screen.queryByText('ghost')).toBeNull()
+  })
+
+  it('never writes a pending space-A quick-access save into space B after a switch', async () => {
+    const appA: CatalogApp = {
+      id: 'race-app-a',
+      organizationId: 'organization-a',
+      name: 'Race App A',
+      description: '',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://a.example.com',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    const appB: CatalogApp = {
+      id: 'race-app-b',
+      organizationId: 'organization-b',
+      name: 'Race App B',
+      description: '',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://b.example.com',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    const contextKeyA = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const contextKeyB = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-b')
+    }`
+    quickAccessByContext.set(contextKeyA, [{
+      id: 'key:race-app-a',
+      addedAt: 1,
+    }])
+    quickAccessByContext.set(contextKeyB, [{
+      id: 'key:race-app-b',
+      addedAt: 1,
+    }])
+    appCatalogHook = {
+      ...hookWithCatalog(enterpriseCatalogWith([appA])),
+      scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
+    }
+    const view = renderHome()
+    await waitFor(() => {
+      expect(screen.getByText('Race App A')).toBeTruthy()
+    })
+
+    // Gate the space-A write-back so it is still in flight across the
+    // context switch — the exact race window from the review finding.
+    let releaseSpaceASave!: (saved: unknown) => void
+    const gatedSpaceASave = new Promise(resolve => {
+      releaseSpaceASave = resolve
+    })
+    setHomeQuickAccess.mockImplementation(async (contextKey: string, apps: any[]) => {
+      if (contextKey === contextKeyA) {
+        quickAccessByContext.set(contextKeyA, apps)
+        return (await gatedSpaceASave) as any[]
+      }
+      quickAccessByContext.set(contextKey, apps)
+      return apps
+    })
+
+    // Remove the A shortcut: a save to context A is now pending.
+    fireEvent.click(screen.getByTestId('home-manage-quick-access'))
+    await waitFor(() => {
+      expect(screen.getByTestId('manage-home-apps-dialog')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('manage-home-apps-item'))
+    await waitFor(() => {
+      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKeyA, [])
+    })
+
+    // Switch the committed ProductSpace to B while the A save is pending.
+    appCatalogHook = {
+      ...hookWithCatalog(enterpriseCatalogWith([appB], {
+        organizationId: 'organization-b',
+      })),
+      scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
+    }
+    view.rerender(createElement(I18nextProvider, { i18n }, createElement(HomePage)))
+    await waitFor(() => {
+      expect(screen.getByText('Race App B')).toBeTruthy()
+    })
+
+    // The stale A save resolves now: it must NOT enter space B's view and
+    // must NOT trigger the B-side prune to persist an emptied B config.
+    releaseSpaceASave([])
+    await Promise.resolve()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(screen.getByText('Race App B')).toBeTruthy()
+    const savedContexts = setHomeQuickAccess.mock.calls.map(call => call[0])
+    expect(savedContexts).not.toContain(contextKeyB)
+    expect(quickAccessByContext.get(contextKeyB)).toEqual([{
+      id: 'key:race-app-b',
+      addedAt: 1,
+    }])
+    view.unmount()
   })
 
   it('opens quick-access Apps through the authorized catalog flow', async () => {
@@ -617,17 +715,17 @@ describe('HomePage copy and formatting', () => {
       i18n.t.bind(i18n),
       { code: 'START_FAILED', message: secret },
       'open',
-    )).toBe('无法打开应用。')
+    )).toBe('无法打开 App。')
     expect(homeAppOperationErrorText(
       i18n.t.bind(i18n),
       { code: 'UNINSTALL_FAILED', message: secret },
       'uninstall',
-    )).toBe('无法卸载应用。')
+    )).toBe('无法卸载 App。')
     expect(homeAppOperationErrorText(
       i18n.t.bind(i18n),
       { code: 'RELEASE_CHANGED', message: secret },
       'install',
-    )).toBe('应用发布版本已变更，请确认更新后的版本再安装。')
+    )).toBe('App 发布版本已变更，请确认更新后的版本再安装。')
     expect(catalogStateMessage(
       i18n.t.bind(i18n),
       'NETWORK_ERROR',

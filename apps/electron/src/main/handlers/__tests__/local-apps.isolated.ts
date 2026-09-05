@@ -56,7 +56,7 @@ const listProductSpaces = mock(async () => ({
     accessMode: 'active' as const,
   }],
 }))
-const getProductSpaceCatalog = mock(async () => ({
+const defaultProductSpaceCatalog = async () => ({
   contractVersion: 1,
   productSpaceId: 'organization-a',
   catalogRevision: 'revision-a',
@@ -75,7 +75,8 @@ const getProductSpaceCatalog = mock(async () => ({
     sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
     permissions: [],
   }],
-}))
+})
+const getProductSpaceCatalog = mock(defaultProductSpaceCatalog)
 const resolveProductSpaceLaunch = mock(async () => ({
   contractVersion: 1,
   productSpaceId: 'organization-a',
@@ -486,6 +487,117 @@ describe('local app main-process authorization boundary', () => {
       state: 'installed',
       currentVersion: '2.3.4',
     }])
+  })
+
+  it('rejects duplicate ProductSpace App identities in one batch', async () => {
+    const getStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+    )!
+    await expect(getStates(context, [
+      productSpaceAppIdentity(),
+      productSpaceAppIdentity(),
+    ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
+  it('validates a full 10,000-identity batch against a 10,000-entry Catalog in one pass', async () => {
+    try {
+      const count = 10_000
+      const identities = Array.from({ length: count }, (_, index) => ({
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogEntryId: `catalog-entry-${index}`,
+        artifactInstanceId: `artifact-instance-${index}`,
+        versionId: `version-${index}`,
+        version: '2.3.4',
+      }))
+      getProductSpaceCatalog.mockImplementation(async () => ({
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogRevision: 'revision-a',
+        entries: identities.map(identity => ({
+          kind: 'app' as const,
+          catalogEntryId: identity.catalogEntryId,
+          artifactInstanceId: identity.artifactInstanceId,
+          version: {
+            versionId: identity.versionId,
+            version: identity.version,
+            checksum: 'b'.repeat(64),
+          },
+          name: `App ${identity.catalogEntryId}`,
+          description: '',
+          availability: 'available' as const,
+          sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+          permissions: [],
+        })),
+      }))
+      scopedStatuses.mockImplementation(async (scopes: CatalogLocalAppScope[]) =>
+        scopes.map(item => ({
+          appId: item.catalogAppId,
+          scope: item,
+          status: 'not_installed' as const,
+        })))
+
+      const getStates = handlers.get(
+        RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+      )!
+      // With the old per-request entries.find this was O(catalog × request)
+      // (~100,000,000 comparisons on the Main thread); the indexed check
+      // keeps the full-size batch linear and fast.
+      const startedAt = Date.now()
+      const states = await getStates(context, identities) as Array<{ app: { catalogEntryId: string } }>
+      const elapsedMs = Date.now() - startedAt
+
+      expect(states).toHaveLength(count)
+      expect(states[count - 1]!.app.catalogEntryId).toBe('catalog-entry-9999')
+      expect(elapsedMs).toBeLessThan(5_000)
+      expect(getProductSpaceCatalog).toHaveBeenCalledTimes(1)
+    } finally {
+      getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    }
+  })
+
+  it('fails the full-size batch closed when one identity drifted', async () => {
+    try {
+      const count = 1_000
+      const identities = Array.from({ length: count }, (_, index) => ({
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogEntryId: `catalog-entry-${index}`,
+        artifactInstanceId: `artifact-instance-${index}`,
+        versionId: `version-${index}`,
+        version: '2.3.4',
+      }))
+      getProductSpaceCatalog.mockImplementation(async () => ({
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogRevision: 'revision-a',
+        entries: identities.map(identity => ({
+          kind: 'app' as const,
+          catalogEntryId: identity.catalogEntryId,
+          artifactInstanceId: identity.artifactInstanceId,
+          version: {
+            versionId: identity.versionId,
+            version: identity.version,
+            checksum: 'b'.repeat(64),
+          },
+          name: `App ${identity.catalogEntryId}`,
+          description: '',
+          availability: 'available' as const,
+          sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+          permissions: [],
+        })),
+      }))
+
+      const getStates = handlers.get(
+        RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+      )!
+      await expect(getStates(context, [
+        ...identities.slice(0, 999),
+        { ...identities[999]!, versionId: 'drifted-version' },
+      ])).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
+    } finally {
+      getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    }
   })
 
   it('registers a restart as a fresh running execution so switching stays blocked', async () => {

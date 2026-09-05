@@ -3,6 +3,7 @@ import {
   resetProductSpaceAppLaunchHandoffsForTests,
   onProductSpaceAppLaunch,
   publishProductSpaceAppLaunch,
+  syncProductSpaceLaunchHandoffContext,
   takeProductSpaceAppLaunch,
 } from '../product-space-app-launch-handoff'
 
@@ -39,7 +40,13 @@ const context = {
   expiresAt: launch.expiresAt,
 }
 
-beforeEach(resetProductSpaceAppLaunchHandoffsForTests)
+beforeEach(() => {
+  resetProductSpaceAppLaunchHandoffsForTests()
+  syncProductSpaceLaunchHandoffContext({
+    accountId: 'account-a',
+    productSpaceId: 'space-a',
+  })
+})
 
 describe('ProductSpace App launch handoff', () => {
   it('hands credentials to POO-47 once without placing them in tab context', () => {
@@ -64,5 +71,69 @@ describe('ProductSpace App launch handoff', () => {
       artifactInstanceId: 'artifact-b',
     })).toBeNull()
     expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+  })
+
+  it('refuses to publish without an active ProductSpace context', () => {
+    syncProductSpaceLaunchHandoffContext(null)
+    expect(() => publishProductSpaceAppLaunch('account-a', launch)).toThrow(
+      'requires an active ProductSpace',
+    )
+  })
+
+  it('refuses to publish for another account or ProductSpace than the live context', () => {
+    expect(() => publishProductSpaceAppLaunch('account-b', launch)).toThrow(
+      'another ProductSpace context',
+    )
+    const otherSpaceLaunch = {
+      ...launch,
+      productSpaceId: 'space-b' as never,
+    }
+    expect(() => publishProductSpaceAppLaunch('account-a', otherSpaceLaunch)).toThrow(
+      'another ProductSpace context',
+    )
+  })
+
+  it('fails closed when the live context switched spaces after the handoff was sealed', () => {
+    const request = publishProductSpaceAppLaunch('account-a', launch)
+    syncProductSpaceLaunchHandoffContext({
+      accountId: 'account-a',
+      productSpaceId: 'space-b',
+    })
+    // The old sealed handoff is dropped outright: the stale consumer cannot
+    // probe the tuple and the exact old context replay must not succeed.
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+  })
+
+  it('fails closed when the live context switched accounts after the handoff was sealed', () => {
+    const request = publishProductSpaceAppLaunch('account-a', launch)
+    syncProductSpaceLaunchHandoffContext({
+      accountId: 'account-b',
+      productSpaceId: 'space-a',
+    })
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+  })
+
+  it('fails closed while signed out after the handoff was sealed', () => {
+    const request = publishProductSpaceAppLaunch('account-a', launch)
+    syncProductSpaceLaunchHandoffContext(null)
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+  })
+
+  it('seals a new handoff after returning to the original context', () => {
+    const request = publishProductSpaceAppLaunch('account-a', launch)
+    syncProductSpaceLaunchHandoffContext({
+      accountId: 'account-a',
+      productSpaceId: 'space-b',
+    })
+    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+    syncProductSpaceLaunchHandoffContext({
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+    })
+    const resealed = publishProductSpaceAppLaunch('account-a', launch)
+    expect(takeProductSpaceAppLaunch(resealed.handoffId, context)).toEqual({
+      accountId: 'account-a',
+      launch,
+    })
   })
 })

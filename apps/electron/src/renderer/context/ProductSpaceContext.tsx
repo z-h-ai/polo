@@ -1,7 +1,8 @@
 import * as React from 'react'
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 import type { PendingSpaceSwitch } from '@/hooks/useProductSpaceContext'
+import { syncProductSpaceLaunchHandoffContext } from '@/lib/product-space-app-launch-handoff'
 
 export interface ProductSpaceContextValue {
   accountId: string
@@ -33,6 +34,17 @@ export function ProductSpaceProvider({
   children: React.ReactNode
   value: ProductSpaceContextValue
 }) {
+  // The sealed launch handoff store is bound to the authoritative live
+  // ProductSpace identity: every account or space transition (including
+  // sign-out) invalidates all pending handoffs before any consumer can
+  // take them across a context boundary.
+  useEffect(() => {
+    syncProductSpaceLaunchHandoffContext(
+      value.accountId && value.activeProductSpaceId
+        ? { accountId: value.accountId, productSpaceId: value.activeProductSpaceId }
+        : null,
+    )
+  }, [value.accountId, value.activeProductSpaceId])
   return (
     <ProductSpaceContext.Provider value={value}>
       {children}

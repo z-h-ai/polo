@@ -381,8 +381,30 @@ async function loadAuthoritativeProductSpaceApps(
       'A fresh ProductSpace Catalog is required',
     )
   }
+  // One index for the entire batch: the Catalog may hold up to 10,000
+  // entries and the request up to 10,000 identities, so per-request
+  // `entries.find` scans would cost O(catalog × request) on the Main thread.
+  const entriesById = new Map<string, (typeof catalog.entries)[number]>(
+    catalog.entries.map(entry => [entry.catalogEntryId as string, entry] as const),
+  )
+  const seenIdentityKeys = new Set<string>()
   for (const app of apps) {
-    const entry = catalog.entries.find(candidate => candidate.catalogEntryId === app.catalogEntryId)
+    const identityKey = JSON.stringify([
+      app.accountId,
+      app.productSpaceId,
+      app.catalogEntryId,
+      app.artifactInstanceId,
+      app.versionId,
+      app.version,
+    ])
+    if (seenIdentityKeys.has(identityKey)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'Duplicate ProductSpace App identities are not allowed',
+      )
+    }
+    seenIdentityKeys.add(identityKey)
+    const entry = entriesById.get(app.catalogEntryId)
     if (
       !entry
       || entry.kind !== 'app'

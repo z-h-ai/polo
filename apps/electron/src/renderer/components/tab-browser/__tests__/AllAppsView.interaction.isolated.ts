@@ -14,7 +14,11 @@ mock.module('@/lib/use-compact-viewport', () => ({
 }))
 
 const { cleanup, fireEvent, render, screen } = await import('@testing-library/react')
-const { AllAppsView, groupAllAppsForDisplay } = await import('../AllAppsView')
+const {
+  AllAppsView,
+  catalogAppBlockedStatusKey,
+  groupAllAppsForDisplay,
+} = await import('../AllAppsView')
 
 function app(id: string, overrides: Partial<CatalogApp> = {}): CatalogApp {
   return {
@@ -142,6 +146,51 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     renderView([app('a')])
     fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
     expect(screen.getByTestId('all-apps-row-detail')).toBeTruthy()
+  })
+
+  it('maps every unavailableReason to its own frozen blocked status', () => {
+    const cases: Array<{
+      reason: 'authorization_ended' | 'space_restricted' | 'version_unavailable' | 'version_blocked'
+      copy: string
+    }> = [
+      { reason: 'authorization_ended', copy: 'Access removed by your organization' },
+      { reason: 'space_restricted', copy: 'Restricted for this space' },
+      { reason: 'version_unavailable', copy: 'Version unavailable' },
+      { reason: 'version_blocked', copy: 'Version blocked' },
+    ]
+    for (const spaceKind of ['personal', 'enterprise'] as const) {
+      for (const { reason, copy } of cases) {
+        renderView(
+          [app('blocked-a', { availability: 'unavailable', unavailableReason: reason })],
+          { spaceKind },
+        )
+        expect(screen.getByText(copy)).toBeTruthy()
+        cleanup()
+      }
+      renderView(
+        [app('blocked-a', { availability: 'unavailable' })],
+        { spaceKind },
+      )
+      // A blocked entry without a reason stays neutral — it must never be
+      // misreported as an organization revocation.
+      expect(screen.getByText('Currently unavailable')).toBeTruthy()
+      expect(screen.queryByText('Access removed by your organization')).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('keys blocked status copy by the authoritative reason, not availability alone', () => {
+    expect(catalogAppBlockedStatusKey({
+      availability: 'unavailable',
+      unavailableReason: 'version_blocked',
+    })).toBe('homeApps.status.versionBlocked')
+    expect(catalogAppBlockedStatusKey({
+      availability: 'unavailable',
+      unavailableReason: 'space_restricted',
+    })).toBe('homeApps.status.spaceRestricted')
+    expect(catalogAppBlockedStatusKey({
+      availability: 'unavailable',
+    })).toBe('homeApps.status.unavailableGeneric')
   })
 
   it('renders loading and failure states without inventing runtime state', () => {

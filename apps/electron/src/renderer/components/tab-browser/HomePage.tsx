@@ -100,6 +100,13 @@ export function HomePage() {
   quickEntriesRef.current = quickEntries
   const quickLoadGenerationRef = useRef(0)
   const quickMutationGenerationRef = useRef(0)
+  /**
+   * The ProductSpace context the CURRENT entries were hydrated (or last
+   * mutated) for. `null` between a context switch and its hydration, so the
+   * prune effect can never judge the previous context's entries against the
+   * new context's Catalog and persist a wiped config.
+   */
+  const quickHydratedContextRef = useRef<string | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
@@ -113,6 +120,8 @@ export function HomePage() {
   const quickContextKey = createHomeQuickAccessContextKey(
     catalog.productSpace?.productSpaceContextKey,
   )
+  const quickContextKeyRef = useRef(quickContextKey)
+  quickContextKeyRef.current = quickContextKey
   const scopeKeyForApp = catalog.scopeKeyForApp
 
   const availableApps = useMemo(
@@ -132,22 +141,30 @@ export function HomePage() {
 
   useEffect(() => {
     // Fail-closed across space transitions: a ProductSpace identity change
-    // resets the home view and closes in-place dialogs.
+    // resets the home view and closes in-place dialogs. The switch also
+    // advances the mutation fence, so a still-in-flight save from the
+    // previous context can never write its entries into this context.
+    const contextKey = quickContextKey
     const generation = ++quickLoadGenerationRef.current
+    quickMutationGenerationRef.current += 1
     const mutationGeneration = quickMutationGenerationRef.current
+    quickHydratedContextRef.current = null
     setView('home')
     setManageOpen(false)
     setQuickEntries([])
-    void loadHomeQuickAccess(quickContextKey)
+    void loadHomeQuickAccess(contextKey)
       .then(entries => {
-        // A mutation in this same context fences the older hydration result:
-        // quick-access slots may never move backwards after a user change.
+        // Apply only while BOTH the context key and the load/mutation
+        // generations still match: quick-access slots may never move
+        // backwards after a user change, and a stale context's hydration
+        // result may never enter the current context's view.
         if (
-          quickLoadGenerationRef.current === generation
-          && quickMutationGenerationRef.current === mutationGeneration
-        ) {
-          setQuickEntries(entries)
-        }
+          quickContextKeyRef.current !== contextKey
+          || quickLoadGenerationRef.current !== generation
+          || quickMutationGenerationRef.current !== mutationGeneration
+        ) return
+        quickHydratedContextRef.current = contextKey
+        setQuickEntries(entries)
       })
       .catch(() => {
         // Quick access is non-critical; keep the section usable.
@@ -155,8 +172,12 @@ export function HomePage() {
   }, [quickContextKey])
 
   // Prune quick-access entries that no longer resolve to an available App
-  // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids).
+  // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids). Runs
+  // only for entries that were hydrated in THIS context — during the switch
+  // commit the stale previous-context entries must never be pruned against
+  // the new Catalog and persisted into the new context.
   useEffect(() => {
+    if (quickHydratedContextRef.current !== quickContextKey) return
     if (quickEntries.length === 0) return
     const availableIds = new Set<string>()
     for (const app of availableApps) {
@@ -170,12 +191,16 @@ export function HomePage() {
     if (pruned.length === quickEntries.length) return
     quickMutationGenerationRef.current += 1
     const generation = quickMutationGenerationRef.current
+    const contextKey = quickContextKey
     setQuickEntries(pruned)
-    void saveHomeQuickAccess(quickContextKey, pruned)
+    void saveHomeQuickAccess(contextKey, pruned)
       .then(saved => {
-        if (quickMutationGenerationRef.current === generation) {
-          setQuickEntries(saved)
-        }
+        if (
+          quickContextKeyRef.current !== contextKey
+          || quickMutationGenerationRef.current !== generation
+        ) return
+        quickHydratedContextRef.current = contextKey
+        setQuickEntries(saved)
       })
       .catch(() => {
         // Persistence failure must not break the home section.
@@ -225,12 +250,18 @@ export function HomePage() {
     }
     quickMutationGenerationRef.current += 1
     const generation = quickMutationGenerationRef.current
+    const contextKey = quickContextKey
+    quickHydratedContextRef.current = contextKey
     setQuickEntries(next)
-    void saveHomeQuickAccess(quickContextKey, next)
+    void saveHomeQuickAccess(contextKey, next)
       .then(saved => {
-        if (quickMutationGenerationRef.current === generation) {
-          setQuickEntries(saved)
-        }
+        // A context switch (or a newer mutation) invalidates this write-back:
+        // the saved entries of the old context must never enter the new one.
+        if (
+          quickContextKeyRef.current !== contextKey
+          || quickMutationGenerationRef.current !== generation
+        ) return
+        setQuickEntries(saved)
       })
       .catch(() => {
         // Persistence failure must not break the home section.

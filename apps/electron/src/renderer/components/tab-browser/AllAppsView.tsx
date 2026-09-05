@@ -52,6 +52,29 @@ interface AllAppsViewProps {
   onBack: () => void
 }
 
+/**
+ * Frozen blocked-state copy per authoritative Catalog unavailability reason.
+ * Governance/version blocks must never be misreported as an authorization
+ * loss, so every reason maps to its own status key and an unknown shape
+ * falls back to a neutral "unavailable" instead of the revocation copy.
+ */
+export function catalogAppBlockedStatusKey(
+  app: Pick<CatalogApp, 'availability' | 'unavailableReason'>,
+): string {
+  switch (app.unavailableReason) {
+    case 'authorization_ended':
+      return 'homeApps.status.unauthorized'
+    case 'space_restricted':
+      return 'homeApps.status.spaceRestricted'
+    case 'version_unavailable':
+      return 'homeApps.status.versionUnavailable'
+    case 'version_blocked':
+      return 'homeApps.status.versionBlocked'
+    default:
+      return 'homeApps.status.unavailableGeneric'
+  }
+}
+
 function AppAvailability({
   app,
   installState,
@@ -63,7 +86,8 @@ function AppAvailability({
 }) {
   const { t } = useTranslation()
   let label = t('homeApps.status.available')
-  if (app.availability !== 'available') label = t('homeApps.status.unauthorized')
+  if (app.availability === 'withdrawn') label = t('homeApps.status.withdrawn')
+  else if (app.availability !== 'available') label = t(catalogAppBlockedStatusKey(app))
   else if (offline) label = t('homeApps.status.offline')
   else if (installState?.state === 'installing') label = t('homeApps.status.installing')
   else if (installState?.state === 'installed') label = t('homeApps.status.installed')
@@ -342,14 +366,31 @@ export function AllAppsView({
       ) : errorCode && apps.length === 0 ? (
         <div className="flex min-h-40 flex-col items-center justify-center text-center">
           <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
-          <p className="text-sm font-medium">{catalogStateMessage(t, errorCode, 'error')}</p>
+          <p className="text-sm font-medium" data-testid="all-apps-load-failed">
+            {t('homeApps.allApps.loadFailed')}
+          </p>
+          <p className="mt-1 max-w-md text-xs text-muted-foreground">
+            {catalogStateMessage(t, errorCode, 'error')}
+          </p>
           <Button type="button" size="sm" variant="secondary" className="mt-4" onClick={onRefresh}>
             {t('homeApps.actions.tryAgain')}
           </Button>
         </div>
       ) : filteredApps.length === 0 ? (
-        <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground" data-testid="all-apps-empty">
-          {normalizedQuery ? t('homeApps.allApps.noResults') : t('homeApps.organization.empty')}
+        <div
+          className="flex min-h-40 flex-col items-center justify-center gap-1 text-center"
+          data-testid="all-apps-empty"
+        >
+          <p className="text-sm text-muted-foreground">
+            {normalizedQuery ? t('homeApps.allApps.noResults') : t('homeApps.allApps.empty')}
+          </p>
+          {!normalizedQuery && (
+            <p className="max-w-md text-xs text-muted-foreground">
+              {spaceKind === 'enterprise'
+                ? t('homeApps.allApps.emptyEnterprise')
+                : t('homeApps.allApps.emptyPersonal')}
+            </p>
+          )}
         </div>
       ) : (
         <div className={cn('grid gap-4', !compact && selectedApp && 'lg:grid-cols-[minmax(0,1fr)_320px]')}>

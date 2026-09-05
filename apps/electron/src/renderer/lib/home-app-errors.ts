@@ -1,12 +1,10 @@
 import type { TFunction } from 'i18next'
 
-export type HomeAppOperation =
-  | 'cancel'
-  | 'install'
-  | 'logs'
-  | 'open'
-  | 'stop'
-  | 'uninstall'
+/**
+ * POO-43 member operations only: runtime stop/log/cancel controls belong to
+ * the POO-47 Runtime and must never resurface through these home messages.
+ */
+export type HomeAppOperation = 'install' | 'open' | 'uninstall'
 
 export function getHomeAppErrorCode(error: unknown): string | null {
   if (!error || typeof error !== 'object') return null
@@ -58,11 +56,8 @@ export function homeAppOperationErrorText(
   }
 
   const fallbackKeys: Record<HomeAppOperation, string> = {
-    cancel: 'homeApps.errors.cancelInstallGeneric',
     install: 'homeApps.errors.installGeneric',
-    logs: 'homeApps.errors.logsGeneric',
     open: 'homeApps.errors.openGeneric',
-    stop: 'homeApps.errors.stopGeneric',
     uninstall: 'homeApps.errors.uninstallGeneric',
   }
   return t(fallbackKeys[operation])
