@@ -18,7 +18,7 @@ interface ManageHomeAppsDialogProps {
   onOpenChange: (open: boolean) => void
   /** Currently `available` Catalog Apps of the active ProductSpace. */
   apps: CatalogApp[]
-  scopeKeyForApp: (app: CatalogApp) => string
+  identityKeyForApp: (app: CatalogApp) => string
   /** Scope keys currently pinned to the home quick access. */
   selectedIds: ReadonlySet<string>
   maxSlots: number
@@ -27,7 +27,7 @@ interface ManageHomeAppsDialogProps {
    * addition was rejected (slot cap). Only home shortcuts change —
    * installation state is never touched here.
    */
-  onToggle: (app: CatalogApp, scopeKey: string, enabled: boolean) => boolean
+  onToggle: (app: CatalogApp, identityKey: string, enabled: boolean) => boolean
 }
 
 /**
@@ -40,7 +40,7 @@ export function ManageHomeAppsDialog({
   open,
   onOpenChange,
   apps,
-  scopeKeyForApp,
+  identityKeyForApp,
   selectedIds,
   maxSlots,
   onToggle,
@@ -65,16 +65,16 @@ export function ManageHomeAppsDialog({
         ) : (
           <ul className="flex max-h-[320px] flex-col gap-2 overflow-y-auto pr-1">
             {apps.map(app => {
-              let scopeKey = ''
+              let identityKey = ''
               try {
-                scopeKey = scopeKeyForApp(app)
+                identityKey = identityKeyForApp(app)
               } catch {
                 return null
               }
-              const selected = selectedIds.has(scopeKey)
+              const selected = selectedIds.has(identityKey)
               const disabled = !selected && atCapacity
               return (
-                <li key={scopeKey}>
+                <li key={identityKey}>
                   <button
                     type="button"
                     role="checkbox"
@@ -90,7 +90,7 @@ export function ManageHomeAppsDialog({
                     data-testid="manage-home-apps-item"
                     data-app-id={app.id}
                     data-selected={selected ? 'true' : 'false'}
-                    onClick={() => { onToggle(app, scopeKey, !selected) }}
+                    onClick={() => { onToggle(app, identityKey, !selected) }}
                   >
                     <span
                       className={cn(

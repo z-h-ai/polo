@@ -276,6 +276,24 @@ function scopeForCatalogApp(
   }
 }
 
+/**
+ * Collision-free STABLE operation identity for ProductSpace install/uninstall
+ * single-flight: a JSON tuple over account, productSpace, catalogEntry, and
+ * artifact instance. Opaque IDs may contain any delimiter, so delimiter
+ * concatenation could merge two distinct identities; versionId is
+ * deliberately excluded — the single-flight slot belongs to the STABLE
+ * artifact instance, and runExclusive scopes it by operation kind.
+ */
+function productSpaceOperationIdentityKey(identity: ProductSpaceAppIdentity): string {
+  return JSON.stringify([
+    'product-space-op',
+    identity.accountId,
+    identity.productSpaceId,
+    identity.catalogEntryId,
+    identity.artifactInstanceId,
+  ])
+}
+
 function identityForProductSpaceApp(
   catalog: AppCatalogCacheEntry,
   app: CatalogApp,
@@ -1445,19 +1463,7 @@ export function useAppCatalog() {
   const installProductSpaceBundle = useCallback((app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)
     const identity = identityForProductSpaceApp(snapshot.catalog, app)
-    // Collision-free operation key: a JSON tuple over the full verified
-    // identity (account, space, entry, artifact instance). Opaque IDs may
-    // contain any delimiter, so delimiter concatenation could merge two
-    // distinct identities; the version is deliberately excluded — the
-    // single-flight slot belongs to the STABLE artifact instance, and
-    // runExclusive scopes it by operation kind.
-    const operationKey = JSON.stringify([
-      'product-space-op',
-      identity.accountId,
-      identity.productSpaceId,
-      identity.catalogEntryId,
-      identity.artifactInstanceId,
-    ])
+    const operationKey = productSpaceOperationIdentityKey(identity)
     return runExclusive(operationKey, 'install', async () => {
       if (state.accessMode !== 'online' || app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
@@ -1491,7 +1497,7 @@ export function useAppCatalog() {
   ) => {
     const snapshot = currentSnapshotForApp(app)
     const identity = identityForProductSpaceApp(snapshot.catalog, app)
-    const operationKey = `product-space:${identity.artifactInstanceId}:${identity.catalogEntryId}:${identity.versionId}`
+    const operationKey = productSpaceOperationIdentityKey(identity)
     return runExclusive(operationKey, 'uninstall', async () => {
       requireCurrent(snapshot)
       await window.electronAPI.localApps.uninstallProductSpaceBundle(

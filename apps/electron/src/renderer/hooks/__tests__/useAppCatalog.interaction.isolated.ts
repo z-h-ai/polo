@@ -1045,4 +1045,148 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
     await Promise.all([first, second])
     expect(installDispatched).toBe(1)
   })
+
+  it('never merges uninstall operations across colon-collision identities, cross-scope reuse, or versions', async () => {
+    const api = window.electronAPI as any
+    let uninstallDispatched = 0
+    const uninstallGates: Array<() => void> = []
+    uninstallProductSpaceBundle = mock((identity: any, _options: { preserveData: boolean }) => {
+      uninstallDispatched += 1
+      return new Promise<void>(resolve => {
+        uninstallGates.push(resolve)
+      })
+    })
+
+    let current = {
+      kind: 'app' as const,
+      catalogEntryId: 'c',
+      artifactInstanceId: 'a:b',
+      version: { versionId: 'v', version: '1.0.0' },
+      name: 'Collision A',
+      description: '',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio' }],
+      permissions: [],
+    }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'uninstall-key-revision',
+      productSpaceId: 'space-a',
+      accessMode: 'online' as const,
+      entries: [current],
+    })
+    api.productSpaceResolveLaunch = async () => ({
+      success: true as const,
+      launch: {
+        contractVersion: 1,
+        productSpaceId: 'space-a',
+        catalogEntryId: current.catalogEntryId,
+        resolvedAt: '2099-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:10:00.000Z',
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: current.artifactInstanceId,
+          versionId: current.version.versionId,
+          version: current.version.version,
+        },
+        payer: { kind: 'personal' as const, accountId: 'account-a' },
+        delivery: {
+          kind: 'web_url' as const,
+          url: 'https://app.example.test',
+          launchToken: 'launch-token-value',
+        },
+      },
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const appA = result.current.state.catalog!.apps[0]!
+
+    // Uninstall A (colon-joined key would be product-space:a:b:c:v) and hold
+    // the slot open.
+    const pendingA = result.current.uninstallProductSpaceBundle(appA, true)
+    await waitFor(() => expect(uninstallDispatched).toBe(1))
+
+    // Swap the catalog to the COLLIDING identity (artifact a, entry b:c —
+    // same delimiter-joined key) while A's uninstall is in flight: B must
+    // dispatch its OWN uninstall instead of riding A's promise.
+    current = {
+      ...current,
+      catalogEntryId: 'b:c',
+      artifactInstanceId: 'a',
+      name: 'Collision B',
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.catalogEntryId).toBe('b:c')
+    })
+    const appB = result.current.state.catalog!.apps[0]!
+    const pendingB = result.current.uninstallProductSpaceBundle(appB, true)
+    await waitFor(() => expect(uninstallDispatched).toBe(2))
+
+    // Release both gates: each identity completes its own uninstall.
+    uninstallGates.forEach(release => release())
+    await Promise.all([pendingA, pendingB])
+    expect(uninstallDispatched).toBe(2)
+  })
+
+  it('single-flights concurrent uninstalls of the same stable instance across version updates', async () => {
+    const api = window.electronAPI as any
+    let uninstallDispatched = 0
+    const uninstallGates: Array<() => void> = []
+    uninstallProductSpaceBundle = mock((identity: any, _options: { preserveData: boolean }) => {
+      uninstallDispatched += 1
+      return new Promise<void>(resolve => {
+        uninstallGates.push(resolve)
+      })
+    })
+
+    let version = { versionId: 'version-1', version: '1.0.0' }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'uninstall-version-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-sf',
+        artifactInstanceId: 'artifact-sf',
+        version,
+        name: 'Versioned App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio SF' }],
+        permissions: [],
+      }],
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const appV1 = result.current.state.catalog!.apps[0]!
+
+    // Two concurrent uninstalls of the same stable instance: the second must
+    // ride the in-flight slot (no bypass), even though a version update
+    // between them changes the version tuple.
+    const first = result.current.uninstallProductSpaceBundle(appV1, true)
+    await waitFor(() => expect(uninstallDispatched).toBe(1))
+
+    version = { versionId: 'version-2', version: '2.0.0' }
+    await result.current.sync(true)
+    const appV2 = result.current.state.catalog!.apps[0]!
+    const second = result.current.uninstallProductSpaceBundle(appV2, true)
+
+    uninstallGates.forEach(release => release())
+    await Promise.all([first, second])
+    // The single-flight slot belongs to the stable instance: exactly one IPC.
+    expect(uninstallDispatched).toBe(1)
+  })
 })

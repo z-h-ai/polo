@@ -422,7 +422,7 @@ export function HomePage() {
             errorCode={catalog.state.errorCode}
             offline={catalog.state.accessMode === 'offline'}
             restricted={catalog.state.accessMode === 'denied'}
-            scopeKeyForApp={uiKeyForApp}
+            identityKeyForApp={uiKeyForApp}
             getInstallState={catalog.getInstallState}
             onRefresh={() => { void catalog.sync(true) }}
             onOpen={(target) => { void openCatalogApp(target) }}
@@ -539,7 +539,7 @@ export function HomePage() {
         open={manageOpen}
         onOpenChange={setManageOpen}
         apps={availableApps}
-        scopeKeyForApp={uiKeyForApp}
+        identityKeyForApp={uiKeyForApp}
         selectedIds={selectedQuickIds}
         maxSlots={MAX_HOME_QUICK_ACCESS_APPS}
         onToggle={toggleQuickAccess}

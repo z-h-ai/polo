@@ -91,8 +91,12 @@ import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-
 interface ProductSpaceCatalogSyncScope {
   latestInvocation: number
   inFlight: number
-  /** Requests that passed the pre-check and are about to commit. */
-  pendingCommits: number
+  /**
+   * Invocations that passed the pre-check and are about to commit. The set
+   * is per-INVOCATION: an older request settling (even last) can never
+   * release a newer request's reservation.
+   */
+  pendingCommitInvocations: Set<number>
 }
 const productSpaceCatalogSyncScopes = new Map<string, ProductSpaceCatalogSyncScope>()
 let nextProductSpaceCatalogSyncInvocation = 0
@@ -101,7 +105,11 @@ function beginProductSpaceCatalogSync(scopeKey: string): number {
   const invocation = ++nextProductSpaceCatalogSyncInvocation
   let scope = productSpaceCatalogSyncScopes.get(scopeKey)
   if (!scope) {
-    scope = { latestInvocation: 0, inFlight: 0, pendingCommits: 0 }
+    scope = {
+      latestInvocation: 0,
+      inFlight: 0,
+      pendingCommitInvocations: new Set<number>(),
+    }
     productSpaceCatalogSyncScopes.set(scopeKey, scope)
   }
   scope.latestInvocation = invocation
@@ -114,10 +122,13 @@ function beginProductSpaceCatalogSync(scopeKey: string): number {
  * session-current commit zone: its final CAS must stay decidable even when
  * another (older) request settles last and drains the in-flight count.
  */
-function markProductSpaceCatalogCommitPending(scopeKey: string): void {
+function markProductSpaceCatalogCommitPending(
+  scopeKey: string,
+  invocation: number,
+): void {
   const scope = productSpaceCatalogSyncScopes.get(scopeKey)
   if (!scope) return
-  scope.pendingCommits += 1
+  scope.pendingCommitInvocations.add(invocation)
 }
 
 function isLatestProductSpaceCatalogSync(scopeKey: string, invocation: number): boolean {
@@ -134,7 +145,7 @@ function settleProductSpaceCatalogSync(scopeKey: string): void {
   const scope = productSpaceCatalogSyncScopes.get(scopeKey)
   if (!scope) return
   scope.inFlight = Math.max(0, scope.inFlight - 1)
-  if (scope.inFlight === 0 && scope.pendingCommits === 0) {
+  if (scope.inFlight === 0 && scope.pendingCommitInvocations.size === 0) {
     productSpaceCatalogSyncScopes.delete(scopeKey)
   }
 }
@@ -143,11 +154,19 @@ function settleProductSpaceCatalogSync(scopeKey: string): void {
  * Releases a consumed commit from the session-current zone: once the scope
  * is fully idle its entry is deleted.
  */
-function releaseProductSpaceCatalogCommit(scopeKey: string): void {
+/**
+ * Releases THIS invocation's own reservation. A request that never marked
+ * (list/Catalog failure, notModified, superseded) has nothing to release and
+ * can never consume a newer request's pending reservation.
+ */
+function releaseProductSpaceCatalogCommit(
+  scopeKey: string,
+  invocation: number,
+): void {
   const scope = productSpaceCatalogSyncScopes.get(scopeKey)
   if (!scope) return
-  scope.pendingCommits = Math.max(0, scope.pendingCommits - 1)
-  if (scope.inFlight === 0 && scope.pendingCommits === 0) {
+  scope.pendingCommitInvocations.delete(invocation)
+  if (scope.inFlight === 0 && scope.pendingCommitInvocations.size === 0) {
     productSpaceCatalogSyncScopes.delete(scopeKey)
   }
 }
@@ -1841,8 +1860,11 @@ export function registerAdminHandlers(
       }
       // The fence scope key is only knowable after authentication (it binds
       // the verified account), so the settle hook releases via this captured
-      // key once the callback has entered the authenticated scope.
+      // key once the callback has entered the authenticated scope. The
+      // reservation is owned by the marking invocation: only a request that
+      // actually marked may release.
       let syncScopeKey: string | null = null
+      let markedCommitInvocation: number | null = null
       return callOrganization(
         'getProductSpaceCatalog',
         async (client, accessToken, userId) => {
@@ -1904,8 +1926,11 @@ export function registerAdminHandlers(
             // to REQUEST_SUPERSEDED with zero authority writes. The pending
             // reservation is ALWAYS released by callOrganization's settle
             // contract afterwards — even when the session changed (commit
-            // skipped) or the authority write threw.
-            markProductSpaceCatalogCommitPending(catalogSyncKey)
+            // skipped) or the authority write threw. The reservation is
+            // owned by THIS invocation: an older unmarked request settling
+            // last can never release it.
+            markProductSpaceCatalogCommitPending(catalogSyncKey, syncInvocation)
+            markedCommitInvocation = syncInvocation
             return {
               __authorityCommit: {
                 scopeKey: catalogSyncKey,
@@ -1981,11 +2006,14 @@ export function registerAdminHandlers(
         // ALWAYS-SETTLE: release the pending commit reservation no matter
         // how the request concluded (committed, CAS-skipped by a session
         // change, or authority write failure) — the scope entry is recycled
-        // as soon as it is fully idle. The scope key was captured in the
-        // callback closure; an unauthenticated request never marked a
-        // reservation.
+        // as soon as it is fully idle. Only THIS request's own marked
+        // reservation is released; an unmarked failure (list/Catalog error,
+        // notModified, superseded) must never steal a newer request's
+        // pending reservation on the same scope.
         () => {
-          if (syncScopeKey !== null) releaseProductSpaceCatalogCommit(syncScopeKey)
+          if (syncScopeKey !== null && markedCommitInvocation !== null) {
+            releaseProductSpaceCatalogCommit(syncScopeKey, markedCommitInvocation)
+          }
         },
       )
     })

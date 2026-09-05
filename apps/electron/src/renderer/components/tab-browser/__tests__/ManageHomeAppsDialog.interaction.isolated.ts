@@ -52,7 +52,7 @@ describe('ManageHomeAppsDialog', () => {
         open: true,
         onOpenChange: () => {},
         apps,
-        scopeKeyForApp,
+        identityKeyForApp: scopeKeyForApp,
         selectedIds,
         maxSlots,
         onToggle,

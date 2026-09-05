@@ -1155,6 +1155,66 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     }
   })
 
+  it('never lets an older unmarked failing request steal a newer pending reservation (cross-request ownership)', async () => {
+    // R1 gated at fetch; R2 (same scope, newer invocation) completes its
+    // fetch, passes the pre-check, MARKS a pending reservation and enters
+    // the session-current commit zone. R1's fetch then resolves and FAILS
+    // its pre-check (superseded, never marks) — R1 settles LAST. The
+    // always-settle release must only release R1's own (non-existent)
+    // reservation: R2's final CAS must still pass and write the newest
+    // authority.
+    const gated = [
+      { release: undefined as undefined | ((value: any) => void) },
+      { release: undefined as undefined | ((value: any) => void) },
+    ]
+    let catalogCalls = 0
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      const index = catalogCalls++
+      return new Promise(resolve => {
+        gated[index].release = resolve
+      })
+    }
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => gated[0].release)
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => gated[1].release)
+
+    // R2 (newest) commits first: pre-check passes, marks pending, enters
+    // the session-current commit zone.
+    gated[1].release!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-2',
+      entries: [authorityTestEntry('rev-2')],
+    })
+    const r2 = await pendingR2 as any
+    expect(r2.success).toBe(true)
+    expect(r2.catalogRevision).toBe('rev-2')
+    expect(r2.withdrawnEntries).toEqual([])
+
+    // R1 (older) now resolves and fails its pre-check without marking.
+    gated[0].release!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+
+    // R2's commit was NOT downgraded by R1's late settle: the newest
+    // authority stands and the fully idle scope was recycled.
+    expect(authorityRecordCalls).toEqual([{
+      accountId: 'user-1',
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-2',
+      entryCount: 1,
+    }])
+    expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+  })
+
   it('never writes the authority when the session changes during the fetch', async () => {
     let release!: (value: any) => void
     adminClientBehavior.getProductSpaceCatalog = async () => {

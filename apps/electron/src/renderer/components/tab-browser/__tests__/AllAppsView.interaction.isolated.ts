@@ -67,7 +67,7 @@ function renderView(apps: CatalogApp[], options: {
       errorCode: options.errorCode ?? null,
       offline: options.offline ?? false,
       restricted: options.restricted ?? false,
-      scopeKeyForApp,
+      identityKeyForApp: scopeKeyForApp,
       getInstallState: (target: CatalogApp) => target.id === options.installedId
         || options.retainedInstalledIds?.includes(target.id) ? {
         app: {
@@ -390,7 +390,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         offline: false,
         restricted: false,
         getInstallState: () => undefined,
-        scopeKeyForApp,
+        identityKeyForApp: scopeKeyForApp,
         onRefresh: () => {},
         onOpen: () => {},
         onUninstall: () => {},

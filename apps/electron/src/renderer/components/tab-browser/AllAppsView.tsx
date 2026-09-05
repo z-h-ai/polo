@@ -47,7 +47,7 @@ interface AllAppsViewProps {
   /** Authorization was lost for the current snapshot (denied view). */
   restricted: boolean
   getInstallState: (app: CatalogApp) => ProductSpaceAppInstallState | undefined
-  scopeKeyForApp: (app: CatalogApp) => string
+  identityKeyForApp: (app: CatalogApp) => string
   onRefresh: () => void
   onOpen: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
@@ -217,7 +217,7 @@ function AppDetail({
 
 function AllAppsRow({
   app,
-  scopeKey,
+  identityKey,
   selected,
   compact,
   installState,
@@ -228,13 +228,13 @@ function AllAppsRow({
   onUninstall,
 }: {
   app: CatalogApp
-  scopeKey: string
+  identityKey: string
   selected: boolean
   compact: boolean
   installState?: ProductSpaceAppInstallState
   offline: boolean
   spaceKind: 'personal' | 'enterprise' | null
-  onSelect: (scopeKey: string) => void
+  onSelect: (identityKey: string) => void
   onOpen: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
 }) {
@@ -251,13 +251,13 @@ function AllAppsRow({
       )}
       data-testid="all-apps-row"
       data-app-id={app.id}
-      data-scope-key={scopeKey}
+      data-identity-key={identityKey}
     >
       <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onSelect(scopeKey)}
+          onClick={() => onSelect(identityKey)}
           aria-expanded={compact ? selected : undefined}
         >
           <AppArtwork app={app} />
@@ -309,7 +309,7 @@ export function AllAppsView({
   offline,
   restricted,
   getInstallState,
-  scopeKeyForApp,
+  identityKeyForApp,
   onRefresh,
   onOpen,
   onUninstall,
@@ -317,7 +317,7 @@ export function AllAppsView({
 }: AllAppsViewProps) {
   const { t } = useTranslation()
   const compact = useCompactViewport()
-  const [selectedScopeKey, setSelectedScopeKey] = useState<string | null>(null)
+  const [selectedIdentityKey, setSelectedIdentityKey] = useState<string | null>(null)
   const [pageLimit, setPageLimit] = useState(ALL_APPS_PAGE_SIZE)
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -330,10 +330,10 @@ export function AllAppsView({
 
   useEffect(() => setPageLimit(ALL_APPS_PAGE_SIZE), [filteredApps])
   useEffect(() => {
-    if (selectedScopeKey && !filteredApps.some(app => {
-      try { return scopeKeyForApp(app) === selectedScopeKey } catch { return false }
-    })) setSelectedScopeKey(null)
-  }, [filteredApps, scopeKeyForApp, selectedScopeKey])
+    if (selectedIdentityKey && !filteredApps.some(app => {
+      try { return identityKeyForApp(app) === selectedIdentityKey } catch { return false }
+    })) setSelectedIdentityKey(null)
+  }, [filteredApps, identityKeyForApp, selectedIdentityKey])
 
   const groups = useMemo(
     () => groupAllAppsForDisplay(filteredApps, spaceKind),
@@ -349,9 +349,9 @@ export function AllAppsView({
     })
   }, [groups, pageLimit])
   const displayedCount = displayedGroups.reduce((sum, group) => sum + group.apps.length, 0)
-  const selectedApp = selectedScopeKey
+  const selectedApp = selectedIdentityKey
     ? filteredApps.find(app => {
-        try { return scopeKeyForApp(app) === selectedScopeKey } catch { return false }
+        try { return identityKeyForApp(app) === selectedIdentityKey } catch { return false }
       }) ?? null
     : null
 
@@ -477,18 +477,18 @@ export function AllAppsView({
                 {group.label && <h3 className="mb-2 text-xs font-semibold text-muted-foreground">{group.label}</h3>}
                 <div className="space-y-2">
                   {group.apps.map(app => {
-                    const scopeKey = scopeKeyForApp(app)
+                    const identityKey = identityKeyForApp(app)
                     return (
                       <AllAppsRow
-                        key={scopeKey}
+                        key={identityKey}
                         app={app}
-                        scopeKey={scopeKey}
-                        selected={selectedScopeKey === scopeKey}
+                        identityKey={identityKey}
+                        selected={selectedIdentityKey === identityKey}
                         compact={compact}
                         installState={getInstallState(app)}
                         offline={offline}
                         spaceKind={spaceKind}
-                        onSelect={setSelectedScopeKey}
+                        onSelect={setSelectedIdentityKey}
                         onOpen={onOpen}
                         onUninstall={onUninstall}
                       />
