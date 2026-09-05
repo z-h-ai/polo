@@ -114,6 +114,7 @@ const {
   within,
 } = await import('@testing-library/react')
 const { formatBytes, HomePage, selectAllAppsForDisplay } = await import('../HomePage')
+const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
   catalogStateMessage,
   homeAppOperationErrorText,
@@ -988,11 +989,6 @@ describe('HomePage quick access (POO-43)', () => {
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     viewRerender()
     await new Promise(resolve => setTimeout(resolve, 50))
-    console.log('[r14-dbg] body quick text:', document.body.textContent?.includes('Delayed App A'))
-    console.log('[r14-dbg] entries:', JSON.stringify(quickAccessByContext.get(contextKey)))
-    expect(document.body.textContent?.includes('Delayed App A')).toBe(true)
-    console.log('[r14-dbg] quick entries:', JSON.stringify(quickAccessByContext.get(contextKey)))
-    console.log('[r14-dbg] state.catalog apps:', appCatalogHook.state.catalog?.apps?.length, 'loading:', appCatalogHook.state.loading)
     expect(setHomeQuickAccess).not.toHaveBeenCalled()
     expect(quickAccessByContext.get(contextKey)).toEqual([
       { id: persistedId, addedAt: 1 },
@@ -1007,6 +1003,67 @@ describe('HomePage quick access (POO-43)', () => {
     })
     expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [])
     expect(quickAccessByContext.get(contextKey)).toEqual([])
+  })
+
+  it('renders denied rows with retained identity and no install/open capability (observation 391939f5…)', async () => {
+    // Enterprise A loads successfully (authorized snapshot with identity)…
+    const appA: CatalogApp = {
+      id: 'denied-app-a',
+      catalogEntryId: 'denied-entry-a',
+      artifactInstanceId: 'denied-artifact-a',
+      organizationId: 'organization-a',
+      name: 'Denied App A',
+      description: '',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://a.example.com',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    expect(screen.getByText('Denied App A')).toBeTruthy()
+
+    // …then a 403 denies the scope: the committed projection strips every
+    // delivery capability but RETAINS the stable UI identity, so the frozen
+    // restricted rows keep rendering (no crash) while exposing no
+    // open/install capability.
+    const deniedSnapshot = markAppCatalogAccessDenied(enterpriseCatalogWith([appA]))
+    expect(deniedSnapshot.apps[0]).toMatchObject({
+      catalogEntryId: 'denied-entry-a',
+      artifactInstanceId: 'denied-artifact-a',
+      availability: 'unavailable',
+    })
+    // Delivery capabilities stay stripped.
+    expect(deniedSnapshot.apps[0]).not.toHaveProperty('remoteUrl')
+    expect(deniedSnapshot.apps[0]).not.toHaveProperty('currentRelease')
+
+    appCatalogHook = {
+      ...hookWithCatalog(deniedSnapshot as unknown as AppCatalogCacheEntry),
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog: deniedSnapshot as unknown as AppCatalogCacheEntry,
+        accessMode: 'denied' as const,
+        errorCode: 'FORBIDDEN',
+      },
+    }
+    viewRerender()
+
+    // The row keeps rendering with its frozen restricted state...
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-restricted-banner')).toBeTruthy()
+    })
+    expect(screen.getByText('Denied App A')).toBeTruthy()
+    // ...and the row can be neither opened nor installed.
+    const deniedAction = screen.getByTestId('all-apps-action-denied-app-a') as HTMLButtonElement
+    expect(deniedAction.disabled).toBe(true)
+    fireEvent.click(deniedAction)
+    expect(openApp).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {

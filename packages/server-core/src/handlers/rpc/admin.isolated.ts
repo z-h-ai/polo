@@ -817,8 +817,6 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
 
     const r2 = await pendingR2 as any
     const r1 = await pendingR1 as any
-    console.log('[fence-test] r1', JSON.stringify(r1))
-    console.log('[fence-test] r2', JSON.stringify(r2))
     expect(r2.success).toBe(true)
     expect(r2.entries).toHaveLength(1)
     expect(r2).not.toHaveProperty('__authorityCommit')

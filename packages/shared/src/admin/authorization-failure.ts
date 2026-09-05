@@ -69,13 +69,20 @@ export function markAppCatalogAccessDenied(
   const projectApp = (app: CatalogApp): DeniedCatalogApp => ({
     id: app.id,
     organizationId: app.organizationId,
+    // Non-secret stable UI identity retained so the frozen restricted view
+    // can key/address live vs withdrawn rows. Every delivery capability
+    // (remoteUrl, currentRelease, permissions, checksums, launch data)
+    // remains stripped.
+    ...(app.catalogEntryId ? { catalogEntryId: app.catalogEntryId } : {}),
+    ...(app.artifactInstanceId ? { artifactInstanceId: app.artifactInstanceId } : {}),
+    ...(app.sourceNames ? { sourceNames: app.sourceNames } : {}),
     name: app.name,
     description: app.description,
     ...(app.iconUrl ? { iconUrl: app.iconUrl } : {}),
     ...(app.creatorName ? { creatorName: app.creatorName } : {}),
     deliveryMode: app.deliveryMode,
     sortOrder: app.sortOrder,
-    availability: 'unavailable',
+    availability: 'unavailable' as const,
   })
   return DeniedAppCatalogSnapshotSchema.parse({
     accountId: catalog.accountId,

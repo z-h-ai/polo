@@ -24,7 +24,6 @@ import {
   type ProductSpaceAppIdentity,
   type ProductSpaceAppInstallState,
 } from '@polo-ai/shared/protocol'
-import { createLocalAppScopeKey as createIdentityScopeKey } from '@polo-ai/shared/protocol'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
   isProductSpaceContractUnsupported,
@@ -277,14 +276,6 @@ function scopeForCatalogApp(
 }
 
 /**
- * Collision-free STABLE operation identity for ProductSpace install/uninstall
- * single-flight: a JSON tuple over account, productSpace, catalogEntry, and
- * artifact instance. Opaque IDs may contain any delimiter, so delimiter
- * concatenation could merge two distinct identities; versionId is
- * deliberately excluded — the single-flight slot belongs to the STABLE
- * artifact instance, and runExclusive scopes it by operation kind.
- */
-/**
  * Collision-free STABLE Catalog identity for install-state reconciliation
  * and lookups: account + productSpace + catalogEntry + artifact instance.
  * Deliberately different from the runtime scope (single catalogAppId slot):
@@ -306,6 +297,14 @@ function productSpaceUiIdentityKey(
   ])
 }
 
+/**
+ * Collision-free STABLE operation identity for ProductSpace install/uninstall
+ * single-flight: a JSON tuple over account, productSpace, catalogEntry, and
+ * artifact instance. Opaque IDs may contain any delimiter, so delimiter
+ * concatenation could merge two distinct identities; versionId is
+ * deliberately excluded — the single-flight slot belongs to the STABLE
+ * artifact instance, and runExclusive scopes it by operation kind.
+ */
 function productSpaceOperationIdentityKey(identity: ProductSpaceAppIdentity): string {
   return JSON.stringify([
     'product-space-op',

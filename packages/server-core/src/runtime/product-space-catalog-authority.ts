@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { z } from 'zod'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
+import {
+  CatalogSourceSchema,
+  CatalogEntryIdSchema,
+  ArtifactInstanceIdSchema,
+  ArtifactVersionIdSchema,
+} from '@polo-ai/shared/product-spaces'
 
 /**
  * ProductSpace Catalog authority (POO-43).
@@ -25,6 +32,41 @@ import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 const AUTHORITY_SCHEMA_VERSION = 1
 const MAX_AUTHORITY_ENTRIES = 10_000
 const MAX_AUTHORITY_TOMBSTONES = 10_000
+
+/**
+ * Credential-stripped authority entry schema, composed from the SHARED
+ * ProductSpace Catalog contracts (branded IDs, the source discriminated
+ * union, the bounded HTTP(S) URL, non-blank lengths): every field the frozen
+ * restricted view needs, with checksums and all delivery capability absent.
+ * `availability` additionally accepts 'withdrawn' (authority-carried
+ * tombstones); `withdrawnAt` marks when the tombstone was recorded.
+ */
+const AuthorityEntryShapeSchema = z.object({
+  kind: z.literal('app'),
+  catalogEntryId: CatalogEntryIdSchema,
+  artifactInstanceId: ArtifactInstanceIdSchema,
+  versionId: ArtifactVersionIdSchema,
+  version: z.string().min(1).max(512),
+  name: z.string().min(1).max(256),
+  description: z.string().max(4_096),
+  iconUrl: z.string().url().max(16_384).optional(),
+  availability: z.enum(['available', 'unavailable', 'blocked', 'withdrawn']),
+  unavailableReason: z
+    .enum(['authorization_ended', 'space_restricted', 'version_unavailable', 'version_blocked'])
+    .optional(),
+  sources: CatalogSourceSchema.array().min(1).max(1_000),
+  permissions: z.array(z.string().min(1).max(512)).max(1_000),
+  withdrawnAt: z.number().int().min(0).optional(),
+}).strict()
+
+const AuthorityEntrySchema = AuthorityEntryShapeSchema.refine(
+  entry => entry.availability !== 'withdrawn' || entry.withdrawnAt !== undefined,
+  { message: 'A withdrawn authority entry must record withdrawnAt' },
+)
+
+function isValidAuthorityEntry(entry: unknown): entry is ProductSpaceCatalogAuthorityEntry {
+  return AuthorityEntrySchema.safeParse(entry).success
+}
 
 export interface ProductSpaceCatalogAuthorityEntry {
   kind: 'app'
@@ -75,100 +117,6 @@ function emptyFile(): ProductSpaceCatalogAuthorityFile {
   return { schemaVersion: AUTHORITY_SCHEMA_VERSION, records: {} }
 }
 
-const AUTHORITY_AVAILABILITY = new Set(['available', 'unavailable', 'blocked', 'withdrawn'])
-const AUTHORITY_UNAVAILABLE_REASONS = new Set([
-  'authorization_ended', 'space_restricted', 'version_unavailable', 'version_blocked',
-])
-const MAX_AUTHORITY_ENTRY_SOURCES = 1_000
-const MAX_AUTHORITY_ENTRY_PERMISSIONS = 1_000
-// Shared opaque-ID / nonBlankString contracts (ids.ts + schemas.ts).
-const MAX_AUTHORITY_ID_LENGTH = 512
-const MAX_AUTHORITY_NAME_LENGTH = 256
-const MAX_AUTHORITY_DESCRIPTION_LENGTH = 4_096
-const MAX_AUTHORITY_PERMISSION_LENGTH = 512
-const MAX_AUTHORITY_SOURCE_NAME_LENGTH = 256
-const MAX_AUTHORITY_CIRCLE_ID_LENGTH = 512
-
-function isAuthorityNonBlankString(value: unknown, maxLength: number): value is string {
-  return typeof value === 'string'
-    && value.length > 0
-    && value.length <= maxLength
-    && value.trim().length > 0
-}
-
-/**
- * Strict mirror of the shared Catalog source discriminated union
- * (polo | creator_circle | enterprise_import): required fields present,
- * forbidden fields absent, per-kind name/circleId contracts enforced.
- */
-function isValidAuthoritySource(source: unknown): boolean {
-  if (!source || typeof source !== 'object') return false
-  const candidate = source as Record<string, unknown>
-  const extraKeys = Object.keys(candidate).filter(key => !['kind', 'name', 'circleId'].includes(key))
-  if (extraKeys.length > 0) return false
-  if (!isAuthorityNonBlankString(candidate.kind, MAX_AUTHORITY_CIRCLE_ID_LENGTH)) return false
-  if (!isAuthorityNonBlankString(candidate.name, MAX_AUTHORITY_SOURCE_NAME_LENGTH)) return false
-  switch (candidate.kind) {
-    case 'polo':
-      // Polo sources are branded: the name is fixed and no circleId exists.
-      return candidate.name === 'Polo' && candidate.circleId === undefined
-    case 'creator_circle':
-      // Circle sources REQUIRE a circleId.
-      return isAuthorityNonBlankString(candidate.circleId, MAX_AUTHORITY_CIRCLE_ID_LENGTH)
-    case 'enterprise_import':
-      // Enterprise imports carry no circleId.
-      return candidate.circleId === undefined
-    default:
-      return false
-  }
-}
-
-/**
- * FULL authority DTO validation (mirror of the ProductSpace Catalog entry
- * contract, post-credential-strip): every field's type, enum, discriminant,
- * blank/length contract, and array membership is checked — a
- * syntactically-valid JSON entry with a malformed field is never treated as
- * a trusted record.
- */
-function isValidAuthorityEntry(entry: unknown): entry is ProductSpaceCatalogAuthorityEntry {
-  if (!entry || typeof entry !== 'object') return false
-  const candidate = entry as Record<string, unknown>
-  if (candidate.kind !== 'app') return false
-  if (!isAuthorityNonBlankString(candidate.catalogEntryId, MAX_AUTHORITY_ID_LENGTH)) return false
-  if (!isAuthorityNonBlankString(candidate.artifactInstanceId, MAX_AUTHORITY_ID_LENGTH)) return false
-  if (!isAuthorityNonBlankString(candidate.versionId, MAX_AUTHORITY_ID_LENGTH)) return false
-  if (!isAuthorityNonBlankString(candidate.version, MAX_AUTHORITY_ID_LENGTH)) return false
-  if (!isAuthorityNonBlankString(candidate.name, MAX_AUTHORITY_NAME_LENGTH)) return false
-  if (
-    typeof candidate.description !== 'string'
-    || candidate.description.length > MAX_AUTHORITY_DESCRIPTION_LENGTH
-  ) return false
-  if (typeof candidate.availability !== 'string' || !AUTHORITY_AVAILABILITY.has(candidate.availability)) return false
-  if (
-    candidate.unavailableReason !== undefined
-    && (typeof candidate.unavailableReason !== 'string'
-      || !AUTHORITY_UNAVAILABLE_REASONS.has(candidate.unavailableReason))
-  ) return false
-  if (candidate.iconUrl !== undefined && typeof candidate.iconUrl !== 'string') return false
-  if (!Array.isArray(candidate.sources) || candidate.sources.length === 0) return false
-  if (candidate.sources.length > MAX_AUTHORITY_ENTRY_SOURCES) return false
-  if (!candidate.sources.every(isValidAuthoritySource)) return false
-  if (
-    !Array.isArray(candidate.permissions)
-    || candidate.permissions.length > MAX_AUTHORITY_ENTRY_PERMISSIONS
-    || !candidate.permissions.every(permission => isAuthorityNonBlankString(permission, MAX_AUTHORITY_PERMISSION_LENGTH))
-  ) return false
-  if (candidate.withdrawnAt !== undefined && typeof candidate.withdrawnAt !== 'number') return false
-  return true
-}
-
-/**
- * Per-record validation on load: a syntactically-valid but malformed record
- * (missing arrays, malformed entries) is DROPPED — withdrawn management for
- * that scope fails closed, and the next verified Catalog fetch rebuilds the
- * scope from scratch (self-healing) instead of crashing tuple reads or
- * carry-forward.
- */
 function sanitizeAuthorityRecord(
   record: unknown,
 ): ProductSpaceCatalogAuthorityRecord | null {

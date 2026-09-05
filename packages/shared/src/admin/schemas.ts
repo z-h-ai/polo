@@ -266,6 +266,11 @@ export const AdminPlatformReleaseCreatedResponseSchema = z.object({
 export const DeniedCatalogAppSchema = z.object({
   id: entityId,
   organizationId: entityId,
+  // Non-secret stable UI identity retained for the frozen restricted view.
+  catalogEntryId: entityId.optional(),
+  artifactInstanceId: entityId.optional(),
+  // Source display metadata (names only, no delivery capability).
+  sourceNames: z.array(nonBlankString(256)).max(1_000).optional(),
   name: nonBlankString(256),
   description: z.string().max(4_096),
   iconUrl: httpUrl.optional(),

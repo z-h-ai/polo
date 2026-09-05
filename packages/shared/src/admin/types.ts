@@ -297,6 +297,12 @@ export interface DeniedCatalogApp extends Pick<
   | 'creatorName'
   | 'deliveryMode'
   | 'sortOrder'
+  // Non-secret stable UI identity: retained so the frozen restricted view
+  // can key/address rows (live vs withdrawn) without exposing any delivery
+  // capability.
+  | 'catalogEntryId'
+  | 'artifactInstanceId'
+  | 'sourceNames'
 > {
   availability: 'unavailable';
 }

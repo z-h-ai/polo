@@ -335,13 +335,66 @@ function productSpaceAppIdentityKey(app: ProductSpaceAppIdentity): string {
   ])
 }
 
-function validateWithdrawnProductSpaceAppBatch(apps: ProductSpaceAppIdentity[]): void {
+/**
+ * Shared shape/scope validation for EVERY ProductSpace App identity batch:
+ * bounded length, syntactic identity validation, one account + one
+ * ProductSpace per batch, and duplicate-identity rejection (full identity
+ * tuple). Authorization differs per channel and stays with the callers:
+ * fresh-Catalog tuple validation for the authoritative channel, persisted
+ * authority tuples for the restricted withdrawn channel.
+ */
+function parseProductSpaceAppIdentityBatch(
+  rawApps: unknown,
+  errorPrefix: string,
+): ProductSpaceAppIdentity[] {
+  if (
+    !Array.isArray(rawApps)
+    || rawApps.length === 0
+    || rawApps.length > MAX_CATALOG_STATUS_SCOPES
+  ) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      `${errorPrefix}: between 1 and ${MAX_CATALOG_STATUS_SCOPES} ProductSpace App identities are required`,
+    )
+  }
+  const apps = rawApps.map(validateProductSpaceAppIdentity)
+  const first = apps[0]!
+  if (apps.some(app => (
+    app.accountId !== first.accountId
+    || app.productSpaceId !== first.productSpaceId
+  ))) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      `${errorPrefix}: a batch must target one account and ProductSpace`,
+    )
+  }
+  const seenIdentityKeys = new Set<string>()
+  for (const app of apps) {
+    const identityKey = productSpaceAppIdentityKey(app)
+    if (seenIdentityKeys.has(identityKey)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        `${errorPrefix}: duplicate ProductSpace App identities are not allowed`,
+      )
+    }
+    seenIdentityKeys.add(identityKey)
+  }
+  return apps
+}
+
+/**
+ * RESTRICTED withdrawn-management gate: every identity's FULL tuple
+ * (catalogEntryId + artifactInstanceId + versionId + version) must come from
+ * the Main-owned persisted Catalog authority. A renderer cannot declare an
+ * identity withdrawn — fabricated catalog/version tuples or unknown artifact
+ * instances are rejected before any registry read.
+ */
+function assertWithdrawnProductSpaceAppAuthority(apps: ProductSpaceAppIdentity[]): void {
   const first = apps[0]!
   const authorityTuples = loadProductSpaceCatalogAuthorityTupleSet(
     first.accountId,
     first.productSpaceId,
   )
-  const seenIdentityKeys = new Set<string>()
   for (const app of apps) {
     const tupleKey = productSpaceCatalogAuthorityTupleKey(
       app.catalogEntryId,
@@ -355,14 +408,6 @@ function validateWithdrawnProductSpaceAppBatch(apps: ProductSpaceAppIdentity[]):
         'Withdrawn ProductSpace App identity is not in the trusted Catalog authority',
       )
     }
-    const identityKey = productSpaceAppIdentityKey(app)
-    if (seenIdentityKeys.has(identityKey)) {
-      throw new LocalAppRuntimeError(
-        'INVALID_REQUEST',
-        'Duplicate withdrawn ProductSpace App identities are not allowed',
-      )
-    }
-    seenIdentityKeys.add(identityKey)
   }
 }
 
@@ -444,23 +489,11 @@ async function loadAuthoritativeProductSpaceApps(
   context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
   catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
 }> {
-  if (!Array.isArray(rawApps) || rawApps.length === 0 || rawApps.length > MAX_CATALOG_STATUS_SCOPES) {
-    throw new LocalAppRuntimeError(
-      'INVALID_REQUEST',
-      `Between 1 and ${MAX_CATALOG_STATUS_SCOPES} ProductSpace App identities are required`,
-    )
-  }
-  const apps = rawApps.map(validateProductSpaceAppIdentity)
+  const apps = parseProductSpaceAppIdentityBatch(
+    rawApps,
+    'ProductSpace App identities',
+  )
   const first = apps[0]!
-  if (apps.some(app => (
-    app.accountId !== first.accountId
-    || app.productSpaceId !== first.productSpaceId
-  ))) {
-    throw new LocalAppRuntimeError(
-      'INVALID_REQUEST',
-      'A ProductSpace App batch must target one account and ProductSpace',
-    )
-  }
   const { accessToken } = await assertProductSpaceAccountCurrent(first)
   const adminUrl = getAdminUrl()
   if (!adminUrl) {
@@ -796,27 +829,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   server.handle(
     RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
     async (_ctx, rawApps: unknown): Promise<ProductSpaceAppInstallState[]> => {
-      if (
-        !Array.isArray(rawApps)
-        || rawApps.length === 0
-        || rawApps.length > MAX_CATALOG_STATUS_SCOPES
-      ) {
-        throw new LocalAppRuntimeError(
-          'INVALID_REQUEST',
-          `Between 1 and ${MAX_CATALOG_STATUS_SCOPES} withdrawn ProductSpace App identities are required`,
-        )
-      }
-      const apps = rawApps.map(validateProductSpaceAppIdentity)
+      const apps = parseProductSpaceAppIdentityBatch(
+        rawApps,
+        'Withdrawn ProductSpace App identities',
+      )
       const first = apps[0]!
-      if (apps.some(app => (
-        app.accountId !== first.accountId
-        || app.productSpaceId !== first.productSpaceId
-      ))) {
-        throw new LocalAppRuntimeError(
-          'INVALID_REQUEST',
-          'A withdrawn ProductSpace App batch must target one account and ProductSpace',
-        )
-      }
       // RESTRICTED withdrawn-management gate: every identity's FULL tuple
       // (catalogEntryId + artifactInstanceId + versionId + version) must
       // come from the Main-owned persisted Catalog authority. A renderer
@@ -825,7 +842,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // registry read, so arbitrary local Apps can be neither probed nor
       // targeted. The fresh Catalog stays the only authority for
       // install/start/open.
-      validateWithdrawnProductSpaceAppBatch(apps)
+      assertWithdrawnProductSpaceAppAuthority(apps)
       await assertProductSpaceAccountCurrent(first)
       const scopes = apps.map(productSpaceBundleScope)
       const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
@@ -916,7 +933,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // install/start/open stay behind the fresh-Catalog availability
       // checks.
       const app = validateProductSpaceAppIdentity(rawApp)
-      validateWithdrawnProductSpaceAppBatch([app])
+      assertWithdrawnProductSpaceAppAuthority([app])
       await assertProductSpaceAccountCurrent(app)
       const scope = productSpaceBundleScope(app)
       await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
