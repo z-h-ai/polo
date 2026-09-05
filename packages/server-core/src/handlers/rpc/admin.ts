@@ -72,6 +72,10 @@ import {
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
+  CatalogEntryIdSchema,
+  ProductSpaceIdSchema,
+} from '@polo-ai/shared/product-spaces'
+import {
   beginAccountTransition,
   settleAccountTransition,
   setSyncTrustedProductSpaceAccountId,
@@ -79,7 +83,14 @@ import {
   setTrustedProductSpaceListFetcher,
   type TrustedProductSpaceListResult,
 } from './trusted-product-space-account'
-import { revokeRuntimeProductSpaceFence } from '../../runtime/product-space-executions'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
+  isSwitchInProgress,
+  revokeRuntimeProductSpaceFence,
+} from '../../runtime/product-space-executions'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -100,6 +111,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
   RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
   RPC_CHANNELS.productSpace.CATALOG,
+  RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -1749,6 +1761,79 @@ export function registerAdminHandlers(
             catalogRevision: result.catalogRevision,
             entries: result.entries,
           }
+        },
+      )
+    },
+  )
+
+  // Direct-open preparation for POO-47. Main derives the host tuple and
+  // resolves against a fresh server-authoritative Catalog. The renderer can
+  // name only an entry in the currently committed ProductSpace; old ids,
+  // cross-space ids, offline state and a concurrent switch all fail closed.
+  server.handle(
+    RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
+    async (_ctx, rawProductSpaceId: unknown, rawCatalogEntryId: unknown) => {
+      const productSpaceId = ProductSpaceIdSchema.safeParse(rawProductSpaceId)
+      const catalogEntryId = CatalogEntryIdSchema.safeParse(rawCatalogEntryId)
+      if (!productSpaceId.success || !catalogEntryId.success) {
+        return {
+          success: false as const,
+          errorCode: 'VALIDATION_ERROR',
+          message: 'Launch request is invalid',
+        }
+      }
+      return callOrganization(
+        'resolveProductSpaceLaunch',
+        async (client, accessToken, userId) => {
+          const requireCurrentLaunchScope = () => {
+            if (
+              getRuntimeActiveProductSpace() !== productSpaceId.data
+              || !isRuntimeFenceBoundToAccount(userId)
+              || isRuntimeOfflineReadOnly()
+              || isRuntimeProductSpaceRestricted(productSpaceId.data)
+              || isSwitchInProgress()
+            ) {
+              throw new AdminError(
+                'Launch is not allowed outside the current active ProductSpace',
+                'FORBIDDEN',
+              )
+            }
+          }
+          requireCurrentLaunchScope()
+
+          const platform = process.platform
+          const arch = process.arch
+          if (
+            (platform !== 'darwin' && platform !== 'win32' && platform !== 'linux')
+            || (arch !== 'arm64' && arch !== 'x64')
+          ) {
+            throw new AdminError('This host cannot resolve App launches', 'VALIDATION_ERROR')
+          }
+
+          const list = await client.listProductSpaces(accessToken)
+          const context = list.productSpaces.find(
+            space => space.id === productSpaceId.data,
+          )
+          if (!context || context.accessMode !== 'active') {
+            throw new AdminError(
+              'The requested ProductSpace is not available for launch',
+              'FORBIDDEN',
+            )
+          }
+          const catalog = await client.getProductSpaceCatalog(accessToken, context)
+          if ('notModified' in catalog) {
+            throw new AdminError('Fresh ProductSpace Catalog is required for launch', 'SERVER_ERROR')
+          }
+          requireCurrentLaunchScope()
+          const launch = await client.resolveProductSpaceLaunch(
+            accessToken,
+            context,
+            catalog,
+            catalogEntryId.data,
+            { platform, arch },
+          )
+          requireCurrentLaunchScope()
+          return { launch }
         },
       )
     },

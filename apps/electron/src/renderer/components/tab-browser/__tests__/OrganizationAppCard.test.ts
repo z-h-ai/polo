@@ -81,7 +81,7 @@ describe('OrganizationAppCard invalid version state', () => {
     }
 
     expect(primaryActionFor(app, status, true, false)).toBe('update')
-    expect(primaryActionFor(app, status, true, true)).toBe('open')
+    expect(primaryActionFor(app, status, true, true)).toBe('unavailable')
     expect(statusText(translate, app, status, true))
       .toBe('homeApps.status.updateAvailable')
   })
@@ -95,7 +95,7 @@ describe('OrganizationAppCard invalid version state', () => {
     }
 
     expect(primaryActionFor(app, status, false, false)).toBe('open')
-    expect(primaryActionFor(app, status, false, true)).toBe('open')
+    expect(primaryActionFor(app, status, false, true)).toBe('unavailable')
   })
 
   it('disables only a fresh install when its Release is incompatible', () => {

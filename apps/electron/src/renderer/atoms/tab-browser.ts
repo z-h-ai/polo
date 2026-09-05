@@ -54,6 +54,7 @@ export const openAppTabAtom = atom(
               title: app.name,
               favicon: app.iconUrl ?? tab.favicon,
               url: app.url,
+              launchContext: app.launchContext,
             }
           : tab
       )))
@@ -69,6 +70,7 @@ export const openAppTabAtom = atom(
       favicon: app.iconUrl,
       url: app.url,
       isLoading: false,
+      launchContext: app.launchContext,
     }
     set(openTabsAtom, [...get(openTabsAtom), tab])
     set(activeTabIdAtom, tab.id)

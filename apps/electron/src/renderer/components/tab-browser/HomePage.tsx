@@ -4,19 +4,21 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import type {
-  HomeRecentAppKind,
-  HomeRecentAppPreference,
-} from '@polo-ai/shared/config/home-recent'
+  HomeQuickAccessApp,
+} from '@polo-ai/shared/config/home-quick-access'
+import {
+  MAX_HOME_QUICK_ACCESS_APPS,
+} from '@polo-ai/shared/config/home-quick-access'
 import {
   createLocalAppScopeKey,
   type LocalAppRuntimeStatus,
 } from '@polo-ai/shared/protocol'
 import { AppIcon } from './AppIcon'
-import {
-  OrganizationAppCard,
-  type CatalogPrimaryAction,
-} from './OrganizationAppCard'
+import type { CatalogPrimaryAction } from './OrganizationAppCard'
+import { AllAppsView } from './AllAppsView'
+import { ManageHomeAppsDialog } from './ManageHomeAppsDialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -30,7 +32,7 @@ import { useAppCatalog } from '@/hooks/useAppCatalog'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
 import {
-  BUILTIN_APP_IDS,
+  POLO_APP_DEFINITION,
   type AppDefinition,
 } from '../../../shared/tab-browser-types'
 import {
@@ -39,17 +41,13 @@ import {
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
 import {
-  createHomeRecentContextKey,
-  loadHomeRecentApps,
-  saveHomeRecentApps,
-} from '@/lib/home-recent-apps'
-
-interface HomePageProps {
-  onAddApp: () => void
-}
-
-const MAX_RECENT_APPS = 6
-export const ORGANIZATION_APP_PAGE_SIZE = 60
+  createHomeQuickAccessContextKey,
+  loadHomeQuickAccess,
+  resolveHomeQuickAccessApps,
+  saveHomeQuickAccess,
+  toggleHomeQuickAccessApp,
+} from '@/lib/home-quick-access'
+import { stageProductSpaceAppLaunch } from '@/lib/product-space-app-launch-handoff'
 
 export function selectOrganizationAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
@@ -97,51 +95,52 @@ export function formatBytes(t: TFunction, sizeBytes: number): string {
 }
 
 function catalogTabDefinition(
-  scopeKey: string,
+  accountId: string,
   app: CatalogApp,
-  url: string,
+  launch: ResolveLaunchResponse,
 ): AppDefinition {
+  if (
+    launch.subject.kind !== 'artifact_instance'
+    || launch.subject.artifactType !== 'app'
+    || launch.delivery.kind === 'built_in'
+  ) {
+    throw new Error('Invalid App launch handoff')
+  }
   return {
-    id: `organization:${scopeKey}`,
+    id: `catalog:${launch.productSpaceId}:${launch.subject.artifactInstanceId}`,
     name: app.name,
-    url,
+    // POO-47 consumes bundle handoffs and replaces this safe placeholder with
+    // its runtime URL. Web Apps can already use the resolved URL directly.
+    url: launch.delivery.kind === 'web_url' ? launch.delivery.url : 'about:blank',
     iconUrl: app.iconUrl,
     type: 'webapp',
     createdAt: 0,
     order: app.sortOrder,
+    launchContext: {
+      accountId,
+      productSpaceId: launch.productSpaceId,
+      catalogEntryId: launch.catalogEntryId,
+      artifactInstanceId: launch.subject.artifactInstanceId,
+      versionId: launch.subject.versionId,
+      version: launch.subject.version,
+      deliveryKind: launch.delivery.kind,
+      resolvedAt: launch.resolvedAt,
+      expiresAt: launch.expiresAt,
+    },
   }
 }
 
-function catalogRecentId(scopeKey: string): string {
-  return scopeKey
-}
-
-function AddExternalAppTile({ onClick }: { onClick: () => void }) {
+export function HomePage() {
   const { t } = useTranslation()
-  return (
-    <button
-      type="button"
-      className="titlebar-no-drag group flex min-w-0 flex-col items-center gap-3 rounded-lg border border-transparent p-3 text-center outline-none transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-foreground/10 hover:bg-foreground/4 hover:shadow-minimal focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onClick}
-      data-testid="add-external-app"
-    >
-      <span className="flex h-[76px] w-[76px] items-center justify-center rounded-lg border border-dashed border-foreground/20 bg-foreground/3 shadow-xs transition-all duration-200 ease-out group-hover:scale-[1.04] group-hover:border-accent/45 group-hover:bg-accent/8">
-        <Icons.Plus className="h-8 w-8 text-foreground/55 group-hover:text-accent" strokeWidth={1.5} />
-      </span>
-      <span className="min-h-9 max-w-[112px] text-sm font-medium leading-[18px] text-foreground/70 group-hover:text-foreground">
-        {t('homeApps.addExternal.title')}
-      </span>
-    </button>
-  )
-}
-
-export function HomePage({ onAddApp }: HomePageProps) {
-  const { t } = useTranslation()
-  const { installedApps, openApp, removeApp } = useTabShell()
+  const { openApp } = useTabShell()
   const catalog = useAppCatalog()
-  const [recentApps, setRecentApps] = useState<HomeRecentAppPreference[]>([])
-  const recentLoadGenerationRef = useRef(0)
-  const recentMutationGenerationRef = useRef(0)
+  const [view, setView] = useState<'home' | 'all-apps'>('home')
+  const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
+  const quickEntriesRef = useRef<HomeQuickAccessApp[]>([])
+  quickEntriesRef.current = quickEntries
+  const quickLoadGenerationRef = useRef(0)
+  const quickMutationGenerationRef = useRef(0)
+  const [manageOpen, setManageOpen] = useState(false)
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
     appConfigVersion: string
@@ -154,23 +153,20 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const [logsLoading, setLogsLoading] = useState(false)
   const logsRequestGenerationRef = useRef(0)
   const logsTargetScopeKeyRef = useRef<string | null>(null)
-  const [organizationAppLimit, setOrganizationAppLimit] = useState(
-    ORGANIZATION_APP_PAGE_SIZE,
-  )
 
-  const externalApps = useMemo(
-    () => installedApps
-      .filter(app => app.type === 'webapp' && !BUILTIN_APP_IDS.has(app.id))
-      .sort((left, right) => left.order - right.order),
-    [installedApps],
+  const activeProductSpace = catalog.productSpace?.activeProductSpace
+  const quickContextKey = createHomeQuickAccessContextKey(
+    catalog.productSpace?.productSpaceContextKey,
   )
-  const builtinApps = useMemo(
-    () => installedApps
-      .filter(app => BUILTIN_APP_IDS.has(app.id))
-      .sort((left, right) => left.order - right.order),
-    [installedApps],
+  const scopeKeyForApp = catalog.scopeKeyForApp
+
+  const availableApps = useMemo(
+    () => (catalog.state.catalog?.apps ?? []).filter(
+      app => app.availability === 'available',
+    ),
+    [catalog.state.catalog],
   )
-  const organizationApps = useMemo(
+  const allApps = useMemo(
     () => selectOrganizationAppsForDisplay(
       catalog.state.catalog,
       catalog.state.statuses,
@@ -182,69 +178,107 @@ export function HomePage({ onAddApp }: HomePageProps) {
       catalog.state.statuses,
     ],
   )
-  const displayedOrganizationApps = organizationApps.slice(0, organizationAppLimit)
+  const quickApps = useMemo(
+    () => resolveHomeQuickAccessApps(quickEntries, availableApps, scopeKeyForApp),
+    [availableApps, quickEntries, scopeKeyForApp],
+  )
+
   useEffect(() => {
-    setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
-  }, [
-    catalog.productSpace?.productSpaceContextKey,
-    catalog.state.catalog?.appConfigVersion,
-  ])
+    // Fail-closed across space transitions: a ProductSpace identity change
+    // resets the home view and closes in-place dialogs.
+    const generation = ++quickLoadGenerationRef.current
+    const mutationGeneration = quickMutationGenerationRef.current
+    setView('home')
+    setManageOpen(false)
+    setQuickEntries([])
+    void loadHomeQuickAccess(quickContextKey)
+      .then(entries => {
+        // A mutation in this same context fences the older hydration result:
+        // quick-access slots may never move backwards after a user change.
+        if (
+          quickLoadGenerationRef.current === generation
+          && quickMutationGenerationRef.current === mutationGeneration
+        ) {
+          setQuickEntries(entries)
+        }
+      })
+      .catch(() => {
+        // Quick access is non-critical; keep the section usable.
+      })
+  }, [quickContextKey])
+
+  // Prune quick-access entries that no longer resolve to an available App
+  // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids).
   useEffect(() => {
-    // Logs are scoped to the exact account/organization/App tuple. Advancing
-    // this independent request generation prevents an older organization
-    // context from publishing into a later dialog.
+    if (quickEntries.length === 0) return
+    const availableIds = new Set<string>()
+    for (const app of availableApps) {
+      try {
+        availableIds.add(scopeKeyForApp(app))
+      } catch {
+        continue
+      }
+    }
+    const pruned = quickEntries.filter(entry => availableIds.has(entry.id))
+    if (pruned.length === quickEntries.length) return
+    quickMutationGenerationRef.current += 1
+    const generation = quickMutationGenerationRef.current
+    setQuickEntries(pruned)
+    void saveHomeQuickAccess(quickContextKey, pruned)
+      .then(saved => {
+        if (quickMutationGenerationRef.current === generation) {
+          setQuickEntries(saved)
+        }
+      })
+      .catch(() => {
+        // Persistence failure must not break the home section.
+      })
+  }, [availableApps, quickContextKey, quickEntries, scopeKeyForApp])
+
+  useEffect(() => {
+    // Logs are scoped to the exact account/space/App tuple. Advancing this
+    // independent request generation prevents an older space context from
+    // publishing into a later dialog.
     logsRequestGenerationRef.current += 1
     logsTargetScopeKeyRef.current = null
     setLogsTarget(null)
     setLogs('')
     setLogsLoading(false)
   }, [catalog.productSpace?.productSpaceContextKey])
-  const activeProductSpace = catalog.productSpace?.activeProductSpace
-  const recentContextKey = createHomeRecentContextKey(
-    catalog.productSpace?.productSpaceContextKey,
-  )
 
-  useEffect(() => {
-    const generation = recentLoadGenerationRef.current + 1
-    recentLoadGenerationRef.current = generation
-    const mutationGeneration = recentMutationGenerationRef.current
-    setRecentApps([])
-    void loadHomeRecentApps(recentContextKey)
-      .then(apps => {
-        // A local open in this same context fences the older hydration result:
-        // launcher history may never move backwards after a user mutation.
-        if (
-          recentLoadGenerationRef.current === generation
-          && recentMutationGenerationRef.current === mutationGeneration
-        ) {
-          setRecentApps(apps)
+  const openPoloAssistant = () => {
+    openApp(POLO_APP_DEFINITION)
+  }
+
+  const toggleQuickAccess = (
+    app: CatalogApp,
+    scopeKey: string,
+    enabled: boolean,
+  ): boolean => {
+    const { next, rejected } = toggleHomeQuickAccessApp(
+      quickEntriesRef.current,
+      scopeKey,
+      enabled,
+    )
+    if (rejected) {
+      toast.error(t('homeApps.manage.limitReached', {
+        max: MAX_HOME_QUICK_ACCESS_APPS,
+      }))
+      return false
+    }
+    quickMutationGenerationRef.current += 1
+    const generation = quickMutationGenerationRef.current
+    setQuickEntries(next)
+    void saveHomeQuickAccess(quickContextKey, next)
+      .then(saved => {
+        if (quickMutationGenerationRef.current === generation) {
+          setQuickEntries(saved)
         }
       })
       .catch(() => {
-        // Launcher history is non-critical; keep the current section usable.
+        // Persistence failure must not break the home section.
       })
-  }, [recentContextKey])
-
-  const recordRecent = (
-    id: string,
-    kind: HomeRecentAppKind,
-  ) => {
-    recentMutationGenerationRef.current += 1
-    setRecentApps(current => {
-      const next = [
-        { id, kind, openedAt: Date.now() },
-        ...current.filter(item => !(item.id === id && item.kind === kind)),
-      ].slice(0, MAX_RECENT_APPS)
-      void saveHomeRecentApps(recentContextKey, next).catch(() => {
-        // Opening an App must not fail because preference persistence failed.
-      })
-      return next
-    })
-  }
-
-  const openPersonalApp = (app: AppDefinition) => {
-    openApp(app)
-    recordRecent(app.id, BUILTIN_APP_IDS.has(app.id) ? 'builtin' : 'external')
+    return true
   }
 
   const openCatalogApp = async (app: CatalogApp) => {
@@ -253,15 +287,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
       return
     }
     try {
-      const scopeKey = catalog.scopeKeyForApp(app)
-      if (app.deliveryMode === 'remote_url') {
-        const remoteUrl = await catalog.resolveRemoteUrl(app)
-        openApp(catalogTabDefinition(scopeKey, app, remoteUrl))
-      } else {
-        const result = await catalog.start(app)
-        openApp(catalogTabDefinition(scopeKey, app, result.url))
-      }
-      recordRecent(catalogRecentId(scopeKey), 'organization')
+      const accountId = catalog.state.catalog?.accountId
+      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
+      const launch = await catalog.resolveLaunch(app)
+      const definition = catalogTabDefinition(accountId, app, launch)
+      stageProductSpaceAppLaunch(definition.id, accountId, launch)
+      openApp(definition)
     } catch (error) {
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
         description: homeAppOperationErrorText(t, error, 'open'),
@@ -387,58 +418,30 @@ export function HomePage({ onAddApp }: HomePageProps) {
       && (!release.arch || release.arch === host.arch)
   }
 
-  const resolvedRecent = (() => {
-    const entries: Array<{
-      key: string
-      definition: AppDefinition
-      onOpen: () => void
-    }> = []
-    const seen = new Set<string>()
+  const selectedQuickIds = useMemo(
+    () => new Set(quickEntries.map(entry => entry.id)),
+    [quickEntries],
+  )
 
-    for (const item of recentApps) {
-      if (item.kind === 'organization') {
-        const app = organizationApps.find(candidate => {
-          try {
-            return catalogRecentId(catalog.scopeKeyForApp(candidate)) === item.id
-          } catch {
-            return false
-          }
-        })
-        if (!app || app.availability !== 'available') continue
-        const status = catalog.getStatus(app)
-        const url = app.remoteUrl || status?.url || 'http://127.0.0.1'
-        const scopeKey = catalog.scopeKeyForApp(app)
-        const key = `organization:${scopeKey}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        entries.push({
-          key,
-          definition: catalogTabDefinition(scopeKey, app, url),
-          onOpen: () => { void openCatalogApp(app) },
-        })
-        continue
-      }
-      const app = installedApps.find(candidate => candidate.id === item.id)
-      if (!app) continue
-      const key = `${item.kind}:${app.id}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      entries.push({
-        key,
-        definition: app,
-        onOpen: () => openPersonalApp(app),
-      })
+  const quickTileFor = (app: CatalogApp) => {
+    const scopeKey = catalog.scopeKeyForApp(app)
+    return {
+      key: scopeKey,
+      definition: {
+        id: `catalog-tile:${scopeKey}`,
+        name: app.name,
+        url: 'about:blank',
+        iconUrl: app.iconUrl,
+        type: 'webapp' as const,
+        createdAt: 0,
+        order: app.sortOrder,
+      },
     }
-
-    return entries.slice(0, MAX_RECENT_APPS)
-  })()
-  const remainingBuiltinApps = builtinApps.filter(app => (
-    !resolvedRecent.some(item => item.key === `builtin:${app.id}`)
-  ))
+  }
 
   return (
     <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-11 pb-[72px] pt-[46px] text-foreground"
+      className="h-full min-h-0 overflow-y-auto bg-background px-4 pb-[72px] pt-6 text-foreground sm:px-7 sm:pt-8 lg:px-11 lg:pt-[46px]"
       data-testid="home-app-hub"
     >
       <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
@@ -451,108 +454,90 @@ export function HomePage({ onAddApp }: HomePageProps) {
             spaceKey={catalog.productSpace.productSpaceContextKey}
           />
         )}
-        <section aria-labelledby="recent-apps-heading">
-          <div className="mb-[18px] flex items-end justify-between gap-4">
-            <div>
-              <h1 id="recent-apps-heading" className="text-[22px] font-bold leading-[1.25] tracking-[-0.03em]">
-                {t('homeApps.recent.title')}
-              </h1>
-              <p className="mt-[7px] text-[13px] leading-[1.5] text-muted-foreground">
-                {t('homeApps.recent.description')}
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
-            {resolvedRecent.map(item => (
-              <AppIcon
-                key={item.key}
-                app={item.definition}
-                onOpen={item.onOpen}
-              />
-            ))}
-          </div>
-          {remainingBuiltinApps.length > 0 && (
-            <div
-              className="rounded-[17px] border border-foreground/10 bg-foreground/2 p-[16px]"
-              data-testid="builtin-app-launcher"
-            >
-              <h2 className="text-[14px] font-medium">{t('homeApps.builtin.title')}</h2>
-              <p className="mt-[4px] text-[12px] text-muted-foreground">
-                {t('homeApps.builtin.description')}
-              </p>
-              <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
-                {remainingBuiltinApps.map(app => (
-                  <AppIcon
-                    key={app.id}
-                    app={app}
-                    onOpen={openPersonalApp}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-
-        {catalog.productSpace && (
-          <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
-            <div className="mb-[18px] flex items-start justify-between gap-4">
+        {view === 'all-apps' && catalog.productSpace ? (
+          <AllAppsView
+            spaceName={activeProductSpace?.name
+              || t('homeApps.organization.current')}
+            spaceKind={activeProductSpace?.kind ?? null}
+            apps={allApps}
+            loading={catalog.state.loading}
+            refreshing={catalog.state.refreshing}
+            warningCode={catalog.state.warningCode}
+            errorCode={catalog.state.errorCode}
+            offline={catalog.state.accessMode === 'offline'}
+            statusErrorCode={catalog.state.statusErrorCode}
+            statusLoadingScopeKeys={catalog.state.statusLoadingScopeKeys}
+            statusErrorScopeKeys={catalog.state.statusErrorScopeKeys}
+            scopeKeyForApp={catalog.scopeKeyForApp}
+            getStatus={catalog.getStatus}
+            compatibleWithHost={compatibleWithHost}
+            onRefresh={() => { void catalog.sync(true) }}
+            onRetryStatuses={() => { void catalog.refreshRuntimeStatuses() }}
+            onPrimaryAction={(target, action) => {
+              void handlePrimaryAction(target, action)
+            }}
+            onStop={(target) => { void handleStop(target) }}
+            onUninstall={setUninstallTarget}
+            onViewLogs={(target) => { void showLogs(target) }}
+            onBack={() => setView('home')}
+          />
+        ) : (
+          <section
+            aria-labelledby="quick-access-heading"
+            data-testid="home-quick-access-section"
+          >
+            <div className="mb-[18px] flex flex-col items-start justify-between gap-4 sm:flex-row">
               <div>
-                <h2 id="organization-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
-                  {t('homeApps.organization.title', {
-                    name: activeProductSpace?.name || t('homeApps.organization.current'),
+                <h1
+                  id="quick-access-heading"
+                  className="text-[22px] font-bold leading-[1.25] tracking-[-0.03em]"
+                >
+                  {t('homeApps.quick.title')}
+                </h1>
+                <p className="mt-[7px] text-[13px] leading-[1.5] text-muted-foreground">
+                  {t('homeApps.quick.description', {
+                    max: MAX_HOME_QUICK_ACCESS_APPS,
                   })}
-                </h2>
-                <p className="mt-[6px] text-[14px] text-muted-foreground">
-                  {activeProductSpace?.kind === 'enterprise'
-                    ? t('homeApps.organization.enterpriseDescription')
-                    : t('homeApps.organization.creatorDescription')}
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={catalog.state.refreshing}
-                onClick={() => { void catalog.sync(true) }}
-              >
-                <Icons.RefreshCw className={catalog.state.refreshing ? 'animate-spin' : ''} />
-                {t('homeApps.actions.refresh')}
-              </Button>
+              {catalog.productSpace && (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setView('all-apps')}
+                    data-testid="home-all-apps-open"
+                  >
+                    <Icons.LayoutGrid />
+                    {t('homeApps.quick.allApps')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setManageOpen(true)}
+                    data-testid="home-manage-quick-access"
+                  >
+                    <Icons.SlidersHorizontal />
+                    {t('homeApps.quick.manage')}
+                  </Button>
+                </div>
+              )}
             </div>
 
-            {catalog.state.warningCode && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <Icons.WifiOff className="size-4 shrink-0" />
-                {catalogStateMessage(t, catalog.state.warningCode, 'warning')}
-              </div>
-            )}
-
-            {catalog.state.statusErrorCode && (
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <span className="flex items-center gap-2">
-                  <Icons.CircleAlert className="size-4 shrink-0" />
-                  {t('homeApps.errors.statusReadFailed')}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { void catalog.refreshRuntimeStatuses() }}
-                >
-                  {t('homeApps.actions.tryAgain')}
-                </Button>
-              </div>
-            )}
-
-            {catalog.state.loading ? (
-              <div className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10">
+            {catalog.state.loading && !catalog.state.catalog ? (
+              <div
+                className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10"
+                data-testid="home-quick-access-loading"
+              >
                 <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
               </div>
             ) : catalog.state.errorCode && !catalog.state.catalog ? (
               <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center">
                 <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
                 <p className="text-sm font-medium">
-                  {t('homeApps.organization.loadFailed')}
+                  {t('homeApps.quick.loadFailed')}
                 </p>
                 <p className="mt-1 max-w-md text-xs text-muted-foreground">
                   {catalogStateMessage(t, catalog.state.errorCode, 'error')}
@@ -567,91 +552,56 @@ export function HomePage({ onAddApp }: HomePageProps) {
                   {t('homeApps.actions.tryAgain')}
                 </Button>
               </div>
-            ) : organizationApps.length === 0 ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-foreground/15 px-6 text-center">
-                <Icons.LayoutGrid className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {t('homeApps.organization.empty')}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {activeProductSpace?.kind === 'enterprise'
-                    ? t('homeApps.organization.emptyEnterprise')
-                    : t('homeApps.organization.emptyCreator')}
-                </p>
-              </div>
             ) : (
-              <>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {displayedOrganizationApps.map(app => {
-                    const scopeKey = catalog.scopeKeyForApp(app)
-                    const status = catalog.getStatus(app)
-                    return (
-                      <OrganizationAppCard
-                        key={scopeKey}
-                        app={app}
-                        status={status}
-                        statusLoading={Boolean(
-                          catalog.state.statusLoadingScopeKeys?.[scopeKey],
-                        )}
-                        statusUnavailable={Boolean(
-                          !status
-                          && !catalog.state.statusLoadingScopeKeys?.[scopeKey]
-                          && catalog.state.statusErrorScopeKeys?.[scopeKey],
-                        )}
-                        compatible={compatibleWithHost(app)}
-                        offline={catalog.state.accessMode === 'offline'}
-                        onPrimaryAction={(target, action) => {
-                          void handlePrimaryAction(target, action)
-                        }}
-                        onStop={(target) => { void handleStop(target) }}
-                        onUninstall={setUninstallTarget}
-                        onViewLogs={(target) => { void showLogs(target) }}
-                      />
-                    )
-                  })}
-                </div>
-                {displayedOrganizationApps.length < organizationApps.length && (
-                  <div className="mt-5 flex justify-center">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setOrganizationAppLimit(current => (
-                          current + ORGANIZATION_APP_PAGE_SIZE
-                        ))
-                      }}
-                    >
-                      {t('homeApps.actions.loadMore')}
-                    </Button>
-                  </div>
+              <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
+                <AppIcon
+                  app={POLO_APP_DEFINITION}
+                  onOpen={openPoloAssistant}
+                  testId="home-quick-entry-polo"
+                />
+                {quickApps.map(app => {
+                  const tile = quickTileFor(app)
+                  return (
+                    <AppIcon
+                      key={tile.key}
+                      app={tile.definition}
+                      onOpen={() => { void openCatalogApp(app) }}
+                      testId="home-quick-entry"
+                    />
+                  )
+                })}
+                {catalog.productSpace
+                  && availableApps.length > 0
+                  && quickApps.length < MAX_HOME_QUICK_ACCESS_APPS && (
+                  <button
+                    type="button"
+                    className="titlebar-no-drag group flex min-w-0 flex-col items-center gap-3 rounded-lg border border-transparent p-3 text-center outline-none transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-foreground/10 hover:bg-foreground/4 hover:shadow-minimal focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setManageOpen(true)}
+                    data-testid="home-quick-access-add"
+                  >
+                    <span className="flex h-[76px] w-[76px] items-center justify-center rounded-lg border border-dashed border-foreground/20 bg-foreground/3 shadow-xs transition-all duration-200 ease-out group-hover:scale-[1.04] group-hover:border-accent/45 group-hover:bg-accent/8">
+                      <Icons.Plus className="h-8 w-8 text-foreground/55 group-hover:text-accent" strokeWidth={1.5} />
+                    </span>
+                    <span className="min-h-9 max-w-[112px] text-sm font-medium leading-[18px] text-foreground/70 group-hover:text-foreground">
+                      {t('homeApps.quick.add')}
+                    </span>
+                  </button>
                 )}
-              </>
+              </div>
             )}
           </section>
         )}
-
-        <section aria-labelledby="external-apps-heading">
-          <div className="mb-[18px]">
-            <h2 id="external-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
-              {t('homeApps.external.title')}
-            </h2>
-            <p className="mt-[6px] text-[14px] text-muted-foreground">
-              {t('homeApps.external.description')}
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
-            {externalApps.map(app => (
-              <AppIcon
-                key={app.id}
-                app={app}
-                onOpen={openPersonalApp}
-                onRemove={(target) => { void removeApp(target.id) }}
-              />
-            ))}
-            <AddExternalAppTile onClick={onAddApp} />
-          </div>
-        </section>
       </div>
+
+      <ManageHomeAppsDialog
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        apps={availableApps}
+        scopeKeyForApp={catalog.scopeKeyForApp}
+        selectedIds={selectedQuickIds}
+        maxSlots={MAX_HOME_QUICK_ACCESS_APPS}
+        onToggle={toggleQuickAccess}
+      />
 
       <Dialog open={Boolean(installTarget)} onOpenChange={(open) => {
         if (!open) setInstallTarget(null)

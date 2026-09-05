@@ -275,6 +275,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // preferences — device-local launcher and verified Admin organization state
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS,
+  RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS,
   RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
@@ -284,6 +286,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // execution gate (active executions live on the local session runtime)
   RPC_CHANNELS.productSpace.LIST,
   RPC_CHANNELS.productSpace.CATALOG,
+  RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_EXECUTION,

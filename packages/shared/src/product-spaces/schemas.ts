@@ -479,6 +479,8 @@ function assertLaunchSubjectMatchesCatalogEntry(
     response.subject.kind !== 'artifact_instance'
     || response.subject.artifactType !== entry.kind
     || response.subject.artifactInstanceId !== entry.artifactInstanceId
+    || response.subject.versionId !== entry.version.versionId
+    || response.subject.version !== entry.version.version
   ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
 }
 

@@ -177,6 +177,7 @@ export const CHANNEL_MAP = {
   productSpaceRestrictActiveSpace: invoke(RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE),
   productSpaceGetRestrictionState: invoke(RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE),
   productSpaceGetCatalog: invoke(RPC_CHANNELS.productSpace.CATALOG),
+  productSpaceResolveLaunch: invoke(RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
   productSpacePrepareSwitch: invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH),
   productSpaceStopSwitchExecutions: invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS),
   productSpaceCommitSwitch: invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH),
@@ -269,6 +270,8 @@ export const CHANNEL_MAP = {
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
   getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
   setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
+  getHomeQuickAccess: invoke(RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS),
+  setHomeQuickAccess: invoke(RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS),
   getOrganizationContextStorage: invoke(
     RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   ),

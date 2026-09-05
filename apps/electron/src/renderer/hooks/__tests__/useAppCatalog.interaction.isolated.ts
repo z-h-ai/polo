@@ -471,6 +471,87 @@ describe('useAppCatalog creator circle relations', () => {
   })
 })
 
+describe('useAppCatalog ProductSpace launch binding', () => {
+  function installStrictCatalogAndResolver(overrides: Record<string, unknown> = {}) {
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'strict-revision-1',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app',
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: { versionId: 'version-a', version: '2.3.4' },
+        name: 'Bound App',
+        description: 'Bound to one artifact instance',
+        availability: 'available',
+        sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
+        permissions: [],
+      }],
+    })
+    api.productSpaceResolveLaunch = mock(async () => ({
+      success: true as const,
+      launch: {
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogEntryId: 'catalog-entry-a',
+        resolvedAt: '2099-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:10:00.000Z',
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: 'artifact-instance-a',
+          versionId: 'version-a',
+          version: '2.3.4',
+        },
+        payer: { kind: 'personal' as const, accountId: 'account-a' },
+        delivery: {
+          kind: 'web_url' as const,
+          url: 'https://app.example.test',
+          launchToken: 'fresh-launch-token',
+        },
+        ...overrides,
+      },
+    }))
+    return api.productSpaceResolveLaunch as ReturnType<typeof mock>
+  }
+
+  it('carries the exact ProductSpace, artifact instance, and version', async () => {
+    const resolver = installStrictCatalogAndResolver()
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.artifactInstanceId)
+        .toBe('artifact-instance-a')
+    })
+
+    const app = result.current.state.catalog!.apps[0]!
+    const launch = await result.current.resolveLaunch(app)
+
+    expect(resolver).toHaveBeenCalledWith('organization-a', 'catalog-entry-a')
+    expect(launch.subject).toMatchObject({
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+    })
+  })
+
+  it('rejects a valid-looking launch response for another ProductSpace', async () => {
+    installStrictCatalogAndResolver({ productSpaceId: 'organization-b' })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+
+    await expect(result.current.resolveLaunch(
+      result.current.state.catalog!.apps[0]!,
+    )).rejects.toThrow()
+  })
+})
+
 describe('useAppCatalog scoped async state', () => {
   it('keeps a local app status unknown until its initial batch resolves', async () => {
     const pendingStatuses = deferred<LocalAppRuntimeStatus[]>()
@@ -1498,7 +1579,7 @@ describe('useAppCatalog scoped async state', () => {
     expect(Object.keys(result.current.state.statuses)).toHaveLength(2)
   })
 
-  it('opens a prepared app from a restricted offline catalog without enabling install', async () => {
+  it('keeps a prepared offline app visible but refuses a new launch or install', async () => {
     syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
       ...syncResult('organization-a', 'offline'),
       source: 'cache',
@@ -1522,18 +1603,8 @@ describe('useAppCatalog scoped async state', () => {
     })
     const catalogApp = result.current.state.catalog!.apps[0]!
 
-    let started!: LocalAppStartResult
-    await act(async () => {
-      started = await result.current.start(catalogApp)
-    })
-    expect(started).toMatchObject({
-      url: 'http://127.0.0.1:9876',
-    })
-    expect(startLocalApp).toHaveBeenCalledWith(expect.objectContaining({
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: 'shared-app-id',
-    }))
+    await expect(result.current.start(catalogApp)).rejects.toThrow()
+    expect(startLocalApp).not.toHaveBeenCalled()
     await expect(result.current.install(
       catalogApp,
       result.current.state.catalog!.appConfigVersion,

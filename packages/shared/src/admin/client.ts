@@ -83,14 +83,21 @@ import {
   AdminPlatformReleaseCreatedResponseSchema,
 } from './schemas.ts';
 import {
+  createResolveLaunchPath,
   createProductSpaceCatalogPath,
   ListProductSpacesResponseSchema,
+  parseResolveLaunchResponseForProductSpace,
   parseProductSpaceCatalogResponseForProductSpace,
   PRODUCT_SPACE_CONTRACT_VERSION,
   ProductSpaceResponsePathError,
   ProductSpaceResponseScopeError,
 } from '../product-spaces/index.ts';
-import type { ListProductSpacesResponse } from '../product-spaces/types.ts';
+import type {
+  ListProductSpacesResponse,
+  ResolveLaunchRequest,
+  ResolveLaunchResponse,
+} from '../product-spaces/types.ts';
+import type { CatalogEntryId } from '../product-spaces/ids.ts';
 import type {
   TrustedProductSpaceCatalog,
   TrustedProductSpaceSummary,
@@ -450,6 +457,52 @@ export class AdminClient {
         );
       }
       throw new AdminError('ProductSpace catalog response is invalid', 'SERVER_ERROR', { cause: error });
+    }
+  }
+
+  /**
+   * Resolves one exact Catalog entry for launch. The response is checked
+   * against both the trusted ProductSpace summary and the fresh Catalog used
+   * for this request, so an old id or a cross-space response fails closed.
+   */
+  async resolveProductSpaceLaunch(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    catalog: TrustedProductSpaceCatalog,
+    catalogEntryId: CatalogEntryId,
+    input: ResolveLaunchRequest,
+  ): Promise<ResolveLaunchResponse> {
+    const response = await this.request<unknown>(
+      createResolveLaunchPath(context.id, catalogEntryId),
+      { method: 'POST', accessToken, body: input },
+    );
+    try {
+      return parseResolveLaunchResponseForProductSpace(
+        response,
+        context,
+        catalog,
+        catalogEntryId,
+      );
+    } catch (error) {
+      const rawVersion = response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        ? (response as Record<string, unknown>).contractVersion
+        : undefined;
+      if (
+        rawVersion !== undefined
+        && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+      ) {
+        throw new AdminError(
+          'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+          'product_space_contract_unsupported',
+        );
+      }
+      throw new AdminError(
+        'ProductSpace launch response failed the Catalog boundary check',
+        'SERVER_ERROR',
+        { cause: error },
+      );
     }
   }
 

@@ -1,6 +1,22 @@
 export type AppDefinitionType = 'builtin' | 'webapp'
 export type TabInstanceType = 'home' | 'polo' | 'webapp'
 
+/**
+ * Non-secret, immutable identity handed to the POO-47 Runtime boundary.
+ * Delivery credentials deliberately stay out of persisted tab state.
+ */
+export interface ProductSpaceAppLaunchContext {
+  accountId: string
+  productSpaceId: string
+  catalogEntryId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+  deliveryKind: 'web_url' | 'bundle'
+  resolvedAt: string
+  expiresAt: string
+}
+
 export interface AppDefinition {
   id: string
   name: string
@@ -9,6 +25,7 @@ export interface AppDefinition {
   type: AppDefinitionType
   createdAt: number
   order: number
+  launchContext?: ProductSpaceAppLaunchContext
 }
 
 export interface TabInstance {
@@ -19,6 +36,7 @@ export interface TabInstance {
   favicon?: string
   isLoading?: boolean
   url?: string
+  launchContext?: ProductSpaceAppLaunchContext
 }
 
 export const HOME_TAB_ID = 'home'
@@ -71,29 +89,4 @@ export function normalizeInstalledApps(apps: AppDefinition[] | undefined | null)
     .sort((a, b) => a.order - b.order)
 
   return [...BUILTIN_APP_DEFINITIONS, ...webApps]
-}
-
-export function isValidWebAppUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol === 'https:') return true
-    if (parsed.protocol !== 'http:') return false
-
-    const host = parsed.hostname.toLowerCase()
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
-    if (host.startsWith('192.168.')) return true
-    if (host.startsWith('10.')) return true
-
-    const private172 = /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-    return private172
-  } catch {
-    return false
-  }
-}
-
-export function normalizeWebAppUrl(input: string): string {
-  const trimmed = input.trim()
-  if (!trimmed) return trimmed
-  if (/^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed)) return trimmed
-  return `https://${trimmed}`
 }

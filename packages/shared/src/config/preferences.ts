@@ -12,6 +12,13 @@ import {
   type HomeRecentAppsByContext,
 } from './home-recent.ts';
 import {
+  MAX_HOME_QUICK_ACCESS_APPS,
+  MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH,
+  sanitizeHomeQuickAccess,
+  type HomeQuickAccessApp,
+  type HomeQuickAccessByContext,
+} from './home-quick-access.ts';
+import {
   type OrganizationContextStorage,
   type OrganizationContextStorageByAccount,
   type OrganizationContextStoragePatch,
@@ -38,6 +45,10 @@ export type {
   HomeRecentAppPreference,
   HomeRecentAppsByContext,
 } from './home-recent.ts';
+export type {
+  HomeQuickAccessApp,
+  HomeQuickAccessByContext,
+} from './home-quick-access.ts';
 export type {
   OrganizationContextStorage,
   OrganizationContextStorageByAccount,
@@ -80,6 +91,9 @@ export interface UserPreferences {
   diffViewer?: DiffViewerPreferences;
   // Home launcher history, isolated by a versioned account/organization key.
   homeRecentApps?: HomeRecentAppsByContext;
+  // Home quick-access shortcuts (POO-43), isolated by a versioned
+  // account/product-space key. Only home shortcuts — never install state.
+  homeQuickAccess?: HomeQuickAccessByContext;
   // Device-local, last verified Admin organization state, isolated by account.
   organizationContextStorage?: OrganizationContextStorageByAccount;
   // Device-local, last verified ProductSpace contract state, isolated by account.
@@ -168,6 +182,37 @@ export function setHomeRecentApps(
     ...current,
     homeRecentApps: {
       ...(current.homeRecentApps ?? {}),
+      [contextKey]: sanitized,
+    },
+  });
+  return sanitized;
+}
+
+export function getHomeQuickAccess(
+  contextKey: string,
+): HomeQuickAccessApp[] {
+  if (!contextKey) return [];
+  return sanitizeHomeQuickAccess(
+    loadPreferences().homeQuickAccess?.[contextKey] ?? [],
+  );
+}
+
+export function setHomeQuickAccess(
+  contextKey: string,
+  apps: readonly HomeQuickAccessApp[],
+): HomeQuickAccessApp[] {
+  if (!contextKey || contextKey.length > MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH) {
+    throw new Error('Home quick-access context is invalid');
+  }
+  const current = loadPreferences();
+  const sanitized = sanitizeHomeQuickAccess(apps).slice(
+    0,
+    MAX_HOME_QUICK_ACCESS_APPS,
+  );
+  savePreferences({
+    ...current,
+    homeQuickAccess: {
+      ...(current.homeQuickAccess ?? {}),
       [contextKey]: sanitized,
     },
   });

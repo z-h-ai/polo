@@ -280,10 +280,17 @@ describe('ProductSpace v1 network contract', () => {
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app',
-        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-a', version: '1.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
       }, personal, personalCatalog, appId,
     ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'app' })
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-app',
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, personalCatalog, appId,
+    )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app',
@@ -311,7 +318,7 @@ describe('ProductSpace v1 network contract', () => {
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
-        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-skill', version: '1.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
       }, personal, personalCatalog, skillId,
     ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'skill' })
@@ -321,7 +328,7 @@ describe('ProductSpace v1 network contract', () => {
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app', payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
-        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-a', version: '1.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
       }, enterprise, enterpriseCatalog, appId,
     ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'app' })
@@ -399,10 +406,10 @@ describe('ProductSpace v1 network contract', () => {
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
-        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-skill', version: '1.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
       }, personal, availableSkillCatalog, skillId,
-    ).subject).toMatchObject({ artifactType: 'skill', version: '2.0.0' })
+    ).subject).toMatchObject({ artifactType: 'skill', version: '1.0.0' })
   })
 
   test('binds Skill enablement to the trusted Skill and permits idempotent disable convergence', () => {

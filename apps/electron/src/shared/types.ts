@@ -892,6 +892,13 @@ export interface ElectronAPI {
     contextKey: string,
     apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
   ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getHomeQuickAccess(
+    contextKey: string,
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
+  setHomeQuickAccess(
+    contextKey: string,
+    apps: import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[],
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
   getOrganizationContextStorage(
     accountId: string,
   ): Promise<
@@ -963,6 +970,21 @@ export interface ElectronAPI {
       status?: number
       accessMode?: 'denied'
       catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
+    }
+  >
+  productSpaceResolveLaunch(
+    productSpaceId: string,
+    catalogEntryId: string,
+  ): Promise<
+    | {
+      success: true
+      launch: import('@polo-ai/shared/product-spaces').ResolveLaunchResponse
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
     }
   >
   productSpacePrepareSwitch(

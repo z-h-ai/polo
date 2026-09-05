@@ -5,6 +5,7 @@ import type {
   CatalogApp,
   DeniedAppCatalogSnapshot,
 } from '@polo-ai/shared/admin'
+import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -301,11 +302,18 @@ function mapProductSpaceCatalogToCacheEntry(
     const entry = rawEntry as {
       kind?: string
       catalogEntryId?: string
+      artifactInstanceId?: string
+      version?: {
+        versionId: string
+        version: string
+        checksum?: string
+      }
       name?: string
       description?: string
       iconUrl?: string
       availability?: string
       sources?: ReadonlyArray<{ kind: string; name?: string }>
+      unavailableReason?: string
       // Delivery metadata is not part of the ProductSpace Catalog contract;
       // the strict server schema strips unknown fields, so these are only
       // present in fixtures that exercise the local-app runtime seams.
@@ -315,19 +323,34 @@ function mapProductSpaceCatalogToCacheEntry(
       permissions?: string[]
     }
     if (entry.kind !== 'app' || !entry.catalogEntryId || !entry.name) return null
+    const effectiveAvailability = entry.availability === 'available'
+      ? 'available'
+      : availability === 'withdrawn'
+      ? 'withdrawn'
+      : 'unavailable'
+    const sourceNames = [...new Set(
+      (entry.sources ?? [])
+        .map(source => source.name?.trim())
+        .filter((name): name is string => Boolean(name)),
+    )]
     return {
       id: entry.catalogEntryId,
+      catalogEntryId: entry.catalogEntryId,
+      artifactInstanceId: entry.artifactInstanceId,
+      catalogVersion: entry.version,
+      sourceNames,
+      unavailableReason: entry.unavailableReason,
       organizationId: productSpaceId,
       name: entry.name,
       description: entry.description ?? '',
       iconUrl: entry.iconUrl,
-      creatorName: entry.sources?.[0]?.name,
+      creatorName: sourceNames.join(' · ') || undefined,
       deliveryMode: entry.deliveryMode ?? 'remote_url',
       remoteUrl: entry.remoteUrl,
       currentRelease: entry.currentRelease,
       permissions: entry.permissions,
       sortOrder: entry.deliveryMode === 'local_bundle' ? (entry as { sortOrder?: number }).sortOrder ?? index : index,
-      availability,
+      availability: effectiveAvailability,
     }
   }
   for (const [index, rawEntry] of catalogResult.entries.entries()) {
@@ -1080,6 +1103,9 @@ export function useAppCatalog() {
       if (app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
+      if (state.accessMode !== 'online') {
+        throw new Error(i18n.t('homeApps.errors.offlineInstall'))
+      }
       requireCurrent(snapshot)
       setState(current => ({
         ...current,
@@ -1118,6 +1144,7 @@ export function useAppCatalog() {
     requireCurrent,
     requireCurrentLifecycleAction,
     runExclusive,
+    state.accessMode,
   ])
 
   const stop = useCallback((app: CatalogApp) => {
@@ -1220,6 +1247,58 @@ export function useAppCatalog() {
     return result.url
   }, [currentSnapshotForApp, requireCurrent])
 
+  /**
+   * Resolves a fresh, fixed ProductSpace launch context for POO-47. No URL or
+   * bundle metadata from the Catalog projection is trusted here.
+   */
+  const resolveLaunch = useCallback(async (
+    app: CatalogApp,
+  ): Promise<ResolveLaunchResponse> => {
+    if (
+      app.availability !== 'available'
+      || !app.catalogEntryId
+      || !app.artifactInstanceId
+      || !app.catalogVersion
+      || state.accessMode !== 'online'
+    ) {
+      throw new Error(i18n.t('homeApps.errors.unavailable'))
+    }
+    const snapshot = currentSnapshotForApp(app)
+    requireCurrent(snapshot)
+    const result = await window.electronAPI.productSpaceResolveLaunch(
+      snapshot.catalog.organizationId,
+      app.catalogEntryId,
+    )
+    requireCurrent(snapshot)
+    if (!result.success) {
+      const error = new Error(result.message)
+      Object.assign(error, { code: result.errorCode, errorCode: result.errorCode })
+      throw error
+    }
+    const launch = result.launch
+    const currentApp = catalogRef.current?.apps.find(
+      candidate => candidate.catalogEntryId === app.catalogEntryId,
+    )
+    if (
+      !currentApp
+      || currentApp.availability !== 'available'
+      || currentApp.artifactInstanceId !== app.artifactInstanceId
+      || currentApp.catalogVersion?.versionId !== app.catalogVersion.versionId
+      || currentApp.catalogVersion?.version !== app.catalogVersion.version
+      || launch.productSpaceId !== snapshot.catalog.organizationId
+      || launch.catalogEntryId !== app.catalogEntryId
+      || launch.subject.kind !== 'artifact_instance'
+      || launch.subject.artifactType !== 'app'
+      || launch.subject.artifactInstanceId !== app.artifactInstanceId
+      || launch.subject.versionId !== app.catalogVersion.versionId
+      || launch.subject.version !== app.catalogVersion.version
+      || Date.parse(launch.expiresAt) <= Date.now()
+    ) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
+    return launch
+  }, [currentSnapshotForApp, requireCurrent, state.accessMode])
+
   const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
     try {
       return state.statuses[scopeKeyForApp(app)]
@@ -1239,6 +1318,7 @@ export function useAppCatalog() {
     uninstall,
     cancelInstall,
     getLogs,
+    resolveLaunch,
     resolveRemoteUrl,
     getStatus,
     scopeForApp,

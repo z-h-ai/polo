@@ -227,6 +227,17 @@ export interface AppReleaseDownload {
 
 export interface CatalogApp {
   id: string;
+  /** ProductSpace Catalog identity. Present for the unified member Catalog. */
+  catalogEntryId?: string;
+  artifactInstanceId?: string;
+  catalogVersion?: {
+    versionId: string;
+    version: string;
+    checksum?: string;
+  };
+  /** All authoritative distribution sources; never inferred from the name. */
+  sourceNames?: string[];
+  unavailableReason?: string;
   organizationId: string;
   name: string;
   description: string;

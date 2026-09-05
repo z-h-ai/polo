@@ -4,6 +4,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import {
   getAllSessionDrafts,
   getDefaultThinkingLevel,
+  getHomeQuickAccess,
   getHomeRecentApps,
   getOrganizationContextStorage,
   getProductSpaceContextStorage,
@@ -11,6 +12,7 @@ import {
   getSessionDraft,
   loadPreferences,
   setDefaultThinkingLevel,
+  setHomeQuickAccess,
   setHomeRecentApps,
   updateOrganizationContextStorage,
   updateProductSpaceContextStorage,
@@ -21,6 +23,9 @@ import {
 import type {
   HomeRecentAppPreference,
 } from '@polo-ai/shared/config/home-recent'
+import type {
+  HomeQuickAccessApp,
+} from '@polo-ai/shared/config/home-quick-access'
 import type {
   OrganizationContextStoragePatch,
 } from '@polo-ai/shared/config/organization-context'
@@ -43,6 +48,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.preferences.WRITE,
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS,
+  RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS,
   RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
@@ -235,6 +242,12 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
         next.homeRecentApps = current.homeRecentApps
       }
       if (
+        next.homeQuickAccess === undefined
+        && current.homeQuickAccess !== undefined
+      ) {
+        next.homeQuickAccess = current.homeQuickAccess
+      }
+      if (
         next.organizationContextStorage === undefined
         && current.organizationContextStorage !== undefined
       ) {
@@ -261,6 +274,20 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
       contextKey: string,
       apps: HomeRecentAppPreference[],
     ) => setHomeRecentApps(contextKey, apps),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS,
+    async (_ctx, contextKey: string) => getHomeQuickAccess(contextKey),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS,
+    async (
+      _ctx,
+      contextKey: string,
+      apps: HomeQuickAccessApp[],
+    ) => setHomeQuickAccess(contextKey, apps),
   )
 
   server.handle(

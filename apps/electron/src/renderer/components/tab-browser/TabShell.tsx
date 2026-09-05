@@ -1,7 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
-import { AddAppDialog } from './AddAppDialog'
 import { useTabShell } from '@/context/TabShellContext'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
@@ -18,7 +17,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function TabShell({ renderPolo }: TabShellProps) {
   const { activeTab, openTabs, activeTabId, activateHome, activateTab, closeTab } = useTabShell()
-  const [addAppOpen, setAddAppOpen] = useState(false)
 
   useEffect(() => {
     const root = document.documentElement
@@ -86,8 +84,7 @@ export function TabShell({ renderPolo }: TabShellProps) {
   return (
     <div className="h-full min-h-0 bg-background">
       <TabBar />
-      <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
-      <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
+      <TabContent renderPolo={renderPolo} />
     </div>
   )
 }
