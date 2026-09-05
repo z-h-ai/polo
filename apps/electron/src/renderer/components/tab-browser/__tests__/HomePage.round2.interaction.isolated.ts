@@ -832,6 +832,97 @@ describe('HomePage quick access (POO-43)', () => {
     expect(openUrl).toHaveBeenCalledTimes(2)
   })
 
+  it('opens members and publishing while the Catalog snapshot is still LOADING (accountId from committed context)', async () => {
+    // Observation eb19670d…: during initial Catalog load (no snapshot) the
+    // workflow lease account derives from the committed ProductSpaceContext
+    // authority — clicking must NOT be falsely rejected as stale.
+    const enterpriseHook = hookWithCatalog(enterpriseCatalogWith([]))
+    enterpriseHook.productSpace.activeProductSpace = {
+      id: 'enterprise-a',
+      enterpriseId: 'enterprise-a',
+      kind: 'enterprise',
+      name: 'Enterprise A',
+      role: 'manager',
+      accessMode: 'active',
+    } as never
+    appCatalogHook = {
+      ...enterpriseHook,
+      state: {
+        ...enterpriseHook.state,
+        catalog: null,
+        loading: true,
+      },
+    }
+    const pendingStatuses: Array<() => void> = []
+    adminGetStatus.mockImplementation(() => {
+      return new Promise(resolve => {
+        pendingStatuses.push(() => resolve({
+          loggedIn: true,
+          userId: 'account-a',
+          adminUrl: 'https://admin.example.com',
+        }))
+      })
+    })
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+    fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+    await waitFor(() => expect(pendingStatuses.length).toBe(2))
+
+    pendingStatuses.forEach(release => release())
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/enterprise/enterprise-a/members',
+      )
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/organization-apps?organizationId=enterprise-a',
+      )
+    })
+  })
+
+  it('opens members and publishing after a NETWORK_ERROR leaves the Catalog snapshot empty (accountId from committed context)', async () => {
+    // Observation eb19670d…: NETWORK_ERROR with catalog=null — the
+    // committed ProductSpaceContext authority still supplies the account, so
+    // both entries must open (the old fail-open fix no longer applies).
+    const enterpriseHook = hookWithCatalog(enterpriseCatalogWith([]))
+    enterpriseHook.productSpace.activeProductSpace = {
+      id: 'enterprise-a',
+      enterpriseId: 'enterprise-a',
+      kind: 'enterprise',
+      name: 'Enterprise A',
+      role: 'manager',
+      accessMode: 'active',
+    } as never
+    appCatalogHook = {
+      ...enterpriseHook,
+      state: {
+        ...enterpriseHook.state,
+        catalog: null,
+        loading: false,
+        errorCode: 'NETWORK_ERROR',
+      },
+    }
+    adminGetStatus.mockResolvedValue({
+      loggedIn: true,
+      userId: 'account-a',
+      adminUrl: 'https://admin.example.com',
+    })
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/enterprise/enterprise-a/members',
+      )
+    })
+    fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://admin.example.com/organization-apps?organizationId=enterprise-a',
+      )
+    })
+  })
+
   it('adds a shortcut through the manage dialog without installing', async () => {
     const appA: CatalogApp = {
       id: 'manage-app-a',

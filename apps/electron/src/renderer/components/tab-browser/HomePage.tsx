@@ -248,10 +248,11 @@ export function HomePage() {
   }
 
   // Authoritative committed-context lease for enterprise workflow jumps:
-  // account + enterprise + context key + the MONOTONIC contextVersion (it
-  // increases on every committed account/space change and never repeats, so
-  // an A→B→A round-trip that restores account/enterprise/contextKey still
-  // fails the re-verification).
+  // account (from the committed ProductSpaceContext authority — present even
+  // while the Catalog snapshot is loading or failed) + enterprise + context
+  // key + the MONOTONIC contextVersion (it increases on every committed
+  // account/space change and never repeats, so an A→B→A round-trip that
+  // restores account/enterprise/contextKey still fails the re-verification).
   interface EnterpriseWorkflowContextLease {
     accountId: string | undefined
     enterpriseId: string | null
@@ -270,7 +271,7 @@ export function HomePage() {
   // committed lease.
   useLayoutEffect(() => {
     liveLeaseRef.current = {
-      accountId: catalog.state.catalog?.accountId,
+      accountId: catalog.productSpace?.accountId,
       enterpriseId: activeProductSpace?.kind === 'enterprise'
         ? activeProductSpace.enterpriseId
         : null,
@@ -287,7 +288,7 @@ export function HomePage() {
   const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
     if (activeProductSpace?.kind !== 'enterprise') return
     const clickLease: EnterpriseWorkflowContextLease = {
-      accountId: catalog.state.catalog?.accountId,
+      accountId: catalog.productSpace?.accountId,
       enterpriseId: activeProductSpace.enterpriseId as string,
       contextKey: catalog.productSpace?.productSpaceContextKey,
       contextVersion: catalog.productSpace?.contextVersion,
