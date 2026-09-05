@@ -144,6 +144,8 @@ let setAvailableRelease = mock(async (
 }))
 let getProductSpaceInstallStates = mock(async (identities: any[]) =>
   identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+let getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+  identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
 let installProductSpaceBundle = mock(async (request: any) => ({
   appId: request.app.artifactInstanceId,
   scope: {
@@ -241,6 +243,8 @@ beforeEach(() => {
   }))
   getProductSpaceInstallStates = mock(async (identities: any[]) =>
     identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+  getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+    identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
   installProductSpaceBundle = mock(async (request: any) => ({
     appId: request.app.artifactInstanceId,
     scope: {
@@ -310,6 +314,8 @@ beforeEach(() => {
       localApps: {
         getProductSpaceInstallStates: (identities: any[]) =>
           getProductSpaceInstallStates(identities),
+        getProductSpaceWithdrawnInstallStates: (identities: any[]) =>
+          getProductSpaceWithdrawnInstallStates(identities),
         installProductSpaceBundle: (request: any) =>
           installProductSpaceBundle(request),
         uninstallProductSpaceBundle: (identity: any, options: any) =>
@@ -620,5 +626,127 @@ describe('useAppCatalog ProductSpace launch binding', () => {
       }),
       { preserveData: true },
     )
+  })
+})
+
+describe('withdrawn tombstones across sequential production refreshes', () => {
+  function strictEntry() {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      version: { versionId: 'version-a', version: '2.3.4' },
+      name: 'Bound App',
+      description: 'Bound to one artifact instance',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+      permissions: ['camera'],
+    }
+  }
+
+  it('keeps a stripped tombstone visible and uninstallable after the entry stops being distributed', async () => {
+    const api = window.electronAPI as any
+    const entries = [strictEntry()]
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'tombstone-revision-1',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries,
+    })
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      })) as any)
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    expect(result.current.state.catalog?.withdrawnApps ?? []).toHaveLength(0)
+
+    // Next refresh: the app stops being distributed (no entries at all).
+    entries.length = 0
+    await act(async () => {
+      await result.current.sync(true)
+    })
+
+    const tombstone = result.current.state.catalog?.withdrawnApps?.[0]
+    expect(tombstone).toBeTruthy()
+    expect(tombstone).toMatchObject({
+      id: 'catalog-entry-a',
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      catalogVersion: { versionId: 'version-a', version: '2.3.4' },
+      availability: 'withdrawn',
+      sourceNames: ['Studio A'],
+    })
+    // A tombstone explains — it never carries delivery credentials.
+    expect(tombstone?.currentRelease).toBeUndefined()
+    expect(tombstone?.remoteUrl).toBeUndefined()
+    expect(tombstone?.deliveryMode).toBe('resolve_launch')
+    expect(result.current.state.catalog?.apps).toHaveLength(0)
+
+    // The retained installation stays visible and uninstallable through the
+    // restricted withdrawn identity (account + space + artifact instance).
+    await waitFor(() => {
+      expect(result.current.getInstallState(tombstone!)?.state).toBe('installed')
+    })
+    expect(getProductSpaceWithdrawnInstallStates).toHaveBeenCalledWith([{
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+    }])
+
+    // A tombstone can never be opened.
+    await expect(result.current.resolveLaunch(tombstone!)).rejects.toThrow()
+
+    // Re-publication clears the tombstone and restores the live entry.
+    entries.push(strictEntry())
+    await act(async () => {
+      await result.current.sync(true)
+    })
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    expect(result.current.state.catalog?.withdrawnApps ?? []).toHaveLength(0)
+  })
+
+  it('does not inherit tombstones when the ProductSpace context changes', async () => {
+    const api = window.electronAPI as any
+    const entries = [strictEntry()]
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'tombstone-revision-2',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries,
+    })
+    const { result, rerender } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    entries.length = 0
+    await act(async () => {
+      await result.current.sync(true)
+    })
+    expect(result.current.state.catalog?.withdrawnApps).toHaveLength(1)
+
+    // Switch to another ProductSpace: nothing from the old space's snapshot
+    // may be carried into the new context.
+    productSpaceContextState = productSpaceContext('organization-b')
+    rerender(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog).toBeNull()
+    })
+    productSpaceContextState = productSpaceContext('organization-a')
   })
 })

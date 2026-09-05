@@ -658,6 +658,9 @@ describe('HomePage all-Apps view (POO-43)', () => {
       ...withdrawnApps[9_999]!,
       name: 'Installed Withdrawn',
       sortOrder: -1,
+      catalogEntryId: 'withdrawn-9999',
+      artifactInstanceId: 'artifact-withdrawn-9999',
+      catalogVersion: { versionId: 'version-withdrawn-9999', version: '1.0.0' },
     }
     const catalog = enterpriseCatalogWith(visibleApps, {
       appConfigVersion: 'maximum',
@@ -686,10 +689,20 @@ describe('HomePage all-Apps view (POO-43)', () => {
     appCatalogHook = hookWithCatalog(
       catalog,
       {
-        getStatus: (target: CatalogApp) => {
-          const scopeKey = appCatalogHook.scopeKeyForApp(target)
-          return statuses[scopeKey]
-        },
+        getInstallState: (target: CatalogApp) => target.id === installedWithdrawn.id
+          ? {
+              app: {
+                accountId: 'account-a',
+                productSpaceId: 'organization-a',
+                catalogEntryId: installedWithdrawn.catalogEntryId!,
+                artifactInstanceId: installedWithdrawn.artifactInstanceId!,
+                versionId: installedWithdrawn.catalogVersion!.versionId,
+                version: installedWithdrawn.catalogVersion!.version,
+              },
+              state: 'installed' as const,
+              currentVersion: '1.0.0',
+            }
+          : undefined,
       },
       { statuses },
     )
@@ -779,10 +792,17 @@ describe('HomePage all-Apps view (POO-43)', () => {
       enterpriseCatalogWith([], { withdrawnApps: [installedTombstone] }),
       {
         uninstallProductSpaceBundle,
-        getStatus: (target: CatalogApp) => target.id === 'gone-installed'
+        getInstallState: (target: CatalogApp) => target.id === 'gone-installed'
           ? {
-              appId: target.id,
-              status: 'installed' as const,
+              app: {
+                accountId: 'account-a',
+                productSpaceId: 'organization-a',
+                catalogEntryId: installedTombstone.catalogEntryId!,
+                artifactInstanceId: installedTombstone.artifactInstanceId!,
+                versionId: installedTombstone.catalogVersion!.versionId,
+                version: installedTombstone.catalogVersion!.version,
+              },
+              state: 'installed' as const,
               currentVersion: '1.5.0',
             }
           : undefined,
@@ -841,6 +861,37 @@ describe('HomePage copy and formatting', () => {
       'INVALID_SEMVER',
       'warning',
     )).not.toContain(secret)
+    // Space-aware failure copy: personal spaces never read as "organization".
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'NOT_AUTHORIZED', message: secret },
+      'open',
+      'personal',
+    )).toBe('此 App 的授权已结束')
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'NOT_AUTHORIZED', message: secret },
+      'open',
+      'enterprise',
+    )).toBe('你的组织已不再提供此 App。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'NETWORK_ERROR',
+      'error',
+      'personal',
+    )).toBe('Polo 无法连接服务器，暂时无法加载当前空间的 App。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'NETWORK_ERROR',
+      'error',
+      'enterprise',
+    )).toBe('Polo 无法连接服务器，暂时无法加载组织 App。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'MEMBERSHIP_REMOVED',
+      'error',
+      'personal',
+    )).toBe('你已无法访问此空间的 App')
   })
 
   it('formats install sizes through locale unit keys', async () => {

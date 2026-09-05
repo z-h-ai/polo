@@ -306,6 +306,47 @@ function productSpaceBundleScope(app: ProductSpaceAppIdentity): CatalogLocalAppS
   }
 }
 
+/**
+ * Shared installation projection for the authoritative (fresh-Catalog
+ * validated) and the restricted withdrawn-management channel: scope echo is
+ * verified per identity, and only non-secret install state is projected.
+ */
+function projectProductSpaceInstallStates(
+  apps: ProductSpaceAppIdentity[],
+  statuses: LocalAppRuntimeStatus[],
+): ProductSpaceAppInstallState[] {
+  return statuses.map((status, index) => {
+    const app = apps[index]!
+    const expectedScope = productSpaceBundleScope(app)
+    if (
+      status.scope?.kind !== 'catalog'
+      || status.scope.accountId !== expectedScope.accountId
+      || status.scope.organizationId !== expectedScope.organizationId
+      || status.scope.catalogAppId !== expectedScope.catalogAppId
+    ) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'ProductSpace installation state belongs to another App',
+      )
+    }
+    const installing = status.status === 'downloading'
+      || status.status === 'installing'
+      || status.installationStatus !== undefined
+    return {
+      app,
+      state: installing
+        ? 'installing'
+        : status.currentVersion
+        ? 'installed'
+        : 'not_installed',
+      ...(status.currentVersion ? { currentVersion: status.currentVersion } : {}),
+      ...(typeof status.progress?.percent === 'number'
+        ? { progressPercent: status.progress.percent }
+        : {}),
+    }
+  })
+}
+
 function assertProductSpaceAppOperationCurrent(app: ProductSpaceAppIdentity): void {
   assertScopeInsideActiveProductSpace(productSpaceBundleScope(app))
   if (
@@ -627,6 +668,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.INSTALL,
   RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
   RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
   RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
@@ -694,36 +736,51 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'ProductSpace installation state response is incomplete',
         )
       }
-      return statuses.map((status, index) => {
-        const app = apps[index]!
-        const expectedScope = scopes[index]!
-        if (
-          status.scope?.kind !== 'catalog'
-          || status.scope.accountId !== expectedScope.accountId
-          || status.scope.organizationId !== expectedScope.organizationId
-          || status.scope.catalogAppId !== expectedScope.catalogAppId
-        ) {
-          throw new LocalAppRuntimeError(
-            'NOT_AUTHORIZED',
-            'ProductSpace installation state belongs to another App',
-          )
-        }
-        const installing = status.status === 'downloading'
-          || status.status === 'installing'
-          || status.installationStatus !== undefined
-        return {
-          app,
-          state: installing
-            ? 'installing'
-            : status.currentVersion
-            ? 'installed'
-            : 'not_installed',
-          ...(status.currentVersion ? { currentVersion: status.currentVersion } : {}),
-          ...(typeof status.progress?.percent === 'number'
-            ? { progressPercent: status.progress.percent }
-            : {}),
-        }
-      })
+      return projectProductSpaceInstallStates(apps, statuses)
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    async (_ctx, rawApps: unknown): Promise<ProductSpaceAppInstallState[]> => {
+      if (
+        !Array.isArray(rawApps)
+        || rawApps.length === 0
+        || rawApps.length > MAX_CATALOG_STATUS_SCOPES
+      ) {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          `Between 1 and ${MAX_CATALOG_STATUS_SCOPES} withdrawn ProductSpace App identities are required`,
+        )
+      }
+      const apps = rawApps.map(validateProductSpaceAppIdentity)
+      const first = apps[0]!
+      if (apps.some(app => (
+        app.accountId !== first.accountId
+        || app.productSpaceId !== first.productSpaceId
+      ))) {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'A withdrawn ProductSpace App batch must target one account and ProductSpace',
+        )
+      }
+      // Restricted withdrawn-management gate: same trusted active-ProductSpace
+      // and account surface as every business RPC. Withdrawn entries are no
+      // longer listed in the fresh Catalog, so the authoritative-tuple
+      // revalidation cannot apply — this read-only installation projection
+      // (artifact-instance scoped, no delivery data involved) is the only way
+      // the member surface can see a retained installation for explanation
+      // and uninstall. It never enables install/start/open.
+      await assertProductSpaceAccountCurrent(first)
+      const scopes = apps.map(productSpaceBundleScope)
+      const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
+      if (statuses.length !== scopes.length) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Withdrawn ProductSpace installation state response is incomplete',
+        )
+      }
+      return projectProductSpaceInstallStates(apps, statuses)
     },
   )
 
@@ -788,12 +845,18 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   server.handle(
     RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
     async (_ctx, rawApp: unknown, options?: LocalAppUninstallOptions) => {
-      const { apps } = await loadAuthoritativeProductSpaceApps([rawApp])
-      const app = apps[0]!
-      await getScopedLocalAppRuntimeRegistry().uninstall(
-        productSpaceBundleScope(app),
-        options,
-      )
+      // Withdrawn-inclusive uninstall: a withdrawn App is no longer listed in
+      // the fresh Catalog, so the authoritative-tuple revalidation cannot
+      // apply. This restricted management path is limited to stop/uninstall/
+      // local-data cleanup — it never accepts renderer download or launch
+      // data, and install/start/open stay behind the fresh-Catalog
+      // availability checks. The scope is the trusted install identity
+      // (account + active ProductSpace + artifact instance).
+      const app = validateProductSpaceAppIdentity(rawApp)
+      await assertProductSpaceAccountCurrent(app)
+      const scope = productSpaceBundleScope(app)
+      await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
+      unregisterLocalAppExecutions(scope)
       await assertProductSpaceAccountCurrent(app)
     },
   )

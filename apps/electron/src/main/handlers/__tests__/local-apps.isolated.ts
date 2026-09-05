@@ -499,6 +499,98 @@ describe('local app main-process authorization boundary', () => {
     ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   })
 
+  it('projects withdrawn install states through the install identity without consulting the Catalog', async () => {
+    scopedStatuses.mockImplementationOnce(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'installed' as const,
+      currentVersion: '2.3.4',
+    })))
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    // The identity is NOT in the fresh Catalog (withdrawn) — the restricted
+    // withdrawn channel must project the retained installation from the
+    // artifact-instance-scoped install identity alone.
+    const states = await getWithdrawnStates(context, [productSpaceAppIdentity()])
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+    expect(scopedStatuses).toHaveBeenCalledWith([{
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'artifact-instance-a',
+    }])
+    expect(states).toEqual([{
+      app: productSpaceAppIdentity(),
+      state: 'installed',
+      currentVersion: '2.3.4',
+    }])
+  })
+
+  it('fails the withdrawn install-state channel closed on empty, cross-space, or signed-out batches', async () => {
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    await expect(getWithdrawnStates(context, []))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(getWithdrawnStates(context, [
+      productSpaceAppIdentity(),
+      { ...productSpaceAppIdentity(), productSpaceId: 'organization-b' },
+    ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+
+    signedInAccountId = null
+    await expect(getWithdrawnStates(context, [productSpaceAppIdentity()]))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    signedInAccountId = 'account-a'
+    setRuntimeActiveProductSpace('organization-b')
+    await expect(getWithdrawnStates(context, [productSpaceAppIdentity()]))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedStatuses).not.toHaveBeenCalled()
+  })
+
+  it('uninstalls a withdrawn retained installation without fresh-Catalog validation', async () => {
+    scopedStatuses.mockImplementation(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'installed' as const,
+      currentVersion: '2.3.4',
+    })))
+    // The withdrawn tombstone is NOT in the fresh Catalog mock (which still
+    // only lists catalog-entry-a under a DIFFERENT identity) — uninstall must
+    // succeed through the restricted stop/uninstall/local-data path.
+    const staleCatalogIdentity = {
+      ...productSpaceAppIdentity(),
+      artifactInstanceId: 'artifact-never-installed',
+      versionId: 'version-a-old',
+      version: '2.0.0',
+    }
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    await uninstall(context, staleCatalogIdentity, { preserveData: true })
+
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'artifact-never-installed',
+    }, { preserveData: true })
+  })
+
+  it('fails withdrawn uninstall closed when signed out or outside the active ProductSpace', async () => {
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    signedInAccountId = null
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+
+    signedInAccountId = 'account-a'
+    setRuntimeActiveProductSpace('organization-b')
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+  })
+
   it('validates a full 10,000-identity batch against a 10,000-entry Catalog in one pass', async () => {
     try {
       const count = 10_000

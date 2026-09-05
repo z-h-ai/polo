@@ -614,6 +614,7 @@ export interface ElectronAPI {
     install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
     installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp>
     getProductSpaceInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    getProductSpaceWithdrawnInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
     uninstallProductSpaceBundle(
       app: ProductSpaceAppIdentity,
       options?: LocalAppUninstallOptions,

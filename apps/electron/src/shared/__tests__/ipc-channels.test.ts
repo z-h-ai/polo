@@ -161,6 +161,7 @@ const EXPECTED_CHANNELS: string[] = [
   'local-apps:getInstalledApps',
   'local-apps:getLogs',
   'local-apps:getProductSpaceInstallStates',
+  'local-apps:getProductSpaceWithdrawnInstallStates',
   'local-apps:getRuntimeStatus',
   'local-apps:getRuntimeStatuses',
   'local-apps:install',

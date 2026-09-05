@@ -35,17 +35,22 @@ export function ProductSpaceProvider({
   value: ProductSpaceContextValue
 }) {
   // The sealed launch handoff store is bound to the authoritative live
-  // ProductSpace identity AND this provider's lifetime. The cleanup runs
-  // BEFORE the next context binds: on an account/space switch it clears the
-  // old pending handoffs first, and on unmount (sign-out, window teardown)
-  // it leaves no live context behind — sealed handles can no longer be taken
-  // and old closures can no longer publish for a signed-out account.
+  // ProductSpace identity. The invalidation runs at the RENDER boundary —
+  // before the committing subtree's layout or passive effects can run — so a
+  // consumer mounted under the NEW context can never take a handoff that was
+  // sealed under the previous one (child layout effects run before any
+  // provider effect, so an effect-only binding leaves a takeover window).
+  // The sync is idempotent per (account, space): re-renders with the same
+  // context are no-ops. A discarded concurrent render only clears sealed
+  // launches (fail closed); the next render re-affirms the committed context.
+  const handoffContext = value.accountId && value.activeProductSpaceId
+    ? { accountId: value.accountId, productSpaceId: value.activeProductSpaceId }
+    : null
+  syncProductSpaceLaunchHandoffContext(handoffContext)
+  // Passive effect: re-affirm after commit and clear on unmount/sign-out —
+  // the render-phase sync above can never run for an unmounted provider.
   useEffect(() => {
-    syncProductSpaceLaunchHandoffContext(
-      value.accountId && value.activeProductSpaceId
-        ? { accountId: value.accountId, productSpaceId: value.activeProductSpaceId }
-        : null,
-    )
+    syncProductSpaceLaunchHandoffContext(handoffContext)
     return () => {
       syncProductSpaceLaunchHandoffContext(null)
     }

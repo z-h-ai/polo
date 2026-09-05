@@ -44,7 +44,7 @@ function renderView(apps: CatalogApp[], options: {
   installedId?: string
   loading?: boolean
   errorCode?: string | null
-  retainedCurrentVersionIds?: string[]
+  retainedInstalledIds?: string[]
 } = {}) {
   const handlers = {
     onRefresh: jest.fn(),
@@ -65,16 +65,8 @@ function renderView(apps: CatalogApp[], options: {
       errorCode: options.errorCode ?? null,
       offline: false,
       scopeKeyForApp,
-      getStatus: (target: CatalogApp) => (
-        options.retainedCurrentVersionIds?.includes(target.id)
-          ? {
-              appId: target.id,
-              status: 'installed' as const,
-              currentVersion: '1.0.0',
-            }
-          : undefined
-      ),
-      getInstallState: (target: CatalogApp) => target.id === options.installedId ? {
+      getInstallState: (target: CatalogApp) => target.id === options.installedId
+        || options.retainedInstalledIds?.includes(target.id) ? {
         app: {
           accountId: 'account-a',
           productSpaceId: 'space-a',
@@ -247,7 +239,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         }),
       ], {
         spaceKind,
-        retainedCurrentVersionIds: ['gone-installed'],
+        retainedInstalledIds: ['gone-installed'],
       })
 
       expect(screen.getAllByTestId('all-apps-row')).toHaveLength(3)
@@ -298,7 +290,6 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         errorCode: null,
         offline: false,
         getInstallState: () => undefined,
-        getStatus: () => undefined,
         scopeKeyForApp,
         onRefresh: () => {},
         onOpen: () => {},

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement } from 'react'
+import { createElement, useLayoutEffect } from 'react'
 import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import {
   onProductSpaceAppLaunch,
@@ -186,6 +186,46 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
 
     expect(takeProductSpaceAppLaunch(first.handoffId, expectedContext)).toBeNull()
     expect(takeProductSpaceAppLaunch(second.handoffId, expectedContext)).toBeNull()
+  })
+
+  it('invalidates sealed handoffs before a NEW context subtree layout consumer can take them', async () => {
+    // A layout effect inside the newly committed B subtree runs BEFORE the
+    // provider's passive effect (and its cleanup). The takeover attempt with
+    // the stale A-context tuple must already fail there.
+    let takenDuringNewContextLayout: unknown = 'not-run'
+    function LayoutTakeoverChild() {
+      useLayoutEffect(() => {
+        takenDuringNewContextLayout = takeProductSpaceAppLaunch(
+          sealedForLayoutTakeover!.handoffId,
+          expectedContext,
+        )
+      }, [])
+      return null
+    }
+    let sealedForLayoutTakeover: ProductSpaceAppLaunchRequest | null = null
+    const unsubscribe = onProductSpaceAppLaunch(request => {
+      sealedForLayoutTakeover = request
+    })
+
+    const view = render(createElement(ProductSpaceProvider, {
+      value: providerValue(),
+      children: createElement(ProbeChild),
+    }))
+    fireEventClick('handoff-probe-publish')
+    expect(sealedForLayoutTakeover).not.toBeNull()
+    unsubscribe()
+
+    // Commit the B context with a layout-phase consumer attempting the
+    // stale takeover.
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b' }),
+      children: createElement(LayoutTakeoverChild),
+    }))
+
+    expect(takenDuringNewContextLayout).toBeNull()
+    // And it stays dead afterwards.
+    expect(takeProductSpaceAppLaunch(sealedForLayoutTakeover!.handoffId, expectedContext)).toBeNull()
+    view.unmount()
   })
 })
 

@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CatalogApp } from '@polo-ai/shared/admin'
-import type {
-  LocalAppRuntimeStatus,
-  ProductSpaceAppInstallState,
-} from '@polo-ai/shared/protocol'
+import type { ProductSpaceAppInstallState } from '@polo-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useCompactViewport } from '@/lib/use-compact-viewport'
@@ -48,7 +45,6 @@ interface AllAppsViewProps {
   errorCode: string | null
   offline: boolean
   getInstallState: (app: CatalogApp) => ProductSpaceAppInstallState | undefined
-  getStatus: (app: CatalogApp) => LocalAppRuntimeStatus | undefined
   scopeKeyForApp: (app: CatalogApp) => string
   onRefresh: () => void
   onOpen: (app: CatalogApp) => void
@@ -115,12 +111,31 @@ function AppAvailability({
   return <span className="text-[11px] text-muted-foreground">{label}</span>
 }
 
+/**
+ * Shared row/inspector policy: a row is unavailable when the Catalog does
+ * not offer it as available (or the session is offline), and the uninstall
+ * entry exists exactly while the member retains an installation on this
+ * device (including installed withdrawn tombstones — their install state is
+ * projected through the restricted withdrawn-management identity).
+ */
+export function isCatalogAppUnavailable(
+  app: Pick<CatalogApp, 'availability'>,
+  offline: boolean,
+): boolean {
+  return app.availability !== 'available' || offline
+}
+
+export function isCatalogAppUninstallable(
+  installState?: ProductSpaceAppInstallState,
+): boolean {
+  return installState?.state === 'installed'
+}
+
 function AppDetail({
   app,
   installState,
   offline,
   spaceKind,
-  getStatus,
   onOpen,
   onUninstall,
 }: {
@@ -128,21 +143,13 @@ function AppDetail({
   installState?: ProductSpaceAppInstallState
   offline: boolean
   spaceKind: 'personal' | 'enterprise' | null
-  getStatus: (app: CatalogApp) => LocalAppRuntimeStatus | undefined
   onOpen: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
 }) {
   const { t } = useTranslation()
   const source = app.creatorName?.trim() || t('homeApps.allApps.unknownSource')
-  const unavailable = app.availability !== 'available' || offline
-  // A withdrawn tombstone keeps its uninstall entry while an installation is
-  // still retained on this device (installation state, or the retained
-  // runtime status the Catalog hook keeps for withdrawn entries).
-  const uninstallable = installState?.state === 'installed'
-    || (
-      app.availability !== 'available'
-      && Boolean(getStatus(app)?.currentVersion)
-    )
+  const unavailable = isCatalogAppUnavailable(app, offline)
+  const uninstallable = isCatalogAppUninstallable(installState)
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="all-apps-inspector-body">
       <div className="flex items-start gap-3">
@@ -214,7 +221,6 @@ function AllAppsRow({
   installState,
   offline,
   spaceKind,
-  getStatus,
   onSelect,
   onOpen,
   onUninstall,
@@ -226,19 +232,14 @@ function AllAppsRow({
   installState?: ProductSpaceAppInstallState
   offline: boolean
   spaceKind: 'personal' | 'enterprise' | null
-  getStatus: (app: CatalogApp) => LocalAppRuntimeStatus | undefined
   onSelect: (scopeKey: string) => void
   onOpen: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
 }) {
   const { t } = useTranslation()
   const source = app.creatorName?.trim() || t('homeApps.allApps.unknownSource')
-  const unavailable = app.availability !== 'available' || offline
-  const uninstallable = installState?.state === 'installed'
-    || (
-      app.availability !== 'available'
-      && Boolean(getStatus(app)?.currentVersion)
-    )
+  const unavailable = isCatalogAppUnavailable(app, offline)
+  const uninstallable = isCatalogAppUninstallable(installState)
   return (
     <article
       className={cn(
@@ -286,7 +287,6 @@ function AllAppsRow({
             installState={installState}
             offline={offline}
             spaceKind={spaceKind}
-            getStatus={getStatus}
             onOpen={onOpen}
             onUninstall={onUninstall}
           />
@@ -306,7 +306,6 @@ export function AllAppsView({
   errorCode,
   offline,
   getInstallState,
-  getStatus,
   scopeKeyForApp,
   onRefresh,
   onOpen,
@@ -402,7 +401,7 @@ export function AllAppsView({
         <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
           {offline
             ? t('homeApps.organization.offlineWarning')
-            : catalogStateMessage(t, warningCode, 'warning')}
+            : catalogStateMessage(t, warningCode, 'warning', spaceKind)}
         </div>
       )}
 
@@ -415,7 +414,7 @@ export function AllAppsView({
             {t('homeApps.allApps.loadFailed')}
           </p>
           <p className="mt-1 max-w-md text-xs text-muted-foreground">
-            {catalogStateMessage(t, errorCode, 'error')}
+            {catalogStateMessage(t, errorCode, 'error', spaceKind)}
           </p>
           <Button type="button" size="sm" variant="secondary" className="mt-4" onClick={onRefresh}>
             {t('homeApps.actions.tryAgain')}
@@ -456,7 +455,6 @@ export function AllAppsView({
                         installState={getInstallState(app)}
                         offline={offline}
                         spaceKind={spaceKind}
-                        getStatus={getStatus}
                         onSelect={setSelectedScopeKey}
                         onOpen={onOpen}
                         onUninstall={onUninstall}
@@ -479,7 +477,6 @@ export function AllAppsView({
                 installState={getInstallState(selectedApp)}
                 offline={offline}
                 spaceKind={spaceKind}
-                getStatus={getStatus}
                 onOpen={onOpen}
                 onUninstall={onUninstall}
               />

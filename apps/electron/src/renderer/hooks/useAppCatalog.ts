@@ -99,6 +99,7 @@ export function selectCreatorCircleRelations(
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
 export const CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT = 2
+export const MAX_WITHDRAWN_TOMBSTONES = 10_000
 export const BUSY_RUNTIME_STATUS_POLL_INTERVAL_MS = 500
 
 export interface BusyStatusPollRequest {
@@ -392,6 +393,77 @@ function mapProductSpaceCatalogToCacheEntry(
   }
 }
 
+function withdrawnTombstoneIdentityKey(
+  catalogEntryId: unknown,
+  artifactInstanceId: unknown,
+  version: { versionId?: unknown; version?: unknown } | undefined,
+): string {
+  return JSON.stringify([
+    typeof catalogEntryId === 'string' ? catalogEntryId : null,
+    typeof artifactInstanceId === 'string' ? artifactInstanceId : null,
+    version && typeof version === 'object'
+      ? [version.versionId ?? null, version.version ?? null]
+      : null,
+  ])
+}
+
+/**
+ * Same-space Catalog refresh diff: an entry verified in the previous
+ * snapshot that no longer appears in the fresh server Catalog becomes a
+ * withdrawn tombstone so a stopped distribution never disappears without a
+ * trace for members who can still see (and uninstall) a retained
+ * installation. Only the verified previous snapshot of the SAME account and
+ * ProductSpace is diffed — the sync context guards guarantee that; an
+ * account or space change starts from an empty snapshot and inherits
+ * nothing. Tombstones keep the full entry identity (catalogEntryId,
+ * artifactInstanceId, version, sources) and carry NO delivery credentials:
+ * release download metadata and remote URLs are stripped, so a tombstone can
+ * explain and uninstall but never run.
+ */
+export function synthesizeWithdrawnTombstones(
+  previous: AppCatalogCacheEntry | null,
+  nextEntries: ReadonlyArray<Record<string, unknown>>,
+): CatalogApp[] {
+  if (!previous || previous.authorizationStatus !== 'authorized') return []
+  const nextIdentities = new Set<string>()
+  for (const rawEntry of nextEntries) {
+    const entry = rawEntry as {
+      catalogEntryId?: unknown
+      artifactInstanceId?: unknown
+      version?: { versionId?: unknown; version?: unknown }
+    }
+    nextIdentities.add(withdrawnTombstoneIdentityKey(
+      entry.catalogEntryId,
+      entry.artifactInstanceId,
+      entry.version,
+    ))
+  }
+  const tombstones: CatalogApp[] = []
+  for (const app of [...previous.apps, ...(previous.withdrawnApps ?? [])]) {
+    if (tombstones.length >= MAX_WITHDRAWN_TOMBSTONES) break
+    const identity = withdrawnTombstoneIdentityKey(
+      app.catalogEntryId ?? app.id,
+      app.artifactInstanceId,
+      app.catalogVersion,
+    )
+    // An identity that returned to the Catalog is live again — no tombstone.
+    if (nextIdentities.has(identity)) continue
+    if (app.availability === 'withdrawn') {
+      tombstones.push(app)
+      continue
+    }
+    tombstones.push({
+      ...app,
+      availability: 'withdrawn',
+      unavailableReason: undefined,
+      deliveryMode: 'resolve_launch',
+      currentRelease: undefined,
+      remoteUrl: undefined,
+    })
+  }
+  return tombstones
+}
+
 export function useAppCatalog() {
   const productSpace = useOptionalProductSpaceContext()
   const catalogContextKey = productSpace?.productSpaceContextKey ?? null
@@ -478,14 +550,42 @@ export function useAppCatalog() {
       // Installation state is secondary to Catalog visibility. A malformed
       // or stale identity fails this cache read closed without turning a
       // successfully loaded Catalog into a page-level failure.
-      const identities = apps.map(app => identityForProductSpaceApp(catalog, app))
-      if (identities.length === 0) {
+      const activeIdentities: ProductSpaceAppIdentity[] = []
+      const withdrawnIdentities: ProductSpaceAppIdentity[] = []
+      for (const app of apps) {
+        if (app.availability === 'withdrawn') {
+          // A withdrawn tombstone is no longer in the fresh Catalog, so the
+          // authoritative-tuple channel would fail the whole batch closed.
+          // Its retained local installation is read through the restricted
+          // withdrawn-management identity (artifact instance scope) instead;
+          // an identity that cannot be built is skipped, never fatal.
+          try {
+            withdrawnIdentities.push(identityForProductSpaceApp(catalog, app))
+          } catch {
+            continue
+          }
+          continue
+        }
+        activeIdentities.push(identityForProductSpaceApp(catalog, app))
+      }
+      if (activeIdentities.length === 0 && withdrawnIdentities.length === 0) {
         setState(current => ({ ...current, installStates: {} }))
         return
       }
-      const states = await window.electronAPI.localApps.getProductSpaceInstallStates(identities)
+      const [activeStates, withdrawnStates] = await Promise.all([
+        activeIdentities.length > 0
+          ? window.electronAPI.localApps.getProductSpaceInstallStates(activeIdentities)
+          : Promise.resolve([]),
+        withdrawnIdentities.length > 0
+          ? window.electronAPI.localApps.getProductSpaceWithdrawnInstallStates(withdrawnIdentities)
+          : Promise.resolve([]),
+      ])
       if (!isCurrentSnapshot(snapshot)) return
-      const requested = new Map(identities.map(identity => [identity.catalogEntryId, identity]))
+      const states = [...activeStates, ...withdrawnStates]
+      const requested = new Map<string, ProductSpaceAppIdentity>()
+      for (const identity of [...activeIdentities, ...withdrawnIdentities]) {
+        requested.set(identity.catalogEntryId, identity)
+      }
       const next: Record<string, ProductSpaceAppInstallState> = {}
       for (const installState of states) {
         const expected = requested.get(installState.app.catalogEntryId)
@@ -494,7 +594,7 @@ export function useAppCatalog() {
         }
         next[installState.app.catalogEntryId] = installState
       }
-      if (Object.keys(next).length !== identities.length) {
+      if (Object.keys(next).length !== requested.size) {
         throw new Error(i18n.t('homeApps.errors.staleContext'))
       }
       setState(current => isCurrentSnapshot(snapshot)
@@ -821,6 +921,17 @@ export function useAppCatalog() {
         accessMode: catalogResult.accessMode ?? 'online',
         warningCode: catalogResult.warningCode ?? null,
       }
+      // Same-space refresh diff: entries verified in the previous snapshot
+      // that the fresh Catalog no longer lists become withdrawn tombstones
+      // (identity retained, delivery credentials stripped). catalogRef here
+      // is guaranteed to be the same account+space snapshot.
+      const carriedTombstones = synthesizeWithdrawnTombstones(
+        catalogRef.current,
+        catalogResult.entries,
+      )
+      if (carriedTombstones.length > 0) {
+        result.catalog = { ...result.catalog, withdrawnApps: carriedTombstones }
+      }
       // REQ-022: creator_circle sources of the active space's Catalog are
       // the account's visible CreatorCircle relations.
       const creatorCircles = selectCreatorCircleRelations(catalogResult.entries)
@@ -869,7 +980,7 @@ export function useAppCatalog() {
         snapshot,
         'replace',
       )
-      await refreshProductSpaceInstallStates(result.catalog.apps, snapshot)
+      await refreshProductSpaceInstallStates(getAppCatalogApps(result.catalog), snapshot)
     } catch (error) {
       if (
         syncGeneration !== syncGenerationRef.current
@@ -1390,7 +1501,7 @@ export function useAppCatalog() {
         || installed.scope.catalogAppId !== identity.artifactInstanceId
         || installed.currentVersion !== identity.version
       ) throw new Error(i18n.t('homeApps.errors.staleContext'))
-      await refreshProductSpaceInstallStates(snapshot.catalog.apps, snapshot)
+      await refreshProductSpaceInstallStates(getAppCatalogApps(snapshot.catalog), snapshot)
       return installed
     })
   }, [
@@ -1415,7 +1526,7 @@ export function useAppCatalog() {
         { preserveData },
       )
       requireCurrent(snapshot)
-      await refreshProductSpaceInstallStates(snapshot.catalog.apps, snapshot)
+      await refreshProductSpaceInstallStates(getAppCatalogApps(snapshot.catalog), snapshot)
     })
   }, [
     currentSnapshotForApp,

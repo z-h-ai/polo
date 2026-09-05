@@ -142,6 +142,7 @@ export function HomePage() {
   const [preserveData, setPreserveData] = useState(true)
 
   const activeProductSpace = catalog.productSpace?.activeProductSpace
+  const spaceKind = activeProductSpace?.kind ?? null
   const quickContextKey = createHomeQuickAccessContextKey(
     catalog.productSpace?.productSpaceContextKey,
   )
@@ -316,7 +317,7 @@ export function HomePage() {
       publishProductSpaceAppLaunch(accountId, launch)
     } catch (error) {
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'open'),
+        description: homeAppOperationErrorText(t, error, 'open', spaceKind),
       })
     }
   }
@@ -339,7 +340,7 @@ export function HomePage() {
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
-          description: homeAppOperationErrorText(t, error, 'install'),
+          description: homeAppOperationErrorText(t, error, 'install', spaceKind),
         })
       }
     }
@@ -354,7 +355,7 @@ export function HomePage() {
       toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
     } catch (error) {
       toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'uninstall'),
+        description: homeAppOperationErrorText(t, error, 'uninstall', spaceKind),
       })
     } finally {
       setPreserveData(true)
@@ -415,7 +416,6 @@ export function HomePage() {
             offline={catalog.state.accessMode === 'offline'}
             scopeKeyForApp={catalog.scopeKeyForApp}
             getInstallState={catalog.getInstallState}
-            getStatus={catalog.getStatus}
             onRefresh={() => { void catalog.sync(true) }}
             onOpen={(target) => { void openCatalogApp(target) }}
             onUninstall={setUninstallTarget}
@@ -484,7 +484,7 @@ export function HomePage() {
                   <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
                   <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
                   <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                    {catalogStateMessage(t, catalog.state.errorCode, 'error')}
+                    {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
                   </p>
                   <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => { void catalog.sync(true) }}>
                     {t('homeApps.actions.tryAgain')}

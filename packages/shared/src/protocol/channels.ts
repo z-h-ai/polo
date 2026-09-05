@@ -168,6 +168,7 @@ export const RPC_CHANNELS = {
     INSTALL: 'local-apps:install',
     INSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:installProductSpaceBundle',
     GET_PRODUCT_SPACE_INSTALL_STATES: 'local-apps:getProductSpaceInstallStates',
+    GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES: 'local-apps:getProductSpaceWithdrawnInstallStates',
     UNINSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:uninstallProductSpaceBundle',
     CANCEL_INSTALL: 'local-apps:cancelInstall',
     START: 'local-apps:start',
