@@ -415,6 +415,7 @@ export function HomePage() {
             warningCode={catalog.state.warningCode}
             errorCode={catalog.state.errorCode}
             offline={catalog.state.accessMode === 'offline'}
+            restricted={catalog.state.accessMode === 'denied'}
             scopeKeyForApp={catalog.scopeKeyForApp}
             getInstallState={catalog.getInstallState}
             onRefresh={() => { void catalog.sync(true) }}

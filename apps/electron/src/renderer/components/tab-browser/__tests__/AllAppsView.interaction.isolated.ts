@@ -46,6 +46,7 @@ function renderView(apps: CatalogApp[], options: {
   errorCode?: string | null
   retainedInstalledIds?: string[]
   offline?: boolean
+  restricted?: boolean
 } = {}) {
   const handlers = {
     onRefresh: jest.fn(),
@@ -65,6 +66,7 @@ function renderView(apps: CatalogApp[], options: {
       warningCode: null,
       errorCode: options.errorCode ?? null,
       offline: options.offline ?? false,
+      restricted: options.restricted ?? false,
       scopeKeyForApp,
       getInstallState: (target: CatalogApp) => target.id === options.installedId
         || options.retainedInstalledIds?.includes(target.id) ? {
@@ -294,6 +296,40 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     }
   })
 
+  it('surfaces cached-catalog refresh failures and restricted views without relaxing fail-closed gates', () => {
+    // Cached rows + refresh failure: stale-catalog banner, rows stay
+    // visible, opens stay DISABLED (offline-cached rows are not launchable).
+    renderView([app('a')], { errorCode: 'NETWORK_ERROR', offline: true })
+    const staleBanner = screen.getByTestId('all-apps-stale-catalog-banner')
+    // The banner only promises the last verified catalog view — never
+    // offline opens.
+    expect(staleBanner.textContent).toContain('last verified catalog')
+    expect((screen.getByTestId('all-apps-action-a') as HTMLButtonElement).disabled).toBe(true)
+    cleanup()
+
+    // Cached rows + generic refresh failure (online): stale banner shows,
+    // opens stay available (the cached rows are still authorized).
+    renderView([app('a')], { errorCode: 'request_failed' })
+    expect(screen.getByTestId('all-apps-stale-catalog-banner').textContent).toContain(
+      'last verified catalog',
+    )
+    expect((screen.getByTestId('all-apps-action-a') as HTMLButtonElement).disabled).toBe(false)
+    cleanup()
+
+    // Denied snapshot: space-aware restricted banner; opens stay disabled.
+    for (const spaceKind of ['personal', 'enterprise'] as const) {
+      renderView([app('a', { availability: 'unavailable' })], {
+        spaceKind,
+        restricted: true,
+        errorCode: 'FORBIDDEN',
+      })
+      const banner = screen.getByTestId('all-apps-restricted-banner')
+      expect(banner.textContent.toLowerCase()).toContain('access')
+      expect((screen.getByTestId('all-apps-action-a') as HTMLButtonElement).disabled).toBe(true)
+      cleanup()
+    }
+  })
+
   it('renders loading and failure states without inventing runtime state', () => {
     const { unmount } = render(createElement(
       I18nextProvider,
@@ -307,6 +343,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         warningCode: null,
         errorCode: null,
         offline: false,
+        restricted: false,
         getInstallState: () => undefined,
         scopeKeyForApp,
         onRefresh: () => {},

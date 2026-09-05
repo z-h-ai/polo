@@ -24,6 +24,7 @@ import {
   type ProductSpaceAppIdentity,
   type ProductSpaceAppInstallState,
 } from '@polo-ai/shared/protocol'
+import { createLocalAppScopeKey as createIdentityScopeKey } from '@polo-ai/shared/protocol'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
   isProductSpaceContractUnsupported,
@@ -510,22 +511,33 @@ export function useAppCatalog() {
       ])
       if (!isCurrentSnapshot(snapshot)) return
       const states = [...activeStates, ...withdrawnStates]
-      // Keyed by catalogEntryId; a live entry always wins its key so an
-      // active/withdrawn overlap can never fail the echo check stale.
+      // Keyed by the authority's collision-free stable identity (scope key
+      // over accountId + productSpaceId + artifactInstanceId) — NEVER by
+      // catalogEntryId alone, so a live entry and a withdrawn tombstone that
+      // happen to share a catalogEntryId can never overwrite each other.
+      const identityScopeKey = (identity: ProductSpaceAppIdentity): string => (
+        createIdentityScopeKey({
+          kind: 'catalog',
+          accountId: identity.accountId,
+          organizationId: identity.productSpaceId,
+          catalogAppId: identity.artifactInstanceId,
+        })
+      )
       const requested = new Map<string, ProductSpaceAppIdentity>()
       for (const identity of withdrawnIdentities) {
-        requested.set(identity.catalogEntryId, identity)
+        requested.set(identityScopeKey(identity), identity)
       }
+      // A live entry always wins its identity key over a withdrawn one.
       for (const identity of activeIdentities) {
-        requested.set(identity.catalogEntryId, identity)
+        requested.set(identityScopeKey(identity), identity)
       }
       const next: Record<string, ProductSpaceAppInstallState> = {}
       for (const installState of states) {
-        const expected = requested.get(installState.app.catalogEntryId)
+        const expected = requested.get(identityScopeKey(installState.app))
         if (!expected || JSON.stringify(expected) !== JSON.stringify(installState.app)) {
           throw new Error(i18n.t('homeApps.errors.staleContext'))
         }
-        next[installState.app.catalogEntryId] = installState
+        next[identityScopeKey(installState.app)] = installState
       }
       if (Object.keys(next).length !== requested.size) {
         throw new Error(i18n.t('homeApps.errors.staleContext'))
@@ -1411,7 +1423,10 @@ export function useAppCatalog() {
   const installProductSpaceBundle = useCallback((app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)
     const identity = identityForProductSpaceApp(snapshot.catalog, app)
-    const operationKey = `product-space:${identity.catalogEntryId}`
+    // Collision-free operation key: full identity, never catalogEntryId
+    // alone (a reused entry id across artifact instances must not merge
+    // lifecycle operations).
+    const operationKey = `product-space:${identity.artifactInstanceId}:${identity.catalogEntryId}:${identity.versionId}`
     return runExclusive(operationKey, 'install', async () => {
       if (state.accessMode !== 'online' || app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
@@ -1445,7 +1460,7 @@ export function useAppCatalog() {
   ) => {
     const snapshot = currentSnapshotForApp(app)
     const identity = identityForProductSpaceApp(snapshot.catalog, app)
-    const operationKey = `product-space:${identity.catalogEntryId}`
+    const operationKey = `product-space:${identity.artifactInstanceId}:${identity.catalogEntryId}:${identity.versionId}`
     return runExclusive(operationKey, 'uninstall', async () => {
       requireCurrent(snapshot)
       await window.electronAPI.localApps.uninstallProductSpaceBundle(
@@ -1462,9 +1477,25 @@ export function useAppCatalog() {
     runExclusive,
   ])
 
-  const getInstallState = useCallback((app: CatalogApp) => (
-    app.catalogEntryId ? state.installStates[app.catalogEntryId] : undefined
-  ), [state.installStates])
+  const getInstallState = useCallback((app: CatalogApp): ProductSpaceAppInstallState | undefined => {
+    // Look up by the collision-free artifact identity scope key — a live
+    // entry and a withdrawn tombstone that share a catalogEntryId keep
+    // separate install states.
+    const catalog = catalogRef.current
+    if (!catalog || !app.artifactInstanceId) return undefined
+    try {
+      const snapshot = currentSnapshotForApp(app)
+      const identityScopeKey = createIdentityScopeKey({
+        kind: 'catalog',
+        accountId: snapshot.catalog.accountId,
+        organizationId: snapshot.catalog.organizationId,
+        catalogAppId: app.artifactInstanceId,
+      })
+      return state.installStates[identityScopeKey]
+    } catch {
+      return undefined
+    }
+  }, [currentSnapshotForApp, state.installStates])
 
   const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
     try {

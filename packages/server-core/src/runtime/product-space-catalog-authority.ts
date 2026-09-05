@@ -79,56 +79,86 @@ const AUTHORITY_AVAILABILITY = new Set(['available', 'unavailable', 'blocked', '
 const AUTHORITY_UNAVAILABLE_REASONS = new Set([
   'authorization_ended', 'space_restricted', 'version_unavailable', 'version_blocked',
 ])
-const AUTHORITY_SOURCE_KINDS = new Set(['polo', 'creator_circle', 'enterprise_import'])
 const MAX_AUTHORITY_ENTRY_SOURCES = 1_000
 const MAX_AUTHORITY_ENTRY_PERMISSIONS = 1_000
+// Shared opaque-ID / nonBlankString contracts (ids.ts + schemas.ts).
+const MAX_AUTHORITY_ID_LENGTH = 512
+const MAX_AUTHORITY_NAME_LENGTH = 256
+const MAX_AUTHORITY_DESCRIPTION_LENGTH = 4_096
+const MAX_AUTHORITY_PERMISSION_LENGTH = 512
+const MAX_AUTHORITY_SOURCE_NAME_LENGTH = 256
+const MAX_AUTHORITY_CIRCLE_ID_LENGTH = 512
+
+function isAuthorityNonBlankString(value: unknown, maxLength: number): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= maxLength
+    && value.trim().length > 0
+}
+
+/**
+ * Strict mirror of the shared Catalog source discriminated union
+ * (polo | creator_circle | enterprise_import): required fields present,
+ * forbidden fields absent, per-kind name/circleId contracts enforced.
+ */
+function isValidAuthoritySource(source: unknown): boolean {
+  if (!source || typeof source !== 'object') return false
+  const candidate = source as Record<string, unknown>
+  const extraKeys = Object.keys(candidate).filter(key => !['kind', 'name', 'circleId'].includes(key))
+  if (extraKeys.length > 0) return false
+  if (!isAuthorityNonBlankString(candidate.kind, MAX_AUTHORITY_CIRCLE_ID_LENGTH)) return false
+  if (!isAuthorityNonBlankString(candidate.name, MAX_AUTHORITY_SOURCE_NAME_LENGTH)) return false
+  switch (candidate.kind) {
+    case 'polo':
+      // Polo sources are branded: the name is fixed and no circleId exists.
+      return candidate.name === 'Polo' && candidate.circleId === undefined
+    case 'creator_circle':
+      // Circle sources REQUIRE a circleId.
+      return isAuthorityNonBlankString(candidate.circleId, MAX_AUTHORITY_CIRCLE_ID_LENGTH)
+    case 'enterprise_import':
+      // Enterprise imports carry no circleId.
+      return candidate.circleId === undefined
+    default:
+      return false
+  }
+}
 
 /**
  * FULL authority DTO validation (mirror of the ProductSpace Catalog entry
  * contract, post-credential-strip): every field's type, enum, discriminant,
- * and array membership is checked — a syntactically-valid JSON entry with a
- * malformed field is never treated as a trusted record.
+ * blank/length contract, and array membership is checked — a
+ * syntactically-valid JSON entry with a malformed field is never treated as
+ * a trusted record.
  */
 function isValidAuthorityEntry(entry: unknown): entry is ProductSpaceCatalogAuthorityEntry {
   if (!entry || typeof entry !== 'object') return false
   const candidate = entry as Record<string, unknown>
   if (candidate.kind !== 'app') return false
-  if (typeof candidate.catalogEntryId !== 'string' || candidate.catalogEntryId === '') return false
-  if (typeof candidate.artifactInstanceId !== 'string' || candidate.artifactInstanceId === '') return false
-  if (typeof candidate.versionId !== 'string' || candidate.versionId === '') return false
-  if (typeof candidate.version !== 'string' || candidate.version === '') return false
-  if (typeof candidate.name !== 'string' || candidate.name === '') return false
-  if (typeof candidate.description !== 'string') return false
+  if (!isAuthorityNonBlankString(candidate.catalogEntryId, MAX_AUTHORITY_ID_LENGTH)) return false
+  if (!isAuthorityNonBlankString(candidate.artifactInstanceId, MAX_AUTHORITY_ID_LENGTH)) return false
+  if (!isAuthorityNonBlankString(candidate.versionId, MAX_AUTHORITY_ID_LENGTH)) return false
+  if (!isAuthorityNonBlankString(candidate.version, MAX_AUTHORITY_ID_LENGTH)) return false
+  if (!isAuthorityNonBlankString(candidate.name, MAX_AUTHORITY_NAME_LENGTH)) return false
+  if (
+    typeof candidate.description !== 'string'
+    || candidate.description.length > MAX_AUTHORITY_DESCRIPTION_LENGTH
+  ) return false
   if (typeof candidate.availability !== 'string' || !AUTHORITY_AVAILABILITY.has(candidate.availability)) return false
   if (
     candidate.unavailableReason !== undefined
     && (typeof candidate.unavailableReason !== 'string'
       || !AUTHORITY_UNAVAILABLE_REASONS.has(candidate.unavailableReason))
   ) return false
-  if (
-    candidate.iconUrl !== undefined
-    && typeof candidate.iconUrl !== 'string'
-  ) return false
-  if (!Array.isArray(candidate.sources) || candidate.sources.length > MAX_AUTHORITY_ENTRY_SOURCES) return false
-  for (const source of candidate.sources) {
-    if (!source || typeof source !== 'object') return false
-    const candidateSource = source as Record<string, unknown>
-    if (typeof candidateSource.kind !== 'string' || !AUTHORITY_SOURCE_KINDS.has(candidateSource.kind)) return false
-    if (typeof candidateSource.name !== 'string' || candidateSource.name === '') return false
-    if (
-      candidateSource.circleId !== undefined
-      && (typeof candidateSource.circleId !== 'string' || candidateSource.circleId === '')
-    ) return false
-  }
+  if (candidate.iconUrl !== undefined && typeof candidate.iconUrl !== 'string') return false
+  if (!Array.isArray(candidate.sources) || candidate.sources.length === 0) return false
+  if (candidate.sources.length > MAX_AUTHORITY_ENTRY_SOURCES) return false
+  if (!candidate.sources.every(isValidAuthoritySource)) return false
   if (
     !Array.isArray(candidate.permissions)
     || candidate.permissions.length > MAX_AUTHORITY_ENTRY_PERMISSIONS
-    || !candidate.permissions.every(permission => typeof permission === 'string')
+    || !candidate.permissions.every(permission => isAuthorityNonBlankString(permission, MAX_AUTHORITY_PERMISSION_LENGTH))
   ) return false
-  if (
-    candidate.withdrawnAt !== undefined
-    && typeof candidate.withdrawnAt !== 'number'
-  ) return false
+  if (candidate.withdrawnAt !== undefined && typeof candidate.withdrawnAt !== 'number') return false
   return true
 }
 
@@ -155,6 +185,10 @@ function sanitizeAuthorityRecord(
   ) return null
   const entries = candidate.entries as unknown[]
   const tombstones = candidate.tombstones as unknown[]
+  // Persisted caps are enforced on load: an over-cap record is dropped (the
+  // next verified Catalog rebuilds the scope).
+  if (entries.length > MAX_AUTHORITY_ENTRIES) return null
+  if (tombstones.length > MAX_AUTHORITY_TOMBSTONES) return null
   if (!entries.every(isValidAuthorityEntry) || !tombstones.every(isValidAuthorityEntry)) {
     return null
   }
@@ -167,13 +201,24 @@ function loadFile(): ProductSpaceCatalogAuthorityFile {
     if (existsSync(authorityPath())) {
       const parsed = JSON.parse(readFileSync(authorityPath(), 'utf8')) as ProductSpaceCatalogAuthorityFile
       if (parsed?.schemaVersion === AUTHORITY_SCHEMA_VERSION && parsed.records) {
+        // Records container is prototype-free: file-supplied keys such as
+        // `__proto__` can never pollute object internals.
         const sanitized: ProductSpaceCatalogAuthorityFile = {
           schemaVersion: AUTHORITY_SCHEMA_VERSION,
-          records: {},
+          records: Object.create(null) as ProductSpaceCatalogAuthorityFile['records'],
         }
         for (const [key, record] of Object.entries(parsed.records)) {
           const valid = sanitizeAuthorityRecord(record)
-          if (valid) sanitized.records[key] = valid
+          if (!valid) continue
+          // Key-binding check: the OUTER storage key must be derived from
+          // the record's OWN account/productSpace identity. A record stored
+          // under a foreign key (persisted key/identity mismatch, or a
+          // `__proto__`-shaped key) is dropped — a scope's trusted tuples
+          // can never be borrowed by another scope.
+          if (productSpaceCatalogAuthorityKey(valid.accountId, valid.productSpaceId) !== key) {
+            continue
+          }
+          sanitized.records[key] = valid
         }
         processCache = sanitized
         return processCache

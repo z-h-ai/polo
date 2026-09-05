@@ -828,4 +828,91 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
     expect(result.current.state.catalog?.apps).toHaveLength(0)
     await expect(result.current.resolveLaunch(tombstone!)).rejects.toThrow()
   })
+
+  it('keeps live and withdrawn install states separate when a catalogEntryId is reused across artifact instances', async () => {
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'collision-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-new',
+        version: { versionId: 'version-new', version: '2.0.0' },
+        name: 'Reused Entry',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+      withdrawnEntries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-old',
+        version: { versionId: 'version-old', version: '1.0.0' },
+        name: 'Reused Entry (old)',
+        description: '',
+        availability: 'withdrawn' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+    })
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      })))
+    getProductSpaceInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      }))) as never
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const live = result.current.state.catalog!.apps[0]!
+    const tombstone = result.current.state.catalog!.withdrawnApps?.[0]!
+    expect(tombstone).toMatchObject({
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-old',
+      availability: 'withdrawn',
+    })
+
+    // Both rows keep SEPARATE install states despite the shared
+    // catalogEntryId.
+    await waitFor(() => {
+      expect(result.current.getInstallState(live)?.state).toBe('installed')
+      expect(result.current.getInstallState(tombstone)?.state).toBe('installed')
+    })
+    expect(result.current.getInstallState(live)?.currentVersion).toBe('2.0.0')
+    expect(result.current.getInstallState(tombstone)?.currentVersion).toBe('1.0.0')
+
+    // The withdrawn old instance stays uninstallable.
+    await result.current.uninstallProductSpaceBundle(tombstone!, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-old',
+        versionId: 'version-old',
+      }),
+      { preserveData: true },
+    )
+    // ...and the live new instance keeps its own uninstall path too.
+    await result.current.uninstallProductSpaceBundle(live, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-new',
+      }),
+      { preserveData: true },
+    )
+  })
 })

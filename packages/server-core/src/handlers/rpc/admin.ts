@@ -76,6 +76,101 @@ import {
   ProductSpaceIdSchema,
   createProductSpaceContextKey,
 } from '@polo-ai/shared/product-spaces'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { RpcServer } from '@polo-ai/server-core/transport'
+import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority'
+import type { HandlerDeps } from '../handler-deps'
+import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
+
+// Latest-request fence per (account, ProductSpace) for the unified Catalog —
+// a BOUNDED in-flight structure: each scope tracks its latest (global
+// monotonic) invocation and the number of in-flight requests; the scope
+// entry is deleted once every request for that scope has finished, so
+// renderer-supplied identifiers cannot grow the map without bound. Global
+// invocation IDs prevent ABA revival across scope re-creation.
+interface ProductSpaceCatalogSyncScope {
+  latestInvocation: number
+  inFlight: number
+  /** Requests that passed the pre-check and are about to commit. */
+  pendingCommits: number
+}
+const productSpaceCatalogSyncScopes = new Map<string, ProductSpaceCatalogSyncScope>()
+let nextProductSpaceCatalogSyncInvocation = 0
+
+function beginProductSpaceCatalogSync(scopeKey: string): number {
+  const invocation = ++nextProductSpaceCatalogSyncInvocation
+  let scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) {
+    scope = { latestInvocation: 0, inFlight: 0, pendingCommits: 0 }
+    productSpaceCatalogSyncScopes.set(scopeKey, scope)
+  }
+  scope.latestInvocation = invocation
+  scope.inFlight += 1
+  return invocation
+}
+
+/**
+ * Marks a request as having passed its pre-check and heading for the
+ * session-current commit zone: its final CAS must stay decidable even when
+ * another (older) request settles last and drains the in-flight count.
+ */
+function markProductSpaceCatalogCommitPending(scopeKey: string): void {
+  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) return
+  scope.pendingCommits += 1
+}
+
+function isLatestProductSpaceCatalogSync(scopeKey: string, invocation: number): boolean {
+  return productSpaceCatalogSyncScopes.get(scopeKey)?.latestInvocation === invocation
+}
+
+/**
+ * Settles one finished request. The scope entry survives while a commit is
+ * still pending in the session-current zone or another request is in
+ * flight; a fully idle scope (no in-flight requests, no pending commits) is
+ * deleted immediately so the map stays bounded.
+ */
+function settleProductSpaceCatalogSync(scopeKey: string): void {
+  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) return
+  scope.inFlight = Math.max(0, scope.inFlight - 1)
+  if (scope.inFlight === 0 && scope.pendingCommits === 0) {
+    productSpaceCatalogSyncScopes.delete(scopeKey)
+  }
+}
+
+/**
+ * Releases a consumed commit from the session-current zone: once the scope
+ * is fully idle its entry is deleted.
+ */
+function releaseProductSpaceCatalogCommit(scopeKey: string): void {
+  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) return
+  scope.pendingCommits = Math.max(0, scope.pendingCommits - 1)
+  if (scope.inFlight === 0 && scope.pendingCommits === 0) {
+    productSpaceCatalogSyncScopes.delete(scopeKey)
+  }
+}
+
+/**
+ * Test-only: force-bump the ProductSpace Catalog latest-request fence,
+ * simulating a newer request's registration-and-exit without a second full
+ * session (the registered invocation permanently supersedes older ones).
+ */
+export function __bumpProductSpaceCatalogSyncFenceForTests(scopeKey: string): void {
+  beginProductSpaceCatalogSync(scopeKey)
+  settleProductSpaceCatalogSync(scopeKey)
+}
+
+/** Test-only: scope count for fence-bounds regressions. */
+export function __productSpaceCatalogSyncScopeCountForTests(): number {
+  return productSpaceCatalogSyncScopes.size
+}
+
+/** Test-only: whether an invocation is still the fence's latest. */
+export function __isLatestProductSpaceCatalogSyncForTests(scopeKey: string, invocation: number): boolean {
+  return isLatestProductSpaceCatalogSync(scopeKey, invocation)
+}
 import {
   beginAccountTransition,
   settleAccountTransition,
@@ -92,28 +187,6 @@ import {
   isSwitchInProgress,
   revokeRuntimeProductSpaceFence,
 } from '../../runtime/product-space-executions'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import type { RpcServer } from '@polo-ai/server-core/transport'
-import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority'
-
-// Latest-request fence per (account, ProductSpace) for the unified Catalog —
-// module-scoped monotonic invocation CAS (same supersession shape as the
-// legacy Catalog sync above). Scope keys are the shared collision-free
-// versioned tuples, never delimiter concatenations.
-const latestProductSpaceCatalogSyncByScope = new Map<string, number>()
-
-/**
- * Test-only: force-bump the ProductSpace Catalog latest-request fence,
- * simulating a newer request's registration without a second full session.
- */
-export function __bumpProductSpaceCatalogSyncFenceForTests(scopeKey: string): void {
-  latestProductSpaceCatalogSyncByScope.set(
-    scopeKey,
-    Math.max(latestProductSpaceCatalogSyncByScope.get(scopeKey) ?? 0, 0) + 1,
-  )
-}
-import type { HandlerDeps } from '../handler-deps'
-import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
@@ -524,7 +597,6 @@ export function registerAdminHandlers(
   const log = deps.platform.logger
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
-  void latestProductSpaceCatalogSyncByScope
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
   // Keep tuple members structured for account-wide authorization changes.
   // Entity IDs may contain every delimiter used by older prefix encodings.
@@ -1751,85 +1823,95 @@ export function registerAdminHandlers(
       if (typeof productSpaceId !== 'string' || !productSpaceId) {
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
       }
+      // The requested identifier is validated BEFORE it can touch the
+      // fence: a renderer-supplied arbitrary string never becomes a
+      // long-lived scope key.
+      const requestedSpaceId = ProductSpaceIdSchema.safeParse(productSpaceId)
+      if (!requestedSpaceId.success) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
+      }
       return callOrganization(
         'getProductSpaceCatalog',
         async (client, accessToken, userId) => {
-          // Main-owned latest-request fence (same shape as the legacy
-          // Catalog sync): the invocation is registered the moment the
-          // request enters the authenticated ProductSpace Catalog scope —
-          // BEFORE any ProductSpace list or Catalog await. A request whose
-          // list validation later finds its space withdrawn still holds the
-          // newer invocation, so an older in-flight response can never
-          // commit a stale authority past it. The scope key is the shared
-          // collision-free versioned tuple (entity IDs may contain every
-          // delimiter), and catalogRevision is opaque and never ordered.
+          // The fence registration happens the moment the request enters the
+          // authenticated ProductSpace Catalog scope — BEFORE any ProductSpace
+          // list or Catalog await — so an older in-flight response can never
+          // commit past a newer request, even when the newer request exits
+          // early (e.g. its list validation finds the space withdrawn).
           const catalogSyncKey = createProductSpaceContextKey(
             userId as never,
-            productSpaceId as never,
+            requestedSpaceId.data,
           )
-          const syncInvocation = Math.max(
-            latestProductSpaceCatalogSyncByScope.get(catalogSyncKey) ?? 0,
-            0,
-          ) + 1
-          latestProductSpaceCatalogSyncByScope.set(catalogSyncKey, syncInvocation)
-          const isLatestCatalogSync = () =>
-            latestProductSpaceCatalogSyncByScope.get(catalogSyncKey) === syncInvocation
+          const syncInvocation = beginProductSpaceCatalogSync(catalogSyncKey)
           const supersededCatalogResult = () => ({
             success: false as const,
             errorCode: 'REQUEST_SUPERSEDED',
             message: 'A newer ProductSpace catalog request replaced this one',
           })
-
-          const list = await client.listProductSpaces(accessToken)
-          const context = list.productSpaces.find(
-            space => space.id === (productSpaceId as never),
-          )
-          if (!context || context.accessMode !== 'active') {
-            throw new AdminError(
-              'The requested ProductSpace is not available for this account',
-              'FORBIDDEN',
+          const commitState = { willCommitAuthority: false }
+          try {
+            const list = await client.listProductSpaces(accessToken)
+            const context = list.productSpaces.find(
+              space => space.id === requestedSpaceId.data,
             )
-          }
-          // Defensive: the fence was registered for the REQUESTED space; the
-          // validated context must be exactly that space.
-          if (context.id !== (productSpaceId as string)) {
-            throw new AdminError(
-              'The requested ProductSpace is not available for this account',
-              'FORBIDDEN',
-            )
-          }
+            if (!context || context.accessMode !== 'active') {
+              throw new AdminError(
+                'The requested ProductSpace is not available for this account',
+                'FORBIDDEN',
+              )
+            }
+            if (context.id !== requestedSpaceId.data) {
+              throw new AdminError(
+                'The requested ProductSpace is not available for this account',
+                'FORBIDDEN',
+              )
+            }
 
-          const result = await client.getProductSpaceCatalog(
-            accessToken,
-            context,
-            typeof knownRevision === 'string' && knownRevision
-              ? knownRevision
-              : undefined,
-          )
-          if ('notModified' in result) {
-            if (!isLatestCatalogSync()) return supersededCatalogResult()
-            return { notModified: true as const, catalogRevision: knownRevision as string }
-          }
-          if (!isLatestCatalogSync()) return supersededCatalogResult()
-          // The authority write happens in onCurrentSuccess (the
-          // session-current commit zone below), where a FINAL invocation CAS
-          // re-checks the fence under the session lock — never on a stale
-          // session or a superseded request.
-          return {
-            __authorityCommit: {
-              scopeKey: catalogSyncKey,
-              invocation: syncInvocation,
-              accountId: userId,
-              productSpaceId: context.id,
+            const result = await client.getProductSpaceCatalog(
+              accessToken,
+              context,
+              typeof knownRevision === 'string' && knownRevision
+                ? knownRevision
+                : undefined,
+            )
+            if ('notModified' in result) {
+              if (!isLatestProductSpaceCatalogSync(catalogSyncKey, syncInvocation)) {
+                return supersededCatalogResult()
+              }
+              // The notModified short-circuit commits nothing; settle the
+              // scope without a pending authority commit.
+              return { notModified: true as const, catalogRevision: knownRevision as string }
+            }
+            if (!isLatestProductSpaceCatalogSync(catalogSyncKey, syncInvocation)) {
+              return supersededCatalogResult()
+            }
+            // The authority write happens in the session-current commit zone
+            // (onCurrentSuccess), where a FINAL CAS re-checks this fence
+            // under the session lock — a failing CAS downgrades the response
+            // to REQUEST_SUPERSEDED with zero authority writes.
+            markProductSpaceCatalogCommitPending(catalogSyncKey)
+            commitState.willCommitAuthority = true
+            return {
+              __authorityCommit: {
+                scopeKey: catalogSyncKey,
+                invocation: syncInvocation,
+                accountId: userId,
+                productSpaceId: requestedSpaceId.data,
+                catalogRevision: result.catalogRevision,
+                entries: result.entries,
+              },
+              notModified: false as const,
+              contractVersion: result.contractVersion,
+              productSpaceId: result.productSpaceId,
               catalogRevision: result.catalogRevision,
               entries: result.entries,
-            },
-            notModified: false as const,
-            contractVersion: result.contractVersion,
-            productSpaceId: result.productSpaceId,
-            catalogRevision: result.catalogRevision,
-            entries: result.entries,
-          } as never
+            } as never
+          } finally {
+            // Settle this request. A committable request keeps its scope
+            // entry alive until the session-current CAS consumes it; every
+            // other exit path deletes an in-flight-free scope immediately.
+            settleProductSpaceCatalogSync(catalogSyncKey)
+          }
         },
         result => {
           const commit = (result as {
@@ -1841,6 +1923,7 @@ export function registerAdminHandlers(
               catalogRevision: string
               entries: ReadonlyArray<Record<string, unknown>>
             }
+            willCommitAuthority?: boolean
           }).__authorityCommit
           if (!commit) return
           delete (result as { __authorityCommit?: unknown }).__authorityCommit
@@ -1848,45 +1931,43 @@ export function registerAdminHandlers(
           // registered a newer invocation while this one waited for the
           // session-current commit zone. A CAS failure downgrades the
           // response to REQUEST_SUPERSEDED with ZERO authority writes.
-          if (latestProductSpaceCatalogSyncByScope.get(commit.scopeKey) !== commit.invocation) {
+          if (!isLatestProductSpaceCatalogSync(commit.scopeKey, commit.invocation)) {
             Object.assign(result, {
               success: false,
               errorCode: 'REQUEST_SUPERSEDED',
               message: 'A newer ProductSpace catalog request replaced this one',
             })
-            return
+          } else {
+            const withdrawnEntries = recordProductSpaceCatalogAuthoritativeEntries(
+              commit.accountId,
+              commit.productSpaceId,
+              commit.catalogRevision,
+              commit.entries,
+            )
+            ;(result as {
+              withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+            }).withdrawnEntries = withdrawnEntries.map(entry => ({
+              kind: 'app' as const,
+              catalogEntryId: entry.catalogEntryId,
+              artifactInstanceId: entry.artifactInstanceId,
+              version: {
+                versionId: entry.versionId,
+                version: entry.version,
+              },
+              name: entry.name,
+              description: entry.description,
+              ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
+              availability: 'withdrawn' as const,
+              sources: entry.sources,
+              permissions: entry.permissions,
+            }))
           }
-          // Session-current commit zone: record the verified Catalog into
-          // the persisted authority and attach the withdrawn tombstones for
-          // the renderer response. The authority itself never authorizes
-          // launch/install/start.
-          const withdrawnEntries = recordProductSpaceCatalogAuthoritativeEntries(
-            commit.accountId,
-            commit.productSpaceId,
-            commit.catalogRevision,
-            commit.entries,
-          )
-          ;(result as {
-            withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
-          }).withdrawnEntries = withdrawnEntries.map(entry => ({
-            kind: 'app' as const,
-            catalogEntryId: entry.catalogEntryId,
-            artifactInstanceId: entry.artifactInstanceId,
-            version: {
-              versionId: entry.versionId,
-              version: entry.version,
-            },
-            name: entry.name,
-            description: entry.description,
-            ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
-            availability: 'withdrawn' as const,
-            sources: entry.sources,
-            permissions: entry.permissions,
-          }))
+          // The committed request was the fence's last in-flight request:
+          // consume the scope entry now.
+          releaseProductSpaceCatalogCommit(commit.scopeKey)
         },
       )
-    },
-  )
+    })
 
   // Direct-open preparation for POO-47. Main derives the host tuple and
   // resolves against a fresh server-authoritative Catalog. The renderer can

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -189,6 +189,107 @@ describe('ProductSpace Catalog authority', () => {
     expect(tombstones).toEqual([])
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed')
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+  })
+
+  it('drops records persisted under a foreign or __proto__-shaped key and self-heals', () => {
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-key-a', [entry()])
+    recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'rev-key-b', [entry()])
+
+    // Tamper: move account-b/space-b's record under account-a/space-a's key,
+    // and add a `__proto__`-shaped key.
+    const file = join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+    const bRecord = JSON.parse(JSON.stringify(getProductSpaceCatalogAuthorityRecord('account-b', 'space-b')))
+    resetProductSpaceCatalogAuthorityForTests()
+    // Tamper: move account-b/space-b's record under account-a/space-a's key,
+    // and add a `__proto__`-shaped key (the prototype assignment never
+    // becomes an own property, mirroring real tamper attempts).
+    const parsed: {
+      schemaVersion: number
+      records: Record<string, unknown>
+    } = {
+      schemaVersion: 1,
+      records: {},
+    }
+    parsed.records[productSpaceCatalogAuthorityKey('account-a', 'space-a')] = bRecord
+    parsed.records[productSpaceCatalogAuthorityKey('account-b', 'space-b')] = bRecord
+    parsed.records['__proto__'] = bRecord
+    writeFileSync(file, JSON.stringify(parsed), 'utf8')
+
+    // A's scope must NOT borrow B's tuples from the mis-keyed record...
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+    // ...while B's own correctly-keyed record still loads.
+    expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', ...tuple())).toBe(true)
+
+    // Self-heal: the next verified Catalog rebuilds A's scope.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed', [entry()])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+  })
+
+  it('drops over-cap persisted records and self-heals', () => {
+    // Legal-JSON record exceeding the persisted tombstone cap.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-cap', [entry()])
+    const file = join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    const key = productSpaceCatalogAuthorityKey('account-a', 'space-a')
+    const ghostTombstones = Array.from({ length: 10_001 }, (_, index) => ({
+      kind: 'app',
+      catalogEntryId: `ghost-${index}`,
+      artifactInstanceId: `ghost-artifact-${index}`,
+      versionId: `ghost-version-${index}`,
+      version: '1.0.0',
+      name: `Ghost ${index}`,
+      description: '',
+      availability: 'withdrawn',
+      sources: [{ kind: 'enterprise_import', name: 'G' }],
+      permissions: [],
+      withdrawnAt: 1,
+    }))
+    parsed.records[key].tombstones = ghostTombstones
+    writeFileSync(file, JSON.stringify(parsed), 'utf8')
+    resetProductSpaceCatalogAuthorityForTests()
+
+    // The over-cap record is dropped on load...
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+    // ...and the next verified Catalog rebuilds the scope.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-cap-healed', [entry()])
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-cap-healed')
+  })
+
+  it('rejects source-discriminant and blank/length contract violations from persisted records', () => {
+    const badEntries = [
+      // creator_circle without circleId.
+      entry({ sources: [{ kind: 'creator_circle', name: 'Circle' }] }),
+      // polo with an arbitrary name.
+      entry({ sources: [{ kind: 'polo', name: 'Not Polo' }] }),
+      // polo with a circleId.
+      entry({ sources: [{ kind: 'polo', name: 'Polo', circleId: 'c1' }] }),
+      // enterprise_import with a circleId.
+      entry({ sources: [{ kind: 'enterprise_import', name: 'Org', circleId: 'c1' }] }),
+      // unknown source kind.
+      entry({ sources: [{ kind: 'unknown-source-kind', name: 'X' }] }),
+      // empty sources.
+      entry({ sources: [] }),
+      // blank name.
+      entry({ name: '   ' }),
+      // over-long name.
+      entry({ name: 'x'.repeat(257) }),
+      // non-string permission member.
+      entry({ permissions: [42 as unknown as string] }),
+      // unknown availability.
+      entry({ availability: 'sort-of-available' }),
+      // non-string description.
+      entry({ description: 42 as unknown as string }),
+    ]
+    for (const [index, badEntry] of badEntries.entries()) {
+      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', `rev-bad-${index}`, [badEntry])
+      resetProductSpaceCatalogAuthorityForTests()
+      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+    }
+
+    // Self-heal: a good record persists normally afterwards.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed-2', [entry()])
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed-2')
   })
 
   it('rejects malformed entries instead of recording them', () => {

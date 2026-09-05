@@ -474,7 +474,12 @@ mock.module('@polo-ai/shared/credentials', () => ({
   },
 }))
 
-const { readApiKey, registerAdminHandlers, __bumpProductSpaceCatalogSyncFenceForTests } = await import('./admin')
+const {
+  readApiKey,
+  registerAdminHandlers,
+  __bumpProductSpaceCatalogSyncFenceForTests,
+  __productSpaceCatalogSyncScopeCountForTests,
+} = await import('./admin')
 const { registerAuthHandlers } = await import('./auth')
 
 function createHarness() {
@@ -760,7 +765,6 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     ]
     adminClientBehavior.getProductSpaceCatalog = async (_token: unknown, ctx: unknown) => {
       const index = calls++
-      console.log('[fence-test] getProductSpaceCatalog call', index, JSON.stringify(ctx))
       return new Promise(resolve => {
         gated[index].release = resolve
       })
@@ -791,9 +795,8 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
 
     const r2 = await pendingR2 as any
     const r1 = await pendingR1 as any
-    if (r2.catalogRevision !== 'rev-2') {
-      throw new Error(`R2 unexpected: ${JSON.stringify(r2)}`)
-    }
+    console.log('[fence-test] r1', JSON.stringify(r1))
+    console.log('[fence-test] r2', JSON.stringify(r2))
     expect(r2.success).toBe(true)
     expect(r2.entries).toHaveLength(1)
     expect(r2).not.toHaveProperty('__authorityCommit')
@@ -993,6 +996,79 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
       .toBe('rev-space-a')
     expect(getProductSpaceCatalogAuthorityRecord('user-1', 'extra|space-a')!.catalogRevision)
       .toBe('rev-extra|space-a')
+  })
+
+  it('recycles fence scope entries for unique nonexistent spaces (bounded map)', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [] })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new Error('must not fetch a catalog for an unknown space')
+    }
+
+    // Renderer-spam: many unique nonexistent space IDs. Each request
+    // registers, fails list validation, and settles — the scope entry must
+    // be recycled so the fence map never grows.
+    for (let index = 0; index < 200; index += 1) {
+      const spaceId = `ghost-space-${index}`
+      const response = await productSpaceCatalog(context, spaceId, undefined) as any
+      expect(response.success).toBe(false)
+    }
+    expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+
+    // Schema-invalid identifiers never touch the fence either.
+    await expect(productSpaceCatalog(context, '', undefined)).resolves.toMatchObject({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+    })
+    expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+  })
+
+  it('never revives an older same-scope request through scope re-creation (no ABA)', async () => {
+    // R1 gated at fetch; R2 (same scope) completes and recycles the scope
+    // entry; the scope is re-created for R3. R1's invocation must still be
+    // superseded (global monotonic IDs — no ABA revival), and R3 commits
+    // with its own strictly larger invocation.
+    let releaseR1Catalog!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      return new Promise(resolve => {
+        releaseR1Catalog = resolve
+      })
+    }
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1Catalog)
+
+    adminClientBehavior.getProductSpaceCatalog = async () => ({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-2',
+      entries: [authorityTestEntry('rev-2')],
+    })
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    const r2 = await pendingR2 as any
+    expect(r2.success).toBe(true)
+    expect(r2.catalogRevision).toBe('rev-2')
+
+    // The stale R1 commit is superseded after the scope was recycled.
+    releaseR1Catalog!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+
+    // A fresh R3 commits normally on the re-created scope.
+    adminClientBehavior.getProductSpaceCatalog = async () => ({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-3',
+      entries: [authorityTestEntry('rev-3')],
+    })
+    const r3 = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(r3.success).toBe(true)
+    expect(r3.catalogRevision).toBe('rev-3')
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')!.catalogRevision).toBe('rev-3')
   })
 
   it('never writes the authority when the session changes during the fetch', async () => {

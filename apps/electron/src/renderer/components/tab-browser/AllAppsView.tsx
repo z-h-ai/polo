@@ -44,6 +44,8 @@ interface AllAppsViewProps {
   warningCode: string | null
   errorCode: string | null
   offline: boolean
+  /** Authorization was lost for the current snapshot (denied view). */
+  restricted: boolean
   getInstallState: (app: CatalogApp) => ProductSpaceAppInstallState | undefined
   scopeKeyForApp: (app: CatalogApp) => string
   onRefresh: () => void
@@ -305,6 +307,7 @@ export function AllAppsView({
   warningCode,
   errorCode,
   offline,
+  restricted,
   getInstallState,
   scopeKeyForApp,
   onRefresh,
@@ -397,13 +400,43 @@ export function AllAppsView({
         </span>
       </div>
 
-      {(warningCode || offline) && (
-        <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
-          {offline
-            ? t('homeApps.organization.offlineWarning')
-            : catalogStateMessage(t, warningCode, 'warning', spaceKind)}
-        </div>
-      )}
+      {(() => {
+        // Frozen failure/restricted states: a refresh failure with cached
+        // rows shows the stale-catalog banner; a denied snapshot shows the
+        // space-aware restricted copy. Both are informational only — the
+        // install/open fail-closed gates below are never relaxed.
+        const cachedFailure = Boolean(errorCode) && apps.length > 0
+        if (restricted) {
+          return (
+            <div
+              className="mb-4 rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-xs text-red-900 dark:text-red-100"
+              data-testid="all-apps-restricted-banner"
+            >
+              {catalogStateMessage(t, errorCode ?? 'FORBIDDEN', 'error', spaceKind)}
+            </div>
+          )
+        }
+        if (cachedFailure) {
+          return (
+            <div
+              className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
+              data-testid="all-apps-stale-catalog-banner"
+            >
+              {t('homeApps.organization.refreshWarning')}
+            </div>
+          )
+        }
+        if (warningCode || offline) {
+          return (
+            <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+              {offline
+                ? t('homeApps.organization.offlineWarning')
+                : catalogStateMessage(t, warningCode, 'warning', spaceKind)}
+            </div>
+          )
+        }
+        return null
+      })()}
 
       {loading && apps.length === 0 ? (
         <div className="flex min-h-40 items-center justify-center"><Icons.LoaderCircle className="animate-spin" /></div>
