@@ -214,9 +214,16 @@ export function HomePage() {
   // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids). Runs
   // only for entries that were hydrated in THIS context — during the switch
   // commit the stale previous-context entries must never be pruned against
-  // the new Catalog and persisted into the new context.
+  // the new Catalog and persisted into the new context. It also requires an
+  // AUTHORITATIVE Catalog snapshot to have been committed for this context:
+  // before that (loading, catalog=null, failure, denied) the stored entries
+  // are preserved untouched — pruning against an empty/unavailable view
+  // would permanently destroy valid shortcuts.
+  const catalogCommitted = catalog.state.catalog !== null
+    && catalog.state.accessMode !== 'denied'
   useEffect(() => {
     if (quickHydratedContextRef.current !== quickContextKey) return
+    if (!catalogCommitted) return
     if (quickEntries.length === 0) return
     const availableIds = new Set<string>()
     for (const app of availableApps) {
@@ -241,7 +248,7 @@ export function HomePage() {
       .catch(() => {
         // Persistence failure must not break the home section.
       })
-  }, [availableApps, isCurrentQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
+  }, [availableApps, catalogCommitted, isCurrentQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
 
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)

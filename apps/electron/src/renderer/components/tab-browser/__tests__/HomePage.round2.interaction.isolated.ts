@@ -923,6 +923,92 @@ describe('HomePage quick access (POO-43)', () => {
     })
   })
 
+  it('preserves persisted quick access until an authoritative Catalog commits, then prunes once (observation dd293484…)', async () => {
+    const appA: CatalogApp = {
+      id: 'delayed-app-a',
+      organizationId: 'organization-a',
+      name: 'Delayed App A',
+      description: '',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://a.example.com',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const persistedId = JSON.stringify([
+      'product-space-ui',
+      'account-a',
+      'organization-a',
+      'delayed-app-a',
+      null,
+    ])
+    quickAccessByContext.set(contextKey, [{ id: persistedId, addedAt: 1 }])
+
+    // Cold load: no Catalog snapshot yet (loading) — the stored entry must
+    // be preserved untouched (no prune, no persistence).
+    const loadingHook = hookWithCatalog(enterpriseCatalogWith([]))
+    appCatalogHook = {
+      ...loadingHook,
+      state: {
+        ...loadingHook.state,
+        catalog: null,
+        loading: true,
+      },
+    }
+    renderHome()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    // The loading placeholder hides the quick grid — the persisted entry is
+    // NOT rendered and NOT pruned.
+    expect(screen.queryByText('Delayed App A')).toBeNull()
+    expect(setHomeQuickAccess).not.toHaveBeenCalled()
+    expect(quickAccessByContext.get(contextKey)).toEqual([
+      { id: persistedId, addedAt: 1 },
+    ])
+
+    // NETWORK_ERROR failure (catalog=null): still preserved.
+    appCatalogHook = {
+      ...loadingHook,
+      state: {
+        ...loadingHook.state,
+        catalog: null,
+        loading: false,
+        errorCode: 'NETWORK_ERROR',
+      },
+    }
+    viewRerender()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(setHomeQuickAccess).not.toHaveBeenCalled()
+    expect(quickAccessByContext.get(contextKey)).toEqual([
+      { id: persistedId, addedAt: 1 },
+    ])
+
+    // AUTHORITATIVE Catalog commits: the entry resolves and stays.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    viewRerender()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    console.log('[r14-dbg] body quick text:', document.body.textContent?.includes('Delayed App A'))
+    console.log('[r14-dbg] entries:', JSON.stringify(quickAccessByContext.get(contextKey)))
+    expect(document.body.textContent?.includes('Delayed App A')).toBe(true)
+    console.log('[r14-dbg] quick entries:', JSON.stringify(quickAccessByContext.get(contextKey)))
+    console.log('[r14-dbg] state.catalog apps:', appCatalogHook.state.catalog?.apps?.length, 'loading:', appCatalogHook.state.loading)
+    expect(setHomeQuickAccess).not.toHaveBeenCalled()
+    expect(quickAccessByContext.get(contextKey)).toEqual([
+      { id: persistedId, addedAt: 1 },
+    ])
+
+    // The authoritative Catalog then stops listing the App: exactly ONE
+    // prune+persist against the committed snapshot.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
+    viewRerender()
+    await waitFor(() => {
+      expect(setHomeQuickAccess).toHaveBeenCalledTimes(1)
+    })
+    expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [])
+    expect(quickAccessByContext.get(contextKey)).toEqual([])
+  })
+
   it('adds a shortcut through the manage dialog without installing', async () => {
     const appA: CatalogApp = {
       id: 'manage-app-a',

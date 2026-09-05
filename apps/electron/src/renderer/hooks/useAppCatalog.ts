@@ -284,6 +284,28 @@ function scopeForCatalogApp(
  * deliberately excluded — the single-flight slot belongs to the STABLE
  * artifact instance, and runExclusive scopes it by operation kind.
  */
+/**
+ * Collision-free STABLE Catalog identity for install-state reconciliation
+ * and lookups: account + productSpace + catalogEntry + artifact instance.
+ * Deliberately different from the runtime scope (single catalogAppId slot):
+ * a legal cross-version reissue (entry-new live + entry-old withdrawn on the
+ * same artifact instance) must keep BOTH identities addressable.
+ */
+function productSpaceUiIdentityKey(
+  accountId: string,
+  productSpaceId: string,
+  catalogEntryId: string,
+  artifactInstanceId: string,
+): string {
+  return JSON.stringify([
+    'product-space-install',
+    accountId,
+    productSpaceId,
+    catalogEntryId,
+    artifactInstanceId,
+  ])
+}
+
 function productSpaceOperationIdentityKey(identity: ProductSpaceAppIdentity): string {
   return JSON.stringify([
     'product-space-op',
@@ -551,33 +573,35 @@ export function useAppCatalog() {
       ])
       if (!isCurrentSnapshot(snapshot)) return
       const states = [...activeStates, ...withdrawnStates]
-      // Keyed by the authority's collision-free stable identity (scope key
-      // over accountId + productSpaceId + artifactInstanceId) — NEVER by
-      // catalogEntryId alone, so a live entry and a withdrawn tombstone that
-      // happen to share a catalogEntryId can never overwrite each other.
-      const identityScopeKey = (identity: ProductSpaceAppIdentity): string => (
-        createIdentityScopeKey({
-          kind: 'catalog',
-          accountId: identity.accountId,
-          organizationId: identity.productSpaceId,
-          catalogAppId: identity.artifactInstanceId,
-        })
+      // Keyed by the STABLE Catalog UI identity (accountId + productSpaceId +
+      // catalogEntryId + artifactInstanceId): the runtime scope
+      // (artifactInstanceId alone) aliases two Catalog identities after a
+      // legal cross-version reissue (entry-new live + entry-old withdrawn
+      // sharing artifact-X), which would collide requested rows and fail the
+      // whole reconciliation.
+      const identityKey = (identity: ProductSpaceAppIdentity): string => (
+        productSpaceUiIdentityKey(
+          identity.accountId,
+          identity.productSpaceId,
+          identity.catalogEntryId,
+          identity.artifactInstanceId,
+        )
       )
       const requested = new Map<string, ProductSpaceAppIdentity>()
       for (const identity of withdrawnIdentities) {
-        requested.set(identityScopeKey(identity), identity)
+        requested.set(identityKey(identity), identity)
       }
       // A live entry always wins its identity key over a withdrawn one.
       for (const identity of activeIdentities) {
-        requested.set(identityScopeKey(identity), identity)
+        requested.set(identityKey(identity), identity)
       }
       const next: Record<string, ProductSpaceAppInstallState> = {}
       for (const installState of states) {
-        const expected = requested.get(identityScopeKey(installState.app))
+        const expected = requested.get(identityKey(installState.app))
         if (!expected || JSON.stringify(expected) !== JSON.stringify(installState.app)) {
           throw new Error(i18n.t('homeApps.errors.staleContext'))
         }
-        next[identityScopeKey(installState.app)] = installState
+        next[identityKey(installState.app)] = installState
       }
       if (Object.keys(next).length !== requested.size) {
         throw new Error(i18n.t('homeApps.errors.staleContext'))
@@ -1515,20 +1539,21 @@ export function useAppCatalog() {
   ])
 
   const getInstallState = useCallback((app: CatalogApp): ProductSpaceAppInstallState | undefined => {
-    // Look up by the collision-free artifact identity scope key — a live
-    // entry and a withdrawn tombstone that share a catalogEntryId keep
-    // separate install states.
+    // Look up by the STABLE Catalog UI identity (accountId + productSpaceId
+    // + catalogEntryId + artifactInstanceId) — a live entry and a withdrawn
+    // tombstone that share either a catalogEntryId OR an artifactInstanceId
+    // keep separate install states.
     const catalog = catalogRef.current
     if (!catalog || !app.artifactInstanceId) return undefined
     try {
       const snapshot = currentSnapshotForApp(app)
-      const identityScopeKey = createIdentityScopeKey({
-        kind: 'catalog',
-        accountId: snapshot.catalog.accountId,
-        organizationId: snapshot.catalog.organizationId,
-        catalogAppId: app.artifactInstanceId,
-      })
-      return state.installStates[identityScopeKey]
+      const identityKey = productSpaceUiIdentityKey(
+        snapshot.catalog.accountId,
+        snapshot.catalog.organizationId,
+        app.catalogEntryId ?? app.id,
+        app.artifactInstanceId,
+      )
+      return state.installStates[identityKey]
     } catch {
       return undefined
     }

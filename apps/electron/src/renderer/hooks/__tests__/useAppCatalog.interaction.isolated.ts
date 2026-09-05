@@ -1189,4 +1189,92 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
     // The single-flight slot belongs to the stable instance: exactly one IPC.
     expect(uninstallDispatched).toBe(1)
   })
+
+  it('keeps live and withdrawn install states separate when the same artifactInstanceId is reissued under a new catalogEntryId', async () => {
+    const api = window.electronAPI as any
+    // Legal cross-version history: entry-old (artifact-X, v1) was withdrawn
+    // and the artifact was REISSUED as entry-new (artifact-X, v2). Both
+    // identities share the SAME runtime scope (artifact-X) but must remain
+    // separately addressable install states.
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'reissue-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-new',
+        artifactInstanceId: 'artifact-X',
+        version: { versionId: 'version-2', version: '2.0.0' },
+        name: 'Reissued App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+      withdrawnEntries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-old',
+        artifactInstanceId: 'artifact-X',
+        version: { versionId: 'version-1', version: '1.0.0' },
+        name: 'Reissued App (old)',
+        description: '',
+        availability: 'withdrawn' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+    })
+    // The retained installation reports through BOTH channels (the runtime
+    // scope is the shared artifact instance).
+    getProductSpaceInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      }))) as never
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      })))
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const live = result.current.state.catalog!.apps[0]!
+    const withdrawn = result.current.state.catalog!.withdrawnApps?.[0]!
+
+    // Both echoed states COEXIST (no reconciliation wipe).
+    await waitFor(() => {
+      expect(result.current.getInstallState(live)?.state).toBe('installed')
+      expect(result.current.getInstallState(withdrawn)?.state).toBe('installed')
+    })
+    expect(result.current.getInstallState(live)?.currentVersion).toBe('2.0.0')
+    expect(result.current.getInstallState(withdrawn)?.currentVersion).toBe('1.0.0')
+
+    // The withdrawn row keeps its uninstall entry (its own identity).
+    await result.current.uninstallProductSpaceBundle(withdrawn, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-old',
+        artifactInstanceId: 'artifact-X',
+        versionId: 'version-1',
+      }),
+      { preserveData: true },
+    )
+    // ...and the live row uninstalls as its own identity too.
+    await result.current.uninstallProductSpaceBundle(live, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-new',
+        artifactInstanceId: 'artifact-X',
+        versionId: 'version-2',
+      }),
+      { preserveData: true },
+    )
+  })
 })
