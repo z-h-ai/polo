@@ -74,6 +74,7 @@ import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/cr
 import {
   CatalogEntryIdSchema,
   ProductSpaceIdSchema,
+  createProductSpaceContextKey,
 } from '@polo-ai/shared/product-spaces'
 import {
   beginAccountTransition,
@@ -94,6 +95,23 @@ import {
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority'
+
+// Latest-request fence per (account, ProductSpace) for the unified Catalog —
+// module-scoped monotonic invocation CAS (same supersession shape as the
+// legacy Catalog sync above). Scope keys are the shared collision-free
+// versioned tuples, never delimiter concatenations.
+const latestProductSpaceCatalogSyncByScope = new Map<string, number>()
+
+/**
+ * Test-only: force-bump the ProductSpace Catalog latest-request fence,
+ * simulating a newer request's registration without a second full session.
+ */
+export function __bumpProductSpaceCatalogSyncFenceForTests(scopeKey: string): void {
+  latestProductSpaceCatalogSyncByScope.set(
+    scopeKey,
+    Math.max(latestProductSpaceCatalogSyncByScope.get(scopeKey) ?? 0, 0) + 1,
+  )
+}
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
 
@@ -506,9 +524,7 @@ export function registerAdminHandlers(
   const log = deps.platform.logger
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
-  // Latest-request fence per account|ProductSpace for the unified Catalog
-  // (same supersession shape as the legacy Catalog sync above).
-  const latestProductSpaceCatalogSyncByScope = new Map<string, number>()
+  void latestProductSpaceCatalogSyncByScope
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
   // Keep tuple members structured for account-wide authorization changes.
   // Entity IDs may contain every delimiter used by older prefix encodings.
@@ -1752,8 +1768,13 @@ export function registerAdminHandlers(
           // Catalog sync): overlapping refreshes for one account+space are
           // monotonic per invocation; only the latest request may commit —
           // a slower older response is superseded and never writes the
-          // authority. catalogRevision is opaque and never ordered.
-          const catalogSyncKey = `${userId}|${context.id}`
+          // authority. The scope key is the shared collision-free versioned
+          // tuple (entity IDs may contain every delimiter), and
+          // catalogRevision is opaque and never ordered.
+          const catalogSyncKey = createProductSpaceContextKey(
+            userId as never,
+            context.id,
+          )
           const syncInvocation = Math.max(
             latestProductSpaceCatalogSyncByScope.get(catalogSyncKey) ?? 0,
             0,
@@ -1780,10 +1801,13 @@ export function registerAdminHandlers(
           }
           if (!isLatestCatalogSync()) return supersededCatalogResult()
           // The authority write happens in onCurrentSuccess (the
-          // session-current commit zone below) — never on a stale session or
-          // a superseded request.
+          // session-current commit zone below), where a FINAL invocation CAS
+          // re-checks the fence under the session lock — never on a stale
+          // session or a superseded request.
           return {
             __authorityCommit: {
+              scopeKey: catalogSyncKey,
+              invocation: syncInvocation,
               accountId: userId,
               productSpaceId: context.id,
               catalogRevision: result.catalogRevision,
@@ -1799,6 +1823,8 @@ export function registerAdminHandlers(
         result => {
           const commit = (result as {
             __authorityCommit?: {
+              scopeKey: string
+              invocation: number
               accountId: string
               productSpaceId: string
               catalogRevision: string
@@ -1807,6 +1833,18 @@ export function registerAdminHandlers(
           }).__authorityCommit
           if (!commit) return
           delete (result as { __authorityCommit?: unknown }).__authorityCommit
+          // FINAL CAS under the session lock: another request may have
+          // registered a newer invocation while this one waited for the
+          // session-current commit zone. A CAS failure downgrades the
+          // response to REQUEST_SUPERSEDED with ZERO authority writes.
+          if (latestProductSpaceCatalogSyncByScope.get(commit.scopeKey) !== commit.invocation) {
+            Object.assign(result, {
+              success: false,
+              errorCode: 'REQUEST_SUPERSEDED',
+              message: 'A newer ProductSpace catalog request replaced this one',
+            })
+            return
+          }
           // Session-current commit zone: record the verified Catalog into
           // the persisted authority and attach the withdrawn tombstones for
           // the renderer response. The authority itself never authorizes

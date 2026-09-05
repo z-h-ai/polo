@@ -75,13 +75,69 @@ function emptyFile(): ProductSpaceCatalogAuthorityFile {
   return { schemaVersion: AUTHORITY_SCHEMA_VERSION, records: {} }
 }
 
+function isValidAuthorityEntry(entry: unknown): entry is ProductSpaceCatalogAuthorityEntry {
+  if (!entry || typeof entry !== 'object') return false
+  const candidate = entry as Record<string, unknown>
+  return typeof candidate.catalogEntryId === 'string' && candidate.catalogEntryId !== ''
+    && typeof candidate.artifactInstanceId === 'string' && candidate.artifactInstanceId !== ''
+    && typeof candidate.versionId === 'string' && candidate.versionId !== ''
+    && typeof candidate.version === 'string' && candidate.version !== ''
+    && typeof candidate.name === 'string'
+    && typeof candidate.availability === 'string'
+    && Array.isArray(candidate.sources)
+    && Array.isArray(candidate.permissions)
+    && candidate.sources.every(source => (
+      source
+      && typeof source === 'object'
+      && typeof (source as { kind?: unknown }).kind === 'string'
+      && typeof (source as { name?: unknown }).name === 'string'
+    ))
+}
+
+/**
+ * Per-record validation on load: a syntactically-valid but malformed record
+ * (missing arrays, malformed entries) is DROPPED — withdrawn management for
+ * that scope fails closed, and the next verified Catalog fetch rebuilds the
+ * scope from scratch (self-healing) instead of crashing tuple reads or
+ * carry-forward.
+ */
+function sanitizeAuthorityRecord(
+  record: unknown,
+): ProductSpaceCatalogAuthorityRecord | null {
+  if (!record || typeof record !== 'object') return null
+  const candidate = record as Record<string, unknown>
+  if (candidate.schemaVersion !== AUTHORITY_SCHEMA_VERSION) return null
+  if (
+    typeof candidate.accountId !== 'string' || !candidate.accountId
+    || typeof candidate.productSpaceId !== 'string' || !candidate.productSpaceId
+    || typeof candidate.syncedAt !== 'number'
+    || typeof candidate.catalogRevision !== 'string'
+    || !Array.isArray(candidate.entries)
+    || !Array.isArray(candidate.tombstones)
+  ) return null
+  const entries = candidate.entries as unknown[]
+  const tombstones = candidate.tombstones as unknown[]
+  if (!entries.every(isValidAuthorityEntry) || !tombstones.every(isValidAuthorityEntry)) {
+    return null
+  }
+  return candidate as unknown as ProductSpaceCatalogAuthorityRecord
+}
+
 function loadFile(): ProductSpaceCatalogAuthorityFile {
   if (processCache) return processCache
   try {
     if (existsSync(authorityPath())) {
       const parsed = JSON.parse(readFileSync(authorityPath(), 'utf8')) as ProductSpaceCatalogAuthorityFile
       if (parsed?.schemaVersion === AUTHORITY_SCHEMA_VERSION && parsed.records) {
-        processCache = parsed
+        const sanitized: ProductSpaceCatalogAuthorityFile = {
+          schemaVersion: AUTHORITY_SCHEMA_VERSION,
+          records: {},
+        }
+        for (const [key, record] of Object.entries(parsed.records)) {
+          const valid = sanitizeAuthorityRecord(record)
+          if (valid) sanitized.records[key] = valid
+        }
+        processCache = sanitized
         return processCache
       }
     }

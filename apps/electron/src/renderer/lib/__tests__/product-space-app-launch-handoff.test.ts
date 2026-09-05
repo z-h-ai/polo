@@ -42,9 +42,15 @@ const liveA: ProductSpaceLaunchHandoffLiveContext = {
   productSpaceId: 'space-a',
 }
 
+// Collision-shaped ALIASES of the same delimiter concatenation — never the
+// real key format, but they document why commitContext takes the shared
+// versioned tuple.
+const collidingKeyForA = 'a|b|c'
+
 describe('ProductSpace App launch handoff store', () => {
   it('hands credentials to POO-47 once without placing them in tab context', () => {
     const store = createProductSpaceLaunchHandoffStore()
+    store.commitContext(collidingKeyForA, liveA)
     const published: unknown[] = []
     const unsubscribe = store.onLaunch(request => published.push(request))
     const request = store.publish(liveA, 'account-a', launch)
@@ -61,6 +67,7 @@ describe('ProductSpace App launch handoff store', () => {
 
   it('fails closed when a persisted tab names another artifact instance', () => {
     const store = createProductSpaceLaunchHandoffStore()
+    store.commitContext(collidingKeyForA, liveA)
     const request = store.publish(liveA, 'account-a', launch)
     expect(store.take(liveA, request.handoffId, {
       ...context,
@@ -69,13 +76,13 @@ describe('ProductSpace App launch handoff store', () => {
     expect(store.take(liveA, request.handoffId, context)).toBeNull()
   })
 
-  it('refuses to publish without an active context or for another account/space', () => {
+  it('refuses to publish without a committed context or for another account/space', () => {
     const store = createProductSpaceLaunchHandoffStore()
-    expect(() => store.publish(
-      { accountId: '', productSpaceId: '' },
-      'account-a',
-      launch,
-    )).toThrow('requires an active ProductSpace')
+    // No commitContext yet: nothing is committed, so nothing may be sealed.
+    expect(() => store.publish(liveA, 'account-a', launch)).toThrow(
+      'another ProductSpace context',
+    )
+    store.commitContext(collidingKeyForA, liveA)
     expect(() => store.publish(liveA, 'account-b', launch)).toThrow(
       'another ProductSpace context',
     )
@@ -87,6 +94,7 @@ describe('ProductSpace App launch handoff store', () => {
 
   it('fails closed when the committed context switched after the handoff was sealed', () => {
     const store = createProductSpaceLaunchHandoffStore()
+    store.commitContext('account-a|space-a', liveA)
     const request = store.publish(liveA, 'account-a', launch)
 
     // The committed context is supplied per call — a consumer running under
@@ -113,6 +121,10 @@ describe('ProductSpace App launch handoff store', () => {
   it('keeps provider-owned stores isolated from each other', () => {
     const storeA = createProductSpaceLaunchHandoffStore()
     const storeB = createProductSpaceLaunchHandoffStore()
+    storeA.commitContext(collidingKeyForA, liveA)
+    storeB.commitContext(collidingKeyForA, liveA)
+    storeA.commitContext(collidingKeyForA, liveA)
+    storeB.commitContext(collidingKeyForA, liveA)
     const request = storeA.publish(liveA, 'account-a', launch)
     // Another provider instance (fresh mount, another account) can neither
     // see nor drain this handle.
@@ -125,20 +137,20 @@ describe('ProductSpace App launch handoff store', () => {
 
   it('never revives a handle after A→B→A without probing in B', () => {
     const store = createProductSpaceLaunchHandoffStore()
-    store.commitContext('account-a|space-a')
+    store.commitContext('account-a|space-a', liveA)
     const request = store.publish(liveA, 'account-a', launch)
 
     // Switch to B (committed), then back to A — WITHOUT anyone probing the
     // old handle in B.
-    store.commitContext('account-a|space-b')
-    store.commitContext('account-a|space-a')
+    store.commitContext('account-a|space-b', liveA)
+    store.commitContext('account-a|space-a', liveA)
 
     expect(store.take(liveA, request.handoffId, context)).toBeNull()
   })
 
   it('fails publish and take closed after dispose', () => {
     const store = createProductSpaceLaunchHandoffStore()
-    store.commitContext('account-a|space-a')
+    store.commitContext(collidingKeyForA, liveA)
     const request = store.publish(liveA, 'account-a', launch)
 
     let observed: unknown = 'not-run'

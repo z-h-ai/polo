@@ -45,12 +45,20 @@ export interface ProductSpaceLaunchHandoffStore {
   ): PendingProductSpaceAppLaunch | null
   onLaunch(listener: ProductSpaceAppLaunchListener): () => void
   /**
-   * Advances the committed-context generation. Every committed
+   * Binds the store to the committed context: advances the non-reusable
+   * generation AND records the committed live identity. Every committed
    * account/ProductSpace change permanently invalidates every handle sealed
    * under the previous generation — an A→B→A round-trip can never revive a
-   * pre-transition launch, even for the returned-to context.
+   * pre-transition launch — and publish/take callers whose captured live
+   * context no longer matches the committed one fail closed immediately
+   * (stale closures cannot act inside the commit→passive window because the
+   * Provider commits at the insertion boundary, before any descendant layout
+   * callback).
    */
-  commitContext(contextKey: string): void
+  commitContext(
+    contextKey: string,
+    live: ProductSpaceLaunchHandoffLiveContext,
+  ): void
   /**
    * Clears all pending launches and listeners; every handler obtained from
    * this store becomes permanently unusable (Provider unmount / sign-out).
@@ -102,6 +110,7 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
   }>()
   const listeners = new Set<ProductSpaceAppLaunchListener>()
   let committedContextKey: string | null = null
+  let committedLive: ProductSpaceLaunchHandoffLiveContext | null = null
   let contextGeneration = 0
   let disposed = false
 
@@ -115,6 +124,16 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
     publish(live, accountId, launch): ProductSpaceAppLaunchRequest {
       if (disposed) {
         throw new Error('ProductSpace App launch handoff store is disposed')
+      }
+      // A caller whose captured live context no longer matches the committed
+      // one is a stale closure — rejected before anything is sealed.
+      if (
+        !committedLive
+        || committedContextKey === null
+        || live.accountId !== committedLive.accountId
+        || live.productSpaceId !== committedLive.productSpaceId
+      ) {
+        throw new Error('ProductSpace App launch handoff belongs to another ProductSpace context')
       }
       if (!live.accountId || !live.productSpaceId) {
         throw new Error('ProductSpace App launch handoff requires an active ProductSpace')
@@ -150,10 +169,19 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
       if (disposed) return null
       const pending = pendingLaunches.get(handoffId)
       if (!pending) return null
-      // A handle is single-attempt as well as single-use. A stale or forged
-      // consumer must not be able to probe the tuple and retry later.
+      // A handle is single-attempt as well as single-use — the deletion
+      // happens BEFORE any validation, so a stale or forged consumer cannot
+      // probe the tuple and retry later.
       pendingLaunches.delete(handoffId)
       const { launch } = pending
+      // Stale-closure guard: the caller's captured live context must still
+      // be the committed one (see commitContext).
+      if (
+        !committedLive
+        || committedContextKey === null
+        || live.accountId !== committedLive.accountId
+        || live.productSpaceId !== committedLive.productSpaceId
+      ) return null
       // Generation fence: a handle sealed under a previous committed context
       // is dead even when the context later returns to its sealing identity
       // (A→B→A can never revive it).
@@ -189,7 +217,10 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
       return () => listeners.delete(listener)
     },
 
-    commitContext(contextKey: string): void {
+    commitContext(
+      contextKey: string,
+      live: ProductSpaceLaunchHandoffLiveContext,
+    ): void {
       // Re-arm is allowed for the SAME provider instance re-running its
       // commit effect (StrictMode double-invocation); a disposed store stays
       // dead for every externally captured handler because re-arm is only
@@ -197,9 +228,13 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
       if (disposed) {
         disposed = false
         committedContextKey = null
+        committedLive = null
       }
       if (contextKey === committedContextKey) return
+      // The context key is the shared collision-free versioned tuple
+      // (createProductSpaceContextKey) — never a delimiter concatenation.
       committedContextKey = contextKey
+      committedLive = { accountId: live.accountId, productSpaceId: live.productSpaceId }
       contextGeneration += 1
       // Every committed context change permanently invalidates handles from
       // all previous generations.

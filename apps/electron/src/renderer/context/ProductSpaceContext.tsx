@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { createContext, useContext, useEffect, useMemo, useRef } from 'react'
+import { createContext, useContext, useInsertionEffect, useMemo, useRef } from 'react'
 import type { ProductSpaceSummary, ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import type { PendingSpaceSwitch } from '@/hooks/useProductSpaceContext'
 import {
@@ -57,19 +57,25 @@ export function ProductSpaceProvider({
     storeRef.current = createProductSpaceLaunchHandoffStore()
   }
   const store = storeRef.current
-  // Every committed account/ProductSpace change advances the store's
-  // non-reusable context generation: handles sealed under a previous
-  // generation stay dead even when the context returns to its sealing
-  // identity (A→B→A can never revive a pre-transition launch). Liveness is
-  // still enforced per call from the committed context below, so this
-  // effect's passive timing cannot open a cross-context window.
-  const committedContextKey = `${value.accountId}|${value.activeProductSpaceId}`
-  useEffect(() => {
-    store.commitContext(committedContextKey)
+  // Every committed account/ProductSpace change binds the store to the new
+  // context at the INSERTION commit boundary — insertion effects complete
+  // before ANY layout effect of the whole tree runs, so a descendant layout
+  // callback of the new commit (or any stale closure invoked there) already
+  // sees the new generation + committed live identity: handles sealed under
+  // the previous context are dead, and stale closures can neither take nor
+  // publish inside the old commit→passive window. The key is the shared
+  // collision-free versioned tuple (productSpaceContextKey), never a
+  // delimiter concatenation of opaque IDs.
+  const committedContextKey = value.productSpaceContextKey
+  const committedLive = { accountId: value.accountId, productSpaceId: value.activeProductSpaceId }
+  useInsertionEffect(() => {
+    store.commitContext(committedContextKey, committedLive)
   }, [store, committedContextKey])
-  // Dispose on unmount / sign-out: pending launches and listeners are
-  // cleared and every handler captured before unmount becomes unusable.
-  useEffect(() => {
+  // Dispose on unmount / sign-out. Insertion cleanups run before layout
+  // cleanups, so stale closures invoked during unmount cleanup phases also
+  // hit a disposed store. The commit effect re-arms after StrictMode's
+  // simulated unmount; a real unmount has no such re-run.
+  useInsertionEffect(() => {
     return () => {
       store.dispose()
     }

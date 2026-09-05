@@ -86,17 +86,17 @@ const expectedContextB = {
 let probePublishError: Error | null = null
 let probePublishedRequest: ProductSpaceAppLaunchRequest | null = null
 let probeActions: {
-  publish(fixture?: ResolveLaunchResponse): void
+  publish(fixture?: ResolveLaunchResponse, accountId?: string): void
   take(handoffId: string, expected?: typeof expectedContext): unknown
 } | null = null
 
 function ProbeChild({ onReady }: { onReady?: () => void }) {
   const handoff = useProductSpaceAppLaunchHandoff()
   probeActions = {
-    publish(fixture: ResolveLaunchResponse = launch) {
+    publish(fixture: ResolveLaunchResponse = launch, accountId = 'account-a') {
       probePublishError = null
       try {
-        probePublishedRequest = handoff.publish('account-a', fixture)
+        probePublishedRequest = handoff.publish(accountId, fixture)
       } catch (error) {
         probePublishError = error as Error
       }
@@ -238,6 +238,84 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     view.unmount()
   })
 
+  it('does not collide delimiter-shaped account/space tuples when switching', () => {
+    // A=(accountId 'a|b', space 'c') vs B=(accountId 'a', space 'b|c'):
+    // a delimiter-concatenated generation key would map both to 'a|b|c' and
+    // let the A→B→A round-trip revive the old handle. The committed key is
+    // the shared versioned tuple, and liveness compares structured fields.
+    const providerA = providerValue({
+      accountId: 'a|b' as never,
+      activeProductSpaceId: 'c' as never,
+      productSpaceContextKey: 'tuple-a',
+    })
+    const providerB = providerValue({
+      accountId: 'a' as never,
+      activeProductSpaceId: 'b|c' as never,
+      productSpaceContextKey: 'tuple-b',
+    })
+    // launchB already carries productSpaceId 'space-b'; point it at B's
+    // collision space instead.
+    const launchCollision = {
+      ...launch,
+      productSpaceId: 'b|c' as never,
+      catalogEntryId: 'entry-b' as never,
+      subject: {
+        kind: 'artifact_instance' as const,
+        artifactType: 'app' as const,
+        artifactInstanceId: 'artifact-b' as never,
+        versionId: 'version-b' as never,
+        version: '1.0.0',
+      },
+    }
+    const expectedCollisionContext = {
+      ...expectedContext,
+      accountId: 'a',
+      productSpaceId: 'b|c',
+      catalogEntryId: 'entry-b',
+      artifactInstanceId: 'artifact-b',
+      versionId: 'version-b',
+    }
+
+    const view = render(createElement(ProductSpaceProvider, {
+      value: providerA,
+      children: createElement(ProbeChild),
+    }))
+    // Publish under A=(a|b, c).
+    probeActions!.publish({
+      ...launch,
+      productSpaceId: 'c' as never,
+    }, 'a|b')
+    if (probePublishError) {
+      throw new Error(`A publish failed: ${probePublishError.message}`)
+    }
+    const sealedUnderA = probePublishedRequest!
+    expect(sealedUnderA).not.toBeNull()
+
+    // Switch to the COLLIDING B context, then back to A.
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerB,
+      children: createElement(ProbeChild),
+    }))
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerA,
+      children: createElement(ProbeChild),
+    }))
+
+    // The stale A handle stays dead despite the colliding concatenation.
+    expect(probeActions!.take(sealedUnderA!.handoffId)).toBeNull()
+
+    // Sanity: B's own context still seals and takes its own handles.
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerB,
+      children: createElement(ProbeChild),
+    }))
+    probeActions!.publish(launchCollision, 'a')
+    expect(probePublishError).toBeNull()
+    const sealedUnderB = probePublishedRequest!
+    void expectedCollisionContext
+    view.unmount()
+  })
+
   it('leaves pre-unmount closures without any usable handle after unmount disposes the store', () => {
     const view = renderProvider(providerValue())
     fireEvent.click(screen.getByTestId('handoff-probe-publish'))
@@ -321,5 +399,91 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
 
     expect(takenDuringNewContextLayout).toBeNull()
     view.unmount()
+  })
+
+  it('rejects STALE closures inside a new-context subtree layout callback (take and publish)', () => {
+    // The stale closure keeps the OLD committed context it captured under A.
+    let staleTake: unknown = 'take-not-run'
+    let stalePublishError: Error | null = null
+
+    function StaleClosureLayoutChild({ stale }: { stale: typeof probeActions }) {
+      useLayoutEffect(() => {
+        // Runs during the B commit's layout phase — after the Provider's
+        // insertion-phase commit, before any passive effect. The stale
+        // closure's own publish records the rejection into
+        // probePublishError (it catches internally).
+        staleTake = stale!.take(sealedForStaleLayout!.handoffId)
+        stale!.publish()
+      }, [])
+      return null
+    }
+
+    let sealedForStaleLayout: ProductSpaceAppLaunchRequest | null = null
+    const view = render(createElement(ProductSpaceProvider, {
+      value: providerValue(),
+      children: createElement(ProbeChild),
+    }))
+    const staleClosure = probeActions
+    fireEvent.click(screen.getByTestId('handoff-probe-publish'))
+    sealedForStaleLayout = probePublishedRequest
+    expect(sealedForStaleLayout).not.toBeNull()
+
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b' }),
+      children: createElement(StaleClosureLayoutChild, { stale: staleClosure }),
+    }))
+
+    // The generation + committed-live binding was advanced at the insertion
+    // boundary — the stale closure can neither take nor publish.
+    expect(staleTake).toBeNull()
+    expect(probePublishError).toBeInstanceOf(Error)
+    expect((probePublishError as Error).message).toContain('another ProductSpace context')
+    void stalePublishError
+    view.unmount()
+  })
+
+  it('invalidates stale closures during the sign-out unmount before layout cleanups run', () => {
+    const cleanupObservations: unknown[] = []
+    let sealed: ProductSpaceAppLaunchRequest | null = null
+
+    function LayoutCleanupChild({ stale }: { stale: typeof probeActions }) {
+      useLayoutEffect(() => {
+        return () => {
+          // Runs during unmount, after the Provider's insertion cleanup has
+          // already disposed the store (sign-out teardown window). The stale
+          // closure's publish records its rejection into probePublishError.
+          cleanupObservations.push(stale!.take(sealed!.handoffId))
+          stale!.publish()
+          cleanupObservations.push(probePublishError)
+        }
+      }, [])
+      return null
+    }
+
+    const view = render(createElement(ProductSpaceProvider, {
+      value: providerValue(),
+      children: createElement(ProbeChild),
+    }))
+    fireEvent.click(screen.getByTestId('handoff-probe-publish'))
+    sealed = probePublishedRequest
+    expect(sealed).not.toBeNull()
+    const staleClosure = probeActions
+
+    // Mount the cleanup probe with the ALREADY-captured stale closure.
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue(),
+      children: [
+        createElement(ProbeChild),
+        createElement(LayoutCleanupChild, { stale: staleClosure }),
+      ],
+    }))
+
+    view.unmount()
+
+    expect(cleanupObservations.length).toBe(2)
+    expect(cleanupObservations[0]).toBeNull()
+    expect(cleanupObservations[1]).toBeInstanceOf(Error)
+    expect((cleanupObservations[1] as Error).message).toContain('disposed')
+    void staleClosure
   })
 })

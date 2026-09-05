@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
 import { join } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { createProductSpaceContextKey } from '@polo-ai/shared/product-spaces'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -473,7 +474,7 @@ mock.module('@polo-ai/shared/credentials', () => ({
   },
 }))
 
-const { readApiKey, registerAdminHandlers } = await import('./admin')
+const { readApiKey, registerAdminHandlers, __bumpProductSpaceCatalogSyncFenceForTests } = await import('./admin')
 const { registerAuthHandlers } = await import('./auth')
 
 function createHarness() {
@@ -806,6 +807,137 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(record!.catalogRevision).toBe('rev-2')
     expect(record!.entries).toHaveLength(1)
     expect(record!.entries[0]!.catalogEntryId).toBe('entry-rev-2')
+  })
+
+  it('downgrades a request to REQUEST_SUPERSEDED via the final commit-zone CAS when a newer invocation registered', async () => {
+    // R1 passes its post-fetch latest check, but its authority commit is
+    // delayed by the session-current lock; a newer invocation registers in
+    // that window (simulated by the fence bump — R2's registration). The
+    // final CAS under the lock must reject R1 with ZERO authority writes.
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    let releaseR1Catalog!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      return new Promise(resolve => {
+        releaseR1Catalog = resolve
+      })
+    }
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1Catalog)
+
+    // R1's post-fetch check has passed at this exact instant; R2 now
+    // registers a newer invocation before R1 reaches the commit zone.
+    __bumpProductSpaceCatalogSyncFenceForTests(
+      createProductSpaceContextKey('user-1' as never, 'space-a' as never),
+    )
+
+    releaseR1Catalog!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+  })
+
+  it('never writes the authority when the newer request finds the space withdrawn during list validation', async () => {
+    // Same final-CAS window, but the newer request dies during its list
+    // validation (space unavailable) — R1 must STILL be superseded and the
+    // authority must stay empty: neither the old nor the failed request
+    // may define the persisted authority.
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    let releaseR1Catalog!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      return new Promise(resolve => {
+        releaseR1Catalog = resolve
+      })
+    }
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1Catalog)
+    __bumpProductSpaceCatalogSyncFenceForTests(
+      createProductSpaceContextKey('user-1' as never, 'space-a' as never),
+    )
+
+    releaseR1Catalog!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+  })
+
+  it('keeps delimiter-collision ProductSpaces on independent fences and authorities', async () => {
+    // (userId 'user-1|extra', space 'space-a') vs (userId 'user-1', space
+    // 'extra|space-a'): a delimiter-concatenated scope key would share one
+    // invocation counter and the two spaces would supersede each other.
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [
+        { id: 'space-a', accessMode: 'active' },
+        { id: 'extra|space-a', accessMode: 'active' },
+      ],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async (_token: string, ctx: unknown) => ({
+      contractVersion: 1,
+      productSpaceId: (ctx as { id: string }).id,
+      catalogRevision: `rev-${(ctx as { id: string }).id}`,
+      entries: [],
+    })
+
+    let releaseACatalog!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async (_token: string, ctx: unknown) => {
+      if ((ctx as { id: string }).id === 'space-a') {
+        return new Promise(resolve => {
+          releaseACatalog = resolve
+        })
+      }
+      return {
+        contractVersion: 1,
+        productSpaceId: (ctx as { id: string }).id,
+        catalogRevision: `rev-${(ctx as { id: string }).id}`,
+        entries: [],
+      }
+    }
+
+    const pendingA = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseACatalog)
+    // While space-a's request is in flight, the OTHER (delimiter-collision)
+    // scope registers on its own fence: with a shared delimiter key this
+    // bump would supersede space-a's in-flight request.
+    __bumpProductSpaceCatalogSyncFenceForTests(
+      createProductSpaceContextKey('user-1' as never, 'extra|space-a' as never),
+    )
+    releaseACatalog!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-space-a',
+      entries: [],
+    })
+    const pendingB = productSpaceCatalog(context, 'extra|space-a', undefined)
+    const rA = await pendingA as any
+    const rB = await pendingB as any
+
+    expect(rA.success).toBe(true)
+    expect(rB.success).toBe(true)
+    expect(rA.catalogRevision).toBe('rev-space-a')
+    expect(rB.catalogRevision).toBe('rev-extra|space-a')
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')!.catalogRevision)
+      .toBe('rev-space-a')
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'extra|space-a')!.catalogRevision)
+      .toBe('rev-extra|space-a')
   })
 
   it('never writes the authority when the session changes during the fetch', async () => {
