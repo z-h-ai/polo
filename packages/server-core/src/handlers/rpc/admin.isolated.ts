@@ -846,14 +846,12 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
   })
 
-  it('never writes the authority when the newer request finds the space withdrawn during list validation', async () => {
-    // Same final-CAS window, but the newer request dies during its list
-    // validation (space unavailable) — R1 must STILL be superseded and the
-    // authority must stay empty: neither the old nor the failed request
-    // may define the persisted authority.
-    adminClientBehavior.listProductSpaces = async () => ({
-      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
-    })
+  it('returns REQUEST_SUPERSEDED for a delayed R1 when a real newer request registered then failed non-session-ending', async () => {
+    // REAL concurrent R1/R2 (no test-hook bump): R1 is gated at its catalog
+    // fetch; R2 enters the scope — registering a NEWER invocation BEFORE any
+    // list await — then exits with a transport failure without committing.
+    // R1's delayed commit must lose to R2's newer invocation via the final
+    // commit-zone CAS.
     let releaseR1Catalog!: (value: any) => void
     adminClientBehavior.getProductSpaceCatalog = async () => {
       return new Promise(resolve => {
@@ -863,9 +861,67 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
 
     const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
     await waitFor(() => releaseR1Catalog)
-    __bumpProductSpaceCatalogSyncFenceForTests(
-      createProductSpaceContextKey('user-1' as never, 'space-a' as never),
-    )
+
+    // R2 enters the scope (registers invocation 2) and blocks at its list
+    // await — registration happens BEFORE the list call.
+    let releaseR2List!: (value: any) => void
+    adminClientBehavior.listProductSpaces = async () => {
+      return new Promise(resolve => {
+        releaseR2List = resolve
+      })
+    }
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR2List)
+
+    // R2 exits with a transport failure (never commits).
+    releaseR2List!(new (class extends Error {
+      readonly errorCode = 'NETWORK_ERROR'
+    })('R2 transport failed'))
+    const r2 = await pendingR2 as any
+    expect(r2.success).toBe(false)
+
+    // The delayed R1 commit must lose to R2's newer invocation.
+    releaseR1Catalog!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+  })
+
+  it('stays fail-closed (zero authority writes) when a real newer request finds the space withdrawn after registering', async () => {
+    // REAL concurrent R1/R2 with the WITHDRAWAL flavor: R2 registers its
+    // newer invocation BEFORE the list await, then its list validation finds
+    // the space withdrawn. That failure is session-ending by production
+    // design, so R1 fails closed as SESSION_CHANGED (or REQUEST_SUPERSEDED
+    // when the session survives) — either way with ZERO authority writes and
+    // never the stale rev-1 commit.
+    let releaseR1Catalog!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      return new Promise(resolve => {
+        releaseR1Catalog = resolve
+      })
+    }
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1Catalog)
+
+    let releaseR2List!: (value: any) => void
+    adminClientBehavior.listProductSpaces = async () => {
+      return new Promise(resolve => {
+        releaseR2List = resolve
+      })
+    }
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR2List)
+
+    releaseR2List!({ productSpaces: [] })
+    const r2 = await pendingR2 as any
+    expect(r2.success).toBe(false)
 
     releaseR1Catalog!({
       contractVersion: 1,
@@ -873,10 +929,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
       catalogRevision: 'rev-1',
       entries: [authorityTestEntry('rev-1')],
     })
-
     const r1 = await pendingR1 as any
     expect(r1.success).toBe(false)
-    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+    expect(['REQUEST_SUPERSEDED', 'SESSION_CHANGED']).toContain(r1.errorCode)
     expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
   })
 

@@ -75,23 +75,61 @@ function emptyFile(): ProductSpaceCatalogAuthorityFile {
   return { schemaVersion: AUTHORITY_SCHEMA_VERSION, records: {} }
 }
 
+const AUTHORITY_AVAILABILITY = new Set(['available', 'unavailable', 'blocked', 'withdrawn'])
+const AUTHORITY_UNAVAILABLE_REASONS = new Set([
+  'authorization_ended', 'space_restricted', 'version_unavailable', 'version_blocked',
+])
+const AUTHORITY_SOURCE_KINDS = new Set(['polo', 'creator_circle', 'enterprise_import'])
+const MAX_AUTHORITY_ENTRY_SOURCES = 1_000
+const MAX_AUTHORITY_ENTRY_PERMISSIONS = 1_000
+
+/**
+ * FULL authority DTO validation (mirror of the ProductSpace Catalog entry
+ * contract, post-credential-strip): every field's type, enum, discriminant,
+ * and array membership is checked — a syntactically-valid JSON entry with a
+ * malformed field is never treated as a trusted record.
+ */
 function isValidAuthorityEntry(entry: unknown): entry is ProductSpaceCatalogAuthorityEntry {
   if (!entry || typeof entry !== 'object') return false
   const candidate = entry as Record<string, unknown>
-  return typeof candidate.catalogEntryId === 'string' && candidate.catalogEntryId !== ''
-    && typeof candidate.artifactInstanceId === 'string' && candidate.artifactInstanceId !== ''
-    && typeof candidate.versionId === 'string' && candidate.versionId !== ''
-    && typeof candidate.version === 'string' && candidate.version !== ''
-    && typeof candidate.name === 'string'
-    && typeof candidate.availability === 'string'
-    && Array.isArray(candidate.sources)
-    && Array.isArray(candidate.permissions)
-    && candidate.sources.every(source => (
-      source
-      && typeof source === 'object'
-      && typeof (source as { kind?: unknown }).kind === 'string'
-      && typeof (source as { name?: unknown }).name === 'string'
-    ))
+  if (candidate.kind !== 'app') return false
+  if (typeof candidate.catalogEntryId !== 'string' || candidate.catalogEntryId === '') return false
+  if (typeof candidate.artifactInstanceId !== 'string' || candidate.artifactInstanceId === '') return false
+  if (typeof candidate.versionId !== 'string' || candidate.versionId === '') return false
+  if (typeof candidate.version !== 'string' || candidate.version === '') return false
+  if (typeof candidate.name !== 'string' || candidate.name === '') return false
+  if (typeof candidate.description !== 'string') return false
+  if (typeof candidate.availability !== 'string' || !AUTHORITY_AVAILABILITY.has(candidate.availability)) return false
+  if (
+    candidate.unavailableReason !== undefined
+    && (typeof candidate.unavailableReason !== 'string'
+      || !AUTHORITY_UNAVAILABLE_REASONS.has(candidate.unavailableReason))
+  ) return false
+  if (
+    candidate.iconUrl !== undefined
+    && typeof candidate.iconUrl !== 'string'
+  ) return false
+  if (!Array.isArray(candidate.sources) || candidate.sources.length > MAX_AUTHORITY_ENTRY_SOURCES) return false
+  for (const source of candidate.sources) {
+    if (!source || typeof source !== 'object') return false
+    const candidateSource = source as Record<string, unknown>
+    if (typeof candidateSource.kind !== 'string' || !AUTHORITY_SOURCE_KINDS.has(candidateSource.kind)) return false
+    if (typeof candidateSource.name !== 'string' || candidateSource.name === '') return false
+    if (
+      candidateSource.circleId !== undefined
+      && (typeof candidateSource.circleId !== 'string' || candidateSource.circleId === '')
+    ) return false
+  }
+  if (
+    !Array.isArray(candidate.permissions)
+    || candidate.permissions.length > MAX_AUTHORITY_ENTRY_PERMISSIONS
+    || !candidate.permissions.every(permission => typeof permission === 'string')
+  ) return false
+  if (
+    candidate.withdrawnAt !== undefined
+    && typeof candidate.withdrawnAt !== 'number'
+  ) return false
+  return true
 }
 
 /**

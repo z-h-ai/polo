@@ -69,8 +69,8 @@ export function ProductSpaceProvider({
   const committedContextKey = value.productSpaceContextKey
   const committedLive = { accountId: value.accountId, productSpaceId: value.activeProductSpaceId }
   useInsertionEffect(() => {
-    store.commitContext(committedContextKey, committedLive)
-  }, [store, committedContextKey])
+    store.commitContext(committedContextKey, committedLive, value.contextVersion)
+  }, [store, committedContextKey, value.contextVersion])
   // Dispose on unmount / sign-out. Insertion cleanups run before layout
   // cleanups, so stale closures invoked during unmount cleanup phases also
   // hit a disposed store. The commit effect re-arms after StrictMode's
@@ -130,9 +130,14 @@ export interface ProductSpaceAppLaunchHandoff {
  */
 export function useProductSpaceAppLaunchHandoff(): ProductSpaceAppLaunchHandoff {
   const store = useContext(LaunchHandoffStoreContext)
-  const { accountId, activeProductSpaceId } = useProductSpaceContext()
+  const { accountId, activeProductSpaceId, contextVersion } = useProductSpaceContext()
   return useMemo(() => {
+    // The lease is the authoritative monotonic contextVersion from the
+    // ProductSpace state at THIS render: every committed transition changes
+    // it, so a closure captured under a previous context can never act after
+    // an A→B→A round-trip (its lease can never become current again).
     const live = { accountId, productSpaceId: activeProductSpaceId }
+    const lease = contextVersion
     if (!store) {
       return {
         publish: (_publisherAccountId: string, _launch: ResolveLaunchResponse) => {
@@ -144,10 +149,11 @@ export function useProductSpaceAppLaunchHandoff(): ProductSpaceAppLaunchHandoff 
     }
     return {
       publish: (publisherAccountId: string, launch: ResolveLaunchResponse) =>
-        store.publish(live, publisherAccountId, launch),
+        store.publish(live, lease, publisherAccountId, launch),
       take: (handoffId: string, expected: ProductSpaceAppLaunchContext) =>
-        store.take(live, handoffId, expected),
-      onLaunch: (listener: ProductSpaceAppLaunchListener) => store.onLaunch(listener),
+        store.take(live, lease, handoffId, expected),
+      onLaunch: (listener: ProductSpaceAppLaunchListener) =>
+        store.onLaunch(live, lease, listener),
     }
-  }, [store, accountId, activeProductSpaceId])
+  }, [store, accountId, activeProductSpaceId, contextVersion])
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -117,6 +117,78 @@ describe('ProductSpace Catalog authority', () => {
     expect(getProductSpaceCatalogAuthorityRecord('account-b', 'space-a')).toBeNull()
     expect(productSpaceCatalogAuthorityKey('account-a', 'space-a'))
       .toBe(JSON.stringify(['product-space-catalog', 1, 'account-a', 'space-a']))
+  })
+
+  it('rejects a syntactically-valid-but-malformed authority file and self-heals on the next fresh Catalog', () => {
+    // Seed a GOOD record first, then overwrite the persisted file with
+    // legal JSON whose record shapes are malformed (missing tombstones
+    // array, entry missing versionId, wrong kind, non-string permission,
+    // unknown availability, unknown source discriminant).
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-good', [entry()])
+    const file = join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1,
+      records: {
+        [productSpaceCatalogAuthorityKey('account-a', 'space-a')]: {
+          schemaVersion: 1,
+          accountId: 'account-a',
+          productSpaceId: 'space-a',
+          syncedAt: 1,
+          catalogRevision: 'rev-bad',
+          entries: [{
+            kind: 'app',
+            catalogEntryId: 'entry-x',
+            artifactInstanceId: 'artifact-x',
+            // versionId missing — entry malformed.
+            version: { version: '1.0.0' },
+            name: 'X',
+            description: '',
+            availability: 'available',
+            sources: [],
+            permissions: ['not-a-string' as unknown as string],
+          }],
+          // tombstones missing entirely.
+        },
+        [productSpaceCatalogAuthorityKey('account-b', 'space-b')]: {
+          schemaVersion: 1,
+          accountId: 'account-b',
+          productSpaceId: 'space-b',
+          syncedAt: 1,
+          catalogRevision: 'rev-bad-2',
+          entries: [],
+          tombstones: [{
+            kind: 'skill',
+            catalogEntryId: 'skill-a',
+            artifactInstanceId: 'artifact-skill',
+            versionId: 'v',
+            version: '1',
+            name: 'S',
+            description: '',
+            availability: 'available',
+            sources: [{ kind: 'unknown-source-kind', name: 'X' }],
+            permissions: [],
+          }],
+        },
+      },
+    }), 'utf8')
+    resetProductSpaceCatalogAuthorityForTests()
+
+    // Both malformed scopes are dropped on load: withdrawn management fails
+    // closed for them (no trusted tuples) and no record is exposed.
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple('entry-x', 'artifact-x', 'v', '1.0.0'))).toBe(false)
+    expect(getProductSpaceCatalogAuthorityRecord('account-b', 'space-b')).toBeNull()
+
+    // The next verified Catalog fetch rebuilds the scope (self-healing).
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a',
+      'space-a',
+      'rev-healed',
+      [entry()],
+    )
+    expect(tombstones).toEqual([])
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed')
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 
   it('rejects malformed entries instead of recording them', () => {

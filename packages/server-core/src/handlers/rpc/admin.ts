@@ -1754,26 +1754,18 @@ export function registerAdminHandlers(
       return callOrganization(
         'getProductSpaceCatalog',
         async (client, accessToken, userId) => {
-          const list = await client.listProductSpaces(accessToken)
-          const context = list.productSpaces.find(
-            space => space.id === (productSpaceId as never),
-          )
-          if (!context || context.accessMode !== 'active') {
-            throw new AdminError(
-              'The requested ProductSpace is not available for this account',
-              'FORBIDDEN',
-            )
-          }
           // Main-owned latest-request fence (same shape as the legacy
-          // Catalog sync): overlapping refreshes for one account+space are
-          // monotonic per invocation; only the latest request may commit —
-          // a slower older response is superseded and never writes the
-          // authority. The scope key is the shared collision-free versioned
-          // tuple (entity IDs may contain every delimiter), and
-          // catalogRevision is opaque and never ordered.
+          // Catalog sync): the invocation is registered the moment the
+          // request enters the authenticated ProductSpace Catalog scope —
+          // BEFORE any ProductSpace list or Catalog await. A request whose
+          // list validation later finds its space withdrawn still holds the
+          // newer invocation, so an older in-flight response can never
+          // commit a stale authority past it. The scope key is the shared
+          // collision-free versioned tuple (entity IDs may contain every
+          // delimiter), and catalogRevision is opaque and never ordered.
           const catalogSyncKey = createProductSpaceContextKey(
             userId as never,
-            context.id,
+            productSpaceId as never,
           )
           const syncInvocation = Math.max(
             latestProductSpaceCatalogSyncByScope.get(catalogSyncKey) ?? 0,
@@ -1787,6 +1779,25 @@ export function registerAdminHandlers(
             errorCode: 'REQUEST_SUPERSEDED',
             message: 'A newer ProductSpace catalog request replaced this one',
           })
+
+          const list = await client.listProductSpaces(accessToken)
+          const context = list.productSpaces.find(
+            space => space.id === (productSpaceId as never),
+          )
+          if (!context || context.accessMode !== 'active') {
+            throw new AdminError(
+              'The requested ProductSpace is not available for this account',
+              'FORBIDDEN',
+            )
+          }
+          // Defensive: the fence was registered for the REQUESTED space; the
+          // validated context must be exactly that space.
+          if (context.id !== (productSpaceId as string)) {
+            throw new AdminError(
+              'The requested ProductSpace is not available for this account',
+              'FORBIDDEN',
+            )
+          }
 
           const result = await client.getProductSpaceCatalog(
             accessToken,

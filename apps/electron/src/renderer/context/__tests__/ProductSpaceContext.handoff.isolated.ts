@@ -191,7 +191,7 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     // Same mounted provider switches the committed space: the context read
     // now returns B, so the stale A handle can never be taken…
     view.rerender(createElement(ProductSpaceProvider, {
-      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b' }),
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b', contextVersion: 1 }),
       children: createElement(ProbeChild),
     }))
     expect(probeActions!.take(sealedBeforeSwitch.handoffId)).toBeNull()
@@ -202,7 +202,7 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
 
     // Re-authentication back into the original space re-arms publishing.
     view.rerender(createElement(ProductSpaceProvider, {
-      value: providerValue(),
+      value: providerValue({ contextVersion: 2 }),
       children: createElement(ProbeChild),
     }))
     probeActions!.publish()
@@ -218,13 +218,14 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     fireEvent.click(screen.getByTestId('handoff-probe-publish'))
     const sealedUnderA = probePublishedRequest!
 
-    // A→B then back to A — the old handle is NEVER touched in B.
+    // A→B then back to A — the old handle is NEVER touched in B, and the
+    // re-entered A context holds a NEW lease (contextVersion 2).
     view.rerender(createElement(ProductSpaceProvider, {
-      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b' }),
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b', contextVersion: 1 }),
       children: createElement(ProbeChild),
     }))
     view.rerender(createElement(ProductSpaceProvider, {
-      value: providerValue(),
+      value: providerValue({ contextVersion: 2 }),
       children: createElement(ProbeChild),
     }))
 
@@ -247,11 +248,13 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
       accountId: 'a|b' as never,
       activeProductSpaceId: 'c' as never,
       productSpaceContextKey: 'tuple-a',
+      contextVersion: 1,
     })
     const providerB = providerValue({
       accountId: 'a' as never,
       activeProductSpaceId: 'b|c' as never,
       productSpaceContextKey: 'tuple-b',
+      contextVersion: 2,
     })
     // launchB already carries productSpaceId 'space-b'; point it at B's
     // collision space instead.
@@ -291,13 +294,18 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     const sealedUnderA = probePublishedRequest!
     expect(sealedUnderA).not.toBeNull()
 
-    // Switch to the COLLIDING B context, then back to A.
+    // Switch to the COLLIDING B context, then back to A (new lease).
     view.rerender(createElement(ProductSpaceProvider, {
       value: providerB,
       children: createElement(ProbeChild),
     }))
     view.rerender(createElement(ProductSpaceProvider, {
-      value: providerA,
+      value: providerValue({
+        accountId: 'a|b' as never,
+        activeProductSpaceId: 'c' as never,
+        productSpaceContextKey: 'tuple-a',
+        contextVersion: 3,
+      }),
       children: createElement(ProbeChild),
     }))
 
@@ -344,6 +352,7 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     const speculativeRoot = renderProvider(providerValue({
       activeProductSpaceId: 'space-b',
       productSpaceContextKey: 'account-a|space-b',
+      contextVersion: 1,
     }))
     const bProbe = probeActions!
     bProbe.publish(launchB)
@@ -398,6 +407,122 @@ describe('ProductSpaceProvider launch handoff lifecycle', () => {
     }))
 
     expect(takenDuringNewContextLayout).toBeNull()
+    view.unmount()
+  })
+
+  it('refuses a STALE publisher re-sealing a pre-transition token after A→B→A; fresh A closures still publish', () => {
+    const view = renderProvider(providerValue())
+    const staleClosure = probeActions
+    fireEvent.click(screen.getByTestId('handoff-probe-publish'))
+    const preTransitionLaunch = probePublishedRequest
+    expect(preTransitionLaunch).not.toBeNull()
+
+    // A→B→A: the committed context returns to A under a NEW lease.
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b', contextVersion: 1 }),
+      children: createElement(ProbeChild),
+    }))
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue({ contextVersion: 2 }),
+      children: createElement(ProbeChild),
+    }))
+    const freshClosure = probeActions
+
+    // The old A closure still holds the pre-transition launch: re-sealing
+    // it into the current generation must be refused.
+    staleClosure!.publish()
+    expect((probePublishError as Error | null)?.message).toContain(
+      'another ProductSpace context',
+    )
+
+    // A fresh A closure publishes a fresh launch and it is consumable.
+    freshClosure!.publish()
+    expect(probePublishError).toBeNull()
+    const fresh = probePublishedRequest!
+    expect(probeActions!.take(fresh.handoffId)).not.toBeNull()
+    view.unmount()
+  })
+
+  it('lets only the current-context listener consume a B publish; the stale A listener cannot burn the handle', () => {
+    const staleSeen: unknown[] = []
+    const bSeen: unknown[] = []
+    type Handoff = ReturnType<typeof useProductSpaceAppLaunchHandoff>
+
+    function ListenerProbeChild({ onReady }: { onReady: (handoff: Handoff) => void }) {
+      const handoff = useProductSpaceAppLaunchHandoff()
+      probeActions = {
+        publish(fixture: ResolveLaunchResponse = launch, accountId = 'account-a') {
+          probePublishError = null
+          try {
+            probePublishedRequest = handoff.publish(accountId, fixture)
+          } catch (error) {
+            probePublishError = error as Error
+          }
+        },
+        take(handoffId: string, expected: typeof expectedContext = expectedContext) {
+          return handoff.take(handoffId, expected)
+        },
+      }
+      onReady(handoff)
+      return createElement('button', {
+        type: 'button',
+        'data-testid': 'handoff-probe-publish',
+        onClick: () => probeActions?.publish(),
+      })
+    }
+
+    let staleHandoff!: Handoff
+    const view = render(createElement(ProductSpaceProvider, {
+      value: providerValue(),
+      children: createElement(ListenerProbeChild, {
+        onReady: handoff => { staleHandoff = handoff },
+      }),
+    }))
+    // The stale A listener binds under A's context and lease.
+    const unsubscribeStale = staleHandoff.onLaunch(request => staleSeen.push(request))
+    fireEvent.click(screen.getByTestId('handoff-probe-publish'))
+    // The stale listener legitimately observed the A-context publish...
+    expect(staleSeen).toHaveLength(1)
+
+    // Commit B: the stale listener retires; B binds its own listener under
+    // B's context and lease.
+    let bHandoff!: Handoff
+    view.rerender(createElement(ProductSpaceProvider, {
+      value: providerValue({ activeProductSpaceId: 'space-b', productSpaceContextKey: 'account-a|space-b', contextVersion: 1 }),
+      children: createElement(ListenerProbeChild, {
+        onReady: handoff => { bHandoff = handoff },
+      }),
+    }))
+    bHandoff.onLaunch(request => bSeen.push(request))
+
+    // B publishes a valid handle: exactly ONE delivery — to B's listener.
+    probeActions!.publish({
+      ...launch,
+      productSpaceId: 'space-b' as never,
+      catalogEntryId: 'entry-b' as never,
+      subject: {
+        kind: 'artifact_instance' as const,
+        artifactType: 'app' as const,
+        artifactInstanceId: 'artifact-b' as never,
+        versionId: 'version-b' as never,
+        version: '1.0.0',
+      },
+    }, 'account-a')
+    expect(probePublishError).toBeNull()
+    const sealed = probePublishedRequest!
+
+    // ...but it never observes the B publish, and it cannot burn the handle.
+    unsubscribeStale()
+    expect(staleSeen).toHaveLength(1)
+    expect(bSeen).toEqual([sealed])
+    const consumed = probeActions!.take(sealed.handoffId, {
+      ...expectedContext,
+      productSpaceId: 'space-b',
+      catalogEntryId: 'entry-b',
+      artifactInstanceId: 'artifact-b',
+      versionId: 'version-b',
+    })
+    expect(consumed).not.toBeNull()
     view.unmount()
   })
 

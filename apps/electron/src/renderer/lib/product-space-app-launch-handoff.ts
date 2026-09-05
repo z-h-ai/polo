@@ -35,29 +35,42 @@ export interface ProductSpaceLaunchHandoffLiveContext {
 export interface ProductSpaceLaunchHandoffStore {
   publish(
     live: ProductSpaceLaunchHandoffLiveContext,
+    lease: number,
     accountId: string,
     launch: ResolveLaunchResponse,
   ): ProductSpaceAppLaunchRequest
   take(
     live: ProductSpaceLaunchHandoffLiveContext,
+    lease: number,
     handoffId: string,
     expected: ProductSpaceAppLaunchContext,
   ): PendingProductSpaceAppLaunch | null
-  onLaunch(listener: ProductSpaceAppLaunchListener): () => void
+  /**
+   * Subscribes a listener bound to the caller's live context and lease: only
+   * the CURRENTLY committed listener is notified of publishes, and stale
+   * listeners can never observe (or burn) handles of a later context.
+   */
+  onLaunch(
+    live: ProductSpaceLaunchHandoffLiveContext,
+    lease: number,
+    listener: ProductSpaceAppLaunchListener,
+  ): () => void
   /**
    * Binds the store to the committed context: advances the non-reusable
-   * generation AND records the committed live identity. Every committed
-   * account/ProductSpace change permanently invalidates every handle sealed
-   * under the previous generation — an A→B→A round-trip can never revive a
-   * pre-transition launch — and publish/take callers whose captured live
-   * context no longer matches the committed one fail closed immediately
-   * (stale closures cannot act inside the commit→passive window because the
-   * Provider commits at the insertion boundary, before any descendant layout
-   * callback).
+   * generation, records the committed live identity AND the committed
+   * context lease (the monotonic contextVersion from the authoritative
+   * ProductSpace state). Every committed account/ProductSpace change
+   * permanently invalidates every handle sealed under the previous
+   * generation/lease — an A→B→A round-trip can never revive a pre-transition
+   * launch, and publish/take callers whose captured live context OR lease no
+   * longer matches the committed one fail closed immediately (stale closures
+   * cannot act inside the commit→passive window because the Provider commits
+   * at the insertion boundary, before any descendant layout callback).
    */
   commitContext(
     contextKey: string,
     live: ProductSpaceLaunchHandoffLiveContext,
+    contextVersion: number,
   ): void
   /**
    * Clears all pending launches and listeners; every handler obtained from
@@ -108,11 +121,29 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
     launch: ResolveLaunchResponse
     contextGeneration: number
   }>()
-  const listeners = new Set<ProductSpaceAppLaunchListener>()
+  const listeners = new Set<{
+    live: ProductSpaceLaunchHandoffLiveContext
+    lease: number
+    listener: ProductSpaceAppLaunchListener
+  }>()
   let committedContextKey: string | null = null
   let committedLive: ProductSpaceLaunchHandoffLiveContext | null = null
+  let committedContextVersion: number | null = null
   let contextGeneration = 0
   let disposed = false
+
+  // The caller's captured (live, lease) must still be the committed one.
+  // Checked BEFORE the single-attempt drain so a stale closure can neither
+  // burn the current consumer's handle nor probe it.
+  const isStaleCaller = (live: ProductSpaceLaunchHandoffLiveContext, lease: number): boolean => (
+    disposed
+    || committedContextVersion === null
+    || committedContextKey === null
+    || committedLive === null
+    || lease !== committedContextVersion
+    || live.accountId !== committedLive.accountId
+    || live.productSpaceId !== committedLive.productSpaceId
+  )
 
   function pruneExpired(): void {
     for (const [key, pending] of pendingLaunches) {
@@ -121,18 +152,13 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
   }
 
   return {
-    publish(live, accountId, launch): ProductSpaceAppLaunchRequest {
+    publish(live, lease, accountId, launch): ProductSpaceAppLaunchRequest {
       if (disposed) {
         throw new Error('ProductSpace App launch handoff store is disposed')
       }
-      // A caller whose captured live context no longer matches the committed
-      // one is a stale closure — rejected before anything is sealed.
-      if (
-        !committedLive
-        || committedContextKey === null
-        || live.accountId !== committedLive.accountId
-        || live.productSpaceId !== committedLive.productSpaceId
-      ) {
+      // A stale closure (captured live context or lease no longer committed)
+      // can never re-seal a pre-transition token into the current generation.
+      if (isStaleCaller(live, lease)) {
         throw new Error('ProductSpace App launch handoff belongs to another ProductSpace context')
       }
       if (!live.accountId || !live.productSpaceId) {
@@ -161,27 +187,32 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
         if (!oldestKey) break
         pendingLaunches.delete(oldestKey)
       }
-      for (const listener of listeners) listener(request)
+      // Only the currently committed listener is notified — a listener kept
+      // from a previous context can neither observe nor burn this handle.
+      for (const entry of listeners) {
+        if (
+          entry.lease === committedContextVersion
+          && entry.live.accountId === committedLive!.accountId
+          && entry.live.productSpaceId === committedLive!.productSpaceId
+        ) {
+          entry.listener(request)
+        }
+      }
       return request
     },
 
-    take(live, handoffId, expected): PendingProductSpaceAppLaunch | null {
-      if (disposed) return null
+    take(live, lease, handoffId, expected): PendingProductSpaceAppLaunch | null {
+      // Stale-closure guard FIRST (no drain): a caller whose captured live
+      // context or lease is no longer committed can neither take the handle
+      // nor burn it for the current consumer.
+      if (isStaleCaller(live, lease)) return null
       const pending = pendingLaunches.get(handoffId)
       if (!pending) return null
       // A handle is single-attempt as well as single-use — the deletion
-      // happens BEFORE any validation, so a stale or forged consumer cannot
-      // probe the tuple and retry later.
+      // happens BEFORE the remaining (tuple) validation, so the committed
+      // consumer cannot probe tuples and retry later.
       pendingLaunches.delete(handoffId)
       const { launch } = pending
-      // Stale-closure guard: the caller's captured live context must still
-      // be the committed one (see commitContext).
-      if (
-        !committedLive
-        || committedContextKey === null
-        || live.accountId !== committedLive.accountId
-        || live.productSpaceId !== committedLive.productSpaceId
-      ) return null
       // Generation fence: a handle sealed under a previous committed context
       // is dead even when the context later returns to its sealing identity
       // (A→B→A can never revive it).
@@ -211,15 +242,21 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
       return { accountId: pending.accountId, launch }
     },
 
-    onLaunch(listener: ProductSpaceAppLaunchListener): () => void {
+    onLaunch(
+      live: ProductSpaceLaunchHandoffLiveContext,
+      lease: number,
+      listener: ProductSpaceAppLaunchListener,
+    ): () => void {
       if (disposed) return () => {}
-      listeners.add(listener)
-      return () => listeners.delete(listener)
+      const entry = { live: { ...live }, lease, listener }
+      listeners.add(entry)
+      return () => listeners.delete(entry)
     },
 
     commitContext(
       contextKey: string,
       live: ProductSpaceLaunchHandoffLiveContext,
+      contextVersion: number,
     ): void {
       // Re-arm is allowed for the SAME provider instance re-running its
       // commit effect (StrictMode double-invocation); a disposed store stays
@@ -229,16 +266,30 @@ export function createProductSpaceLaunchHandoffStore(): ProductSpaceLaunchHandof
         disposed = false
         committedContextKey = null
         committedLive = null
+        committedContextVersion = null
       }
-      if (contextKey === committedContextKey) return
+      if (contextKey === committedContextKey && contextVersion === committedContextVersion) return
       // The context key is the shared collision-free versioned tuple
       // (createProductSpaceContextKey) — never a delimiter concatenation.
+      // The contextVersion is the monotonic lease from the authoritative
+      // ProductSpace state; it never repeats for a re-entered context.
       committedContextKey = contextKey
       committedLive = { accountId: live.accountId, productSpaceId: live.productSpaceId }
+      committedContextVersion = contextVersion
       contextGeneration += 1
       // Every committed context change permanently invalidates handles from
-      // all previous generations.
+      // all previous generations and atomically retires every listener bound
+      // to a previous lease — the current consumer re-subscribes.
       pendingLaunches.clear()
+      for (const entry of [...listeners]) {
+        if (
+          entry.lease !== contextVersion
+          || entry.live.accountId !== live.accountId
+          || entry.live.productSpaceId !== live.productSpaceId
+        ) {
+          listeners.delete(entry)
+        }
+      }
     },
 
     dispose(): void {

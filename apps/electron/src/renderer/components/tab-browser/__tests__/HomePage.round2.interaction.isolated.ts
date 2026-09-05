@@ -20,7 +20,7 @@ GlobalRegistrator.register()
 setupI18n()
 
 const openApp = jest.fn()
-const storePublish = jest.fn((_live: unknown, accountId: string, launch: unknown) => ({
+const storePublish = jest.fn((_live: unknown, _lease: number, accountId: string, launch: unknown) => ({
   handoffId: 'test-handoff',
   context: { accountId, launch },
 }))
@@ -160,7 +160,7 @@ function homeTree() {
     allProductSpaces: [],
     personalProductSpaceId: ps?.activeProductSpaceId ?? 'organization-a',
     productSpaceContextKey: ps?.productSpaceContextKey ?? 'account-a|organization-a',
-    contextVersion: 0,
+    contextVersion: 7,
     pendingSwitch: null,
     onSelectProductSpace: () => {},
     onRefreshProductSpaces: () => {},
@@ -482,6 +482,7 @@ describe('HomePage quick access (POO-43)', () => {
     await waitFor(() => {
       expect(storePublish).toHaveBeenCalledWith(
         { accountId: 'account-a', productSpaceId: 'organization-a' },
+        7,
         'account-a',
         resolvedLaunch(appA),
       )
@@ -662,6 +663,7 @@ describe('HomePage all-Apps view (POO-43)', () => {
       expect(resolveLaunch).toHaveBeenCalledTimes(2)
       expect(storePublish).toHaveBeenCalledWith(
         { accountId: 'account-a', productSpaceId: 'organization-a' },
+        7,
         'account-a',
         launch,
       )
