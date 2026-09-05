@@ -93,6 +93,7 @@ import {
 } from '../../runtime/product-space-executions'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
+import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
 
@@ -1733,7 +1734,7 @@ export function registerAdminHandlers(
       }
       return callOrganization(
         'getProductSpaceCatalog',
-        async (client, accessToken) => {
+        async (client, accessToken, userId) => {
           const list = await client.listProductSpaces(accessToken)
           const context = list.productSpaces.find(
             space => space.id === (productSpaceId as never),
@@ -1754,12 +1755,41 @@ export function registerAdminHandlers(
           if ('notModified' in result) {
             return { notModified: true as const, catalogRevision: knownRevision as string }
           }
+          // Main records the verified Catalog into the persisted authority
+          // (credential-stripped identity + carried withdrawn tombstones).
+          // The tombstones ride along to the renderer for explain-and-clean;
+          // the authority itself never authorizes launch/install/start.
+          const withdrawnEntries = recordProductSpaceCatalogAuthoritativeEntries(
+            userId,
+            context.id,
+            result.catalogRevision,
+            result.entries,
+          )
           return {
             notModified: false as const,
             contractVersion: result.contractVersion,
             productSpaceId: result.productSpaceId,
             catalogRevision: result.catalogRevision,
             entries: result.entries,
+            ...(withdrawnEntries.length > 0
+              ? {
+                  withdrawnEntries: withdrawnEntries.map(entry => ({
+                    kind: 'app' as const,
+                    catalogEntryId: entry.catalogEntryId,
+                    artifactInstanceId: entry.artifactInstanceId,
+                    version: {
+                      versionId: entry.versionId,
+                      version: entry.version,
+                    },
+                    name: entry.name,
+                    description: entry.description,
+                    ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
+                    availability: 'withdrawn' as const,
+                    sources: entry.sources,
+                    permissions: entry.permissions,
+                  })),
+                }
+              : {}),
           }
         },
       )

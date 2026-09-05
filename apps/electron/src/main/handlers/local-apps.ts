@@ -58,6 +58,10 @@ import {
   ProductSpaceIdSchema,
   ProductSpaceExecutionScopeSchema,
 } from '@polo-ai/shared/product-spaces'
+import {
+  hasProductSpaceCatalogAuthorityArtifact,
+  hasProductSpaceCatalogAuthorityBinding,
+} from '@polo-ai/server-core/runtime/product-space-catalog-authority'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
 import type { HandlerDeps } from './handler-deps'
@@ -764,13 +768,24 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'A withdrawn ProductSpace App batch must target one account and ProductSpace',
         )
       }
-      // Restricted withdrawn-management gate: same trusted active-ProductSpace
-      // and account surface as every business RPC. Withdrawn entries are no
-      // longer listed in the fresh Catalog, so the authoritative-tuple
-      // revalidation cannot apply — this read-only installation projection
-      // (artifact-instance scoped, no delivery data involved) is the only way
-      // the member surface can see a retained installation for explanation
-      // and uninstall. It never enables install/start/open.
+      // RESTRICTED withdrawn-management gate: every identity must come from
+      // the Main-owned persisted Catalog authority. A renderer cannot declare
+      // an identity withdrawn — fabricated catalog/version tuples or
+      // unknown artifact instances are rejected before any registry read, so
+      // arbitrary local Apps can be neither probed nor targeted. The fresh
+      // Catalog stays the only authority for install/start/open.
+      for (const app of apps) {
+        if (!hasProductSpaceCatalogAuthorityArtifact(
+          app.accountId,
+          app.productSpaceId,
+          app.artifactInstanceId,
+        )) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'Withdrawn ProductSpace App identity is not in the trusted Catalog authority',
+          )
+        }
+      }
       await assertProductSpaceAccountCurrent(first)
       const scopes = apps.map(productSpaceBundleScope)
       const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
@@ -847,12 +862,25 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     async (_ctx, rawApp: unknown, options?: LocalAppUninstallOptions) => {
       // Withdrawn-inclusive uninstall: a withdrawn App is no longer listed in
       // the fresh Catalog, so the authoritative-tuple revalidation cannot
-      // apply. This restricted management path is limited to stop/uninstall/
-      // local-data cleanup — it never accepts renderer download or launch
-      // data, and install/start/open stay behind the fresh-Catalog
-      // availability checks. The scope is the trusted install identity
-      // (account + active ProductSpace + artifact instance).
+      // apply. Instead the catalogEntryId/artifactInstanceId binding MUST
+      // come from the Main-owned persisted Catalog authority — a renderer
+      // cannot self-declare withdrawn, and fabricated identities are
+      // rejected BEFORE the registry can touch any installation directory.
+      // This path is limited to stop/uninstall/local-data cleanup; it never
+      // accepts renderer download or launch data, and install/start/open
+      // stay behind the fresh-Catalog availability checks.
       const app = validateProductSpaceAppIdentity(rawApp)
+      if (!hasProductSpaceCatalogAuthorityBinding(
+        app.accountId,
+        app.productSpaceId,
+        app.catalogEntryId,
+        app.artifactInstanceId,
+      )) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'ProductSpace App identity is not in the trusted Catalog authority',
+        )
+      }
       await assertProductSpaceAccountCurrent(app)
       const scope = productSpaceBundleScope(app)
       await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)

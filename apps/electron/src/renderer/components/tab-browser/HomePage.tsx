@@ -24,6 +24,7 @@ import {
 import { useAppCatalog } from '@/hooks/useAppCatalog'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
+import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
 import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
@@ -37,15 +38,16 @@ import {
   saveHomeQuickAccess,
   toggleHomeQuickAccessApp,
 } from '@/lib/home-quick-access'
-import { publishProductSpaceAppLaunch } from '@/lib/product-space-app-launch-handoff'
 
 /**
  * Full "当前空间全部 Apps" projection: current Catalog Apps plus the
  * withdrawn tombstones the Catalog hook retains for explanation. A stopped
  * distribution must never disappear without a trace — installed members keep
  * a visible, non-launchable row with its frozen withdrawn status and, when
- * still installed, its uninstall entry. Same artifact identities appearing
- * in both lists collapse to the live entry; rows keep Catalog order.
+ * still installed, its uninstall entry. Dedup is per ARTIFACT INSTANCE (the
+ * stable ProductSpace identity, WITHOUT the version — a version upgrade
+ * replaces the live row and must never pair it with a stale withdrawn row);
+ * the live entry wins and rows keep Catalog order.
  */
 export function selectAllAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
@@ -55,8 +57,6 @@ export function selectAllAppsForDisplay(
     app.organizationId ?? null,
     app.catalogEntryId ?? app.id ?? null,
     app.artifactInstanceId ?? null,
-    app.catalogVersion?.versionId ?? null,
-    app.catalogVersion?.version ?? null,
   ])
   const merged = new Map<string, CatalogApp>()
   for (const app of [...catalog.apps, ...(catalog.withdrawnApps ?? [])]) {
@@ -118,6 +118,7 @@ export function createEnterpriseWorkflowUrl(
 export function HomePage() {
   const { t } = useTranslation()
   const { openApp } = useTabShell()
+  const launchHandoff = useProductSpaceAppLaunchHandoff()
   const catalog = useAppCatalog()
   const [view, setView] = useState<'home' | 'all-apps'>('home')
   const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
@@ -314,7 +315,7 @@ export function HomePage() {
           return
         }
       }
-      publishProductSpaceAppLaunch(accountId, launch)
+      launchHandoff.publish(accountId, launch)
     } catch (error) {
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
         description: homeAppOperationErrorText(t, error, 'open', spaceKind),
@@ -336,7 +337,7 @@ export function HomePage() {
       if (!isBundleAppLaunch(launch)) {
         throw new Error(t('homeApps.errors.staleContext'))
       }
-      publishProductSpaceAppLaunch(accountId, launch)
+      launchHandoff.publish(accountId, launch)
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {

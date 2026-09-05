@@ -1,10 +1,7 @@
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 import {
-  resetProductSpaceAppLaunchHandoffsForTests,
-  onProductSpaceAppLaunch,
-  publishProductSpaceAppLaunch,
-  syncProductSpaceLaunchHandoffContext,
-  takeProductSpaceAppLaunch,
+  createProductSpaceLaunchHandoffStore,
+  type ProductSpaceLaunchHandoffLiveContext,
 } from '../product-space-app-launch-handoff'
 
 const launch = {
@@ -40,98 +37,87 @@ const context = {
   expiresAt: launch.expiresAt,
 }
 
-beforeEach(() => {
-  resetProductSpaceAppLaunchHandoffsForTests()
-  syncProductSpaceLaunchHandoffContext({
-    accountId: 'account-a',
-    productSpaceId: 'space-a',
-  })
-})
+const liveA: ProductSpaceLaunchHandoffLiveContext = {
+  accountId: 'account-a',
+  productSpaceId: 'space-a',
+}
 
-describe('ProductSpace App launch handoff', () => {
+describe('ProductSpace App launch handoff store', () => {
   it('hands credentials to POO-47 once without placing them in tab context', () => {
+    const store = createProductSpaceLaunchHandoffStore()
     const published: unknown[] = []
-    const unsubscribe = onProductSpaceAppLaunch(request => published.push(request))
-    const request = publishProductSpaceAppLaunch('account-a', launch)
+    const unsubscribe = store.onLaunch(request => published.push(request))
+    const request = store.publish(liveA, 'account-a', launch)
     unsubscribe()
     expect(request.context).not.toHaveProperty('launchToken')
     expect(request).not.toHaveProperty('launch')
     expect(published).toEqual([request])
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toEqual({
+    expect(store.take(liveA, request.handoffId, context)).toEqual({
       accountId: 'account-a',
       launch,
     })
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+    expect(store.take(liveA, request.handoffId, context)).toBeNull()
   })
 
   it('fails closed when a persisted tab names another artifact instance', () => {
-    const request = publishProductSpaceAppLaunch('account-a', launch)
-    expect(takeProductSpaceAppLaunch(request.handoffId, {
+    const store = createProductSpaceLaunchHandoffStore()
+    const request = store.publish(liveA, 'account-a', launch)
+    expect(store.take(liveA, request.handoffId, {
       ...context,
       artifactInstanceId: 'artifact-b',
     })).toBeNull()
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+    expect(store.take(liveA, request.handoffId, context)).toBeNull()
   })
 
-  it('refuses to publish without an active ProductSpace context', () => {
-    syncProductSpaceLaunchHandoffContext(null)
-    expect(() => publishProductSpaceAppLaunch('account-a', launch)).toThrow(
-      'requires an active ProductSpace',
-    )
-  })
-
-  it('refuses to publish for another account or ProductSpace than the live context', () => {
-    expect(() => publishProductSpaceAppLaunch('account-b', launch)).toThrow(
+  it('refuses to publish without an active context or for another account/space', () => {
+    const store = createProductSpaceLaunchHandoffStore()
+    expect(() => store.publish(
+      { accountId: '', productSpaceId: '' },
+      'account-a',
+      launch,
+    )).toThrow('requires an active ProductSpace')
+    expect(() => store.publish(liveA, 'account-b', launch)).toThrow(
       'another ProductSpace context',
     )
-    const otherSpaceLaunch = {
+    expect(() => store.publish(liveA, 'account-a', {
       ...launch,
       productSpaceId: 'space-b' as never,
-    }
-    expect(() => publishProductSpaceAppLaunch('account-a', otherSpaceLaunch)).toThrow(
-      'another ProductSpace context',
-    )
+    })).toThrow('another ProductSpace context')
   })
 
-  it('fails closed when the live context switched spaces after the handoff was sealed', () => {
-    const request = publishProductSpaceAppLaunch('account-a', launch)
-    syncProductSpaceLaunchHandoffContext({
-      accountId: 'account-a',
-      productSpaceId: 'space-b',
-    })
-    // The old sealed handoff is dropped outright: the stale consumer cannot
-    // probe the tuple and the exact old context replay must not succeed.
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
+  it('fails closed when the committed context switched after the handoff was sealed', () => {
+    const store = createProductSpaceLaunchHandoffStore()
+    const request = store.publish(liveA, 'account-a', launch)
+
+    // The committed context is supplied per call — a consumer running under
+    // space B (or account B, or signed out) can never take an A handle.
+    expect(store.take(
+      { accountId: 'account-a', productSpaceId: 'space-b' },
+      request.handoffId,
+      context,
+    )).toBeNull()
+    expect(store.take(
+      { accountId: 'account-b', productSpaceId: 'space-a' },
+      request.handoffId,
+      context,
+    )).toBeNull()
+    expect(store.take(
+      { accountId: '', productSpaceId: '' },
+      request.handoffId,
+      context,
+    )).toBeNull()
+    // The failed attempts stay single-attempt: no probing and retrying.
+    expect(store.take(liveA, request.handoffId, context)).toBeNull()
   })
 
-  it('fails closed when the live context switched accounts after the handoff was sealed', () => {
-    const request = publishProductSpaceAppLaunch('account-a', launch)
-    syncProductSpaceLaunchHandoffContext({
-      accountId: 'account-b',
-      productSpaceId: 'space-a',
-    })
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
-  })
-
-  it('fails closed while signed out after the handoff was sealed', () => {
-    const request = publishProductSpaceAppLaunch('account-a', launch)
-    syncProductSpaceLaunchHandoffContext(null)
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
-  })
-
-  it('seals a new handoff after returning to the original context', () => {
-    const request = publishProductSpaceAppLaunch('account-a', launch)
-    syncProductSpaceLaunchHandoffContext({
-      accountId: 'account-a',
-      productSpaceId: 'space-b',
-    })
-    expect(takeProductSpaceAppLaunch(request.handoffId, context)).toBeNull()
-    syncProductSpaceLaunchHandoffContext({
-      accountId: 'account-a',
-      productSpaceId: 'space-a',
-    })
-    const resealed = publishProductSpaceAppLaunch('account-a', launch)
-    expect(takeProductSpaceAppLaunch(resealed.handoffId, context)).toEqual({
+  it('keeps provider-owned stores isolated from each other', () => {
+    const storeA = createProductSpaceLaunchHandoffStore()
+    const storeB = createProductSpaceLaunchHandoffStore()
+    const request = storeA.publish(liveA, 'account-a', launch)
+    // Another provider instance (fresh mount, another account) can neither
+    // see nor drain this handle.
+    expect(storeB.take(liveA, request.handoffId, context)).toBeNull()
+    expect(storeA.take(liveA, request.handoffId, context)).toEqual({
       accountId: 'account-a',
       launch,
     })

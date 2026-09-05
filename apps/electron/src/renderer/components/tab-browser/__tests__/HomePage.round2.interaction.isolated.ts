@@ -14,12 +14,16 @@ import {
   POLO_APP_DEFINITION,
 } from '../../../../shared/tab-browser-types'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
+import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
 
 GlobalRegistrator.register()
 setupI18n()
 
 const openApp = jest.fn()
-const publishProductSpaceAppLaunch = jest.fn()
+const storePublish = jest.fn((_live: unknown, accountId: string, launch: unknown) => ({
+  handoffId: 'test-handoff',
+  context: { accountId, launch },
+}))
 const adminGetStatus = jest.fn()
 const openUrl = jest.fn()
 let appCatalogHook: any
@@ -92,7 +96,11 @@ mock.module('@/hooks/useAppCatalog', () => ({
 }))
 
 mock.module('@/lib/product-space-app-launch-handoff', () => ({
-  publishProductSpaceAppLaunch,
+  createProductSpaceLaunchHandoffStore: () => ({
+    publish: storePublish,
+    take: jest.fn(() => null),
+    onLaunch: () => () => {},
+  }),
 }))
 
 const {
@@ -112,7 +120,7 @@ const {
 beforeEach(async () => {
   localStorage.clear()
   openApp.mockClear()
-  publishProductSpaceAppLaunch.mockClear()
+  storePublish.mockClear()
   adminGetStatus.mockReset()
   openUrl.mockReset()
   appCatalogHook = signedOutCatalogHook()
@@ -137,12 +145,38 @@ afterEach(() => {
   cleanup()
 })
 
+function homeTree() {
+  // HomePage publishes through the Provider-owned handoff store; the
+  // provider value mirrors the mocked catalog hook's committed context.
+  const ps = appCatalogHook.productSpace
+  const value = {
+    accountId: ps?.accountId ?? 'account-a',
+    activeProductSpaceId: ps?.activeProductSpaceId ?? 'organization-a',
+    activeProductSpace: ps?.activeProductSpace
+      ?? { id: 'organization-a', kind: 'enterprise', name: 'Organization A' },
+    productSpaces: [],
+    allProductSpaces: [],
+    personalProductSpaceId: ps?.activeProductSpaceId ?? 'organization-a',
+    productSpaceContextKey: ps?.productSpaceContextKey ?? 'account-a|organization-a',
+    contextVersion: 0,
+    pendingSwitch: null,
+    onSelectProductSpace: () => {},
+    onRefreshProductSpaces: () => {},
+    onConfirmStopAndSwitch: () => {},
+    onRetryFailedStops: () => {},
+    onRetryTargetLoad: () => {},
+    onCancelSwitch: () => {},
+    onDismissTargetAccessLost: () => {},
+    onStopSwitchExecution: () => {},
+  }
+  return createElement(ProductSpaceProvider, {
+    value: value as never,
+    children: createElement(I18nextProvider, { i18n }, createElement(HomePage)),
+  })
+}
+
 function renderHome() {
-  return render(createElement(
-    I18nextProvider,
-    { i18n },
-    createElement(HomePage),
-  ))
+  return render(homeTree())
 }
 
 async function renderAllApps() {
@@ -398,7 +432,7 @@ describe('HomePage quick access (POO-43)', () => {
       })),
       scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
     }
-    view.rerender(createElement(I18nextProvider, { i18n }, createElement(HomePage)))
+    view.rerender(homeTree())
     await waitFor(() => {
       expect(screen.getByText('Race App B')).toBeTruthy()
     })
@@ -444,7 +478,8 @@ describe('HomePage quick access (POO-43)', () => {
     fireEvent.click(await screen.findByText('Open App A'))
 
     await waitFor(() => {
-      expect(publishProductSpaceAppLaunch).toHaveBeenCalledWith(
+      expect(storePublish).toHaveBeenCalledWith(
+        { accountId: 'account-a', productSpaceId: 'organization-a' },
         'account-a',
         resolvedLaunch(appA),
       )
@@ -623,7 +658,11 @@ describe('HomePage all-Apps view (POO-43)', () => {
     await waitFor(() => {
       expect(installProductSpaceBundle).toHaveBeenCalledWith(bundleApp)
       expect(resolveLaunch).toHaveBeenCalledTimes(2)
-      expect(publishProductSpaceAppLaunch).toHaveBeenCalledWith('account-a', launch)
+      expect(storePublish).toHaveBeenCalledWith(
+        { accountId: 'account-a', productSpaceId: 'organization-a' },
+        'account-a',
+        launch,
+      )
     })
     expect(openApp).not.toHaveBeenCalled()
   })
@@ -746,6 +785,9 @@ describe('HomePage all-Apps view (POO-43)', () => {
     const tombstoneOfSameArtifact: CatalogApp = {
       ...live,
       name: 'Dup App (old)',
+      // The stale version of the SAME artifact instance: dedup must be
+      // version-agnostic so an upgrade never pairs live v2 + withdrawn v1.
+      catalogVersion: { versionId: 'version-1', version: '1.0.0' },
       availability: 'withdrawn',
       sortOrder: 1,
     }

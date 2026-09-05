@@ -972,6 +972,8 @@ export interface ElectronAPI {
       accessMode?: 'online' | 'offline'
       warningCode?: string | null
       entries: ReadonlyArray<Record<string, unknown>>
+      /** Credential-stripped tombstones emitted from the Main catalog authority. */
+      withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
     }
     | {
       success: false

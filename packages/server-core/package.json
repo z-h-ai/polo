@@ -20,6 +20,7 @@
     "./runtime/product-space-executions": "./src/runtime/product-space-executions.ts",
     "./runtime/trusted-start-gate": "./src/runtime/trusted-start-gate.ts",
     "./runtime/legacy-state-cleaners": "./src/runtime/legacy-state-cleaners.ts",
+    "./runtime/product-space-catalog-authority": "./src/runtime/product-space-catalog-authority.ts",
     "./sessions": "./src/sessions/index.ts",
     "./webui": "./src/webui/index.ts"
   },
