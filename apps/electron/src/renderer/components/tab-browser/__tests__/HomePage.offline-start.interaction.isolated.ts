@@ -223,6 +223,8 @@ beforeEach(async () => {
         entries: [{
           kind: 'app',
           catalogEntryId: 'offline-app',
+          artifactInstanceId: 'offline-app-instance',
+          version: { versionId: 'offline-app-version', version: '1.0.0' },
           name: 'Offline App',
           description: 'Prepared locally',
           availability: 'available',

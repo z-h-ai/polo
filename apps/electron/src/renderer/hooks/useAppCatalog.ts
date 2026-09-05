@@ -462,6 +462,28 @@ export function useAppCatalog() {
     createLocalAppScopeKey(scopeForApp(app))
   ), [scopeForApp])
 
+  /**
+   * Collision-free STABLE identity key for UI selection and home quick-entry
+   * persistence: account + productSpace + catalogEntryId + artifact
+   * instance. Deliberately SEPARATE from the runtime scope key above (which
+   * carries only one catalogAppId slot): a catalogEntryId reused across
+   * artifact instances must keep its live row, withdrawn row, inspector
+   * selection, and quick-entry slot independent.
+   */
+  const uiIdentityKeyForApp = useCallback((app: CatalogApp): string => {
+    const catalog = currentSnapshotForApp(app).catalog
+    if (!app.catalogEntryId || !app.artifactInstanceId) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
+    return JSON.stringify([
+      'product-space-ui',
+      catalog.accountId,
+      catalog.organizationId,
+      app.catalogEntryId,
+      app.artifactInstanceId,
+    ])
+  }, [currentSnapshotForApp])
+
   const refreshProductSpaceInstallStates = useCallback(async (
     apps: CatalogApp[],
     suppliedSnapshot?: ContextSnapshot,
@@ -1423,10 +1445,19 @@ export function useAppCatalog() {
   const installProductSpaceBundle = useCallback((app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)
     const identity = identityForProductSpaceApp(snapshot.catalog, app)
-    // Collision-free operation key: full identity, never catalogEntryId
-    // alone (a reused entry id across artifact instances must not merge
-    // lifecycle operations).
-    const operationKey = `product-space:${identity.artifactInstanceId}:${identity.catalogEntryId}:${identity.versionId}`
+    // Collision-free operation key: a JSON tuple over the full verified
+    // identity (account, space, entry, artifact instance). Opaque IDs may
+    // contain any delimiter, so delimiter concatenation could merge two
+    // distinct identities; the version is deliberately excluded — the
+    // single-flight slot belongs to the STABLE artifact instance, and
+    // runExclusive scopes it by operation kind.
+    const operationKey = JSON.stringify([
+      'product-space-op',
+      identity.accountId,
+      identity.productSpaceId,
+      identity.catalogEntryId,
+      identity.artifactInstanceId,
+    ])
     return runExclusive(operationKey, 'install', async () => {
       if (state.accessMode !== 'online' || app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
@@ -1524,6 +1555,7 @@ export function useAppCatalog() {
     getStatus,
     scopeForApp,
     scopeKeyForApp,
+    uiIdentityKeyForApp,
     refreshRuntimeStatuses,
   }
 }

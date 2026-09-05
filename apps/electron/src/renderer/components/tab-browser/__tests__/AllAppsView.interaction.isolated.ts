@@ -296,6 +296,51 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     }
   })
 
+  it('keeps same-catalogEntryId live and withdrawn rows independently selectable and uninstallable', () => {
+    // entry-1 was re-issued for artifact-new while artifact-old stays as a
+    // withdrawn tombstone: the rows must not collide (distinct React keys,
+    // independent selection, independent uninstall targets).
+    const live = app('entry-1', {
+      name: 'Reissued',
+      artifactInstanceId: 'artifact-new',
+      catalogVersion: { versionId: 'version-new', version: '2.0.0' },
+    })
+    const tombstone = app('entry-1', {
+      name: 'Reissued (old)',
+      artifactInstanceId: 'artifact-old',
+      catalogVersion: { versionId: 'version-old', version: '1.0.0' },
+      availability: 'withdrawn',
+      sortOrder: 1,
+    })
+    const handlers = renderView([live, tombstone], {
+      installedId: 'entry-1',
+      retainedInstalledIds: ['entry-1'],
+    })
+
+    // Distinct rows (no duplicate React key collapse).
+    expect(screen.getAllByTestId('all-apps-row')).toHaveLength(2)
+    expect(screen.getByText('Reissued')).toBeTruthy()
+    expect(screen.getByText('Reissued (old)')).toBeTruthy()
+
+    // Select the WITHDRAWN row: the inspector must bind to the withdrawn
+    // artifact instance (not the first live row sharing the entry id).
+    fireEvent.click(screen.getAllByTestId('all-apps-row')[1]!.querySelector('button')!)
+    const withdrawnPrimary = screen.getByTestId('all-apps-inspector-primary') as HTMLButtonElement
+    expect(withdrawnPrimary.disabled).toBe(true)
+    expect(screen.getByTestId('all-apps-inspector-uninstall')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+    expect(handlers.onUninstall).toHaveBeenCalledWith(
+      expect.objectContaining({ artifactInstanceId: 'artifact-old' }),
+    )
+    cleanup()
+
+    // The live row selects and opens independently.
+    renderView([live], { installedId: 'entry-1' })
+    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
+    expect((screen.getByTestId('all-apps-inspector-primary') as HTMLButtonElement).disabled).toBe(false)
+    cleanup()
+  })
+
   it('surfaces cached-catalog refresh failures and restricted views without relaxing fail-closed gates', () => {
     // Cached rows + refresh failure: stale-catalog banner, rows stay
     // visible, opens stay DISABLED (offline-cached rows are not launchable).

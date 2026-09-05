@@ -249,6 +249,14 @@ function hookWithCatalog(
     organizationId: catalog.organizationId,
     catalogAppId: target.id,
   })
+  // Mirrors the production uiIdentityKeyForApp format.
+  const uiIdentityKeyForApp = (target: CatalogApp) => JSON.stringify([
+    'product-space-ui',
+    catalog.accountId,
+    catalog.organizationId,
+    target.catalogEntryId ?? target.id,
+    target.artifactInstanceId ?? null,
+  ])
   return {
     ...signedOutCatalogHook(),
     productSpace: {
@@ -271,6 +279,7 @@ function hookWithCatalog(
       ...stateOverrides,
     },
     scopeKeyForApp,
+    uiIdentityKeyForApp,
     ...hookOverrides,
   }
 }
@@ -309,7 +318,7 @@ describe('HomePage quick access (POO-43)', () => {
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
     quickAccessByContext.set(contextKey, [{
-      id: appCatalogHook.scopeKeyForApp(appA),
+      id: appCatalogHook.uiIdentityKeyForApp(appA),
       addedAt: 1,
     }])
 
@@ -337,7 +346,7 @@ describe('HomePage quick access (POO-43)', () => {
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
     quickAccessByContext.set(contextKey, [
-      { id: appCatalogHook.scopeKeyForApp(appA), addedAt: 1 },
+      { id: appCatalogHook.uiIdentityKeyForApp(appA), addedAt: 1 },
       // Another space's scope key and a legacy local id must both vanish.
       { id: '["catalog","account-b","organization-z","ghost"]', addedAt: 2 },
       { id: 'legacy-local-app', addedAt: 3 },
@@ -351,7 +360,7 @@ describe('HomePage quick access (POO-43)', () => {
     const [savedContext, savedApps] = setHomeQuickAccess.mock.calls[0]!
     expect(savedContext).toBe(contextKey)
     expect(savedApps).toEqual([{
-      id: appCatalogHook.scopeKeyForApp(appA),
+      id: appCatalogHook.uiIdentityKeyForApp(appA),
       addedAt: 1,
     }])
     expect(screen.getByText('Prune App A')).toBeTruthy()
@@ -386,16 +395,17 @@ describe('HomePage quick access (POO-43)', () => {
       createProductSpaceContextKey('account-a', 'organization-b')
     }`
     quickAccessByContext.set(contextKeyA, [{
-      id: 'key:race-app-a',
+      id: 'ui:race-app-a',
       addedAt: 1,
     }])
     quickAccessByContext.set(contextKeyB, [{
-      id: 'key:race-app-b',
+      id: 'ui:race-app-b',
       addedAt: 1,
     }])
     appCatalogHook = {
       ...hookWithCatalog(enterpriseCatalogWith([appA])),
       scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
+      uiIdentityKeyForApp: (target: CatalogApp) => `ui:${target.id}`,
     }
     const view = renderHome()
     await waitFor(() => {
@@ -433,6 +443,7 @@ describe('HomePage quick access (POO-43)', () => {
         organizationId: 'organization-b',
       })),
       scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
+      uiIdentityKeyForApp: (target: CatalogApp) => `ui:${target.id}`,
     }
     view.rerender(homeTree())
     await waitFor(() => {
@@ -448,7 +459,7 @@ describe('HomePage quick access (POO-43)', () => {
     const savedContexts = setHomeQuickAccess.mock.calls.map(call => call[0])
     expect(savedContexts).not.toContain(contextKeyB)
     expect(quickAccessByContext.get(contextKeyB)).toEqual([{
-      id: 'key:race-app-b',
+      id: 'ui:race-app-b',
       addedAt: 1,
     }])
     view.unmount()
@@ -472,7 +483,7 @@ describe('HomePage quick access (POO-43)', () => {
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
     quickAccessByContext.set(contextKey, [{
-      id: appCatalogHook.scopeKeyForApp(appA),
+      id: appCatalogHook.uiIdentityKeyForApp(appA),
       addedAt: 1,
     }])
 
@@ -543,6 +554,48 @@ describe('HomePage quick access (POO-43)', () => {
     })
   })
 
+  it('fail-closed drops a quick entry whose artifact instance was replaced (never re-binds)', async () => {
+    // entry-1 was previously pinned with artifact-old; the fresh Catalog
+    // re-issues entry-1 for artifact-new. The persisted quick id binds the
+    // OLD artifact instance, so it must be pruned — never silently re-bound
+    // to the new instance.
+    const replacedApp: CatalogApp = {
+      id: 'entry-1',
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-new',
+      catalogVersion: { versionId: 'version-new', version: '2.0.0' },
+      organizationId: 'organization-a',
+      name: 'Replaced App',
+      description: '',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://new.example.com',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([replacedApp]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    quickAccessByContext.set(contextKey, [{
+      id: JSON.stringify([
+        'product-space-ui',
+        'account-a',
+        'organization-a',
+        'entry-1',
+        'artifact-old',
+      ]),
+      addedAt: 1,
+    }])
+
+    renderHome()
+    await waitFor(() => {
+      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [])
+    })
+    // The replaced app is NOT silently re-pinned by the stale binding.
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+    expect(quickAccessByContext.get(contextKey)).toEqual([])
+  })
+
   it('adds a shortcut through the manage dialog without installing', async () => {
     const appA: CatalogApp = {
       id: 'manage-app-a',
@@ -570,7 +623,7 @@ describe('HomePage quick access (POO-43)', () => {
     fireEvent.click(screen.getByTestId('manage-home-apps-done'))
     await waitFor(() => {
       expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [{
-        id: appCatalogHook.scopeKeyForApp(appA),
+        id: appCatalogHook.uiIdentityKeyForApp(appA),
         addedAt: expect.any(Number),
       }])
     })

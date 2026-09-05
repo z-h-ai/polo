@@ -156,7 +156,13 @@ export function HomePage() {
     quickContextKeyRef.current === contextKey
     && quickMutationGenerationRef.current === generation
   ), [])
-  const scopeKeyForApp = catalog.scopeKeyForApp
+  // UI selection + quick-entry persistence use the collision-free stable
+  // artifact identity key (account + space + entry + artifact instance), NOT
+  // the runtime scope: a catalogEntryId reused across artifact instances
+  // must keep its live row, withdrawn row, and quick-entry slot independent,
+  // and an artifact swap must fail-closed drop the old shortcut instead of
+  // silently re-binding it.
+  const uiKeyForApp = catalog.uiIdentityKeyForApp
 
   const availableApps = useMemo(
     () => (catalog.state.catalog?.apps ?? []).filter(
@@ -169,8 +175,8 @@ export function HomePage() {
     [catalog.state.catalog],
   )
   const quickApps = useMemo(
-    () => resolveHomeQuickAccessApps(quickEntries, availableApps, scopeKeyForApp),
-    [availableApps, quickEntries, scopeKeyForApp],
+    () => resolveHomeQuickAccessApps(quickEntries, availableApps, uiKeyForApp),
+    [availableApps, quickEntries, uiKeyForApp],
   )
 
   useEffect(() => {
@@ -215,7 +221,7 @@ export function HomePage() {
     const availableIds = new Set<string>()
     for (const app of availableApps) {
       try {
-        availableIds.add(scopeKeyForApp(app))
+        availableIds.add(uiKeyForApp(app))
       } catch {
         continue
       }
@@ -235,7 +241,7 @@ export function HomePage() {
       .catch(() => {
         // Persistence failure must not break the home section.
       })
-  }, [availableApps, isCurrentQuickMutation, quickContextKey, quickEntries, scopeKeyForApp])
+  }, [availableApps, isCurrentQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
 
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
@@ -369,7 +375,7 @@ export function HomePage() {
   )
 
   const quickTileFor = (app: CatalogApp) => {
-    const scopeKey = catalog.scopeKeyForApp(app)
+    const scopeKey = uiKeyForApp(app)
     return {
       key: scopeKey,
       definition: {
@@ -416,7 +422,7 @@ export function HomePage() {
             errorCode={catalog.state.errorCode}
             offline={catalog.state.accessMode === 'offline'}
             restricted={catalog.state.accessMode === 'denied'}
-            scopeKeyForApp={catalog.scopeKeyForApp}
+            scopeKeyForApp={uiKeyForApp}
             getInstallState={catalog.getInstallState}
             onRefresh={() => { void catalog.sync(true) }}
             onOpen={(target) => { void openCatalogApp(target) }}
@@ -533,7 +539,7 @@ export function HomePage() {
         open={manageOpen}
         onOpenChange={setManageOpen}
         apps={availableApps}
-        scopeKeyForApp={catalog.scopeKeyForApp}
+        scopeKeyForApp={uiKeyForApp}
         selectedIds={selectedQuickIds}
         maxSlots={MAX_HOME_QUICK_ACCESS_APPS}
         onToggle={toggleQuickAccess}

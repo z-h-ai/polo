@@ -18,10 +18,6 @@ import {
 import { getAccountTransitionEpoch } from './trusted-product-space-account'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import {
-  getProductSpaceCatalogAuthorityRecord,
-  resetProductSpaceCatalogAuthorityForTests,
-} from '../../runtime/product-space-catalog-authority'
 
 type StoredTokens = {
   accessToken: string
@@ -474,6 +470,31 @@ mock.module('@polo-ai/shared/credentials', () => ({
   },
 }))
 
+// Pure fake of the authority module: admin.ts only consumes the record
+// entrypoint. Tests that need the REAL authority run in their own isolated
+// files against the untouched module.
+const authorityRecordCalls: Array<{
+  accountId: string
+  productSpaceId: string
+  catalogRevision: string
+  entryCount: number
+}> = []
+let failAuthorityRecord = false
+mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () => ({
+  recordProductSpaceCatalogAuthoritativeEntries: (
+    accountId: string,
+    productSpaceId: string,
+    catalogRevision: string,
+    entries: ReadonlyArray<Record<string, unknown>>,
+  ) => {
+    authorityRecordCalls.push({ accountId, productSpaceId, catalogRevision, entryCount: entries.length })
+    if (failAuthorityRecord) {
+      throw new Error('authority write failed (injected)')
+    }
+    return []
+  },
+}))
+
 const {
   readApiKey,
   registerAdminHandlers,
@@ -750,7 +771,8 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
   let logout: HandlerFn
 
   beforeEach(async () => {
-    resetProductSpaceCatalogAuthorityForTests()
+    authorityRecordCalls.length = 0
+    failAuthorityRecord = false
     const harness = createHarness()
     productSpaceCatalog = harness.productSpaceCatalog
     logout = harness.logout
@@ -805,11 +827,13 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(r1.success).toBe(false)
     expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
 
-    const record = getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')!
-    expect(record).not.toBeNull()
-    expect(record!.catalogRevision).toBe('rev-2')
-    expect(record!.entries).toHaveLength(1)
-    expect(record!.entries[0]!.catalogEntryId).toBe('entry-rev-2')
+    // Exactly one authority write: the newest request's entries.
+    expect(authorityRecordCalls).toEqual([{
+      accountId: 'user-1',
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-2',
+      entryCount: 1,
+    }])
   })
 
   it('downgrades a request to REQUEST_SUPERSEDED via the final commit-zone CAS when a newer invocation registered', async () => {
@@ -846,7 +870,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     const r1 = await pendingR1 as any
     expect(r1.success).toBe(false)
     expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+    // ZERO authority writes: the stale rev-1 commit never reached the
+    // authority (the newer request registered and exited).
+    expect(authorityRecordCalls).toEqual([])
   })
 
   it('returns REQUEST_SUPERSEDED for a delayed R1 when a real newer request registered then failed non-session-ending', async () => {
@@ -893,7 +919,7 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     const r1 = await pendingR1 as any
     expect(r1.success).toBe(false)
     expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+    expect(authorityRecordCalls.filter(call => call.catalogRevision === 'rev-1')).toEqual([])
   })
 
   it('stays fail-closed (zero authority writes) when a real newer request finds the space withdrawn after registering', async () => {
@@ -935,7 +961,8 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     const r1 = await pendingR1 as any
     expect(r1.success).toBe(false)
     expect(['REQUEST_SUPERSEDED', 'SESSION_CHANGED']).toContain(r1.errorCode)
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+    // ZERO authority writes for the stale request.
+    expect(authorityRecordCalls).toEqual([])
   })
 
   it('keeps delimiter-collision ProductSpaces on independent fences and authorities', async () => {
@@ -992,10 +1019,11 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(rB.success).toBe(true)
     expect(rA.catalogRevision).toBe('rev-space-a')
     expect(rB.catalogRevision).toBe('rev-extra|space-a')
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')!.catalogRevision)
-      .toBe('rev-space-a')
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'extra|space-a')!.catalogRevision)
-      .toBe('rev-extra|space-a')
+    // Both collision scopes recorded their own authority independently.
+    expect(authorityRecordCalls).toEqual([
+      { accountId: 'user-1', productSpaceId: 'space-a', catalogRevision: 'rev-space-a', entryCount: 0 },
+      { accountId: 'user-1', productSpaceId: 'extra|space-a', catalogRevision: 'rev-extra|space-a', entryCount: 0 },
+    ])
   })
 
   it('recycles fence scope entries for unique nonexistent spaces (bounded map)', async () => {
@@ -1068,7 +1096,63 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     const r3 = await productSpaceCatalog(context, 'space-a', undefined) as any
     expect(r3.success).toBe(true)
     expect(r3.catalogRevision).toBe('rev-3')
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')!.catalogRevision).toBe('rev-3')
+    // The recycled scope committed the newest authority last.
+    expect(authorityRecordCalls.at(-1)).toEqual({
+      accountId: 'user-1',
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-3',
+      entryCount: 1,
+    })
+  })
+
+  it('releases the pending fence reservation when the session changed while the request was in flight (bounded map)', async () => {
+    let releaseR1Catalog!: (value: any) => void
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      return new Promise(resolve => {
+        releaseR1Catalog = resolve
+      })
+    }
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1Catalog)
+
+    // The session changes while R1 is still in flight (its pre-check and
+    // mark happen only when the delayed catalog response arrives).
+    await logout(context)
+
+    releaseR1Catalog!({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-1',
+      entries: [authorityTestEntry('rev-1')],
+    })
+
+    const r1 = await pendingR1 as any
+    try {
+      // The late response still passes the fence pre-check (it was latest)
+      // and marks a pending reservation — but the session-current CAS zone
+      // is SKIPPED by the session change. The always-settle contract must
+      // release the reservation anyway.
+      expect(r1.success).toBe(false)
+      expect(r1.errorCode).toBe('SESSION_CHANGED')
+      expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+    } finally {
+      failAuthorityRecord = false
+    }
+  })
+
+  it('releases the pending fence reservation when the authority write throws (bounded map)', async () => {
+    failAuthorityRecord = true
+    try {
+      const failing = productSpaceCatalog(context, 'space-a', undefined) as any
+      const response = await failing
+      expect(response.success).toBe(false)
+      // The always-settle release recycled the scope entry even though the
+      // authority write threw inside the session-current commit zone.
+      expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+    } finally {
+      failAuthorityRecord = false
+    }
   })
 
   it('never writes the authority when the session changes during the fetch', async () => {
@@ -1094,7 +1178,8 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
 
     const response = await pending as any
     expect(response.success).toBe(false)
-    expect(getProductSpaceCatalogAuthorityRecord('user-1', 'space-a')).toBeNull()
+    // The skipped commit zone left zero authority writes.
+    expect(authorityRecordCalls).toEqual([])
   })
 })
 

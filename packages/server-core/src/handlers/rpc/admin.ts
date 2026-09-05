@@ -828,9 +828,15 @@ export function registerAdminHandlers(
       result: T,
       session: AdminSessionSnapshot,
     ) => void | Promise<void>,
+    // ALWAYS-SETTLE cleanup contract: runs exactly once after the callback
+    // has settled — whether the session-current CAS applied, was skipped, or
+    // the commit-zone work threw. Receives the callback result (or null when
+    // the callback never completed).
+    onSettled?: (result: T | null) => void,
   ) => {
     let requestContext: AdminRequestContext | null = null
     let manager: CredentialManager | null = null
+    let settledResult: T | null = null
     try {
       const adminUrl = requireAdminUrl()
       manager = getCredentialManager()
@@ -868,6 +874,7 @@ export function registerAdminHandlers(
         tokenResult.tokens.accessToken,
         tokenResult.tokens.userId,
       )
+      settledResult = result
       const current = onCurrentSuccess
         ? await sessions.mutateIfCurrent(
             manager,
@@ -894,6 +901,8 @@ export function registerAdminHandlers(
       const adminError = toAdminRpcError(error)
       log?.warn(`[Admin] ${operation} failed:`, adminError.message)
       return { success: false as const, ...adminError }
+    } finally {
+      onSettled?.(settledResult)
     }
   }
 
@@ -1830,6 +1839,10 @@ export function registerAdminHandlers(
       if (!requestedSpaceId.success) {
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
       }
+      // The fence scope key is only knowable after authentication (it binds
+      // the verified account), so the settle hook releases via this captured
+      // key once the callback has entered the authenticated scope.
+      let syncScopeKey: string | null = null
       return callOrganization(
         'getProductSpaceCatalog',
         async (client, accessToken, userId) => {
@@ -1842,13 +1855,13 @@ export function registerAdminHandlers(
             userId as never,
             requestedSpaceId.data,
           )
+          syncScopeKey = catalogSyncKey
           const syncInvocation = beginProductSpaceCatalogSync(catalogSyncKey)
           const supersededCatalogResult = () => ({
             success: false as const,
             errorCode: 'REQUEST_SUPERSEDED',
             message: 'A newer ProductSpace catalog request replaced this one',
           })
-          const commitState = { willCommitAuthority: false }
           try {
             const list = await client.listProductSpaces(accessToken)
             const context = list.productSpaces.find(
@@ -1888,9 +1901,11 @@ export function registerAdminHandlers(
             // The authority write happens in the session-current commit zone
             // (onCurrentSuccess), where a FINAL CAS re-checks this fence
             // under the session lock — a failing CAS downgrades the response
-            // to REQUEST_SUPERSEDED with zero authority writes.
+            // to REQUEST_SUPERSEDED with zero authority writes. The pending
+            // reservation is ALWAYS released by callOrganization's settle
+            // contract afterwards — even when the session changed (commit
+            // skipped) or the authority write threw.
             markProductSpaceCatalogCommitPending(catalogSyncKey)
-            commitState.willCommitAuthority = true
             return {
               __authorityCommit: {
                 scopeKey: catalogSyncKey,
@@ -1962,9 +1977,15 @@ export function registerAdminHandlers(
               permissions: entry.permissions,
             }))
           }
-          // The committed request was the fence's last in-flight request:
-          // consume the scope entry now.
-          releaseProductSpaceCatalogCommit(commit.scopeKey)
+        },
+        // ALWAYS-SETTLE: release the pending commit reservation no matter
+        // how the request concluded (committed, CAS-skipped by a session
+        // change, or authority write failure) — the scope entry is recycled
+        // as soon as it is fully idle. The scope key was captured in the
+        // callback closure; an unauthenticated request never marked a
+        // reservation.
+        () => {
+          if (syncScopeKey !== null) releaseProductSpaceCatalogCommit(syncScopeKey)
         },
       )
     })

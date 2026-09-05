@@ -915,4 +915,134 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
       { preserveData: true },
     )
   })
+
+  it('never merges install operations across colon-colliding catalog identities in one hook', async () => {
+    const api = window.electronAPI as any
+    let installDispatched = 0
+    const installGates: Array<() => void> = []
+    installProductSpaceBundle = mock((request: any) => {
+      installDispatched += 1
+      return new Promise<void>(resolve => {
+        installGates.push(resolve)
+      }).then(() => ({
+        appId: request.app.artifactInstanceId,
+        scope: {
+          kind: 'catalog' as const,
+          accountId: request.app.accountId,
+          organizationId: request.app.productSpaceId,
+          catalogAppId: request.app.artifactInstanceId,
+        },
+        status: 'installed' as const,
+        currentVersion: request.app.version,
+      }))
+    })
+
+    // One mounted hook (one ProductSpace context): the catalog swaps between
+    // two identities whose delimiter-joined op keys would both be
+    // 'product-space:a:b:c:v'.
+    let current = {
+      kind: 'app' as const,
+      catalogEntryId: 'c',
+      artifactInstanceId: 'a:b',
+      version: { versionId: 'v', version: '1.0.0' },
+      name: 'Collision A',
+      description: '',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio' }],
+      permissions: [],
+    }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'op-key-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [current],
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const appA = result.current.state.catalog!.apps[0]!
+    const pendingA = result.current.installProductSpaceBundle(appA)
+    await waitFor(() => expect(installDispatched).toBe(1))
+
+    // Swap the catalog to the colliding identity while A's install is still
+    // in flight, then install B: it must dispatch its OWN IPC instead of
+    // riding A's in-flight promise.
+    current = {
+      ...current,
+      catalogEntryId: 'b:c',
+      artifactInstanceId: 'a',
+      name: 'Collision B',
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.catalogEntryId).toBe('b:c')
+    })
+    const appB = result.current.state.catalog!.apps[0]!
+    const pendingB = result.current.installProductSpaceBundle(appB)
+    await waitFor(() => expect(installDispatched).toBe(2))
+
+    installGates.forEach(release => release())
+    await Promise.all([pendingA, pendingB])
+    // Each identity dispatched exactly one install.
+    expect(installDispatched).toBe(2)
+  })
+
+  it('single-flights concurrent same-instance installs without bypassing the in-flight slot', async () => {
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'single-flight-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-sf',
+        artifactInstanceId: 'artifact-sf',
+        version: { versionId: 'version-sf', version: '1.0.0' },
+        name: 'Single Flight App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio SF' }],
+        permissions: [],
+      }],
+    })
+    let installDispatched = 0
+    const installGates: Array<() => void> = []
+    installProductSpaceBundle = mock((request: any) => {
+      installDispatched += 1
+      return new Promise<void>(resolve => {
+        installGates.push(resolve)
+      }).then(() => ({
+        appId: request.app.artifactInstanceId,
+        scope: {
+          kind: 'catalog' as const,
+          accountId: request.app.accountId,
+          organizationId: request.app.productSpaceId,
+          catalogAppId: request.app.artifactInstanceId,
+        },
+        status: 'installed' as const,
+        currentVersion: request.app.version,
+      }))
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const app = result.current.state.catalog!.apps[0]!
+    const first = result.current.installProductSpaceBundle(app)
+    const second = result.current.installProductSpaceBundle(app)
+    await waitFor(() => expect(installDispatched).toBe(1))
+    // The concurrent duplicate rides the in-flight slot: no second IPC.
+    installGates.forEach(release => release())
+    await Promise.all([first, second])
+    expect(installDispatched).toBe(1)
+  })
 })
