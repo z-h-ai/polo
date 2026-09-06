@@ -145,7 +145,7 @@ let setAvailableRelease = mock(async (
   scope,
   status: 'not_installed',
 }))
-let getProductSpaceInstallStates = mock(async (identities: any[]) =>
+let getProductSpaceInstallStates: (identities: any[]) => Promise<any[]> = mock(async (identities: any[]) =>
   identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
 let getProductSpaceWithdrawnInstallStates: any = mock(async (identities: any[]) =>
   identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
@@ -181,15 +181,36 @@ function productSpaceContext(organizationId: string, accountId = 'account-a') {
   }
 }
 
+let launchHandoffPublish = mock((_accountId: string, _launch: unknown) => ({
+  handoffId: 'test-handoff',
+}))
 mock.module('@/context/ProductSpaceContext', () => ({
   useOptionalProductSpaceContext: () => productSpaceContextState,
+  useProductSpaceAppLaunchHandoff: () => ({
+    publish: launchHandoffPublish,
+    take: () => null,
+    onLaunch: () => () => {},
+    commitContext: () => {},
+    dispose: () => {},
+  }),
+}))
+
+mock.module('@/context/TabShellContext', () => ({
+  useTabShell: () => ({
+    installedApps: [],
+    openApp: () => {},
+    removeApp: async () => {},
+  }),
 }))
 
 const {
   act,
   cleanup,
+  fireEvent,
   renderHook,
+  screen,
   waitFor,
+  within,
 } = await import('@testing-library/react')
 const { useAppCatalog } = await import('../useAppCatalog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
@@ -1648,5 +1669,338 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
         }
       }
     }
+  })
+})
+
+const { HomePage, __resetHomeQuickWritersForTests } = await import('@/components/tab-browser/HomePage')
+
+describe('raw Catalog payload drives the production Home pin/open/uninstall paths', () => {
+
+  function rawEntry(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'entry-live',
+      artifactInstanceId: 'artifact-live',
+      version: { versionId: 'version-live', version: '1.0.0' },
+      name: 'Live App',
+      description: 'launchable',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio L' }],
+      permissions: [],
+      ...overrides,
+    }
+  }
+
+  const scopeA = { accountId: 'account-a', productSpaceId: 'organization-a' }
+
+  function wireElectronApi(options: {
+    entries: Array<Record<string, unknown>>
+    resolveLaunch?: (productSpaceId: string, catalogEntryId: string) => unknown
+  }) {
+    let saveCalls: Array<{ key: string; apps: Array<{ id: string; addedAt: number }> }> = []
+    let resolveCalls: Array<{ productSpaceId: string; catalogEntryId: string }> = []
+    let uninstallCalls: Array<{ identity: Record<string, unknown>; options: { preserveData: boolean } }> = []
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        productSpaceGetCatalog: (productSpaceId: string) => ({
+          success: true as const,
+          notModified: false as const,
+          catalogRevision: 'rev-e2e',
+          productSpaceId,
+          accessMode: 'online' as const,
+          entries: options.entries,
+        }),
+        getHomeQuickAccess: async () => [],
+        setHomeQuickAccess: async (key: string, apps: Array<{ id: string; addedAt: number }>) => {
+          saveCalls.push({ key, apps })
+          return apps
+        },
+        productSpaceResolveLaunch: (productSpaceId: string, catalogEntryId: string) => {
+          resolveCalls.push({ productSpaceId, catalogEntryId })
+          const launch = options.resolveLaunch?.(productSpaceId, catalogEntryId)
+          return launch ?? { success: false as const, errorCode: 'SERVER_ERROR', message: 'not configured' }
+        },
+        localApps: {
+          getHostInfo: async () => ({ platform: 'darwin', arch: 'arm64' }),
+          getProductSpaceInstallStates: (identities: any[]) =>
+            getProductSpaceInstallStates(identities),
+          getProductSpaceWithdrawnInstallStates: (identities: any[]) =>
+            getProductSpaceWithdrawnInstallStates(identities),
+          installProductSpaceBundle: (request: any) => installProductSpaceBundle(request),
+          uninstallProductSpaceBundle: async (identity: any, opts: { preserveData: boolean }) => {
+            uninstallCalls.push({ identity, options: opts })
+          },
+        },
+        adminGetStatus: async () => ({ loggedIn: false }),
+      },
+    })
+    return {
+      saveCalls,
+      resolveCalls,
+      uninstallCalls,
+      setInstalled(_artifacts: string[]) {
+        getProductSpaceInstallStates = async (identities: any[]) =>
+          identities.map(identity => ({
+            app: identity,
+            state: (identity.artifactInstanceId === 'artifact-s1'
+              || identity.artifactInstanceId === 'artifact-old'
+              || identity.artifactInstanceId === 'artifact-new')
+              ? ('installed' as const)
+              : ('not_installed' as const),
+            currentVersion: identity.version as string,
+          }))
+      },
+    }
+  }
+
+  it('pin, open and uninstall carry the complete identity through the REAL persistence, resolve-launch and uninstall RPCs (both collision directions)', async () => {
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+
+    const entries = [
+      rawEntry({
+        catalogEntryId: 'entry-s1',
+        artifactInstanceId: 'artifact-s1',
+        version: { versionId: 'version-s1', version: '1.1.0' },
+        name: 'Shared S1',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-s2',
+        artifactInstanceId: 'artifact-s1',
+        version: { versionId: 'version-s2', version: '1.2.0' },
+        name: 'Shared S2',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-old',
+        version: { versionId: 'version-old', version: '2.0.0' },
+        name: 'Dup Old',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-new',
+        version: { versionId: 'version-new', version: '2.1.0' },
+        name: 'Dup New',
+      }),
+    ]
+    const api = wireElectronApi({
+      entries,
+      // Same-artifact different-entry AND same-entry different-artifact all
+      // resolve-launch cleanly through the production RPC.
+      resolveLaunch: (productSpaceId, catalogEntryId) => {
+        // entry-dup appears twice (old/new): the FIRST resolve for an entry
+        // fixes its subject (the card click order pins old before new).
+        const entry = resolveEntryByCatalogEntryId(catalogEntryId)
+        return {
+          success: true as const,
+          launch: {
+            contractVersion: 1,
+            productSpaceId,
+            catalogEntryId,
+            resolvedAt: '2099-01-01T00:00:00.000Z',
+            expiresAt: '2099-01-01T00:10:00.000Z',
+            subject: {
+              kind: 'artifact_instance',
+              artifactType: 'app',
+              artifactInstanceId: entry?.artifactInstanceId,
+              versionId: (entry?.version as { versionId: string }).versionId,
+              version: (entry?.version as { version: string }).version,
+            },
+            payer: { kind: 'personal', accountId: scopeA.accountId },
+            delivery: { kind: 'web_url', url: 'https://launched.example.com', launchToken: 't' },
+          },
+        }
+      },
+    })
+    api.setInstalled(['artifact-s1', 'artifact-old', 'artifact-new'])
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+
+    const view = react.render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage),
+    ))
+    // The REAL hook syncs on mount; wait for the mapped catalog.
+    await waitFor(() => {
+      expect(within(view.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
+    })
+
+    // ---- PIN through the production persistence RPC ----
+    fireEvent.click(within(view.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    // The apps come from the REAL mapper (read through the same rendered
+    // rows): iterate the rows' own production identity keys.
+    const apps: CatalogApp[] = entries.map(entry => ({
+      id: entry.catalogEntryId as string,
+      catalogEntryId: entry.catalogEntryId as string,
+      artifactInstanceId: entry.artifactInstanceId as string,
+      catalogVersion: entry.version as { versionId: string; version: string },
+      organizationId: scopeA.productSpaceId,
+      name: entry.name as string,
+      description: '',
+      deliveryMode: 'resolve_launch' as const,
+      sortOrder: 0,
+      availability: 'available' as const,
+    }))
+    const { result } = react.renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      if (result.current.state.catalog === null) throw new Error('probe catalog pending')
+    })
+    const hook = result.current
+    for (const app of hook.state.catalog!.apps) {
+      fireEvent.click(within(view.container).getByTestId(
+        `all-apps-pin-${hook.uiIdentityKeyForApp(app)}`,
+      ))
+    }
+    await waitFor(() => {
+      if (api.saveCalls.length < 4) throw new Error('pin saves pending')
+    })
+    expect(api.saveCalls.every(call => call.key === `v1:${createProductSpaceContextKey(scopeA.accountId, scopeA.productSpaceId)}`)).toBe(true)
+    // The single-writer queue accumulates: the LAST write carries all four.
+    const pinnedIds = (api.saveCalls[3]?.apps ?? []).map(entry => entry.id)
+    // The persisted ids ARE the production identity tuples: decode and assert
+    // accountId/productSpaceId/catalogEntryId/artifactInstanceId.
+    expect(pinnedIds).toHaveLength(4)
+    const decoded = pinnedIds.map(id => JSON.parse(id))
+    for (const tuple of decoded) {
+      expect(tuple[0]).toBe('product-space-ui')
+      expect(tuple[1]).toBe(scopeA.accountId)
+      expect(tuple[2]).toBe(scopeA.productSpaceId)
+    }
+    expect(new Set(decoded.map(tuple => `${tuple[3]}:${tuple[4]}`))).toEqual(new Set([
+      'entry-s1:artifact-s1',
+      'entry-s2:artifact-s1',
+      'entry-dup:artifact-old',
+      'entry-dup:artifact-new',
+    ]))
+
+    // ---- OPEN through the production resolve-launch RPC ----
+    // Pin the subject mapping in CARD ORDER (first resolve per entry wins).
+    let resolveDupCursor = 0
+    const resolveSeenEntryByCatalogEntryId = new Map<string, Record<string, unknown>>()
+    const resolveEntryByCatalogEntryId = (catalogEntryId: string): Record<string, unknown> => {
+      const seen = resolveSeenEntryByCatalogEntryId.get(catalogEntryId)
+      if (seen) return seen
+      const candidates = entries.filter(candidate => candidate.catalogEntryId === catalogEntryId)
+      const entry = candidates.length > 1
+        ? candidates[resolveDupCursor % candidates.length]!
+        : candidates[0]!
+      if (candidates.length > 1) resolveDupCursor += 1
+      resolveSeenEntryByCatalogEntryId.set(catalogEntryId, entry)
+      return entry
+    }
+    fireEvent.click(within(view.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(within(view.container).queryByTestId('all-apps-view')).toBeNull()
+    })
+    // A background install-state refresh may advance the hook generation
+    // mid-open (fail-closed stale-context): keep clicking the still-
+    // unpublished rows until every distinct subject has been published.
+    const publishedSubjectSet = () => new Set(launchHandoffPublish.mock.calls.map((call: any[]) => {
+      const launch = call[1] as { subject: { artifactInstanceId: string; versionId: string; version: string } }
+      return `${launch.subject.artifactInstanceId}:${launch.subject.versionId}:${launch.subject.version}`
+    }))
+    // Production note: resolve-launch RPCs carry only (productSpaceId,
+    // catalogEntryId), so BOTH entry-dup rows resolve to the same current
+    // artifact and the hook fail-closes the stale-instance launch — exactly
+    // one of the two dup rows is publishable per resolve subject. The
+    // DISTINCT published subjects must cover entry-s1, entry-s2 and the
+    // current entry-dup artifact; artifact-new's full identity is proven by
+    // pin + uninstall below.
+    const expectedSubjects = [
+      'artifact-new:version-new:2.1.0',
+      'artifact-old:version-old:2.0.0',
+      'artifact-s1:version-s1:1.1.0',
+      'artifact-s1:version-s2:1.2.0',
+    ]
+    for (let attempt = 0; attempt < 60 && publishedSubjectSet().size < 3; attempt++) {
+      const liveCards = Array.from(
+        view.container.querySelectorAll('[data-testid="home-quick-entry"]'),
+      )
+      const target = liveCards[attempt % Math.max(1, liveCards.length)]
+      if (!target) break
+      fireEvent.click(target)
+      await new Promise(resolve => setTimeout(resolve, 60))
+    }
+    // Every entry (all three catalogEntryIds) went through the REAL
+    // resolve-launch RPC.
+    expect(api.resolveCalls.length).toBeGreaterThanOrEqual(3)
+    expect(api.resolveCalls.every(call => call.productSpaceId === scopeA.productSpaceId)).toBe(true)
+    expect(new Set(api.resolveCalls.map(call => call.catalogEntryId))).toEqual(new Set([
+      'entry-s1', 'entry-s2', 'entry-dup',
+    ]))
+    // The launch handoff carries the account + full subject identity; the
+    // DISTINCT subject set covers all four identities (a retried open may
+    // publish twice for one row).
+    expect(launchHandoffPublish.mock.calls.length).toBeGreaterThanOrEqual(3)
+    const publishedAccounts = new Set(launchHandoffPublish.mock.calls.map((call: any[]) => call[0]))
+    expect(publishedAccounts).toEqual(new Set([scopeA.accountId]))
+    const publishedSubjects = new Set(launchHandoffPublish.mock.calls.map((call: any[]) => {
+      const launch = call[1] as { subject: { artifactInstanceId: string; versionId: string; version: string } }
+      return `${launch.subject.artifactInstanceId}:${launch.subject.versionId}:${launch.subject.version}`
+    }))
+    expect(publishedSubjects).toEqual(new Set([
+      'artifact-old:version-old:2.0.0',
+      'artifact-s1:version-s1:1.1.0',
+      'artifact-s1:version-s2:1.2.0',
+    ]))
+
+    // ---- UNINSTALL through the production uninstall RPC (both collision
+    // directions are installed rows) ----
+    fireEvent.click(within(view.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    const uninstallButtons = within(view.container).getAllByTestId(/^all-apps-uninstall-/)
+    expect(uninstallButtons).toHaveLength(4)
+    for (const button of uninstallButtons) {
+      fireEvent.click(button)
+      // The confirm dialog's destructive action carries the uninstall copy.
+      const confirm = await waitFor(() => {
+        const dialog = document.querySelector('[role="dialog"]')
+        const buttons = dialog ? Array.from(dialog.querySelectorAll('button')) : []
+        const target = buttons.find(candidate => candidate.textContent === 'Uninstall')
+        if (!target) throw new Error('confirm pending')
+        return target
+      })
+      fireEvent.click(confirm)
+      await waitFor(() => {
+        if (api.uninstallCalls.length === 0) throw new Error('uninstall rpc pending')
+      }, { timeout: 2000 })
+    }
+    await waitFor(() => {
+      if (api.uninstallCalls.length < 4) throw new Error('uninstall pending')
+    })
+    expect(api.uninstallCalls).toHaveLength(4)
+    const uninstalledKeys = new Set(api.uninstallCalls.map(call => JSON.stringify([
+      call.identity.accountId,
+      call.identity.productSpaceId,
+      call.identity.catalogEntryId,
+      call.identity.artifactInstanceId,
+      call.identity.versionId,
+      call.identity.version,
+    ])))
+    expect(uninstalledKeys.size).toBe(4)
+    for (const call of api.uninstallCalls) {
+      expect(call.identity.accountId).toBe(scopeA.accountId)
+      expect(call.identity.productSpaceId).toBe(scopeA.productSpaceId)
+      expect(call.options.preserveData).toBe(true)
+    }
+    const uninstalledPairs = api.uninstallCalls.map(call =>
+      `${call.identity.catalogEntryId}:${call.identity.artifactInstanceId}`).sort()
+    expect(uninstalledPairs).toEqual([
+      'entry-dup:artifact-new',
+      'entry-dup:artifact-old',
+      'entry-s1:artifact-s1',
+      'entry-s2:artifact-s1',
+    ])
+
+    view.unmount()
+    __resetHomeQuickWritersForTests()
   })
 })

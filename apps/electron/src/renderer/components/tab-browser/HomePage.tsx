@@ -139,16 +139,21 @@ export function createEnterpriseWorkflowUrl(
  */
 interface HomeQuickContextWriter {
   queue: Promise<void>
+  /** Queued-but-unsettled mutation tasks. */
   busy: number
+  /** Mount ids currently owning this context (multiple mounts allowed). */
+  owners: Set<number>
   gate: Promise<boolean>
   resolveGate: (hydrated: boolean) => void
   hydrated: boolean
+  /** True while an activation load is still in flight. */
+  hydrating: boolean
   intent: HomeQuickAccessApp[]
   confirmed: HomeQuickAccessApp[]
 }
 
 const homeQuickWriters = new Map<string, HomeQuickContextWriter>()
-let activeHomeQuickContextKey: string | null = null
+let nextHomeQuickMountId = 0
 
 function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
   let writer = homeQuickWriters.get(contextKey)
@@ -158,9 +163,11 @@ function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
     writer = {
       queue: Promise.resolve(),
       busy: 0,
+      owners: new Set<number>(),
       gate,
       resolveGate,
       hydrated: false,
+      hydrating: false,
       intent: [],
       confirmed: [],
     }
@@ -169,9 +176,16 @@ function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
   return writer
 }
 
+/**
+ * Cleanup: a writer is dropped ONLY when no mount owns it, no mutation task
+ * is pending AND no hydration is in flight. Sweeping therefore can never
+ * delete a writer another mount still uses, never lose pending durable
+ * writes, and never interrupt an activation load; a swept baseline is
+ * re-derived from the persisted store on the next activation.
+ */
 function sweepHomeQuickWriters(): void {
   for (const [key, writer] of homeQuickWriters) {
-    if (key !== activeHomeQuickContextKey && writer.busy === 0) {
+    if (writer.owners.size === 0 && writer.busy === 0 && !writer.hydrating) {
       homeQuickWriters.delete(key)
     }
   }
@@ -180,7 +194,6 @@ function sweepHomeQuickWriters(): void {
 /** Test-only: drop every writer (tests reset the persisted store too). */
 export function __resetHomeQuickWritersForTests(): void {
   homeQuickWriters.clear()
-  activeHomeQuickContextKey = null
 }
 
 export function HomePage() {
@@ -198,6 +211,13 @@ export function HomePage() {
    */
   const quickLoadGenerationRef = useRef(0)
   const quickMountedRef = useRef(false)
+  /** This mount's registry identity (owner token in the writer registry). */
+  const homeQuickMountIdRef = useRef(0)
+  if (homeQuickMountIdRef.current === 0) {
+    homeQuickMountIdRef.current = ++nextHomeQuickMountId
+  }
+  /** The context key this mount currently owns in the registry. */
+  const ownedHomeQuickContextKeyRef = useRef<string | null>(null)
   /**
    * The ProductSpace context the CURRENT entries were hydrated (or last
    * mutated) for. `null` between a context switch and its hydration, so the
@@ -321,8 +341,17 @@ export function HomePage() {
     // in-flight writes and advances its own baseline independently.
     const contextKey = quickContextKey
     const generation = ++quickLoadGenerationRef.current
-    activeHomeQuickContextKey = contextKey
+    // Ownership transfer for THIS mount: release the previously owned
+    // context's writer, acquire the new one. Other mounts' ownership is
+    // untouched.
+    const mountId = homeQuickMountIdRef.current
+    const previousOwned = ownedHomeQuickContextKeyRef.current
+    if (previousOwned !== null && previousOwned !== contextKey) {
+      homeQuickWriters.get(previousOwned)?.owners.delete(mountId)
+    }
     const writer = getHomeQuickWriter(contextKey)
+    writer.owners.add(mountId)
+    ownedHomeQuickContextKeyRef.current = contextKey
     quickHydratedContextRef.current = null
     setView('home')
     setManageOpen(false)
@@ -335,42 +364,61 @@ export function HomePage() {
       sweepHomeQuickWriters()
       return
     }
-    // Fresh activation: install a NEW hydration gate for this attempt (a
-    // previously failed attempt's gate must not poison it) and load.
-    let resolveGate!: (hydrated: boolean) => void
-    writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
-    writer.resolveGate = resolveGate
-    void loadHomeQuickAccess(contextKey)
-      .then(entries => {
-        // The baseline ALWAYS advances for this context; only the display is
-        // fenced against a context switch that happened during the load.
-        writer.intent = entries
-        writer.confirmed = entries
-        writer.hydrated = true
-        writer.resolveGate(true)
-        if (
-          quickMountedRef.current
-          && quickContextKeyRef.current === contextKey
-          && quickLoadGenerationRef.current === generation
-        ) {
-          quickHydratedContextRef.current = contextKey
-          setQuickEntries(entries)
-        }
-      })
-      .catch(() => {
-        // Quick access is non-critical; keep the section usable. Queued
-        // mutations for this context fail closed on the gate (a later
-        // activation installs a fresh gate and retries the load).
-        writer.resolveGate(false)
-      })
+    // Fresh activation for THIS mount: only ONE load may be in flight per
+    // context (a second mount joining during hydration awaits the SAME gate
+    // and displays the shared baseline). Every mount waits for the gate and
+    // displays from the baseline through its own state setter.
+    if (!writer.hydrating) {
+      writer.hydrating = true
+      let resolveGate!: (hydrated: boolean) => void
+      writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
+      writer.resolveGate = resolveGate
+      void loadHomeQuickAccess(contextKey)
+        .then(entries => {
+          // The baseline ALWAYS advances for this context; the display is
+          // applied per mount below through the shared gate.
+          writer.intent = entries
+          writer.confirmed = entries
+          writer.hydrated = true
+          writer.resolveGate(true)
+        })
+        .catch(() => {
+          // Quick access is non-critical; keep the section usable. Queued
+          // mutations for this context fail closed on the gate (a later
+          // activation installs a fresh gate and retries the load).
+          writer.resolveGate(false)
+        })
+        .finally(() => {
+          writer.hydrating = false
+          sweepHomeQuickWriters()
+        })
+    }
+    void writer.gate.then(hydrated => {
+      if (!hydrated) return
+      if (
+        quickMountedRef.current
+        && quickContextKeyRef.current === contextKey
+        && quickLoadGenerationRef.current === generation
+      ) {
+        quickHydratedContextRef.current = contextKey
+        setQuickEntries(writer.confirmed)
+      }
+    })
     sweepHomeQuickWriters()
   }, [quickContextKey])
 
   useEffect(() => {
+    const mountId = homeQuickMountIdRef.current
     quickMountedRef.current = true
     return () => {
       quickMountedRef.current = false
-      activeHomeQuickContextKey = null
+      // Release ONLY this mount's ownership: another live mount sharing a
+      // context keeps its writer (gate, baseline, queue) fully intact.
+      const owned = ownedHomeQuickContextKeyRef.current
+      if (owned !== null) {
+        homeQuickWriters.get(owned)?.owners.delete(mountId)
+        ownedHomeQuickContextKeyRef.current = null
+      }
       sweepHomeQuickWriters()
     }
   }, [])

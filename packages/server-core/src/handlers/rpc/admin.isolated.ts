@@ -505,11 +505,13 @@ mock.module('@polo-ai/shared/credentials', () => ({
 // entrypoint. Tests that need the REAL authority run in their own isolated
 // files against the untouched module.
 const authorityRevokeCalls: Array<{ accountId: string; productSpaceId: string }> = []
-// Fault-injection controls for the revoke fake: an async gate lets tests
-// interleave a fence A→B switch INSIDE the awaited revocation, and a failure
-// flag simulates a durable-persistence error.
-let gateAuthorityRevoke: Promise<void> = Promise.resolve()
+// Fault-injection control for the revoke fake. The REAL
+// revokeProductSpaceCatalogAuthority is SYNCHRONOUS (a same-tick file
+// operation) — the fake must be synchronous too so tests prove the critical
+// section truly has no yield.
 let failAuthorityRevoke = false
+/** Test observer invoked INSIDE the synchronous revoke (post-CAS moment). */
+let observeAuthorityRevoke: ((accountId: string, productSpaceId: string) => void) | null = null
 const authorityRecordCalls: Array<{
   accountId: string
   productSpaceId: string
@@ -530,9 +532,9 @@ mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () =
     }
     return []
   },
-  revokeProductSpaceCatalogAuthority: async (accountId: string, productSpaceId: string) => {
+  revokeProductSpaceCatalogAuthority: (accountId: string, productSpaceId: string) => {
     authorityRevokeCalls.push({ accountId, productSpaceId })
-    await gateAuthorityRevoke
+    observeAuthorityRevoke?.(accountId, productSpaceId)
     if (failAuthorityRevoke) {
       throw new Error('authority persistence failed (injected)')
     }
@@ -543,6 +545,7 @@ const {
   readApiKey,
   registerAdminHandlers,
   __bumpProductSpaceCatalogSyncFenceForTests,
+  __latestProductSpaceCatalogSyncInvocationForTests,
   __productSpaceCatalogSyncScopeCountForTests,
 } = await import('./admin')
 const { registerAuthHandlers } = await import('./auth')
@@ -820,7 +823,6 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     authorityRevokeCalls.length = 0
     failAuthorityRecord = false
     failAuthorityRevoke = false
-    gateAuthorityRevoke = Promise.resolve()
     setRuntimeActiveProductSpace(null)
     const harness = createHarness()
     productSpaceCatalog = harness.productSpaceCatalog
@@ -1351,7 +1353,13 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(getRuntimeActiveProductSpaceAccount()).toBe('user-2')
   })
 
-  it('the awaited revocation never tears down a fence committed by a concurrent A→B switch', async () => {
+  it('a revocation decision parked on the switch lock never tears down a fence committed meanwhile', async () => {
+    const { withSwitchLock } = await import('../../runtime/product-space-executions')
+    let releaseHolder: (() => void) | undefined
+    void withSwitchLock(async () => {
+      await new Promise<void>(resolve => { releaseHolder = resolve })
+    })
+
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
     })
@@ -1361,24 +1369,20 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     setRuntimeActiveProductSpace('space-a')
     setRuntimeActiveProductSpaceAccount('user-1')
 
-    // Gate INSIDE the revocation: the fence A→B switch lands after the
-    // denial was observed but before the revoke critical section runs.
-    let releaseRevoke: (() => void) | undefined
-    gateAuthorityRevoke = new Promise(resolve => {
-      releaseRevoke = resolve
-    })
-
+    // R1's denial decision queues on the held switch lock.
     const pending = productSpaceCatalog(context, 'space-a', undefined)
-    await waitFor(() => authorityRevokeCalls.length === 1)
+    await waitFor(() => releaseHolder !== undefined)
+    // Let the queued decision actually claim its lock slot.
+    await new Promise(resolve => setTimeout(resolve, 60))
 
-    // A committed switch re-points the fence at space-b (advances the fence
-    // generation).
+    // A committed switch re-points the fence at space-b while the denial is
+    // parked (the fence generation advances).
     setRuntimeActiveProductSpace('space-b')
     setRuntimeActiveProductSpaceAccount('user-1')
 
-    releaseRevoke!()
+    releaseHolder!()
     const response = await pending as any
-    // The response returns only AFTER the awaited compare-and-revoke decided.
+    // The decision completes only after the compare-and-revoke decided.
     expect(response.success).toBe(false)
     expect(response.errorCode).toBe('FORBIDDEN')
     // The new space-b fence was never torn down.
@@ -1456,6 +1460,80 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     const r2 = await pendingR2 as any
     expect(r2.success).toBe(true)
     expect(authorityRecordCalls.some(call => call.catalogRevision === 'rev-2')).toBe(true)
+  })
+
+  it('no newer invocation can register inside the critical section: authority delete and fence decision share one synchronous block', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new TestAdminError('denied', 'FORBIDDEN', { status: 403 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    const scopeKey = createProductSpaceContextKey('user-1' as never, 'space-a' as never)
+
+    // Captured INSIDE the synchronous authority mutation (post-CAS,
+  // pre-fence): the latest invocation at that instant, and the fence state.
+  let latestAtAuthorityDelete: number | null | 'not-called' = 'not-called'
+  let fenceAtAuthorityDelete: string | null | 'not-called' = 'not-called'
+  observeAuthorityRevoke = () => {
+    latestAtAuthorityDelete = __latestProductSpaceCatalogSyncInvocationForTests(
+      createProductSpaceContextKey('user-1' as never, 'space-a' as never),
+    )
+    fenceAtAuthorityDelete = getRuntimeActiveProductSpace()
+  }
+
+  const pending = productSpaceCatalog(context, 'space-a', undefined)
+  const response = await pending as any
+  expect(response.errorCode).toBe('FORBIDDEN')
+
+  // The decision block observed a CONSISTENT snapshot: the fence was still
+  // committed while the authority was being deleted, and the invocation it
+  // CAS-ed on is the one that completed the whole block — a registration
+  // inside the block would have shown up as a newer latest here.
+  expect(latestAtAuthorityDelete).not.toBe('not-called')
+  expect(typeof latestAtAuthorityDelete).toBe('number')
+  expect(fenceAtAuthorityDelete).toBe('space-a')
+  // After the response the scope state is FULLY deleted (bounded registry):
+  // the reservation lived exactly until the revoke/onDenied settled.
+  const latestAfter = __latestProductSpaceCatalogSyncInvocationForTests(
+    createProductSpaceContextKey('user-1' as never, 'space-a' as never),
+  )
+  expect(latestAfter).toBeNull()
+  expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+
+  // A later R2 registration+commit lands strictly OUTSIDE the block and
+  // re-establishes fresh authority; the fence stays revoked (R1's honest
+  // linearized revocation) — consistent, split-free final state.
+  adminClientBehavior.getProductSpaceCatalog = async () => ({
+    contractVersion: 1,
+    productSpaceId: 'space-a',
+    catalogRevision: 'rev-2',
+    entries: [authorityTestEntry('rev-2')],
+  })
+  const r2 = await productSpaceCatalog(context, 'space-a', undefined) as any
+  expect(r2.success).toBe(true)
+  expect(authorityRecordCalls.some(call => call.catalogRevision === 'rev-2')).toBe(true)
+  observeAuthorityRevoke = null
+  })
+
+  it('10,000 unique denied scope IDs retain ZERO scope state (bounded registry)', async () => {
+    // Registration happens before the remote list proves visibility: every
+    // syntactically valid renderer-supplied space ID registers an
+    // invocation. Each denial must release its reservation at settle so the
+    // registry cannot grow with the number of attempted IDs.
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [] })
+    failAuthorityRevoke = false
+    let peak = 0
+    for (let i = 0; i < 10_000; i++) {
+      const response = await productSpaceCatalog(context, `space-${i}`, undefined) as any
+      expect(response.success).toBe(false)
+      peak = Math.max(peak, __productSpaceCatalogSyncScopeCountForTests())
+    }
+    // Total retained count after 10,000 unique denied IDs: zero.
+    expect(peak).toBeLessThanOrEqual(1)
+    expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
   })
 
   it('keeps a different space runtime fence when another space is denied', async () => {
@@ -1601,7 +1679,6 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     authorityRecordCalls.length = 0
     authorityRevokeCalls.length = 0
     failAuthorityRevoke = false
-    gateAuthorityRevoke = Promise.resolve()
     setRuntimeActiveProductSpace(null)
     const harness = createHarness()
     resolveLaunch = harness.productSpaceResolveLaunch

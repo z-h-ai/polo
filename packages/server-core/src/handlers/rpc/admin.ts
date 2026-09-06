@@ -1,6 +1,7 @@
 import {
   AdminClient,
   AdminError,
+  type AdminErrorDetails,
   denyAppCatalogAccessForAccount,
   denyCachedAppCatalogAuthorization,
   denyCachedAppCatalogAuthorizationForAccount,
@@ -122,20 +123,9 @@ interface ProductSpaceCatalogSyncScope {
 }
 const productSpaceCatalogSyncScopes = new Map<string, ProductSpaceCatalogSyncScope>()
 let nextProductSpaceCatalogSyncInvocation = 0
-/**
- * Latest invocation per scope whose live entry has ALREADY been recycled
- * (fully idle). The catalog-denial decision runs inside the switch lock and
- * must verify latest-wins AT DECISION TIME — a denial arriving after its own
- * scope entry was settled still needs to know whether a newer invocation
- * registered. Bounded like the scopes map: one number per verified
- * (account, ProductSpace) pair; the entry is deleted as soon as the scope
- * re-registers (the live entry tracks it again).
- */
-const settledProductSpaceCatalogScopes = new Map<string, number>()
 
 function beginProductSpaceCatalogSync(scopeKey: string): number {
   const invocation = ++nextProductSpaceCatalogSyncInvocation
-  settledProductSpaceCatalogScopes.delete(scopeKey)
   let scope = productSpaceCatalogSyncScopes.get(scopeKey)
   if (!scope) {
     scope = {
@@ -180,7 +170,6 @@ function settleProductSpaceCatalogSync(scopeKey: string): void {
   scope.inFlight = Math.max(0, scope.inFlight - 1)
   if (scope.inFlight === 0 && scope.pendingCommitInvocations.size === 0) {
     productSpaceCatalogSyncScopes.delete(scopeKey)
-    settledProductSpaceCatalogScopes.set(scopeKey, scope.latestInvocation)
   }
 }
 
@@ -202,19 +191,7 @@ function releaseProductSpaceCatalogCommit(
   scope.pendingCommitInvocations.delete(invocation)
   if (scope.inFlight === 0 && scope.pendingCommitInvocations.size === 0) {
     productSpaceCatalogSyncScopes.delete(scopeKey)
-    settledProductSpaceCatalogScopes.set(scopeKey, scope.latestInvocation)
   }
-}
-
-/**
- * Latest-wins verdict at DECISION time: consults the live entry, and — after
- * it was recycled — the settled-latest tombstone. Used by the catalog-scope
- * denial revocation inside its switch-lock critical section.
- */
-function isLatestProductSpaceCatalogInvocation(scopeKey: string, invocation: number): boolean {
-  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
-  if (scope) return scope.latestInvocation === invocation
-  return settledProductSpaceCatalogScopes.get(scopeKey) === invocation
 }
 
 /**
@@ -235,6 +212,11 @@ export function __productSpaceCatalogSyncScopeCountForTests(): number {
 /** Test-only: whether an invocation is still the fence's latest. */
 export function __isLatestProductSpaceCatalogSyncForTests(scopeKey: string, invocation: number): boolean {
   return isLatestProductSpaceCatalogSync(scopeKey, invocation)
+}
+
+/** Test-only: the latest registered invocation for a scope (or null). */
+export function __latestProductSpaceCatalogSyncInvocationForTests(scopeKey: string): number | null {
+  return productSpaceCatalogSyncScopes.get(scopeKey)?.latestInvocation ?? null
 }
 
 export const HANDLED_CHANNELS = [
@@ -868,19 +850,29 @@ export function registerAdminHandlers(
 
   type ProductSpaceDenialOrigin = 'remote_authority' | 'local_scope_guard'
 
-  const DENIAL_ORIGIN_PROPERTY = 'poloProductSpaceDenialOrigin'
+  /**
+   * Typed denial representation: the origin is a DECLARED readonly field on
+   * an AdminError subclass — no dynamic property attachment, no forced
+   * casts. `instanceof` + the field give the revocation policy an auditable
+   * discriminator.
+   */
+  class ProductSpaceDenialError extends AdminError {
+    readonly denialOrigin: ProductSpaceDenialOrigin
 
-  function withDenialOrigin<T extends AdminError>(
-    error: T,
-    origin: ProductSpaceDenialOrigin,
-  ): T {
-    Object.assign(error, { [DENIAL_ORIGIN_PROPERTY]: origin })
-    return error
+    constructor(
+      message: string,
+      errorCode: AdminErrorCode,
+      origin: ProductSpaceDenialOrigin,
+      options?: { status?: number; details?: AdminErrorDetails },
+    ) {
+      super(message, errorCode, options)
+      this.name = 'ProductSpaceDenialError'
+      this.denialOrigin = origin
+    }
   }
 
   function denialOriginOf(error: unknown): ProductSpaceDenialOrigin | null {
-    return (error as { [DENIAL_ORIGIN_PROPERTY]?: ProductSpaceDenialOrigin } | null)
-      ?.[DENIAL_ORIGIN_PROPERTY] ?? null
+    return error instanceof ProductSpaceDenialError ? error.denialOrigin : null
   }
 
   /**
@@ -904,8 +896,13 @@ export function registerAdminHandlers(
         return 'superseded'
       }
       let firstError: unknown = null
+      // SYNCHRONOUS: the authority mutation is a same-tick file operation.
+      // There must be NO yield between the final latest CAS, the authority
+      // mutation and the fence mutation — a yield here would let a queued R2
+      // register a newer invocation inside the critical section and split
+      // the linearization.
       try {
-        await revokeProductSpaceCatalogAuthority(options.accountId, options.productSpaceId)
+        revokeProductSpaceCatalogAuthority(options.accountId, options.productSpaceId)
       } catch (error) {
         firstError = error
       }
@@ -2138,12 +2135,11 @@ export function registerAdminHandlers(
               entries: result.entries,
             } as never
           } finally {
-            // Settle this request. A committable request keeps its scope
-            // entry alive until the session-current CAS consumes it; every
-            // other exit path deletes an in-flight-free scope immediately
-            // (its latest invocation survives in the settled tombstone for
-            // the denial-time CAS).
-            settleProductSpaceCatalogSync(catalogSyncKey)
+            // NOTE: the scope entry is deliberately NOT settled here. It must
+            // survive until callOrganization's ALWAYS-SETTLE hook runs — i.e.
+            // AFTER a catalog-scope denial's revocation decision — so the
+            // decision-time latest CAS reads a live registration. The settle
+            // (and full state deletion) happens in onSettled below.
           }
         },
         {
@@ -2213,6 +2209,11 @@ export function registerAdminHandlers(
             if (syncScopeKey !== null && markedCommitInvocation !== null) {
               releaseProductSpaceCatalogCommit(syncScopeKey, markedCommitInvocation)
             }
+            // ALWAYS-SETTLE the scope itself — after the denial decision —
+            // so the bounded in-flight structure is fully deleted once idle.
+            if (syncScopeKey !== null) {
+              settleProductSpaceCatalogSync(syncScopeKey)
+            }
           },
           // Catalog-scope error semantics: a 403/FORBIDDEN (governance
           // restriction, membership loss for this space) must NOT end the
@@ -2233,7 +2234,7 @@ export function registerAdminHandlers(
                 requireLatestInvocation: () =>
                   syncScopeKey !== null
                   && denialInvocation !== null
-                  && isLatestProductSpaceCatalogInvocation(syncScopeKey, denialInvocation),
+                  && isLatestProductSpaceCatalogSync(syncScopeKey, denialInvocation),
               })
               return verdict === 'superseded' ? 'superseded' : undefined
             },
@@ -2275,10 +2276,11 @@ export function registerAdminHandlers(
               || isRuntimeProductSpaceRestricted(productSpaceId.data)
               || isSwitchInProgress()
             ) {
-              throw withDenialOrigin(new AdminError(
+              throw new ProductSpaceDenialError(
                 'Launch is not allowed outside the current active ProductSpace',
                 'FORBIDDEN',
-              ), 'local_scope_guard')
+                'local_scope_guard',
+              )
             }
           }
           requireCurrentLaunchScope()
@@ -2290,7 +2292,14 @@ export function registerAdminHandlers(
             try {
               return await call
             } catch (error) {
-              if (error instanceof AdminError) throw withDenialOrigin(error, 'remote_authority')
+              if (error instanceof AdminError && denialOriginOf(error) === null) {
+                throw new ProductSpaceDenialError(
+                  error.message,
+                  error.errorCode,
+                  'remote_authority',
+                  { status: error.status, details: error.details },
+                )
+              }
               throw error
             }
           }
@@ -2311,10 +2320,11 @@ export function registerAdminHandlers(
           if (!context || context.accessMode !== 'active') {
             // The server ANSWERED, but this space does not exist for the
             // member or is not active: an authoritative remote denial.
-            throw withDenialOrigin(new AdminError(
+            throw new ProductSpaceDenialError(
               'The requested ProductSpace is not available for launch',
               'FORBIDDEN',
-            ), 'remote_authority')
+              'remote_authority',
+            )
           }
           const catalog = await tagRemoteAuthority(client.getProductSpaceCatalog(accessToken, context))
           if ('notModified' in catalog) {

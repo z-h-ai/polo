@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement, type ReactElement } from 'react'
+import { createContext, createElement, useContext, type ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type {
@@ -93,8 +93,11 @@ mock.module('@/context/TabShellContext', () => ({
   }),
 }))
 
+// Per-tree hook override: lets one test mount HomePages on DIFFERENT
+// contexts simultaneously without the module-global leaking between them.
+const hookOverrideContext = createContext<any>(null)
 mock.module('@/hooks/useAppCatalog', () => ({
-  useAppCatalog: () => appCatalogHook,
+  useAppCatalog: () => useContext(hookOverrideContext) ?? appCatalogHook,
 }))
 
 mock.module('@/lib/product-space-app-launch-handoff', () => ({
@@ -152,10 +155,13 @@ afterEach(() => {
   cleanup()
 })
 
-function homeTree() {
+function homeTree(hookOverride?: any) {
   // HomePage publishes through the Provider-owned handoff store; the
-  // provider value mirrors the mocked catalog hook's committed context.
-  const ps = appCatalogHook.productSpace
+  // provider value mirrors the mocked catalog hook's committed context. A
+  // per-tree hook override binds THAT tree to a different context even when
+  // another mount keeps using the module-global hook.
+  const hookInstance = hookOverride ?? appCatalogHook
+  const ps = hookInstance.productSpace
   const value = {
     accountId: ps?.accountId ?? 'account-a',
     activeProductSpaceId: ps?.activeProductSpaceId ?? 'organization-a',
@@ -176,10 +182,12 @@ function homeTree() {
     onDismissTargetAccessLost: () => {},
     onStopSwitchExecution: () => {},
   }
-  return createElement(ProductSpaceProvider, {
+  const tree = createElement(ProductSpaceProvider, {
     value: value as never,
     children: createElement(I18nextProvider, { i18n }, createElement(HomePage)),
   })
+  if (!hookOverride) return tree
+  return createElement(hookOverrideContext.Provider, { value: hookOverride }, tree)
 }
 
 let homeRerender: (tree: ReactElement) => void = () => {}
@@ -1183,7 +1191,10 @@ describe('HomePage quick access (POO-43)', () => {
     // must load it back into the home quick access.
     view.unmount()
     const loadsBefore = loadCallCount()
+    console.log('DBG before remount loads', loadsBefore)
     renderHome()
+    await new Promise(resolve => setTimeout(resolve, 200))
+    console.log('DBG after remount loads', loadCallCount(), getHomeQuickAccess.mock.calls.map(c => String(c[0]).slice(-30)))
     await waitForNextScopeLoad(loadsBefore, contextKey)
     await waitFor(() => {
       expect(screen.queryByTestId('all-apps-view')).toBeNull()
@@ -1671,6 +1682,111 @@ describe('HomePage quick access (POO-43)', () => {
       .toEqual([keyA1, keyA2])
     expect(quickAccessByContext.get(contextKeyB)?.map((entry: { id: string }) => entry.id))
       .toEqual([keyB])
+  })
+
+  it('two mounts of the SAME context share one writer; unmounting either keeps the survivor working', async () => {
+    const appA = pinnedApp('mm-app-a', 'mm-entry-a', 'mm-artifact-a', 'MultiMount A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+
+    const v1 = renderHome()
+    const loadsBeforeV2 = loadCallCount()
+    const v2 = render(homeTree())
+    // The second mount JOINS the same context writer: no second racing load
+    // (the shared baseline is displayed directly).
+    await waitFor(() => {
+      expect(within(v2.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
+    })
+    expect(loadCallCount()).toBe(loadsBeforeV2)
+
+    // Unmount the FIRST mount: the survivor keeps the writer.
+    v1.unmount()
+    fireEvent.click(within(v2.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(v2.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(within(v2.container).getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+    // The persisted call hits the CORRECT context.
+    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
+    fireEvent.click(within(v2.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(within(v2.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    })
+    v2.unmount()
+  })
+
+  it('two mounts on DIFFERENT contexts own separate writers; unmounting either lets the survivor pin/prune its own context', async () => {
+    const appA = pinnedApp('mm2-app-a', 'mm2-entry-a', 'mm2-artifact-a', 'MultiMount2 A')
+    const appB = pinnedApp('mm2-app-b', 'mm2-entry-b', 'mm2-artifact-b', 'MultiMount2 B')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKeyA = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+
+    // Mount 1 on context A.
+    const v1 = renderHome()
+    await waitForNextScopeLoad(0, contextKeyA)
+
+    // Mount 2 on context B (fresh hook — the provider value follows it).
+    const contextKeyB = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-b')
+    }`
+    const hookB = hookWithCatalog(
+      enterpriseCatalogWith([appB], { organizationId: 'organization-b' }),
+    )
+    const v2Render = render(homeTree(hookB))
+    await waitFor(() => {
+      if (getHomeQuickAccess.mock.calls.length < 2) throw new Error('B load pending')
+    })
+    expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKeyB)
+
+    // Unmount mount 2 (context B): mount 1's context-A writer must survive.
+    v2Render.unmount()
+    await waitFor(() => {
+      if (!within(v1.container).getByTestId('home-quick-entry-polo')) {
+        throw new Error('A home pending')
+      }
+    })
+    fireEvent.click(within(v1.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(v1.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(within(v1.container).getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKeyA)
+    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
+      { id: keyA, addedAt: expect.any(Number) },
+    ])
+    expect(quickAccessByContext.get(contextKeyA)?.map((entry: { id: string }) => entry.id))
+      .toEqual([keyA])
+    fireEvent.click(within(v1.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(within(v1.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    })
+
+    // Unmount the OTHER order too: a fresh mount 1' on B, unmount mount 1
+    // (context A) — the B survivor still pins into B's own slot.
+    v1.unmount()
+    const v3 = render(homeTree(hookB))
+    await waitFor(() => {
+      if (getHomeQuickAccess.mock.calls.length < 3) throw new Error('reload pending')
+    })
+    expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKeyB)
+    fireEvent.click(within(v3.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(v3.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(within(v3.container).getByTestId(
+      `all-apps-pin-${hookB.uiIdentityKeyForApp(appB)}`,
+    ))
+    await waitForSaveCalls(2)
+    expect(setHomeQuickAccess.mock.calls[1]?.[0]).toBe(contextKeyB)
+    v3.unmount()
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {
