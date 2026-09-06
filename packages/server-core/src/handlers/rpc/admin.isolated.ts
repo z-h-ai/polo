@@ -3235,7 +3235,7 @@ describe('registerAdminHandlers', () => {
     const releaseLock = createDeferred<void>()
     const wedge = withSwitchLock(() => new Promise<void>(resolve => {
       void releaseLock.promise.then(resolve)
-    }))
+    }), { phase: 'test-holder' })
     const { login } = createHarness()
     const pendingLogin = login(
       { clientId: 'client-1', workspaceId: null, webContentsId: null },

@@ -76,7 +76,7 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
     // The helper must NOT hold the switch lock while it resolves the
     // trusted account through the Admin session lock. Bounded assertion.
     const lockAcquired = await Promise.race([
-      withSwitchLock(async () => true),
+      withSwitchLock(async () => true, { phase: 'test-holder' }),
       new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
     ])
     expect(lockAcquired).toBe(true)
@@ -98,7 +98,7 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
     const switchLockReleased = new Promise<void>(resolve => { releaseSwitchLock = () => resolve() })
     const lockHolder = withSwitchLock(async () => {
       await switchLockReleased
-    })
+    }, { phase: 'test-holder' })
     let releaseProvider!: () => void
     const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve(trustedAccountId) })
     setTrustedProductSpaceAccountProvider(() => gatedProvider)
@@ -303,7 +303,7 @@ describe('assistant send-path execution registration (R29 lock order)', () => {
     const switchLockReleased = new Promise<void>(resolve => { releaseSwitchLock = () => resolve() })
     const lockHolder = withSwitchLock(async () => {
       await switchLockReleased
-    })
+    }, { phase: 'test-holder' })
     let releaseProvider!: () => void
     const gatedProvider = new Promise<string | null>(resolve => { releaseProvider = () => resolve(trustedAccountId) })
     setTrustedProductSpaceAccountProvider(() => gatedProvider)

@@ -853,7 +853,7 @@ describe('two-phase switch transaction', () => {
     // inside its (Admin-session-lock-taking) list fetch, the switch lock
     // MUST be acquirable — account replacement's revoke path depends on it.
     const lockAcquired = await Promise.race([
-      withSwitchLock(async () => true),
+      withSwitchLock(async () => true, { phase: 'test-holder' }),
       new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
     ])
     expect(lockAcquired).toBe(true)
@@ -888,7 +888,7 @@ describe('two-phase switch transaction', () => {
     expect(fetchCalls).toBe(1)
 
     const lockAcquired = await Promise.race([
-      withSwitchLock(async () => true),
+      withSwitchLock(async () => true, { phase: 'test-holder' }),
       new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
     ])
     expect(lockAcquired).toBe(true)

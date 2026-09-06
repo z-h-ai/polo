@@ -1723,10 +1723,13 @@ describe('HomePage quick access (POO-43)', () => {
     const appA = pinnedApp('noruntime-app-a', 'noruntime-entry-a', 'noruntime-artifact-a', 'NoRuntime A')
     let getStatusCalls = 0
     const hook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    hook.getStatus = (): any => {
+    // Typed spy derived from the hook's OWN getStatus type: the return value
+    // satisfies the real signature, no `any` masks a contract violation.
+    const getStatusSpy: typeof hook.getStatus = () => {
       getStatusCalls += 1
-      return { status: 'running' }
+      return undefined
     }
+    hook.getStatus = getStatusSpy
     appCatalogHook = hook
     const contextKey = `v1:${
       createProductSpaceContextKey('account-a', 'organization-a')}`

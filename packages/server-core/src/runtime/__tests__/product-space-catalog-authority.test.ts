@@ -41,6 +41,19 @@ function entry(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function waitFor<T>(predicate: () => T | undefined, timeoutMs = 2_000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now()
+    const poll = (): void => {
+      const value = predicate()
+      if (value !== undefined) return resolve(value)
+      if (Date.now() - startedAt > timeoutMs) return reject(new Error('waitFor timeout'))
+      setTimeout(poll, 10)
+    }
+    poll()
+  })
+}
+
 beforeEach(() => {
   resetProductSpaceCatalogAuthorityForTests()
 })
@@ -285,6 +298,30 @@ describe('ProductSpace Catalog authority', () => {
       // non-string description.
       entry({ description: 42 as unknown as string }),
     ]
+    // Whole-transaction tests run from an EXISTING trusted state: seed an
+    // old trusted record whose identity (entry-old/artifact-old/version-old)
+    // is disjoint from every candidate row below, so a failed transaction
+    // can be proven to preserve the prior trusted state exactly.
+    const oldTuple = tuple('entry-old', 'artifact-old', 'version-old', '0.9.0')
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-old-trusted', [
+      entry({
+        catalogEntryId: oldTuple[0],
+        artifactInstanceId: oldTuple[1],
+        version: { versionId: oldTuple[2], version: oldTuple[3], checksum: 'b'.repeat(64) },
+      }),
+    ])
+    const candidateTuple = tuple()
+    const authorityPath = join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+    expect(existsSync(authorityPath)).toBe(true)
+
+    // The three preserved surfaces: the public record projection, the RAW
+    // authority file bytes, and the complete trusted tuple set.
+    const captureTrustedState = () => ({
+      recordJson: JSON.stringify(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')),
+      fileBytes: readFileSync(authorityPath),
+      tupleSet: loadProductSpaceCatalogAuthorityTupleSet('account-a', 'space-a'),
+    })
+
     // R24/R25 contract: a fresh row that FAILS the formal AuthorityEntrySchema
     // (after the credential-stripping projection) fails the WHOLE transaction —
     // R27 contract: RAW fresh rows are validated FIRST against the shared
@@ -294,30 +331,62 @@ describe('ProductSpace Catalog authority', () => {
     // the WHOLE transaction with a throw before ANY cache/disk mutation.
     // Nothing is filtered, defaulted, or normalized into trust.
     for (const [index, badEntry] of badEntries.entries()) {
+      const before = captureTrustedState()
       expect(() => recordProductSpaceCatalogAuthoritativeEntries(
         'account-a', 'space-a', `rev-bad-${index}`, [badEntry],
       )).toThrow(/ProductSpaceCatalogEntrySchema/)
-      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
-      expect(existsSync(join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json'))).toBe(false)
+      const after = captureTrustedState()
+      expect(after.recordJson).toBe(before.recordJson)
+      expect(Buffer.compare(after.fileBytes, before.fileBytes)).toBe(0)
+      expect(after.tupleSet).toEqual(before.tupleSet)
+      // The seeded old tuple stays trusted; the rejected candidate grants
+      // nothing.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...oldTuple)).toBe(true)
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...candidateTuple)).toBe(false)
     }
+
     // Mixed valid + invalid: the invalid row poisons the whole transaction —
-    // no partial trust is granted.
+    // no partial trust is granted and the prior trusted state survives.
+    const beforeMixed = captureTrustedState()
     expect(() => recordProductSpaceCatalogAuthoritativeEntries(
       'account-a', 'space-a', 'rev-mixed', [...badEntries.slice(0, 3), entry()],
     )).toThrow(/ProductSpaceCatalogEntrySchema/)
-    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+    const afterMixed = captureTrustedState()
+    expect(afterMixed.recordJson).toBe(beforeMixed.recordJson)
+    expect(Buffer.compare(afterMixed.fileBytes, beforeMixed.fileBytes)).toBe(0)
+    expect(afterMixed.tupleSet).toEqual(beforeMixed.tupleSet)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...oldTuple)).toBe(true)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...candidateTuple)).toBe(false)
 
-    // Self-heal: a good record persists normally afterwards.
+    // Self-heal: ONE clearly legal follow-up commit recovers and produces
+    // the expected new state.
     recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed-2', [entry()])
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed-2')
-    // Self-heal: a good record persists normally afterwards.
-    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed-2', [entry()])
-    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed-2')
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...candidateTuple)).toBe(true)
   })
 
   it('rejects malformed entries with a full-transaction throw (mixed valid+invalid grants nothing)', () => {
+    // This transaction also starts from an EXISTING trusted state with a
+    // disjoint old identity, so zero-grant AND state preservation are both
+    // observable.
+    const oldTuple = tuple('entry-old', 'artifact-old', 'version-old', '0.9.0')
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-old-trusted', [
+      entry({
+        catalogEntryId: oldTuple[0],
+        artifactInstanceId: oldTuple[1],
+        version: { versionId: oldTuple[2], version: oldTuple[3], checksum: 'b'.repeat(64) },
+      }),
+    ])
+    const authorityPath = join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+    const captureTrustedState = () => ({
+      recordJson: JSON.stringify(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')),
+      fileBytes: readFileSync(authorityPath),
+      tupleSet: loadProductSpaceCatalogAuthorityTupleSet('account-a', 'space-a'),
+    })
+
     // Mixed valid + invalid: the invalid row poisons the whole transaction —
     // no partial trust, nothing recorded, nothing trusted.
+    const before = captureTrustedState()
     expect(() => recordProductSpaceCatalogAuthoritativeEntries(
       'account-a',
       'space-a',
@@ -328,7 +397,11 @@ describe('ProductSpace Catalog authority', () => {
         entry(),
       ],
     )).toThrow()
-    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+    const after = captureTrustedState()
+    expect(after.recordJson).toBe(before.recordJson)
+    expect(Buffer.compare(after.fileBytes, before.fileBytes)).toBe(0)
+    expect(after.tupleSet).toEqual(before.tupleSet)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...oldTuple)).toBe(true)
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
   })
 
@@ -1270,6 +1343,44 @@ describe('R27-a2: switch-lock public boundary + typed structured tokens', () => 
     expect(tokensSeen).toEqual(['account-A', 'account-B'])
     expect(pendingSwitchLockTasks()).toBe(0)
     // The registry is empty after all tasks settle.
+    expect(switchLockEventLog()).toEqual([])
+  })
+
+  it('mutating a getter-returned token never leaks into the internal registry', async () => {
+    const { withSwitchLock, switchLockEventLog } = await import('../switch-lock-internal')
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const running = withSwitchLock(async () => {
+      await held
+    }, {
+      phase: 'catalog-authority-commit',
+      accountId: 'acct-deep-copy',
+      productSpaceId: 'space-deep-copy',
+      invocation: 7,
+    })
+    // Wait until the running task's event is actually registered.
+    await waitFor(() => {
+      if (switchLockEventLog().length !== 1) return undefined
+      return true
+    })
+
+    // First getter call: mutate the RETURNED token's field...
+    const first = switchLockEventLog()
+    const mutated = first[0]!.token
+    if (mutated.phase === 'catalog-authority-commit') mutated.invocation = 99_999
+
+    // ...a SECOND getter call must still observe the pristine internal token.
+    const second = switchLockEventLog()
+    expect(second).toHaveLength(1)
+    expect(second[0]!.token).toEqual({
+      phase: 'catalog-authority-commit',
+      accountId: 'acct-deep-copy',
+      productSpaceId: 'space-deep-copy',
+      invocation: 7,
+    })
+
+    release()
+    await running
     expect(switchLockEventLog()).toEqual([])
   })
 })

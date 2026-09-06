@@ -37,10 +37,8 @@ export function productSpaceSwitchToken(productSpaceId: string): ProductSpaceSwi
 }
 export type TestHolderToken = { phase: 'test-holder' }
 export type TestThrowingToken = { phase: 'test-throwing' }
-export type GenericSwitchToken = { phase: 'generic-switch' }
 
 export type SwitchLockToken =
-  | GenericSwitchToken
   | CatalogAuthorityCommitToken
   | CatalogAuthorityRevokeToken
   | RuntimePublicMutexToken
@@ -67,11 +65,12 @@ let switchLockTail: Promise<unknown> = Promise.resolve()
 
 /**
  * Production mutex: strictly serializes queued tasks (FIFO). The token is a
- * structured observational identity — it does not alter lock semantics.
+ * REQUIRED structured observational identity — every call site declares its
+ * own semantic phase; there is no default or generic token.
  */
 export async function withSwitchLock<T>(
   operation: () => Promise<T>,
-  token: SwitchLockToken = { phase: 'generic-switch' },
+  token: SwitchLockToken,
 ): Promise<T> {
   const previous = switchLockTail
   let release!: () => void
