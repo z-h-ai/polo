@@ -120,29 +120,46 @@ interface ProductSpaceCatalogAuthorityFile {
 let processCache: ProductSpaceCatalogAuthorityFile | null = null
 
 /**
- * Precise-scope DENY markers from FAILED durable revocations. The marker is
- * a record INSIDE the authority file itself (`kind: 'denied'`) — the
- * revocation is ONE atomic write-temp+rename of that file, so there is no
- * second durable write whose independent failure could leave an unmarked
- * stale authority:
+ * DURABLE TRUST MODEL (cold-start default-distrust).
  *
- * - rename succeeded  → the on-disk truth IS the denial; every restart loads
- *   the denied scope fail-closed;
- * - rename failed     → the authority file is untouched (atomic rename is
- *   old-or-new). The scope is denied in-process, the failure propagates, and
- *   as a catastrophic fallback the authority FILE ITSELF is removed: without
- *   the file there is no trustworthy authority, so every scope fails closed
- *   until a fresh verified Catalog re-records it. There is therefore no
- *   restart state in which a failed revocation leaves the stale record
- *   trusted.
+ * The persisted authority file is a RECOVERY CANDIDATE / display cache — it
+ * can NEVER grant authority to a new process. A scope enters THIS process'
+ * trusted state only through a fresh server revalidation
+ * (`recordProductSpaceCatalogAuthoritativeEntries`, called exclusively from
+ * the verified-Catalog commit zone) in the SAME process:
  *
- * A damaged authority file (unreadable / malformed / invalid schema) has
- * always been a GLOBAL fail-closed (loadFile → empty) — the denial signal can
- * never be damaged into an all-clear. A fresh verified Catalog replaces the
- * denied record only after its own durable write succeeds.
+ * - `processTrustedScopes` holds the scopes revalidated in this process;
+ * - `deniedAuthorityScopes` holds scopes whose revocation failed (or whose
+ *   durable record on disk is a `denied` record) — sticky until a fresh
+ *   revalidation replaces them.
+ *
+ * Consequences that make restart fail-closed PROVABLE even under a total
+ * write failure domain (read-only directory: temp write AND unlink both
+ * fail, old file stays readable):
+ *
+ * - a FAILED revocation mutates only this process' denial state and
+ *   propagates its error — the on-disk file may remain untouched, but any
+ *   NEW process starts with an EMPTY trusted set and therefore denies every
+ *   scope until it revalidates; the stale record is a candidate, never a
+ *   grant;
+ * - unrelated scopes are never deleted or revoked by another scope's
+ *   failure (no unlink fallback exists);
+ * - a durable `kind:'denied'` record (written when the directory IS
+ *   writable) additionally sticks the denial across restarts until a fresh
+ *   revalidation replaces it;
+ * - offline/withdrawn behavior follows the same rule: before the fresh
+ *   revalidation the scope reads as empty (installs/opens/uninstalls and
+ *   withdrawn management fail closed); after it, the freshly recorded
+ *   entries and withdrawn tombstones serve again.
+ *
+ * A damaged authority file (unreadable / malformed / invalid schema /
+ * unknown record kind) remains a GLOBAL fail-closed: the file cannot be
+ * decoded into any trust.
  */
-/** In-process markers for failed revocations (durable truth is in the file). */
+/** In-process sticky denial (failed revocation or durable denied record). */
 const deniedAuthorityScopes = new Set<string>()
+/** Scopes freshly revalidated in THIS process (the only grants). */
+const processTrustedScopes = new Set<string>()
 
 const DENIED_RECORD_SCHEMA_VERSION = 1
 
@@ -176,6 +193,15 @@ function isScopeDenied(scopeKey: string): boolean {
   return isDeniedAuthorityRecord(loadFile().records[scopeKey] ?? null)
 }
 
+/**
+ * Cold-start rule: ONLY a scope freshly revalidated in THIS process may
+ * serve authority. The persisted file is a recovery candidate, never a
+ * grant.
+ */
+function isScopeTrusted(scopeKey: string): boolean {
+  return processTrustedScopes.has(scopeKey) && !isScopeDenied(scopeKey)
+}
+
 export function productSpaceCatalogAuthorityKey(
   accountId: string,
   productSpaceId: string,
@@ -189,9 +215,24 @@ function emptyFile(): ProductSpaceCatalogAuthorityFile {
 
 function sanitizeAuthorityRecord(
   record: unknown,
-): ProductSpaceCatalogAuthorityRecord | null {
+): ProductSpaceCatalogScopeRecord | null {
   if (!record || typeof record !== 'object') return null
   const candidate = record as Record<string, unknown>
+  // TRUE discriminated union: `kind` is decoded FIRST and each branch
+  // validates only its own fields — a denied record does NOT require the
+  // authority-only fields (syncedAt/catalogRevision/entries/tombstones) and
+  // an authority record must not be mistaken for a denial.
+  if (candidate.kind === 'denied') {
+    const denied = candidate as unknown as DeniedAuthorityRecord
+    if (
+      denied.schemaVersion !== DENIED_RECORD_SCHEMA_VERSION
+      || typeof denied.accountId !== 'string' || !denied.accountId
+      || typeof denied.productSpaceId !== 'string' || !denied.productSpaceId
+      || typeof denied.deniedAt !== 'number'
+    ) return null
+    return denied
+  }
+  if (candidate.kind !== undefined) return null
   if (candidate.schemaVersion !== AUTHORITY_SCHEMA_VERSION) return null
   if (
     typeof candidate.accountId !== 'string' || !candidate.accountId
@@ -201,16 +242,6 @@ function sanitizeAuthorityRecord(
     || !Array.isArray(candidate.entries)
     || !Array.isArray(candidate.tombstones)
   ) return null
-  if (candidate.kind === 'denied') {
-    const denied = candidate as unknown as DeniedAuthorityRecord
-    if (
-      denied.schemaVersion !== DENIED_RECORD_SCHEMA_VERSION
-      || typeof denied.accountId !== 'string' || !denied.accountId
-      || typeof denied.productSpaceId !== 'string' || !denied.productSpaceId
-      || typeof denied.deniedAt !== 'number'
-    ) return null
-    return candidate as unknown as ProductSpaceCatalogAuthorityRecord
-  }
   const entries = candidate.entries as unknown[]
   const tombstones = candidate.tombstones as unknown[]
   // Persisted caps are enforced on load: an over-cap record is dropped (the
@@ -434,10 +465,11 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
   recordEntries(record, freshEntries)
   file.records[key] = record
   if (denied) {
-    // Recovery path: the fresh verified Catalog replaces the denied record
-    // in ONE atomic durable write. Until that write succeeds the scope stays
-    // denied everywhere — a failed write propagates (never swallowed) and
-    // keeps the in-process marker.
+    // Denied-recovery path: the fresh verified Catalog replaces the denied
+    // record with a THROWING atomic persist. A read-only directory (or any
+    // persistence failure) propagates and the scope stays denied/untrusted
+    // in this process — the denial is only cleared AFTER the fresh record
+    // is durably on disk.
     const records: ProductSpaceCatalogAuthorityFile['records'] = Object.create(null)
     for (const [existingKey, existing] of Object.entries(file.records)) {
       records[existingKey] = existing
@@ -446,13 +478,17 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
       persistFileAtomic({ schemaVersion: AUTHORITY_SCHEMA_VERSION, records })
     } catch (error) {
       deniedAuthorityScopes.add(key)
+      processTrustedScopes.delete(key)
       throw error
     }
     processCache = { schemaVersion: AUTHORITY_SCHEMA_VERSION, records }
     deniedAuthorityScopes.delete(key)
+    processTrustedScopes.add(key)
     return tombstones
   }
   saveFile(file)
+  // Fresh server revalidation in THIS process is the only grant.
+  processTrustedScopes.add(key)
   return tombstones
 }
 
@@ -482,10 +518,10 @@ export function loadProductSpaceCatalogAuthorityTupleSet(
   productSpaceId: string,
 ): Set<string> {
   const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
-  // A scope with a pending failed-revocation marker is denied: its tuples
-  // fail closed even though the stale record may still sit on disk (or
-  // reload from it) — across cache reloads AND process restarts.
-  if (isScopeDenied(scopeKey)) return new Set()
+  // Denied scopes fail closed; every other scope fails closed too until
+  // THIS process revalidated it (the persisted file is a candidate, never a
+  // grant — cold-start default-distrust).
+  if (isScopeDenied(scopeKey) || !isScopeTrusted(scopeKey)) return new Set()
   const record = loadFile().records[scopeKey] ?? null
   const tuples = new Set<string>()
   if (!record || isDeniedAuthorityRecord(record)) return tuples
@@ -531,7 +567,7 @@ export function getProductSpaceCatalogAuthorityRecord(
   productSpaceId: string,
 ): ProductSpaceCatalogAuthorityRecord | null {
   const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
-  if (isScopeDenied(scopeKey)) return null
+  if (isScopeDenied(scopeKey) || !isScopeTrusted(scopeKey)) return null
   const record = loadFile().records[scopeKey] ?? null
   return record && !isDeniedAuthorityRecord(record) ? record : null
 }
@@ -579,23 +615,19 @@ export function revokeProductSpaceCatalogAuthority(
     persistFileAtomic(next)
   } catch (error) {
     // The denial could not be made durable and the on-disk state is
-    // unchanged (atomic rename is old-or-new). No restart may trust that
-    // stale record after a FAILED revocation: as a catastrophic fallback,
-    // remove the authority file entirely — without it there is NO
-    // trustworthy authority and every scope fails closed until a fresh
-    // verified Catalog re-records it.
+    // unchanged (atomic rename is old-or-new). That is acceptable under the
+    // cold-start model: EVERY new process starts with an empty trusted set,
+    // so the stale record is a candidate that can never become a grant
+    // without a fresh server revalidation. This process is failed closed
+    // via the sticky in-process marker; the error propagates. Unrelated
+    // scopes are never touched (no unlink fallback exists).
     deniedAuthorityScopes.add(key)
-    try {
-      unlinkSync(authorityPath())
-      processCache = null
-    } catch {
-      // Even the removal failed: the in-process marker still fails THIS
-      // process closed; the original error propagates regardless.
-    }
+    processTrustedScopes.delete(key)
     throw error
   }
   processCache = next
-  deniedAuthorityScopes.delete(key)
+  deniedAuthorityScopes.add(key)
+  processTrustedScopes.delete(key)
 }
 
 /**
@@ -611,6 +643,7 @@ export function __dropAuthorityProcessCacheForTests(): void {
 export function resetProductSpaceCatalogAuthorityForTests(): void {
   processCache = null
   deniedAuthorityScopes.clear()
+  processTrustedScopes.clear()
   try {
     if (existsSync(authorityPath())) rmSync(authorityPath(), { recursive: true, force: true })
   } catch {

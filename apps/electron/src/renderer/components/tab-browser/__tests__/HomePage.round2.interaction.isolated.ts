@@ -118,7 +118,7 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { formatBytes, HomePage, selectAllAppsForDisplay, __resetHomeQuickWritersForTests } = await import('../HomePage')
+const { formatBytes, HomePage, selectAllAppsForDisplay, __resetHomeQuickWritersForTests, __homeQuickWritersCountForTests, __homeQuickWriterStatsForTests } = await import('../HomePage')
 const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
   catalogStateMessage,
@@ -1190,11 +1190,10 @@ describe('HomePage quick access (POO-43)', () => {
     // REAL remount: the persisted Map now holds the entry; a fresh mount
     // must load it back into the home quick access.
     view.unmount()
+    // The idle final-owner unmount swept the writer: the remount re-derives
+    // the baseline with a REAL load (event-driven, not a fixed sleep).
     const loadsBefore = loadCallCount()
-    console.log('DBG before remount loads', loadsBefore)
     renderHome()
-    await new Promise(resolve => setTimeout(resolve, 200))
-    console.log('DBG after remount loads', loadCallCount(), getHomeQuickAccess.mock.calls.map(c => String(c[0]).slice(-30)))
     await waitForNextScopeLoad(loadsBefore, contextKey)
     await waitFor(() => {
       expect(screen.queryByTestId('all-apps-view')).toBeNull()
@@ -1242,13 +1241,14 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
 
-    // REAL remount: the SHARED per-context writer is reused (no second
-    // racing queue, no re-read) — still empty.
+    // REAL remount: the idle final-owner unmount swept the writer, so the
+    // remount re-derives the (still empty) baseline with a REAL load —
+    // event-driven, nothing is invented.
     view.unmount()
+    const loadsBeforeRemount = loadCallCount()
     renderHome()
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    })
+    await waitForNextScopeLoad(loadsBeforeRemount, contextKeyA)
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
 
     // A→B→A: switch to another context and back — nothing is invented.
@@ -1684,7 +1684,7 @@ describe('HomePage quick access (POO-43)', () => {
       .toEqual([keyB])
   })
 
-  it('two mounts of the SAME context share one writer; unmounting either keeps the survivor working', async () => {
+  it('two mounts of the SAME context share one writer and BOTH display acks from either mount', async () => {
     const appA = pinnedApp('mm-app-a', 'mm-entry-a', 'mm-artifact-a', 'MultiMount A')
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const contextKey = `v1:${
@@ -1692,31 +1692,43 @@ describe('HomePage quick access (POO-43)', () => {
     }`
     const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
 
-    const v1 = renderHome()
-    const loadsBeforeV2 = loadCallCount()
-    const v2 = render(homeTree())
+    const firstMount = renderHome()
+    await waitForNextScopeLoad(0, contextKey)
+    const loadsBeforeSecondMount = loadCallCount()
+    const survivor = render(homeTree())
     // The second mount JOINS the same context writer: no second racing load
     // (the shared baseline is displayed directly).
     await waitFor(() => {
-      expect(within(v2.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
+      expect(within(survivor.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
     })
-    expect(loadCallCount()).toBe(loadsBeforeV2)
+    expect(loadCallCount()).toBe(loadsBeforeSecondMount)
 
-    // Unmount the FIRST mount: the survivor keeps the writer.
-    v1.unmount()
-    fireEvent.click(within(v2.container).getByTestId('home-all-apps-open'))
+    // Mutate from the FIRST mount: the persisted ack must appear in BOTH
+    // mounts (subscriber broadcast).
+    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
     await waitFor(() => {
-      expect(within(v2.container).getByTestId('all-apps-view')).toBeTruthy()
+      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
     })
-    fireEvent.click(within(v2.container).getByTestId(`all-apps-pin-${keyA}`))
+    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
     await waitForSaveCalls(1)
-    // The persisted call hits the CORRECT context.
     expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
-    fireEvent.click(within(v2.container).getByTestId('all-apps-back'))
+    // The SURVIVOR mount (idle on the home view) displays the ack through
+    // the subscriber broadcast — without any mutation of its own.
     await waitFor(() => {
-      expect(within(v2.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+      expect(within(survivor.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
     })
-    v2.unmount()
+
+    // The initiating mount returns home and displays the same ack.
+    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(within(firstMount.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    })
+
+    // Unmount the initiating mount: the survivor still works off the shared
+    // writer.
+    firstMount.unmount()
+    expect(within(survivor.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    survivor.unmount()
   })
 
   it('two mounts on DIFFERENT contexts own separate writers; unmounting either lets the survivor pin/prune its own context', async () => {
@@ -1729,7 +1741,7 @@ describe('HomePage quick access (POO-43)', () => {
     const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
 
     // Mount 1 on context A.
-    const v1 = renderHome()
+    const ownerMountA = renderHome()
     await waitForNextScopeLoad(0, contextKeyA)
 
     // Mount 2 on context B (fresh hook — the provider value follows it).
@@ -1739,24 +1751,24 @@ describe('HomePage quick access (POO-43)', () => {
     const hookB = hookWithCatalog(
       enterpriseCatalogWith([appB], { organizationId: 'organization-b' }),
     )
-    const v2Render = render(homeTree(hookB))
+    const mountB = render(homeTree(hookB))
     await waitFor(() => {
       if (getHomeQuickAccess.mock.calls.length < 2) throw new Error('B load pending')
     })
     expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKeyB)
 
     // Unmount mount 2 (context B): mount 1's context-A writer must survive.
-    v2Render.unmount()
+    mountB.unmount()
     await waitFor(() => {
-      if (!within(v1.container).getByTestId('home-quick-entry-polo')) {
+      if (!within(ownerMountA.container).getByTestId('home-quick-entry-polo')) {
         throw new Error('A home pending')
       }
     })
-    fireEvent.click(within(v1.container).getByTestId('home-all-apps-open'))
+    fireEvent.click(within(ownerMountA.container).getByTestId('home-all-apps-open'))
     await waitFor(() => {
-      expect(within(v1.container).getByTestId('all-apps-view')).toBeTruthy()
+      expect(within(ownerMountA.container).getByTestId('all-apps-view')).toBeTruthy()
     })
-    fireEvent.click(within(v1.container).getByTestId(`all-apps-pin-${keyA}`))
+    fireEvent.click(within(ownerMountA.container).getByTestId(`all-apps-pin-${keyA}`))
     await waitForSaveCalls(1)
     expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKeyA)
     expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
@@ -1764,29 +1776,62 @@ describe('HomePage quick access (POO-43)', () => {
     ])
     expect(quickAccessByContext.get(contextKeyA)?.map((entry: { id: string }) => entry.id))
       .toEqual([keyA])
-    fireEvent.click(within(v1.container).getByTestId('all-apps-back'))
+    fireEvent.click(within(ownerMountA.container).getByTestId('all-apps-back'))
     await waitFor(() => {
-      expect(within(v1.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+      expect(within(ownerMountA.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
     })
 
     // Unmount the OTHER order too: a fresh mount 1' on B, unmount mount 1
     // (context A) — the B survivor still pins into B's own slot.
-    v1.unmount()
-    const v3 = render(homeTree(hookB))
+    ownerMountA.unmount()
+    const survivorB = render(homeTree(hookB))
     await waitFor(() => {
       if (getHomeQuickAccess.mock.calls.length < 3) throw new Error('reload pending')
     })
     expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKeyB)
-    fireEvent.click(within(v3.container).getByTestId('home-all-apps-open'))
+    fireEvent.click(within(survivorB.container).getByTestId('home-all-apps-open'))
     await waitFor(() => {
-      expect(within(v3.container).getByTestId('all-apps-view')).toBeTruthy()
+      expect(within(survivorB.container).getByTestId('all-apps-view')).toBeTruthy()
     })
-    fireEvent.click(within(v3.container).getByTestId(
+    fireEvent.click(within(survivorB.container).getByTestId(
       `all-apps-pin-${hookB.uiIdentityKeyForApp(appB)}`,
     ))
     await waitForSaveCalls(2)
     expect(setHomeQuickAccess.mock.calls[1]?.[0]).toBe(contextKeyB)
-    v3.unmount()
+    survivorB.unmount()
+  })
+
+  it('the final owner unmounts during a pending save: settle sweeps the registry to zero and the write lands', async () => {
+    const appA = pinnedApp('final-app-a', 'final-entry-a', 'final-artifact-a', 'Final Owner A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    const tasks = installDeferredSave()
+
+    const view = renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+
+    // The final owner unmounts while the save is still in flight: the
+    // writer must be RETAINED (busy > 0) — no data loss.
+    view.unmount()
+    expect(__homeQuickWritersCountForTests()).toBe(1)
+
+    // The save settles: the durable write lands and the busy→0 transition
+    // sweeps the registry to zero retained writers.
+    tasks[0]!.resolve()
+    await waitFor(() => (quickAccessByContext.get(contextKey)?.length === 1 ? true : undefined))
+    await waitFor(() => {
+      if (__homeQuickWritersCountForTests() !== 0) throw new Error('sweep pending')
+    })
+    expect(quickAccessByContext.get(contextKey)?.map((entry: { id: string }) => entry.id))
+      .toEqual([keyA])
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {

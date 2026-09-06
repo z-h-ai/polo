@@ -143,6 +143,12 @@ interface HomeQuickContextWriter {
   busy: number
   /** Mount ids currently owning this context (multiple mounts allowed). */
   owners: Set<number>
+  /**
+   * Live mount notification channels: hydration, persisted acks and
+   * rollbacks are BROADCAST to every owner so all simultaneous mounts of a
+   * context display the same confirmed baseline.
+   */
+  subscribers: Map<number, (entries: HomeQuickAccessApp[]) => void>
   gate: Promise<boolean>
   resolveGate: (hydrated: boolean) => void
   hydrated: boolean
@@ -164,6 +170,7 @@ function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
       queue: Promise.resolve(),
       busy: 0,
       owners: new Set<number>(),
+      subscribers: new Map<number, (entries: HomeQuickAccessApp[]) => void>(),
       gate,
       resolveGate,
       hydrated: false,
@@ -191,9 +198,41 @@ function sweepHomeQuickWriters(): void {
   }
 }
 
+/** Broadcast one confirmed snapshot to every live owner of the writer. */
+function notifyHomeQuickSubscribers(
+  writer: HomeQuickContextWriter,
+  entries: HomeQuickAccessApp[],
+): void {
+  for (const notify of writer.subscribers.values()) {
+    notify(entries)
+  }
+}
+
 /** Test-only: drop every writer (tests reset the persisted store too). */
 export function __resetHomeQuickWritersForTests(): void {
   homeQuickWriters.clear()
+}
+
+/** Test-only: number of retained per-context writers (bounded-registry proof). */
+export function __homeQuickWritersCountForTests(): number {
+  return homeQuickWriters.size
+}
+
+/** Test-only: subscriber/owner/busy snapshot of one writer. */
+export function __homeQuickWriterStatsForTests(contextKey: string): {
+  owners: number
+  subscribers: number
+  busy: number
+  hydrated: boolean
+} | null {
+  const writer = homeQuickWriters.get(contextKey)
+  if (!writer) return null
+  return {
+    owners: writer.owners.size,
+    subscribers: writer.subscribers.size,
+    busy: writer.busy,
+    hydrated: writer.hydrated,
+  }
 }
 
 export function HomePage() {
@@ -209,7 +248,6 @@ export function HomePage() {
    * TRANSACTION baseline it advances belongs to the per-context writer (see
    * the module-level registry) and is context-scoped anyway.
    */
-  const quickLoadGenerationRef = useRef(0)
   const quickMountedRef = useRef(false)
   /** This mount's registry identity (owner token in the writer registry). */
   const homeQuickMountIdRef = useRef(0)
@@ -270,31 +308,23 @@ export function HomePage() {
         if (rejected || next === null) return
         const saved = await saveHomeQuickAccess(contextKey, next)
         // Durable baseline: advances for THIS context regardless of which
-        // context is displayed or whether the component is mounted.
+        // context is displayed or whether the component is mounted — then
+        // BROADCASTS to every live owner of the context.
         writer.intent = saved
         writer.confirmed = saved
-        if (
-          quickMountedRef.current
-          && quickContextKeyRef.current === contextKey
-        ) {
-          quickHydratedContextRef.current = contextKey
-          setQuickEntries(saved)
-        }
+        notifyHomeQuickSubscribers(writer, saved)
       })
       .catch(() => {
         // Save rejected: roll THIS context's unconfirmed suffix back to its
-        // last persisted acknowledgement. Display rolls back only while this
-        // context is the displayed one.
+        // last persisted acknowledgement and broadcast the rollback.
         writer.intent = writer.confirmed
-        if (
-          quickMountedRef.current
-          && quickContextKeyRef.current === contextKey
-        ) {
-          setQuickEntries(writer.confirmed)
-        }
+        notifyHomeQuickSubscribers(writer, writer.confirmed)
       })
       .finally(() => {
         writer.busy -= 1
+        // The final owner may have unmounted while this task was in flight:
+        // once busy reaches 0 the writer is sweepable.
+        sweepHomeQuickWriters()
       })
     writer.queue = task
   }, [])
@@ -340,14 +370,15 @@ export function HomePage() {
     // switched to the new context; the OLD context's writer keeps owning its
     // in-flight writes and advances its own baseline independently.
     const contextKey = quickContextKey
-    const generation = ++quickLoadGenerationRef.current
     // Ownership transfer for THIS mount: release the previously owned
     // context's writer, acquire the new one. Other mounts' ownership is
     // untouched.
     const mountId = homeQuickMountIdRef.current
     const previousOwned = ownedHomeQuickContextKeyRef.current
     if (previousOwned !== null && previousOwned !== contextKey) {
-      homeQuickWriters.get(previousOwned)?.owners.delete(mountId)
+      const previousWriter = homeQuickWriters.get(previousOwned)
+      previousWriter?.owners.delete(mountId)
+      previousWriter?.subscribers.delete(mountId)
     }
     const writer = getHomeQuickWriter(contextKey)
     writer.owners.add(mountId)
@@ -356,6 +387,18 @@ export function HomePage() {
     setView('home')
     setManageOpen(false)
     setQuickEntries([])
+    // Every mount of the context subscribes: hydration, persisted acks and
+    // rollbacks broadcast to ALL live owners, so simultaneous mounts stay in
+    // lockstep on the shared confirmed baseline.
+    writer.subscribers.set(mountId, entries => {
+      if (
+        quickMountedRef.current
+        && quickContextKeyRef.current === contextKey
+      ) {
+        quickHydratedContextRef.current = contextKey
+        setQuickEntries(entries)
+      }
+    })
     if (writer.hydrated) {
       // Same-context remount or A→B→A: the SHARED writer already holds the
       // transaction baseline — display it without a second racing queue.
@@ -375,12 +418,13 @@ export function HomePage() {
       writer.resolveGate = resolveGate
       void loadHomeQuickAccess(contextKey)
         .then(entries => {
-          // The baseline ALWAYS advances for this context; the display is
-          // applied per mount below through the shared gate.
+          // The baseline ALWAYS advances for this context, then BROADCASTS
+          // to every live owner of the context.
           writer.intent = entries
           writer.confirmed = entries
           writer.hydrated = true
           writer.resolveGate(true)
+          notifyHomeQuickSubscribers(writer, entries)
         })
         .catch(() => {
           // Quick access is non-critical; keep the section usable. Queued
@@ -393,17 +437,6 @@ export function HomePage() {
           sweepHomeQuickWriters()
         })
     }
-    void writer.gate.then(hydrated => {
-      if (!hydrated) return
-      if (
-        quickMountedRef.current
-        && quickContextKeyRef.current === contextKey
-        && quickLoadGenerationRef.current === generation
-      ) {
-        quickHydratedContextRef.current = contextKey
-        setQuickEntries(writer.confirmed)
-      }
-    })
     sweepHomeQuickWriters()
   }, [quickContextKey])
 
@@ -412,21 +445,17 @@ export function HomePage() {
     quickMountedRef.current = true
     return () => {
       quickMountedRef.current = false
-      // Release ONLY this mount's ownership: another live mount sharing a
-      // context keeps its writer (gate, baseline, queue) fully intact.
+      // Release ONLY this mount's ownership and notification channel:
+      // another live mount sharing a context keeps its writer (gate,
+      // baseline, queue, remaining subscribers) fully intact.
       const owned = ownedHomeQuickContextKeyRef.current
       if (owned !== null) {
-        homeQuickWriters.get(owned)?.owners.delete(mountId)
+        const writer = homeQuickWriters.get(owned)
+        writer?.owners.delete(mountId)
+        writer?.subscribers.delete(mountId)
         ownedHomeQuickContextKeyRef.current = null
       }
       sweepHomeQuickWriters()
-    }
-  }, [])
-
-  useEffect(() => {
-    quickMountedRef.current = true
-    return () => {
-      quickMountedRef.current = false
     }
   }, [])
 

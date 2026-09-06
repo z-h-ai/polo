@@ -1417,32 +1417,81 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
     react.cleanup()
   })
 
-  it('both identity collision directions stay distinct through real pin/open/uninstall behavior', async () => {
-    const result = await mountCatalog([
+  it('schema-valid same-name Apps stay distinct through real pin/open/uninstall, and the parser rejects duplicates', async () => {
+    const { ProductSpaceCatalogResponseSchema } = await import('@polo-ai/shared/product-spaces')
+    // Production fixture: SAME NAME with DISTINCT entry AND artifact ids
+    // (both collision-relevant axes) — must be ACCEPTED by the real parser.
+    const schemaValidEntries = [
+      {
+        kind: 'built_in_app' as const,
+        builtInAppId: 'polo_assistant' as const,
+        catalogEntryId: 'assistant-entry',
+        name: 'Polo',
+        description: '',
+        availability: 'available' as const,
+      },
       rawEntry({
-        catalogEntryId: 'entry-s1',
-        name: 'Shared S1',
+        catalogEntryId: 'entry-alpha',
+        artifactInstanceId: 'artifact-alpha',
+        version: { versionId: 'version-alpha', version: '1.1.0' },
+        name: 'Same Name App',
       }),
       rawEntry({
-        catalogEntryId: 'entry-s2',
-        name: 'Shared S2',
+        catalogEntryId: 'entry-beta',
+        artifactInstanceId: 'artifact-beta',
+        version: { versionId: 'version-beta', version: '1.2.0' },
+        name: 'Same Name App',
       }),
-      rawEntry({
-        catalogEntryId: 'entry-dup',
-        artifactInstanceId: 'artifact-old',
-        name: 'Dup Old',
-      }),
-      rawEntry({
-        catalogEntryId: 'entry-dup',
-        artifactInstanceId: 'artifact-new',
-        name: 'Dup New',
-      }),
-    ])
-    const apps: CatalogApp[] = result.current.state.catalog!.apps
-    expect(apps).toHaveLength(4)
-    // Production keys: both collision directions produce DISTINCT identities.
+    ]
+    const parsed = ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-schema-valid',
+      entries: schemaValidEntries,
+    })
+    expect(parsed.success).toBe(true)
+
+    // Parser boundary: duplicate catalogEntryId is fail-closed rejected...
+    const duplicateEntry = ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-dup-entry',
+      entries: [
+        ...schemaValidEntries,
+        rawEntry({
+          catalogEntryId: 'entry-alpha',
+          artifactInstanceId: 'artifact-another',
+          version: { versionId: 'version-another', version: '9.0.0' },
+          name: 'Same Name App',
+        }),
+      ],
+    })
+    expect(duplicateEntry.success).toBe(false)
+    // ...and duplicate artifactInstanceId is fail-closed rejected too.
+    const duplicateArtifact = ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-dup-artifact',
+      entries: [
+        ...schemaValidEntries,
+        rawEntry({
+          catalogEntryId: 'entry-another',
+          artifactInstanceId: 'artifact-alpha',
+          version: { versionId: 'version-another', version: '9.0.0' },
+          name: 'Same Name App',
+        }),
+      ],
+    })
+    expect(duplicateArtifact.success).toBe(false)
+
+    // Drive the schema-valid payload through the real mapper into the UI.
+    const result = await mountCatalog(schemaValidEntries)
+    const apps: CatalogApp[] = result.current.state.catalog!.apps.filter(
+      (app: CatalogApp) => app.catalogEntryId !== 'assistant-entry',
+    )
+    expect(apps).toHaveLength(2)
     const keys = apps.map(app => result.current.uiIdentityKeyForApp(app))
-    expect(new Set(keys).size).toBe(4)
+    expect(new Set(keys).size).toBe(2)
 
     const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
     const react = await import('@testing-library/react')
@@ -1457,7 +1506,7 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
       createElement(AllAppsView, {
         spaceName: 'Space',
         spaceKind: 'enterprise',
-        apps,
+        apps: result.current.state.catalog!.apps,
         loading: false,
         refreshing: false,
         warningCode: null,
@@ -1467,20 +1516,18 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
         circleCount: 0,
         pinnedIds: new Set<string>(),
         onPin,
-        getInstallState: (target: CatalogApp) => target.artifactInstanceId === 'artifact-new'
-          ? {
-            app: {
-              accountId: 'account-a',
-              productSpaceId: 'organization-a',
-              catalogEntryId: target.catalogEntryId!,
-              artifactInstanceId: target.artifactInstanceId!,
-              versionId: target.catalogVersion!.versionId,
-              version: target.catalogVersion!.version,
-            },
-            state: 'installed' as const,
-            currentVersion: target.catalogVersion!.version,
-          }
-          : undefined,
+        getInstallState: (target: CatalogApp) => ({
+          app: {
+            accountId: 'account-a',
+            productSpaceId: 'organization-a',
+            catalogEntryId: target.catalogEntryId!,
+            artifactInstanceId: target.artifactInstanceId!,
+            versionId: target.catalogVersion!.versionId,
+            version: target.catalogVersion!.version,
+          },
+          state: 'installed' as const,
+          currentVersion: target.catalogVersion!.version,
+        }),
         identityKeyForApp: result.current.uiIdentityKeyForApp,
         onRefresh: () => {},
         onOpen,
@@ -1488,29 +1535,44 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
         onBack: () => {},
       }),
     ))
-    // Four distinct rows, each pinnable through its own production key.
-    expect(react.screen.getAllByTestId('all-apps-row')).toHaveLength(4)
+    expect(react.screen.getAllByTestId('all-apps-row')).toHaveLength(2)
     for (const key of keys) {
       react.fireEvent.click(react.screen.getByTestId(`all-apps-pin-${key}`))
     }
-    expect(onPin).toHaveBeenCalledTimes(4)
+    expect(onPin).toHaveBeenCalledTimes(2)
     const pinnedTargets = new Set(onPin.mock.calls.map((call: any[]) => {
       const app = call[0] as CatalogApp
-      return `${app.catalogEntryId}:${app.artifactInstanceId}`
+      return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
     }))
-    expect(pinnedTargets.size).toBe(4)
-    // Open targets the exact row's identity — never a colliding sibling.
+    expect(pinnedTargets).toEqual(new Set([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ]))
     for (const app of apps) {
-      react.fireEvent.click(react.screen.getByTestId(`all-apps-action-${result.current.uiIdentityKeyForApp(app)}`))
+      react.fireEvent.click(react.screen.getByTestId(
+        `all-apps-action-${result.current.uiIdentityKeyForApp(app)}`,
+      ))
     }
-    expect(onOpen.mock.calls.map((call: any[]) => (call[0] as CatalogApp).artifactInstanceId).sort())
-      .toEqual(['artifact-live', 'artifact-live', 'artifact-new', 'artifact-old'])
-    // Uninstall exists ONLY for the installed artifact-new row and targets it.
+    expect(onOpen.mock.calls.map((call: any[]) => {
+      const app = call[0] as CatalogApp
+      return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+    }).sort()).toEqual([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ])
+    // BOTH same-name rows are installed → both uninstallable, complete targets.
     const uninstallButtons = react.screen.getAllByTestId(/^all-apps-uninstall-/)
-    expect(uninstallButtons).toHaveLength(1)
-    react.fireEvent.click(uninstallButtons[0]!)
-    expect(onUninstall).toHaveBeenCalledTimes(1)
-    expect((onUninstall.mock.calls[0]![0] as CatalogApp).artifactInstanceId).toBe('artifact-new')
+    expect(uninstallButtons).toHaveLength(2)
+    for (const button of uninstallButtons) {
+      react.fireEvent.click(button)
+    }
+    expect(onUninstall.mock.calls.map((call: any[]) => {
+      const app = call[0] as CatalogApp
+      return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+    }).sort()).toEqual([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ])
     react.cleanup()
   })
 
@@ -1700,17 +1762,19 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     let saveCalls: Array<{ key: string; apps: Array<{ id: string; addedAt: number }> }> = []
     let resolveCalls: Array<{ productSpaceId: string; catalogEntryId: string }> = []
     let uninstallCalls: Array<{ identity: Record<string, unknown>; options: { preserveData: boolean } }> = []
+    // Layer the test-specific RPCs on TOP of the full beforeEach electronAPI
+    // stub, so every runtime channel the hook touches stays functional.
+    const base = (window.electronAPI ?? {}) as Record<string, any>
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
       value: {
-        productSpaceGetCatalog: (productSpaceId: string) => ({
-          success: true as const,
-          notModified: false as const,
-          catalogRevision: 'rev-e2e',
-          productSpaceId,
-          accessMode: 'online' as const,
-          entries: options.entries,
-        }),
+        ...base,
+        localApps: {
+          ...base.localApps,
+          uninstallProductSpaceBundle: async (identity: any, opts: { preserveData: boolean }) => {
+            uninstallCalls.push({ identity, options: opts })
+          },
+        },
         getHomeQuickAccess: async () => [],
         setHomeQuickAccess: async (key: string, apps: Array<{ id: string; addedAt: number }>) => {
           saveCalls.push({ key, apps })
@@ -1721,17 +1785,14 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
           const launch = options.resolveLaunch?.(productSpaceId, catalogEntryId)
           return launch ?? { success: false as const, errorCode: 'SERVER_ERROR', message: 'not configured' }
         },
-        localApps: {
-          getHostInfo: async () => ({ platform: 'darwin', arch: 'arm64' }),
-          getProductSpaceInstallStates: (identities: any[]) =>
-            getProductSpaceInstallStates(identities),
-          getProductSpaceWithdrawnInstallStates: (identities: any[]) =>
-            getProductSpaceWithdrawnInstallStates(identities),
-          installProductSpaceBundle: (request: any) => installProductSpaceBundle(request),
-          uninstallProductSpaceBundle: async (identity: any, opts: { preserveData: boolean }) => {
-            uninstallCalls.push({ identity, options: opts })
-          },
-        },
+        productSpaceGetCatalog: (productSpaceId: string) => ({
+          success: true as const,
+          notModified: false as const,
+          catalogRevision: 'rev-e2e',
+          productSpaceId,
+          accessMode: 'online' as const,
+          entries: options.entries,
+        }),
         adminGetStatus: async () => ({ loggedIn: false }),
       },
     })
@@ -1743,9 +1804,8 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
         getProductSpaceInstallStates = async (identities: any[]) =>
           identities.map(identity => ({
             app: identity,
-            state: (identity.artifactInstanceId === 'artifact-s1'
-              || identity.artifactInstanceId === 'artifact-old'
-              || identity.artifactInstanceId === 'artifact-new')
+            state: (identity.artifactInstanceId === 'artifact-alpha'
+              || identity.artifactInstanceId === 'artifact-beta')
               ? ('installed' as const)
               : ('not_installed' as const),
             currentVersion: identity.version as string,
@@ -1759,40 +1819,45 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     const { createElement } = await import('react')
     const { I18nextProvider } = await import('react-i18next')
 
+    // Schema-valid production fixture (ProductSpaceCatalogResponseSchema):
+    // same NAME with DISTINCT entry + artifact ids across BOTH collision
+    // axes; validated by the real parser boundary.
+    const { ProductSpaceCatalogResponseSchema } = await import('@polo-ai/shared/product-spaces')
     const entries = [
+      {
+        kind: 'built_in_app' as const,
+        builtInAppId: 'polo_assistant' as const,
+        catalogEntryId: 'assistant-entry',
+        name: 'Polo',
+        description: '',
+        availability: 'available' as const,
+      },
       rawEntry({
-        catalogEntryId: 'entry-s1',
-        artifactInstanceId: 'artifact-s1',
-        version: { versionId: 'version-s1', version: '1.1.0' },
-        name: 'Shared S1',
+        catalogEntryId: 'entry-alpha',
+        artifactInstanceId: 'artifact-alpha',
+        version: { versionId: 'version-alpha', version: '1.1.0' },
+        name: 'Same Name App',
       }),
       rawEntry({
-        catalogEntryId: 'entry-s2',
-        artifactInstanceId: 'artifact-s1',
-        version: { versionId: 'version-s2', version: '1.2.0' },
-        name: 'Shared S2',
-      }),
-      rawEntry({
-        catalogEntryId: 'entry-dup',
-        artifactInstanceId: 'artifact-old',
-        version: { versionId: 'version-old', version: '2.0.0' },
-        name: 'Dup Old',
-      }),
-      rawEntry({
-        catalogEntryId: 'entry-dup',
-        artifactInstanceId: 'artifact-new',
-        version: { versionId: 'version-new', version: '2.1.0' },
-        name: 'Dup New',
+        catalogEntryId: 'entry-beta',
+        artifactInstanceId: 'artifact-beta',
+        version: { versionId: 'version-beta', version: '1.2.0' },
+        name: 'Same Name App',
       }),
     ]
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: scopeA.productSpaceId,
+      catalogRevision: 'rev-e2e',
+      entries,
+    }).success).toBe(true)
+
     const api = wireElectronApi({
       entries,
-      // Same-artifact different-entry AND same-entry different-artifact all
-      // resolve-launch cleanly through the production RPC.
       resolveLaunch: (productSpaceId, catalogEntryId) => {
-        // entry-dup appears twice (old/new): the FIRST resolve for an entry
-        // fixes its subject (the card click order pins old before new).
-        const entry = resolveEntryByCatalogEntryId(catalogEntryId)
+        const appEntry = entries.find(
+          candidate => candidate.catalogEntryId === catalogEntryId,
+        ) as { artifactInstanceId: string; version: { versionId: string; version: string } }
         return {
           success: true as const,
           launch: {
@@ -1804,9 +1869,9 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
             subject: {
               kind: 'artifact_instance',
               artifactType: 'app',
-              artifactInstanceId: entry?.artifactInstanceId,
-              versionId: (entry?.version as { versionId: string }).versionId,
-              version: (entry?.version as { version: string }).version,
+              artifactInstanceId: appEntry.artifactInstanceId,
+              versionId: appEntry.version.versionId,
+              version: appEntry.version.version,
             },
             payer: { kind: 'personal', accountId: scopeA.accountId },
             delivery: { kind: 'web_url', url: 'https://launched.example.com', launchToken: 't' },
@@ -1814,7 +1879,7 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
         }
       },
     })
-    api.setInstalled(['artifact-s1', 'artifact-old', 'artifact-new'])
+    api.setInstalled(['artifact-alpha', 'artifact-beta'])
     getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
       identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
 
@@ -1835,13 +1900,20 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     })
     // The apps come from the REAL mapper (read through the same rendered
     // rows): iterate the rows' own production identity keys.
-    const apps: CatalogApp[] = entries.map(entry => ({
-      id: entry.catalogEntryId as string,
-      catalogEntryId: entry.catalogEntryId as string,
-      artifactInstanceId: entry.artifactInstanceId as string,
-      catalogVersion: entry.version as { versionId: string; version: string },
+    const appEntries = (entries as Array<{
+      kind: string
+      catalogEntryId: string
+      artifactInstanceId: string
+      version: { versionId: string; version: string }
+      name: string
+    }>).filter(entry => entry.kind === 'app')
+    const apps: CatalogApp[] = appEntries.map(entry => ({
+      id: entry.catalogEntryId,
+      catalogEntryId: entry.catalogEntryId,
+      artifactInstanceId: entry.artifactInstanceId,
+      catalogVersion: entry.version,
       organizationId: scopeA.productSpaceId,
-      name: entry.name as string,
+      name: entry.name,
       description: '',
       deliveryMode: 'resolve_launch' as const,
       sortOrder: 0,
@@ -1858,14 +1930,16 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       ))
     }
     await waitFor(() => {
-      if (api.saveCalls.length < 4) throw new Error('pin saves pending')
+      if (api.saveCalls.length < 2) throw new Error('pin saves pending')
     })
     expect(api.saveCalls.every(call => call.key === `v1:${createProductSpaceContextKey(scopeA.accountId, scopeA.productSpaceId)}`)).toBe(true)
-    // The single-writer queue accumulates: the LAST write carries all four.
-    const pinnedIds = (api.saveCalls[3]?.apps ?? []).map(entry => entry.id)
-    // The persisted ids ARE the production identity tuples: decode and assert
-    // accountId/productSpaceId/catalogEntryId/artifactInstanceId.
-    expect(pinnedIds).toHaveLength(4)
+    // The single-writer queue accumulates: the LAST write carries both.
+    // NOTE: the persisted id is deliberately VERSION-STABLE (account+space+
+    // entry+artifact) — pinning survives version upgrades; the OPEN path
+    // re-validates against the CURRENT Catalog (resolve-launch re-checks
+    // entry/artifact/version) and uninstall binds the full version identity.
+    const pinnedIds = (api.saveCalls[1]?.apps ?? []).map(entry => entry.id)
+    expect(pinnedIds).toHaveLength(2)
     const decoded = pinnedIds.map(id => JSON.parse(id))
     for (const tuple of decoded) {
       expect(tuple[0]).toBe('product-space-ui')
@@ -1873,10 +1947,8 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       expect(tuple[2]).toBe(scopeA.productSpaceId)
     }
     expect(new Set(decoded.map(tuple => `${tuple[3]}:${tuple[4]}`))).toEqual(new Set([
-      'entry-s1:artifact-s1',
-      'entry-s2:artifact-s1',
-      'entry-dup:artifact-old',
-      'entry-dup:artifact-new',
+      'entry-alpha:artifact-alpha',
+      'entry-beta:artifact-beta',
     ]))
 
     // ---- OPEN through the production resolve-launch RPC ----
@@ -1905,20 +1977,10 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       const launch = call[1] as { subject: { artifactInstanceId: string; versionId: string; version: string } }
       return `${launch.subject.artifactInstanceId}:${launch.subject.versionId}:${launch.subject.version}`
     }))
-    // Production note: resolve-launch RPCs carry only (productSpaceId,
-    // catalogEntryId), so BOTH entry-dup rows resolve to the same current
-    // artifact and the hook fail-closes the stale-instance launch — exactly
-    // one of the two dup rows is publishable per resolve subject. The
-    // DISTINCT published subjects must cover entry-s1, entry-s2 and the
-    // current entry-dup artifact; artifact-new's full identity is proven by
-    // pin + uninstall below.
-    const expectedSubjects = [
-      'artifact-new:version-new:2.1.0',
-      'artifact-old:version-old:2.0.0',
-      'artifact-s1:version-s1:1.1.0',
-      'artifact-s1:version-s2:1.2.0',
-    ]
-    for (let attempt = 0; attempt < 60 && publishedSubjectSet().size < 3; attempt++) {
+    // Production semantics: the schema guarantees unique entry AND artifact
+    // ids, so resolve-by-entry is unambiguous — each card's publish subject
+    // is its own artifact+version.
+    for (let attempt = 0; attempt < 60 && publishedSubjectSet().size < 2; attempt++) {
       const liveCards = Array.from(
         view.container.querySelectorAll('[data-testid="home-quick-entry"]'),
       )
@@ -1929,15 +1991,14 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     }
     // Every entry (all three catalogEntryIds) went through the REAL
     // resolve-launch RPC.
-    expect(api.resolveCalls.length).toBeGreaterThanOrEqual(3)
+    expect(api.resolveCalls.length).toBeGreaterThanOrEqual(2)
     expect(api.resolveCalls.every(call => call.productSpaceId === scopeA.productSpaceId)).toBe(true)
     expect(new Set(api.resolveCalls.map(call => call.catalogEntryId))).toEqual(new Set([
-      'entry-s1', 'entry-s2', 'entry-dup',
+      'entry-alpha', 'entry-beta',
     ]))
-    // The launch handoff carries the account + full subject identity; the
-    // DISTINCT subject set covers all four identities (a retried open may
-    // publish twice for one row).
-    expect(launchHandoffPublish.mock.calls.length).toBeGreaterThanOrEqual(3)
+    // The launch handoff carries the account + full subject identity
+    // (artifactInstanceId + versionId + version) for every opened row.
+    expect(launchHandoffPublish.mock.calls.length).toBeGreaterThanOrEqual(2)
     const publishedAccounts = new Set(launchHandoffPublish.mock.calls.map((call: any[]) => call[0]))
     expect(publishedAccounts).toEqual(new Set([scopeA.accountId]))
     const publishedSubjects = new Set(launchHandoffPublish.mock.calls.map((call: any[]) => {
@@ -1945,9 +2006,8 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       return `${launch.subject.artifactInstanceId}:${launch.subject.versionId}:${launch.subject.version}`
     }))
     expect(publishedSubjects).toEqual(new Set([
-      'artifact-old:version-old:2.0.0',
-      'artifact-s1:version-s1:1.1.0',
-      'artifact-s1:version-s2:1.2.0',
+      'artifact-alpha:version-alpha:1.1.0',
+      'artifact-beta:version-beta:1.2.0',
     ]))
 
     // ---- UNINSTALL through the production uninstall RPC (both collision
@@ -1957,7 +2017,7 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
     })
     const uninstallButtons = within(view.container).getAllByTestId(/^all-apps-uninstall-/)
-    expect(uninstallButtons).toHaveLength(4)
+    expect(uninstallButtons).toHaveLength(2)
     for (const button of uninstallButtons) {
       fireEvent.click(button)
       // The confirm dialog's destructive action carries the uninstall copy.
@@ -1974,9 +2034,9 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       }, { timeout: 2000 })
     }
     await waitFor(() => {
-      if (api.uninstallCalls.length < 4) throw new Error('uninstall pending')
+      if (api.uninstallCalls.length < 2) throw new Error('uninstall pending')
     })
-    expect(api.uninstallCalls).toHaveLength(4)
+    expect(api.uninstallCalls).toHaveLength(2)
     const uninstalledKeys = new Set(api.uninstallCalls.map(call => JSON.stringify([
       call.identity.accountId,
       call.identity.productSpaceId,
@@ -1985,19 +2045,17 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       call.identity.versionId,
       call.identity.version,
     ])))
-    expect(uninstalledKeys.size).toBe(4)
+    expect(uninstalledKeys.size).toBe(2)
     for (const call of api.uninstallCalls) {
       expect(call.identity.accountId).toBe(scopeA.accountId)
       expect(call.identity.productSpaceId).toBe(scopeA.productSpaceId)
       expect(call.options.preserveData).toBe(true)
     }
     const uninstalledPairs = api.uninstallCalls.map(call =>
-      `${call.identity.catalogEntryId}:${call.identity.artifactInstanceId}`).sort()
+      `${call.identity.catalogEntryId}:${call.identity.artifactInstanceId}:${call.identity.version}`).sort()
     expect(uninstalledPairs).toEqual([
-      'entry-dup:artifact-new',
-      'entry-dup:artifact-old',
-      'entry-s1:artifact-s1',
-      'entry-s2:artifact-s1',
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
     ])
 
     view.unmount()

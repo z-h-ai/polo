@@ -202,9 +202,6 @@ describe('ProductSpace Catalog authority', () => {
     const file = join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
     const bRecord = JSON.parse(JSON.stringify(getProductSpaceCatalogAuthorityRecord('account-b', 'space-b')))
     resetProductSpaceCatalogAuthorityForTests()
-    // Tamper: move account-b/space-b's record under account-a/space-a's key,
-    // and add a `__proto__`-shaped key (the prototype assignment never
-    // becomes an own property, mirroring real tamper attempts).
     const parsed: {
       schemaVersion: number
       records: Record<string, unknown>
@@ -217,14 +214,18 @@ describe('ProductSpace Catalog authority', () => {
     parsed.records['__proto__'] = bRecord
     writeFileSync(file, JSON.stringify(parsed), 'utf8')
 
-    // A's scope must NOT borrow B's tuples from the mis-keyed record...
+    // Cold-start default-distrust: no disk record (mis-keyed or not) creates
+    // TRUST — neither scope serves tuples from the tampered file.
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
-    // ...while B's own correctly-keyed record still loads.
-    expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', ...tuple())).toBe(true)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', ...tuple())).toBe(false)
 
-    // Self-heal: the next verified Catalog rebuilds A's scope.
-    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed', [entry()])
+    // Self-heal: revalidating A rebuilds A's scope with A's OWN entries —
+    // never B's tuples from the mis-keyed record.
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed', [entry()])
+    expect(tombstones).toEqual([])
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed')
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.entries[0]!.catalogEntryId).toBe('entry-a')
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 
@@ -341,9 +342,12 @@ describe('ProductSpace Catalog authority', () => {
       expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(true)
     })
 
-    it('a WRITE fault propagates and leaves NO trustworthy authority file across restarts', () => {
+    it('a WRITE fault propagates and NO fresh process trusts the stale authority (dual-fault, unrelated scope untouched)', () => {
       seedScopes()
-      // writeFileSync fault: the temp target exists as a DIRECTORY.
+      // writeFileSync fault: the temp target exists as a DIRECTORY. The
+      // directory is also made read-only-proof irrelevant here — the point
+      // is the atomic rename fails and NO unlink fallback exists: the file
+      // (including the unrelated scope) stays untouched on disk.
       const tmpPath = `${authorityFile()}.${process.pid}.tmp`
       mkdirSync(tmpPath)
       try {
@@ -351,13 +355,15 @@ describe('ProductSpace Catalog authority', () => {
       } finally {
         rmSync(tmpPath, { recursive: true, force: true })
       }
-      // Catastrophic fallback: the authority FILE was removed — without it
-      // there is no trustworthy authority, in this process...
-      expect(existsSync(authorityFile())).toBe(false)
+      // In-process: the denied scope AND the unrelated scope's trust are
+      // untouched by the failed write — the denial is exact-scope.
       expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
-      expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(false)
-      // ...and in a REAL restarted process (both-write failure can never
-      // leave the stale record trusted).
+      expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(true)
+      // The file stays on disk (candidate/display cache)...
+
+      // ...but a REAL restarted process trusts NOTHING: cold-start
+      // default-distrust means even the dual-fault stale authority can never
+      // become a grant without a fresh server revalidation.
       const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority.ts')
       const probe = `
         const { pathToFileURL } = await import('node:url')
@@ -381,7 +387,8 @@ describe('ProductSpace Catalog authority', () => {
       expect(out.deniedTrusted).toBe(false)
       expect(out.otherTrusted).toBe(false)
 
-      // A fresh verified Catalog re-records the scope durably.
+      // A fresh verified Catalog re-records the scope durably and restores
+      // THIS process' trust.
       recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-fresh', [entry()])
       expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
     })
@@ -542,22 +549,32 @@ describe('ProductSpace Catalog authority', () => {
         freshTrusted: boolean
         oldStillUntrusted: boolean
       }
-      // Restarted process: the durable denial is loaded fail-closed, other
-      // scopes unaffected, the fresh success resurrects ZERO tombstones and
-      // trusts only the fresh identity.
+      // Restarted process: cold-start trusts NOTHING from disk (both scopes
+      // are candidates); the fresh success resurrects ZERO tombstones and
+      // grants only the revalidated fresh identity.
       expect(out.deniedTrusted).toBe(false)
-      expect(out.otherTrusted).toBe(true)
+      expect(out.otherTrusted).toBe(false)
       expect(out.tombstones).toBe(0)
       expect(out.freshTrusted).toBe(true)
       expect(out.oldStillUntrusted).toBe(false)
 
-      // Process 3 (another independent restart): the fresh record survives
-      // and the old identity stays gone.
+      // Process 3 (another independent restart): the fresh record is a
+      // CANDIDATE only — cold-start distrusts it until THIS process
+      // revalidates; then it trusts exactly the fresh identity.
       const probe2 = `
         const { pathToFileURL } = await import('node:url')
         const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+        const coldTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-a', 'space-a', 'entry-restarted', 'artifact-restarted', 'version-restarted', '3.0.0')
+        mod.recordProductSpaceCatalogAuthoritativeEntries(
+          'account-a', 'space-a', 'rev-p3',
+          [{ kind: 'app', catalogEntryId: 'entry-restarted', artifactInstanceId: 'artifact-restarted',
+             version: { versionId: 'version-restarted', version: '3.0.0' }, name: 'Restarted',
+             description: '', availability: 'available',
+             sources: [{ kind: 'enterprise_import', name: 'Studio R' }], permissions: [] }])
         console.log(JSON.stringify({
-          freshTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+          coldTrusted,
+          revalidatedTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
             'account-a', 'space-a', 'entry-restarted', 'artifact-restarted', 'version-restarted', '3.0.0'),
           oldUntrusted: mod.hasProductSpaceCatalogAuthorityTuple(
             'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0'),
@@ -572,10 +589,12 @@ describe('ProductSpace Catalog authority', () => {
       })
       expect(third.exitCode).toBe(0)
       const finalState = JSON.parse(third.stdout.toString().trim()) as {
-        freshTrusted: boolean
+        coldTrusted: boolean
+        revalidatedTrusted: boolean
         oldUntrusted: boolean
       }
-      expect(finalState.freshTrusted).toBe(true)
+      expect(finalState.coldTrusted).toBe(false)
+      expect(finalState.revalidatedTrusted).toBe(true)
       expect(finalState.oldUntrusted).toBe(false)
     })
   })
