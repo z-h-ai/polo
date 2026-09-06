@@ -19,6 +19,7 @@ import {
 import {
   pendingSwitchLockTasks,
   switchLockEventLog,
+  type SwitchLockToken,
 } from '../../runtime/switch-lock-internal'
 import { getAccountTransitionEpoch } from './trusted-product-space-account'
 import { mkdtempSync } from 'node:fs'
@@ -1380,7 +1381,7 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     let releaseHolder: (() => void) | undefined
     void withSwitchLock(async () => {
       await new Promise<void>(resolve => { releaseHolder = resolve })
-    }, 'test-holder')
+    }, { phase: 'test-holder' })
 
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1398,7 +1399,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     // IDENTITY barrier: R1's revocation decision has actually queued.
     await waitFor(() => {
       if (!switchLockEventLog().some(e =>
-        e.label.startsWith('phase=catalog-authority-revoke;account=user-1;space=space-a;inv=')
+        e.token.phase === 'catalog-authority-revoke'
+        && e.token.accountId === 'user-1'
+        && e.token.productSpaceId === 'space-a'
       )) {
         return undefined
       }
@@ -1444,7 +1447,7 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     let releaseHolder: (() => void) | undefined
     void withSwitchLock(async () => {
       await new Promise<void>(resolve => { releaseHolder = resolve })
-    }, 'test-holder')
+    }, { phase: 'test-holder' })
 
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1472,7 +1475,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     // IDENTITY barrier 1: R1's revocation decision is queued on the lock.
     await waitFor(() => {
       if (!switchLockEventLog().some(e =>
-        e.label.startsWith('phase=catalog-authority-revoke;account=user-1;space=space-a;inv=')
+        e.token.phase === 'catalog-authority-revoke'
+        && e.token.accountId === 'user-1'
+        && e.token.productSpaceId === 'space-a'
       )) {
         return undefined
       }
@@ -1492,10 +1497,14 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
       // AFTER R1's decision token. Generic/unlabeled entries never satisfy
       // this barrier.
       const revokeToken = log.find(e =>
-        e.label.startsWith('phase=catalog-authority-revoke;account=user-1;space=space-a;inv='))
+        e.token.phase === 'catalog-authority-revoke'
+        && e.token.accountId === 'user-1'
+        && e.token.productSpaceId === 'space-a')
       const commitToken = log.find(e =>
-        e.label.startsWith(`phase=catalog-authority-commit;account=user-1;space=space-a;inv=`)
-        && e.label.endsWith(`;inv=${latestBeforeR2! + 1}`))
+        e.token.phase === 'catalog-authority-commit'
+        && e.token.accountId === 'user-1'
+        && e.token.productSpaceId === 'space-a'
+        && e.token.invocation === (latestBeforeR2 ?? -99) + 1)
       const latest = __latestProductSpaceCatalogSyncInvocationForTests(scopeKey)
       const r2Registered = latest !== null && latestBeforeR2 !== null && latest > latestBeforeR2
       if (revokeToken && commitToken && commitToken.seq > revokeToken.seq && r2Registered) {
@@ -1595,12 +1604,12 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
   })
 
   it('a THROWING labeled switch-lock task completes, drains the token registry, and rejects to its caller', async () => {
-    const { withSwitchLock: withSwitchLock } = await import('../../runtime/switch-lock-internal')
+    const { withSwitchLock } = await import('../../runtime/switch-lock-internal')
     await expect(withSwitchLock(async () => {
       throw new Error('labeled task failed (injected)')
-    }, 'injected-throwing-task')).rejects.toThrow('labeled task failed (injected)')
+    }, { phase: 'test-throwing' })).rejects.toThrow('labeled task failed (injected)')
     // The token registry drained despite the throw.
-    expect(switchLockEventLog().some(e => e.label === 'injected-throwing-task')).toBe(false)
+    expect(switchLockEventLog().some(e => e.token.phase === 'test-throwing')).toBe(false)
     expect(pendingSwitchLockTasks()).toBe(0)
   })
 

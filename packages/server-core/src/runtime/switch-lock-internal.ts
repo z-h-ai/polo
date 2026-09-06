@@ -7,12 +7,56 @@
  * mutex runner (`runUnderSwitchMutex`) but never the labeled scheduler or
  * its observation registry.
  *
- * Labels are purely descriptive (observational tokens for tests); they do
- * not alter lock semantics and carry no capability.
+ * Tokens are STRUCTURED identities (typed objects discriminated by
+ * `phase`) — never arbitrary strings. They are purely observational for
+ * tests; they do not alter lock semantics and carry no capability.
  */
+export type CatalogAuthorityCommitToken = {
+  phase: 'catalog-authority-commit'
+  accountId: string
+  productSpaceId: string
+  invocation: number
+}
+export type CatalogAuthorityRevokeToken = {
+  phase: 'catalog-authority-revoke'
+  accountId: string
+  productSpaceId: string
+  invocation: number
+}
+export type RuntimePublicMutexToken = { phase: 'runtime-public-mutex' }
+export type RuntimeRevokeFenceToken = { phase: 'runtime-revoke-fence' }
+export type RuntimeRevokeFenceIfBoundToken = { phase: 'runtime-revoke-fence-if-bound' }
+export type ProductSpaceSwitchToken = { phase: 'product-space-switch'; productSpaceId: string }
+export type ProductSpaceListFetchToken = { phase: 'product-space-list-fetch' }
+export type ProductSpaceFinalizeToken = { phase: 'product-space-finalize' }
+export type ProductSpaceRestoreOfflineToken = { phase: 'product-space-restore-offline' }
+export type AssistantSwitchToken = { phase: 'assistant-switch'; productSpaceId: string }
+
+export function productSpaceSwitchToken(productSpaceId: string): ProductSpaceSwitchToken {
+  return { phase: 'product-space-switch', productSpaceId }
+}
+export type TestHolderToken = { phase: 'test-holder' }
+export type TestThrowingToken = { phase: 'test-throwing' }
+export type GenericSwitchToken = { phase: 'generic-switch' }
+
+export type SwitchLockToken =
+  | GenericSwitchToken
+  | CatalogAuthorityCommitToken
+  | CatalogAuthorityRevokeToken
+  | RuntimePublicMutexToken
+  | RuntimeRevokeFenceToken
+  | RuntimeRevokeFenceIfBoundToken
+  | ProductSpaceSwitchToken
+  | ProductSpaceListFetchToken
+  | ProductSpaceFinalizeToken
+  | ProductSpaceRestoreOfflineToken
+  | AssistantSwitchToken
+  | TestHolderToken
+  | TestThrowingToken
+
 export interface SwitchLockEvent {
   seq: number
-  label: string
+  token: SwitchLockToken
 }
 
 const log: SwitchLockEvent[] = []
@@ -22,12 +66,12 @@ let pending = 0
 let switchLockTail: Promise<unknown> = Promise.resolve()
 
 /**
- * Production mutex: strictly serializes queued tasks (FIFO). The optional
- * label is observational only.
+ * Production mutex: strictly serializes queued tasks (FIFO). The token is a
+ * structured observational identity — it does not alter lock semantics.
  */
 export async function withSwitchLock<T>(
   operation: () => Promise<T>,
-  label = 'unlabeled',
+  token: SwitchLockToken = { phase: 'generic-switch' },
 ): Promise<T> {
   const previous = switchLockTail
   let release!: () => void
@@ -35,7 +79,7 @@ export async function withSwitchLock<T>(
     release = resolve
   })
   pending += 1
-  const event = { seq: ++seq, label }
+  const event = { seq: ++seq, token }
   log.push(event)
   await previous.catch(() => {})
   try {
@@ -53,7 +97,13 @@ export function pendingSwitchLockTasks(): number {
   return pending
 }
 
-/** Test-observable enqueue/settle token registry (drains on settle). */
+/**
+ * Test-observable enqueue/settle token registry. Returns DEEP COPIES of the
+ * structured tokens — the internal registry is never exposed by reference.
+ */
 export function switchLockEventLog(): SwitchLockEvent[] {
-  return log.map(entry => ({ ...entry }))
+  return log.map(entry => ({
+    seq: entry.seq,
+    token: JSON.parse(JSON.stringify(entry.token)) as SwitchLockToken,
+  }))
 }

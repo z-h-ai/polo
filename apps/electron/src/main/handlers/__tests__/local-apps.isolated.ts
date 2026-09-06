@@ -848,6 +848,89 @@ describe('local app main-process authorization boundary', () => {
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
   })
 
+  it('TOCTOU: concurrent authority commit during parked fresh fetch cannot launder the R1 request (DRIFT, registry 0)', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding R1: confirmed with enterprise_import sources.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
+    // fresh fetch PARKED: the handler awaits while a concurrent R2 commit
+    // changes the Main-owned binding (source kind + availability).
+    const r2Row = {
+      kind: 'app',
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+      name: 'ProductSpace App',
+      description: '',
+      availability: 'available',
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      permissions: [],
+    }
+    let parkFetch: ((catalog: unknown) => void) | undefined
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => {
+      const catalog = await new Promise<any>(resolve => { parkFetch = resolve })
+      return catalog
+    })
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+
+    const pending = uninstall(context, base, { preserveData: true })
+    for (let i = 0; i < 50 && !parkFetch; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    if (!parkFetch) throw new Error('fetch pending')
+
+    // Concurrent R2 commit: the authority binding mutates to R2 sources.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      availability: 'available' as const,
+    }], { catalogRevision: 'rev-r2' })
+
+    // Release the parked fetch: the handler compares the live R2 rows
+    // against the PRE-AWAIT captured R1 binding — sources drift → DRIFT.
+    parkFetch!({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-r2-live',
+      entries: [r2Row],
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('TOCTOU: authority already at R2 while renderer carries R1 revision → fail closed before registry', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding ALREADY at R2 (creator_circle sources); the
+    // renderer still carries an R1 revision identity.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      availability: 'available' as const,
+    }], { catalogRevision: 'rev-r2' })
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
   it('rejects uninstalling an OLD republished tuple when the same entry/artifact is re-released at a NEW version (live drift, not tombstone)', async () => {
     // Sequence: the old version WAS withdrawn and retained as a trusted
     // tombstone; the same stable entry + artifact is then REPUBLISHED at a

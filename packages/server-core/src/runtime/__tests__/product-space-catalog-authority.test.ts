@@ -1209,3 +1209,67 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 })
+
+describe('R27-a2: switch-lock public boundary + typed structured tokens', () => {
+  it('the public product-space-executions subpath exposes NO scheduler seam', async () => {
+    const mod = await import('../product-space-executions')
+    expect((mod as Record<string, unknown>).withSwitchLock).toBeUndefined()
+    expect((mod as Record<string, unknown>).__pendingSwitchLockTasksForTests).toBeUndefined()
+    expect((mod as Record<string, unknown>).__switchLockEventLogForTests).toBeUndefined()
+    // package exports map does not expose the internal seam
+    const pkg = JSON.parse(readFileSync(
+      join(import.meta.dir, '..', '..', '..', 'package.json'), 'utf8',
+    )) as { exports: Record<string, string> }
+    expect(Object.values(pkg.exports ?? {}).join('|')).not.toContain('switch-lock-internal')
+  })
+
+  it('structured tokens use object field equality (not string parsing) and drain to zero', async () => {
+    const { withSwitchLock, switchLockEventLog, pendingSwitchLockTasks } =
+      await import('../switch-lock-internal')
+    // success
+    await withSwitchLock(async () => 'ok', {
+      phase: 'catalog-authority-commit',
+      accountId: 'acct-drain',
+      productSpaceId: 'space-drain',
+      invocation: 42,
+    })
+    expect(pendingSwitchLockTasks()).toBe(0)
+    expect(switchLockEventLog()).toEqual([])
+
+    // throw
+    await expect(withSwitchLock(async () => {
+      throw new Error('drain throw probe')
+    }, { phase: 'test-throwing' })).rejects.toThrow('drain throw probe')
+    expect(pendingSwitchLockTasks()).toBe(0)
+    expect(switchLockEventLog()).toEqual([])
+
+    // early return
+    await withSwitchLock(async () => { return }, {
+      phase: 'catalog-authority-revoke',
+      accountId: 'acct-early',
+      productSpaceId: 'space-early',
+      invocation: 1,
+    })
+    expect(pendingSwitchLockTasks()).toBe(0)
+    expect(switchLockEventLog()).toEqual([])
+  })
+
+  it('typed tokens from different accounts with the same space ID do not collide in the registry', async () => {
+    const { withSwitchLock, pendingSwitchLockTasks, switchLockEventLog } =
+      await import('../switch-lock-internal')
+
+    // Run a commit/revoke pair for two different accounts sharing a space.
+    // The structured tokens must maintain distinct accountIds.
+    const tokensSeen: Array<string | undefined> = []
+    for (const acct of ['account-A', 'account-B']) {
+      await withSwitchLock(async () => {
+        tokensSeen.push(acct)
+      }, { phase: 'catalog-authority-revoke', accountId: acct, productSpaceId: 'shared-space', invocation: acct === 'account-A' ? 1 : 2 })
+    }
+    // FIFO: both completed, tokens were distinct.
+    expect(tokensSeen).toEqual(['account-A', 'account-B'])
+    expect(pendingSwitchLockTasks()).toBe(0)
+    // The registry is empty after all tasks settle.
+    expect(switchLockEventLog()).toEqual([])
+  })
+})

@@ -461,7 +461,7 @@ export async function revokeRuntimeProductSpaceFence(): Promise<void> {
   await withSwitchLock(async () => {
     setRuntimeOfflineReadOnly(false)
     setRuntimeActiveProductSpace(null)
-  })
+  }, { phase: 'runtime-revoke-fence' } as const)
 }
 
 export type RuntimeFenceRevokeOutcome =
@@ -520,7 +520,8 @@ export async function revokeRuntimeProductSpaceFenceIfBound(
   expected: ExpectedRuntimeFenceScope,
 ): Promise<RuntimeFenceRevokeOutcome> {
   return withSwitchLock(async (): Promise<RuntimeFenceRevokeOutcome> =>
-    revokeRuntimeProductSpaceFenceIfBoundLocked(expected))
+    revokeRuntimeProductSpaceFenceIfBoundLocked(expected),
+  { phase: 'runtime-revoke-fence-if-bound' })
 }
 
 /**
@@ -691,7 +692,7 @@ import { withSwitchLock } from './switch-lock-internal'
  * lives only in the package-internal instrumentation module.
  */
 export async function runUnderSwitchMutex<T>(operation: () => Promise<T>): Promise<T> {
-  return withSwitchLock(operation, 'runtime-public-mutex')
+  return withSwitchLock(operation, { phase: 'runtime-public-mutex' })
 }
 
 

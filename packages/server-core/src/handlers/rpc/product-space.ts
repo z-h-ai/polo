@@ -54,7 +54,7 @@ import {
   stopRegisteredProductSpaceExecutionsForSpace,
   type RegisteredProductSpaceExecution,
 } from '../../runtime/product-space-executions'
-import { withSwitchLock } from '../../runtime/switch-lock-internal'
+import { productSpaceSwitchToken, withSwitchLock } from '../../runtime/switch-lock-internal'
 import { runLegacyLocalAppCleaner } from '../../runtime/legacy-state-cleaners'
 import { clearLegacySkillCaches } from './admin'
 import {
@@ -682,7 +682,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           success: true as const,
           restricted: isRuntimeProductSpaceRestricted(productSpaceId),
         }
-      })
+      }, productSpaceSwitchToken(productSpaceId))
     },
   )
 

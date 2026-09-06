@@ -13,7 +13,7 @@ import {
   unregisterProductSpaceExecution,
   type RegisteredProductSpaceExecution,
 } from './product-space-executions'
-import { withSwitchLock } from './switch-lock-internal'
+import { type AssistantSwitchToken, withSwitchLock } from './switch-lock-internal'
 import {
   captureTrustedStartGate,
   isTrustedStartGateCurrent,
