@@ -783,7 +783,6 @@
   "homeApps.status.installing": "Instalowanie",
   "homeApps.status.installingUpdate": "Instalowanie aktualizacji",
   "homeApps.status.offline": "Niedostępna offline",
-  "homeApps.status.running": "Uruchomiona",
   "homeApps.status.spaceRestricted": "Ograniczone w tej przestrzeni",
   "homeApps.status.unauthorized": "Organizacja odebrała dostęp",
   "homeApps.status.unauthorizedPersonal": "Dostęp do tej App wygasł",

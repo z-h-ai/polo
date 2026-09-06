@@ -783,7 +783,6 @@
   "homeApps.status.installing": "インストール中",
   "homeApps.status.installingUpdate": "アップデートをインストール中",
   "homeApps.status.offline": "オフラインでは利用不可",
-  "homeApps.status.running": "実行中",
   "homeApps.status.spaceRestricted": "このスペースでは制限されています",
   "homeApps.status.unauthorized": "組織によってアクセスが削除されました",
   "homeApps.status.unauthorizedPersonal": "この App へのアクセスは終了しました",

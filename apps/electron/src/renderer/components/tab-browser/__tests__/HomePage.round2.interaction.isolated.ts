@@ -1719,6 +1719,31 @@ describe('HomePage quick access (POO-43)', () => {
     await waitFor(() => { if (__homeQuickWritersCountForTests() !== 0) throw new Error('registry drain pending') })
   })
 
+  it('Home work cards render NO live runtime running badge (POO-47 scope stays out)', async () => {
+    const appA = pinnedApp('noruntime-app-a', 'noruntime-entry-a', 'noruntime-artifact-a', 'NoRuntime A')
+    let getStatusCalls = 0
+    const hook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    hook.getStatus = (): any => {
+      getStatusCalls += 1
+      return { status: 'running' }
+    }
+    appCatalogHook = hook
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')}`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    quickAccessByContext.set(contextKey, [{ id: keyA, addedAt: 1 }])
+
+    renderHome()
+    await waitForNextScopeLoad(0, contextKey)
+    await waitFor(() => {
+      expect(screen.getByTestId('home-quick-entry')).toBeTruthy()
+    })
+    // POO-43 must not consult live runtime state on the Home cards and must
+    // never render a running badge — that UI belongs to POO-47.
+    expect(getStatusCalls).toBe(0)
+    expect(screen.queryByText('Running')).toBeNull()
+  })
+
   it('removing the last persisted entry persists an explicitly empty collection', async () => {
     const appA = pinnedApp('last-app-a', 'last-entry-a', 'last-artifact-a', 'Last App A')
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))

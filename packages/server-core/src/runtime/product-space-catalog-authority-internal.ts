@@ -7,6 +7,7 @@ import {
   CatalogEntryIdSchema,
   ArtifactInstanceIdSchema,
   ArtifactVersionIdSchema,
+  ProductSpaceCatalogEntrySchema,
 } from '@polo-ai/shared/product-spaces'
 
 /**
@@ -354,16 +355,6 @@ function loadFile(): ProductSpaceCatalogAuthorityFile {
   return processCache
 }
 
-function saveFile(file: ProductSpaceCatalogAuthorityFile): void {
-  processCache = file
-  try {
-    persistFileAtomic(file)
-  } catch {
-    // Persistence failure keeps the in-process record: withdrawn management
-    // works for this session and is re-derived from the next fresh Catalog.
-  }
-}
-
 /**
  * write-temp-then-rename persistence. Throws on ANY persistence failure —
  * callers that need durable-revocation semantics must observe the failure
@@ -460,13 +451,6 @@ function stableEntryKey(
   return JSON.stringify([catalogEntryId, artifactInstanceId])
 }
 
-function recordEntries(
-  record: ProductSpaceCatalogAuthorityRecord,
-  entries: ProductSpaceCatalogAuthorityEntry[],
-): void {
-  record.entries = entries.slice(0, MAX_AUTHORITY_ENTRIES)
-}
-
 /**
  * Records a freshly fetched Catalog into the authority and returns the
  * withdrawn tombstones that must be emitted alongside the live entries:
@@ -499,28 +483,42 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
     ? null
     : previousRecord
 
-  // FRESH SCHEMA GATE: every fresh row must pass the FULL formal
-  // AuthorityEntrySchema (sources 1..1000, permission caps, version contract,
-  // …) — the hand-written projection is only a credential-stripping step, it
-  // can never relax the schema. Any invalid row fails the WHOLE transaction
-  // closed (cache/disk untouched); no partial trust is ever granted.
+  // FRESH SCHEMA GATE (two stages, whole-transaction fail-closed):
+  // Stage 1 — validate the RAW fresh row against the SHARED authoritative
+  // ProductSpaceCatalogEntrySchema (non-blank names, availability enum with
+  // cross-field rules, canonical sources 1..1000 with cross-field rules,
+  // permission caps, version/ID contracts). Authority-bearing invalid fields
+  // can never be filtered, defaulted, or normalized into trust here.
+  // Stage 2 — strip ONLY delivery/credential fields from the PARSED data and
+  // re-validate the exact persisted projection against AuthorityEntrySchema.
+  // Any failure at either stage throws before ANY cache/disk mutation; the
+  // previous cached+durable record stays bit-for-bit intact and zero trust is
+  // granted.
   const freshEntries: ProductSpaceCatalogAuthorityEntry[] = []
   const freshKeys = new Set<string>()
   for (const rawEntry of rawEntries) {
-    const entry = stripToAuthorityEntry(rawEntry)
-    if (!entry) {
+    const rawParsed = ProductSpaceCatalogEntrySchema.safeParse(rawEntry)
+    if (!rawParsed.success) {
       throw new Error(
-        'Fresh Catalog entry failed AuthorityEntrySchema validation — the whole transaction is rejected',
+        `Fresh Catalog row failed ProductSpaceCatalogEntrySchema validation: ${rawParsed.error.issues[0]?.message ?? 'unknown'}`,
       )
     }
-    const parsed = AuthorityEntrySchema.safeParse(entry)
-    if (!parsed.success) {
+    const rawApp = rawParsed.data
+    if (rawApp.kind !== 'app') continue
+    const projected = stripToAuthorityEntry(rawApp as unknown as Record<string, unknown>)
+    if (!projected) {
       throw new Error(
-        `Fresh Catalog entry failed AuthorityEntrySchema validation: ${parsed.error.issues[0]?.message ?? 'unknown'}`,
+        'Fresh Catalog App row failed AuthorityEntrySchema projection validation — the whole transaction is rejected',
       )
     }
-    freshKeys.add(stableEntryKey(entry.catalogEntryId, entry.artifactInstanceId))
-    freshEntries.push(entry)
+    const persistedParsed = AuthorityEntrySchema.safeParse(projected)
+    if (!persistedParsed.success) {
+      throw new Error(
+        `Fresh Catalog persisted projection failed AuthorityEntrySchema validation: ${persistedParsed.error.issues[0]?.message ?? 'unknown'}`,
+      )
+    }
+    freshKeys.add(stableEntryKey(projected.catalogEntryId, projected.artifactInstanceId))
+    freshEntries.push(projected)
   }
   if (freshEntries.length > MAX_AUTHORITY_ENTRIES) {
     throw new Error(
@@ -655,10 +653,10 @@ export function getProductSpaceCatalogAuthorityRecord(
   if (!record || record.kind !== 'authority') return null
   // DEEP SNAPSHOT: the returned value must not alias the processCache record
   // at ANY level (record, entries, tombstones, entry.version, sources,
-  // permissions), or a public caller could mutate entries into the trust
-  // set. Freeze deeply so even in-place mutation of the snapshot is
-  // rejected in dev and irrelevant in prod.
-  return deepFreezeSnapshot(record)
+  // permissions). The getter DEEP-COPIES first and freezes only the COPY —
+  // the internal cache object is neither returned nor frozen, and two calls
+  // produce independent objects.
+  return deepCopiedFrozenSnapshot(record)
 }
 
 /** Structural deep copy — the snapshot must never alias processCache. */

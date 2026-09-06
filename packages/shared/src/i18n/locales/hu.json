@@ -783,7 +783,6 @@
   "homeApps.status.installing": "Telepítés",
   "homeApps.status.installingUpdate": "Frissítés telepítése",
   "homeApps.status.offline": "Offline nem érhető el",
-  "homeApps.status.running": "Fut",
   "homeApps.status.spaceRestricted": "Ebben a térben korlátozva",
   "homeApps.status.unauthorized": "A szervezeted visszavonta a hozzáférést",
   "homeApps.status.unauthorizedPersonal": "Az App hozzáférése megszűnt",

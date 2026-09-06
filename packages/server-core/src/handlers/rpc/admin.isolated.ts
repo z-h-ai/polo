@@ -1395,7 +1395,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     await waitFor(() => releaseHolder !== undefined)
     // IDENTITY barrier: R1's revocation decision has actually queued.
     await waitFor(() => {
-      if (!__switchLockEventLogForTests().some(e => e.label.startsWith('catalog-authority-revoke:space-a#'))) {
+      if (!__switchLockEventLogForTests().some(e =>
+        e.label.startsWith('phase=catalog-authority-revoke;account=user-1;space=space-a;inv=')
+      )) {
         return undefined
       }
       return true
@@ -1467,7 +1469,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     await waitFor(() => releaseHolder !== undefined)
     // IDENTITY barrier 1: R1's revocation decision is queued on the lock.
     await waitFor(() => {
-      if (!__switchLockEventLogForTests().some(e => e.label.startsWith('catalog-authority-revoke:space-a#'))) {
+      if (!__switchLockEventLogForTests().some(e =>
+        e.label.startsWith('phase=catalog-authority-revoke;account=user-1;space=space-a;inv=')
+      )) {
         return undefined
       }
       return true
@@ -1485,13 +1489,15 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
       // R2's commit token carries the R2 scopeKey+invocation and must queue
       // AFTER R1's decision token. Generic/unlabeled entries never satisfy
       // this barrier.
-      const revokeToken = log.find(e => e.label.startsWith('catalog-authority-revoke:space-a#'))
-      const commitToken = log.find(e => e.label.startsWith(`catalog-authority-commit:${scopeKey}#`))
+      const revokeToken = log.find(e =>
+        e.label.startsWith('phase=catalog-authority-revoke;account=user-1;space=space-a;inv='))
+      const commitToken = log.find(e =>
+        e.label.startsWith(`phase=catalog-authority-commit;account=user-1;space=space-a;inv=`)
+        && e.label.endsWith(`;inv=${latestBeforeR2! + 1}`))
       const latest = __latestProductSpaceCatalogSyncInvocationForTests(scopeKey)
       const r2Registered = latest !== null && latestBeforeR2 !== null && latest > latestBeforeR2
       if (revokeToken && commitToken && commitToken.seq > revokeToken.seq && r2Registered) {
-        const commitInvocation = Number(commitToken.label.split('#')[1])
-        if (commitInvocation === latest) return true
+        return true
       }
       return undefined
     })

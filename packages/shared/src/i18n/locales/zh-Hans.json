@@ -783,7 +783,6 @@
   "homeApps.status.installing": "正在安装",
   "homeApps.status.installingUpdate": "正在安装更新",
   "homeApps.status.offline": "离线时不可用",
-  "homeApps.status.running": "运行中",
   "homeApps.status.spaceRestricted": "空间受限，暂不可用",
   "homeApps.status.unauthorized": "组织已移除访问权限",
   "homeApps.status.unauthorizedPersonal": "此 App 的授权已结束",

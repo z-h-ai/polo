@@ -901,7 +901,6 @@ export function HomePage() {
                 ) : (
                   <>
                     {homeWorkCards.map((app, index) => {
-                      const running = catalog.getStatus(app)?.status === 'running'
                       const artGlyph = index % 2 === 0 ? '▣' : '▦'
                       return (
                         <article
@@ -920,11 +919,6 @@ export function HomePage() {
                             {app.description || t('homeApps.noDescription')}
                           </p>
                           <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-                            {running && (
-                              <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-accent/12 px-[7px] py-[2px] text-[10px] text-accent before:block before:size-[5px] before:rounded-full before:bg-current">
-                                {t('homeApps.status.running')}
-                              </span>
-                            )}
                             <Button
                               type="button"
                               variant="ghost"

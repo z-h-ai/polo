@@ -916,7 +916,7 @@ export function registerAdminHandlers(
       })
       if (firstError) throw firstError
       return 'revoked'
-    }, `catalog-authority-revoke:${options.productSpaceId}#${options.invocation ?? 'unknown'}`)
+    }, `phase=catalog-authority-revoke;account=${options.accountId};space=${options.productSpaceId};inv=${options.invocation ?? 'unknown'}`)
   }
 
   interface CatalogScopeRevocationPolicy {
@@ -2199,7 +2199,7 @@ export function registerAdminHandlers(
               sources: entry.sources,
               permissions: entry.permissions,
             }))
-          }, `catalog-authority-commit:${commit.scopeKey}#${commit.invocation}`)
+          }, `phase=catalog-authority-commit;account=${commit.accountId};space=${commit.productSpaceId};inv=${commit.invocation}`)
         },
           // ALWAYS-SETTLE: release the pending commit reservation no matter
         // how the request concluded (committed, CAS-skipped by a session

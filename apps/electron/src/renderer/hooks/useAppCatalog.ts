@@ -1558,14 +1558,6 @@ export function useAppCatalog() {
     }
   }, [currentSnapshotForApp, state.installStates])
 
-  const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
-    try {
-      return state.statuses[scopeKeyForApp(app)]
-    } catch {
-      return undefined
-    }
-  }, [scopeKeyForApp, state.statuses])
-
   return {
     productSpace,
     state,
@@ -1582,7 +1574,6 @@ export function useAppCatalog() {
     uninstallProductSpaceBundle,
     getInstallState,
     resolveRemoteUrl,
-    getStatus,
     scopeForApp,
     scopeKeyForApp,
     uiIdentityKeyForApp,

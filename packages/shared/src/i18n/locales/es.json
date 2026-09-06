@@ -783,7 +783,6 @@
   "homeApps.status.installing": "Instalando",
   "homeApps.status.installingUpdate": "Instalando actualización",
   "homeApps.status.offline": "No disponible sin conexión",
-  "homeApps.status.running": "En ejecución",
   "homeApps.status.spaceRestricted": "Restringido en este espacio",
   "homeApps.status.unauthorized": "Tu organización retiró el acceso",
   "homeApps.status.unauthorizedPersonal": "El acceso a esta App ha finalizado",

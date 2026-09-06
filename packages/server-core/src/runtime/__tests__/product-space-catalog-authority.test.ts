@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -287,28 +287,29 @@ describe('ProductSpace Catalog authority', () => {
     ]
     // R24/R25 contract: a fresh row that FAILS the formal AuthorityEntrySchema
     // (after the credential-stripping projection) fails the WHOLE transaction —
-    // throw, and nothing is granted, recorded, or left on disk.
-    //
-    // The projection deliberately NORMALIZES a few raw shapes (unknown source
-    // kinds / non-string permission members are filtered, unknown availability
-    // and non-string description are coerced) — those produce schema-valid
-    // persisted rows by construction and are asserted separately below.
-    const schemaFailing = [0, 1, 2, 3, 4, 5, 7]
-    for (const index of schemaFailing) {
+    // R27 contract: RAW fresh rows are validated FIRST against the shared
+    // ProductSpaceCatalogEntrySchema — authority-bearing invalid fields
+    // (unknown availability, whitespace/blank name, non-string permission
+    // members, invalid/empty sources, source cross-field violations) fail
+    // the WHOLE transaction with a throw before ANY cache/disk mutation.
+    // Nothing is filtered, defaulted, or normalized into trust.
+    for (const [index, badEntry] of badEntries.entries()) {
       expect(() => recordProductSpaceCatalogAuthoritativeEntries(
-        'account-a', 'space-a', `rev-bad-${index}`, [badEntries[index]!],
-      )).toThrow()
+        'account-a', 'space-a', `rev-bad-${index}`, [badEntry],
+      )).toThrow(/ProductSpaceCatalogEntrySchema/)
       expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
       expect(existsSync(join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json'))).toBe(false)
     }
-    // Normalizing projection: these raw shapes persist as SCHEMA-VALID rows.
-    for (const index of [6, 8, 9, 10]) {
-      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', `rev-norm-${index}`, [badEntries[index]!])
-      const normalized = getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')
-      expect(normalized).not.toBeNull()
-      resetProductSpaceCatalogAuthorityForTests()
-    }
+    // Mixed valid + invalid: the invalid row poisons the whole transaction —
+    // no partial trust is granted.
+    expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-mixed', [...badEntries.slice(0, 3), entry()],
+    )).toThrow(/ProductSpaceCatalogEntrySchema/)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
 
+    // Self-heal: a good record persists normally afterwards.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed-2', [entry()])
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed-2')
     // Self-heal: a good record persists normally afterwards.
     recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed-2', [entry()])
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed-2')
@@ -919,7 +920,34 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
 
   it('the public record getter returns a deep snapshot: mutating every layer cannot forge trust', () => {
     recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
-    const snapshot = publicAuthority.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+    const record = publicAuthority.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+    const record2 = publicAuthority.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+    // NO-ALIAS at every layer: two reads return distinct objects.
+    expect(record).not.toBe(record2)
+    expect(record.entries).not.toBe(record2.entries)
+    expect(record.tombstones).not.toBe(record2.tombstones)
+    expect(record.entries[0]).not.toBe(record2.entries[0])
+    expect((record.entries[0] as { sources: unknown }).sources)
+      .not.toBe((record2.entries[0] as { sources: unknown }).sources)
+    expect((record.entries[0] as { sources: unknown[] }).sources[0])
+      .not.toBe((record2.entries[0] as { sources: unknown[] }).sources[0])
+    expect((record.entries[0] as { permissions: unknown }).permissions)
+      .not.toBe((record2.entries[0] as { permissions: unknown }).permissions)
+    // The snapshot copies are frozen (defensive), JSON-equivalent, and do
+    // not alias the internal cache (all layers compared above). The internal
+    // cache itself is never frozen by the public read: a later legal commit
+    // must still succeed.
+    const commitTombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-2', [entry()],
+    )
+    expect(commitTombstones).toEqual([])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    const rereadAfterCommit = publicAuthority.getProductSpaceCatalogAuthorityRecord(
+      'account-a', 'space-a',
+    )!
+    expect(rereadAfterCommit.entries).toHaveLength(1)
+    expect(rereadAfterCommit.catalogRevision).toBe('rev-2')
+    const snapshot = record
     expect(snapshot.entries).toHaveLength(1)
     // Mutate every aliasable layer of the returned value.
     try {
@@ -948,9 +976,20 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
     const reread = publicAuthority.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
     expect(reread.entries).toHaveLength(1)
     expect((reread.entries[0] as { catalogEntryId: string }).catalogEntryId).toBe('entry-a')
-    expect(reread.catalogRevision).toBe('rev-1')
-    expect(Object.isFrozen(reread.entries)).toBe(true)
-    expect(Object.isFrozen(reread.entries[0])).toBe(true)
+    // The snapshot copies are frozen (defensive), JSON-equivalent, and do
+    // not alias the internal cache (all layers compared above). The internal
+    // cache itself is never frozen by the public read: a later legal commit
+    // must still succeed.
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-2', [entry()],
+    )
+    expect(tombstones).toEqual([])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    const rereadAfterCommit2 = publicAuthority.getProductSpaceCatalogAuthorityRecord(
+      'account-a', 'space-a',
+    )!
+    expect(rereadAfterCommit2.entries).toHaveLength(1)
+    expect(rereadAfterCommit.catalogRevision).toBe('rev-2')
   })
 
   it('a malformed legacy candidate (invalid entry) contributes ZERO tombstones to a fresh empty Catalog', () => {
@@ -1062,13 +1101,18 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
     recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'rev-1', [
       entry({ catalogEntryId: 'entry-b', artifactInstanceId: 'artifact-b' }),
     ])
-    // Dedicated targets for rename + old-file mutation BEFORE chmod.
+    // Dedicated rename target: created and stat-proven to EXIST before the
+    // fault, so a later rename failure can only be a permission denial
+    // (ENOENT would prove a missing source, i.e. a setup defect).
     const renameTarget = join(dirname(authorityFile()), 'r25-rename-probe.bin')
     const oldFileSnapshot = readFileSync(authorityFile(), 'utf8')
     writeFileSync(renameTarget, 'x')
+    expect(statSync(renameTarget).isFile()).toBe(true)
     const dir = dirname(authorityFile())
     chmodSync(dir, 0o555)
     try {
+      // The rename source STILL exists under the fault.
+      expect(statSync(renameTarget).isFile()).toBe(true)
       // create denied
       let createErrno: string | null = null
       try {
@@ -1077,17 +1121,15 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
         createErrno = (error as { code?: string }).code ?? 'unknown'
       }
       expect(createErrno).toBe('EACCES')
-      // rename denied
+      // rename denied (EACCES on macOS / EACCES or EPERM on Linux — never
+      // ENOENT: the source provably exists).
       let renameErrno: string | null = null
       try {
         renameSync(renameTarget, join(dir, 'r25-rename-dest.bin'))
       } catch (error) {
-        // macOS returns EPERM on cross-permission renames into a read-only
-        // directory; Linux returns EACCES. Either is a denied rename.
-        const code = (error as { code?: string }).code
-        renameErrno = code ?? `unknown: ${String(error).slice(0, 60)}`
+        renameErrno = (error as { code?: string }).code ?? 'unknown'
       }
-      expect(['EACCES', 'EPERM', 'ENOENT'] as string[]).toContain(renameErrno as string)
+      expect(['EACCES', 'EPERM'] as string[]).toContain(renameErrno as string)
       // old-file unlink/mutation denied
       let unlinkErrno: string | null = null
       try {

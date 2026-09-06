@@ -57,8 +57,10 @@ import {
   CatalogEntryIdSchema,
   ProductSpaceIdSchema,
   ProductSpaceExecutionScopeSchema,
+  type TrustedProductSpaceCatalogEntry,
 } from '@polo-ai/shared/product-spaces'
 import {
+  getProductSpaceCatalogAuthorityRecord,
   loadProductSpaceCatalogAuthorityTupleSet,
   loadProductSpaceWithdrawnTombstoneTupleSet,
   productSpaceCatalogAuthorityTupleKey,
@@ -1000,8 +1002,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // version, 403/401/network or schema failure fails closed BEFORE the
       // registry or any file is touched.
       let liveUninstall = false
+      let loadedLive: Awaited<ReturnType<typeof loadAuthoritativeProductSpaceApps>> | null = null
       try {
-        await loadAuthoritativeProductSpaceApps([rawApp], {
+        loadedLive = await loadAuthoritativeProductSpaceApps([rawApp], {
           driftCode: 'CATALOG_IDENTITY_DRIFT',
         })
         liveUninstall = true
@@ -1019,6 +1022,50 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           && error.code === 'CATALOG_ENTRY_MISSING'
         if (!authoritativeMissing) throw error
         assertRetainedTombstoneProductSpaceAppAuthority([app])
+      }
+      if (liveUninstall && loadedLive !== null) {
+        // SOURCE / AVAILABILITY drift (R27 matrix): a live row whose entry/
+        // artifact/version matches can still have DRIFTED in its canonical
+        // sources (enterprise_import → creator_circle, set change) or its
+        // availability (available → blocked/unavailable). Both are live
+        // identity drift and fail closed against the Main-owned binding
+        // recorded in the trusted authority snapshot — the renderer cannot
+        // influence either side of the comparison.
+        const liveRow = loadedLive.catalog.entries.find(
+          candidate => candidate.catalogEntryId === app.catalogEntryId && candidate.kind === 'app',
+        ) as (TrustedProductSpaceCatalogEntry & { kind: 'app'; sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }> }) | undefined
+        if (!liveRow || liveRow.availability !== 'available') {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The ProductSpace Catalog App is no longer available (availability drift)',
+          )
+        }
+        const binding = getProductSpaceCatalogAuthorityRecord(app.accountId, app.productSpaceId)
+        const bindingEntry = binding?.entries.find(
+          candidate => candidate.catalogEntryId === app.catalogEntryId
+            && candidate.artifactInstanceId === app.artifactInstanceId
+            && candidate.versionId === app.versionId
+            && candidate.version === app.version,
+        )
+        if (!bindingEntry) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'No Main-owned source binding exists for this ProductSpace App identity',
+          )
+        }
+        const canonical = (sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>): string =>
+          JSON.stringify(sources
+            .map(source => ({ circleId: source.circleId, kind: source.kind, name: source.name ?? null }))
+            .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
+        if (
+          canonical(liveRow.sources as ReadonlyArray<{ kind: string; name?: string; circleId?: string }>)
+          !== canonical(bindingEntry.sources)
+        ) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The ProductSpace Catalog App sources changed since the last confirmed revalidation',
+          )
+        }
       }
       void liveUninstall
       const scope = productSpaceBundleScope(app)
