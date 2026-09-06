@@ -96,8 +96,8 @@ import {
   isSwitchInProgress,
   revokeRuntimeProductSpaceFence,
   revokeRuntimeProductSpaceFenceIfBoundLocked,
-  withSwitchLock,
 } from '../../runtime/product-space-executions'
+import { withSwitchLock } from '../../runtime/switch-lock-internal'
 import { revokeProductSpaceCatalogAuthority } from '../../runtime/product-space-catalog-authority'
 // INTERNAL commit entry: the ONLY grant-capable mutator, reachable solely
 // from this schema-validated Admin Catalog commit path (not exported by the

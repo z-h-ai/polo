@@ -45,8 +45,8 @@ import {
   isRuntimeProductSpaceRestricted,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
+  runUnderSwitchMutex,
   unregisterProductSpaceExecution,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '@polo-ai/server-core/runtime/product-space-executions'
 import {
@@ -282,12 +282,17 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
   const catalogEntryId = CatalogEntryIdSchema.safeParse(input.catalogEntryId)
   const artifactInstanceId = ArtifactInstanceIdSchema.safeParse(input.artifactInstanceId)
   const versionId = ArtifactVersionIdSchema.safeParse(input.versionId)
+  const catalogRevision = typeof input.catalogRevision === 'string'
+    ? input.catalogRevision.trim()
+    : ''
   if (
     !accountId.success
     || !productSpaceId.success
     || !catalogEntryId.success
     || !artifactInstanceId.success
     || !versionId.success
+    || catalogRevision.length === 0
+    || catalogRevision.length > 512
     || typeof input.version !== 'string'
     || input.version.trim().length === 0
     || input.version.length > 512
@@ -301,6 +306,7 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
     artifactInstanceId: artifactInstanceId.data,
     versionId: versionId.data,
     version: input.version,
+    catalogRevision,
   }
 }
 
@@ -995,12 +1001,41 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // checks.
       const app = validateProductSpaceAppIdentity(rawApp)
       await assertProductSpaceAccountCurrent(app)
-      // LIVE uninstall: the current Catalog is fetched FRESH and
-      // schema-validated and the FULL identity
-      // (accountId/productSpaceId/catalogEntryId/artifactInstanceId/versionId/
-      // version) must match exactly — any drift, missing entry, stale
-      // version, 403/401/network or schema failure fails closed BEFORE the
-      // registry or any file is touched.
+
+      // CAPTURE PHASE — BEFORE any fresh-fetch await: read the Main-owned
+      // confirmed binding ONCE and treat it as an immutable snapshot for the
+      // rest of this uninstall. No later authority mutation (a concurrent
+      // Catalog commit) can influence this comparison baseline.
+      const bindingAtEntry = getProductSpaceCatalogAuthorityRecord(app.accountId, app.productSpaceId)
+      if (!bindingAtEntry) {
+        // Cold-start default-distrust: without a process-trusted binding the
+        // uninstall fails closed.
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'No trusted ProductSpace authority binding exists for this App',
+        )
+      }
+      if (bindingAtEntry.catalogRevision !== app.catalogRevision) {
+        throw new LocalAppRuntimeError(
+          'CATALOG_IDENTITY_DRIFT',
+          'The uninstall request references a stale Catalog revision',
+        )
+      }
+      const bindingEntry = bindingAtEntry.entries.find(
+        candidate => candidate.catalogEntryId === app.catalogEntryId
+          && candidate.artifactInstanceId === app.artifactInstanceId
+          && candidate.versionId === app.versionId
+          && candidate.version === app.version,
+      )
+      const bindingTombstone = bindingAtEntry.tombstones.find(
+        candidate => candidate.catalogEntryId === app.catalogEntryId
+          && candidate.artifactInstanceId === app.artifactInstanceId
+          && candidate.versionId === app.versionId
+          && candidate.version === app.version,
+      )
+
+      // LIVE PHASE — fresh fetch + comparison against the CAPTURED binding
+      // only (never a post-await re-read of current authority state).
       let liveUninstall = false
       let loadedLive: Awaited<ReturnType<typeof loadAuthoritativeProductSpaceApps>> | null = null
       try {
@@ -1009,61 +1044,68 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         })
         liveUninstall = true
       } catch (error) {
-        // The ONLY authoritative verdict that may fall back to the
-        // no-fresh-Catalog cleanup gate is CATALOG_ENTRY_MISSING — the fresh
-        // Catalog itself proved the entry is GONE from the current
-        // distribution. A live row that merely DRIFTED
-        // (artifactInstanceId/versionId/version/kind mismatch) is a LIVE App
-        // mismatch (CATALOG_IDENTITY_DRIFT) and stays fail-closed — it must
-        // never fall through to retained-tombstone cleanup. Auth/network/
-        // schema/space-state failures also stay fail-closed; a renderer can
-        // never self-declare its way onto this path.
+        // ONLY CATALOG_ENTRY_MISSING may fall back to retained-tombstone
+        // cleanup — and the exact retained tombstone must exist in the
+        // pre-await captured binding. KIND drift and artifact/version drift
+        // are LIVE identity drift and stay fail-closed. Auth/network/schema/
+        // space-state failures also stay fail-closed.
         const authoritativeMissing = error instanceof LocalAppRuntimeError
           && error.code === 'CATALOG_ENTRY_MISSING'
         if (!authoritativeMissing) throw error
-        assertRetainedTombstoneProductSpaceAppAuthority([app])
+        if (!bindingTombstone) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'Missing entry has no exact retained tombstone in the trusted binding',
+          )
+        }
       }
-      if (liveUninstall && loadedLive !== null) {
-        // SOURCE / AVAILABILITY drift (R27 matrix): a live row whose entry/
-        // artifact/version matches can still have DRIFTED in its canonical
-        // sources (enterprise_import → creator_circle, set change) or its
-        // availability (available → blocked/unavailable). Both are live
-        // identity drift and fail closed against the Main-owned binding
-        // recorded in the trusted authority snapshot — the renderer cannot
-        // influence either side of the comparison.
-        const liveRow = loadedLive.catalog.entries.find(
+      if (liveUninstall) {
+        // Compare the live row against the PRE-AWAIT captured binding: full
+        // tuple must match the binding entry, canonical sources must equal
+        // the binding sources, and BOTH the binding and the live row must be
+        // available. A concurrent authority commit during the fresh fetch
+        // cannot influence this comparison.
+        const liveRow = loadedLive!.catalog.entries.find(
           candidate => candidate.catalogEntryId === app.catalogEntryId && candidate.kind === 'app',
         ) as (TrustedProductSpaceCatalogEntry & { kind: 'app'; sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }> }) | undefined
-        if (!liveRow || liveRow.availability !== 'available') {
+        if (!bindingEntry || !liveRow) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The live Catalog row no longer matches the trusted binding',
+          )
+        }
+        // The live row keeps the shared Catalog shape (version is a nested
+        // object); the trusted binding entry carries versionId/version as
+        // flattened authority fields.
+        const liveTuple = JSON.stringify([
+          liveRow.artifactInstanceId, liveRow.version.versionId, liveRow.version.version,
+        ])
+        const bindingTuple = JSON.stringify([
+          bindingEntry.artifactInstanceId, bindingEntry.versionId, bindingEntry.version,
+        ])
+        if (liveTuple !== bindingTuple) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The live Catalog App tuple drifted from the trusted binding',
+          )
+        }
+        if (bindingEntry.availability !== 'available' || liveRow.availability !== 'available') {
           throw new LocalAppRuntimeError(
             'CATALOG_IDENTITY_DRIFT',
             'The ProductSpace Catalog App is no longer available (availability drift)',
           )
         }
-        const binding = getProductSpaceCatalogAuthorityRecord(app.accountId, app.productSpaceId)
-        const bindingEntry = binding?.entries.find(
-          candidate => candidate.catalogEntryId === app.catalogEntryId
-            && candidate.artifactInstanceId === app.artifactInstanceId
-            && candidate.versionId === app.versionId
-            && candidate.version === app.version,
-        )
-        if (!bindingEntry) {
-          throw new LocalAppRuntimeError(
-            'NOT_AUTHORIZED',
-            'No Main-owned source binding exists for this ProductSpace App identity',
-          )
-        }
         const canonical = (sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>): string =>
           JSON.stringify(sources
-            .map(source => ({ circleId: source.circleId, kind: source.kind, name: source.name ?? null }))
+            .map(source => ({ circleId: source.circleId ?? null, kind: source.kind, name: source.name ?? null }))
             .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
         if (
-          canonical(liveRow.sources as ReadonlyArray<{ kind: string; name?: string; circleId?: string }>)
+          canonical(liveRow.sources)
           !== canonical(bindingEntry.sources)
         ) {
           throw new LocalAppRuntimeError(
             'CATALOG_IDENTITY_DRIFT',
-            'The ProductSpace Catalog App sources changed since the last confirmed revalidation',
+            'The ProductSpace Catalog App sources changed since the confirmed revalidation',
           )
         }
       }
@@ -1291,7 +1333,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     // section is all in-memory: the shared trusted-start gate (mirror
     // account, account generation, transition epoch, account-bound fence)
     // and fence checks never acquire the Admin session lock.
-    return withSwitchLock(async () => {
+    return runUnderSwitchMutex(async () => {
       const activeProductSpaceId = getRuntimeActiveProductSpace()
       if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
         throw new LocalAppRuntimeError(

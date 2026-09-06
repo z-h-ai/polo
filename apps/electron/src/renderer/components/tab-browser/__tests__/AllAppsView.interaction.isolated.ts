@@ -92,6 +92,7 @@ function renderView(apps: CatalogApp[], options: {
         app: {
           accountId: 'account-a',
           productSpaceId: 'space-a',
+          catalogRevision: 'rev-1',
           catalogEntryId: target.id,
           artifactInstanceId: target.artifactInstanceId!,
           versionId: target.catalogVersion!.versionId,

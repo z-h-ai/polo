@@ -634,6 +634,7 @@ describe('useAppCatalog ProductSpace launch binding', () => {
       app: {
         accountId: 'account-a',
         productSpaceId: 'organization-a',
+        catalogRevision: 'strict-revision-1',
         catalogEntryId: 'catalog-entry-a',
         artifactInstanceId: 'artifact-instance-a',
         versionId: 'version-a',
@@ -644,6 +645,9 @@ describe('useAppCatalog ProductSpace launch binding', () => {
     await result.current.uninstallProductSpaceBundle(catalogApp, true)
     expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
       expect.objectContaining({
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogRevision: 'strict-revision-1',
         catalogEntryId: 'catalog-entry-a',
         artifactInstanceId: 'artifact-instance-a',
         versionId: 'version-a',
@@ -735,6 +739,7 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
     expect(getProductSpaceWithdrawnInstallStates).toHaveBeenCalledWith([{
       accountId: 'account-a',
       productSpaceId: 'organization-a',
+      catalogRevision: 'restart-revision-1',
       catalogEntryId: 'catalog-entry-w',
       artifactInstanceId: 'artifact-w',
       versionId: 'version-w',
@@ -1520,6 +1525,7 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
           app: {
             accountId: 'account-a',
             productSpaceId: 'organization-a',
+            catalogRevision: 'rev-e2e',
             catalogEntryId: target.catalogEntryId!,
             artifactInstanceId: target.artifactInstanceId!,
             versionId: target.catalogVersion!.versionId,
@@ -1643,6 +1649,7 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
               app: {
                 accountId: scope.accountId,
                 productSpaceId: scope.productSpaceId,
+                catalogRevision: 'rev-schema-valid',
                 catalogEntryId: target.catalogEntryId!,
                 artifactInstanceId: target.artifactInstanceId!,
                 versionId: target.catalogVersion!.versionId,

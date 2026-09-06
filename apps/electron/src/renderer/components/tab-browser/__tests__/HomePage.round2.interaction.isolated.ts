@@ -2378,6 +2378,7 @@ describe('HomePage all-Apps view (POO-43)', () => {
               app: {
                 accountId: 'account-a',
                 productSpaceId: 'organization-a',
+                catalogRevision: 'rev-1',
                 catalogEntryId: installedWithdrawn.catalogEntryId!,
                 artifactInstanceId: installedWithdrawn.artifactInstanceId!,
                 versionId: installedWithdrawn.catalogVersion!.versionId,
@@ -2486,6 +2487,7 @@ describe('HomePage all-Apps view (POO-43)', () => {
               app: {
                 accountId: 'account-a',
                 productSpaceId: 'organization-a',
+                catalogRevision: 'rev-1',
                 catalogEntryId: installedTombstone.catalogEntryId!,
                 artifactInstanceId: installedTombstone.artifactInstanceId!,
                 versionId: installedTombstone.catalogVersion!.versionId,

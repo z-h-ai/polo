@@ -7,9 +7,9 @@ import {
   setRuntimeActiveProductSpaceAccount,
   setRuntimeProductSpaceRestricted,
   stopRegisteredProductSpaceExecutionsForAccount,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from './product-space-executions'
+import { withSwitchLock } from './switch-lock-internal'
 import {
   beginAccountTransition,
   setSyncTrustedProductSpaceAccountId,

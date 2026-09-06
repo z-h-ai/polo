@@ -145,6 +145,12 @@ export interface ProductSpaceAppIdentity {
   artifactInstanceId: string
   versionId: string
   version: string
+  /**
+   * The catalog revision the renderer confirmed when building this
+   * identity. Renderer-supplied: it serves ONLY as an index — Main proves
+   * it against its own pre-await captured authority binding.
+   */
+  catalogRevision: string
 }
 
 export interface ProductSpaceBundleInstallRequest {

@@ -52,9 +52,9 @@ import {
   stopAllRegisteredProductSpaceExecutions,
   stopRegisteredExecutionsOnce,
   stopRegisteredProductSpaceExecutionsForSpace,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '../../runtime/product-space-executions'
+import { withSwitchLock } from '../../runtime/switch-lock-internal'
 import { runLegacyLocalAppCleaner } from '../../runtime/legacy-state-cleaners'
 import { clearLegacySkillCaches } from './admin'
 import {

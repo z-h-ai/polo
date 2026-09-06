@@ -673,48 +673,27 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
  * blocking, termination, target verification and the fence commit all run
  * inside this lock so no interleaved registration can slip between
  * enumeration and commit.
+ *
+ * The mutex itself and its test observation registry live in the
+ * package-INTERNAL module `./switch-lock-internal` (absent from the package
+ * `exports` map). This public subpath exposes only:
+ * - `runUnderSwitchMutex` — the narrow, unlabeled production mutex runner
+ *   needed by the local-app start path;
+ * - the surrounding switch transaction/fence APIs.
+ * It does NOT re-export the labeled scheduler or its observation registry.
  */
-import {
-  eventLog as switchLockEventLog,
-  lockEnqueued,
-  lockSettled,
-  pendingSwitchLockTasks,
-} from './switch-lock-instrumentation'
-
-let switchLockTail: Promise<unknown> = Promise.resolve()
+import { withSwitchLock } from './switch-lock-internal'
 
 /**
- * Test-only observation seam — re-exported nowhere; package consumers cannot
- * see it because `./runtime/switch-lock-instrumentation` is absent from the
- * package `exports` map. The production lock behavior is unchanged and the
- * labels are purely descriptive (no capability).
+ * PUBLIC narrow mutex runner for the local-app start path: runs `operation`
+ * under the same switch mutex as switch transactions. Deliberately carries
+ * NO labels and exposes NO observation registry — the scheduler test seam
+ * lives only in the package-internal instrumentation module.
  */
-export function __pendingSwitchLockTasksForTests(): number {
-  return pendingSwitchLockTasks()
+export async function runUnderSwitchMutex<T>(operation: () => Promise<T>): Promise<T> {
+  return withSwitchLock(operation, 'runtime-public-mutex')
 }
 
-export function __switchLockEventLogForTests(): { seq: number; label: string }[] {
-  return switchLockEventLog()
-}
-
-export async function withSwitchLock<T>(
-  operation: () => Promise<T>,
-  label = 'unlabeled',
-): Promise<T> {
-  const previous = switchLockTail
-  let release!: () => void
-  switchLockTail = new Promise<void>(resolve => {
-    release = resolve
-  })
-  const event = lockEnqueued(label)
-  await previous.catch(() => {})
-  try {
-    return await operation()
-  } finally {
-    lockSettled(event)
-    release()
-  }
-}
 
 /**
  * While a switch transaction is in flight — including the async window

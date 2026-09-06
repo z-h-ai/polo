@@ -11,9 +11,9 @@ import {
   isSwitchInProgress,
   registerProductSpaceExecution,
   unregisterProductSpaceExecution,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from './product-space-executions'
+import { withSwitchLock } from './switch-lock-internal'
 import {
   captureTrustedStartGate,
   isTrustedStartGateCurrent,

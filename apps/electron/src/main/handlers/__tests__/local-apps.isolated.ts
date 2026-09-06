@@ -300,12 +300,25 @@ const trustedRecordByScope = new Map<string, {
 function seedTrustedBinding(
   accountId: string,
   productSpaceId: string,
-  bindings: Array<{ catalogEntryId: string; artifactInstanceId: string; versionId: string; version: string; sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }> }>,
+  bindings: Array<{
+    catalogEntryId: string
+    artifactInstanceId: string
+    versionId: string
+    version: string
+    sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>
+    availability?: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
+  }>,
+  options: { catalogRevision?: string; tombstones?: Array<Record<string, unknown>> } = {},
 ): void {
   trustedRecordByScope.set(authorityScopeKey(accountId, productSpaceId), {
     kind: 'authority',
-    entries: bindings,
-  })
+    catalogRevision: options.catalogRevision ?? 'revision-a',
+    entries: bindings.map(binding => ({
+      ...binding,
+      availability: binding.availability ?? ('available' as const),
+    })),
+    tombstones: options.tombstones ?? [],
+  } as never)
 }
 
 mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () => ({
@@ -374,8 +387,8 @@ const {
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
-  withSwitchLock,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { runUnderSwitchMutex } = await import('@polo-ai/server-core/runtime/product-space-executions')
 
 function createCatalog(count: number): AppCatalogCacheEntry {
   return {
@@ -429,6 +442,7 @@ function productSpaceAppIdentity() {
   return {
     accountId: 'account-a',
     productSpaceId: 'organization-a',
+    catalogRevision: 'revision-a',
     catalogEntryId: 'catalog-entry-a',
     artifactInstanceId: 'artifact-instance-a',
     versionId: 'version-a',
@@ -699,6 +713,15 @@ describe('local app main-process authorization boundary', () => {
       'version-w',
       '2.0.0',
     )
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      tombstones: [{
+        catalogEntryId: 'catalog-entry-w',
+        artifactInstanceId: 'artifact-w',
+        versionId: 'version-w',
+        version: '2.0.0',
+        withdrawnAt: 1,
+      }],
+    })
     const withdrawnIdentity = {
       accountId: 'account-a',
       productSpaceId: 'organization-a',
@@ -706,6 +729,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-w',
       versionId: 'version-w',
       version: '2.0.0',
+      catalogRevision: 'revision-a',
     }
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
     await uninstall(context, withdrawnIdentity, { preserveData: true })
@@ -725,10 +749,14 @@ describe('local app main-process authorization boundary', () => {
     // Old app tombstone retained; the STABLE entry ID now belongs to a
     // non-app (skill) live row in the current Catalog. The uninstall must
     // fail closed as live identity drift — registry zero calls.
-    seedTombstoneBinding(
-      'account-a', 'organization-a',
-      'catalog-entry-a', 'artifact-instance-a', 'version-a', '2.3.4',
-    )
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
     getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
       contractVersion: 1,
       productSpaceId: 'organization-a',
@@ -775,6 +803,7 @@ describe('local app main-process authorization boundary', () => {
       versionId: base.versionId,
       version: base.version,
       sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
     }])
 
     const driftCatalogs: Array<[string, Record<string, unknown>]> = [
@@ -812,6 +841,7 @@ describe('local app main-process authorization boundary', () => {
       versionId: base.versionId,
       version: base.version,
       sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
     }])
     await uninstall(context, base, { preserveData: true })
     expect(scopedRegistry.uninstall).toHaveBeenCalled()
@@ -823,6 +853,14 @@ describe('local app main-process authorization boundary', () => {
     // tombstone; the same stable entry + artifact is then REPUBLISHED at a
     // new version. Uninstalling the OLD tuple must fail closed as live
     // drift — registry and files are untouched.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-old',
+      version: '2.0.0',
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
     seedTombstoneBinding(
       'account-a', 'organization-a',
       'catalog-entry-a', 'artifact-instance-a', 'version-old', '2.0.0',
@@ -856,25 +894,37 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-instance-a',
       versionId: 'version-old',
       version: '2.0.0',
+      catalogRevision: 'revision-a',
     }, { preserveData: true })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
   })
 
-  it('covers each per-field drift (artifactInstanceId / versionId / version) as fail-closed live drift, missing-entry as tombstone-routable, and inactive space as NOT_AUTHORIZED', async () => {
+  it('covers each per-field drift (artifactInstanceId / versionId / version) as fail-closed live drift, and separates missing-entry routes', async () => {
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
     const base = productSpaceAppIdentity()
-    const currentEntry = {
-      kind: 'app' as const,
+    const currentEntry = (): Record<string, unknown> => ({
+      kind: 'app',
       catalogEntryId: base.catalogEntryId,
       artifactInstanceId: base.artifactInstanceId,
       version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
       name: 'ProductSpace App',
       description: '',
-      availability: 'available' as const,
-      sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+      availability: 'available',
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
       permissions: [],
-    }
+    })
+
+    // Trusted binding: base entry available (live path must match it).
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
+
     // Per-field drift: artifact / versionId / version each → DRIFT.
     for (const drifted of [
       { artifactInstanceId: 'artifact-drifted' },
@@ -885,18 +935,25 @@ describe('local app main-process authorization boundary', () => {
         contractVersion: 1,
         productSpaceId: 'organization-a',
         catalogRevision: 'rev-drift',
-        entries: [{ ...currentEntry, ...drifted }],
+        entries: [{ ...currentEntry(), ...drifted }],
       }))
+      const callsBefore = scopedRegistry.uninstall.mock.calls.length
       await expect(uninstall(context, base, { preserveData: true }))
         .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+      expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
     }
 
-    // Genuinely missing entry + tombstone evidence → tombstone cleanup.
-    seedTombstoneBinding(
-      base.accountId, base.productSpaceId,
-      base.catalogEntryId, base.artifactInstanceId, base.versionId, base.version,
-    )
-    getProductSpaceCatalog.mockImplementation(async () => ({
+    // Genuinely missing entry + trusted retained tombstone → cleanup.
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      tombstones: [{
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        versionId: base.versionId,
+        version: base.version,
+        withdrawnAt: 1,
+      }],
+    })
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
       contractVersion: 1,
       productSpaceId: 'organization-a',
       catalogRevision: 'rev-missing',
@@ -907,7 +964,7 @@ describe('local app main-process authorization boundary', () => {
 
     // Missing entry WITHOUT tombstone evidence → fail closed.
     const callsBefore = scopedRegistry.uninstall.mock.calls.length
-    getProductSpaceCatalog.mockImplementation(async () => ({
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
       contractVersion: 1,
       productSpaceId: 'organization-a',
       catalogRevision: 'rev-missing-2',
@@ -916,6 +973,7 @@ describe('local app main-process authorization boundary', () => {
     await expect(uninstall(context, {
       accountId: 'account-a',
       productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
       catalogEntryId: 'catalog-entry-never',
       artifactInstanceId: 'artifact-never',
       versionId: 'version-never',
@@ -937,11 +995,19 @@ describe('local app main-process authorization boundary', () => {
         accessMode: 'billing_restricted' as const,
       }],
     }))
-    seedTombstoneBinding()
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
     await expect(uninstall(context, base, { preserveData: true }))
       .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
-    listProductSpaces.mockImplementation(async () => ({
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listProductSpaces.mockImplementation(async (): Promise<any> => ({
       contractVersion: 1,
       defaultProductSpaceId: 'organization-a',
       productSpaces: [{
@@ -959,6 +1025,14 @@ describe('local app main-process authorization boundary', () => {
     // Even WITH retained-tombstone evidence, a fresh-fetch auth failure must
     // stay fail-closed: 401/403/network are never tombstone fallbacks.
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      versionId: 'version-w',
+      version: '2.0.0',
+      sources: [{ kind: 'enterprise_import', name: 'Organization W' }],
+      availability: 'available' as const,
+    }])
     seedTombstoneBinding()
     getProductSpaceCatalog.mockImplementation(async () => {
       throw Object.assign(new Error('session expired'), { errorCode: 'UNAUTHORIZED', status: 401 })
@@ -971,6 +1045,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-w',
       versionId: 'version-w',
       version: '2.0.0',
+      catalogRevision: 'revision-a',
     }, { preserveData: true })).rejects.toMatchObject({ errorCode: 'UNAUTHORIZED', status: 401 })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
@@ -978,6 +1053,14 @@ describe('local app main-process authorization boundary', () => {
 
   it('rejects fabricated withdrawn uninstall identities before the registry can run', async () => {
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
     // Fabricated SQL/XSS-shaped catalogEntryId on a REAL artifact instance —
     // the FULL tuple check rejects it before any registry call.
     await expect(uninstall(context, {
@@ -1090,6 +1173,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: `authority-artifact-${index}`,
       versionId: `authority-version-${index}`,
       version: '1.0.0',
+      catalogRevision: 'revision-a',
     }))
     const set = authorityTuplesByScope.get(authorityScopeKey('account-a', 'organization-a'))!
     for (const identity of identities) {
@@ -1199,6 +1283,7 @@ describe('local app main-process authorization boundary', () => {
         artifactInstanceId: `artifact-instance-${index}`,
         versionId: `version-${index}`,
         version: '2.3.4',
+        catalogRevision: 'revision-a',
       }))
       getProductSpaceCatalog.mockImplementation(async () => ({
         contractVersion: 1,
@@ -1256,6 +1341,7 @@ describe('local app main-process authorization boundary', () => {
         artifactInstanceId: `artifact-instance-${index}`,
         versionId: `version-${index}`,
         version: '2.3.4',
+        catalogRevision: 'revision-a',
       }))
       getProductSpaceCatalog.mockImplementation(async () => ({
         contractVersion: 1,
@@ -1396,7 +1482,7 @@ describe('local app main-process authorization boundary', () => {
     // work. Bounded assertion.
     releaseProvider()
     const lockAcquiredDuringBoot = await Promise.race([
-      withSwitchLock(async () => true),
+      runUnderSwitchMutex(async () => true),
       new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
     ])
     expect(lockAcquiredDuringBoot).toBe(true)

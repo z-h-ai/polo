@@ -328,6 +328,7 @@ function identityForProductSpaceApp(
   return {
     accountId: catalog.accountId,
     productSpaceId: catalog.organizationId,
+    catalogRevision: catalog.appConfigVersion,
     catalogEntryId: app.catalogEntryId,
     artifactInstanceId: app.artifactInstanceId,
     versionId: app.catalogVersion.versionId,
