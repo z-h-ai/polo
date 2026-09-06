@@ -417,5 +417,196 @@ describe('ProductSpace Catalog authority', () => {
       expect(() => revokeProductSpaceCatalogAuthority('account-x', 'space-x')).not.toThrow()
       expect(existsSync(authorityFile())).toBe(false)
     })
+
+    it('a fresh Catalog after a failed revoke never resurrects the denied identities as tombstones', () => {
+      seedScopes()
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+      // Scope denied: stale record invisible.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+
+      // A fresh verified Catalog containing ONLY a new entry must be built
+      // from "no previous authority": the old identity may NOT reappear as a
+      // withdrawn tombstone.
+      const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a',
+        'space-a',
+        'rev-fresh',
+        [entry({
+          catalogEntryId: 'entry-fresh',
+          artifactInstanceId: 'artifact-fresh',
+          version: { versionId: 'version-fresh', version: '2.0.0' },
+        })],
+      )
+      expect(tombstones).toEqual([])
+      const record = getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+      expect(record.tombstones).toEqual([])
+      expect(record.entries.map(e => e.catalogEntryId)).toEqual(['entry-fresh'])
+      // The old tuple is NOT trusted again; the fresh one is.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      expect(hasProductSpaceCatalogAuthorityTuple(
+        'account-a', 'space-a', 'entry-fresh', 'artifact-fresh', 'version-fresh', '2.0.0',
+      )).toBe(true)
+    })
+
+    it('a fresh Catalog write fault keeps the deny and propagates instead of clearing it', () => {
+      seedScopes()
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+
+      // The fresh record's OWN write fails: the error propagates and the
+      // scope stays denied (no early marker clear, no swallowed error).
+      const freshTmp = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(freshTmp)
+      try {
+        expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+          'account-a', 'space-a', 'rev-denied-fresh', [entry()],
+        )).toThrow()
+        expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      } finally {
+        rmSync(freshTmp, { recursive: true, force: true })
+      }
+
+      // Retry once the obstacle is gone: the fresh record persists durably
+      // and only THEN is the deny cleared.
+      const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a', 'space-a', 'rev-denied-fresh-2', [entry()],
+      )
+      expect(tombstones).toEqual([])
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    })
+
+    it('a fresh Catalog rename fault keeps the deny and propagates', () => {
+      seedScopes()
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+
+      // Target occupied by a directory: the fresh record's rename fails.
+      rmSync(authorityFile())
+      mkdirSync(authorityFile())
+      try {
+        expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+          'account-a', 'space-a', 'rev-rename-fault', [entry()],
+        )).toThrow()
+        expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      } finally {
+        rmSync(authorityFile(), { recursive: true, force: true })
+      }
+
+      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-after', [entry()])
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    })
+
+    it('the deny survives a REAL process restart and a fresh success recovers it (two independent processes)', () => {
+      seedScopes()
+      // Process 1 (this one): the revoke's write fails — the marker is
+      // persisted durably.
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+      // In-process: denied.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+
+      const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority.ts')
+      const probe = `
+        const { pathToFileURL } = await import('node:url')
+        const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+        const deniedTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0')
+        const otherTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')
+        // Fresh success IN THE RESTARTED PROCESS: built from no previous
+        // authority, clears the deny only after the durable write.
+        const tombstones = mod.recordProductSpaceCatalogAuthoritativeEntries(
+          'account-a', 'space-a', 'rev-restart-fresh',
+          [{ kind: 'app', catalogEntryId: 'entry-restarted', artifactInstanceId: 'artifact-restarted',
+             version: { versionId: 'version-restarted', version: '3.0.0' }, name: 'Restarted',
+             description: '', availability: 'available',
+             sources: [{ kind: 'enterprise_import', name: 'Studio R' }], permissions: [] }])
+        const freshTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-a', 'space-a', 'entry-restarted', 'artifact-restarted', 'version-restarted', '3.0.0')
+        const oldStillUntrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0')
+        console.log(JSON.stringify({ deniedTrusted, otherTrusted, tombstones: tombstones.length, freshTrusted, oldStillUntrusted }))
+      `
+      const restarted = Bun.spawnSync({
+        cmd: [process.execPath, '-e', probe],
+        cwd: join(import.meta.dir, '..', '..', '..'),
+        env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(restarted.exitCode).toBe(0)
+      const out = JSON.parse(restarted.stdout.toString().trim()) as {
+        deniedTrusted: boolean
+        otherTrusted: boolean
+        tombstones: number
+        freshTrusted: boolean
+        oldStillUntrusted: boolean
+      }
+      // Restarted process: the denied scope is STILL fail closed, other
+      // scopes unaffected, fresh success produced ZERO resurrected
+      // tombstones and trusted only the fresh identity.
+      expect(out.deniedTrusted).toBe(false)
+      expect(out.otherTrusted).toBe(true)
+      expect(out.tombstones).toBe(0)
+      expect(out.freshTrusted).toBe(true)
+      expect(out.oldStillUntrusted).toBe(false)
+
+      // Process 3 (another independent restart): the fresh record survives
+      // and the old identity stays gone.
+      const probe2 = `
+        const { pathToFileURL } = await import('node:url')
+        const fs = await import('node:fs')
+        const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+        const cfg = process.env.POLO_AI_CONFIG_DIR
+        console.log(JSON.stringify({
+          freshTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+            'account-a', 'space-a', 'entry-restarted', 'artifact-restarted', 'version-restarted', '3.0.0'),
+          oldUntrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+            'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0'),
+          tupleSet: Array.from(mod.loadProductSpaceCatalogAuthorityTupleSet('account-a', 'space-a')),
+          recordViaApi: mod.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a'),
+          rawParses: (() => { try { return Object.keys(JSON.parse(fs.readFileSync(cfg + '/product-space-catalog-authority.json', 'utf8')).records).length } catch (e) { return 'parse-error: ' + String(e).slice(0, 120) } })(),
+          deniedRaw: fs.existsSync(cfg + '/product-space-catalog-authority-denied.json') ? fs.readFileSync(cfg + '/product-space-catalog-authority-denied.json', 'utf8').slice(0, 300) : 'missing',
+          authorityRaw: fs.readFileSync(cfg + '/product-space-catalog-authority.json', 'utf8').slice(0, 260),
+          schemaVersion: mod.PRODUCT_SPACE_CATALOG_AUTHORITY_SCHEMA_VERSION,
+          cfgDir: cfg,
+        }))
+      `
+      const third = Bun.spawnSync({
+        cmd: [process.execPath, '-e', probe2],
+        cwd: join(import.meta.dir, '..', '..', '..'),
+        env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      console.log('PROBE2 rc', third.exitCode, 'stdout', third.stdout.toString().trim(), 'stderr', third.stderr.toString().slice(0, 400))
+      const finalState = JSON.parse(third.stdout.toString().trim()) as {
+        freshTrusted: boolean
+        oldUntrusted: boolean
+      }
+      expect(finalState.freshTrusted).toBe(true)
+      expect(finalState.oldUntrusted).toBe(false)
+    })
   })
 })

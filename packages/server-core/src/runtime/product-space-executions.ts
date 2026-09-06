@@ -484,32 +484,43 @@ export interface ExpectedRuntimeFenceScope {
 }
 
 /**
- * Catalog-denial fence revocation: compare-and-revoke in ONE switch-lock
- * critical section. The expected account+space+generation binding is
- * captured BEFORE the lock; inside the lock the live fence must still match
- * exactly. An in-flight A→B switch that re-commits the fence after the
- * observation therefore leaves the new B fence untouched. Awaits the lock —
- * the caller cannot observe its own error path before the fence state is
- * durably decided — and propagates lock/operation failures to the caller.
+ * Catalog-denial fence decision — MUST be called while HOLDING the switch
+ * lock. Compare-and-revoke in the caller's critical section: the expected
+ * account+space+generation binding is captured BEFORE the lock; the live
+ * fence must still match exactly. An in-flight A→B switch that re-commits
+ * the fence after the observation therefore leaves the new B fence
+ * untouched.
+ */
+export function revokeRuntimeProductSpaceFenceIfBoundLocked(
+  expected: ExpectedRuntimeFenceScope,
+): RuntimeFenceRevokeOutcome {
+  if (runtimeActiveProductSpaceId === null) return 'already_clear'
+  if (
+    runtimeActiveProductSpaceId !== expected.productSpaceId
+    || runtimeActiveAccountId !== expected.accountId
+  ) {
+    return 'scope_moved'
+  }
+  if (runtimeFenceGeneration !== expected.fenceGeneration) {
+    return 'generation_moved'
+  }
+  setRuntimeOfflineReadOnly(false)
+  setRuntimeActiveProductSpace(null)
+  return 'revoked'
+}
+
+/**
+ * Catalog-denial fence revocation: acquires the switch lock and delegates
+ * to the locked decision, so the compare and the revoke complete in ONE
+ * critical section. Awaits the lock — the caller cannot observe its own
+ * error path before the fence state is durably decided — and propagates
+ * lock/operation failures to the caller.
  */
 export async function revokeRuntimeProductSpaceFenceIfBound(
   expected: ExpectedRuntimeFenceScope,
 ): Promise<RuntimeFenceRevokeOutcome> {
-  return withSwitchLock(async (): Promise<RuntimeFenceRevokeOutcome> => {
-    if (runtimeActiveProductSpaceId === null) return 'already_clear'
-    if (
-      runtimeActiveProductSpaceId !== expected.productSpaceId
-      || runtimeActiveAccountId !== expected.accountId
-    ) {
-      return 'scope_moved'
-    }
-    if (runtimeFenceGeneration !== expected.fenceGeneration) {
-      return 'generation_moved'
-    }
-    setRuntimeOfflineReadOnly(false)
-    setRuntimeActiveProductSpace(null)
-    return 'revoked'
-  })
+  return withSwitchLock(async (): Promise<RuntimeFenceRevokeOutcome> =>
+    revokeRuntimeProductSpaceFenceIfBoundLocked(expected))
 }
 
 /**

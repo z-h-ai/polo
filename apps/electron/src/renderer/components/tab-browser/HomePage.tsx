@@ -117,6 +117,72 @@ export function createEnterpriseWorkflowUrl(
   return url.toString()
 }
 
+/**
+ * MODULE-LEVEL per-context quick-access writer registry. Every context key
+ * owns an INDEPENDENT single-writer queue, hydration gate and transaction
+ * baseline (intent/confirmed). The lifetime is bound to the CONTEXT, not to
+ * any HomePage mount:
+ *
+ * - a durable acknowledgement always advances its OWN context's baseline,
+ *   even while another context is displayed or the component is unmounted —
+ *   only the React UI update is gated by the current context + mount;
+ * - a hung save in context A never blocks context B (separate queues);
+ * - an immediate remount rejoins the SAME writer — no second racing queue;
+ * - queued mutations wait for the context's hydration gate, so they build
+ *   on the persisted collection instead of an empty intent;
+ * - a rejected save rolls the unconfirmed suffix of THAT context back to
+ *   its last acknowledgement.
+ *
+ * Cleanup: idle (busy===0) writers of non-active contexts are swept. Sweeping
+ * never loses pending durable writes, and a swept baseline is re-derived
+ * from the persisted store on the next activation via the hydration gate.
+ */
+interface HomeQuickContextWriter {
+  queue: Promise<void>
+  busy: number
+  gate: Promise<boolean>
+  resolveGate: (hydrated: boolean) => void
+  hydrated: boolean
+  intent: HomeQuickAccessApp[]
+  confirmed: HomeQuickAccessApp[]
+}
+
+const homeQuickWriters = new Map<string, HomeQuickContextWriter>()
+let activeHomeQuickContextKey: string | null = null
+
+function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
+  let writer = homeQuickWriters.get(contextKey)
+  if (!writer) {
+    let resolveGate!: (hydrated: boolean) => void
+    const gate = new Promise<boolean>(resolve => { resolveGate = resolve })
+    writer = {
+      queue: Promise.resolve(),
+      busy: 0,
+      gate,
+      resolveGate,
+      hydrated: false,
+      intent: [],
+      confirmed: [],
+    }
+    homeQuickWriters.set(contextKey, writer)
+  }
+  return writer
+}
+
+function sweepHomeQuickWriters(): void {
+  for (const [key, writer] of homeQuickWriters) {
+    if (key !== activeHomeQuickContextKey && writer.busy === 0) {
+      homeQuickWriters.delete(key)
+    }
+  }
+}
+
+/** Test-only: drop every writer (tests reset the persisted store too). */
+export function __resetHomeQuickWritersForTests(): void {
+  homeQuickWriters.clear()
+  activeHomeQuickContextKey = null
+}
+
 export function HomePage() {
   const { t } = useTranslation()
   const { openApp } = useTabShell()
@@ -125,30 +191,12 @@ export function HomePage() {
   const [view, setView] = useState<'home' | 'all-apps'>('home')
   const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
   /**
-   * Quick-access transaction state. `quickEntries` (display) commits only
-   * through the single-writer queue below; `quickIntentRef` is the
-   * synchronous base every mutation builds on, `quickConfirmedRef` the last
-   * persisted acknowledgement for precise suffix rollback.
+   * Display fence for hydration results: a load that started for context X
+   * must never display into context Y that was switched to afterwards. The
+   * TRANSACTION baseline it advances belongs to the per-context writer (see
+   * the module-level registry) and is context-scoped anyway.
    */
-  const quickIntentRef = useRef<HomeQuickAccessApp[]>([])
-  const quickConfirmedRef = useRef<HomeQuickAccessApp[]>([])
   const quickLoadGenerationRef = useRef(0)
-  const quickMutationGenerationRef = useRef(0)
-  /**
-   * SINGLE-WRITER serialization for every quick-access disk write (pin,
-   * manage toggle, prune). Tasks run strictly in enqueue order, so writes to
-   * one persisted slot can never land out of order — a slow earlier save
-   * completes before a later one STARTS. Context switches and unmount only
-   * gate DISPLAY of a result; they never cancel or reorder queued writes.
-   */
-  const quickWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
-  /**
-   * Hydration gate of the current context load: mutations enqueued before
-   * the persisted collection loaded wait for it, so they build on the
-   * stored entries instead of an empty intent (never wiping the stored
-   * collection with an unpersisted first click).
-   */
-  const quickHydrationGateRef = useRef<{ contextKey: string; gate: Promise<boolean> } | null>(null)
   const quickMountedRef = useRef(false)
   /**
    * The ProductSpace context the CURRENT entries were hydrated (or last
@@ -174,23 +222,15 @@ export function HomePage() {
   )
   const quickContextKeyRef = useRef(quickContextKey)
   quickContextKeyRef.current = quickContextKey
-  // Shared stale-write predicate for every quick-access write-back: a save
-  // may only commit state while the SAME context and mutation generation are
-  // still current.
-  const isCurrentQuickMutation = useCallback((contextKey: string, generation: number): boolean => (
-    quickContextKeyRef.current === contextKey
-    && quickMutationGenerationRef.current === generation
-  ), [])
-
   /**
    * THE quick-access transaction primitive (pin, manage toggle and prune
-   * all share it). Mutations are appended to the single-writer queue: each
-   * task awaits the context's hydration gate, applies its change to the
-   * synchronous intent, and persists IN ORDER. A successful save advances
-   * the confirmed snapshot (display only while the same context+generation
-   * is still current); a rejected save rolls the unconfirmed suffix back to
-   * the last acknowledgement. A superseded context or unmount only gates
-   * display — the in-order disk write is never cancelled or reordered.
+   * all share it). Mutations are appended to the CONTEXT'S OWN single-writer
+   * queue: each task awaits that context's hydration gate, applies its
+   * change to the context's synchronous intent, and persists IN ORDER. A
+   * successful save advances the context's durable baseline UNCONDITIONALLY —
+   * only the React UI update is gated by the current context + mount — and a
+   * rejected save rolls that context's unconfirmed suffix back to its last
+   * acknowledgement. A hung save in one context never blocks another.
    */
   const enqueueQuickMutation = useCallback((
     contextKey: string,
@@ -199,46 +239,45 @@ export function HomePage() {
       rejected?: boolean
     },
   ): void => {
-    const task = quickWriteQueueRef.current
+    const writer = getHomeQuickWriter(contextKey)
+    writer.busy += 1
+    const task = writer.queue
       .catch(() => {})
       .then(async () => {
-        const hydration = quickHydrationGateRef.current
-        if (hydration && hydration.contextKey === contextKey) {
-          const hydrated = await hydration.gate
-          if (!hydrated) return
-        }
-        const { next, rejected } = apply(quickIntentRef.current)
+        const hydrated = await writer.gate
+        if (!hydrated) return
+        const { next, rejected } = apply(writer.intent)
         if (rejected || next === null) return
-        const generation = ++quickMutationGenerationRef.current
         const saved = await saveHomeQuickAccess(contextKey, next)
-        // Display gate only: a superseded context/generation never shows
-        // this result, but its disk write already happened in queue order.
-        if (
-          quickMountedRef.current
-          && isCurrentQuickMutation(contextKey, generation)
-        ) {
-          quickHydratedContextRef.current = contextKey
-          quickIntentRef.current = saved
-          quickConfirmedRef.current = saved
-          setQuickEntries(saved)
-        }
-      })
-      .catch(() => {
-        // Save rejected: roll the unconfirmed suffix back to the last
-        // persisted acknowledgement. The disk keeps its last in-order
-        // write; the display rolls back only in the SAME context.
-        if (quickContextKeyRef.current === contextKey) {
-          quickIntentRef.current = quickConfirmedRef.current
-        }
+        // Durable baseline: advances for THIS context regardless of which
+        // context is displayed or whether the component is mounted.
+        writer.intent = saved
+        writer.confirmed = saved
         if (
           quickMountedRef.current
           && quickContextKeyRef.current === contextKey
         ) {
-          setQuickEntries(quickConfirmedRef.current)
+          quickHydratedContextRef.current = contextKey
+          setQuickEntries(saved)
         }
       })
-    quickWriteQueueRef.current = task
-  }, [isCurrentQuickMutation])
+      .catch(() => {
+        // Save rejected: roll THIS context's unconfirmed suffix back to its
+        // last persisted acknowledgement. Display rolls back only while this
+        // context is the displayed one.
+        writer.intent = writer.confirmed
+        if (
+          quickMountedRef.current
+          && quickContextKeyRef.current === contextKey
+        ) {
+          setQuickEntries(writer.confirmed)
+        }
+      })
+      .finally(() => {
+        writer.busy -= 1
+      })
+    writer.queue = task
+  }, [])
   // UI selection + quick-entry persistence use the collision-free stable
   // artifact identity key (account + space + entry + artifact instance), NOT
   // the runtime scope: a catalogEntryId reused across artifact instances
@@ -277,48 +316,64 @@ export function HomePage() {
 
   useEffect(() => {
     // Fail-closed across space transitions: a ProductSpace identity change
-    // resets the home view and closes in-place dialogs. The switch also
-    // advances the mutation fence, so a still-in-flight save from the
-    // previous context can never DISPLAY its entries into this context (its
-    // disk write keeps its in-queue order — it is never reordered).
+    // resets the home view and closes in-place dialogs. The DISPLAY is
+    // switched to the new context; the OLD context's writer keeps owning its
+    // in-flight writes and advances its own baseline independently.
     const contextKey = quickContextKey
     const generation = ++quickLoadGenerationRef.current
-    quickMutationGenerationRef.current += 1
-    const mutationGeneration = quickMutationGenerationRef.current
+    activeHomeQuickContextKey = contextKey
+    const writer = getHomeQuickWriter(contextKey)
     quickHydratedContextRef.current = null
-    quickIntentRef.current = []
-    quickConfirmedRef.current = []
-    let resolveGate!: (hydrated: boolean) => void
-    const gate = new Promise<boolean>(resolve => { resolveGate = resolve })
-    quickHydrationGateRef.current = { contextKey, gate }
     setView('home')
     setManageOpen(false)
     setQuickEntries([])
+    if (writer.hydrated) {
+      // Same-context remount or A→B→A: the SHARED writer already holds the
+      // transaction baseline — display it without a second racing queue.
+      setQuickEntries(writer.confirmed)
+      quickHydratedContextRef.current = contextKey
+      sweepHomeQuickWriters()
+      return
+    }
+    // Fresh activation: install a NEW hydration gate for this attempt (a
+    // previously failed attempt's gate must not poison it) and load.
+    let resolveGate!: (hydrated: boolean) => void
+    writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
+    writer.resolveGate = resolveGate
     void loadHomeQuickAccess(contextKey)
       .then(entries => {
-        // Apply only while BOTH the context key and the load/mutation
-        // generations still match: quick-access slots may never move
-        // backwards after a user change, and a stale context's hydration
-        // result may never enter the current context's view.
+        // The baseline ALWAYS advances for this context; only the display is
+        // fenced against a context switch that happened during the load.
+        writer.intent = entries
+        writer.confirmed = entries
+        writer.hydrated = true
+        writer.resolveGate(true)
         if (
-          !isCurrentQuickMutation(contextKey, mutationGeneration)
-          || quickLoadGenerationRef.current !== generation
+          quickMountedRef.current
+          && quickContextKeyRef.current === contextKey
+          && quickLoadGenerationRef.current === generation
         ) {
-          resolveGate(false)
-          return
+          quickHydratedContextRef.current = contextKey
+          setQuickEntries(entries)
         }
-        quickHydratedContextRef.current = contextKey
-        quickIntentRef.current = entries
-        quickConfirmedRef.current = entries
-        setQuickEntries(entries)
-        resolveGate(true)
       })
       .catch(() => {
         // Quick access is non-critical; keep the section usable. Queued
-        // mutations for this context fail closed on the gate.
-        resolveGate(false)
+        // mutations for this context fail closed on the gate (a later
+        // activation installs a fresh gate and retries the load).
+        writer.resolveGate(false)
       })
-  }, [isCurrentQuickMutation, quickContextKey])
+    sweepHomeQuickWriters()
+  }, [quickContextKey])
+
+  useEffect(() => {
+    quickMountedRef.current = true
+    return () => {
+      quickMountedRef.current = false
+      activeHomeQuickContextKey = null
+      sweepHomeQuickWriters()
+    }
+  }, [])
 
   useEffect(() => {
     quickMountedRef.current = true

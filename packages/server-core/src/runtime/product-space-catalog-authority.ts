@@ -102,19 +102,154 @@ interface ProductSpaceCatalogAuthorityFile {
 let processCache: ProductSpaceCatalogAuthorityFile | null = null
 
 /**
- * Precise-scope deny markers from FAILED durable revocations. A revoke whose
- * write/rename failed must still fail CLOSED for exactly that (account,
- * ProductSpace) scope in this process — the stale on-disk record can never
- * be trusted again — while other scopes keep their records and a later
- * revoke retries the durable deletion. Markers survive cache resets/reloads
- * and are cleared only by a successful durable revoke or a fresh verified
- * Catalog for the same scope.
+ * Precise-scope DENY markers from FAILED durable revocations. A revoke whose
+ * write/rename failed must fail CLOSED for exactly that (account,
+ * ProductSpace) scope — the stale on-disk record can never be trusted again
+ * — while other scopes keep their records and a later revoke retries the
+ * durable deletion.
+ *
+ * The markers are DURABLE state in their own file (never a "trusted empty
+ * Catalog" record): they survive process restarts and cache reloads, and a
+ * fresh verified Catalog clears a marker only AFTER the fresh authority
+ * itself is safely persisted. A marker exists exactly when the on-disk
+ * authority for that scope must read as denied.
  */
+interface DeniedAuthorityMarker {
+  accountId: string
+  productSpaceId: string
+  deniedAt: number
+}
+
+interface DeniedAuthorityMarkerFile {
+  schemaVersion: number
+  denied: Record<string, DeniedAuthorityMarker>
+}
+
+const DENIED_MARKER_SCHEMA_VERSION = 1
+
+let deniedMarkerCache: DeniedAuthorityMarkerFile | null = null
+/** In-memory view; always kept in sync with the durable marker file. */
 const deniedAuthorityScopes = new Set<string>()
+
+function deniedMarkerPath(): string {
+  const configDir = process.env.POLO_AI_CONFIG_DIR || CONFIG_DIR
+  return join(configDir, 'product-space-catalog-authority-denied.json')
+}
+
+function emptyDeniedMarkerFile(): DeniedAuthorityMarkerFile {
+  return { schemaVersion: DENIED_MARKER_SCHEMA_VERSION, denied: {} }
+}
+
+function sanitizeDeniedMarkerFile(parsed: unknown): DeniedAuthorityMarkerFile | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const candidate = parsed as Record<string, unknown>
+  if (candidate.schemaVersion !== DENIED_MARKER_SCHEMA_VERSION) return null
+  if (!candidate.denied || typeof candidate.denied !== 'object') return null
+  const sanitized = emptyDeniedMarkerFile()
+  for (const [key, value] of Object.entries(candidate.denied as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue
+    const marker = value as Record<string, unknown>
+    if (typeof marker.accountId !== 'string' || !marker.accountId) continue
+    if (typeof marker.productSpaceId !== 'string' || !marker.productSpaceId) continue
+    if (typeof marker.deniedAt !== 'number') continue
+    // Key binding: a marker stored under a foreign scope key is dropped.
+    if (productSpaceCatalogAuthorityKey(marker.accountId, marker.productSpaceId) !== key) continue
+    sanitized.denied[key] = {
+      accountId: marker.accountId,
+      productSpaceId: marker.productSpaceId,
+      deniedAt: marker.deniedAt,
+    }
+  }
+  return sanitized
+}
+
+function loadDeniedMarkers(): DeniedAuthorityMarkerFile {
+  if (deniedMarkerCache) return deniedMarkerCache
+  try {
+    if (existsSync(deniedMarkerPath())) {
+      const parsed = JSON.parse(readFileSync(deniedMarkerPath(), 'utf8'))
+      const sanitized = sanitizeDeniedMarkerFile(parsed)
+      if (sanitized) {
+        deniedMarkerCache = sanitized
+        return deniedMarkerCache
+      }
+    }
+  } catch {
+    // A damaged marker file cannot be silently trusted-away: fall through to
+    // the empty view (the authority record itself remains the truth for
+    // scopes without an in-memory marker from this process lifetime).
+  }
+  deniedMarkerCache = emptyDeniedMarkerFile()
+  return deniedMarkerCache
+}
+
+function persistDeniedMarkers(file: DeniedAuthorityMarkerFile): void {
+  const path = deniedMarkerPath()
+  mkdirSync(dirname(path), { recursive: true })
+  const tempPath = `${path}.${process.pid}.tmp`
+  writeFileSync(tempPath, JSON.stringify(file), 'utf8')
+  renameSync(tempPath, path)
+}
+
+/**
+ * Durably records a deny marker for one scope (after a failed authority
+ * revoke) and mirrors it into the in-memory set. Throws when the marker
+ * itself cannot be persisted — the caller's original failure is then
+ * reported with the marker durability problem still outstanding, and the
+ * in-memory marker keeps THIS process fail-closed.
+ */
+function denyScopeDurably(scopeKey: string, marker: DeniedAuthorityMarker): void {
+  deniedAuthorityScopes.add(scopeKey)
+  const file = loadDeniedMarkers()
+  if (file.denied[scopeKey]) return
+  const records: DeniedAuthorityMarkerFile['denied'] = {}
+  for (const [existingKey, existing] of Object.entries(file.denied)) {
+    records[existingKey] = existing
+  }
+  records[scopeKey] = marker
+  const next: DeniedAuthorityMarkerFile = {
+    schemaVersion: DENIED_MARKER_SCHEMA_VERSION,
+    denied: records,
+  }
+  persistDeniedMarkers(next)
+  deniedMarkerCache = next
+}
+
+/**
+ * Durably removes one scope's deny marker. Only called AFTER the replacing
+ * truth (a successful durable revoke, or a fresh verified authority) is
+ * already safely on disk. Throws when the marker removal cannot be
+ * persisted — the in-memory marker stays so this process keeps failing
+ * closed until a retry lands.
+ */
+function clearDeniedScopeDurably(scopeKey: string): void {
+  const file = loadDeniedMarkers()
+  if (!file.denied[scopeKey]) {
+    deniedAuthorityScopes.delete(scopeKey)
+    return
+  }
+  const records: DeniedAuthorityMarkerFile['denied'] = {}
+  for (const [existingKey, existing] of Object.entries(file.denied)) {
+    if (existingKey !== scopeKey) records[existingKey] = existing
+  }
+  const next: DeniedAuthorityMarkerFile = {
+    schemaVersion: DENIED_MARKER_SCHEMA_VERSION,
+    denied: records,
+  }
+  persistDeniedMarkers(next)
+  deniedMarkerCache = next
+  deniedAuthorityScopes.delete(scopeKey)
+}
 
 function authorityPath(): string {
   const configDir = process.env.POLO_AI_CONFIG_DIR || CONFIG_DIR
   return join(configDir, 'product-space-catalog-authority.json')
+}
+
+/** True when the scope carries a deny marker (durable or in-process). */
+function isScopeDenied(scopeKey: string): boolean {
+  if (deniedAuthorityScopes.has(scopeKey)) return true
+  return Boolean(loadDeniedMarkers().denied[scopeKey])
 }
 
 export function productSpaceCatalogAuthorityKey(
@@ -312,7 +447,11 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
 ): ProductSpaceCatalogAuthorityEntry[] {
   const file = loadFile()
   const key = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
-  const previous = file.records[key] ?? null
+  // A denied scope has NO trustworthy previous authority: the stale record
+  // behind the deny marker must never seed withdrawn tombstones — the fresh
+  // Catalog alone defines the scope's truth.
+  const denied = isScopeDenied(key)
+  const previous = denied ? null : file.records[key] ?? null
 
   const freshEntries: ProductSpaceCatalogAuthorityEntry[] = []
   const freshKeys = new Set<string>()
@@ -348,9 +487,29 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
   }
   recordEntries(record, freshEntries)
   file.records[key] = record
-  // A fresh verified Catalog for this scope re-establishes trust: any
-  // failed-revocation deny marker is obsolete.
-  deniedAuthorityScopes.delete(key)
+  if (denied) {
+    // Recovery path: persist the fresh authority FIRST (errors propagate —
+    // never swallow), and only clear the deny marker once the fresh record
+    // is safely on disk. Until then the scope stays denied everywhere.
+    const records: ProductSpaceCatalogAuthorityFile['records'] = Object.create(null)
+    for (const [existingKey, existing] of Object.entries(file.records)) {
+      records[existingKey] = existing
+    }
+    try {
+      persistFileAtomic({ schemaVersion: AUTHORITY_SCHEMA_VERSION, records })
+    } catch (error) {
+      deniedAuthorityScopes.add(key)
+      throw error
+    }
+    processCache = { schemaVersion: AUTHORITY_SCHEMA_VERSION, records }
+    try {
+      clearDeniedScopeDurably(key)
+    } catch (error) {
+      deniedAuthorityScopes.add(key)
+      throw error
+    }
+    return tombstones
+  }
   saveFile(file)
   return tombstones
 }
@@ -381,10 +540,10 @@ export function loadProductSpaceCatalogAuthorityTupleSet(
   productSpaceId: string,
 ): Set<string> {
   const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
-  // A scope with a pending failed-revocation marker is denied in-process:
-  // its tuples fail closed even though the stale record may still sit on
-  // disk (or reload from it).
-  if (deniedAuthorityScopes.has(scopeKey)) return new Set()
+  // A scope with a pending failed-revocation marker is denied: its tuples
+  // fail closed even though the stale record may still sit on disk (or
+  // reload from it) — across cache reloads AND process restarts.
+  if (isScopeDenied(scopeKey)) return new Set()
   const record = loadFile().records[scopeKey] ?? null
   const tuples = new Set<string>()
   if (!record) return tuples
@@ -430,7 +589,7 @@ export function getProductSpaceCatalogAuthorityRecord(
   productSpaceId: string,
 ): ProductSpaceCatalogAuthorityRecord | null {
   const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
-  if (deniedAuthorityScopes.has(scopeKey)) return null
+  if (isScopeDenied(scopeKey)) return null
   return loadFile().records[scopeKey] ?? null
 }
 
@@ -455,9 +614,10 @@ export function revokeProductSpaceCatalogAuthority(
   const key = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
   const file = loadFile()
   if (!(key in file.records)) {
-    // Nothing recorded — but a marker from an earlier failed revoke means
-    // the durable deletion must still be retried.
-    if (!deniedAuthorityScopes.has(key)) return
+    // Nothing recorded — but a marker from an earlier failed revoke (this
+    // process or a previous one) means the durable deletion + marker removal
+    // must still be retried.
+    if (!isScopeDenied(key)) return
   }
   const records: ProductSpaceCatalogAuthorityFile['records'] = Object.create(null)
   for (const [recordKey, record] of Object.entries(file.records)) {
@@ -470,13 +630,21 @@ export function revokeProductSpaceCatalogAuthority(
   try {
     persistFileAtomic(next)
   } catch (error) {
-    deniedAuthorityScopes.add(key)
+    // The stale on-disk record survived: fail the scope closed durably and
+    // propagate — the caller must never treat this revoke as done.
+    try {
+      denyScopeDurably(key, { accountId, productSpaceId, deniedAt: Date.now() })
+    } catch {
+      // The marker could not be persisted either; the in-memory marker set
+      // by denyScopeDurably still fails THIS process closed.
+    }
     throw error
   }
-  // The durable write succeeded: commit the normal cache and clear any
-  // stale marker for this scope.
+  // The authority deletion is durable: commit the normal cache, then remove
+  // the deny marker durably (the marker-clear failure propagates so the
+  // caller knows the scope is not yet clean across restarts).
   processCache = next
-  deniedAuthorityScopes.delete(key)
+  clearDeniedScopeDurably(key)
 }
 
 /**
@@ -491,9 +659,15 @@ export function __dropAuthorityProcessCacheForTests(): void {
 
 export function resetProductSpaceCatalogAuthorityForTests(): void {
   processCache = null
+  deniedMarkerCache = null
   deniedAuthorityScopes.clear()
   try {
     if (existsSync(authorityPath())) unlinkSync(authorityPath())
+  } catch {
+    // Best-effort test cleanup.
+  }
+  try {
+    if (existsSync(deniedMarkerPath())) unlinkSync(deniedMarkerPath())
   } catch {
     // Best-effort test cleanup.
   }

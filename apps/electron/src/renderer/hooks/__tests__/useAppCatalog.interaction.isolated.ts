@@ -1493,16 +1493,160 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
     react.cleanup()
   })
 
-  it('the same entry+artifact under another account/space yields a different production identity', async () => {
-    const entries = [rawEntry()]
-    const spaceA = await mountCatalog(entries, 'organization-a', 'account-a')
-    const spaceB = await mountCatalog(entries, 'organization-b', 'account-b')
-    const appA: CatalogApp = spaceA.current.state.catalog!.apps[0]
-    const appB: CatalogApp = spaceB.current.state.catalog!.apps[0]
-    expect(appA.catalogEntryId).toBe(appB.catalogEntryId)
-    expect(appA.artifactInstanceId).toBe(appB.artifactInstanceId)
-    expect(spaceA.current.uiIdentityKeyForApp(appA))
-      .not.toBe(spaceB.current.uiIdentityKeyForApp(appB))
-    cleanup()
+  it('both account/space contexts render from raw payloads and drive pin/open/uninstall with complete targets', async () => {
+    const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+
+    // BOTH collision directions live in EVERY context, with install states
+    // bound to that context's account+space.
+    const rawEntries = [
+      rawEntry({
+        catalogEntryId: 'entry-s1',
+        name: 'Shared S1',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-s2',
+        name: 'Shared S2',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-old',
+        name: 'Dup Old',
+        version: { versionId: 'version-old', version: '1.0.0' },
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-new',
+        name: 'Dup New',
+        version: { versionId: 'version-new', version: '2.0.0' },
+      }),
+    ]
+
+    for (const scope of [
+      { accountId: 'account-a', productSpaceId: 'organization-a' },
+      { accountId: 'account-b', productSpaceId: 'organization-b' },
+    ]) {
+      const result = await mountCatalog(rawEntries, scope.productSpaceId, scope.accountId)
+      const apps: CatalogApp[] = result.current.state.catalog!.apps
+      expect(apps).toHaveLength(4)
+      // Production keys from the REAL hook are context-bound.
+      const keys = apps.map(app => result.current.uiIdentityKeyForApp(app))
+      expect(new Set(keys).size).toBe(4)
+
+      const onPin = jest.fn()
+      const onOpen = jest.fn()
+      const onUninstall = jest.fn()
+      react.render(createElement(
+        I18nextProvider,
+        { i18n },
+        createElement(AllAppsView, {
+          spaceName: scope.productSpaceId,
+          spaceKind: 'enterprise',
+          apps,
+          loading: false,
+          refreshing: false,
+          warningCode: null,
+          errorCode: null,
+          offline: false,
+          restricted: false,
+          circleCount: 0,
+          pinnedIds: new Set<string>(),
+          onPin,
+          getInstallState: (target: CatalogApp) => target.artifactInstanceId === 'artifact-old'
+            || target.artifactInstanceId === 'artifact-new'
+            ? {
+              app: {
+                accountId: scope.accountId,
+                productSpaceId: scope.productSpaceId,
+                catalogEntryId: target.catalogEntryId!,
+                artifactInstanceId: target.artifactInstanceId!,
+                versionId: target.catalogVersion!.versionId,
+                version: target.catalogVersion!.version,
+              },
+              state: 'installed' as const,
+              currentVersion: target.catalogVersion!.version,
+            }
+            : undefined,
+          identityKeyForApp: result.current.uiIdentityKeyForApp,
+          onRefresh: () => {},
+          onOpen,
+          onUninstall,
+          onBack: () => {},
+        }),
+      ))
+
+      // Pin: every row pinnable through its own production key, target carries
+      // the COMPLETE identity.
+      for (const key of keys) {
+        react.fireEvent.click(react.screen.getByTestId(`all-apps-pin-${key}`))
+      }
+      expect(onPin).toHaveBeenCalledTimes(4)
+      for (const call of onPin.mock.calls) {
+        const app = call[0] as CatalogApp
+        expect(app.organizationId).toBe(scope.productSpaceId)
+        expect(app.catalogEntryId).toBeTruthy()
+        expect(app.artifactInstanceId).toBeTruthy()
+        expect(app.catalogVersion?.versionId).toBeTruthy()
+        expect(app.catalogVersion?.version).toBeTruthy()
+      }
+      expect(new Set(onPin.mock.calls.map((call: any[]) => {
+        const app = call[0] as CatalogApp
+        return `${app.catalogEntryId}:${app.artifactInstanceId}`
+      })).size).toBe(4)
+
+      // Open: each row's action targets exactly its own identity.
+      for (const app of apps) {
+        react.fireEvent.click(react.screen.getByTestId(
+          `all-apps-action-${result.current.uiIdentityKeyForApp(app)}`,
+        ))
+      }
+      expect(onOpen).toHaveBeenCalledTimes(4)
+      const opened = onOpen.mock.calls.map((call: any[]) => {
+        const app = call[0] as CatalogApp
+        return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+      }).sort()
+      expect(opened).toEqual([
+        'entry-dup:artifact-new:2.0.0',
+        'entry-dup:artifact-old:1.0.0',
+        'entry-s1:artifact-live:1.0.0',
+        'entry-s2:artifact-live:1.0.0',
+      ])
+
+      // Uninstall: BOTH collision directions are installed in this context,
+      // each uninstall targeting its complete distinct identity.
+      const uninstallButtons = react.screen.getAllByTestId(/^all-apps-uninstall-/)
+      expect(uninstallButtons).toHaveLength(2)
+      react.fireEvent.click(uninstallButtons[0]!)
+      react.fireEvent.click(uninstallButtons[1]!)
+      expect(onUninstall).toHaveBeenCalledTimes(2)
+      const uninstalled = onUninstall.mock.calls.map((call: any[]) => {
+        const app = call[0] as CatalogApp
+        return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+      }).sort()
+      expect(uninstalled).toEqual([
+        'entry-dup:artifact-new:2.0.0',
+        'entry-dup:artifact-old:1.0.0',
+      ])
+      // The context binding of the install states is the rendering scope.
+      const installedArtifacts = apps
+        .filter(app => app.artifactInstanceId === 'artifact-old'
+          || app.artifactInstanceId === 'artifact-new')
+        .map(app => result.current.uiIdentityKeyForApp(app))
+      expect(new Set(installedArtifacts).size).toBe(2)
+
+      react.cleanup()
+      cleanup()
+      // The two contexts' production keys never collide with each other.
+      if (scope.accountId === 'account-a') {
+        (globalThis as Record<string, unknown>).__spaceAKeys = keys
+      } else {
+        const spaceAKeys = (globalThis as Record<string, unknown>).__spaceAKeys as string[]
+        for (const key of keys) {
+          expect(spaceAKeys).not.toContain(key)
+        }
+      }
+    }
   })
 })

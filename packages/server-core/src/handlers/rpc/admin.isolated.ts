@@ -1405,6 +1405,59 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(getRuntimeActiveProductSpace()).toBeNull()
   })
 
+  it('a denial parked behind the switch lock re-checks latest at DECISION time (R2 registers+commits meanwhile)', async () => {
+    const { withSwitchLock } = await import('../../runtime/product-space-executions')
+    let releaseHolder: (() => void) | undefined
+    void withSwitchLock(async () => {
+      await new Promise<void>(resolve => { releaseHolder = resolve })
+    })
+
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    let catalogCalls = 0
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      catalogCalls += 1
+      if (catalogCalls === 1) {
+        throw new TestAdminError('denied', 'FORBIDDEN', { status: 403 })
+      }
+      return {
+        contractVersion: 1,
+        productSpaceId: 'space-a',
+        catalogRevision: 'rev-2',
+        entries: [authorityTestEntry('rev-2')],
+      }
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    // R1 denies and its revocation decision QUEUES on the held switch lock.
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseHolder !== undefined)
+    // Let R1's denial queue onto the held switch lock.
+    await new Promise(resolve => setTimeout(resolve, 60))
+
+    // While R1 is parked: R2 registers (newer invocation), fetches, and its
+    // commit zone queues BEHIND R1's queued decision.
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    // Release the holder: R1's decision runs FIRST and must see R2's newer
+    // registration at decision time.
+    releaseHolder!()
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+    // Zero state writes from the stale denial.
+    expect(authorityRevokeCalls).toEqual([])
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+
+    // R2 then commits the fresh authority.
+    const r2 = await pendingR2 as any
+    expect(r2.success).toBe(true)
+    expect(authorityRecordCalls.some(call => call.catalogRevision === 'rev-2')).toBe(true)
+  })
+
   it('keeps a different space runtime fence when another space is denied', async () => {
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1571,6 +1624,37 @@ describe('ProductSpace resolve-launch catalog-scope denial', () => {
     expect(managerState.tokens).not.toBeNull()
     // ...and by the time the response returns, the fail-closed revocation
     // has ALREADY completed (awaited, not fire-and-forget).
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+  })
+
+  it('a remote list WITHOUT the requested space is an authoritative denial: revoke + keep session', async () => {
+    // The server ANSWERED, but this space does not exist for the member.
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-other', accessMode: 'active' }],
+    })
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const response = await resolveLaunch(context, 'space-a', 'entry-1') as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('FORBIDDEN')
+    expect(managerState.tokens).not.toBeNull()
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+  })
+
+  it('an INACTIVE requested space is an authoritative denial: revoke + keep session', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'suspended' }],
+    })
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const response = await resolveLaunch(context, 'space-a', 'entry-1') as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('FORBIDDEN')
+    expect(managerState.tokens).not.toBeNull()
     expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
     expect(getRuntimeActiveProductSpace()).toBeNull()
   })

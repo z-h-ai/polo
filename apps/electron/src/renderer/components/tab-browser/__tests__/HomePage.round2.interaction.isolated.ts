@@ -115,7 +115,7 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { formatBytes, HomePage, selectAllAppsForDisplay } = await import('../HomePage')
+const { formatBytes, HomePage, selectAllAppsForDisplay, __resetHomeQuickWritersForTests } = await import('../HomePage')
 const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
   catalogStateMessage,
@@ -131,6 +131,7 @@ beforeEach(async () => {
   appCatalogHook = signedOutCatalogHook()
   installedApps = [...BUILTIN_APP_DEFINITIONS]
   quickAccessByContext.clear()
+  __resetHomeQuickWritersForTests()
   getHomeQuickAccess.mockClear()
   getHomeQuickAccess.mockImplementation(defaultGetHomeQuickAccess)
   setHomeQuickAccess.mockClear()
@@ -1230,10 +1231,13 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
 
-    // REAL remount: still empty.
+    // REAL remount: the SHARED per-context writer is reused (no second
+    // racing queue, no re-read) — still empty.
     view.unmount()
     renderHome()
-    await waitForNextScopeLoad(1, contextKeyA)
+    await waitFor(() => {
+      expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    })
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
 
     // A→B→A: switch to another context and back — nothing is invented.
@@ -1246,14 +1250,16 @@ describe('HomePage quick access (POO-43)', () => {
     }`
     appCatalogHook = hookWithCatalog(catalogB)
     viewRerender()
-    await waitForNextScopeLoad(2, contextKeyB)
+    await waitForNextScopeLoad(1, contextKeyB)
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
 
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
     viewRerender()
-    await waitForNextScopeLoad(3, contextKeyA)
+    // Returning to A reuses A's shared writer (no reload) — still empty.
+    await waitFor(() => {
+      expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    })
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   })
 
   it('pins same-artifact different-entry and same-entry different-artifact identities as distinct slots', async () => {
@@ -1539,11 +1545,10 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
 
-    // REAL remount on A: the persisted pin appears.
+    // Return to A: the SHARED writer already advanced its baseline with the
+    // late ack — A's pin shows without any re-read.
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const loadsBeforeA = loadCallCount()
     viewRerender()
-    await waitForNextScopeLoad(loadsBeforeA, contextKeyA)
     await waitFor(() => {
       expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
     })
@@ -1576,13 +1581,96 @@ describe('HomePage quick access (POO-43)', () => {
     })
     expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyA])
 
-    // REAL remount reads the persisted pin back.
-    const loadsBeforeRemount = loadCallCount()
+    // REAL remount rejoins the SHARED writer (its baseline advanced with the
+    // late ack even though the component was unmounted) — the pin shows.
     renderHome()
-    await waitForNextScopeLoad(loadsBeforeRemount, contextKey)
     await waitFor(() => {
       expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
     })
+  })
+
+  it('A/S1+A/S2 across A→B→A with B completing independently (per-context writers)', async () => {
+    const appA1 = pinnedApp('pc-app-a1', 'pc-entry-a1', 'pc-artifact-a1', 'PerContext A1')
+    const appA2 = pinnedApp('pc-app-a2', 'pc-entry-a2', 'pc-artifact-a2', 'PerContext A2')
+    const appB = pinnedApp('pc-app-b', 'pc-entry-b', 'pc-artifact-b', 'PerContext B')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA1, appA2]))
+    const contextKeyA = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA1 = appCatalogHook.uiIdentityKeyForApp(appA1)
+    const keyA2 = appCatalogHook.uiIdentityKeyForApp(appA2)
+    const tasks = installDeferredSave()
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    // A/S1 fires; A/S2 queues behind it on A's OWN writer.
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA1}`))
+    await waitForSaveCalls(1)
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA2}`))
+    expect(tasks).toHaveLength(1)
+
+    // Switch to B while both A writes are outstanding.
+    const contextKeyB = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-b')
+    }`
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(
+      [pinnedApp('pc-app-b', 'pc-entry-b', 'pc-artifact-b', 'PerContext B')],
+      { organizationId: 'organization-b' },
+    ))
+    viewRerender()
+    await waitForNextScopeLoad(0, contextKeyB)
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+
+    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
+    // B pins and COMPLETES while A/S1 is still hung: B is never blocked by A.
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(
+      `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(appB)}`,
+    ))
+    await waitForSaveCalls(2)
+    expect(tasks[1]?.key).toBe(contextKeyB)
+    tasks[1]!.resolve()
+    // Back on B's home: the acked B pin displays.
+    fireEvent.click(screen.getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyB)
+    })
+
+    // A/S1 acks while B is DISPLAYED: A's durable baseline advances, B's
+    // view is untouched.
+    tasks[0]!.resolve()
+    await waitFor(() => (quickAccessByContext.get(contextKeyA)?.length === 1 ? true : undefined))
+    expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(
+      appCatalogHook.uiIdentityKeyForApp(appB),
+    )
+
+    // A/S2 starts from S1's ACKED base (never B's intent) and its payload
+    // targets A's slot only.
+    await waitForSaveCalls(3)
+    expect(tasks[2]?.key).toBe(contextKeyA)
+    expect((tasks[2]?.apps as Array<{ id: string }>).map(entry => entry.id)).toEqual([keyA1, keyA2])
+    tasks[2]!.resolve()
+    await waitFor(() => (quickAccessByContext.get(contextKeyA)?.length === 2 ? true : undefined))
+
+    // A→B→A: the shared writer's advanced baseline displays both A pins.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA1, appA2]))
+    viewRerender()
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-quick-entry')
+      if (cards.length !== 2) throw new Error('A cards pending')
+      const identities = cards.map(card => card.getAttribute('data-identity-key'))
+      expect(new Set(identities)).toEqual(new Set([keyA1, keyA2]))
+    })
+    expect(quickAccessByContext.get(contextKeyA)?.map((entry: { id: string }) => entry.id))
+      .toEqual([keyA1, keyA2])
+    expect(quickAccessByContext.get(contextKeyB)?.map((entry: { id: string }) => entry.id))
+      .toEqual([keyB])
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {
