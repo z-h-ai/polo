@@ -464,6 +464,54 @@ export async function revokeRuntimeProductSpaceFence(): Promise<void> {
   })
 }
 
+export type RuntimeFenceRevokeOutcome =
+  | 'revoked'
+  | 'already_clear'
+  | 'scope_moved'
+  | 'generation_moved'
+
+export interface ExpectedRuntimeFenceScope {
+  accountId: string
+  productSpaceId: string
+  /**
+   * Fence generation observed when the caller's request entered the
+   * ProductSpace scope. Revocation only applies while the CURRENT fence is
+   * exactly the observed one: a concurrently committed switch (new account,
+   * new space, or a torn-down-and-rebuilt fence) is never torn down by an
+   * older denial.
+   */
+  fenceGeneration: number
+}
+
+/**
+ * Catalog-denial fence revocation: compare-and-revoke in ONE switch-lock
+ * critical section. The expected account+space+generation binding is
+ * captured BEFORE the lock; inside the lock the live fence must still match
+ * exactly. An in-flight A→B switch that re-commits the fence after the
+ * observation therefore leaves the new B fence untouched. Awaits the lock —
+ * the caller cannot observe its own error path before the fence state is
+ * durably decided — and propagates lock/operation failures to the caller.
+ */
+export async function revokeRuntimeProductSpaceFenceIfBound(
+  expected: ExpectedRuntimeFenceScope,
+): Promise<RuntimeFenceRevokeOutcome> {
+  return withSwitchLock(async (): Promise<RuntimeFenceRevokeOutcome> => {
+    if (runtimeActiveProductSpaceId === null) return 'already_clear'
+    if (
+      runtimeActiveProductSpaceId !== expected.productSpaceId
+      || runtimeActiveAccountId !== expected.accountId
+    ) {
+      return 'scope_moved'
+    }
+    if (runtimeFenceGeneration !== expected.fenceGeneration) {
+      return 'generation_moved'
+    }
+    setRuntimeOfflineReadOnly(false)
+    setRuntimeActiveProductSpace(null)
+    return 'revoked'
+  })
+}
+
 /**
  * Stops and unregisters every registered execution of one account —
  * assistant sessions and Local Apps alike. Used by Admin session-ending and

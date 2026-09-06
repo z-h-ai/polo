@@ -4,13 +4,13 @@ import {
   describe,
   expect,
   it,
+  jest,
   mock,
 } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import type {
   AppCatalogCacheEntry,
   AppCatalogSyncResult,
-  CatalogApp,
   DeniedAppCatalogSnapshot,
 } from '@polo-ai/shared/admin'
 import type {
@@ -21,8 +21,11 @@ import type {
 } from '@polo-ai/shared/protocol'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
+import { setupI18n, i18n } from '@polo-ai/shared/i18n'
+import type { CatalogApp } from '@polo-ai/shared/admin'
 
 GlobalRegistrator.register()
+setupI18n()
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -1276,5 +1279,230 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
       }),
       { preserveData: true },
     )
+  })
+})
+
+
+describe('real ProductSpace payload projection through useAppCatalog into the UI', () => {
+  function rawEntry(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'entry-live',
+      artifactInstanceId: 'artifact-live',
+      version: { versionId: 'version-live', version: '1.0.0' },
+      name: 'Live App',
+      description: 'launchable',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio L' }],
+      permissions: [],
+      ...overrides,
+    }
+  }
+
+  async function mountCatalog(entries: unknown[], spaceId = 'organization-a', accountId = 'account-a') {
+    productSpaceContextState = productSpaceContext(spaceId, accountId)
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: `rev-${spaceId}-${accountId}`,
+      productSpaceId: spaceId,
+      accessMode: 'online' as const,
+      entries,
+    })
+    const react = await import('@testing-library/react')
+    const { result } = react.renderHook(() => useAppCatalog())
+    await react.waitFor(() => {
+      if (result.current.state.catalog === null) throw new Error('catalog pending')
+    })
+    return result
+  }
+
+  it('a version_blocked raw entry reaches the blocked badge, reason reveal, and pin gating', async () => {
+    const result = await mountCatalog([
+      rawEntry(),
+      rawEntry({
+        catalogEntryId: 'entry-blocked',
+        artifactInstanceId: 'artifact-blocked',
+        name: 'Blocked App',
+        availability: 'blocked',
+        unavailableReason: 'version_blocked',
+      }),
+    ])
+    // The production mapper normalizes the blocked raw entry.
+    const blockedApp = result.current.state.catalog!.apps.find(
+      (app: CatalogApp) => app.catalogEntryId === 'entry-blocked',
+    )
+    expect(blockedApp).toMatchObject({
+      availability: 'unavailable',
+      unavailableReason: 'version_blocked',
+    })
+    // A blocked App can never enter the home pin source (available only).
+    expect(
+      result.current.state.catalog!.apps.filter(
+        (app: CatalogApp) => app.availability === 'available',
+      ).map((app: CatalogApp) => app.catalogEntryId),
+    ).toEqual(['entry-live'])
+
+    // AllAppsView rendered with the REAL mapped apps and the REAL identity
+    // keys from the hook (no test-side algorithm).
+    const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+    react.render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(AllAppsView, {
+        spaceName: 'Space',
+        spaceKind: 'enterprise',
+        apps: result.current.state.catalog!.apps,
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        offline: false,
+        restricted: false,
+        circleCount: 0,
+        pinnedIds: new Set<string>(),
+        onPin: () => {},
+        getInstallState: () => undefined,
+        identityKeyForApp: result.current.uiIdentityKeyForApp,
+        onRefresh: () => {},
+        onOpen: () => {},
+        onUninstall: () => {},
+        onBack: () => {},
+      }),
+    ))
+    const blockedKey = result.current.uiIdentityKeyForApp(blockedApp!)
+    expect(react.screen.getByText('Blocked')).toBeTruthy()
+    const reasonControl = react.screen.getByTestId(`all-apps-reason-${blockedKey}`)
+    expect((reasonControl as HTMLElement).getAttribute('aria-expanded')).toBe('false')
+    react.fireEvent.click(reasonControl)
+    expect(react.screen.getByTestId(`all-apps-reason-text-${blockedKey}`).textContent)
+      .toContain('Version blocked')
+    expect((reasonControl as HTMLElement).getAttribute('aria-expanded')).toBe('true')
+    expect(react.screen.queryByTestId(`all-apps-pin-${blockedKey}`)).toBeNull()
+    const liveApp = result.current.state.catalog!.apps.find(
+      (app: CatalogApp) => app.catalogEntryId === 'entry-live',
+    )
+    expect(react.screen.getByTestId(`all-apps-pin-${result.current.uiIdentityKeyForApp(liveApp!)}`))
+      .toBeTruthy()
+    react.cleanup()
+  })
+
+  it('both identity collision directions stay distinct through real pin/open/uninstall behavior', async () => {
+    const result = await mountCatalog([
+      rawEntry({
+        catalogEntryId: 'entry-s1',
+        name: 'Shared S1',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-s2',
+        name: 'Shared S2',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-old',
+        name: 'Dup Old',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-new',
+        name: 'Dup New',
+      }),
+    ])
+    const apps: CatalogApp[] = result.current.state.catalog!.apps
+    expect(apps).toHaveLength(4)
+    // Production keys: both collision directions produce DISTINCT identities.
+    const keys = apps.map(app => result.current.uiIdentityKeyForApp(app))
+    expect(new Set(keys).size).toBe(4)
+
+    const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+    const onPin = jest.fn()
+    const onOpen = jest.fn()
+    const onUninstall = jest.fn()
+    react.render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(AllAppsView, {
+        spaceName: 'Space',
+        spaceKind: 'enterprise',
+        apps,
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        offline: false,
+        restricted: false,
+        circleCount: 0,
+        pinnedIds: new Set<string>(),
+        onPin,
+        getInstallState: (target: CatalogApp) => target.artifactInstanceId === 'artifact-new'
+          ? {
+            app: {
+              accountId: 'account-a',
+              productSpaceId: 'organization-a',
+              catalogEntryId: target.catalogEntryId!,
+              artifactInstanceId: target.artifactInstanceId!,
+              versionId: target.catalogVersion!.versionId,
+              version: target.catalogVersion!.version,
+            },
+            state: 'installed' as const,
+            currentVersion: target.catalogVersion!.version,
+          }
+          : undefined,
+        identityKeyForApp: result.current.uiIdentityKeyForApp,
+        onRefresh: () => {},
+        onOpen,
+        onUninstall,
+        onBack: () => {},
+      }),
+    ))
+    // Four distinct rows, each pinnable through its own production key.
+    expect(react.screen.getAllByTestId('all-apps-row')).toHaveLength(4)
+    for (const key of keys) {
+      react.fireEvent.click(react.screen.getByTestId(`all-apps-pin-${key}`))
+    }
+    expect(onPin).toHaveBeenCalledTimes(4)
+    const pinnedTargets = new Set(onPin.mock.calls.map((call: any[]) => {
+      const app = call[0] as CatalogApp
+      return `${app.catalogEntryId}:${app.artifactInstanceId}`
+    }))
+    expect(pinnedTargets.size).toBe(4)
+    // Open targets the exact row's identity — never a colliding sibling.
+    for (const app of apps) {
+      react.fireEvent.click(react.screen.getByTestId(`all-apps-action-${result.current.uiIdentityKeyForApp(app)}`))
+    }
+    expect(onOpen.mock.calls.map((call: any[]) => (call[0] as CatalogApp).artifactInstanceId).sort())
+      .toEqual(['artifact-live', 'artifact-live', 'artifact-new', 'artifact-old'])
+    // Uninstall exists ONLY for the installed artifact-new row and targets it.
+    const uninstallButtons = react.screen.getAllByTestId(/^all-apps-uninstall-/)
+    expect(uninstallButtons).toHaveLength(1)
+    react.fireEvent.click(uninstallButtons[0]!)
+    expect(onUninstall).toHaveBeenCalledTimes(1)
+    expect((onUninstall.mock.calls[0]![0] as CatalogApp).artifactInstanceId).toBe('artifact-new')
+    react.cleanup()
+  })
+
+  it('the same entry+artifact under another account/space yields a different production identity', async () => {
+    const entries = [rawEntry()]
+    const spaceA = await mountCatalog(entries, 'organization-a', 'account-a')
+    const spaceB = await mountCatalog(entries, 'organization-b', 'account-b')
+    const appA: CatalogApp = spaceA.current.state.catalog!.apps[0]
+    const appB: CatalogApp = spaceB.current.state.catalog!.apps[0]
+    expect(appA.catalogEntryId).toBe(appB.catalogEntryId)
+    expect(appA.artifactInstanceId).toBe(appB.artifactInstanceId)
+    expect(spaceA.current.uiIdentityKeyForApp(appA))
+      .not.toBe(spaceB.current.uiIdentityKeyForApp(appB))
+    cleanup()
   })
 })

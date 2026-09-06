@@ -8,6 +8,7 @@ import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceAccount,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
@@ -121,6 +122,15 @@ const adminClientBehavior = {
   getProductSpaceCatalog: async (_accessToken: string, _context: unknown): Promise<any> => {
     throw new Error('getProductSpaceCatalog behavior not configured')
   },
+  resolveProductSpaceLaunch: async (
+    _accessToken: string,
+    _context: unknown,
+    _catalog: unknown,
+    _catalogEntryId: string,
+    _host: unknown,
+  ): Promise<any> => {
+    throw new Error('resolveProductSpaceLaunch behavior not configured')
+  },
   createOrganization: async (_accessToken: string, _input: unknown): Promise<any> => {
     throw new Error('createOrganization behavior not configured')
   },
@@ -223,6 +233,27 @@ class MockAdminClient {
       accessToken,
     })
     return adminClientBehavior.getProductSpaceCatalog(accessToken, context)
+  }
+
+  async resolveProductSpaceLaunch(
+    accessToken: string,
+    context: unknown,
+    catalog: unknown,
+    catalogEntryId: string,
+    host: unknown,
+  ) {
+    adminClientCalls.push({
+      method: 'resolveProductSpaceLaunch',
+      args: [context, catalogEntryId, host],
+      accessToken,
+    })
+    return adminClientBehavior.resolveProductSpaceLaunch(
+      accessToken,
+      context,
+      catalog,
+      catalogEntryId,
+      host,
+    )
   }
 
   async createOrganization(accessToken: string, input: unknown) {
@@ -474,6 +505,11 @@ mock.module('@polo-ai/shared/credentials', () => ({
 // entrypoint. Tests that need the REAL authority run in their own isolated
 // files against the untouched module.
 const authorityRevokeCalls: Array<{ accountId: string; productSpaceId: string }> = []
+// Fault-injection controls for the revoke fake: an async gate lets tests
+// interleave a fence A→B switch INSIDE the awaited revocation, and a failure
+// flag simulates a durable-persistence error.
+let gateAuthorityRevoke: Promise<void> = Promise.resolve()
+let failAuthorityRevoke = false
 const authorityRecordCalls: Array<{
   accountId: string
   productSpaceId: string
@@ -494,8 +530,12 @@ mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () =
     }
     return []
   },
-  revokeProductSpaceCatalogAuthority: (accountId: string, productSpaceId: string) => {
+  revokeProductSpaceCatalogAuthority: async (accountId: string, productSpaceId: string) => {
     authorityRevokeCalls.push({ accountId, productSpaceId })
+    await gateAuthorityRevoke
+    if (failAuthorityRevoke) {
+      throw new Error('authority persistence failed (injected)')
+    }
   },
 }))
 
@@ -568,6 +608,7 @@ function createHarness() {
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     syncAppCatalog: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_APP_CATALOG),
     productSpaceCatalog: requiredHandler(handlers, RPC_CHANNELS.productSpace.CATALOG),
+    productSpaceResolveLaunch: requiredHandler(handlers, RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
@@ -778,6 +819,9 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     authorityRecordCalls.length = 0
     authorityRevokeCalls.length = 0
     failAuthorityRecord = false
+    failAuthorityRevoke = false
+    gateAuthorityRevoke = Promise.resolve()
+    setRuntimeActiveProductSpace(null)
     const harness = createHarness()
     productSpaceCatalog = harness.productSpaceCatalog
     logout = harness.logout
@@ -1197,6 +1241,170 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     expect(recovered.success).toBe(true)
   })
 
+  it('answers a stale catalog denial with REQUEST_SUPERSEDED and zero state writes (R1 late 403 after R2 success)', async () => {
+    let releaseR1: (() => void) | undefined
+    let catalogCalls = 0
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      catalogCalls += 1
+      if (catalogCalls === 1) {
+        return new Promise((_resolve, reject) => {
+          releaseR1 = () => reject(new TestAdminError('denied', 'FORBIDDEN', { status: 403 }))
+        })
+      }
+      return {
+        contractVersion: 1,
+        productSpaceId: 'space-a',
+        catalogRevision: 'rev-2',
+        entries: [authorityTestEntry('rev-2')],
+      }
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1)
+    const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
+    // R2 commits the newer revision first.
+    await waitFor(() => authorityRecordCalls.some(call => call.catalogRevision === 'rev-2')
+      ? true
+      : undefined)
+
+    // R1's 403 arrives LAST: it must not delete R2's fresh authority nor
+    // touch the fence — it is answered REQUEST_SUPERSEDED with zero writes.
+    releaseR1!()
+    const r1 = await pendingR1 as any
+    expect(r1.success).toBe(false)
+    expect(r1.errorCode).toBe('REQUEST_SUPERSEDED')
+    expect(authorityRevokeCalls).toEqual([])
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+    await pendingR2
+  })
+
+  it('revokes immediately when the denial is the latest request, and a fresh catalog restores afterwards', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    let catalogCalls = 0
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      catalogCalls += 1
+      if (catalogCalls === 1) {
+        throw new TestAdminError('denied', 'FORBIDDEN', { status: 403 })
+      }
+      return {
+        contractVersion: 1,
+        productSpaceId: 'space-a',
+        catalogRevision: 'rev-fresh',
+        entries: [authorityTestEntry('rev-fresh')],
+      }
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const denied = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(denied.errorCode).toBe('FORBIDDEN')
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+
+    // A later fresh Catalog re-establishes the space state.
+    const recovered = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(recovered.success).toBe(true)
+  })
+
+  it('a stale denial after an account switch revokes only the OLD account scope and keeps the new fence', async () => {
+    let releaseR1: (() => void) | undefined
+    let catalogCalls = 0
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      catalogCalls += 1
+      if (catalogCalls === 1) {
+        return new Promise((_resolve, reject) => {
+          releaseR1 = () => reject(new TestAdminError('denied', 'FORBIDDEN', { status: 403 }))
+        })
+      }
+      throw new TestAdminError('denied', 'FORBIDDEN', { status: 403 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => releaseR1)
+
+    // An account switch commits a NEW fence for another scope (B).
+    setRuntimeActiveProductSpace('space-b')
+    setRuntimeActiveProductSpaceAccount('user-2')
+
+    releaseR1!()
+    const r1 = await pendingR1 as any
+    // R1 is still the latest invocation of ITS OWN (user-1|space-a) scope,
+    // so the denial proceeds: the OLD account's authority for that scope is
+    // revoked — and ONLY that scope...
+    expect(r1.errorCode).toBe('FORBIDDEN')
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    // ...while the switch-committed fence of the NEW scope survives the
+    // precise compare-and-revoke.
+    expect(getRuntimeActiveProductSpace()).toBe('space-b')
+    expect(getRuntimeActiveProductSpaceAccount()).toBe('user-2')
+  })
+
+  it('the awaited revocation never tears down a fence committed by a concurrent A→B switch', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new TestAdminError('denied', 'FORBIDDEN', { status: 403 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    // Gate INSIDE the revocation: the fence A→B switch lands after the
+    // denial was observed but before the revoke critical section runs.
+    let releaseRevoke: (() => void) | undefined
+    gateAuthorityRevoke = new Promise(resolve => {
+      releaseRevoke = resolve
+    })
+
+    const pending = productSpaceCatalog(context, 'space-a', undefined)
+    await waitFor(() => authorityRevokeCalls.length === 1)
+
+    // A committed switch re-points the fence at space-b (advances the fence
+    // generation).
+    setRuntimeActiveProductSpace('space-b')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    releaseRevoke!()
+    const response = await pending as any
+    // The response returns only AFTER the awaited compare-and-revoke decided.
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('FORBIDDEN')
+    // The new space-b fence was never torn down.
+    expect(getRuntimeActiveProductSpace()).toBe('space-b')
+  })
+
+  it('propagates a failed durable revocation as CATALOG_SCOPE_REVOKE_FAILED while staying fail-closed', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new TestAdminError('denied', 'FORBIDDEN', { status: 403 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    failAuthorityRevoke = true
+
+    const response = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('CATALOG_SCOPE_REVOKE_FAILED')
+    // The login session survives (catalog-scope, not session-ending)...
+    expect(managerState.tokens).not.toBeNull()
+    // ...and the fence half still ran to its fail-closed outcome.
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+  })
+
   it('keeps a different space runtime fence when another space is denied', async () => {
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1317,6 +1525,107 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
   })
 })
 
+describe('ProductSpace resolve-launch catalog-scope denial', () => {
+  const context = {
+    clientId: 'renderer',
+    workspaceId: null,
+    webContentsId: null,
+    signal: new AbortController().signal,
+  }
+  let resolveLaunch: HandlerFn
+
+  const activeList = async () => ({
+    productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+  })
+  const freshCatalog = async () => ({
+    contractVersion: 1,
+    productSpaceId: 'space-a',
+    catalogRevision: 'rev-launch',
+    entries: [],
+  })
+
+  beforeEach(async () => {
+    authorityRecordCalls.length = 0
+    authorityRevokeCalls.length = 0
+    failAuthorityRevoke = false
+    gateAuthorityRevoke = Promise.resolve()
+    setRuntimeActiveProductSpace(null)
+    const harness = createHarness()
+    resolveLaunch = harness.productSpaceResolveLaunch
+    await harness.login(context, 'admin', 'admin-password')
+  })
+
+  it('a REMOTE membership 403 keeps the session and synchronously revokes the scope authority and fence', async () => {
+    adminClientBehavior.listProductSpaces = activeList
+    adminClientBehavior.getProductSpaceCatalog = freshCatalog
+    adminClientBehavior.resolveProductSpaceLaunch = async () => {
+      throw new TestAdminError('membership denied', 'FORBIDDEN', { status: 403 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const response = await resolveLaunch(context, 'space-a', 'entry-1') as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('FORBIDDEN')
+    // The login session survives the catalog-scope denial...
+    expect(managerState.tokens).not.toBeNull()
+    // ...and by the time the response returns, the fail-closed revocation
+    // has ALREADY completed (awaited, not fire-and-forget).
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+  })
+
+  it('the LOCAL stale-scope guard rejection never touches the trusted state', async () => {
+    // No fence committed: the launch-scope guard rejects BEFORE any remote
+    // call. A local guard is request-scoped — it proves nothing about
+    // membership, so authority and fence stay untouched.
+    adminClientBehavior.listProductSpaces = activeList
+    adminClientBehavior.getProductSpaceCatalog = freshCatalog
+    adminClientBehavior.resolveProductSpaceLaunch = async () => {
+      throw new Error('must not be reached')
+    }
+
+    const response = await resolveLaunch(context, 'space-a', 'entry-1') as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('FORBIDDEN')
+    expect(authorityRevokeCalls).toEqual([])
+    expect(authorityRecordCalls).toEqual([])
+    expect(managerState.tokens).not.toBeNull()
+  })
+
+  it('a REMOTE 401 still ends the admin session', async () => {
+    adminClientBehavior.listProductSpaces = activeList
+    adminClientBehavior.getProductSpaceCatalog = freshCatalog
+    adminClientBehavior.resolveProductSpaceLaunch = async () => {
+      throw new TestAdminError('token revoked', 'UNAUTHORIZED', { status: 401 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const response = await resolveLaunch(context, 'space-a', 'entry-1') as any
+    expect(response.success).toBe(false)
+    expect(managerState.tokens).toBeNull()
+  })
+
+  it('a failed durable revocation during resolve answers CATALOG_SCOPE_REVOKE_FAILED', async () => {
+    adminClientBehavior.listProductSpaces = activeList
+    adminClientBehavior.getProductSpaceCatalog = freshCatalog
+    adminClientBehavior.resolveProductSpaceLaunch = async () => {
+      throw new TestAdminError('membership denied', 'FORBIDDEN', { status: 403 })
+    }
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+    failAuthorityRevoke = true
+
+    const response = await resolveLaunch(context, 'space-a', 'entry-1') as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('CATALOG_SCOPE_REVOKE_FAILED')
+    expect(managerState.tokens).not.toBeNull()
+    // The fence half still reached its fail-closed outcome.
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+  })
+})
+
 describe('registerAdminHandlers', () => {
   it('registers every admin channel', () => {
     const harness = createHarness()
@@ -1337,6 +1646,7 @@ describe('registerAdminHandlers', () => {
       'logout',
       'previewOrganizationJoin',
       'productSpaceCatalog',
+      'productSpaceResolveLaunch',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',

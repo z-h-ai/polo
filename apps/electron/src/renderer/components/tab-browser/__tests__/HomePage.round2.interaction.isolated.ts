@@ -29,8 +29,10 @@ const openUrl = jest.fn()
 let appCatalogHook: any
 let installedApps = [...BUILTIN_APP_DEFINITIONS]
 const quickAccessByContext = new Map<string, any[]>()
-const getHomeQuickAccess = jest.fn(async (contextKey: string) =>
-  quickAccessByContext.get(contextKey) ?? [])
+function defaultGetHomeQuickAccess(contextKey: string) {
+  return Promise.resolve(quickAccessByContext.get(contextKey) ?? [])
+}
+const getHomeQuickAccess = jest.fn(defaultGetHomeQuickAccess)
 async function defaultSetHomeQuickAccess(contextKey: string, apps: any[]) {
   quickAccessByContext.set(contextKey, apps)
   return apps
@@ -130,6 +132,7 @@ beforeEach(async () => {
   installedApps = [...BUILTIN_APP_DEFINITIONS]
   quickAccessByContext.clear()
   getHomeQuickAccess.mockClear()
+  getHomeQuickAccess.mockImplementation(defaultGetHomeQuickAccess)
   setHomeQuickAccess.mockClear()
   setHomeQuickAccess.mockImplementation(defaultSetHomeQuickAccess)
   Object.defineProperty(window, 'electronAPI', {
@@ -1089,6 +1092,54 @@ describe('HomePage quick access (POO-43)', () => {
     availability: 'available',
   })
 
+  /** Number of load-scope calls recorded so far (pseudo-wait guard). */
+  const loadCallCount = () => getHomeQuickAccess.mock.calls.length
+  /** Waits for the NEXT load-scope call after `before`, asserting its key. */
+  async function waitForNextScopeLoad(before: number, contextKey: string) {
+    await waitFor(() => {
+      if (getHomeQuickAccess.mock.calls.length <= before) {
+        throw new Error('scope load pending')
+      }
+    })
+    expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKey)
+  }
+  /** Waits until the persisted save queue has settled to `count` calls. */
+  async function waitForSaveCalls(count: number) {
+    await waitFor(() => {
+      if (setHomeQuickAccess.mock.calls.length < count) {
+        throw new Error('save pending')
+      }
+    })
+  }
+
+  /**
+   * Deferred save model: each queued save call is a pending write. Resolving
+   * a task COMMITS it to the persisted Map (durability); rejecting it fails
+   * the write. Returns the pending tasks in call order.
+   */
+  function installDeferredSave() {
+    const tasks: Array<{
+      key: string
+      apps: unknown[]
+      resolve: () => void
+      reject: (error: unknown) => void
+    }> = []
+    setHomeQuickAccess.mockImplementation(async (key: string, apps: unknown[]) => {
+      return await new Promise<unknown[]>((resolve, reject) => {
+        tasks.push({
+          key,
+          apps,
+          resolve: () => {
+            void defaultSetHomeQuickAccess(key, apps)
+            resolve(apps)
+          },
+          reject,
+        })
+      })
+    })
+    return tasks
+  }
+
   async function openAllAppsAndPin(app: CatalogApp, contextKey: string) {
     const renderResult = renderHome()
     fireEvent.click(screen.getByTestId('home-all-apps-open'))
@@ -1098,11 +1149,11 @@ describe('HomePage quick access (POO-43)', () => {
     fireEvent.click(screen.getByTestId(
       `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(app)}`,
     ))
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [
-        { id: appCatalogHook.uiIdentityKeyForApp(app), addedAt: expect.any(Number) },
-      ])
-    })
+    await waitForSaveCalls(1)
+    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
+    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
+      { id: appCatalogHook.uiIdentityKeyForApp(app), addedAt: expect.any(Number) },
+    ])
     return renderResult
   }
 
@@ -1127,10 +1178,12 @@ describe('HomePage quick access (POO-43)', () => {
       appCatalogHook.uiIdentityKeyForApp(appA),
     )
 
-    // The persisted acknowledgement survives a remount: the fresh mount
-    // loads the persisted entry back into the home quick access.
+    // REAL remount: the persisted Map now holds the entry; a fresh mount
+    // must load it back into the home quick access.
     view.unmount()
+    const loadsBefore = loadCallCount()
     renderHome()
+    await waitForNextScopeLoad(loadsBefore, contextKey)
     await waitFor(() => {
       expect(screen.queryByTestId('all-apps-view')).toBeNull()
     })
@@ -1140,7 +1193,7 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   })
 
-  it('a rejected pin save never shows the card: the confirmed snapshot stays', async () => {
+  it('a rejected pin save rolls back: card never shows and the Map stays empty', async () => {
     const appA = pinnedApp('reject-app-a', 'reject-entry-a', 'reject-artifact-a', 'Reject App A')
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const contextKey = `v1:${
@@ -1157,12 +1210,13 @@ describe('HomePage quick access (POO-43)', () => {
       expect(screen.queryByTestId('all-apps-view')).toBeNull()
     })
     // No persisted acknowledgement: the home keeps its empty confirmed
-    // snapshot — the pinned card never appears.
+    // snapshot — the pinned card never appears and nothing was stored.
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(quickAccessByContext.get(contextKey)).toBeUndefined()
   })
 
-  it('an explicitly empty quick-access collection stays empty across remount and A→B→A', async () => {
+  it('an explicitly empty quick-access collection stays empty across real remount and A→B→A', async () => {
     const appA = pinnedApp('empty-app-a', 'empty-entry-a', 'empty-artifact-a', 'Empty Fallback A')
     const appB = pinnedApp('empty-app-b', 'empty-entry-b', 'empty-artifact-b', 'Empty Fallback B')
     // Two available apps, NOTHING persisted: no default curation may fill
@@ -1171,22 +1225,18 @@ describe('HomePage quick access (POO-43)', () => {
     const contextKeyA = `v1:${
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
-    renderHome()
-    await waitFor(() => {
-      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyA)
-    })
+    const view = renderHome()
+    await waitForNextScopeLoad(0, contextKeyA)
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
 
-    // Remount: still empty.
-    cleanup()
+    // REAL remount: still empty.
+    view.unmount()
     renderHome()
-    await waitFor(() => {
-      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyA)
-    })
+    await waitForNextScopeLoad(1, contextKeyA)
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
 
-    // A→B→A: switching to another context and back must not invent entries.
+    // A→B→A: switch to another context and back — nothing is invented.
     const catalogB = enterpriseCatalogWith(
       [pinnedApp('b-app', 'b-entry', 'b-artifact', 'Space B App')],
       { organizationId: 'organization-b' },
@@ -1196,18 +1246,12 @@ describe('HomePage quick access (POO-43)', () => {
     }`
     appCatalogHook = hookWithCatalog(catalogB)
     viewRerender()
-    await waitFor(() => {
-      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyB)
-    })
+    await waitForNextScopeLoad(2, contextKeyB)
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
 
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
     viewRerender()
-    await waitFor(() => {
-      expect(getHomeQuickAccess).toHaveBeenCalledTimes(
-        getHomeQuickAccess.mock.calls.filter(([key]) => key === contextKeyA).length + 1,
-      )
-    })
+    await waitForNextScopeLoad(3, contextKeyA)
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   })
@@ -1234,14 +1278,16 @@ describe('HomePage quick access (POO-43)', () => {
         `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(target)}`,
       ))
     }
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenLastCalledWith(contextKey, [
-        { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactA), addedAt: expect.any(Number) },
-        { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactB), addedAt: expect.any(Number) },
-        { id: appCatalogHook.uiIdentityKeyForApp(sameEntryOld), addedAt: expect.any(Number) },
-        { id: appCatalogHook.uiIdentityKeyForApp(sameEntryNew), addedAt: expect.any(Number) },
-      ])
-    })
+    // The single-writer queue serializes the four pins: payloads accumulate
+    // in click order and the LAST write carries all four identities.
+    await waitForSaveCalls(4)
+    expect(setHomeQuickAccess.mock.calls[3]?.[0]).toBe(contextKey)
+    expect(setHomeQuickAccess.mock.calls[3]?.[1]).toEqual([
+      { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactA), addedAt: expect.any(Number) },
+      { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactB), addedAt: expect.any(Number) },
+      { id: appCatalogHook.uiIdentityKeyForApp(sameEntryOld), addedAt: expect.any(Number) },
+      { id: appCatalogHook.uiIdentityKeyForApp(sameEntryNew), addedAt: expect.any(Number) },
+    ])
 
     // All four identities resolve into DISTINCT home cards.
     fireEvent.click(screen.getByTestId('all-apps-back'))
@@ -1254,49 +1300,289 @@ describe('HomePage quick access (POO-43)', () => {
     view.unmount()
   })
 
-  it('a delayed pin save from context A never pollutes context B (A→B→A)', async () => {
-    const appA = pinnedApp('delay-app-a', 'delay-entry-a', 'delay-artifact-a', 'Delayed Pin A')
+  it('S1 success then S2 failure keeps S1 on disk and rolls the UI back to the S1 ack', async () => {
+    const appA = pinnedApp('s1-app', 's1-entry', 's1-artifact', 'Serial App A')
+    const appB = pinnedApp('s2-app', 's2-entry', 's2-artifact', 'Serial App B')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
+    const tasks = installDeferredSave()
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyB}`))
+    // Single writer: S2 is QUEUED, not started while S1 is in flight.
+    expect(tasks).toHaveLength(1)
+
+    // S1 commits; only then does S2 start (on S1's acked base) and FAIL.
+    tasks[0]!.resolve()
+    await waitForSaveCalls(2)
+    tasks[1]!.reject(new Error('S2 persistence rejected'))
+    // Back on the home: exactly the S1 card survives the S2 rollback.
+    fireEvent.click(screen.getByTestId('all-apps-back'))
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-quick-entry')
+      if (cards.length !== 1) throw new Error('rollback pending')
+      expect(cards[0]?.getAttribute('data-identity-key')).toBe(keyA)
+    })
+    // Disk keeps exactly S1's committed payload — S2's rejected suffix is gone.
+    expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyA])
+  })
+
+  it('two out-of-order-duration successes still write the disk strictly in click order', async () => {
+    const appA = pinnedApp('oo-app-a', 'oo-entry-a', 'oo-artifact-a', 'Order App A')
+    const appB = pinnedApp('oo-app-b', 'oo-entry-b', 'oo-artifact-b', 'Order App B')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
+    const tasks = installDeferredSave()
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyB}`))
+    // S2 must NOT have started while S1 is in flight (single writer).
+    expect(tasks).toHaveLength(1)
+
+    // S1 resolves LATE — only then does S2 start, building on S1's result.
+    tasks[0]!.resolve()
+    await waitForSaveCalls(2)
+    expect(tasks[1]?.key).toBe(contextKey)
+    expect((tasks[1]?.apps as Array<{ id: string }> | undefined)?.map(entry => entry.id))
+      .toEqual([keyA, keyB])
+    tasks[1]!.resolve()
+    await waitFor(() => {
+      if (!(quickAccessByContext.get(contextKey)?.length === 2)) {
+        throw new Error('condition pending')
+      }
+    })
+    // Disk order: [A] then [A,B] — never [A,B] overwritten by a late [A].
+    expect((quickAccessByContext.get(contextKey) as Array<{ id: string }> | undefined)
+      ?.map(entry => entry.id))
+      .toEqual([keyA, keyB])
+  })
+
+  it('a pin clicked before hydration builds on the stored collection instead of wiping it', async () => {
+    const storedApp = pinnedApp('hyd-app-a', 'hyd-entry-a', 'hyd-artifact-a', 'Stored App A')
+    const clickApp = pinnedApp('hyd-app-b', 'hyd-entry-b', 'hyd-artifact-b', 'Clicked App B')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([storedApp, clickApp]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyStored = appCatalogHook.uiIdentityKeyForApp(storedApp)
+    const keyClicked = appCatalogHook.uiIdentityKeyForApp(clickApp)
+    quickAccessByContext.set(contextKey, [{ id: keyStored, addedAt: 1 }])
+
+    // Defer the LOAD: the click happens before hydration completes.
+    let releaseLoad: ((entries: unknown[]) => void) | undefined
+    getHomeQuickAccess.mockImplementation(async (_key: string) => {
+      const entries = await new Promise<unknown[]>(resolve => { releaseLoad = resolve })
+      return entries
+    })
+
+    renderHome()
+    await waitFor(() => {
+      if (!(releaseLoad)) {
+        throw new Error('condition pending')
+      }
+    })
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyClicked}`))
+
+    // Hydration completes AFTER the click: the queued pin must persist the
+    // MERGED collection, never [B] alone.
+    releaseLoad?.([{ id: keyStored, addedAt: 1 }])
+    await waitForSaveCalls(1)
+    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
+    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
+      { id: keyStored, addedAt: 1 },
+      { id: keyClicked, addedAt: expect.any(Number) },
+    ])
+  })
+
+  it('removing the last persisted entry persists an explicitly empty collection', async () => {
+    const appA = pinnedApp('last-app-a', 'last-entry-a', 'last-artifact-a', 'Last App A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    quickAccessByContext.set(contextKey, [{ id: keyA, addedAt: 1 }])
+
+    const view = renderHome()
+    await waitForNextScopeLoad(0, contextKey)
+    await waitFor(() => {
+      expect(screen.getByTestId('home-quick-entry')).toBeTruthy()
+    })
+
+    // Remove the last entry through the manage dialog.
+    fireEvent.click(screen.getByTestId('home-manage-quick-access'))
+    await waitFor(() => {
+      expect(screen.getByTestId('manage-home-apps-dialog')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('manage-home-apps-item'))
+    fireEvent.click(screen.getByTestId('manage-home-apps-done'))
+    await waitForSaveCalls(1)
+    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
+    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([])
+    expect(quickAccessByContext.get(contextKey)).toEqual([])
+
+    // REAL remount: the explicitly empty collection stays empty.
+    view.unmount()
+    renderHome()
+    await waitForNextScopeLoad(1, contextKey)
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  })
+
+  it('a rejected prune keeps the confirmed entries in UI and Map', async () => {
+    const keptApp = pinnedApp('prune-app-kept', 'prune-entry-kept', 'prune-artifact-kept', 'Prune Kept')
+    const vanishingApp = pinnedApp('prune-app-gone', 'prune-entry-gone', 'prune-artifact-gone', 'Prune Gone')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([keptApp, vanishingApp]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyKept = appCatalogHook.uiIdentityKeyForApp(keptApp)
+    const keyGone = appCatalogHook.uiIdentityKeyForApp(vanishingApp)
+    quickAccessByContext.set(contextKey, [
+      { id: keyKept, addedAt: 1 },
+      { id: keyGone, addedAt: 2 },
+    ])
+
+    renderHome()
+    await waitForNextScopeLoad(0, contextKey)
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(2)
+    })
+
+    // The Catalog drops the second App: the prune runs but EVERY persistence
+    // attempt rejects (durable failure). Each rejected suffix rolls back to
+    // the last acknowledgement — nothing may ever commit.
+    setHomeQuickAccess.mockImplementation(async () => {
+      throw new Error('prune persistence rejected')
+    })
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([keptApp]))
+    viewRerender()
+    // The prune's save rejects and rolls back to the acknowledgement.
+    await waitForSaveCalls(1)
+    await new Promise(resolve => setTimeout(resolve, 80))
+
+    // The persisted collection keeps BOTH entries — nothing committed.
+    expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyKept, keyGone])
+
+    // And the entries are still held in state: restoring the Catalog brings
+    // BOTH cards back (a committed prune would have deleted the entry).
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([keptApp, vanishingApp]))
+    viewRerender()
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-quick-entry')
+      if (cards.length !== 2) throw new Error('entries not restored')
+      const identities = cards.map(card => card.getAttribute('data-identity-key'))
+      expect(new Set(identities)).toEqual(new Set([keyKept, keyGone]))
+    })
+  })
+
+  it('a queued write from context A lands in order after a switch and never pollutes B; remount shows it', async () => {
+    const appA = pinnedApp('switch-app-a', 'switch-entry-a', 'switch-artifact-a', 'Switch App A')
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const contextKeyA = `v1:${
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
-    let releaseSave: ((entries: unknown[]) => void) | undefined
-    setHomeQuickAccess.mockImplementation(async (_key: string, _apps: unknown[]) => {
-      const saved = await new Promise<unknown[]>(resolve => { releaseSave = resolve })
-      return saved
-    })
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    const tasks = installDeferredSave()
 
-    await openAllAppsAndPin(appA, contextKeyA)
-    expect(releaseSave).toBeTruthy()
+    renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
 
     // Switch to space B while A's save is still in flight.
     const contextKeyB = `v1:${
       createProductSpaceContextKey('account-a', 'organization-b')
     }`
+    const loadsBefore = loadCallCount()
     appCatalogHook = hookWithCatalog(
       enterpriseCatalogWith([], { organizationId: 'organization-b' }),
     )
     viewRerender()
-    await waitFor(() => {
-      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyB)
-    })
+    await waitForNextScopeLoad(loadsBefore, contextKeyB)
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
 
-    // A's save resolves LATE: it must never commit into context B.
-    releaseSave?.([{ id: appCatalogHook.uiIdentityKeyForApp(appA), addedAt: 1 }])
+    // A's save commits LATE: it lands in A's slot only; B shows nothing.
+    tasks[0]!.resolve()
     await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalled()
+      if (!(quickAccessByContext.get(contextKeyA)?.length === 1)) {
+        throw new Error('condition pending')
+      }
     })
     expect(screen.queryByTestId('home-quick-entry')).toBeNull()
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
 
-    // Returning to A loads A's persisted (empty) state — the un-acked pin
-    // does not resurrect.
+    // REAL remount on A: the persisted pin appears.
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const loadsBeforeA = loadCallCount()
     viewRerender()
+    await waitForNextScopeLoad(loadsBeforeA, contextKeyA)
     await waitFor(() => {
-      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyA)
+      expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
     })
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+  })
+
+  it('an unmounted component still lands queued writes in order; a remount reads them back', async () => {
+    const appA = pinnedApp('unmount-app-a', 'unmount-entry-a', 'unmount-artifact-a', 'Unmount App A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    const tasks = installDeferredSave()
+
+    const view = renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+
+    // Unmount BEFORE the save resolves: the in-order write must still land.
+    view.unmount()
+    tasks[0]!.resolve()
+    await waitFor(() => {
+      if (!(quickAccessByContext.get(contextKey)?.length === 1)) {
+        throw new Error('condition pending')
+      }
+    })
+    expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyA])
+
+    // REAL remount reads the persisted pin back.
+    const loadsBeforeRemount = loadCallCount()
+    renderHome()
+    await waitForNextScopeLoad(loadsBeforeRemount, contextKey)
+    await waitFor(() => {
+      expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    })
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {

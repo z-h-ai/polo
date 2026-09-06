@@ -101,6 +101,17 @@ interface ProductSpaceCatalogAuthorityFile {
 
 let processCache: ProductSpaceCatalogAuthorityFile | null = null
 
+/**
+ * Precise-scope deny markers from FAILED durable revocations. A revoke whose
+ * write/rename failed must still fail CLOSED for exactly that (account,
+ * ProductSpace) scope in this process — the stale on-disk record can never
+ * be trusted again — while other scopes keep their records and a later
+ * revoke retries the durable deletion. Markers survive cache resets/reloads
+ * and are cleared only by a successful durable revoke or a fresh verified
+ * Catalog for the same scope.
+ */
+const deniedAuthorityScopes = new Set<string>()
+
 function authorityPath(): string {
   const configDir = process.env.POLO_AI_CONFIG_DIR || CONFIG_DIR
   return join(configDir, 'product-space-catalog-authority.json')
@@ -183,15 +194,24 @@ function loadFile(): ProductSpaceCatalogAuthorityFile {
 function saveFile(file: ProductSpaceCatalogAuthorityFile): void {
   processCache = file
   try {
-    const path = authorityPath()
-    mkdirSync(dirname(path), { recursive: true })
-    const tempPath = `${path}.${process.pid}.tmp`
-    writeFileSync(tempPath, JSON.stringify(file), 'utf8')
-    renameSync(tempPath, path)
+    persistFileAtomic(file)
   } catch {
     // Persistence failure keeps the in-process record: withdrawn management
     // works for this session and is re-derived from the next fresh Catalog.
   }
+}
+
+/**
+ * write-temp-then-rename persistence. Throws on ANY persistence failure —
+ * callers that need durable-revocation semantics must observe the failure
+ * and never treat the in-memory view as authoritative until this returned.
+ */
+function persistFileAtomic(file: ProductSpaceCatalogAuthorityFile): void {
+  const path = authorityPath()
+  mkdirSync(dirname(path), { recursive: true })
+  const tempPath = `${path}.${process.pid}.tmp`
+  writeFileSync(tempPath, JSON.stringify(file), 'utf8')
+  renameSync(tempPath, path)
 }
 
 function stripToAuthorityEntry(
@@ -328,6 +348,9 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
   }
   recordEntries(record, freshEntries)
   file.records[key] = record
+  // A fresh verified Catalog for this scope re-establishes trust: any
+  // failed-revocation deny marker is obsolete.
+  deniedAuthorityScopes.delete(key)
   saveFile(file)
   return tombstones
 }
@@ -357,7 +380,12 @@ export function loadProductSpaceCatalogAuthorityTupleSet(
   accountId: string,
   productSpaceId: string,
 ): Set<string> {
-  const record = loadFile().records[productSpaceCatalogAuthorityKey(accountId, productSpaceId)] ?? null
+  const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
+  // A scope with a pending failed-revocation marker is denied in-process:
+  // its tuples fail closed even though the stale record may still sit on
+  // disk (or reload from it).
+  if (deniedAuthorityScopes.has(scopeKey)) return new Set()
+  const record = loadFile().records[scopeKey] ?? null
   const tuples = new Set<string>()
   if (!record) return tuples
   for (const entry of record.entries) {
@@ -401,7 +429,9 @@ export function getProductSpaceCatalogAuthorityRecord(
   accountId: string,
   productSpaceId: string,
 ): ProductSpaceCatalogAuthorityRecord | null {
-  return loadFile().records[productSpaceCatalogAuthorityKey(accountId, productSpaceId)] ?? null
+  const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
+  if (deniedAuthorityScopes.has(scopeKey)) return null
+  return loadFile().records[scopeKey] ?? null
 }
 
 /**
@@ -410,20 +440,58 @@ export function getProductSpaceCatalogAuthorityRecord(
  * record for that space must not survive — installs/opens/uninstalls and
  * launch resolution all fail closed until a fresh verified Catalog lands.
  * Other accounts and spaces are untouched.
+ *
+ * DURABLE semantics: the in-memory cache adopts the revoked state ONLY
+ * after the write-temp-then-rename persistence SUCCEEDED. On a persistence
+ * failure this function throws to the caller AND leaves a precise-scope
+ * in-process deny marker, so the denied scope fails closed immediately even
+ * though the stale record may still sit on disk — and a later revoke for
+ * the same scope RETRIES the durable deletion instead of early-returning.
  */
 export function revokeProductSpaceCatalogAuthority(
   accountId: string,
   productSpaceId: string,
 ): void {
-  const file = loadFile()
   const key = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
-  if (!(key in file.records)) return
-  delete file.records[key]
-  saveFile(file)
+  const file = loadFile()
+  if (!(key in file.records)) {
+    // Nothing recorded — but a marker from an earlier failed revoke means
+    // the durable deletion must still be retried.
+    if (!deniedAuthorityScopes.has(key)) return
+  }
+  const records: ProductSpaceCatalogAuthorityFile['records'] = Object.create(null)
+  for (const [recordKey, record] of Object.entries(file.records)) {
+    if (recordKey !== key) records[recordKey] = record
+  }
+  const next: ProductSpaceCatalogAuthorityFile = {
+    schemaVersion: AUTHORITY_SCHEMA_VERSION,
+    records,
+  }
+  try {
+    persistFileAtomic(next)
+  } catch (error) {
+    deniedAuthorityScopes.add(key)
+    throw error
+  }
+  // The durable write succeeded: commit the normal cache and clear any
+  // stale marker for this scope.
+  processCache = next
+  deniedAuthorityScopes.delete(key)
+}
+
+/**
+ * Test-only: drops the process cache WITHOUT clearing deny markers,
+ * simulating a same-process reload path — a scope with a pending
+ * failed-revocation marker must still read as denied even when the stale
+ * record reloads from disk.
+ */
+export function __dropAuthorityProcessCacheForTests(): void {
+  processCache = null
 }
 
 export function resetProductSpaceCatalogAuthorityForTests(): void {
   processCache = null
+  deniedAuthorityScopes.clear()
   try {
     if (existsSync(authorityPath())) unlinkSync(authorityPath())
   } catch {

@@ -125,18 +125,31 @@ export function HomePage() {
   const [view, setView] = useState<'home' | 'all-apps'>('home')
   const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
   /**
-   * Synchronous INTENT state for quick-access mutations. The rendered
-   * `quickEntries` commit only on the persisted acknowledgement (a save
-   * reject or superseded generation never enters the UI), but two clicks
-   * arriving before the first save resolves must still build on each other:
-   * this ref is the base every mutation reads and advances, while
-   * `quickConfirmedRef` holds the last persisted acknowledgement for precise
-   * failure rollback.
+   * Quick-access transaction state. `quickEntries` (display) commits only
+   * through the single-writer queue below; `quickIntentRef` is the
+   * synchronous base every mutation builds on, `quickConfirmedRef` the last
+   * persisted acknowledgement for precise suffix rollback.
    */
   const quickIntentRef = useRef<HomeQuickAccessApp[]>([])
   const quickConfirmedRef = useRef<HomeQuickAccessApp[]>([])
   const quickLoadGenerationRef = useRef(0)
   const quickMutationGenerationRef = useRef(0)
+  /**
+   * SINGLE-WRITER serialization for every quick-access disk write (pin,
+   * manage toggle, prune). Tasks run strictly in enqueue order, so writes to
+   * one persisted slot can never land out of order — a slow earlier save
+   * completes before a later one STARTS. Context switches and unmount only
+   * gate DISPLAY of a result; they never cancel or reorder queued writes.
+   */
+  const quickWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
+  /**
+   * Hydration gate of the current context load: mutations enqueued before
+   * the persisted collection loaded wait for it, so they build on the
+   * stored entries instead of an empty intent (never wiping the stored
+   * collection with an unpersisted first click).
+   */
+  const quickHydrationGateRef = useRef<{ contextKey: string; gate: Promise<boolean> } | null>(null)
+  const quickMountedRef = useRef(false)
   /**
    * The ProductSpace context the CURRENT entries were hydrated (or last
    * mutated) for. `null` between a context switch and its hydration, so the
@@ -168,6 +181,64 @@ export function HomePage() {
     quickContextKeyRef.current === contextKey
     && quickMutationGenerationRef.current === generation
   ), [])
+
+  /**
+   * THE quick-access transaction primitive (pin, manage toggle and prune
+   * all share it). Mutations are appended to the single-writer queue: each
+   * task awaits the context's hydration gate, applies its change to the
+   * synchronous intent, and persists IN ORDER. A successful save advances
+   * the confirmed snapshot (display only while the same context+generation
+   * is still current); a rejected save rolls the unconfirmed suffix back to
+   * the last acknowledgement. A superseded context or unmount only gates
+   * display — the in-order disk write is never cancelled or reordered.
+   */
+  const enqueueQuickMutation = useCallback((
+    contextKey: string,
+    apply: (entries: HomeQuickAccessApp[]) => {
+      next: HomeQuickAccessApp[] | null
+      rejected?: boolean
+    },
+  ): void => {
+    const task = quickWriteQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        const hydration = quickHydrationGateRef.current
+        if (hydration && hydration.contextKey === contextKey) {
+          const hydrated = await hydration.gate
+          if (!hydrated) return
+        }
+        const { next, rejected } = apply(quickIntentRef.current)
+        if (rejected || next === null) return
+        const generation = ++quickMutationGenerationRef.current
+        const saved = await saveHomeQuickAccess(contextKey, next)
+        // Display gate only: a superseded context/generation never shows
+        // this result, but its disk write already happened in queue order.
+        if (
+          quickMountedRef.current
+          && isCurrentQuickMutation(contextKey, generation)
+        ) {
+          quickHydratedContextRef.current = contextKey
+          quickIntentRef.current = saved
+          quickConfirmedRef.current = saved
+          setQuickEntries(saved)
+        }
+      })
+      .catch(() => {
+        // Save rejected: roll the unconfirmed suffix back to the last
+        // persisted acknowledgement. The disk keeps its last in-order
+        // write; the display rolls back only in the SAME context.
+        if (quickContextKeyRef.current === contextKey) {
+          quickIntentRef.current = quickConfirmedRef.current
+        }
+        if (
+          quickMountedRef.current
+          && quickContextKeyRef.current === contextKey
+        ) {
+          setQuickEntries(quickConfirmedRef.current)
+        }
+      })
+    quickWriteQueueRef.current = task
+  }, [isCurrentQuickMutation])
   // UI selection + quick-entry persistence use the collision-free stable
   // artifact identity key (account + space + entry + artifact instance), NOT
   // the runtime scope: a catalogEntryId reused across artifact instances
@@ -208,7 +279,8 @@ export function HomePage() {
     // Fail-closed across space transitions: a ProductSpace identity change
     // resets the home view and closes in-place dialogs. The switch also
     // advances the mutation fence, so a still-in-flight save from the
-    // previous context can never write its entries into this context.
+    // previous context can never DISPLAY its entries into this context (its
+    // disk write keeps its in-queue order — it is never reordered).
     const contextKey = quickContextKey
     const generation = ++quickLoadGenerationRef.current
     quickMutationGenerationRef.current += 1
@@ -216,6 +288,9 @@ export function HomePage() {
     quickHydratedContextRef.current = null
     quickIntentRef.current = []
     quickConfirmedRef.current = []
+    let resolveGate!: (hydrated: boolean) => void
+    const gate = new Promise<boolean>(resolve => { resolveGate = resolve })
+    quickHydrationGateRef.current = { contextKey, gate }
     setView('home')
     setManageOpen(false)
     setQuickEntries([])
@@ -228,16 +303,29 @@ export function HomePage() {
         if (
           !isCurrentQuickMutation(contextKey, mutationGeneration)
           || quickLoadGenerationRef.current !== generation
-        ) return
+        ) {
+          resolveGate(false)
+          return
+        }
         quickHydratedContextRef.current = contextKey
         quickIntentRef.current = entries
         quickConfirmedRef.current = entries
         setQuickEntries(entries)
+        resolveGate(true)
       })
       .catch(() => {
-        // Quick access is non-critical; keep the section usable.
+        // Quick access is non-critical; keep the section usable. Queued
+        // mutations for this context fail closed on the gate.
+        resolveGate(false)
       })
   }, [isCurrentQuickMutation, quickContextKey])
+
+  useEffect(() => {
+    quickMountedRef.current = true
+    return () => {
+      quickMountedRef.current = false
+    }
+  }, [])
 
   // Prune quick-access entries that no longer resolve to an available App
   // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids). Runs
@@ -262,74 +350,49 @@ export function HomePage() {
         continue
       }
     }
-    const pruned = quickEntries.filter(entry => availableIds.has(entry.id))
-    if (pruned.length === quickEntries.length) return
-    quickMutationGenerationRef.current += 1
-    const generation = quickMutationGenerationRef.current
-    const contextKey = quickContextKey
-    quickIntentRef.current = pruned
-    setQuickEntries(pruned)
-    void saveHomeQuickAccess(contextKey, pruned)
-      .then(saved => {
-        if (!isCurrentQuickMutation(contextKey, generation)) return
-        quickHydratedContextRef.current = contextKey
-        quickIntentRef.current = saved
-        quickConfirmedRef.current = saved
-        setQuickEntries(saved)
-      })
-      .catch(() => {
-        // Persistence failure must not break the home section.
-      })
-  }, [availableApps, catalogCommitted, isCurrentQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
+    const hasUnresolvable = quickEntries.some(entry => !availableIds.has(entry.id))
+    if (!hasUnresolvable) return
+    // Prune shares the same single-writer transaction primitive: the filter
+    // re-runs against the intent at EXECUTION time, so a concurrent pin is
+    // never clobbered, and a no-op second run persists nothing.
+    enqueueQuickMutation(quickContextKey, entries => {
+      const pruned = entries.filter(entry => availableIds.has(entry.id))
+      if (pruned.length === entries.length) return { next: null }
+      return { next: pruned }
+    })
+  }, [availableApps, catalogCommitted, enqueueQuickMutation, quickContextKey, quickEntries])
 
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
   }
 
+
   /**
-   * Ack-committed quick-access persistence shared by pin and manage-dialog
-   * toggles. The rendered entries update ONLY on the persisted
-   * acknowledgement; on a save reject (or a superseded context/generation)
-   * the intent and UI roll back precisely to the last confirmed snapshot.
-   * Mutations chain on the synchronous intent ref, so two clicks arriving
-   * before the first save resolves still accumulate into one payload.
+   * Ack-committed quick-access toggle (pin and manage-dialog both route
+   * here) — a queued task on the SAME single-writer primitive as prune. The
+   * toggle applies at EXECUTION time against the hydrated intent, so a
+   * click before hydration can never wipe the stored collection.
    */
   const persistQuickToggle = useCallback((
     contextKey: string,
     scopeKey: string,
     enabled: boolean,
   ): boolean => {
-    const previous = quickIntentRef.current
-    const { next, rejected } = toggleHomeQuickAccessApp(previous, scopeKey, enabled)
-    if (rejected) {
-      toast.error(t('homeApps.manage.limitReached', {
-        max: MAX_HOME_QUICK_ACCESS_APPS,
-      }))
-      return false
-    }
-    quickMutationGenerationRef.current += 1
-    const generation = quickMutationGenerationRef.current
-    quickIntentRef.current = next
-    void saveHomeQuickAccess(contextKey, next)
-      .then(saved => {
-        if (!isCurrentQuickMutation(contextKey, generation)) return
-        quickHydratedContextRef.current = contextKey
-        quickIntentRef.current = saved
-        quickConfirmedRef.current = saved
-        setQuickEntries(saved)
-      })
-      .catch(() => {
-        if (!isCurrentQuickMutation(contextKey, generation)) return
-        // Precise rollback to the last PERSISTED snapshot — the unacked
-        // toggle never enters the view.
-        quickIntentRef.current = quickConfirmedRef.current
-        setQuickEntries(quickConfirmedRef.current)
-      })
+    enqueueQuickMutation(contextKey, entries => {
+      const { next, rejected } = toggleHomeQuickAccessApp(entries, scopeKey, enabled)
+      if (rejected) {
+        toast.error(t('homeApps.manage.limitReached', {
+          max: MAX_HOME_QUICK_ACCESS_APPS,
+        }))
+        return { next: null, rejected: true }
+      }
+      return { next }
+    })
     return true
-  }, [isCurrentQuickMutation, t])
+  }, [enqueueQuickMutation, t])
 
-  // 显示在首页: pin a catalog App into the home quick access — ack-committed
-  // and rolled back exactly like every other quick-access mutation.
+  // 显示在首页: pin a catalog App into the home quick access — queued on the
+  // same single-writer primitive as every other quick-access mutation.
   const pinApp = useCallback((app: CatalogApp) => {
     persistQuickToggle(quickContextKey, uiKeyForApp(app), true)
   }, [persistQuickToggle, quickContextKey, uiKeyForApp])

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  __dropAuthorityProcessCacheForTests,
   getProductSpaceCatalogAuthorityRecord,
   hasProductSpaceCatalogAuthorityTuple,
   loadProductSpaceCatalogAuthorityTupleSet,
@@ -10,6 +11,7 @@ import {
   productSpaceCatalogAuthorityTupleKey,
   recordProductSpaceCatalogAuthoritativeEntries,
   resetProductSpaceCatalogAuthorityForTests,
+  revokeProductSpaceCatalogAuthority,
 } from '../product-space-catalog-authority'
 
 function tuple(
@@ -305,5 +307,115 @@ describe('ProductSpace Catalog authority', () => {
     )
     expect(tombstones).toEqual([])
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.entries).toHaveLength(1)
+  })
+
+  describe('durable revocation', () => {
+    const authorityFile = (): string => join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+
+    function seedScopes(): void {
+      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
+      recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'rev-1', [
+        entry({ catalogEntryId: 'entry-b', artifactInstanceId: 'artifact-b' }),
+      ])
+    }
+
+    it('persists the revocation durably: the on-disk file no longer holds the scope record', () => {
+      seedScopes()
+      revokeProductSpaceCatalogAuthority('account-a', 'space-a')
+      // Memory is revoked...
+      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      // ...and the DISK is too — the durable file no longer contains the key.
+      const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+      expect(Object.keys(onDisk.records)).not.toContain(productSpaceCatalogAuthorityKey('account-a', 'space-a'))
+      // Other scopes are untouched in memory and on disk.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(true)
+      expect(Object.keys(onDisk.records)).toContain(productSpaceCatalogAuthorityKey('account-b', 'space-b'))
+    })
+
+    it('a WRITE fault propagates, fails the scope closed in-process, and a retry durably succeeds', () => {
+      seedScopes()
+      // writeFileSync fault: the temp target exists as a DIRECTORY.
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+      // In-process fail-closed for exactly the denied scope...
+      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      // ...while the other scope keeps its tuples.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(true)
+      // The durable deletion FAILED: the stale record is still on disk —
+      // the process must not trust it, which the deny marker guarantees.
+      const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+      expect(Object.keys(onDisk.records)).toContain(productSpaceCatalogAuthorityKey('account-a', 'space-a'))
+
+      // Retry after the obstacle is removed: the deletion becomes durable
+      // and the deny marker clears.
+      revokeProductSpaceCatalogAuthority('account-a', 'space-a')
+      expect(Object.keys(JSON.parse(readFileSync(authorityFile(), 'utf8')).records))
+        .not.toContain(productSpaceCatalogAuthorityKey('account-a', 'space-a'))
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+    })
+
+    it('a RENAME fault propagates and the retry persists durably', () => {
+      seedScopes()
+      // renameSync fault: the target path is occupied by a directory, so
+      // the temp write succeeds but the atomic rename cannot.
+      rmSync(authorityFile())
+      mkdirSync(authorityFile())
+      expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+
+      // Clear the obstacle: the retry lands the revocation on disk.
+      rmSync(authorityFile(), { recursive: true, force: true })
+      revokeProductSpaceCatalogAuthority('account-a', 'space-a')
+      expect(JSON.parse(readFileSync(authorityFile(), 'utf8')).records).not.toHaveProperty(
+        productSpaceCatalogAuthorityKey('account-a', 'space-a'),
+      )
+    })
+
+    it('the deny marker survives a process-cache reload of the stale disk record', () => {
+      seedScopes()
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+      // Simulate the reload path: the process cache is dropped, so the next
+      // read reloads the stale on-disk record — the deny marker must still
+      // fail the scope closed.
+      __dropAuthorityProcessCacheForTests()
+      expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      expect(loadProductSpaceCatalogAuthorityTupleSet('account-a', 'space-a')).toEqual(new Set())
+      // Other scopes reload normally.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(true)
+    })
+
+    it('a fresh verified Catalog for the scope clears the deny marker and re-establishes trust', () => {
+      seedScopes()
+      const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+      mkdirSync(tmpPath)
+      try {
+        expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      } finally {
+        rmSync(tmpPath, { recursive: true, force: true })
+      }
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+
+      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-2', [entry()])
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    })
+
+    it('revoking an unknown scope without a pending marker is a no-op', () => {
+      expect(() => revokeProductSpaceCatalogAuthority('account-x', 'space-x')).not.toThrow()
+      expect(existsSync(authorityFile())).toBe(false)
+    })
   })
 })
