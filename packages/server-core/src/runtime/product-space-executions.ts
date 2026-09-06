@@ -675,6 +675,12 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
  * enumeration and commit.
  */
 let switchLockTail: Promise<unknown> = Promise.resolve()
+/** Test-observable queue depth: tasks waiting on or running under the lock. */
+let switchLockPending = 0
+
+export function __pendingSwitchLockTasksForTests(): number {
+  return switchLockPending
+}
 
 export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T> {
   const previous = switchLockTail
@@ -682,10 +688,12 @@ export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T>
   switchLockTail = new Promise<void>(resolve => {
     release = resolve
   })
+  switchLockPending += 1
   await previous.catch(() => {})
   try {
     return await operation()
   } finally {
+    switchLockPending -= 1
     release()
   }
 }

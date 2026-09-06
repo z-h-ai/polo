@@ -275,9 +275,27 @@ mock.module('@polo-ai/shared/config', () => ({
   getAdminUrl: () => 'https://admin.example.com',
 }))
 
+const withdrawnTombstonesByScope = new Map<string, Set<string>>()
+
+function seedTombstoneBinding(
+  accountId = 'account-a',
+  productSpaceId = 'organization-a',
+  catalogEntryId = 'catalog-entry-w',
+  artifactInstanceId = 'artifact-w',
+  versionId = 'version-w',
+  version = '2.0.0',
+): void {
+  const scope = authorityScopeKey(accountId, productSpaceId)
+  const set = withdrawnTombstonesByScope.get(scope) ?? new Set<string>()
+  set.add(JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version]))
+  withdrawnTombstonesByScope.set(scope, set)
+}
+
 mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () => ({
   loadProductSpaceCatalogAuthorityTupleSet: (accountId: string, productSpaceId: string) =>
     authorityTuplesByScope.get(authorityScopeKey(accountId, productSpaceId)) ?? new Set<string>(),
+  loadProductSpaceWithdrawnTombstoneTupleSet: (accountId: string, productSpaceId: string) =>
+    withdrawnTombstonesByScope.get(authorityScopeKey(accountId, productSpaceId)) ?? new Set<string>(),
   productSpaceCatalogAuthorityTupleKey: (
     catalogEntryId: string,
     artifactInstanceId: string,
@@ -415,6 +433,7 @@ describe('local app main-process authorization boundary', () => {
     appAccessDenied = false
     catalog = createCatalog(1)
     authorityTuplesByScope.clear()
+    withdrawnTombstonesByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1
@@ -646,12 +665,13 @@ describe('local app main-process authorization boundary', () => {
     expect(scopedStatuses).not.toHaveBeenCalled()
   })
 
-  it('uninstalls a withdrawn retained installation through the full-tuple authority binding without fresh-Catalog validation', async () => {
+  it('routes a withdrawn retained installation to the retained-tombstone gate after the fresh Catalog proves the entry gone', async () => {
     // A withdrawn tombstone identity that exists ONLY in the Main authority
     // (the fresh Catalog mock still lists catalog-entry-a with a DIFFERENT
-    // identity) — uninstall must succeed through the restricted
-    // stop/uninstall/local-data path when the FULL tuple matches.
-    seedAuthorityBinding(
+    // identity) — the fresh fetch runs FIRST and its authoritative
+    // missing-entry verdict routes the uninstall to the restricted
+    // stop/uninstall/local-data path when the FULL tombstone tuple matches.
+    seedTombstoneBinding(
       'account-a',
       'organization-a',
       'catalog-entry-w',
@@ -670,13 +690,36 @@ describe('local app main-process authorization boundary', () => {
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
     await uninstall(context, withdrawnIdentity, { preserveData: true })
 
-    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+    // The current Catalog IS fetched first; its authoritative missing-entry
+    // verdict is what routes the request to the retained-tombstone gate.
+    expect(getProductSpaceCatalog).toHaveBeenCalled()
     expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
       kind: 'catalog',
       accountId: 'account-a',
       organizationId: 'organization-a',
       catalogAppId: 'artifact-w',
     }, { preserveData: true })
+  })
+
+  it('fails tombstone-evidenced cleanup closed when the fresh fetch itself fails (401)', async () => {
+    // Even WITH retained-tombstone evidence, a fresh-fetch auth failure must
+    // stay fail-closed: 401/403/network are never tombstone fallbacks.
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTombstoneBinding()
+    getProductSpaceCatalog.mockImplementation(async () => {
+      throw Object.assign(new Error('session expired'), { errorCode: 'UNAUTHORIZED', status: 401 })
+    })
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, {
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      versionId: 'version-w',
+      version: '2.0.0',
+    }, { preserveData: true })).rejects.toMatchObject({ errorCode: 'UNAUTHORIZED', status: 401 })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
   })
 
   it('rejects fabricated withdrawn uninstall identities before the registry can run', async () => {
@@ -696,6 +739,50 @@ describe('local app main-process authorization boundary', () => {
       ...productSpaceAppIdentity(),
       versionId: 'forged-version' as never,
     }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    // LIVE uninstall: the fresh Catalog matches the FULL identity exactly —
+    // success WITHOUT any tombstone evidence.
+    seedAuthorityBinding()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    await uninstall(context, productSpaceAppIdentity(), { preserveData: true })
+    expect(getProductSpaceCatalog).toHaveBeenCalled()
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'artifact-instance-a',
+    }, { preserveData: true })
+
+    // STALE VERSION drift: the live Catalog holds a different version for
+    // the entry → fail closed even with the OLD tuple present in the union.
+    getProductSpaceCatalog.mockImplementation(async () => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-upgraded',
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: {
+          versionId: 'version-upgraded',
+          version: '3.0.0',
+          checksum: 'b'.repeat(64),
+        },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+        permissions: [],
+      }],
+    }))
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+
+    // FRESH FETCH FAILURE (auth/network/schema): fail closed even when the
+    // identity HAS retained-tombstone evidence (covered in its own test
+    // below — here the fabricated/stale variants stay fail-closed too).
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
     await expect(uninstall(context, {
       ...productSpaceAppIdentity(),
       version: '999.0.0' as never,
@@ -717,8 +804,11 @@ describe('local app main-process authorization boundary', () => {
       version: '1.0.0' as never,
     }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
 
-    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
-    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+    // R24: the fresh-Catalog revalidation now runs for every uninstall —
+    // what matters is that the destructive registry path never runs for the
+    // cross-space/fabricated variants above.
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
   })
 
   it('validates a full 10,000-identity withdrawn batch against a 20,000-tuple authority in one pass', async () => {

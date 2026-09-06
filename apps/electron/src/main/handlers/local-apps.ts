@@ -60,6 +60,7 @@ import {
 } from '@polo-ai/shared/product-spaces'
 import {
   loadProductSpaceCatalogAuthorityTupleSet,
+  loadProductSpaceWithdrawnTombstoneTupleSet,
   productSpaceCatalogAuthorityTupleKey,
 } from '@polo-ai/server-core/runtime/product-space-catalog-authority'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
@@ -389,6 +390,35 @@ function parseProductSpaceAppIdentityBatch(
  * identity withdrawn — fabricated catalog/version tuples or unknown artifact
  * instances are rejected before any registry read.
  */
+/**
+ * RETAINED-TOMBSTONE gate for no-fresh-Catalog cleanup: every identity's
+ * FULL tuple must be a WITHDRAWN TOMBSTONE of the process-trusted authority
+ * record — deliberately NOT the live∪tombstone union. A live (or stale-
+ * version live) App can never pass this gate; the live path must go through
+ * the fresh-Catalog revalidation instead.
+ */
+function assertRetainedTombstoneProductSpaceAppAuthority(apps: ProductSpaceAppIdentity[]): void {
+  const first = apps[0]!
+  const tombstoneTuples = loadProductSpaceWithdrawnTombstoneTupleSet(
+    first.accountId,
+    first.productSpaceId,
+  )
+  for (const app of apps) {
+    const tupleKey = productSpaceCatalogAuthorityTupleKey(
+      app.catalogEntryId,
+      app.artifactInstanceId,
+      app.versionId,
+      app.version,
+    )
+    if (!tombstoneTuples.has(tupleKey)) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'Retained cleanup requires a withdrawn tombstone identity from the trusted Catalog authority',
+      )
+    }
+  }
+}
+
 function assertWithdrawnProductSpaceAppAuthority(apps: ProductSpaceAppIdentity[]): void {
   const first = apps[0]!
   const authorityTuples = loadProductSpaceCatalogAuthorityTupleSet(
@@ -933,8 +963,31 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // install/start/open stay behind the fresh-Catalog availability
       // checks.
       const app = validateProductSpaceAppIdentity(rawApp)
-      assertWithdrawnProductSpaceAppAuthority([app])
       await assertProductSpaceAccountCurrent(app)
+      // LIVE uninstall: the current Catalog is fetched FRESH and
+      // schema-validated and the FULL identity
+      // (accountId/productSpaceId/catalogEntryId/artifactInstanceId/versionId/
+      // version) must match exactly — any drift, missing entry, stale
+      // version, 403/401/network or schema failure fails closed BEFORE the
+      // registry or any file is touched.
+      let liveUninstall = false
+      try {
+        await loadAuthoritativeProductSpaceApps([rawApp])
+        liveUninstall = true
+      } catch (error) {
+        // The ONLY authoritative verdict that may fall back to the
+        // no-fresh-Catalog cleanup gate is RELEASE_CHANGED — the fresh
+        // Catalog itself proved the identity is gone from the current
+        // distribution. Auth/network/schema/space-state failures (and any
+        // stale-version drift, which is a LIVE App mismatch, not a
+        // tombstone) stay fail-closed; a renderer can never self-declare
+        // its way onto this path.
+        const authoritativeMissing = error instanceof LocalAppRuntimeError
+          && error.code === 'RELEASE_CHANGED'
+        if (!authoritativeMissing) throw error
+        assertRetainedTombstoneProductSpaceAppAuthority([app])
+      }
+      void liveUninstall
       const scope = productSpaceBundleScope(app)
       await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
       unregisterLocalAppExecutions(scope)

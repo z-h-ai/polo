@@ -7,6 +7,7 @@ import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
+  __pendingSwitchLockTasksForTests,
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
   listRegisteredProductSpaceExecutions,
@@ -520,6 +521,23 @@ const authorityRecordCalls: Array<{
 }> = []
 let failAuthorityRecord = false
 mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () => ({
+  revokeProductSpaceCatalogAuthority: (accountId: string, productSpaceId: string) => {
+    authorityRevokeCalls.push({ accountId, productSpaceId })
+    observeAuthorityRevoke?.(accountId, productSpaceId)
+    if (failAuthorityRevoke) {
+      throw new Error('authority persistence failed (injected)')
+    }
+  },
+  productSpaceCatalogAuthorityKey: (accountId: string, productSpaceId: string) =>
+    JSON.stringify(['product-space-catalog', 1, accountId, productSpaceId]),
+}))
+
+// The GRANT mutator lives in the package-internal commit module (not on the
+// public subpath) — the Admin handler is its only production caller. The
+// mock is registered for BOTH specifiers that resolve to the commit module
+// (package alias + the handler's relative path) so the handler's binding is
+// intercepted regardless of resolver dedupe.
+const commitModuleFactory = () => ({
   recordProductSpaceCatalogAuthoritativeEntries: (
     accountId: string,
     productSpaceId: string,
@@ -532,14 +550,9 @@ mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () =
     }
     return []
   },
-  revokeProductSpaceCatalogAuthority: (accountId: string, productSpaceId: string) => {
-    authorityRevokeCalls.push({ accountId, productSpaceId })
-    observeAuthorityRevoke?.(accountId, productSpaceId)
-    if (failAuthorityRevoke) {
-      throw new Error('authority persistence failed (injected)')
-    }
-  },
-}))
+})
+mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority-commit', commitModuleFactory)
+mock.module('../../runtime/product-space-catalog-authority-commit', commitModuleFactory)
 
 const {
   readApiKey,
@@ -1369,11 +1382,14 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     setRuntimeActiveProductSpace('space-a')
     setRuntimeActiveProductSpaceAccount('user-1')
 
-    // R1's denial decision queues on the held switch lock.
+    // R1's denial decision queues on the held switch lock — observable via
+    // the switch-lock queue depth (holder + R1's parked decision).
     const pending = productSpaceCatalog(context, 'space-a', undefined)
     await waitFor(() => releaseHolder !== undefined)
-    // Let the queued decision actually claim its lock slot.
-    await new Promise(resolve => setTimeout(resolve, 60))
+    await waitFor(() => {
+      if (__pendingSwitchLockTasksForTests() < 2) return undefined
+      return true
+    })
 
     // A committed switch re-points the fence at space-b while the denial is
     // parked (the fence generation advances).
@@ -1436,15 +1452,29 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     setRuntimeActiveProductSpaceAccount('user-1')
 
     // R1 denies and its revocation decision QUEUES on the held switch lock.
+    const scopeKey = createProductSpaceContextKey('user-1' as never, 'space-a' as never)
     const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
     await waitFor(() => releaseHolder !== undefined)
-    // Let R1's denial queue onto the held switch lock.
-    await new Promise(resolve => setTimeout(resolve, 60))
+    await waitFor(() => {
+      if (__pendingSwitchLockTasksForTests() >= 2) return true
+      return undefined
+    })
 
     // While R1 is parked: R2 registers (newer invocation), fetches, and its
-    // commit zone queues BEHIND R1's queued decision.
+    // commit zone queues BEHIND R1's queued decision — both edges observed
+    // through real state (the latest-invocation registration and the lock
+    // queue depth).
+    const latestBeforeR2 = __latestProductSpaceCatalogSyncInvocationForTests(scopeKey)
     const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
-    await new Promise(resolve => setTimeout(resolve, 200))
+    await waitFor(() => {
+      const latest = __latestProductSpaceCatalogSyncInvocationForTests(scopeKey)
+      if (
+        latest !== null
+        && latest > (latestBeforeR2 ?? Number.MAX_SAFE_INTEGER)
+        && __pendingSwitchLockTasksForTests() >= 3
+      ) return true
+      return undefined
+    })
 
     // Release the holder: R1's decision runs FIRST and must see R2's newer
     // registration at decision time.

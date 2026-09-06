@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   __dropAuthorityProcessCacheForTests,
   getProductSpaceCatalogAuthorityRecord,
@@ -9,10 +9,10 @@ import {
   loadProductSpaceCatalogAuthorityTupleSet,
   productSpaceCatalogAuthorityKey,
   productSpaceCatalogAuthorityTupleKey,
-  recordProductSpaceCatalogAuthoritativeEntries,
   resetProductSpaceCatalogAuthorityForTests,
   revokeProductSpaceCatalogAuthority,
 } from '../product-space-catalog-authority'
+import { recordProductSpaceCatalogAuthoritativeEntries } from '../product-space-catalog-authority-commit'
 
 function tuple(
   catalogEntryId = 'entry-a',
@@ -514,7 +514,9 @@ describe('ProductSpace Catalog authority', () => {
       revokeProductSpaceCatalogAuthority('account-a', 'space-a')
       expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
 
-      const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority.ts')
+      // P2 uses the INTERNAL commit entry (the grant mutator is not on the
+      // public subpath — see the boundary test below).
+      const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
       const probe = `
         const { pathToFileURL } = await import('node:url')
         const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
@@ -597,5 +599,269 @@ describe('ProductSpace Catalog authority', () => {
       expect(finalState.revalidatedTrusted).toBe(true)
       expect(finalState.oldUntrusted).toBe(false)
     })
+  })
+})
+
+describe('R24: denied-recovery transaction (no cross-scope laundering)', () => {
+  const authorityFile = (): string => join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+
+  function seedScopes(): void {
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
+    recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'rev-1', [
+      entry({ catalogEntryId: 'entry-b', artifactInstanceId: 'artifact-b' }),
+    ])
+  }
+
+  it('P1 denied A → P2 fresh-A persist fails → B succeeds: disk A stays denied, cache unpublishable', () => {
+    // P1: durable deny A.
+    seedScopes()
+    revokeProductSpaceCatalogAuthority('account-a', 'space-a')
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+
+    // P2 (same process model): fresh-A persist FAILS (temp occupied)…
+    const tmpPath = `${authorityFile()}.${process.pid}.tmp`
+    mkdirSync(tmpPath)
+    try {
+      expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a', 'space-a', 'fresh-a', [entry()],
+      )).toThrow()
+      // …A is still denied/untrusted in this process, and the shared cache
+      // was NEVER published with the failed candidate.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+    } finally {
+      // The transient fault clears (the blocker is removed)…
+      rmSync(tmpPath, { recursive: true, force: true })
+    }
+
+    // …B then refreshes SUCCESSFULLY: the durable file must keep A's
+    // denied record — B's success cannot launder A's failed candidate.
+    recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'fresh-b', [
+      entry({ catalogEntryId: 'entry-b2', artifactInstanceId: 'artifact-b2' }),
+    ])
+    const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+    const aRecord = onDisk.records[productSpaceCatalogAuthorityKey('account-a', 'space-a')]
+    expect(aRecord.kind).toBe('denied')
+    expect(onDisk.records[productSpaceCatalogAuthorityKey('account-b', 'space-b')].catalogRevision).toBe('fresh-b')
+    // A remains denied after B's success.
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+    expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b2', 'artifact-b2', 'version-1', '1.0.0')).toBe(true)
+
+    // P3 (fresh process, READ-ONLY directory): fresh A goes down the normal
+    // path and must THROW (no swallow, no in-process trust) while the disk
+    // stays untouched.
+    chmodSync(dirname(authorityFile()), 0o555)
+    try {
+      expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a', 'space-a', 'fresh-a-p3', [entry()],
+      )).toThrow()
+      const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+      expect(onDisk.records[productSpaceCatalogAuthorityKey('account-a', 'space-a')].kind).toBe('denied')
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+    } finally {
+      chmodSync(dirname(authorityFile()), 0o755)
+    }
+
+    // After permissions are restored, a fresh revalidation recovers A.
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'fresh-a-recovered', [entry()],
+    )
+    expect(tombstones).toEqual([])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+  })
+
+  it('P1 denied A → P2 fresh-A fails under a REAL 0555 read-only containing directory → P3 fresh process still denies A', () => {
+    seedScopes()
+    revokeProductSpaceCatalogAuthority('account-a', 'space-a')
+
+    // REAL POSIX dual fault: the containing directory is made read-only so
+    // BOTH the temp-file creation and any old-file mutation are denied,
+    // while the pre-existing authority file stays perfectly readable.
+    const dir = dirname(authorityFile())
+    chmodSync(dir, 0o555)
+    try {
+      expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a', 'space-a', 'fresh-readonly', [entry()],
+      )).toThrow()
+      // The old file is intact and readable; A stays denied in this process.
+      expect(readFileSync(authorityFile(), 'utf8')).toContain('"kind":"denied"')
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      // Unrelated scope keeps its precise in-process trust.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')).toBe(true)
+
+      // A REAL fresh process (third process) reads the readable candidate
+      // file but must trust NOTHING before its own revalidation.
+      const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
+      const probe = `
+        const { pathToFileURL } = await import('node:url')
+        const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+        console.log(JSON.stringify({
+          deniedTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+            'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0'),
+          otherTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+            'account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0'),
+          deniedOnDisk: JSON.parse(
+            require('node:fs').readFileSync(
+              process.env.POLO_AI_CONFIG_DIR + '/product-space-catalog-authority.json', 'utf8',
+            ),
+          ).records[${JSON.stringify(productSpaceCatalogAuthorityKey('account-a', 'space-a'))}].kind,
+        }))
+      `
+      const fresh = Bun.spawnSync({
+        cmd: [process.execPath, '-e', probe],
+        cwd: join(import.meta.dir, '..', '..', '..'),
+        env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(fresh.exitCode).toBe(0)
+      const out = JSON.parse(fresh.stdout.toString().trim()) as {
+        deniedTrusted: boolean
+        otherTrusted: boolean
+        deniedOnDisk: string
+      }
+      expect(out.deniedTrusted).toBe(false)
+      expect(out.otherTrusted).toBe(false)
+      expect(out.deniedOnDisk).toBe('denied')
+    } finally {
+      chmodSync(dir, 0o755)
+    }
+  })
+})
+
+describe('R24: public-surface boundary (no public grant API)', () => {
+  it('the public subpath exposes NO grant-capable mutator', async () => {
+    const pub = await import('../product-space-catalog-authority')
+    expect((pub as Record<string, unknown>).recordProductSpaceCatalogAuthoritativeEntries).toBeUndefined()
+    // Public read/revoke APIs cannot mint trust either: a fresh process
+    // state + revoke/read round-trip leaves the tuples untrusted.
+    resetProductSpaceCatalogAuthorityForTests()
+    seedScopesNoop()
+    expect(hasProductSpaceCatalogAuthorityTuple('account-x', 'space-x', ...tuple())).toBe(false)
+    expect(() => revokeProductSpaceCatalogAuthority('account-x', 'space-x')).not.toThrow()
+    expect(hasProductSpaceCatalogAuthorityTuple('account-x', 'space-x', ...tuple())).toBe(false)
+  })
+
+  function seedScopesNoop(): void {
+    recordA()
+  }
+  function recordA(): void {
+    // no-op: the boundary test proves trust CANNOT be created without the
+    // internal commit entry — nothing is seeded here on purpose.
+  }
+
+  it('the package exports map does NOT expose the commit module', () => {
+    const pkg = JSON.parse(readFileSync(
+      join(import.meta.dir, '..', '..', '..', 'package.json'),
+      'utf8',
+    )) as { exports: Record<string, string> }
+    const exposed = Object.values(pkg.exports ?? {}).join('|')
+    expect(exposed).not.toContain('product-space-catalog-authority-commit')
+    expect(exposed).toContain('product-space-catalog-authority')
+  })
+})
+
+describe('R24: explicit kind union decoding', () => {
+  const authorityFile = (): string => join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+  const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
+
+  function writeRecords(records: Record<string, unknown>): void {
+    writeFileSync(authorityFile(), JSON.stringify({
+      schemaVersion: 1,
+      records,
+    }), 'utf8')
+    __dropAuthorityProcessCacheForTests()
+  }
+
+  function probeTrusted(entryId: string, artifactId: string, versionId = 'version-1', version = '1.0.0'): boolean {
+    const probe = `
+      const { pathToFileURL } = await import('node:url')
+      const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+      console.log(JSON.stringify({
+        trusted: mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-a', 'space-a', ${JSON.stringify(entryId)}, ${JSON.stringify(artifactId)}, ${JSON.stringify(versionId)}, ${JSON.stringify(version)}),
+    }))
+    `
+    const proc = Bun.spawnSync({
+      cmd: [process.execPath, '-e', probe],
+      cwd: join(import.meta.dir, '..', '..', '..'),
+      env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(proc.exitCode).toBe(0)
+    return JSON.parse(proc.stdout.toString().trim()).trusted
+  }
+
+  const scopeKey = JSON.stringify(['product-space-catalog', 1, 'account-a', 'space-a'])
+
+  it('an explicit kind=authority record is a candidate on cold start and grants after revalidation', () => {
+    const explicit = {
+      kind: 'authority',
+      schemaVersion: 1,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      syncedAt: 1,
+      catalogRevision: 'rev-explicit',
+      entries: [{
+        kind: 'app', catalogEntryId: 'entry-x', artifactInstanceId: 'artifact-x',
+        versionId: 'version-1', version: '1.0.0', name: 'X', description: '',
+        availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
+        permissions: [],
+      }],
+      tombstones: [],
+    }
+    writeRecords({ [scopeKey]: explicit })
+    // Cold start: candidate — never a grant.
+    expect(probeTrusted('entry-x', 'artifact-x')).toBe(false)
+    // Fresh revalidation migrates/refreshes and grants in-process.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-2', [entry()])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    // The durable record is migrated to the explicit kind.
+    const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+    expect(onDisk.records[scopeKey].kind).toBe('authority')
+  })
+
+  it('a legacy (missing-kind) record is a non-granting candidate that migrates on fresh success', () => {
+    const legacy = {
+      schemaVersion: 1,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      syncedAt: 1,
+      catalogRevision: 'rev-legacy',
+      entries: [{
+        kind: 'app', catalogEntryId: 'entry-legacy', artifactInstanceId: 'artifact-legacy',
+        versionId: 'version-1', version: '1.0.0', name: 'L', description: '',
+        availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
+        permissions: [],
+      }],
+      tombstones: [],
+    }
+    writeRecords({ [scopeKey]: legacy })
+    // Never grants.
+    expect(probeTrusted('entry-legacy', 'artifact-legacy')).toBe(false)
+    // Fresh success migrates the record to kind=authority.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-migrate', [entry()])
+    const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+    expect(onDisk.records[scopeKey].kind).toBe('authority')
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+  })
+
+  it('an unknown kind is dropped (fail closed) and a fresh Catalog rebuilds the scope', () => {
+    const unknownKind = {
+      kind: 'quarantined-by-someone',
+      schemaVersion: 1,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      syncedAt: 1,
+      catalogRevision: 'rev-unknown',
+      entries: [],
+      tombstones: [],
+    }
+    writeRecords({ [scopeKey]: unknownKind })
+    expect(probeTrusted('entry-any', 'artifact-any')).toBe(false)
+    // The malformed/unknown record is dropped at load — the reload sees no
+    // trusted authority and a fresh Catalog rebuilds cleanly.
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-rebuild', [entry()])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 })

@@ -98,10 +98,11 @@ import {
   revokeRuntimeProductSpaceFenceIfBoundLocked,
   withSwitchLock,
 } from '../../runtime/product-space-executions'
-import {
-  recordProductSpaceCatalogAuthoritativeEntries,
-  revokeProductSpaceCatalogAuthority,
-} from '../../runtime/product-space-catalog-authority'
+import { revokeProductSpaceCatalogAuthority } from '../../runtime/product-space-catalog-authority'
+// INTERNAL commit entry: the ONLY grant-capable mutator, reachable solely
+// from this schema-validated Admin Catalog commit path (not exported by the
+// package `exports` map — asserted by the authority boundary tests).
+import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority-commit'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
 

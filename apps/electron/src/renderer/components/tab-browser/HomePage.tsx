@@ -154,12 +154,16 @@ interface HomeQuickContextWriter {
   hydrated: boolean
   /** True while an activation load is still in flight. */
   hydrating: boolean
+  /** Observable bounded-retry counter for the activation load. */
+  hydrationAttempts: number
   intent: HomeQuickAccessApp[]
   confirmed: HomeQuickAccessApp[]
 }
 
 const homeQuickWriters = new Map<string, HomeQuickContextWriter>()
 let nextHomeQuickMountId = 0
+/** Bounded hydration retries while owners remain (initial + 1 retry). */
+const MAX_HYDRATION_ATTEMPTS = 2
 
 function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
   let writer = homeQuickWriters.get(contextKey)
@@ -175,6 +179,7 @@ function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
       resolveGate,
       hydrated: false,
       hydrating: false,
+      hydrationAttempts: 0,
       intent: [],
       confirmed: [],
     }
@@ -303,7 +308,14 @@ export function HomePage() {
       .catch(() => {})
       .then(async () => {
         const hydrated = await writer.gate
-        if (!hydrated) return
+        if (!hydrated) {
+          // HYDRATION LOST: the mutation must NOT be silently dropped. A
+          // queued task that could never build on a hydrated baseline takes
+          // the visible error path (rollback broadcast + toast) — no pseudo
+          // acks.
+          toast.error(t('homeApps.quick.loadFailed'))
+          throw new Error('hydration unavailable')
+        }
         const { next, rejected } = apply(writer.intent)
         if (rejected || next === null) return
         const saved = await saveHomeQuickAccess(contextKey, next)
@@ -315,8 +327,9 @@ export function HomePage() {
         notifyHomeQuickSubscribers(writer, saved)
       })
       .catch(() => {
-        // Save rejected: roll THIS context's unconfirmed suffix back to its
-        // last persisted acknowledgement and broadcast the rollback.
+        // Save rejected (or hydration lost): roll THIS context's unconfirmed
+        // suffix back to its last persisted acknowledgement and broadcast
+        // the rollback so every live mount converges on the same state.
         writer.intent = writer.confirmed
         notifyHomeQuickSubscribers(writer, writer.confirmed)
       })
@@ -327,7 +340,7 @@ export function HomePage() {
         sweepHomeQuickWriters()
       })
     writer.queue = task
-  }, [])
+  }, [t])
   // UI selection + quick-entry persistence use the collision-free stable
   // artifact identity key (account + space + entry + artifact instance), NOT
   // the runtime scope: a catalogEntryId reused across artifact instances
@@ -410,9 +423,12 @@ export function HomePage() {
     // Fresh activation for THIS mount: only ONE load may be in flight per
     // context (a second mount joining during hydration awaits the SAME gate
     // and displays the shared baseline). Every mount waits for the gate and
-    // displays from the baseline through its own state setter.
-    if (!writer.hydrating) {
+    // displays from the baseline through its own state setter. A rejected
+    // load is retried a BOUNDED number of times while owners remain —
+    // queued mutations are never silently dropped.
+    const activateHydration = (attempt: number): void => {
       writer.hydrating = true
+      writer.hydrationAttempts = attempt
       let resolveGate!: (hydrated: boolean) => void
       writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
       writer.resolveGate = resolveGate
@@ -427,15 +443,25 @@ export function HomePage() {
           notifyHomeQuickSubscribers(writer, entries)
         })
         .catch(() => {
-          // Quick access is non-critical; keep the section usable. Queued
-          // mutations for this context fail closed on the gate (a later
-          // activation installs a fresh gate and retries the load).
+          if (attempt < MAX_HYDRATION_ATTEMPTS && writer.owners.size > 0) {
+            // Bounded, observable retry with a fresh gate.
+            writer.hydrating = false
+            activateHydration(attempt + 1)
+            return
+          }
+          // Retries exhausted: the gate resolves FALSE so queued mutations
+          // take their VISIBLE failure path (rollback broadcast + toast) —
+          // never a silent pseudo-ack. A later activation installs a fresh
+          // gate and retries the load again.
           writer.resolveGate(false)
         })
         .finally(() => {
           writer.hydrating = false
           sweepHomeQuickWriters()
         })
+    }
+    if (!writer.hydrating) {
+      activateHydration(1)
     }
     sweepHomeQuickWriters()
   }, [quickContextKey])
