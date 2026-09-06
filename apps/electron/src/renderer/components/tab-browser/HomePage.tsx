@@ -142,6 +142,7 @@ export function HomePage() {
   } | null>(null)
   const installTargetApp = installTarget?.app ?? null
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
+  const [showCirclesCard, setShowCirclesCard] = useState(false)
   const [preserveData, setPreserveData] = useState(true)
 
   const activeProductSpace = catalog.productSpace?.activeProductSpace
@@ -180,6 +181,32 @@ export function HomePage() {
     () => resolveHomeQuickAccessApps(quickEntries, availableApps, uiKeyForApp),
     [availableApps, quickEntries, uiKeyForApp],
   )
+  // Authoritative pinned identity keys: derived from the persisted quick
+  // entries, never from local All Apps view state.
+  const quickPinnedIds = useMemo(
+    () => new Set(quickEntries.map(entry => entry.id)),
+    [quickEntries],
+  )
+  // First-run default curation (POO-41 v1): with nothing pinned, surface the
+  // first two distinct-name work Apps as quick-access cards. User pins always
+  // win — the defaults only fill an empty home.
+  // First-run default curation (POO-41 v1): only when the context has never
+  // had persisted quick entries does the home surface the first two
+  // distinct-name work Apps. Once anything was pinned/pruned, user state wins.
+  const hadPersistedQuickEntriesRef = useRef(false)
+  const homeWorkCards = useMemo(() => {
+    if (quickApps.length > 0) return quickApps
+    if (quickEntries.length > 0 || hadPersistedQuickEntriesRef.current) return []
+    const seen = new Set<string>()
+    const picks: CatalogApp[] = []
+    for (const app of availableApps) {
+      if (seen.has(app.name)) continue
+      seen.add(app.name)
+      picks.push(app)
+      if (picks.length >= 2) break
+    }
+    return picks
+  }, [availableApps, quickApps, quickEntries])
 
   useEffect(() => {
     // Fail-closed across space transitions: a ProductSpace identity change
@@ -204,6 +231,7 @@ export function HomePage() {
           !isCurrentQuickMutation(contextKey, mutationGeneration)
           || quickLoadGenerationRef.current !== generation
         ) return
+        if (entries.length > 0) hadPersistedQuickEntriesRef.current = true
         quickHydratedContextRef.current = contextKey
         setQuickEntries(entries)
       })
@@ -255,6 +283,31 @@ export function HomePage() {
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
   }
+
+  // 显示在首页: pin a catalog App into the home quick access (fenced +
+  // persisted exactly like toggleQuickAccess).
+  const pinApp = useCallback((app: CatalogApp) => {
+    const key = uiKeyForApp(app)
+    const { next, rejected } = toggleHomeQuickAccessApp(quickEntriesRef.current, key, true)
+    if (rejected) {
+      toast.error(t('homeApps.manage.limitReached', {
+        max: MAX_HOME_QUICK_ACCESS_APPS,
+      }))
+      return
+    }
+    quickMutationGenerationRef.current += 1
+    const generation = quickMutationGenerationRef.current
+    const contextKey = quickContextKey
+    setQuickEntries(next)
+    void saveHomeQuickAccess(contextKey, next)
+      .then(saved => {
+        if (!isCurrentQuickMutation(contextKey, generation)) return
+        setQuickEntries(saved)
+      })
+      .catch(() => {
+        // Persistence failure must not break the home section.
+      })
+  }, [isCurrentQuickMutation, quickContextKey, t])
 
   // Authoritative committed-context lease for enterprise workflow jumps:
   // account (from the committed ProductSpaceContext authority — present even
@@ -451,23 +504,6 @@ export function HomePage() {
       data-testid="home-app-hub"
     >
       <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
-        {catalog.productSpace && (
-          <HomeSpaceContext
-            spaceName={activeProductSpace?.name
-              || t('homeApps.organization.current')}
-            spaceKind={activeProductSpace?.kind ?? null}
-            creatorCircles={catalog.creatorCircles}
-            spaceKey={catalog.productSpace.productSpaceContextKey}
-            enterpriseRole={activeProductSpace?.kind === 'enterprise'
-              ? activeProductSpace.role
-              : undefined}
-            enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
-              ? activeProductSpace.accessMode
-              : undefined}
-            onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
-            onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
-          />
-        )}
         {view === 'all-apps' && catalog.productSpace ? (
           <AllAppsView
             spaceName={activeProductSpace?.name
@@ -480,116 +516,225 @@ export function HomePage() {
             errorCode={catalog.state.errorCode}
             offline={catalog.state.accessMode === 'offline'}
             restricted={catalog.state.accessMode === 'denied'}
+            pinnedIds={quickPinnedIds}
             identityKeyForApp={uiKeyForApp}
             getInstallState={catalog.getInstallState}
+            circleCount={catalog.creatorCircles?.length ?? 0}
+            onPin={pinApp}
             onRefresh={() => { void catalog.sync(true) }}
             onOpen={(target) => { void openCatalogApp(target) }}
             onUninstall={setUninstallTarget}
             onBack={() => setView('home')}
           />
         ) : (
-          <section
-            aria-labelledby="quick-access-heading"
-            data-testid="home-quick-access-section"
-          >
-            <div className="mb-[18px] flex flex-col items-start justify-between gap-4 sm:flex-row">
+          <div data-testid="home-quick-access-section">
+            <div className="flex items-end justify-between gap-[24px]">
               <div>
-                <h1
-                  id="quick-access-heading"
-                  className="text-[22px] font-bold leading-[1.25] tracking-[-0.03em]"
-                >
-                  {t('homeApps.quick.title')}
+                <h1 className="m-0 text-[36px] font-semibold leading-[1.08] tracking-[-0.05em]">
+                  {t('homeApps.home.greeting')}
                 </h1>
-                <p className="mt-[7px] text-[13px] leading-[1.5] text-muted-foreground">
-                  {t('homeApps.quick.description', {
-                    max: MAX_HOME_QUICK_ACCESS_APPS,
+                <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
+                  {t('homeApps.home.greetingLead', {
+                    space: activeProductSpace?.name ?? t('homeApps.organization.current'),
                   })}
                 </p>
               </div>
-              {catalog.productSpace && (
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setView('all-apps')}
-                    data-testid="home-all-apps-open"
-                  >
-                    <Icons.LayoutGrid />
-                    {t('homeApps.quick.allApps')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setManageOpen(true)}
-                    data-testid="home-manage-quick-access"
-                  >
-                    <Icons.SlidersHorizontal />
-                    {t('homeApps.quick.manage')}
-                  </Button>
-                </div>
+              {catalog.productSpace && activeProductSpace?.kind === 'personal' && (
+                <button
+                  type="button"
+                  data-testid="home-circles-link"
+                  onClick={() => setShowCirclesCard(value => !value)}
+                  className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                >
+                  {t('homeApps.home.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
+                </button>
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
-              <AppIcon
-                app={POLO_APP_DEFINITION}
-                onOpen={openPoloAssistant}
-                testId="home-quick-entry-polo"
+            {catalog.state.accessMode === 'denied' && (
+              <div
+                className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+                data-testid="home-restricted-banner"
+              >
+                {t('homeApps.organization.accessError')}
+              </div>
+            )}
+
+            {catalog.productSpace && activeProductSpace?.kind === 'enterprise' && (
+              <HomeSpaceContext
+                spaceName={activeProductSpace?.name
+                  || t('homeApps.organization.current')}
+                spaceKind="enterprise"
+                creatorCircles={catalog.creatorCircles}
+                spaceKey={catalog.productSpace.productSpaceContextKey}
+                enterpriseRole={activeProductSpace?.kind === 'enterprise'
+                  ? activeProductSpace.role
+                  : undefined}
+                enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
+                  ? activeProductSpace.accessMode
+                  : undefined}
+                onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
+                onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
               />
-              {catalog.state.loading && !catalog.state.catalog ? (
-                <div
-                  className="col-span-2 flex min-h-28 items-center justify-center rounded-xl border border-foreground/10 sm:col-span-3 md:col-span-5"
-                  data-testid="home-quick-access-loading"
-                >
-                  <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : catalog.state.errorCode && !catalog.state.catalog ? (
-                <div className="col-span-2 flex min-h-32 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center sm:col-span-3 md:col-span-5">
-                  <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
-                  <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
-                  <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                    {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
+            )}
+
+            <section className="mt-[34px]">
+              <div className="mb-[18px] flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="m-0 text-[20px] tracking-[-0.03em]">{t('homeApps.home.sectionTitle')}</h2>
+                  <p className="mt-[6px] text-sm leading-[1.45] text-muted-foreground">
+                    {t('homeApps.home.sectionDescription')}
                   </p>
-                  <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => { void catalog.sync(true) }}>
-                    {t('homeApps.actions.tryAgain')}
-                  </Button>
                 </div>
-              ) : (
-                <>
-                {quickApps.map(app => {
-                  const tile = quickTileFor(app)
-                  return (
-                    <AppIcon
-                      key={tile.key}
-                      app={tile.definition}
-                      onOpen={() => { void openCatalogApp(app) }}
-                      testId="home-quick-entry"
-                    />
-                  )
-                })}
-                {catalog.productSpace
-                  && availableApps.length > 0
-                  && quickApps.length < MAX_HOME_QUICK_ACCESS_APPS && (
-                  <button
-                    type="button"
-                    className="titlebar-no-drag group flex min-w-0 flex-col items-center gap-3 rounded-lg border border-transparent p-3 text-center outline-none transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-foreground/10 hover:bg-foreground/4 hover:shadow-minimal focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setManageOpen(true)}
-                    data-testid="home-quick-access-add"
-                  >
-                    <span className="flex h-[76px] w-[76px] items-center justify-center rounded-lg border border-dashed border-foreground/20 bg-foreground/3 shadow-xs transition-all duration-200 ease-out group-hover:scale-[1.04] group-hover:border-accent/45 group-hover:bg-accent/8">
-                      <Icons.Plus className="h-8 w-8 text-foreground/55 group-hover:text-accent" strokeWidth={1.5} />
-                    </span>
-                    <span className="min-h-9 max-w-[112px] text-sm font-medium leading-[18px] text-foreground/70 group-hover:text-foreground">
-                      {t('homeApps.quick.add')}
-                    </span>
-                  </button>
+                {catalog.productSpace && (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="home-manage-quick-access"
+                      onClick={() => setManageOpen(true)}
+                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    >
+                      {t('homeApps.quick.manage')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="home-all-apps-open"
+                      onClick={() => setView('all-apps')}
+                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    >
+                      {t('homeApps.quick.allApps')}
+                    </button>
+                  </div>
                 )}
-                </>
-              )}
-            </div>
-          </section>
+              </div>
+
+              <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+                {/* The fixed Polo assistant card always renders — loading and
+                    error tiles only occupy the work-App slots beside it. */}
+                <article
+                  data-testid="home-quick-entry-polo"
+                  onClick={openPoloAssistant}
+                  className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
+                >
+                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-accent/12 text-accent text-[17px]">✦</span>
+                  <h3 className="m-0 text-base font-semibold">Polo 助手</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+                  <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+                    {t('homeApps.home.poloDescription')}
+                  </p>
+                  <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setManageOpen(true)
+                      }}
+                    >
+                      管理 Skills
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="min-h-[32px] rounded-lg border border-accent bg-accent px-3 text-xs font-semibold text-primary-foreground hover:bg-accent/90"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openPoloAssistant()
+                      }}
+                    >
+                      打开助手
+                    </Button>
+                  </div>
+                </article>
+                {catalog.state.loading && !catalog.state.catalog ? (
+                  <div
+                    className="flex min-h-[222px] max-[1080px]:min-h-[210px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
+                    data-testid="home-quick-access-loading"
+                  >
+                    <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : catalog.state.errorCode && !catalog.state.catalog ? (
+                  <div className="flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-6 text-center">
+                    <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
+                    <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
+                    <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                      {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
+                    </p>
+                    <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => { void catalog.sync(true) }}>
+                      {t('homeApps.actions.tryAgain')}
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    {homeWorkCards.map((app, index) => {
+                      const running = catalog.getStatus(app)?.status === 'running'
+                      const artGlyph = index % 2 === 0 ? '▣' : '▦'
+                      return (
+                        <article
+                          key={uiKeyForApp(app)}
+                          data-testid="home-quick-entry"
+                          onClick={() => { void openCatalogApp(app) }}
+                          className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
+                        >
+                          <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-success/12 text-success text-[17px]">{artGlyph}</span>
+                          <h3 className="m-0 text-base font-semibold">{app.name}</h3>
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {app.sourceNames?.length ? app.sourceNames.join(' · ') : t('homeApps.allApps.unknownSource')}
+                          </p>
+                          <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+                            {app.description || t('homeApps.noDescription')}
+                          </p>
+                          <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                            {running && (
+                              <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-accent/12 px-[7px] py-[2px] text-[10px] text-accent before:block before:size-[5px] before:rounded-full before:bg-current">
+                                {t('homeApps.status.running')}
+                              </span>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void openCatalogApp(app)
+                              }}
+                            >
+                              {t('common.open')}
+                            </Button>
+                          </div>
+                        </article>
+                      )
+                    })}
+                    {catalog.productSpace
+                      && catalogCommitted
+                      && homeWorkCards.length < MAX_HOME_QUICK_ACCESS_APPS && (
+                      <button
+                        type="button"
+                        data-testid="home-quick-access-add"
+                        onClick={() => setManageOpen(true)}
+                        className="flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col items-center justify-center gap-3 rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
+                      >
+                        <Icons.Plus className="size-6" strokeWidth={1.5} />
+                        <span className="text-xs">{t('homeApps.quick.add')}</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
+            {catalog.productSpace && activeProductSpace?.kind === 'personal' && showCirclesCard && (
+              <HomeSpaceContext
+                spaceName={activeProductSpace?.name
+                  || t('homeApps.organization.current')}
+                spaceKind="personal"
+                creatorCircles={catalog.creatorCircles}
+                spaceKey={catalog.productSpace.productSpaceContextKey}
+              />
+            )}
+          </div>
         )}
       </div>
 

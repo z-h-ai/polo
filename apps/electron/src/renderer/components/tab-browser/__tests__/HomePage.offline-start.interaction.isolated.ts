@@ -303,7 +303,9 @@ describe('restricted offline App to HomePage start flow', () => {
       expect(screen.getByText(/You are offline/)).toBeTruthy()
     })
 
-    const openButton = screen.getByTestId('all-apps-action-offline-app') as HTMLButtonElement
+    const openButton = screen.getByTestId(
+      'all-apps-action-["product-space-ui","account-offline","11111111-1111-4111-8111-111111111111","offline-app","offline-app-instance"]',
+    ) as HTMLButtonElement
     expect(openButton.disabled).toBe(true)
     expect(start).not.toHaveBeenCalled()
     expect(openApp).not.toHaveBeenCalled()

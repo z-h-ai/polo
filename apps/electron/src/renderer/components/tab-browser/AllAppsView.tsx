@@ -46,6 +46,12 @@ interface AllAppsViewProps {
   offline: boolean
   /** Authorization was lost for the current snapshot (denied view). */
   restricted: boolean
+  /** Number of creator circles visible in the active space's Catalog. */
+  circleCount: number
+  /** Authoritative identity keys currently pinned to the home quick access. */
+  pinnedIds: ReadonlySet<string>
+  /** Pins an App to the home quick access; persistence is owned by HomePage. */
+  onPin: (app: CatalogApp) => void
   getInstallState: (app: CatalogApp) => ProductSpaceAppInstallState | undefined
   identityKeyForApp: (app: CatalogApp) => string
   onRefresh: () => void
@@ -218,82 +224,123 @@ function AppDetail({
 function AllAppsRow({
   app,
   identityKey,
-  selected,
-  compact,
   installState,
   offline,
   spaceKind,
-  onSelect,
+  pinned,
   onOpen,
+  onPin,
   onUninstall,
 }: {
   app: CatalogApp
   identityKey: string
-  selected: boolean
-  compact: boolean
   installState?: ProductSpaceAppInstallState
   offline: boolean
   spaceKind: 'personal' | 'enterprise' | null
-  onSelect: (identityKey: string) => void
+  pinned: boolean
   onOpen: (app: CatalogApp) => void
+  onPin: (app: CatalogApp) => void
   onUninstall: (app: CatalogApp) => void
 }) {
   const { t } = useTranslation()
-  const source = app.creatorName?.trim() || t('homeApps.allApps.unknownSource')
   const unavailable = isCatalogAppUnavailable(app, offline)
+  const blocked = (app.availability as string) === 'blocked'
   const uninstallable = isCatalogAppUninstallable(installState)
   return (
     <article
       className={cn(
-        'relative flex min-w-0 flex-col rounded-[17px] border bg-[var(--background-elevated)] px-[16px] py-[12px] shadow-xs transition-shadow hover:shadow-minimal',
-        selected ? 'border-accent/45' : 'border-foreground/10',
-        app.availability !== 'available' && 'opacity-65',
+        'flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col rounded-[17px] border bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]',
+        unavailable ? 'border-foreground/10 opacity-65' : 'border-foreground/10',
       )}
       data-testid="all-apps-row"
       data-app-id={app.id}
       data-identity-key={identityKey}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onSelect(identityKey)}
-          aria-expanded={compact ? selected : undefined}
-        >
-          <AppArtwork app={app} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{app.name}</span>
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-testid="all-apps-row-source">
-              {source}
+      <AppArtwork app={app} />
+      <h3 className="m-0 mt-[26px] text-base font-semibold">{app.name}</h3>
+      {app.sourceNames?.length ? (
+        <div className="mt-[6px] flex flex-wrap items-center gap-[6px]">
+          {app.sourceNames.map(sourceName => (
+            <span
+              key={sourceName}
+              className="inline-flex items-center rounded-md bg-accent/12 px-[7px] py-[2px] text-[10px] text-accent"
+              data-testid="all-apps-row-source"
+            >
+              {t('homeApps.allApps.fromSource', { source: sourceName })}
             </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-[6px] text-xs text-muted-foreground">
+          {app.creatorName?.trim() || t('homeApps.allApps.unknownSource')}
+        </p>
+      )}
+      <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+        {app.description || t('homeApps.noDescription')}
+      </p>
+      {(app.creatorName?.trim() || app.catalogVersion?.version) && (
+        <p className="mt-[4px] text-xs text-muted-foreground">
+          {[
+            app.creatorName?.trim(),
+            app.catalogVersion?.version ? `v${app.catalogVersion.version}` : null,
+          ].filter(Boolean).join(' · ')}
+        </p>
+      )}
+      <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} />
+      <div className="mt-auto flex flex-wrap items-center justify-end gap-[7px] pt-[14px]">
+        {blocked && (
+          <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-danger/12 px-[7px] py-[2px] text-[10px] text-danger before:block before:size-[5px] before:rounded-full before:bg-current">
+            {t('homeApps.status.blocked')}
           </span>
-          <span className="hidden shrink-0 sm:block">
-            <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} />
-          </span>
-        </button>
+        )}
         <Button
           type="button"
+          variant="ghost"
           size="sm"
-          disabled={unavailable || installState?.state === 'installing'}
-          onClick={() => onOpen(app)}
-          data-testid={`all-apps-action-${app.id}`}
+          className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => onPin(app)}
+          data-testid={`all-apps-pin-${identityKey}`}
         >
-          {installState?.state === 'installing' && <Icons.LoaderCircle className="animate-spin" />}
-          {t('common.open')}
+          {pinned
+            ? t('homeApps.actions.pinnedToHome')
+            : t('homeApps.actions.pinToHome')}
         </Button>
+        {blocked ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            data-testid={`all-apps-reason-${identityKey}`}
+          >
+            {t('homeApps.allApps.viewReason')}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            className="min-h-[32px] rounded-lg border border-accent bg-accent px-3 text-xs font-semibold text-primary-foreground hover:bg-accent/90"
+            disabled={unavailable || installState?.state === 'installing'}
+            onClick={() => onOpen(app)}
+            data-testid={`all-apps-action-${identityKey}`}
+          >
+            {installState?.state === 'installing' && <Icons.LoaderCircle className="animate-spin" />}
+            {t('common.open')}
+          </Button>
+        )}
+        {uninstallable && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => onUninstall(app)}
+            data-testid={`all-apps-uninstall-${identityKey}`}
+          >
+            {t('homeApps.actions.uninstall')}
+          </Button>
+        )}
       </div>
-      {compact && selected && (
-        <div className="mt-3 border-t border-foreground/10 pt-3" data-testid="all-apps-row-detail">
-          <AppDetail
-            app={app}
-            installState={installState}
-            offline={offline}
-            spaceKind={spaceKind}
-            onOpen={onOpen}
-            onUninstall={onUninstall}
-          />
-        </div>
-      )}
     </article>
   )
 }
@@ -308,6 +355,9 @@ export function AllAppsView({
   errorCode,
   offline,
   restricted,
+  circleCount,
+  pinnedIds,
+  onPin,
   getInstallState,
   identityKeyForApp,
   onRefresh,
@@ -317,7 +367,6 @@ export function AllAppsView({
 }: AllAppsViewProps) {
   const { t } = useTranslation()
   const compact = useCompactViewport()
-  const [selectedIdentityKey, setSelectedIdentityKey] = useState<string | null>(null)
   const [pageLimit, setPageLimit] = useState(ALL_APPS_PAGE_SIZE)
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -329,12 +378,6 @@ export function AllAppsView({
   ].some(value => value?.toLocaleLowerCase().includes(normalizedQuery))), [apps, normalizedQuery])
 
   useEffect(() => setPageLimit(ALL_APPS_PAGE_SIZE), [filteredApps])
-  useEffect(() => {
-    if (selectedIdentityKey && !filteredApps.some(app => {
-      try { return identityKeyForApp(app) === selectedIdentityKey } catch { return false }
-    })) setSelectedIdentityKey(null)
-  }, [filteredApps, identityKeyForApp, selectedIdentityKey])
-
   const groups = useMemo(
     () => groupAllAppsForDisplay(filteredApps, spaceKind),
     [filteredApps, spaceKind],
@@ -349,55 +392,62 @@ export function AllAppsView({
     })
   }, [groups, pageLimit])
   const displayedCount = displayedGroups.reduce((sum, group) => sum + group.apps.length, 0)
-  const selectedApp = selectedIdentityKey
-    ? filteredApps.find(app => {
-        try { return identityKeyForApp(app) === selectedIdentityKey } catch { return false }
-      }) ?? null
-    : null
-
   return (
     <section aria-labelledby="all-apps-heading" data-testid="all-apps-view">
-      <div className="mb-[18px] flex flex-col items-start justify-between gap-4 sm:flex-row">
+      <div className="mb-[26px] flex items-end justify-between gap-5">
         <div className="min-w-0">
-          <button
-            type="button"
-            className="mb-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-muted-foreground hover:bg-foreground/4"
-            onClick={onBack}
-            data-testid="all-apps-back"
+          <p className="m-0 text-xs text-muted-foreground">{spaceName}</p>
+          <h1
+            id="all-apps-heading"
+            className="m-0 mt-[6px] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em]"
           >
-            <Icons.ArrowLeft className="size-4" />
-            {t('homeApps.allApps.back')}
-          </button>
-          <h2 id="all-apps-heading" className="truncate text-[20px] font-[720] tracking-[-0.03em]">
-            {t('homeApps.allApps.title', { name: spaceName })}
-          </h2>
-          <p className="mt-[6px] text-[13px] text-muted-foreground">
-            {spaceKind === 'enterprise'
-              ? t('homeApps.allApps.enterpriseDescription')
-              : t('homeApps.allApps.personalDescription')}
+            {t('homeApps.allApps.title')}
+          </h1>
+          <p className="mt-[10px] text-[13px] text-muted-foreground">
+            {t('homeApps.allApps.subtitle')}
           </p>
         </div>
-        <Button type="button" variant="ghost" size="sm" disabled={refreshing} onClick={onRefresh}>
-          <Icons.RefreshCw className={cn(refreshing && 'animate-spin')} />
-          {t('homeApps.actions.refresh')}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button type="button" variant="ghost" size="sm" disabled={refreshing} onClick={onRefresh}>
+            <Icons.RefreshCw className={cn(refreshing && 'animate-spin')} />
+            {t('homeApps.actions.refresh')}
+          </Button>
+          <button
+            type="button"
+            data-testid="all-apps-back"
+            onClick={onBack}
+            className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          >
+            {t('homeApps.allApps.back')}
+          </button>
+        </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-3">
-        <label className="relative min-w-0 flex-1">
-          <Icons.Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder={t('homeApps.allApps.searchPlaceholder')}
-            className="h-9 w-full rounded-lg border border-foreground/10 bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            data-testid="all-apps-search"
-          />
+      <div className="mb-[24px] flex items-end justify-between gap-[18px]">
+        <label className="grid w-[min(480px,100%)] gap-[7px]">
+          <span className="text-xs text-muted-foreground">{t('homeApps.allApps.searchLabel')}</span>
+          <span className="relative block">
+            <Icons.Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder={t('homeApps.allApps.searchPlaceholder')}
+              className="h-[42px] w-full rounded-lg border border-foreground/10 bg-background pl-[13px] pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              data-testid="all-apps-search"
+            />
+          </span>
         </label>
-        <span className="shrink-0 text-xs text-muted-foreground" data-testid="all-apps-count">
-          {t('homeApps.allApps.count', { count: filteredApps.length })}
+        <span className="shrink-0 pb-1 text-xs text-muted-foreground" data-testid="all-apps-count">
+          {t('homeApps.allApps.countVisible', { visible: filteredApps.length, total: apps.length })}
         </span>
+      </div>
+
+      <div className="mb-[18px]">
+        <h2 className="m-0 text-[20px] tracking-[-0.03em]">{t('homeApps.allApps.sectionTitle')}</h2>
+        <p className="mt-[6px] text-sm text-muted-foreground">
+          {t('homeApps.allApps.circlesDescription', { count: circleCount })}
+        </p>
       </div>
 
       {(() => {
@@ -470,50 +520,30 @@ export function AllAppsView({
           )}
         </div>
       ) : (
-        <div className={cn('grid gap-4', !compact && selectedApp && 'lg:grid-cols-[minmax(0,1fr)_320px]')}>
-          <div className="space-y-5">
-            {displayedGroups.map(group => (
-              <div key={group.key}>
-                {group.label && <h3 className="mb-2 text-xs font-semibold text-muted-foreground">{group.label}</h3>}
-                <div className="space-y-2">
-                  {group.apps.map(app => {
-                    const identityKey = identityKeyForApp(app)
-                    return (
-                      <AllAppsRow
-                        key={identityKey}
-                        app={app}
-                        identityKey={identityKey}
-                        selected={selectedIdentityKey === identityKey}
-                        compact={compact}
-                        installState={getInstallState(app)}
-                        offline={offline}
-                        spaceKind={spaceKind}
-                        onSelect={setSelectedIdentityKey}
-                        onOpen={onOpen}
-                        onUninstall={onUninstall}
-                      />
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
-            {displayedCount < filteredApps.length && (
-              <Button type="button" variant="secondary" onClick={() => setPageLimit(limit => limit + ALL_APPS_PAGE_SIZE)}>
-                {t('homeApps.actions.loadMore')}
-              </Button>
-            )}
-          </div>
-          {!compact && selectedApp && (
-            <aside className="sticky top-0 h-fit rounded-[17px] border border-foreground/10 bg-[var(--background-elevated)] p-4" data-testid="all-apps-inspector">
-              <AppDetail
-                app={selectedApp}
-                installState={getInstallState(selectedApp)}
+        <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+          {displayedGroups.flatMap(group => group.apps.map(app => {
+            const identityKey = identityKeyForApp(app)
+            const installState = getInstallState(app)
+            const pinned = pinnedIds.has(identityKey)
+            return (
+              <AllAppsRow
+                key={identityKey}
+                app={app}
+                identityKey={identityKey}
+                installState={installState}
                 offline={offline}
                 spaceKind={spaceKind}
+                pinned={pinnedIds.has(identityKey)}
                 onOpen={onOpen}
+                onPin={onPin}
                 onUninstall={onUninstall}
               />
-            </aside>
+            )
+          }))}
+          {displayedCount < filteredApps.length && (
+            <Button type="button" variant="secondary" onClick={() => setPageLimit(limit => limit + ALL_APPS_PAGE_SIZE)}>
+              {t('homeApps.actions.loadMore')}
+            </Button>
           )}
         </div>
       )}

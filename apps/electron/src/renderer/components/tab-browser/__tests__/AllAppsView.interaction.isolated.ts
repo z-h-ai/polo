@@ -37,7 +37,9 @@ function app(id: string, overrides: Partial<CatalogApp> = {}): CatalogApp {
   }
 }
 
-const scopeKeyForApp = (target: CatalogApp) => `space-a:${target.artifactInstanceId}`
+const scopeKeyForApp = (target: CatalogApp) => `space-a:${target.artifactInstanceId ?? target.id}`
+const actionTestIdFor = (target: CatalogApp) => `all-apps-action-${scopeKeyForApp(target)}`
+const uninstallTestIdFor = (target: CatalogApp) => `all-apps-uninstall-${scopeKeyForApp(target)}`
 
 function renderView(apps: CatalogApp[], options: {
   spaceKind?: 'personal' | 'enterprise'
@@ -47,12 +49,14 @@ function renderView(apps: CatalogApp[], options: {
   retainedInstalledIds?: string[]
   offline?: boolean
   restricted?: boolean
+  pinnedIds?: string[]
 } = {}) {
   const handlers = {
     onRefresh: jest.fn(),
     onOpen: jest.fn(),
     onUninstall: jest.fn(),
     onBack: jest.fn(),
+    onPin: jest.fn(),
   }
   render(createElement(
     I18nextProvider,
@@ -67,6 +71,8 @@ function renderView(apps: CatalogApp[], options: {
       errorCode: options.errorCode ?? null,
       offline: options.offline ?? false,
       restricted: options.restricted ?? false,
+      circleCount: 3,
+      pinnedIds: new Set(options.pinnedIds ?? []),
       identityKeyForApp: scopeKeyForApp,
       getInstallState: (target: CatalogApp) => target.id === options.installedId
         || options.retainedInstalledIds?.includes(target.id) ? {
@@ -121,11 +127,10 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     const handlers = renderView(apps, { installedId: 'a' })
     expect(screen.getAllByTestId('all-apps-row')).toHaveLength(2)
 
-    fireEvent.click(screen.getByTestId('all-apps-action-b'))
+    fireEvent.click(screen.getByTestId(actionTestIdFor(apps[1]!)))
     expect(handlers.onOpen).toHaveBeenCalledWith(apps[1])
 
-    fireEvent.click(screen.getAllByTestId('all-apps-row')[0]!.querySelector('button')!)
-    fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+    fireEvent.click(screen.getByTestId(uninstallTestIdFor(apps[0]!)))
     expect(handlers.onUninstall).toHaveBeenCalledWith(apps[0])
   })
 
@@ -147,11 +152,11 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     expect(screen.getByText('Writer')).toBeTruthy()
   })
 
-  it('keeps the stable mobile expanded-row anchor', () => {
+  it('keeps stable rows in the compact mobile grid', () => {
     compactViewport = true
-    renderView([app('a')])
-    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
-    expect(screen.getByTestId('all-apps-row-detail')).toBeTruthy()
+    renderView([app('a'), app('b')])
+    expect(screen.getAllByTestId('all-apps-row')).toHaveLength(2)
+    expect(screen.getByTestId('all-apps-action-space-a:artifact-a')).toBeTruthy()
   })
 
   it('maps every unavailableReason to its own frozen blocked status', () => {
@@ -254,17 +259,16 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         : 'Removed by your organization')).toHaveLength(2)
 
       // Open stays disabled for every tombstone, live app stays openable.
-      const goneInstalledAction = screen.getByTestId('all-apps-action-gone-installed') as HTMLButtonElement
-      const gonePlainAction = screen.getByTestId('all-apps-action-gone-plain') as HTMLButtonElement
+      const goneInstalledAction = screen.getByTestId(actionTestIdFor(app('gone-installed', { sortOrder: 5 }))) as HTMLButtonElement
+      const gonePlainAction = screen.getByTestId(actionTestIdFor(app('gone-plain', { sortOrder: 6 }))) as HTMLButtonElement
       expect(goneInstalledAction.disabled).toBe(true)
       expect(gonePlainAction.disabled).toBe(true)
-      expect((screen.getByTestId('all-apps-action-live-a') as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByTestId(actionTestIdFor(app('live-a'))) as HTMLButtonElement).disabled).toBe(false)
 
-      // The retained installation keeps its uninstall entry; the plain
-      // tombstone does not.
-      fireEvent.click(screen.getAllByTestId('all-apps-row')[1]!.querySelector('button')!)
-      expect(screen.getByTestId('all-apps-inspector-uninstall')).toBeTruthy()
-      fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+      // The retained installation keeps its row-level uninstall entry; the
+      // plain tombstone does not.
+      expect(screen.getByTestId(uninstallTestIdFor(app('gone-installed', { sortOrder: 5 })))).toBeTruthy()
+      fireEvent.click(screen.getByTestId(uninstallTestIdFor(app('gone-installed', { sortOrder: 5 }))))
       expect(handlers.onUninstall).toHaveBeenCalledWith(expect.objectContaining({ id: 'gone-installed' }))
       cleanup()
     }
@@ -274,9 +278,8 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     renderView([
       app('gone-plain', { name: 'Gone Plain', availability: 'withdrawn', sortOrder: 5 }),
     ], { spaceKind: 'enterprise' })
-    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
-    expect(screen.getByTestId('all-apps-inspector-primary')).toBeTruthy()
-    expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
+    expect((screen.getByTestId(actionTestIdFor(app('gone-plain', { sortOrder: 5 }))) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId(uninstallTestIdFor(app('gone-plain', { sortOrder: 5 })))).toBeNull()
   })
 
   it('keeps offline copy consistent with the frozen contract: viewable, never openable', () => {
@@ -296,10 +299,10 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     }
   })
 
-  it('keeps same-catalogEntryId live and withdrawn rows independently selectable and uninstallable', () => {
+  it('keeps same-catalogEntryId live and withdrawn rows independently addressable and uninstallable', () => {
     // entry-1 was re-issued for artifact-new while artifact-old stays as a
     // withdrawn tombstone: the rows must not collide (distinct React keys,
-    // independent selection, independent uninstall targets).
+    // independent open/uninstall targets).
     const live = app('entry-1', {
       name: 'Reissued',
       artifactInstanceId: 'artifact-new',
@@ -322,23 +325,19 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     expect(screen.getByText('Reissued')).toBeTruthy()
     expect(screen.getByText('Reissued (old)')).toBeTruthy()
 
-    // Select the WITHDRAWN row: the inspector must bind to the withdrawn
-    // artifact instance (not the first live row sharing the entry id).
-    fireEvent.click(screen.getAllByTestId('all-apps-row')[1]!.querySelector('button')!)
-    const withdrawnPrimary = screen.getByTestId('all-apps-inspector-primary') as HTMLButtonElement
-    expect(withdrawnPrimary.disabled).toBe(true)
-    expect(screen.getByTestId('all-apps-inspector-uninstall')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+    // The withdrawn row can be neither opened nor installed...
+    const withdrawnAction = screen.getByTestId('all-apps-action-space-a:artifact-old') as HTMLButtonElement
+    expect(withdrawnAction.disabled).toBe(true)
+    // ...but the retained installation keeps its row-level uninstall entry.
+    expect(screen.getByTestId('all-apps-uninstall-space-a:artifact-old')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('all-apps-uninstall-space-a:artifact-old'))
     expect(handlers.onUninstall).toHaveBeenCalledWith(
       expect.objectContaining({ artifactInstanceId: 'artifact-old' }),
     )
-    cleanup()
 
-    // The live row selects and opens independently.
-    renderView([live], { installedId: 'entry-1' })
-    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
-    expect((screen.getByTestId('all-apps-inspector-primary') as HTMLButtonElement).disabled).toBe(false)
-    cleanup()
+    // The live row opens independently.
+    const liveAction = screen.getByTestId('all-apps-action-space-a:artifact-new') as HTMLButtonElement
+    expect(liveAction.disabled).toBe(false)
   })
 
   it('surfaces cached-catalog refresh failures and restricted views without relaxing fail-closed gates', () => {
@@ -349,7 +348,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     // The banner only promises the last verified catalog view — never
     // offline opens.
     expect(staleBanner.textContent).toContain('last verified catalog')
-    expect((screen.getByTestId('all-apps-action-a') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('all-apps-action-space-a:artifact-a') as HTMLButtonElement).disabled).toBe(true)
     cleanup()
 
     // Cached rows + generic refresh failure (online): stale banner shows,
@@ -358,7 +357,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     expect(screen.getByTestId('all-apps-stale-catalog-banner').textContent).toContain(
       'last verified catalog',
     )
-    expect((screen.getByTestId('all-apps-action-a') as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByTestId('all-apps-action-space-a:artifact-a') as HTMLButtonElement).disabled).toBe(false)
     cleanup()
 
     // Denied snapshot: space-aware restricted banner; opens stay disabled.
@@ -370,7 +369,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
       })
       const banner = screen.getByTestId('all-apps-restricted-banner')
       expect(banner.textContent.toLowerCase()).toContain('access')
-      expect((screen.getByTestId('all-apps-action-a') as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByTestId('all-apps-action-space-a:artifact-a') as HTMLButtonElement).disabled).toBe(true)
       cleanup()
     }
   })
@@ -389,6 +388,9 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         errorCode: null,
         offline: false,
         restricted: false,
+        circleCount: 3,
+        pinnedIds: new Set<string>(),
+        onPin: () => {},
         getInstallState: () => undefined,
         identityKeyForApp: scopeKeyForApp,
         onRefresh: () => {},

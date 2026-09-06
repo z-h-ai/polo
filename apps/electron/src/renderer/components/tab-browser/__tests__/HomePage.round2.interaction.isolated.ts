@@ -245,6 +245,14 @@ function resolvedBundleLaunch(app: CatalogApp) {
   }
 }
 
+const uiKeyFor = (app: CatalogApp) => JSON.stringify([
+  'product-space-ui',
+  app.organizationId ? 'account-a' : 'account-a',
+  app.organizationId ?? 'organization-a',
+  app.catalogEntryId ?? app.id,
+  app.artifactInstanceId ?? null,
+])
+
 function hookWithCatalog(
   catalog: AppCatalogCacheEntry | DeniedAppCatalogSnapshot,
   hookOverrides: Record<string, unknown> = {},
@@ -1058,12 +1066,60 @@ describe('HomePage quick access (POO-43)', () => {
     })
     expect(screen.getByText('Denied App A')).toBeTruthy()
     // ...and the row can be neither opened nor installed.
-    const deniedAction = screen.getByTestId('all-apps-action-denied-app-a') as HTMLButtonElement
+    const deniedAction = screen.getByTestId(
+      `all-apps-action-${JSON.stringify(['product-space-ui', 'account-a', 'organization-a', 'denied-entry-a', 'denied-artifact-a'])}`,
+    ) as HTMLButtonElement
     expect(deniedAction.disabled).toBe(true)
     fireEvent.click(deniedAction)
     expect(openApp).not.toHaveBeenCalled()
     expect(storePublish).not.toHaveBeenCalled()
     expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
+  })
+
+  it('pins a catalog App from All Apps through the authoritative persisted quick-access flow', async () => {
+    const appA: CatalogApp = {
+      id: 'pin-app-a',
+      catalogEntryId: 'pin-entry-a',
+      artifactInstanceId: 'pin-artifact-a',
+      organizationId: 'organization-a',
+      name: 'Pin App A',
+      description: '',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://pin.example.com',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+
+    renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByTestId(
+      `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(appA)}`,
+    ))
+    await waitFor(() => {
+      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [{
+        id: JSON.stringify([
+          'product-space-ui',
+          'account-a',
+          'organization-a',
+          'pin-entry-a',
+          'pin-artifact-a',
+        ]),
+        addedAt: expect.any(Number),
+      }])
+    })
+    // The pin is authoritative: the persisted entry resolves into a home
+    // quick-access card.
+    await waitFor(() => {
+      expect(screen.getByText('Pin App A')).toBeTruthy()
+    })
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {
@@ -1147,7 +1203,7 @@ describe('HomePage all-Apps view (POO-43)', () => {
     )
 
     await renderAllApps()
-    fireEvent.click(screen.getByTestId('all-apps-action-remote-app'))
+    fireEvent.click(screen.getByTestId(`all-apps-action-${uiKeyFor(remoteApp)}`))
 
     await waitFor(() => {
       expect(resolveLaunch).toHaveBeenCalledWith(remoteApp)
@@ -1177,7 +1233,12 @@ describe('HomePage all-Apps view (POO-43)', () => {
     )
 
     await renderAllApps()
-    fireEvent.click(screen.getByTestId('all-apps-action-bundle-entry'))
+    fireEvent.click(screen.getByTestId(`all-apps-action-${appCatalogHook.uiIdentityKeyForApp({
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: 'bundle-entry',
+      artifactInstanceId: 'bundle-artifact',
+    })}`))
     await waitFor(() => expect(screen.getByText('Install Bundle App')).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 
@@ -1284,16 +1345,18 @@ describe('HomePage all-Apps view (POO-43)', () => {
 
     // The withdrawn tombstone is NEVER launchable, even when installed.
     const tombstoneAction = screen.getByTestId(
-      'all-apps-action-withdrawn-9999',
+      `all-apps-action-${appCatalogHook.uiIdentityKeyForApp(installedWithdrawn)}`,
     ) as HTMLButtonElement
     expect(tombstoneAction.disabled).toBe(true)
     // A live App on the same page stays launchable.
-    expect((screen.getByTestId('all-apps-action-visible-0') as HTMLButtonElement).disabled)
-      .toBe(false)
+    expect((screen.getByTestId(
+      `all-apps-action-${JSON.stringify(['product-space-ui', 'account-a', 'organization-a', 'visible-0', null])}`,
+    ) as HTMLButtonElement).disabled).toBe(false)
 
-    // The retained installation keeps its uninstall entry in the inspector.
-    fireEvent.click(screen.getAllByTestId('all-apps-row')[0]!.querySelector('button')!)
-    expect(screen.getByTestId('all-apps-inspector-uninstall')).toBeTruthy()
+    // The retained installation keeps its row-level uninstall entry.
+    expect(screen.getByTestId(
+      `all-apps-uninstall-${appCatalogHook.uiIdentityKeyForApp(installedWithdrawn)}`,
+    )).toBeTruthy()
   })
 
   it('merges withdrawn tombstones into all-Apps with identity dedup and live preference', () => {
@@ -1380,11 +1443,13 @@ describe('HomePage all-Apps view (POO-43)', () => {
 
     await renderAllApps()
     expect(screen.getByText('Gone Installed')).toBeTruthy()
-    expect((screen.getByTestId('all-apps-action-gone-installed') as HTMLButtonElement).disabled)
-      .toBe(true)
+    expect((screen.getByTestId(
+      `all-apps-action-${appCatalogHook.uiIdentityKeyForApp(installedTombstone)}`,
+    ) as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.click(screen.getByTestId('all-apps-row').querySelector('button')!)
-    fireEvent.click(screen.getByTestId('all-apps-inspector-uninstall'))
+    fireEvent.click(screen.getByTestId(
+      `all-apps-uninstall-${appCatalogHook.uiIdentityKeyForApp(installedTombstone)}`,
+    ))
     await waitFor(() => {
       expect(screen.getByText('Uninstall Gone Installed?')).toBeTruthy()
     })
