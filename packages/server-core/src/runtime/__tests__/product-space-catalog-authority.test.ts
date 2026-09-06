@@ -285,10 +285,28 @@ describe('ProductSpace Catalog authority', () => {
       // non-string description.
       entry({ description: 42 as unknown as string }),
     ]
-    for (const [index, badEntry] of badEntries.entries()) {
-      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', `rev-bad-${index}`, [badEntry])
-      resetProductSpaceCatalogAuthorityForTests()
+    // R24/R25 contract: a fresh row that FAILS the formal AuthorityEntrySchema
+    // (after the credential-stripping projection) fails the WHOLE transaction —
+    // throw, and nothing is granted, recorded, or left on disk.
+    //
+    // The projection deliberately NORMALIZES a few raw shapes (unknown source
+    // kinds / non-string permission members are filtered, unknown availability
+    // and non-string description are coerced) — those produce schema-valid
+    // persisted rows by construction and are asserted separately below.
+    const schemaFailing = [0, 1, 2, 3, 4, 5, 7]
+    for (const index of schemaFailing) {
+      expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a', 'space-a', `rev-bad-${index}`, [badEntries[index]!],
+      )).toThrow()
       expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+      expect(existsSync(join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json'))).toBe(false)
+    }
+    // Normalizing projection: these raw shapes persist as SCHEMA-VALID rows.
+    for (const index of [6, 8, 9, 10]) {
+      recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', `rev-norm-${index}`, [badEntries[index]!])
+      const normalized = getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')
+      expect(normalized).not.toBeNull()
+      resetProductSpaceCatalogAuthorityForTests()
     }
 
     // Self-heal: a good record persists normally afterwards.
@@ -296,8 +314,10 @@ describe('ProductSpace Catalog authority', () => {
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed-2')
   })
 
-  it('rejects malformed entries instead of recording them', () => {
-    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+  it('rejects malformed entries with a full-transaction throw (mixed valid+invalid grants nothing)', () => {
+    // Mixed valid + invalid: the invalid row poisons the whole transaction —
+    // no partial trust, nothing recorded, nothing trusted.
+    expect(() => recordProductSpaceCatalogAuthoritativeEntries(
       'account-a',
       'space-a',
       'rev-1',
@@ -306,9 +326,9 @@ describe('ProductSpace Catalog authority', () => {
         { kind: 'app', catalogEntryId: 'no-artifact' },
         entry(),
       ],
-    )
-    expect(tombstones).toEqual([])
-    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.entries).toHaveLength(1)
+    )).toThrow()
+    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')).toBeNull()
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
   })
 
   describe('durable revocation', () => {
@@ -758,6 +778,8 @@ describe('R24: public-surface boundary (no public grant API)', () => {
     const exposed = Object.values(pkg.exports ?? {}).join('|')
     expect(exposed).not.toContain('product-space-catalog-authority-commit')
     expect(exposed).toContain('product-space-catalog-authority')
+    // The switch-lock test instrumentation seam is likewise package-internal.
+    expect(exposed).not.toContain('switch-lock-instrumentation')
   })
 })
 

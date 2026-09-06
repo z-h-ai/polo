@@ -1124,8 +1124,10 @@ describe('HomePage quick access (POO-43)', () => {
     expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKey)
   }
   function apiSaveCallKeys(index: number): string[] {
-    const call = setHomeQuickAccess.mock.calls[index]
-    return ((call?.[1] ?? []) as Array<{ id: string }>).map(entry => entry.id)
+    const call = setHomeQuickAccess.mock.calls[index] as
+      | [string, Array<{ id: string }>]
+      | undefined
+    return (call?.[1] ?? []).map(entry => entry.id)
   }
   /** Waits until the persisted save queue has settled to `count` calls. */
   async function waitForSaveCalls(count: number) {
@@ -1635,6 +1637,86 @@ describe('HomePage quick access (POO-43)', () => {
       if (cards.length !== 2) throw new Error('remount display pending')
     })
     firstMount.unmount()
+  })
+
+  it('a THIRD owner joining between attempt-1 reject and retry rides the SAME activation: loads stay 2, queued mutations settle, no sweep', async () => {
+    const storedApp = pinnedApp('it3-app-a', 'it3-entry-a', 'it3-artifact-a', 'Interleave A')
+    const appB = pinnedApp('it3-app-b', 'it3-entry-b', 'it3-artifact-b', 'Interleave B')
+    const appC = pinnedApp('it3-app-c', 'it3-entry-c', 'it3-artifact-c', 'Interleave C')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([storedApp, appB, appC]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')}`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(storedApp)
+    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
+    const keyC = appCatalogHook.uiIdentityKeyForApp(appC)
+    quickAccessByContext.set(contextKey, [{ id: keyA, addedAt: 1 }])
+
+    // Attempt 1: in-flight DEFERRED; attempt 2 (bounded retry): in-flight
+    // DEFERRED — full control over the interleave window.
+    let rejectFirst: ((error: unknown) => void) | undefined
+    let releaseRetry: ((entries: unknown[]) => void) | undefined
+    getHomeQuickAccess.mockImplementationOnce(async (_key: string): Promise<any[]> => {
+      await new Promise<never>((_, reject) => { rejectFirst = reject })
+      return []
+    }).mockImplementation(async (_key: string): Promise<any[]> => {
+      const entries = await new Promise<any[]>(resolve => { releaseRetry = resolve })
+      return entries
+    })
+
+    // Mounts A and B join attempt 1 (single load).
+    const mountA = renderHome()
+    await waitFor(() => { if (!rejectFirst) throw new Error('attempt1 pending') })
+    const mountB = render(homeTree())
+    expect(loadCallCount()).toBe(1)
+
+    // Queue mutations from A and B while attempt 1 is unresolved. The pins
+    // target entries OUTSIDE the stored baseline (B, C) so the queued
+    // mutations are observable additions.
+    fireEvent.click(within(mountA.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(mountA.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(within(mountA.container).getByTestId(`all-apps-pin-${keyB}`))
+    fireEvent.click(within(mountB.container).getByTestId('home-all-apps-open'))
+    fireEvent.click(within(mountB.container).getByTestId(`all-apps-pin-${keyC}`))
+
+    // Attempt 1 rejects; the SAME-gate retry starts (attempt 2).
+    rejectFirst!(new Error('attempt 1 rejected (injected)'))
+    await waitFor(() => { if (!releaseRetry) throw new Error('retry pending') })
+
+    // The decisive interleave: a THIRD owner mounts in the retry window.
+    // It must ride the SAME activation (no third load, no gate replacement,
+    // no writer sweep).
+    const mountC = render(homeTree())
+    expect(loadCallCount()).toBe(2)
+
+    // The retry resolves: queued mutations from A and B settle in order —
+    // B first (queued first), then C.
+    releaseRetry?.([
+      { id: keyA, addedAt: 1 },
+    ])
+    await waitForSaveCalls(2)
+    expect(apiSaveCallKeys(0)).toEqual([keyA, keyB])
+    expect(apiSaveCallKeys(1)).toEqual([keyA, keyB, keyC])
+
+    // All live mounts converge on the full acked baseline.
+    const assertConverged = async (container: HTMLElement): Promise<void> => {
+      await waitFor(() => {
+        const cards = within(container).queryAllByTestId('home-quick-entry')
+        if (cards.length !== 3) return undefined
+        const identities = cards.map(card => card.getAttribute('data-identity-key'))
+        return new Set(identities).size === 3 ? true : undefined
+      })
+    }
+    await assertConverged(mountA.container)
+    await assertConverged(mountB.container)
+    await assertConverged(mountC.container)
+
+    // Final unmounts drain the registry.
+    mountA.unmount()
+    mountB.unmount()
+    mountC.unmount()
+    await waitFor(() => { if (__homeQuickWritersCountForTests() !== 0) throw new Error('registry drain pending') })
   })
 
   it('removing the last persisted entry persists an explicitly empty collection', async () => {

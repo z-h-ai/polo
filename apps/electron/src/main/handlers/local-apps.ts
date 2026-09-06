@@ -572,13 +572,22 @@ async function loadAuthoritativeProductSpaceApps(
     }
     seenIdentityKeys.add(identityKey)
     const entry = entriesById.get(app.catalogEntryId)
-    if (!entry || entry.kind !== 'app') {
+    if (!entry) {
       // Authoritative absence: the CURRENT distribution genuinely has no
       // such entry. This is the ONLY verdict that may route an uninstall to
       // the retained-tombstone cleanup gate.
       throw new LocalAppRuntimeError(
         'CATALOG_ENTRY_MISSING',
         'The ProductSpace Catalog no longer lists this entry',
+      )
+    }
+    if (entry.kind !== 'app') {
+      // KIND DRIFT: the entry ID exists but is no longer an App (skill /
+      // built-in row took the stable ID). This is a LIVE identity drift —
+      // it must never fall through to retained-tombstone cleanup.
+      throw new LocalAppRuntimeError(
+        options.driftCode ?? 'RELEASE_CHANGED',
+        'The ProductSpace Catalog entry kind changed (live drift)',
       )
     }
     if (

@@ -499,13 +499,33 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
     ? null
     : previousRecord
 
+  // FRESH SCHEMA GATE: every fresh row must pass the FULL formal
+  // AuthorityEntrySchema (sources 1..1000, permission caps, version contract,
+  // …) — the hand-written projection is only a credential-stripping step, it
+  // can never relax the schema. Any invalid row fails the WHOLE transaction
+  // closed (cache/disk untouched); no partial trust is ever granted.
   const freshEntries: ProductSpaceCatalogAuthorityEntry[] = []
   const freshKeys = new Set<string>()
   for (const rawEntry of rawEntries) {
     const entry = stripToAuthorityEntry(rawEntry)
-    if (!entry) continue
+    if (!entry) {
+      throw new Error(
+        'Fresh Catalog entry failed AuthorityEntrySchema validation — the whole transaction is rejected',
+      )
+    }
+    const parsed = AuthorityEntrySchema.safeParse(entry)
+    if (!parsed.success) {
+      throw new Error(
+        `Fresh Catalog entry failed AuthorityEntrySchema validation: ${parsed.error.issues[0]?.message ?? 'unknown'}`,
+      )
+    }
     freshKeys.add(stableEntryKey(entry.catalogEntryId, entry.artifactInstanceId))
     freshEntries.push(entry)
+  }
+  if (freshEntries.length > MAX_AUTHORITY_ENTRIES) {
+    throw new Error(
+      `Fresh Catalog exceeds the ${MAX_AUTHORITY_ENTRIES}-entry authority cap — the whole transaction is rejected`,
+    )
   }
 
   const tombstones: ProductSpaceCatalogAuthorityEntry[] = []
@@ -641,6 +661,22 @@ export function getProductSpaceCatalogAuthorityRecord(
   return deepFreezeSnapshot(record)
 }
 
+/** Structural deep copy — the snapshot must never alias processCache. */
+function deepCopySnapshot<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(item => deepCopySnapshot(item)) as unknown as T
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = deepCopySnapshot(v)
+    }
+    return out as T
+  }
+  return value
+}
+
+/** Deep-freezes a SNAPSHOT (a copy) — never the internal cache record. */
 function deepFreezeSnapshot<T>(value: T): T {
   if (Array.isArray(value)) {
     for (const item of value) deepFreezeSnapshot(item)
@@ -653,6 +689,10 @@ function deepFreezeSnapshot<T>(value: T): T {
     return Object.freeze(value)
   }
   return Object.freeze(value)
+}
+
+function deepCopiedFrozenSnapshot<T>(value: T): Readonly<T> {
+  return deepFreezeSnapshot(deepCopySnapshot(value))
 }
 
 /**

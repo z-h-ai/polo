@@ -674,29 +674,27 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
  * inside this lock so no interleaved registration can slip between
  * enumeration and commit.
  */
+import {
+  eventLog as switchLockEventLog,
+  lockEnqueued,
+  lockSettled,
+  pendingSwitchLockTasks,
+} from './switch-lock-instrumentation'
+
 let switchLockTail: Promise<unknown> = Promise.resolve()
-/** Test-observable queue depth: tasks waiting on or running under the lock. */
-let switchLockPending = 0
+
 /**
- * Test-observable enqueue tokens: every queued task registers
- * `{ seq, label }` at enqueue time and is removed when it SETTLES. Labels
- * are caller-supplied descriptions (e.g. 'catalog-authority-revoke') —
- * purely observational, never a capability. Drains to empty when no task is
- * in flight.
+ * Test-only observation seam — re-exported nowhere; package consumers cannot
+ * see it because `./runtime/switch-lock-instrumentation` is absent from the
+ * package `exports` map. The production lock behavior is unchanged and the
+ * labels are purely descriptive (no capability).
  */
-export interface SwitchLockEvent {
-  seq: number
-  label: string
-}
-const switchLockEventLog: SwitchLockEvent[] = []
-let switchLockEventSeq = 0
-
 export function __pendingSwitchLockTasksForTests(): number {
-  return switchLockPending
+  return pendingSwitchLockTasks()
 }
 
-export function __switchLockEventLogForTests(): SwitchLockEvent[] {
-  return switchLockEventLog.map(entry => ({ ...entry }))
+export function __switchLockEventLogForTests(): { seq: number; label: string }[] {
+  return switchLockEventLog()
 }
 
 export async function withSwitchLock<T>(
@@ -708,16 +706,12 @@ export async function withSwitchLock<T>(
   switchLockTail = new Promise<void>(resolve => {
     release = resolve
   })
-  switchLockPending += 1
-  const event: SwitchLockEvent = { seq: ++switchLockEventSeq, label }
-  switchLockEventLog.push(event)
+  const event = lockEnqueued(label)
   await previous.catch(() => {})
   try {
     return await operation()
   } finally {
-    switchLockPending -= 1
-    const done = switchLockEventLog.findIndex(entry => entry.seq === event.seq)
-    if (done !== -1) switchLockEventLog.splice(done, 1)
+    lockSettled(event)
     release()
   }
 }

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { statSync } from 'node:fs'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { AppCatalogCacheEntry } from '@polo-ai/shared/admin'
 import type {
@@ -699,6 +700,39 @@ describe('local app main-process authorization boundary', () => {
       organizationId: 'organization-a',
       catalogAppId: 'artifact-w',
     }, { preserveData: true })
+  })
+
+  it('rejects KIND drift: old app tombstone + a live same-ID non-app row must NEVER reach the registry', async () => {
+    // Old app tombstone retained; the STABLE entry ID now belongs to a
+    // non-app (skill) live row in the current Catalog. The uninstall must
+    // fail closed as live identity drift — registry zero calls.
+    seedTombstoneBinding(
+      'account-a', 'organization-a',
+      'catalog-entry-a', 'artifact-instance-a', 'version-a', '2.3.4',
+    )
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-kind-drift',
+      entries: [{
+        kind: 'skill' as const,
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: { versionId: 'version-a', version: '2.3.4' },
+        name: 'Same-ID Skill',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+        enabled: true,
+        permissions: [],
+      }],
+    }))
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
   })
 
   it('rejects uninstalling an OLD republished tuple when the same entry/artifact is re-released at a NEW version (live drift, not tombstone)', async () => {

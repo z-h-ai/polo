@@ -427,57 +427,61 @@ export function HomePage() {
     // Fresh activation for THIS mount: only ONE load may be in flight per
     // context (a second mount joining during hydration awaits the SAME gate
     // and displays the shared baseline). Every mount waits for the gate and
-    // displays from the baseline through its own state setter. A rejected
-    // load is retried a BOUNDED number of times while owners remain —
-    // queued mutations are never silently dropped.
+    // displays from the baseline through its own state setter.
     //
-    // SINGLE ACTIVATION GATE: the deferred gate is created ONCE per
-    // activation and is shared by the initial attempt AND its bounded retry.
-    // It resolves exactly once, at the TERMINAL outcome. An activation token
-    // makes stale attempts (finally blocks of a superseded load) unable to
-    // clear the hydrating flag or trigger duplicate activations.
+    // SINGLE TERMINAL ACTIVATION LOOP: the initial attempt and its bounded
+    // retry live inside ONE async loop with ONE terminal finally, guarded by
+    // an activation epoch. The stable deferred gate is created once per
+    // activation and resolves exactly once at the terminal outcome. The
+    // loop keeps `hydrating` true across attempts — a third owner joining
+    // mid-retry joins the SAME activation instead of starting a duplicate.
+    // All stale callbacks / context switches / owner changes fail closed on
+    // the activation epoch.
     if (!writer.hydrating) {
       writer.hydrating = true
       writer.hydrationAttempts = 0
       let resolveGate!: (hydrated: boolean) => void
       writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
       writer.resolveGate = resolveGate
-      const activationToken = ++homeQuickActivationSequence
-      writer.activationToken = activationToken
-      const runAttempt = (attempt: number): void => {
-        writer.hydrationAttempts = attempt
-        void loadHomeQuickAccess(contextKey)
-          .then(entries => {
-            if (writer.activationToken !== activationToken) return
-            // Terminal SUCCESS: the baseline ALWAYS advances for this
-            // context, then BROADCASTS to every live owner.
-            writer.intent = entries
-            writer.confirmed = entries
-            writer.hydrated = true
-            writer.resolveGate(true)
-            notifyHomeQuickSubscribers(writer, entries)
-          })
-          .catch(() => {
-            if (writer.activationToken !== activationToken) return
-            if (attempt < MAX_HYDRATION_ATTEMPTS && writer.owners.size > 0) {
-              // Bounded observable retry — SAME gate, same activation.
-              runAttempt(attempt + 1)
+      const activationEpoch = ++homeQuickActivationSequence
+      writer.activationToken = activationEpoch
+      void (async (): Promise<void> => {
+        try {
+          for (let attempt = 1; attempt <= MAX_HYDRATION_ATTEMPTS; attempt++) {
+            writer.hydrationAttempts = attempt
+            try {
+              const entries = await loadHomeQuickAccess(contextKey)
+              if (writer.activationToken !== activationEpoch) return
+              // Terminal SUCCESS: the baseline ALWAYS advances for this
+              // context, then BROADCASTS to every live owner.
+              writer.intent = entries
+              writer.confirmed = entries
+              writer.hydrated = true
+              writer.resolveGate(true)
+              notifyHomeQuickSubscribers(writer, entries)
               return
+            } catch {
+              if (writer.activationToken !== activationEpoch) return
+              if (attempt === MAX_HYDRATION_ATTEMPTS || writer.owners.size === 0) {
+                // Terminal FAILURE: the gate resolves FALSE exactly once so
+                // queued mutations take their VISIBLE failure path (rollback
+                // broadcast + toast) — never a silent pseudo-ack.
+                writer.resolveGate(false)
+                return
+              }
+              // Bounded observable retry — SAME gate, same activation; the
+              // loop keeps `hydrating` true so joining owners ride along.
             }
-            // Terminal FAILURE: the gate resolves FALSE exactly once so
-            // queued mutations take their VISIBLE failure path (rollback
-            // broadcast + toast) — never a silent pseudo-ack.
-            writer.resolveGate(false)
-          })
-          .finally(() => {
-            if (writer.activationToken !== activationToken) return
-            // Only the CURRENT attempt may clear the in-flight flag; a stale
-            // attempt's finally can neither clear it nor sweep mid-flight.
+          }
+        } finally {
+          // ONE terminal cleanup for the WHOLE activation: only the current
+          // epoch may clear the in-flight flag or sweep.
+          if (writer.activationToken === activationEpoch) {
             writer.hydrating = false
             sweepHomeQuickWriters()
-          })
-      }
-      runAttempt(1)
+          }
+        }
+      })()
     }
     sweepHomeQuickWriters()
   }, [quickContextKey])
@@ -534,7 +538,7 @@ export function HomePage() {
       if (pruned.length === entries.length) return { next: null }
       return { next: pruned }
     })
-  }, [availableApps, catalogCommitted, enqueueQuickMutation, quickContextKey, quickEntries])
+  }, [availableApps, catalogCommitted, enqueueQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
 
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
