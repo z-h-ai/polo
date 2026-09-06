@@ -1980,15 +1980,24 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     // Production semantics: the schema guarantees unique entry AND artifact
     // ids, so resolve-by-entry is unambiguous — each card's publish subject
     // is its own artifact+version.
-    for (let attempt = 0; attempt < 60 && publishedSubjectSet().size < 2; attempt++) {
+    // Bounded, event-driven retry: each round clicks a live card and then
+    // waits for the NEXT resolve-launch RPC (a real observable barrier)
+    // before re-evaluating the published-subject coverage.
+    const resolvesBefore = api.resolveCalls.length
+    for (let round = 0; round < 8 && publishedSubjectSet().size < 2; round++) {
+      const before = api.resolveCalls.length
       const liveCards = Array.from(
         view.container.querySelectorAll('[data-testid="home-quick-entry"]'),
       )
-      const target = liveCards[attempt % Math.max(1, liveCards.length)]
+      const target = liveCards[round % Math.max(1, liveCards.length)]
       if (!target) break
       fireEvent.click(target)
-      await new Promise(resolve => setTimeout(resolve, 60))
+      await waitFor(() => {
+        if (api.resolveCalls.length <= before) return undefined
+        return true
+      })
     }
+    void resolvesBefore
     // Every entry (all three catalogEntryIds) went through the REAL
     // resolve-launch RPC.
     expect(api.resolveCalls.length).toBeGreaterThanOrEqual(2)

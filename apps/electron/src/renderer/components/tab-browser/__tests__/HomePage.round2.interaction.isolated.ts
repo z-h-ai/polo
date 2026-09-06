@@ -19,6 +19,8 @@ import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
 GlobalRegistrator.register()
 setupI18n()
 
+const toastErrorSpy = jest.fn()
+const toastSuccessSpy = jest.fn()
 const openApp = jest.fn()
 const storePublish = jest.fn((_live: unknown, _lease: number, accountId: string, launch: unknown) => ({
   handoffId: 'test-handoff',
@@ -110,6 +112,13 @@ mock.module('@/lib/product-space-app-launch-handoff', () => ({
   }),
 }))
 
+mock.module('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorSpy(...args),
+    success: (...args: unknown[]) => toastSuccessSpy(...args),
+  },
+}))
+
 const {
   cleanup,
   fireEvent,
@@ -127,6 +136,8 @@ const {
 
 beforeEach(async () => {
   localStorage.clear()
+  toastErrorSpy.mockClear()
+  toastSuccessSpy.mockClear()
   openApp.mockClear()
   storePublish.mockClear()
   adminGetStatus.mockReset()
@@ -1112,11 +1123,6 @@ describe('HomePage quick access (POO-43)', () => {
     })
     expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKey)
   }
-  function writerHydratedForTest(_contextKey: string): boolean {
-    // The bounded retry completes asynchronously; the queued mutations wait
-    // on the shared gate themselves, so this helper only needs to yield.
-    return true
-  }
   function apiSaveCallKeys(index: number): string[] {
     const call = setHomeQuickAccess.mock.calls[index]
     return ((call?.[1] ?? []) as Array<{ id: string }>).map(entry => entry.id)
@@ -1444,7 +1450,7 @@ describe('HomePage quick access (POO-43)', () => {
     ])
   })
 
-  it('a rejected load retries once, then a queued pin takes the VISIBLE failure path on every live mount', async () => {
+  it('a rejected load retries once on a STABLE gate: mutations queued before the reject from BOTH mounts land in order', async () => {
     const appA = pinnedApp('hl-app-a', 'hl-entry-a', 'hl-artifact-a', 'Hydration Lost A')
     const appB = pinnedApp('hl-app-b', 'hl-entry-b', 'hl-artifact-b', 'Hydration Lost B')
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
@@ -1453,84 +1459,182 @@ describe('HomePage quick access (POO-43)', () => {
     const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
     const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
 
-    let loadFailures = 0
-    let releaseLoad: ((entries: unknown[]) => void) | undefined
-    getHomeQuickAccess.mockImplementation(async () => {
-      // The INITIAL attempt rejects; the single bounded retry succeeds via
-      // the deferred release.
-      if (loadFailures === 0) {
-        loadFailures += 1
-        throw new Error('hydration load rejected (injected)')
-      }
-      const entries = await new Promise<unknown[]>(resolve => { releaseLoad = resolve })
+    // Attempt 1 is an in-flight DEFERRED rejection; attempt 2 (the bounded
+    // retry) succeeds through a deferred release.
+    let rejectFirst: ((error: unknown) => void) | undefined
+    let releaseRetry: ((entries: unknown[]) => void) | undefined
+    getHomeQuickAccess.mockImplementationOnce(async (_key: string): Promise<any[]> => {
+      await new Promise<any[]>((_, reject) => { rejectFirst = reject })
+      return []
+    }).mockImplementation(async (_key: string) => {
+      const entries = await new Promise<unknown[]>(resolve => { releaseRetry = resolve })
       return entries
     })
 
-    // TWO mounts join the SAME in-flight hydration.
+    // BOTH mounts join the SAME in-flight activation (attempt 1).
     const firstMount = renderHome()
+    await waitFor(() => { if (!rejectFirst) throw new Error('first load pending') })
     const survivor = render(homeTree())
-    await waitFor(() => { if (!releaseLoad) throw new Error('first load pending') })
-    // First attempt rejects; the bounded retry starts automatically.
-    releaseLoad?.([])
-    await waitFor(() => { if (!writerHydratedForTest(contextKey)) throw new Error('hydration pending') })
+    const loadsAfterJoin = loadCallCount()
 
-    // Both mounts queue mutations while the retry is in flight.
-    fireEvent.click(firstMount.container.ownerDocument!.defaultView === null
-      ? firstMount.container
-      : within(firstMount.container).getByTestId('home-all-apps-open'))
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-    fireEvent.click(within(survivor.container).getByTestId('home-all-apps-open'))
-    fireEvent.click(within(survivor.container).getByTestId(`all-apps-pin-${keyB}`))
-
-    // The bounded retry succeeds: queued mutations from BOTH mounts apply in
-    // order — nothing is silently dropped.
-    releaseLoad?.([])
-    await waitForSaveCalls(2)
-    expect(apiSaveCallKeys(0)).toEqual([keyA])
-    expect(apiSaveCallKeys(1)).toEqual([keyA, keyB])
-    firstMount.unmount()
-    survivor.unmount()
-  })
-
-  it('an exhausted load rejects queued mutations visibly and consistently on both mounts', async () => {
-    const appA = pinnedApp('ex-app-a', 'ex-entry-a', 'ex-artifact-a', 'Exhausted A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-
-    // EVERY hydration attempt rejects (bounded retries exhausted).
-    getHomeQuickAccess.mockImplementation(async () => {
-      throw new Error('hydration load rejected (injected)')
-    })
-
-    // Mount A starts hydration (attempt 1 fails); mount B joins DURING the
-    // bounded retry — one shared in-flight load, no duplicate.
-    const firstMount = renderHome()
-    await waitFor(() => { if (loadCallCount() < 1) throw new Error('first attempt pending') })
-    const survivor = render(homeTree())
-    await waitFor(() => { if (loadCallCount() < 2) throw new Error('bounded retry pending') })
-
-    // A mutation is queued from mount A, then the retries exhaust: the task
-    // takes the VISIBLE failure path — no persisted save anywhere, and BOTH
-    // mounts converge on the same (empty, errored) state with no quick
-    // entries.
+    // Queue mutations from BOTH mounts BEFORE attempt 1 rejects.
     fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
     await waitFor(() => {
       expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
     })
     fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-    await new Promise(resolve => setTimeout(resolve, 120))
 
-    expect(setHomeQuickAccess.mock.calls.length).toBe(0)
-    expect(within(firstMount.container).queryAllByTestId('home-quick-entry')).toHaveLength(0)
-    expect(within(survivor.container).queryAllByTestId('home-quick-entry')).toHaveLength(0)
-    expect(within(survivor.container).getByTestId('home-app-hub')).toBeTruthy()
-    // The bounded retries are observable and BOUNDED: mount B mounted after
-    // exhaustion and ran its own bounded activation — 2 attempts per mount
-    // (initial + 1 retry), never an infinite loop.
-    expect(loadCallCount()).toBe(4)
-    void keyA
+    // Attempt 1 rejects; the bounded retry starts on the SAME gate.
+    rejectFirst!(new Error('hydration load rejected (injected)'))
+    await waitFor(() => { if (!releaseRetry) throw new Error('retry load pending') })
+    fireEvent.click(within(survivor.container).getByTestId('home-all-apps-open'))
+    fireEvent.click(within(survivor.container).getByTestId(`all-apps-pin-${keyB}`))
+
+    // Loads: attempt 1 + attempt 2 = EXACTLY 2 (single shared activation).
+    expect(loadCallCount()).toBe(loadsAfterJoin + 1)
+
+    // Retry succeeds: queued mutations from BOTH mounts persist in order.
+    releaseRetry?.([
+      { id: keyA, addedAt: 1 },
+    ])
+    await waitFor(() => { if (setHomeQuickAccess.mock.calls.length < 2) throw new Error('saves pending') })
+    expect(apiSaveCallKeys(0)).toEqual([keyA])
+    expect(apiSaveCallKeys(1)).toEqual([keyA, keyB])
+    // Both mounts converge on the acked baseline (navigate A back home):
+    // each displays BOTH acked cards.
+    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
+    const assertBothCards = async (container: HTMLElement): Promise<void> => {
+      // NOTE: the file-local waitFor rejects on a thrown predicate — poll
+      // with an undefined-return predicate until the cards settle.
+      await waitFor(() => {
+        const cards = within(container).queryAllByTestId('home-quick-entry')
+        if (cards.length !== 2) return undefined
+        const identities = cards.map(card => card.getAttribute('data-identity-key'))
+        return new Set(identities).size === 2 ? true : undefined
+      })
+    }
+    await assertBothCards(firstMount.container)
+    await assertBothCards(survivor.container)
     firstMount.unmount()
     survivor.unmount()
+  })
+
+  it('an exhausted load (exactly 2 attempts) fails queued mutations VISIBLY with a toast on both mounts', async () => {
+    const appA = pinnedApp('ex-app-a', 'ex-entry-a', 'ex-artifact-a', 'Exhausted A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+
+    // Attempt 1: in-flight DEFERRED rejection; attempt 2: immediate reject
+    // (bounded retry exhausted).
+    let rejectFirst: ((error: unknown) => void) | undefined
+    getHomeQuickAccess.mockImplementationOnce(async (_key: string): Promise<any[]> => {
+      await new Promise<any[]>((_, reject) => { rejectFirst = reject })
+      return []
+    }).mockImplementation(async () => {
+      throw new Error('hydration load rejected (injected)')
+    })
+
+    // Mount A starts attempt 1; mount B JOINS the same in-flight activation.
+    const firstMount = renderHome()
+    await waitFor(() => { if (!rejectFirst) throw new Error('first load pending') })
+    const survivor = render(homeTree())
+
+    // Queue the mutation BEFORE exhaustion.
+    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
+
+    // Attempt 1 rejects → retry (attempt 2) rejects immediately → terminal.
+    rejectFirst!(new Error('hydration load rejected (injected)'))
+    await waitFor(() => { if (toastErrorSpy.mock.calls.length === 0) throw new Error('toast pending') })
+    expect(toastErrorSpy).toHaveBeenCalled()
+
+    // Visible failure: NO persisted save, both mounts converge with no
+    // quick entries, and the load count is EXACTLY 2 (initial + 1 retry).
+    expect(setHomeQuickAccess.mock.calls.length).toBe(0)
+    expect(loadCallCount()).toBe(2)
+    expect(within(firstMount.container).queryAllByTestId('home-quick-entry')).toHaveLength(0)
+    expect(within(survivor.container).queryAllByTestId('home-quick-entry')).toHaveLength(0)
+    firstMount.unmount()
+    survivor.unmount()
+  })
+
+  it('an optimistic ack is visible on BOTH mounts before a later reject rolls BOTH back (two unmount orders)', async () => {
+    const appA = pinnedApp('os-app-a', 'os-entry-a', 'os-artifact-a', 'Optimistic A')
+    const appB = pinnedApp('os-app-b', 'os-entry-b', 'os-artifact-b', 'Optimistic B')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')}`
+    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
+    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
+    const tasks = installDeferredSave()
+
+    // Two live mounts on the same context.
+    const firstMount = renderHome()
+    const survivor = render(homeTree())
+    await waitFor(() => {
+      expect(within(survivor.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
+    })
+
+    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+
+    // (a) successful pin from the SURVIVOR: optimistic ack visible on BOTH.
+    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
+    await waitForSaveCalls(1)
+    tasks[0]!.resolve()
+    await waitFor(() => {
+      expect(within(survivor.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    })
+    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(within(firstMount.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
+    })
+
+    // (b) rejected pin from the FIRST mount: rollback broadcast reverts BOTH.
+    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
+    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyB}`))
+    await waitForSaveCalls(2)
+    tasks[1]!.reject(new Error('save rejected (injected)'))
+    // Navigate the first mount home, then assert the rollback broadcast
+    // converged BOTH mounts on the same confirmed snapshot.
+    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      if (within(survivor.container).queryAllByTestId('home-quick-entry').length !== 1) {
+        throw new Error('survivor rollback pending')
+      }
+    })
+    await waitFor(() => {
+      if (within(firstMount.container).queryAllByTestId('home-quick-entry').length !== 1) {
+        throw new Error('first mount rollback pending')
+      }
+    })
+    expect(quickAccessByContext.get(contextKey)?.map((entry: { id: string }) => entry.id))
+      .toEqual([keyA])
+
+    // (c) owner-order unmount variants: unmount the survivor FIRST — the
+    // first mount still works; then settle-remount path.
+    survivor.unmount()
+    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyB}`))
+    await waitForSaveCalls(3)
+    tasks[2]!.resolve()
+    await waitFor(() => {
+      if (quickAccessByContext.get(contextKey)?.length !== 2) throw new Error('write pending')
+    })
+    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      const cards = within(firstMount.container).getAllByTestId('home-quick-entry')
+      if (cards.length !== 2) throw new Error('remount display pending')
+    })
+    firstMount.unmount()
   })
 
   it('removing the last persisted entry persists an explicitly empty collection', async () => {
@@ -1598,8 +1702,6 @@ describe('HomePage quick access (POO-43)', () => {
     viewRerender()
     // The prune's save rejects and rolls back to the acknowledgement.
     await waitForSaveCalls(1)
-    await new Promise(resolve => setTimeout(resolve, 80))
-
     // The persisted collection keeps BOTH entries — nothing committed.
     expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyKept, keyGone])
 

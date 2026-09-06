@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -13,6 +13,7 @@ import {
   revokeProductSpaceCatalogAuthority,
 } from '../product-space-catalog-authority'
 import { recordProductSpaceCatalogAuthoritativeEntries } from '../product-space-catalog-authority-commit'
+import * as publicAuthority from '../product-space-catalog-authority'
 
 function tuple(
   catalogEntryId = 'entry-a',
@@ -862,6 +863,285 @@ describe('R24: explicit kind union decoding', () => {
     // The malformed/unknown record is dropped at load — the reload sees no
     // trusted authority and a fresh Catalog rebuilds cleanly.
     recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-rebuild', [entry()])
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+  })
+})
+
+describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', () => {
+  const authorityFile = (): string => join(process.env.POLO_AI_CONFIG_DIR!, 'product-space-catalog-authority.json')
+  const scopeKey = JSON.stringify(['product-space-catalog', 1, 'account-a', 'space-a'])
+  const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
+
+  it('blocks plain and percent-encoded traversal to the commit/internal modules while safe exports stay usable', async () => {
+    const attempts = [
+      ['plain commit traversal', '@polo-ai/server-core/handlers/rpc/../../runtime/product-space-catalog-authority-commit'],
+      ['encoded commit traversal', '@polo-ai/server-core/handlers/rpc/%2e%2e%2f%2e%2e%2fruntime/product-space-catalog-authority-commit'],
+      ['plain internal traversal', '@polo-ai/server-core/handlers/rpc/../../runtime/product-space-catalog-authority-internal'],
+      ['runtime commit direct', '@polo-ai/server-core/runtime/product-space-catalog-authority-commit'],
+      ['runtime internal direct', '@polo-ai/server-core/runtime/product-space-catalog-authority-internal'],
+    ]
+    for (const [label, specifier] of attempts) {
+      try {
+        const mod = await import(/* @vite-ignore */ specifier)
+        // An import that resolves must not expose the grant mutator.
+        expect((mod as Record<string, unknown>).recordProductSpaceCatalogAuthoritativeEntries).toBeUndefined()
+      } catch (error) {
+        const code = (error as { code?: string }).code
+        expect(['ERR_PACKAGE_PATH_NOT_EXPORTED', 'ERR_MODULE_NOT_FOUND'] as string[]).toContain(code as string)
+      }
+    }
+    // Safe exports remain usable.
+    const admin = await import('@polo-ai/server-core/handlers/rpc/admin')
+    expect(typeof admin.registerAdminHandlers).toBe('function')
+  })
+
+  it('the public record getter returns a deep snapshot: mutating every layer cannot forge trust', () => {
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
+    const snapshot = publicAuthority.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+    expect(snapshot.entries).toHaveLength(1)
+    // Mutate every aliasable layer of the returned value.
+    try {
+      (snapshot.entries as unknown as unknown[]).length = 0
+    } catch {}
+    const first = snapshot.entries[0] as unknown as Record<string, unknown>
+    if (first) {
+      try {
+        first.catalogEntryId = 'forged-entry'
+        ;(first.sources as unknown as unknown[]).length = 0
+        ;((first as { permissions: unknown[] }).permissions as unknown[]).length = 0
+      } catch {}
+    }
+    try {
+      (snapshot.tombstones as unknown as unknown[]).length = 0
+    } catch {}
+    try {
+      (snapshot as unknown as { catalogRevision: string }).catalogRevision = 'forged-revision'
+    } catch {}
+
+    // Internal trust is untouched at every layer.
+    expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
+    expect(loadProductSpaceCatalogAuthorityTupleSet('account-a', 'space-a')).toEqual(
+      new Set([productSpaceCatalogAuthorityTupleKey(...tuple())]),
+    )
+    const reread = publicAuthority.getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
+    expect(reread.entries).toHaveLength(1)
+    expect((reread.entries[0] as { catalogEntryId: string }).catalogEntryId).toBe('entry-a')
+    expect(reread.catalogRevision).toBe('rev-1')
+    expect(Object.isFrozen(reread.entries)).toBe(true)
+    expect(Object.isFrozen(reread.entries[0])).toBe(true)
+  })
+
+  it('a malformed legacy candidate (invalid entry) contributes ZERO tombstones to a fresh empty Catalog', () => {
+    const malformedEntry = {
+      schemaVersion: 1,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      syncedAt: 1,
+      catalogRevision: 'rev-legacy-malformed',
+      entries: [{
+        kind: 'app', catalogEntryId: 'entry-forged', artifactInstanceId: 'artifact-forged',
+        versionId: 'version-forged', version: '1.0.0', name: 'Forged', description: '',
+        availability: 'available', sources: [], permissions: [],
+      }],
+      tombstones: [],
+    }
+    writeFileSync(authorityFile(), JSON.stringify({
+      schemaVersion: 1,
+      records: { [scopeKey]: malformedEntry },
+    }), 'utf8')
+    __dropAuthorityProcessCacheForTests()
+
+    // Fresh EMPTY Catalog: the malformed legacy entry must NOT become a
+    // retained trusted tombstone.
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-empty', [],
+    )
+    expect(tombstones).toEqual([])
+    expect(hasProductSpaceCatalogAuthorityTuple(
+      'account-a', 'space-a', 'entry-forged', 'artifact-forged', 'version-forged', '1.0.0',
+    )).toBe(false)
+    const onDisk = JSON.parse(readFileSync(authorityFile(), 'utf8'))
+    const record = onDisk.records[scopeKey]
+    expect(record.kind).toBe('authority')
+    expect(record.tombstones).toEqual([])
+  })
+
+  it('an invalid legacy tombstone and an over-cap legacy record contribute nothing and stay untrusted', () => {
+    const invalidTombstone = {
+      schemaVersion: 1,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      syncedAt: 1,
+      catalogRevision: 'rev-legacy-invalid-tombstone',
+      entries: [],
+      tombstones: [{ kind: 'app', catalogEntryId: 'ghost', artifactInstanceId: 'ghost-a',
+        versionId: 'version-ghost', version: '1.0.0', name: 'Ghost', description: '',
+        availability: 'withdrawn', sources: [], permissions: [], withdrawnAt: 1 }],
+    }
+    writeFileSync(authorityFile(), JSON.stringify({
+      schemaVersion: 1, records: { [scopeKey]: invalidTombstone },
+    }), 'utf8')
+    __dropAuthorityProcessCacheForTests()
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-empty', [],
+    )
+    expect(tombstones).toEqual([])
+    expect(hasProductSpaceCatalogAuthorityTuple(
+      'account-a', 'space-a', 'ghost', 'ghost-a', 'version-ghost', '1.0.0',
+    )).toBe(false)
+  })
+
+  it('a valid-looking forged legacy record never grants, even with a non-empty fresh response', () => {
+    const forgedLegacy = {
+      schemaVersion: 1,
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      syncedAt: 1,
+      catalogRevision: 'rev-forged-legacy',
+      entries: [{
+        kind: 'app', catalogEntryId: 'entry-forged', artifactInstanceId: 'artifact-forged',
+        versionId: 'version-forged', version: '1.0.0', name: 'Forged', description: '',
+        availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
+        permissions: [],
+      }],
+      tombstones: [],
+    }
+    writeFileSync(authorityFile(), JSON.stringify({
+      schemaVersion: 1, records: { [scopeKey]: forgedLegacy },
+    }), 'utf8')
+    __dropAuthorityProcessCacheForTests()
+    expect(hasProductSpaceCatalogAuthorityTuple(
+      'account-a', 'space-a', 'entry-forged', 'artifact-forged', 'version-forged', '1.0.0',
+    )).toBe(false)
+
+    // Fresh non-empty response: only the fresh response's own live rows grant.
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-fresh-nonempty',
+      [entry({ catalogEntryId: 'entry-real', artifactInstanceId: 'artifact-real' })],
+    )
+    expect(tombstones).toEqual([])
+    expect(hasProductSpaceCatalogAuthorityTuple(
+      'account-a', 'space-a', 'entry-forged', 'artifact-forged', 'version-forged', '1.0.0',
+    )).toBe(false)
+    expect(hasProductSpaceCatalogAuthorityTuple(
+      'account-a', 'space-a', 'entry-real', 'artifact-real', 'version-1', '1.0.0',
+    )).toBe(true)
+  })
+
+  it('the REAL 0555 containing-directory dual fault: create/unlink/rename denied, old bytes intact, cold process denies, fresh commit under 0555 throws, recovery after chmod', () => {
+    // uid disposition: POSIX permission checks are bypassed for uid 0; the
+    // probe asserts the fault domain only for non-root runs (CI/dev run as
+    // uid 501 on macOS / unprivileged on Linux).
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      console.log('skipped: running as uid 0 bypasses permission faults')
+      return
+    }
+    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
+    recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'rev-1', [
+      entry({ catalogEntryId: 'entry-b', artifactInstanceId: 'artifact-b' }),
+    ])
+    // Dedicated targets for rename + old-file mutation BEFORE chmod.
+    const renameTarget = join(dirname(authorityFile()), 'r25-rename-probe.bin')
+    const oldFileSnapshot = readFileSync(authorityFile(), 'utf8')
+    writeFileSync(renameTarget, 'x')
+    const dir = dirname(authorityFile())
+    chmodSync(dir, 0o555)
+    try {
+      // create denied
+      let createErrno: string | null = null
+      try {
+        writeFileSync(join(dir, 'r25-create-probe.bin'), 'x')
+      } catch (error) {
+        createErrno = (error as { code?: string }).code ?? 'unknown'
+      }
+      expect(createErrno).toBe('EACCES')
+      // rename denied
+      let renameErrno: string | null = null
+      try {
+        renameSync(renameTarget, join(dir, 'r25-rename-dest.bin'))
+      } catch (error) {
+        // macOS returns EPERM on cross-permission renames into a read-only
+        // directory; Linux returns EACCES. Either is a denied rename.
+        const code = (error as { code?: string }).code
+        renameErrno = code ?? `unknown: ${String(error).slice(0, 60)}`
+      }
+      expect(['EACCES', 'EPERM', 'ENOENT'] as string[]).toContain(renameErrno as string)
+      // old-file unlink/mutation denied
+      let unlinkErrno: string | null = null
+      try {
+        rmSync(authorityFile())
+      } catch (error) {
+        unlinkErrno = (error as { code?: string }).code ?? 'unknown'
+      }
+      expect(['EACCES', 'EPERM'] as string[]).toContain(unlinkErrno as string)
+      // Old authority bytes intact (readable).
+      expect(readFileSync(authorityFile(), 'utf8')).toBe(oldFileSnapshot)
+
+      // revoke + fresh persist must BOTH throw inside this fault domain.
+      expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
+      expect(() => recordProductSpaceCatalogAuthoritativeEntries(
+        'account-a', 'space-a', 'fresh-0555', [entry()],
+      )).toThrow()
+      // Old bytes STILL intact.
+      expect(readFileSync(authorityFile(), 'utf8')).toBe(oldFileSnapshot)
+
+      // P3: a cold child process must deny BOTH scopes before revalidation
+      // AND its fresh commit attempt under 0555 must throw.
+      const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
+      const probe = `
+        const { pathToFileURL } = await import('node:url')
+        const fs = await import('node:fs')
+        const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+        let commitThrew = false
+        try {
+          mod.recordProductSpaceCatalogAuthoritativeEntries(
+            'account-a', 'space-a', 'rev-p3-0555',
+            [{ kind: 'app', catalogEntryId: 'entry-p3', artifactInstanceId: 'artifact-p3',
+               version: { versionId: 'version-p3', version: '9.0.0' }, name: 'P3', description: '',
+               availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
+               permissions: [] }])
+        } catch { commitThrew = true }
+        console.log(JSON.stringify({
+          commitThrew,
+          aTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+            'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0'),
+          bTrusted: mod.hasProductSpaceCatalogAuthorityTuple(
+            'account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0'),
+          oldBytesIntact: fs.readFileSync(
+            process.env.POLO_AI_CONFIG_DIR + '/product-space-catalog-authority.json', 'utf8',
+          ) === ${JSON.stringify(oldFileSnapshot)},
+        }))
+      `
+      const p3 = Bun.spawnSync({
+        cmd: [process.execPath, '-e', probe],
+        cwd: join(import.meta.dir, '..', '..', '..'),
+        env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(p3.exitCode).toBe(0)
+      const p3Out = JSON.parse(p3.stdout.toString().trim()) as {
+        commitThrew: boolean
+        aTrusted: boolean
+        bTrusted: boolean
+        oldBytesIntact: boolean
+      }
+      expect(p3Out.commitThrew).toBe(true)
+      expect(p3Out.aTrusted).toBe(false)
+      expect(p3Out.bTrusted).toBe(false)
+      expect(p3Out.oldBytesIntact).toBe(true)
+    } finally {
+      chmodSync(dir, 0o755)
+      rmSync(renameTarget, { force: true })
+      rmSync(join(dir, 'r25-create-probe.bin'), { force: true })
+      rmSync(join(dir, 'r25-rename-dest.bin'), { force: true })
+    }
+
+    // Permission restored: fresh commit succeeds and recovers the scope.
+    const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
+      'account-a', 'space-a', 'rev-recovered', [entry()],
+    )
+    expect(tombstones).toEqual([])
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 })

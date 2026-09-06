@@ -914,7 +914,7 @@ export function registerAdminHandlers(
       })
       if (firstError) throw firstError
       return 'revoked'
-    })
+    }, `catalog-authority-revoke:${options.productSpaceId}`)
   }
 
   interface CatalogScopeRevocationPolicy {
@@ -2197,8 +2197,8 @@ export function registerAdminHandlers(
               sources: entry.sources,
               permissions: entry.permissions,
             }))
-          })
-          },
+          }, 'catalog-authority-commit')
+        },
           // ALWAYS-SETTLE: release the pending commit reservation no matter
         // how the request concluded (committed, CAS-skipped by a session
         // change, or authority write failure) — the scope entry is recycled

@@ -489,7 +489,13 @@ export function recordProductSpaceCatalogAuthoritativeEntries(
   // Catalog alone defines the scope's truth.
   const denied = isScopeDenied(key)
   const previousRecord = file.records[key] ?? null
-  const previous = denied || isDeniedAuthorityRecord(previousRecord)
+  // Legacy candidates (missing explicit kind) and denied records contribute
+  // NOTHING: their entries/tombstones can never become retained trusted
+  // tombstones of a fresh grant — the fresh schema-valid response alone
+  // defines the scope's truth.
+  const previous = denied
+    || isDeniedAuthorityRecord(previousRecord)
+    || (previousRecord !== null && previousRecord.kind !== 'authority')
     ? null
     : previousRecord
 
@@ -621,13 +627,32 @@ export function hasProductSpaceCatalogAuthorityTuple(
 export function getProductSpaceCatalogAuthorityRecord(
   accountId: string,
   productSpaceId: string,
-): ProductSpaceCatalogAuthorityRecord | null {
+): Readonly<ProductSpaceCatalogAuthorityRecord> | null {
   const scopeKey = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
   if (isScopeDenied(scopeKey) || !isScopeTrusted(scopeKey)) return null
   const record = loadFile().records[scopeKey] ?? null
   // A legacy candidate (or denied record) never serves as authority.
   if (!record || record.kind !== 'authority') return null
-  return record
+  // DEEP SNAPSHOT: the returned value must not alias the processCache record
+  // at ANY level (record, entries, tombstones, entry.version, sources,
+  // permissions), or a public caller could mutate entries into the trust
+  // set. Freeze deeply so even in-place mutation of the snapshot is
+  // rejected in dev and irrelevant in prod.
+  return deepFreezeSnapshot(record)
+}
+
+function deepFreezeSnapshot<T>(value: T): T {
+  if (Array.isArray(value)) {
+    for (const item of value) deepFreezeSnapshot(item)
+    return Object.freeze(value)
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      deepFreezeSnapshot(item)
+    }
+    return Object.freeze(value)
+  }
+  return Object.freeze(value)
 }
 
 /**

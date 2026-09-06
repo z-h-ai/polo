@@ -677,23 +677,47 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
 let switchLockTail: Promise<unknown> = Promise.resolve()
 /** Test-observable queue depth: tasks waiting on or running under the lock. */
 let switchLockPending = 0
+/**
+ * Test-observable enqueue tokens: every queued task registers
+ * `{ seq, label }` at enqueue time and is removed when it SETTLES. Labels
+ * are caller-supplied descriptions (e.g. 'catalog-authority-revoke') —
+ * purely observational, never a capability. Drains to empty when no task is
+ * in flight.
+ */
+export interface SwitchLockEvent {
+  seq: number
+  label: string
+}
+const switchLockEventLog: SwitchLockEvent[] = []
+let switchLockEventSeq = 0
 
 export function __pendingSwitchLockTasksForTests(): number {
   return switchLockPending
 }
 
-export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T> {
+export function __switchLockEventLogForTests(): SwitchLockEvent[] {
+  return switchLockEventLog.map(entry => ({ ...entry }))
+}
+
+export async function withSwitchLock<T>(
+  operation: () => Promise<T>,
+  label = 'unlabeled',
+): Promise<T> {
   const previous = switchLockTail
   let release!: () => void
   switchLockTail = new Promise<void>(resolve => {
     release = resolve
   })
   switchLockPending += 1
+  const event: SwitchLockEvent = { seq: ++switchLockEventSeq, label }
+  switchLockEventLog.push(event)
   await previous.catch(() => {})
   try {
     return await operation()
   } finally {
     switchLockPending -= 1
+    const done = switchLockEventLog.findIndex(entry => entry.seq === event.seq)
+    if (done !== -1) switchLockEventLog.splice(done, 1)
     release()
   }
 }

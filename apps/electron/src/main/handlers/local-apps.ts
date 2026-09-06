@@ -512,6 +512,16 @@ async function assertProductSpaceAccountCurrent(app: ProductSpaceAppIdentity): P
 
 async function loadAuthoritativeProductSpaceApps(
   rawApps: unknown,
+  options: {
+    /**
+     * Error code for a live-drift mismatch (entry EXISTS but its
+     * artifact/version differs from the request). Defaults to the legacy
+     * `RELEASE_CHANGED`; the uninstall IPC uses the granular
+     * `CATALOG_IDENTITY_DRIFT` so live drift can never be confused with an
+     * authoritative missing-entry verdict.
+     */
+    driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
+  } = {},
 ): Promise<{
   apps: ProductSpaceAppIdentity[]
   accessToken: string
@@ -562,16 +572,26 @@ async function loadAuthoritativeProductSpaceApps(
     }
     seenIdentityKeys.add(identityKey)
     const entry = entriesById.get(app.catalogEntryId)
+    if (!entry || entry.kind !== 'app') {
+      // Authoritative absence: the CURRENT distribution genuinely has no
+      // such entry. This is the ONLY verdict that may route an uninstall to
+      // the retained-tombstone cleanup gate.
+      throw new LocalAppRuntimeError(
+        'CATALOG_ENTRY_MISSING',
+        'The ProductSpace Catalog no longer lists this entry',
+      )
+    }
     if (
-      !entry
-      || entry.kind !== 'app'
-      || entry.artifactInstanceId !== app.artifactInstanceId
+      entry.artifactInstanceId !== app.artifactInstanceId
       || entry.version.versionId !== app.versionId
       || entry.version.version !== app.version
     ) {
+      // Live drift: the entry STILL EXISTS but its artifact/version differs
+      // from the request. This is a LIVE App mismatch — never a tombstone
+      // cleanup candidate.
       throw new LocalAppRuntimeError(
-        'RELEASE_CHANGED',
-        'The ProductSpace Catalog App identity changed',
+        options.driftCode ?? 'RELEASE_CHANGED',
+        'The ProductSpace Catalog App identity changed (live drift)',
       )
     }
   }
@@ -972,18 +992,22 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // registry or any file is touched.
       let liveUninstall = false
       try {
-        await loadAuthoritativeProductSpaceApps([rawApp])
+        await loadAuthoritativeProductSpaceApps([rawApp], {
+          driftCode: 'CATALOG_IDENTITY_DRIFT',
+        })
         liveUninstall = true
       } catch (error) {
         // The ONLY authoritative verdict that may fall back to the
-        // no-fresh-Catalog cleanup gate is RELEASE_CHANGED — the fresh
-        // Catalog itself proved the identity is gone from the current
-        // distribution. Auth/network/schema/space-state failures (and any
-        // stale-version drift, which is a LIVE App mismatch, not a
-        // tombstone) stay fail-closed; a renderer can never self-declare
-        // its way onto this path.
+        // no-fresh-Catalog cleanup gate is CATALOG_ENTRY_MISSING — the fresh
+        // Catalog itself proved the entry is GONE from the current
+        // distribution. A live row that merely DRIFTED
+        // (artifactInstanceId/versionId/version/kind mismatch) is a LIVE App
+        // mismatch (CATALOG_IDENTITY_DRIFT) and stays fail-closed — it must
+        // never fall through to retained-tombstone cleanup. Auth/network/
+        // schema/space-state failures also stay fail-closed; a renderer can
+        // never self-declare its way onto this path.
         const authoritativeMissing = error instanceof LocalAppRuntimeError
-          && error.code === 'RELEASE_CHANGED'
+          && error.code === 'CATALOG_ENTRY_MISSING'
         if (!authoritativeMissing) throw error
         assertRetainedTombstoneProductSpaceAppAuthority([app])
       }

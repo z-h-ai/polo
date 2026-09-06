@@ -154,6 +154,8 @@ interface HomeQuickContextWriter {
   hydrated: boolean
   /** True while an activation load is still in flight. */
   hydrating: boolean
+  /** Monotonic activation token: only the CURRENT attempt may settle state. */
+  activationToken: number
   /** Observable bounded-retry counter for the activation load. */
   hydrationAttempts: number
   intent: HomeQuickAccessApp[]
@@ -162,6 +164,7 @@ interface HomeQuickContextWriter {
 
 const homeQuickWriters = new Map<string, HomeQuickContextWriter>()
 let nextHomeQuickMountId = 0
+let homeQuickActivationSequence = 0
 /** Bounded hydration retries while owners remain (initial + 1 retry). */
 const MAX_HYDRATION_ATTEMPTS = 2
 
@@ -179,6 +182,7 @@ function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
       resolveGate,
       hydrated: false,
       hydrating: false,
+      activationToken: 0,
       hydrationAttempts: 0,
       intent: [],
       confirmed: [],
@@ -426,42 +430,54 @@ export function HomePage() {
     // displays from the baseline through its own state setter. A rejected
     // load is retried a BOUNDED number of times while owners remain —
     // queued mutations are never silently dropped.
-    const activateHydration = (attempt: number): void => {
+    //
+    // SINGLE ACTIVATION GATE: the deferred gate is created ONCE per
+    // activation and is shared by the initial attempt AND its bounded retry.
+    // It resolves exactly once, at the TERMINAL outcome. An activation token
+    // makes stale attempts (finally blocks of a superseded load) unable to
+    // clear the hydrating flag or trigger duplicate activations.
+    if (!writer.hydrating) {
       writer.hydrating = true
-      writer.hydrationAttempts = attempt
+      writer.hydrationAttempts = 0
       let resolveGate!: (hydrated: boolean) => void
       writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
       writer.resolveGate = resolveGate
-      void loadHomeQuickAccess(contextKey)
-        .then(entries => {
-          // The baseline ALWAYS advances for this context, then BROADCASTS
-          // to every live owner of the context.
-          writer.intent = entries
-          writer.confirmed = entries
-          writer.hydrated = true
-          writer.resolveGate(true)
-          notifyHomeQuickSubscribers(writer, entries)
-        })
-        .catch(() => {
-          if (attempt < MAX_HYDRATION_ATTEMPTS && writer.owners.size > 0) {
-            // Bounded, observable retry with a fresh gate.
+      const activationToken = ++homeQuickActivationSequence
+      writer.activationToken = activationToken
+      const runAttempt = (attempt: number): void => {
+        writer.hydrationAttempts = attempt
+        void loadHomeQuickAccess(contextKey)
+          .then(entries => {
+            if (writer.activationToken !== activationToken) return
+            // Terminal SUCCESS: the baseline ALWAYS advances for this
+            // context, then BROADCASTS to every live owner.
+            writer.intent = entries
+            writer.confirmed = entries
+            writer.hydrated = true
+            writer.resolveGate(true)
+            notifyHomeQuickSubscribers(writer, entries)
+          })
+          .catch(() => {
+            if (writer.activationToken !== activationToken) return
+            if (attempt < MAX_HYDRATION_ATTEMPTS && writer.owners.size > 0) {
+              // Bounded observable retry — SAME gate, same activation.
+              runAttempt(attempt + 1)
+              return
+            }
+            // Terminal FAILURE: the gate resolves FALSE exactly once so
+            // queued mutations take their VISIBLE failure path (rollback
+            // broadcast + toast) — never a silent pseudo-ack.
+            writer.resolveGate(false)
+          })
+          .finally(() => {
+            if (writer.activationToken !== activationToken) return
+            // Only the CURRENT attempt may clear the in-flight flag; a stale
+            // attempt's finally can neither clear it nor sweep mid-flight.
             writer.hydrating = false
-            activateHydration(attempt + 1)
-            return
-          }
-          // Retries exhausted: the gate resolves FALSE so queued mutations
-          // take their VISIBLE failure path (rollback broadcast + toast) —
-          // never a silent pseudo-ack. A later activation installs a fresh
-          // gate and retries the load again.
-          writer.resolveGate(false)
-        })
-        .finally(() => {
-          writer.hydrating = false
-          sweepHomeQuickWriters()
-        })
-    }
-    if (!writer.hydrating) {
-      activateHydration(1)
+            sweepHomeQuickWriters()
+          })
+      }
+      runAttempt(1)
     }
     sweepHomeQuickWriters()
   }, [quickContextKey])

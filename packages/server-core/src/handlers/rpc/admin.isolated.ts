@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
 import { join } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
@@ -8,6 +8,7 @@ import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
   __pendingSwitchLockTasksForTests,
+  __switchLockEventLogForTests,
   getRuntimeActiveProductSpace,
   getRuntimeActiveProductSpaceAccount,
   listRegisteredProductSpaceExecutions,
@@ -831,6 +832,12 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
   let productSpaceCatalog: HandlerFn
   let logout: HandlerFn
 
+  afterEach(() => {
+    // Every queued lock task has settled and the token registry has drained.
+    expect(__pendingSwitchLockTasksForTests()).toBe(0)
+    expect(__switchLockEventLogForTests()).toEqual([])
+  })
+
   beforeEach(async () => {
     authorityRecordCalls.length = 0
     authorityRevokeCalls.length = 0
@@ -1371,7 +1378,7 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     let releaseHolder: (() => void) | undefined
     void withSwitchLock(async () => {
       await new Promise<void>(resolve => { releaseHolder = resolve })
-    })
+    }, 'test-holder')
 
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1386,8 +1393,11 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     // the switch-lock queue depth (holder + R1's parked decision).
     const pending = productSpaceCatalog(context, 'space-a', undefined)
     await waitFor(() => releaseHolder !== undefined)
+    // IDENTITY barrier: R1's revocation decision has actually queued.
     await waitFor(() => {
-      if (__pendingSwitchLockTasksForTests() < 2) return undefined
+      if (!__switchLockEventLogForTests().some(e => e.label === 'catalog-authority-revoke:space-a')) {
+        return undefined
+      }
       return true
     })
 
@@ -1430,7 +1440,7 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     let releaseHolder: (() => void) | undefined
     void withSwitchLock(async () => {
       await new Promise<void>(resolve => { releaseHolder = resolve })
-    })
+    }, 'test-holder')
 
     adminClientBehavior.listProductSpaces = async () => ({
       productSpaces: [{ id: 'space-a', accessMode: 'active' }],
@@ -1455,23 +1465,31 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     const scopeKey = createProductSpaceContextKey('user-1' as never, 'space-a' as never)
     const pendingR1 = productSpaceCatalog(context, 'space-a', undefined)
     await waitFor(() => releaseHolder !== undefined)
+    // IDENTITY barrier 1: R1's revocation decision is queued on the lock.
     await waitFor(() => {
-      if (__pendingSwitchLockTasksForTests() >= 2) return true
-      return undefined
+      if (!__switchLockEventLogForTests().some(e => e.label === 'catalog-authority-revoke:space-a')) {
+        return undefined
+      }
+      return true
     })
 
     // While R1 is parked: R2 registers (newer invocation), fetches, and its
     // commit zone queues BEHIND R1's queued decision — both edges observed
-    // through real state (the latest-invocation registration and the lock
-    // queue depth).
+    // through real state (the latest-invocation registration and the labeled
+    // R2-commit token queued AFTER R1's decision token).
     const latestBeforeR2 = __latestProductSpaceCatalogSyncInvocationForTests(scopeKey)
     const pendingR2 = productSpaceCatalog(context, 'space-a', undefined)
     await waitFor(() => {
+      const log = __switchLockEventLogForTests()
+      const revokeIdx = log.findIndex(e => e.label === 'catalog-authority-revoke:space-a')
+      const commitIdx = log.findIndex(e => e.label === 'catalog-authority-commit')
       const latest = __latestProductSpaceCatalogSyncInvocationForTests(scopeKey)
       if (
         latest !== null
         && latest > (latestBeforeR2 ?? Number.MAX_SAFE_INTEGER)
-        && __pendingSwitchLockTasksForTests() >= 3
+        && revokeIdx !== -1
+        && commitIdx !== -1
+        && commitIdx > revokeIdx
       ) return true
       return undefined
     })
@@ -1564,6 +1582,24 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     // Total retained count after 10,000 unique denied IDs: zero.
     expect(peak).toBeLessThanOrEqual(1)
     expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+  })
+
+  it('a THROWING labeled switch-lock task completes, drains the token registry, and rejects to its caller', async () => {
+    const { withSwitchLock } = await import('../../runtime/product-space-executions')
+    await expect(withSwitchLock(async () => {
+      throw new Error('labeled task failed (injected)')
+    }, 'injected-throwing-task')).rejects.toThrow('labeled task failed (injected)')
+    // The token registry drained despite the throw.
+    expect(__switchLockEventLogForTests().some(e => e.label === 'injected-throwing-task')).toBe(false)
+    expect(__pendingSwitchLockTasksForTests()).toBe(0)
+  })
+
+  it('the 10k denial sweep drains the switch-lock event registry to zero', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [] })
+    for (let i = 0; i < 10_000; i++) {
+      await productSpaceCatalog(context, `space-${i}`, undefined)
+    }
+    expect(__switchLockEventLogForTests()).toEqual([])
   })
 
   it('keeps a different space runtime fence when another space is denied', async () => {
