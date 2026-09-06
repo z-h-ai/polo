@@ -307,7 +307,7 @@ describe('HomePage quick access (POO-43)', () => {
     renderHome()
 
     const poloEntry = screen.getByTestId('home-quick-entry-polo')
-    expect(within(poloEntry).getByText('Polo 助手')).toBeTruthy()
+    expect(within(poloEntry).getByText('Polo Assistant')).toBeTruthy()
     fireEvent.click(poloEntry)
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
   })
@@ -1076,50 +1076,227 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
   })
 
-  it('pins a catalog App from All Apps through the authoritative persisted quick-access flow', async () => {
-    const appA: CatalogApp = {
-      id: 'pin-app-a',
-      catalogEntryId: 'pin-entry-a',
-      artifactInstanceId: 'pin-artifact-a',
-      organizationId: 'organization-a',
-      name: 'Pin App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://pin.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
+  const pinnedApp = (id: string, entryId: string, artifactId: string, name: string): CatalogApp => ({
+    id,
+    catalogEntryId: entryId,
+    artifactInstanceId: artifactId,
+    organizationId: 'organization-a',
+    name,
+    description: '',
+    deliveryMode: 'remote_url',
+    remoteUrl: `https://${id}.example.com`,
+    sortOrder: 0,
+    availability: 'available',
+  })
+
+  async function openAllAppsAndPin(app: CatalogApp, contextKey: string) {
+    const renderResult = renderHome()
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId(
+      `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(app)}`,
+    ))
+    await waitFor(() => {
+      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [
+        { id: appCatalogHook.uiIdentityKeyForApp(app), addedAt: expect.any(Number) },
+      ])
+    })
+    return renderResult
+  }
+
+  it('pins a catalog App from All Apps: exact persisted payload, home test-id after back, remount persistence', async () => {
+    const appA = pinnedApp('pin-app-a', 'pin-entry-a', 'pin-artifact-a', 'Pin App A')
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const contextKey = `v1:${
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
 
+    const view = await openAllAppsAndPin(appA, contextKey)
+
+    // 'Pin App A' already exists as an All Apps row name: verifying the pin
+    // through getByText would match that row. Return to the home and verify
+    // through the HOME-ONLY quick-entry test-id and its persisted identity.
+    fireEvent.click(screen.getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('all-apps-view')).toBeNull()
+    })
+    const card = screen.getByTestId('home-quick-entry')
+    expect(card.getAttribute('data-identity-key')).toBe(
+      appCatalogHook.uiIdentityKeyForApp(appA),
+    )
+
+    // The persisted acknowledgement survives a remount: the fresh mount
+    // loads the persisted entry back into the home quick access.
+    view.unmount()
     renderHome()
+    await waitFor(() => {
+      expect(screen.queryByTestId('all-apps-view')).toBeNull()
+    })
+    expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(
+      appCatalogHook.uiIdentityKeyForApp(appA),
+    )
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  })
+
+  it('a rejected pin save never shows the card: the confirmed snapshot stays', async () => {
+    const appA = pinnedApp('reject-app-a', 'reject-entry-a', 'reject-artifact-a', 'Reject App A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    setHomeQuickAccess.mockImplementation(async () => {
+      throw new Error('persistence rejected')
+    })
+
+    await openAllAppsAndPin(appA, contextKey)
+
+    fireEvent.click(screen.getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('all-apps-view')).toBeNull()
+    })
+    // No persisted acknowledgement: the home keeps its empty confirmed
+    // snapshot — the pinned card never appears.
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  })
+
+  it('an explicitly empty quick-access collection stays empty across remount and A→B→A', async () => {
+    const appA = pinnedApp('empty-app-a', 'empty-entry-a', 'empty-artifact-a', 'Empty Fallback A')
+    const appB = pinnedApp('empty-app-b', 'empty-entry-b', 'empty-artifact-b', 'Empty Fallback B')
+    // Two available apps, NOTHING persisted: no default curation may fill
+    // the home.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    const contextKeyA = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    renderHome()
+    await waitFor(() => {
+      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyA)
+    })
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+
+    // Remount: still empty.
+    cleanup()
+    renderHome()
+    await waitFor(() => {
+      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyA)
+    })
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+
+    // A→B→A: switching to another context and back must not invent entries.
+    const catalogB = enterpriseCatalogWith(
+      [pinnedApp('b-app', 'b-entry', 'b-artifact', 'Space B App')],
+      { organizationId: 'organization-b' },
+    )
+    const contextKeyB = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-b')
+    }`
+    appCatalogHook = hookWithCatalog(catalogB)
+    viewRerender()
+    await waitFor(() => {
+      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyB)
+    })
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    viewRerender()
+    await waitFor(() => {
+      expect(getHomeQuickAccess).toHaveBeenCalledTimes(
+        getHomeQuickAccess.mock.calls.filter(([key]) => key === contextKeyA).length + 1,
+      )
+    })
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  })
+
+  it('pins same-artifact different-entry and same-entry different-artifact identities as distinct slots', async () => {
+    const sharedArtifactA = pinnedApp('sa-app-a', 'sa-entry-a', 'sa-artifact-shared', 'Shared Artifact A')
+    const sharedArtifactB = pinnedApp('sa-app-b', 'sa-entry-b', 'sa-artifact-shared', 'Shared Artifact B')
+    const sameEntryOld = pinnedApp('se-app', 'se-entry', 'se-artifact-old', 'Same Entry Old')
+    const sameEntryNew = pinnedApp('se-app-2', 'se-entry', 'se-artifact-new', 'Same Entry New')
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([sharedArtifactA, sharedArtifactB, sameEntryOld, sameEntryNew]),
+    )
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    const view = renderHome()
     fireEvent.click(screen.getByTestId('home-all-apps-open'))
     await waitFor(() => {
       expect(screen.getByTestId('all-apps-view')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByTestId(
-      `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(appA)}`,
-    ))
+    for (const target of [sharedArtifactA, sharedArtifactB, sameEntryOld, sameEntryNew]) {
+      fireEvent.click(screen.getByTestId(
+        `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(target)}`,
+      ))
+    }
     await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [{
-        id: JSON.stringify([
-          'product-space-ui',
-          'account-a',
-          'organization-a',
-          'pin-entry-a',
-          'pin-artifact-a',
-        ]),
-        addedAt: expect.any(Number),
-      }])
+      expect(setHomeQuickAccess).toHaveBeenLastCalledWith(contextKey, [
+        { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactA), addedAt: expect.any(Number) },
+        { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactB), addedAt: expect.any(Number) },
+        { id: appCatalogHook.uiIdentityKeyForApp(sameEntryOld), addedAt: expect.any(Number) },
+        { id: appCatalogHook.uiIdentityKeyForApp(sameEntryNew), addedAt: expect.any(Number) },
+      ])
     })
-    // The pin is authoritative: the persisted entry resolves into a home
-    // quick-access card.
+
+    // All four identities resolve into DISTINCT home cards.
+    fireEvent.click(screen.getByTestId('all-apps-back'))
     await waitFor(() => {
-      expect(screen.getByText('Pin App A')).toBeTruthy()
+      expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(4)
     })
+    const identities = screen.getAllByTestId('home-quick-entry')
+      .map(card => card.getAttribute('data-identity-key'))
+    expect(new Set(identities).size).toBe(4)
+    view.unmount()
+  })
+
+  it('a delayed pin save from context A never pollutes context B (A→B→A)', async () => {
+    const appA = pinnedApp('delay-app-a', 'delay-entry-a', 'delay-artifact-a', 'Delayed Pin A')
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const contextKeyA = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    let releaseSave: ((entries: unknown[]) => void) | undefined
+    setHomeQuickAccess.mockImplementation(async (_key: string, _apps: unknown[]) => {
+      const saved = await new Promise<unknown[]>(resolve => { releaseSave = resolve })
+      return saved
+    })
+
+    await openAllAppsAndPin(appA, contextKeyA)
+    expect(releaseSave).toBeTruthy()
+
+    // Switch to space B while A's save is still in flight.
+    const contextKeyB = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-b')
+    }`
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([], { organizationId: 'organization-b' }),
+    )
+    viewRerender()
+    await waitFor(() => {
+      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyB)
+    })
+
+    // A's save resolves LATE: it must never commit into context B.
+    releaseSave?.([{ id: appCatalogHook.uiIdentityKeyForApp(appA), addedAt: 1 }])
+    await waitFor(() => {
+      expect(setHomeQuickAccess).toHaveBeenCalled()
+    })
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+
+    // Returning to A loads A's persisted (empty) state — the un-acked pin
+    // does not resurrect.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    viewRerender()
+    await waitFor(() => {
+      expect(getHomeQuickAccess).toHaveBeenCalledWith(contextKeyA)
+    })
+    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
   })
 
   it('adds a shortcut through the manage dialog without installing', async () => {

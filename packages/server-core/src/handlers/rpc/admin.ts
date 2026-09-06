@@ -94,7 +94,10 @@ import {
   isSwitchInProgress,
   revokeRuntimeProductSpaceFence,
 } from '../../runtime/product-space-executions'
-import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority'
+import {
+  recordProductSpaceCatalogAuthoritativeEntries,
+  revokeProductSpaceCatalogAuthority,
+} from '../../runtime/product-space-catalog-authority'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
 
@@ -852,6 +855,22 @@ export function registerAdminHandlers(
     // the commit-zone work threw. Receives the callback result (or null when
     // the callback never completed).
     onSettled?: (result: T | null) => void,
+    options?: {
+      /**
+       * Catalog-scope error semantics: org/space-level 403/FORBIDDEN and
+       * membership denials stay IN-PAGE (login session preserved, only the
+       * failing request fails). 401/TOKEN_REVOKED still end the session.
+       */
+      catalogScopedErrors?: boolean
+      /**
+       * Invoked when a catalogScopedErrors request fails with a
+       * catalog-scope denial (FORBIDDEN, 403, MEMBERSHIP_REMOVED, …):
+       * lets the handler revoke the denied space's trusted state
+       * (authority, runtime fence) BEFORE the error result is returned.
+       * Session-ending failures never reach this hook.
+       */
+      onCatalogScopeFailure?: () => void | Promise<void>
+    },
   ) => {
     let requestContext: AdminRequestContext | null = null
     let manager: CredentialManager | null = null
@@ -907,7 +926,10 @@ export function registerAdminHandlers(
       if (error instanceof AdminSessionChangedError) {
         return staleAdminSessionResult()
       }
-      if (isSessionEndingAuthFailure(error)) {
+      const sessionEnding = options?.catalogScopedErrors
+        ? isSessionEndingCatalogScopedError(error)
+        : isSessionEndingAuthFailure(error)
+      if (sessionEnding) {
         if (!manager || !requestContext) return staleAdminSessionResult()
         const ended = await endAdminSession(
           manager,
@@ -916,6 +938,26 @@ export function registerAdminHandlers(
           requestContext.session,
         )
         if (!ended) return staleAdminSessionResult()
+      } else if (
+        options?.catalogScopedErrors
+        && options?.onCatalogScopeFailure
+        && error instanceof AdminError
+        && classifyAdminAuthorizationFailure(
+          error,
+          { catalogScoped: true },
+        ) === 'catalog_scope'
+      ) {
+        // The space itself denied this member: revoke that space's trusted
+        // state before answering so installs/opens/uninstalls and launch
+        // resolution fail closed while the login session survives.
+        try {
+          await options.onCatalogScopeFailure()
+        } catch (revokeError) {
+          log?.warn(
+            `[Admin] ${operation} catalog-scope revocation failed:`,
+            revokeError instanceof Error ? revokeError.message : String(revokeError),
+          )
+        }
       }
       const adminError = toAdminRpcError(error)
       log?.warn(`[Admin] ${operation} failed:`, adminError.message)
@@ -1865,6 +1907,10 @@ export function registerAdminHandlers(
       // actually marked may release.
       let syncScopeKey: string | null = null
       let markedCommitInvocation: number | null = null
+      // Verified only after the callback enters the authenticated scope —
+      // the catalog-scope revocation hook must never act on an unverified
+      // account.
+      let verifiedAccountId: string | null = null
       return callOrganization(
         'getProductSpaceCatalog',
         async (client, accessToken, userId) => {
@@ -1878,6 +1924,7 @@ export function registerAdminHandlers(
             requestedSpaceId.data,
           )
           syncScopeKey = catalogSyncKey
+          verifiedAccountId = userId as string
           const syncInvocation = beginProductSpaceCatalogSync(catalogSyncKey)
           const supersededCatalogResult = () => ({
             success: false as const,
@@ -2015,6 +2062,28 @@ export function registerAdminHandlers(
             releaseProductSpaceCatalogCommit(syncScopeKey, markedCommitInvocation)
           }
         },
+        // Catalog-scope error semantics: a 403/FORBIDDEN (governance
+        // restriction, membership loss for this space) must NOT end the
+        // login session — the member stays on the home with the frozen
+        // restricted view and can return to their personal space. Only
+        // genuine session failures (401/TOKEN_REVOKED/…) end it.
+        {
+          catalogScopedErrors: true,
+          onCatalogScopeFailure: () => {
+            // The denied space loses its trusted Catalog authority and,
+            // when the runtime fence still points at it, its runtime
+            // scope. Other spaces and the session stay intact.
+            if (verifiedAccountId === null) return
+            const deniedSpaceId = requestedSpaceId.data
+            revokeProductSpaceCatalogAuthority(verifiedAccountId, deniedSpaceId)
+            if (
+              getRuntimeActiveProductSpace() === deniedSpaceId
+              && isRuntimeFenceBoundToAccount(verifiedAccountId)
+            ) {
+              void revokeRuntimeProductSpaceFence().catch(() => {})
+            }
+          },
+        },
       )
     })
 
@@ -2087,6 +2156,14 @@ export function registerAdminHandlers(
           requireCurrentLaunchScope()
           return { launch }
         },
+        undefined,
+        undefined,
+        // Catalog-scope error semantics for direct-open resolution too: a
+        // 403/FORBIDDEN (including the launch-scope guards above and a
+        // server-side membership denial) stays IN-PAGE — the login session
+        // survives and the member can return to their personal space. Only
+        // genuine session failures end it.
+        { catalogScopedErrors: true },
       )
     },
   )
@@ -3274,6 +3351,21 @@ function isSessionEndingAuthFailure(error: unknown): boolean {
     && classifyAdminAuthorizationFailure(
       error,
       { catalogScoped: false },
+    ) === 'session'
+}
+
+/**
+ * Catalog-scoped error semantics for ProductSpace Catalog/launch calls: only
+ * genuine account-session failures (401, UNAUTHORIZED, TOKEN_REVOKED,
+ * ACCOUNT_DISABLED) end the login session. Org/space-level denials
+ * (FORBIDDEN, MEMBERSHIP_*, NOT_FOUND, 403) stay in-page so the member can
+ * return to their personal space.
+ */
+function isSessionEndingCatalogScopedError(error: unknown): boolean {
+  return error instanceof AdminError
+    && classifyAdminAuthorizationFailure(
+      error,
+      { catalogScoped: true },
     ) === 'session'
 }
 

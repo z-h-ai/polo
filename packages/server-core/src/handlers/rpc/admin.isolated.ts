@@ -473,6 +473,7 @@ mock.module('@polo-ai/shared/credentials', () => ({
 // Pure fake of the authority module: admin.ts only consumes the record
 // entrypoint. Tests that need the REAL authority run in their own isolated
 // files against the untouched module.
+const authorityRevokeCalls: Array<{ accountId: string; productSpaceId: string }> = []
 const authorityRecordCalls: Array<{
   accountId: string
   productSpaceId: string
@@ -492,6 +493,9 @@ mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () =
       throw new Error('authority write failed (injected)')
     }
     return []
+  },
+  revokeProductSpaceCatalogAuthority: (accountId: string, productSpaceId: string) => {
+    authorityRevokeCalls.push({ accountId, productSpaceId })
   },
 }))
 
@@ -772,6 +776,7 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
 
   beforeEach(async () => {
     authorityRecordCalls.length = 0
+    authorityRevokeCalls.length = 0
     failAuthorityRecord = false
     const harness = createHarness()
     productSpaceCatalog = harness.productSpaceCatalog
@@ -1151,6 +1156,77 @@ describe('ProductSpace Catalog latest-request fence and authority commit', () =>
     } finally {
       failAuthorityRecord = false
     }
+  })
+
+  it('keeps the login session on catalog-scope FORBIDDEN so the member can return to their personal space', async () => {
+    // catalog_denied production wiring: the ProductSpace Catalog returns
+    // 403/FORBIDDEN (governance restriction). The handler must fail the
+    // request WITHOUT ending the login session — the member stays signed in
+    // and can switch back to their personal space.
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new TestAdminError('fixture access denied', 'FORBIDDEN', { status: 403 })
+    }
+
+    // The runtime fence points at the soon-to-be-denied space, bound to the
+    // verified account — the production state during a Catalog refresh.
+    setRuntimeActiveProductSpace('space-a')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const response = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(response.success).toBe(false)
+    expect(response.errorCode).toBe('FORBIDDEN')
+    // Login session preserved: tokens are NOT cleared.
+    expect(managerState.tokens).not.toBeNull()
+    // The denied space's trusted state is revoked: authority record plus the
+    // runtime fence that still pointed at it.
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+    expect(__productSpaceCatalogSyncScopeCountForTests()).toBe(0)
+
+    // The member can immediately retry into their personal space.
+    adminClientBehavior.getProductSpaceCatalog = async () => ({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'rev-recovered',
+      entries: [],
+    })
+    const recovered = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(recovered.success).toBe(true)
+  })
+
+  it('keeps a different space runtime fence when another space is denied', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new TestAdminError('fixture access denied', 'FORBIDDEN', { status: 403 })
+    }
+    // The fence points at a DIFFERENT space: the denial of space-a must not
+    // tear down space-b's runtime.
+    setRuntimeActiveProductSpace('space-b')
+    setRuntimeActiveProductSpaceAccount('user-1')
+
+    const response = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(response.success).toBe(false)
+    expect(authorityRevokeCalls).toEqual([{ accountId: 'user-1', productSpaceId: 'space-a' }])
+    expect(getRuntimeActiveProductSpace()).toBe('space-b')
+  })
+
+  it('ends the admin session only for genuine account-session failures (401/UNAUTHORIZED)', async () => {
+    adminClientBehavior.listProductSpaces = async () => ({
+      productSpaces: [{ id: 'space-a', accessMode: 'active' }],
+    })
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      throw new TestAdminError('token revoked or expired', 'UNAUTHORIZED', { status: 401 })
+    }
+
+    const response = await productSpaceCatalog(context, 'space-a', undefined) as any
+    expect(response.success).toBe(false)
+    // The session-ending classification cleared the stored tokens.
+    expect(managerState.tokens).toBeNull()
   })
 
   it('never lets an older unmarked failing request steal a newer pending reservation (cross-request ownership)', async () => {

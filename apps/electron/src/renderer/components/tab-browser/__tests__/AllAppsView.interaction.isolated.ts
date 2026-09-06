@@ -37,9 +37,22 @@ function app(id: string, overrides: Partial<CatalogApp> = {}): CatalogApp {
   }
 }
 
-const scopeKeyForApp = (target: CatalogApp) => `space-a:${target.artifactInstanceId ?? target.id}`
-const actionTestIdFor = (target: CatalogApp) => `all-apps-action-${scopeKeyForApp(target)}`
-const uninstallTestIdFor = (target: CatalogApp) => `all-apps-uninstall-${scopeKeyForApp(target)}`
+// Production-consistent full UI identity tuple: account + productSpace +
+// catalogEntryId + artifactInstanceId (mirrors useAppCatalog's
+// uiIdentityKeyForApp — the renderView default binds space-a/account-a).
+const identityKeyForApp = (
+  target: CatalogApp,
+  accountId = 'account-a',
+  productSpaceId = 'space-a',
+) => JSON.stringify([
+  'product-space-ui',
+  accountId,
+  productSpaceId,
+  target.catalogEntryId ?? target.id,
+  target.artifactInstanceId ?? target.id,
+])
+const actionTestIdFor = (target: CatalogApp) => `all-apps-action-${identityKeyForApp(target)}`
+const uninstallTestIdFor = (target: CatalogApp) => `all-apps-uninstall-${identityKeyForApp(target)}`
 
 function renderView(apps: CatalogApp[], options: {
   spaceKind?: 'personal' | 'enterprise'
@@ -73,7 +86,7 @@ function renderView(apps: CatalogApp[], options: {
       restricted: options.restricted ?? false,
       circleCount: 3,
       pinnedIds: new Set(options.pinnedIds ?? []),
-      identityKeyForApp: scopeKeyForApp,
+      identityKeyForApp,
       getInstallState: (target: CatalogApp) => target.id === options.installedId
         || options.retainedInstalledIds?.includes(target.id) ? {
         app: {
@@ -156,7 +169,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     compactViewport = true
     renderView([app('a'), app('b')])
     expect(screen.getAllByTestId('all-apps-row')).toHaveLength(2)
-    expect(screen.getByTestId('all-apps-action-space-a:artifact-a')).toBeTruthy()
+    expect(screen.getByTestId(actionTestIdFor(app('a')))).toBeTruthy()
   })
 
   it('maps every unavailableReason to its own frozen blocked status', () => {
@@ -326,17 +339,17 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     expect(screen.getByText('Reissued (old)')).toBeTruthy()
 
     // The withdrawn row can be neither opened nor installed...
-    const withdrawnAction = screen.getByTestId('all-apps-action-space-a:artifact-old') as HTMLButtonElement
+    const withdrawnAction = screen.getByTestId(actionTestIdFor(tombstone)) as HTMLButtonElement
     expect(withdrawnAction.disabled).toBe(true)
     // ...but the retained installation keeps its row-level uninstall entry.
-    expect(screen.getByTestId('all-apps-uninstall-space-a:artifact-old')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('all-apps-uninstall-space-a:artifact-old'))
+    expect(screen.getByTestId(uninstallTestIdFor(tombstone))).toBeTruthy()
+    fireEvent.click(screen.getByTestId(uninstallTestIdFor(tombstone)))
     expect(handlers.onUninstall).toHaveBeenCalledWith(
       expect.objectContaining({ artifactInstanceId: 'artifact-old' }),
     )
 
     // The live row opens independently.
-    const liveAction = screen.getByTestId('all-apps-action-space-a:artifact-new') as HTMLButtonElement
+    const liveAction = screen.getByTestId(actionTestIdFor(live)) as HTMLButtonElement
     expect(liveAction.disabled).toBe(false)
   })
 
@@ -348,7 +361,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     // The banner only promises the last verified catalog view — never
     // offline opens.
     expect(staleBanner.textContent).toContain('last verified catalog')
-    expect((screen.getByTestId('all-apps-action-space-a:artifact-a') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId(actionTestIdFor(app('a'))) as HTMLButtonElement).disabled).toBe(true)
     cleanup()
 
     // Cached rows + generic refresh failure (online): stale banner shows,
@@ -357,7 +370,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     expect(screen.getByTestId('all-apps-stale-catalog-banner').textContent).toContain(
       'last verified catalog',
     )
-    expect((screen.getByTestId('all-apps-action-space-a:artifact-a') as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByTestId(actionTestIdFor(app('a'))) as HTMLButtonElement).disabled).toBe(false)
     cleanup()
 
     // Denied snapshot: space-aware restricted banner; opens stay disabled.
@@ -369,7 +382,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
       })
       const banner = screen.getByTestId('all-apps-restricted-banner')
       expect(banner.textContent.toLowerCase()).toContain('access')
-      expect((screen.getByTestId('all-apps-action-space-a:artifact-a') as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByTestId(actionTestIdFor(app('a'))) as HTMLButtonElement).disabled).toBe(true)
       cleanup()
     }
   })
@@ -392,7 +405,7 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
         pinnedIds: new Set<string>(),
         onPin: () => {},
         getInstallState: () => undefined,
-        identityKeyForApp: scopeKeyForApp,
+        identityKeyForApp,
         onRefresh: () => {},
         onOpen: () => {},
         onUninstall: () => {},
@@ -404,5 +417,100 @@ describe('AllAppsView ProductSpace Catalog boundary', () => {
     const handlers = renderView([], { errorCode: 'request_failed' })
     fireEvent.click(screen.getByText('Try again'))
     expect(handlers.onRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AllAppsView blocked projection, pin gating, and space copy', () => {
+  it('reaches the blocked state through the real version_blocked projection: badge, reason reveal, no pin', () => {
+    // Production mapper shape: availability 'unavailable' + unavailableReason
+    // 'version_blocked' (a literal availability 'blocked' is never produced).
+    const blockedRow = app('blk', {
+      availability: 'unavailable',
+      unavailableReason: 'version_blocked',
+    })
+    const live = app('live')
+    renderView([blockedRow, live])
+
+    // Blocked badge + status copy are reachable.
+    expect(screen.getByText('Blocked')).toBeTruthy()
+    expect(screen.getByText('Version blocked')).toBeTruthy()
+
+    // The reason control is a REAL explanation interaction: toggling reveals
+    // the version-block explanation with the correct aria wiring.
+    const reasonControl = screen.getByTestId(`all-apps-reason-${identityKeyForApp(blockedRow)}`)
+    expect((reasonControl as HTMLElement).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTestId(`all-apps-reason-text-${identityKeyForApp(blockedRow)}`)).toBeNull()
+    fireEvent.click(reasonControl)
+    const reasonText = screen.getByTestId(`all-apps-reason-text-${identityKeyForApp(blockedRow)}`)
+    expect(reasonText.textContent).toContain('Version blocked')
+    expect((reasonControl as HTMLElement).getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(reasonControl)
+    expect(screen.queryByTestId(`all-apps-reason-text-${identityKeyForApp(blockedRow)}`)).toBeNull()
+
+    // A version-blocked row can never be pinned...
+    expect(screen.queryByTestId(`all-apps-pin-${identityKeyForApp(blockedRow)}`)).toBeNull()
+    // ...while an available row keeps its pin action.
+    expect(screen.getByTestId(`all-apps-pin-${identityKeyForApp(live)}`)).toBeTruthy()
+  })
+
+  it('forbids pinning every non-available row: withdrawn, otherwise unavailable, offline', () => {
+    const withdrawn = app('wd', { availability: 'withdrawn' })
+    const unavailable = app('un', {
+      availability: 'unavailable',
+      unavailableReason: 'space_restricted',
+    })
+    const live = app('live')
+    renderView([withdrawn, unavailable, live])
+
+    expect(screen.queryByTestId(`all-apps-pin-${identityKeyForApp(withdrawn)}`)).toBeNull()
+    expect(screen.queryByTestId(`all-apps-pin-${identityKeyForApp(unavailable)}`)).toBeNull()
+    expect(screen.getByTestId(`all-apps-pin-${identityKeyForApp(live)}`)).toBeTruthy()
+
+    // Offline: even a Catalog-available row is not pinnable while the
+    // session cannot persist authoritative state.
+    cleanup()
+    renderView([live], { offline: true })
+    expect(screen.queryByTestId(`all-apps-pin-${identityKeyForApp(live)}`)).toBeNull()
+  })
+
+  it('keys rows with the full production UI identity tuple across both collision directions and accounts/spaces', () => {
+    // Direction 1: same artifact instance, different catalog entries.
+    const entryA = app('entry-a', { artifactInstanceId: 'artifact-shared' })
+    const entryB = app('entry-b', { artifactInstanceId: 'artifact-shared' })
+    // Direction 2: same catalog entry, different artifact instances.
+    const artifactOld = app('entry-c', { artifactInstanceId: 'artifact-old' })
+    const artifactNew = app('entry-c', { artifactInstanceId: 'artifact-new' })
+    renderView([entryA, entryB, artifactOld, artifactNew])
+
+    const keys = [
+      identityKeyForApp(entryA),
+      identityKeyForApp(entryB),
+      identityKeyForApp(artifactOld),
+      identityKeyForApp(artifactNew),
+    ]
+    expect(new Set(keys).size).toBe(4)
+    for (const key of keys) {
+      expect(screen.getByTestId(`all-apps-pin-${key}`)).toBeTruthy()
+    }
+    // Cross-account and cross-space projections never collide either.
+    expect(identityKeyForApp(entryA, 'account-b')).not.toBe(identityKeyForApp(entryA))
+    expect(identityKeyForApp(entryA, 'account-a', 'space-b')).not.toBe(identityKeyForApp(entryA))
+  })
+
+  it('never shows the personal circles description for enterprise All Apps (empty and with data)', () => {
+    // Enterprise + data: no circles sentence...
+    renderView([app('a')], { spaceKind: 'enterprise' })
+    expect(screen.queryByText('Works from 3 circles are shown separately, always labelled with their source circle.')).toBeNull()
+
+    // ...enterprise + empty: still no circles sentence.
+    cleanup()
+    renderView([], { spaceKind: 'enterprise' })
+    expect(screen.getByTestId('all-apps-empty')).toBeTruthy()
+    expect(screen.queryByText('Works from 3 circles are shown separately, always labelled with their source circle.')).toBeNull()
+
+    // Personal keeps the circles description for parity.
+    cleanup()
+    renderView([app('a')], { spaceKind: 'personal' })
+    expect(screen.getByText('Works from 3 circles are shown separately, always labelled with their source circle.')).toBeTruthy()
   })
 })

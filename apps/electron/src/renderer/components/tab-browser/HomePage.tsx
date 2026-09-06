@@ -124,8 +124,17 @@ export function HomePage() {
   const catalog = useAppCatalog()
   const [view, setView] = useState<'home' | 'all-apps'>('home')
   const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
-  const quickEntriesRef = useRef<HomeQuickAccessApp[]>([])
-  quickEntriesRef.current = quickEntries
+  /**
+   * Synchronous INTENT state for quick-access mutations. The rendered
+   * `quickEntries` commit only on the persisted acknowledgement (a save
+   * reject or superseded generation never enters the UI), but two clicks
+   * arriving before the first save resolves must still build on each other:
+   * this ref is the base every mutation reads and advances, while
+   * `quickConfirmedRef` holds the last persisted acknowledgement for precise
+   * failure rollback.
+   */
+  const quickIntentRef = useRef<HomeQuickAccessApp[]>([])
+  const quickConfirmedRef = useRef<HomeQuickAccessApp[]>([])
   const quickLoadGenerationRef = useRef(0)
   const quickMutationGenerationRef = useRef(0)
   /**
@@ -187,26 +196,13 @@ export function HomePage() {
     () => new Set(quickEntries.map(entry => entry.id)),
     [quickEntries],
   )
-  // First-run default curation (POO-41 v1): with nothing pinned, surface the
-  // first two distinct-name work Apps as quick-access cards. User pins always
-  // win — the defaults only fill an empty home.
-  // First-run default curation (POO-41 v1): only when the context has never
-  // had persisted quick entries does the home surface the first two
-  // distinct-name work Apps. Once anything was pinned/pruned, user state wins.
-  const hadPersistedQuickEntriesRef = useRef(false)
-  const homeWorkCards = useMemo(() => {
-    if (quickApps.length > 0) return quickApps
-    if (quickEntries.length > 0 || hadPersistedQuickEntriesRef.current) return []
-    const seen = new Set<string>()
-    const picks: CatalogApp[] = []
-    for (const app of availableApps) {
-      if (seen.has(app.name)) continue
-      seen.add(app.name)
-      picks.push(app)
-      if (picks.length >= 2) break
-    }
-    return picks
-  }, [availableApps, quickApps, quickEntries])
+  // Home work cards render ONLY the persisted quick entries of the current
+  // account + ProductSpace context, resolved against its Catalog. There is
+  // deliberately NO first-run default curation: an explicitly empty (or
+  // unpersisted) collection stays empty — across first mount, remounts and
+  // A→B→A context round-trips — instead of silently surfacing Catalog apps
+  // the member never pinned.
+  const homeWorkCards = quickApps
 
   useEffect(() => {
     // Fail-closed across space transitions: a ProductSpace identity change
@@ -218,6 +214,8 @@ export function HomePage() {
     quickMutationGenerationRef.current += 1
     const mutationGeneration = quickMutationGenerationRef.current
     quickHydratedContextRef.current = null
+    quickIntentRef.current = []
+    quickConfirmedRef.current = []
     setView('home')
     setManageOpen(false)
     setQuickEntries([])
@@ -231,8 +229,9 @@ export function HomePage() {
           !isCurrentQuickMutation(contextKey, mutationGeneration)
           || quickLoadGenerationRef.current !== generation
         ) return
-        if (entries.length > 0) hadPersistedQuickEntriesRef.current = true
         quickHydratedContextRef.current = contextKey
+        quickIntentRef.current = entries
+        quickConfirmedRef.current = entries
         setQuickEntries(entries)
       })
       .catch(() => {
@@ -268,11 +267,14 @@ export function HomePage() {
     quickMutationGenerationRef.current += 1
     const generation = quickMutationGenerationRef.current
     const contextKey = quickContextKey
+    quickIntentRef.current = pruned
     setQuickEntries(pruned)
     void saveHomeQuickAccess(contextKey, pruned)
       .then(saved => {
         if (!isCurrentQuickMutation(contextKey, generation)) return
         quickHydratedContextRef.current = contextKey
+        quickIntentRef.current = saved
+        quickConfirmedRef.current = saved
         setQuickEntries(saved)
       })
       .catch(() => {
@@ -284,30 +286,53 @@ export function HomePage() {
     openApp(POLO_APP_DEFINITION)
   }
 
-  // 显示在首页: pin a catalog App into the home quick access (fenced +
-  // persisted exactly like toggleQuickAccess).
-  const pinApp = useCallback((app: CatalogApp) => {
-    const key = uiKeyForApp(app)
-    const { next, rejected } = toggleHomeQuickAccessApp(quickEntriesRef.current, key, true)
+  /**
+   * Ack-committed quick-access persistence shared by pin and manage-dialog
+   * toggles. The rendered entries update ONLY on the persisted
+   * acknowledgement; on a save reject (or a superseded context/generation)
+   * the intent and UI roll back precisely to the last confirmed snapshot.
+   * Mutations chain on the synchronous intent ref, so two clicks arriving
+   * before the first save resolves still accumulate into one payload.
+   */
+  const persistQuickToggle = useCallback((
+    contextKey: string,
+    scopeKey: string,
+    enabled: boolean,
+  ): boolean => {
+    const previous = quickIntentRef.current
+    const { next, rejected } = toggleHomeQuickAccessApp(previous, scopeKey, enabled)
     if (rejected) {
       toast.error(t('homeApps.manage.limitReached', {
         max: MAX_HOME_QUICK_ACCESS_APPS,
       }))
-      return
+      return false
     }
     quickMutationGenerationRef.current += 1
     const generation = quickMutationGenerationRef.current
-    const contextKey = quickContextKey
-    setQuickEntries(next)
+    quickIntentRef.current = next
     void saveHomeQuickAccess(contextKey, next)
       .then(saved => {
         if (!isCurrentQuickMutation(contextKey, generation)) return
+        quickHydratedContextRef.current = contextKey
+        quickIntentRef.current = saved
+        quickConfirmedRef.current = saved
         setQuickEntries(saved)
       })
       .catch(() => {
-        // Persistence failure must not break the home section.
+        if (!isCurrentQuickMutation(contextKey, generation)) return
+        // Precise rollback to the last PERSISTED snapshot — the unacked
+        // toggle never enters the view.
+        quickIntentRef.current = quickConfirmedRef.current
+        setQuickEntries(quickConfirmedRef.current)
       })
-  }, [isCurrentQuickMutation, quickContextKey, t])
+    return true
+  }, [isCurrentQuickMutation, t])
+
+  // 显示在首页: pin a catalog App into the home quick access — ack-committed
+  // and rolled back exactly like every other quick-access mutation.
+  const pinApp = useCallback((app: CatalogApp) => {
+    persistQuickToggle(quickContextKey, uiKeyForApp(app), true)
+  }, [persistQuickToggle, quickContextKey, uiKeyForApp])
 
   // Authoritative committed-context lease for enterprise workflow jumps:
   // account (from the committed ProductSpaceContext authority — present even
@@ -380,37 +405,15 @@ export function HomePage() {
   }
 
   const toggleQuickAccess = (
-    app: CatalogApp,
+    _app: CatalogApp,
     scopeKey: string,
     enabled: boolean,
   ): boolean => {
-    const { next, rejected } = toggleHomeQuickAccessApp(
-      quickEntriesRef.current,
-      scopeKey,
-      enabled,
-    )
-    if (rejected) {
-      toast.error(t('homeApps.manage.limitReached', {
-        max: MAX_HOME_QUICK_ACCESS_APPS,
-      }))
-      return false
-    }
-    quickMutationGenerationRef.current += 1
-    const generation = quickMutationGenerationRef.current
-    const contextKey = quickContextKey
-    quickHydratedContextRef.current = contextKey
-    setQuickEntries(next)
-    void saveHomeQuickAccess(contextKey, next)
-      .then(saved => {
-        // A context switch (or a newer mutation) invalidates this write-back:
-        // the saved entries of the old context must never enter the new one.
-        if (!isCurrentQuickMutation(contextKey, generation)) return
-        setQuickEntries(saved)
-      })
-      .catch(() => {
-        // Persistence failure must not break the home section.
-      })
-    return true
+    // Ack-based commit, identical to pinApp: the dialog's `enabled` flag is
+    // an intent until the persistence resolves; a reject or superseded
+    // context/generation rolls the intent back to the last persisted
+    // snapshot.
+    return persistQuickToggle(quickContextKey, scopeKey, enabled)
   }
 
   const openCatalogApp = async (app: CatalogApp) => {
@@ -617,24 +620,12 @@ export function HomePage() {
                   className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
                 >
                   <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-accent/12 text-accent text-[17px]">✦</span>
-                  <h3 className="m-0 text-base font-semibold">Polo 助手</h3>
+                  <h3 className="m-0 text-base font-semibold">{t('homeApps.home.poloTitle')}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">{t('homeApps.home.poloSource')}</p>
                   <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                     {t('homeApps.home.poloDescription')}
                   </p>
                   <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        setManageOpen(true)
-                      }}
-                    >
-                      管理 Skills
-                    </Button>
                     <Button
                       type="button"
                       size="sm"
@@ -644,7 +635,7 @@ export function HomePage() {
                         openPoloAssistant()
                       }}
                     >
-                      打开助手
+                      {t('homeApps.home.openAssistant')}
                     </Button>
                   </div>
                 </article>
@@ -675,6 +666,7 @@ export function HomePage() {
                         <article
                           key={uiKeyForApp(app)}
                           data-testid="home-quick-entry"
+                          data-identity-key={uiKeyForApp(app)}
                           onClick={() => { void openCatalogApp(app) }}
                           className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
                         >

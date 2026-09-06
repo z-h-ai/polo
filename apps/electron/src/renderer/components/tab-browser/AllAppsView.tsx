@@ -139,6 +139,19 @@ export function isCatalogAppUninstallable(
   return installState?.state === 'installed'
 }
 
+/**
+ * Real blocked-projection semantics: the authoritative Catalog marks a
+ * version-governed entry with `unavailableReason: 'version_blocked'` (the
+ * local mapper normalizes such entries to `availability: 'unavailable'` —
+ * a literal `availability === 'blocked'` shape is never produced, so the
+ * reason is the only reachable signal).
+ */
+export function isCatalogAppVersionBlocked(
+  app: Pick<CatalogApp, 'availability' | 'unavailableReason'>,
+): boolean {
+  return app.availability === 'unavailable' && app.unavailableReason === 'version_blocked'
+}
+
 function AppDetail({
   app,
   installState,
@@ -244,7 +257,8 @@ function AllAppsRow({
 }) {
   const { t } = useTranslation()
   const unavailable = isCatalogAppUnavailable(app, offline)
-  const blocked = (app.availability as string) === 'blocked'
+  const blocked = isCatalogAppVersionBlocked(app)
+  const [reasonOpen, setReasonOpen] = useState(false)
   const uninstallable = isCatalogAppUninstallable(installState)
   return (
     <article
@@ -293,24 +307,32 @@ function AllAppsRow({
             {t('homeApps.status.blocked')}
           </span>
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => onPin(app)}
-          data-testid={`all-apps-pin-${identityKey}`}
-        >
-          {pinned
-            ? t('homeApps.actions.pinnedToHome')
-            : t('homeApps.actions.pinToHome')}
-        </Button>
+        {/* Pinning is an authority claim on the home: only entries the
+        Catalog offers as available (and online) may be pinned — blocked,
+        withdrawn, otherwise unavailable and offline rows are excluded. */}
+        {!unavailable && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => onPin(app)}
+            data-testid={`all-apps-pin-${identityKey}`}
+          >
+            {pinned
+              ? t('homeApps.actions.pinnedToHome')
+              : t('homeApps.actions.pinToHome')}
+          </Button>
+        )}
         {blocked ? (
           <Button
             type="button"
             variant="ghost"
             size="sm"
             className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            aria-expanded={reasonOpen}
+            aria-controls={`all-apps-reason-text-${identityKey}`}
+            onClick={() => setReasonOpen(open => !open)}
             data-testid={`all-apps-reason-${identityKey}`}
           >
             {t('homeApps.allApps.viewReason')}
@@ -341,6 +363,15 @@ function AllAppsRow({
           </Button>
         )}
       </div>
+      {blocked && reasonOpen && (
+        <p
+          id={`all-apps-reason-text-${identityKey}`}
+          className="mt-[10px] text-xs leading-[1.6] text-muted-foreground"
+          data-testid={`all-apps-reason-text-${identityKey}`}
+        >
+          {t(catalogAppBlockedStatusKey(app, spaceKind))}
+        </p>
+      )}
     </article>
   )
 }
@@ -445,9 +476,13 @@ export function AllAppsView({
 
       <div className="mb-[18px]">
         <h2 className="m-0 text-[20px] tracking-[-0.03em]">{t('homeApps.allApps.sectionTitle')}</h2>
-        <p className="mt-[6px] text-sm text-muted-foreground">
-          {t('homeApps.allApps.circlesDescription', { count: circleCount })}
-        </p>
+        {/* Circles are a personal-space concept: enterprise All Apps must
+        never describe its entries as coming from member circles. */}
+        {spaceKind !== 'enterprise' && (
+          <p className="mt-[6px] text-sm text-muted-foreground">
+            {t('homeApps.allApps.circlesDescription', { count: circleCount })}
+          </p>
+        )}
       </div>
 
       {(() => {

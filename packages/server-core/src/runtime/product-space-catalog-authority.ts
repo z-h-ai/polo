@@ -404,6 +404,24 @@ export function getProductSpaceCatalogAuthorityRecord(
   return loadFile().records[productSpaceCatalogAuthorityKey(accountId, productSpaceId)] ?? null
 }
 
+/**
+ * Revokes ALL recorded authority for one account and ProductSpace (Catalog
+ * identities AND tombstones): after a catalog-scope denial the trusted
+ * record for that space must not survive — installs/opens/uninstalls and
+ * launch resolution all fail closed until a fresh verified Catalog lands.
+ * Other accounts and spaces are untouched.
+ */
+export function revokeProductSpaceCatalogAuthority(
+  accountId: string,
+  productSpaceId: string,
+): void {
+  const file = loadFile()
+  const key = productSpaceCatalogAuthorityKey(accountId, productSpaceId)
+  if (!(key in file.records)) return
+  delete file.records[key]
+  saveFile(file)
+}
+
 export function resetProductSpaceCatalogAuthorityForTests(): void {
   processCache = null
   try {
