@@ -379,8 +379,41 @@ afterEach(() => {
 })
 
 describe('useAppCatalog creator circle relations', () => {
-  it('clears derived creator circles when a Catalog refresh fails', async () => {
-    // The wrapper stub maps entries from catalog.apps; for this test the
+  it('R31: projects the built-in Polo assistant OUT of the work-App list (assistant-only Catalog hydrates to zero work Apps)', async () => {
+    // A schema-valid Catalog ALWAYS contains exactly one built-in Polo
+    // assistant. The work-App projection must never surface it: an
+    // assistant-only Catalog hydrates to an EMPTY work-App list so All Apps
+    // can show the frozen empty state while Home keeps its fixed Polo card.
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-assistant-only',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'built_in_app',
+        catalogEntryId: 'cat_builtin_polo_assistant',
+        name: 'Polo 助手',
+        description: '内置 Polo 助手',
+        availability: 'available',
+        builtInAppId: 'polo_assistant',
+      }],
+      withdrawnEntries: [],
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-assistant-only')
+    })
+    // The built-in assistant is projected OUT: zero work Apps, no circles,
+    // and no install-state IPC is even needed for an empty work-App list.
+    expect(result.current.state.catalog?.apps).toHaveLength(0)
+    expect(result.current.state.errorCode).toBeNull()
+    expect(getProductSpaceInstallStates).not.toHaveBeenCalled()
+  })
+
+  it('clears derived creator circles when a Catalog refresh fails', async () => {    // The wrapper stub maps entries from catalog.apps; for this test the
     // product-space RPC is replaced directly so raw entries (with
     // creator_circle sources) reach the hook.
     const entriesWithCircle = [{

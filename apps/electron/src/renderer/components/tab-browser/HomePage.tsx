@@ -760,7 +760,7 @@ export function HomePage() {
 
   return (
     <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-4 pb-[72px] pt-6 text-foreground sm:px-7 sm:pt-8 lg:px-11 lg:pt-[46px]"
+      className="h-full min-h-0 overflow-y-auto bg-background px-[18px] pb-[50px] pt-[30px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
       <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
@@ -788,7 +788,10 @@ export function HomePage() {
           />
         ) : (
           <div data-testid="home-quick-access-section">
-            <div className="flex items-end justify-between gap-[24px]">
+            {/* Frozen launcher hero: row with bottom-aligned side action at
+            desktop/tablet; stacks under the text at the ≤760px breakpoint
+            exactly like the frozen ≤760px `.hero` column rule. */}
+            <div className="flex items-end justify-between gap-[24px] max-[760px]:flex-col max-[760px]:items-start">
               <div>
                 <h1 className="m-0 text-[36px] font-semibold leading-[1.08] tracking-[-0.05em]">
                   {t('homeApps.home.greeting')}
@@ -804,7 +807,7 @@ export function HomePage() {
                   type="button"
                   data-testid="home-circles-link"
                   onClick={() => setShowCirclesCard(value => !value)}
-                  className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 >
                   {t('homeApps.home.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
                 </button>
@@ -842,7 +845,7 @@ export function HomePage() {
               <div className="mb-[18px] flex items-start justify-between gap-4">
                 <div>
                   <h2 className="m-0 text-[20px] tracking-[-0.03em]">{t('homeApps.home.sectionTitle')}</h2>
-                  <p className="mt-[6px] text-sm leading-[1.45] text-muted-foreground">
+                  <p className="mt-[6px] text-[14px] leading-[1.45] text-muted-foreground">
                     {t('homeApps.home.sectionDescription')}
                   </p>
                 </div>
@@ -852,7 +855,7 @@ export function HomePage() {
                       type="button"
                       data-testid="home-manage-quick-access"
                       onClick={() => setManageOpen(true)}
-                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
                       {t('homeApps.quick.manage')}
                     </button>
@@ -860,7 +863,7 @@ export function HomePage() {
                       type="button"
                       data-testid="home-all-apps-open"
                       onClick={() => setView('all-apps')}
-                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
                       {t('homeApps.quick.allApps')}
                     </button>
@@ -874,11 +877,11 @@ export function HomePage() {
                 <article
                   data-testid="home-quick-entry-polo"
                   onClick={openPoloAssistant}
-                  className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
+                  className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[20px] shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
                 >
                   <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-accent/12 text-accent text-[17px]">✦</span>
-                  <h3 className="m-0 text-base font-semibold">{t('homeApps.home.poloTitle')}</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+                  <h3 className="m-0 text-[16px] font-semibold">{t('homeApps.home.poloTitle')}</h3>
+                  <p className="mt-[4px] text-[12px] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
                   <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                     {t('homeApps.home.poloDescription')}
                   </p>
@@ -886,7 +889,7 @@ export function HomePage() {
                     <Button
                       type="button"
                       size="sm"
-                      className="min-h-[32px] rounded-lg border border-accent bg-accent px-3 text-xs font-semibold text-primary-foreground hover:bg-accent/90"
+                      className="min-h-[32px] rounded-lg border border-accent bg-accent px-3 text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
                       onClick={(event) => {
                         event.stopPropagation()
                         openPoloAssistant()
@@ -924,11 +927,11 @@ export function HomePage() {
                           data-testid="home-quick-entry"
                           data-identity-key={uiKeyForApp(app)}
                           onClick={() => { void openCatalogApp(app) }}
-                          className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
+                          className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[20px] shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
                         >
                           <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-success/12 text-success text-[17px]">{artGlyph}</span>
-                          <h3 className="m-0 text-base font-semibold">{app.name}</h3>
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                          <h3 className="m-0 text-[16px] font-semibold">{app.name}</h3>
+                          <p className="mt-[4px] truncate text-[12px] text-muted-foreground">
                             {app.sourceNames?.length ? app.sourceNames.join(' · ') : t('homeApps.allApps.unknownSource')}
                           </p>
                           <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
@@ -939,7 +942,7 @@ export function HomePage() {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+                              className="min-h-[32px] rounded-lg border-0 px-3 text-[12px] text-muted-foreground hover:text-foreground"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 void openCatalogApp(app)
@@ -961,7 +964,7 @@ export function HomePage() {
                         className="flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col items-center justify-center gap-3 rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
                       >
                         <Icons.Plus className="size-6" strokeWidth={1.5} />
-                        <span className="text-xs">{t('homeApps.quick.add')}</span>
+                        <span className="text-[12px]">{t('homeApps.quick.add')}</span>
                       </button>
                     )}
                   </>

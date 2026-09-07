@@ -337,6 +337,31 @@ describe('HomePage quick access (POO-43)', () => {
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
   })
 
+  it('R31: an assistant-only Catalog keeps the fixed Polo on Home and shows the frozen empty work-App state in All Apps', async () => {
+    // A schema-valid Catalog always contains exactly one built-in Polo
+    // assistant. With ZERO work Apps the All Apps view must project the
+    // assistant out and render the frozen empty state — never the assistant
+    // as a work App row — while Home keeps its fixed Polo quick entry.
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    quickAccessByContext.set(contextKey, [])
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
+    renderHome()
+    await act(async () => {})
+
+    // Home keeps the fixed Polo assistant entry.
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+
+    // All Apps projects zero work Apps and shows the frozen empty state.
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-empty')).toBeTruthy()
+    })
+    expect(screen.getByTestId('all-apps-count').textContent).toContain('0 / 0')
+    expect(screen.queryByTestId('all-apps-row')).toBeNull()
+  })
+
   it('hides space management entries when no ProductSpace context exists', async () => {
     renderHome()
     await act(async () => {})
