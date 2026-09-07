@@ -2298,6 +2298,9 @@ export default function App() {
   // show an in-app preview overlay or open externally. Replaces the old
   // handleOpenFile/handleOpenUrl that always opened in external apps.
   const linkInterceptor = useLinkInterceptor({
+    // Scope seal (Review R33/R34): every opened preview is stamped with the
+    // immutable ProductSpace context key that opened it.
+    scopeKey: () => productSpace.productSpaceContextKey ?? null,
     openFileExternal: async (path) => {
       try {
         await window.electronAPI.openFile(path)
@@ -2344,11 +2347,25 @@ export default function App() {
   // Entering the narrow viewport closes any retained file preview: the
   // narrow-Home surface never mounts the preview renderer, and a retained
   // preview must not resurface when the window is widened again.
+  // Review R33/R34: a preview SEALED to a previous scope (stale epoch/key)
+  // is closed as well — the render-time rejection below covers the first
+  // committed layout; this passive close releases the retained state.
   useEffect(() => {
-    if (narrowViewport && linkInterceptor.previewState) {
-      linkInterceptor.closePreview()
-    }
-  }, [narrowViewport, linkInterceptor.previewState, linkInterceptor.closePreview])
+    if (!linkInterceptor.previewState) return
+    const stale = narrowViewport
+      || linkInterceptor.previewState.scopeKey !== (productSpace.productSpaceContextKey ?? null)
+    if (stale) linkInterceptor.closePreview()
+  }, [narrowViewport, linkInterceptor.previewState, linkInterceptor.closePreview, productSpace.productSpaceContextKey])
+
+  // Render-time scope seal (Review R33/R34): a preview opened under a
+  // PREVIOUS account/ProductSpace epoch is rejected SYNCHRONOUSLY — the
+  // target scope's first committed layout never mounts or displays the
+  // stale preview overlay/content/path. (The passive close above then
+  // releases the retained state.)
+  const previewScopeKey = linkInterceptor.previewState?.scopeKey ?? null
+  const previewStale =
+    linkInterceptor.previewState !== null
+    && previewScopeKey !== (productSpace.productSpaceContextKey ?? null)
 
   const connectionState = useTransportConnectionState()
   const showTransportConnectionBanner = shouldShowTransportConnectionBanner(connectionState)
@@ -3160,7 +3177,7 @@ export default function App() {
                   renderer — retained previews are closed on entry (effect at
                   the useNarrowViewport declaration) so the POO-43 Home
                   surface can never be overlaid by a preview. */}
-              {linkInterceptor.previewState && !narrowViewport && (
+              {linkInterceptor.previewState && !previewStale && !narrowViewport && (
                 <div data-testid="file-preview-overlay">
                   <FilePreviewRenderer
                     state={linkInterceptor.previewState}

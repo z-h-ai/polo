@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement, useLayoutEffect } from 'react'
-import type { ReactNode } from 'react'
+import { createElement, useEffect, useLayoutEffect, type ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
@@ -28,13 +27,10 @@ if (typeof window === 'undefined') {
 }
 setupI18n()
 
-// Minimal safe stub for the WindowWidthGuard module: the pre-hydration
-// boundary under test must render the scope-neutral shell, and no scenario
-// here drives a width that would need the real guard.
-mock.module('@/components/product-space/WindowWidthGuard', () => ({
-  useNarrowViewport: () => false,
-  WindowWidthGuard: ({ children }: { children?: unknown }) => children ?? null,
-}))
+// NOTE: the REAL WindowWidthGuard module (real useNarrowViewport +
+// WindowWidthGuard) is intentionally NOT mocked — Review R34 requires the
+// narrow/wide cases to execute their true boundary paths. The controllable
+// matchMedia fixture below drives the real hook.
 
 // Fail-fast electronAPI for the reduced TabShell tree: subscriptions and the
 // localApps members the restored Home surface touches are enumerated; any
@@ -73,6 +69,13 @@ const localAppsStub: Record<string, unknown> = {
   uninstall: async () => {},
   uninstallProductSpaceBundle: async () => {},
 }
+// Side-effect instrumentation (Review R34 issue 2): pre-hydration must not
+// register the deep-link subscription or keydown listeners; hydration
+// registers exactly once; keyed remount cleans up exactly once.
+let deepLinkRegistrations = 0
+let deepLinkUnsubscribed = 0
+const deepLinkCallbacks: Array<unknown> = []
+
 const localAppsProxy = new Proxy(localAppsStub, {
   get(_target, prop: string | symbol) {
     if (typeof prop === 'symbol') throw new Error(`localApps fixture: symbol access ${String(prop)}`)
@@ -83,7 +86,13 @@ const localAppsProxy = new Proxy(localAppsStub, {
 Object.defineProperty(window, 'electronAPI', {
   configurable: true,
   value: {
-    onDeepLinkNavigate: (_callback: unknown) => () => {},
+    onDeepLinkNavigate: (callback: unknown) => {
+      deepLinkRegistrations += 1
+      deepLinkCallbacks.push(callback)
+      return () => {
+        deepLinkUnsubscribed += 1
+      }
+    },
     productSpaceGetCatalog: async () => ({
       success: false as const,
       errorCode: 'request_failed',
@@ -159,6 +168,26 @@ function LayoutSnapshot({ children }: { children: ReactNode }) {
   return createElement('div', { 'data-testid': 'r33-snapshot-host' }, children)
 }
 
+// Passive-effect probe rendered as a SIBLING AFTER TabShell: its passive
+// effect runs after TabShell's passive effects but BEFORE the provider's
+// hydration effect, so it observes exactly the pre-hydration side-effect
+// window (Review R34 issue 2).
+interface SideEffectObservation {
+  marker: string | undefined
+  deepLinkRegistrations: number
+}
+const sideEffectObservations: SideEffectObservation[] = []
+
+function SideEffectProbe(): ReactNode {
+  useEffect(() => {
+    sideEffectObservations.push({
+      marker: document.documentElement.dataset.activeTab,
+      deepLinkRegistrations,
+    })
+  })
+  return null
+}
+
 function WorkbenchProbe(): ReactNode {
   return createElement('div', { 'data-testid': 'polo-app-root' })
 }
@@ -174,6 +203,7 @@ function buildShellTree(providerKey: string): ReactNode {
     LayoutSnapshot,
     null,
     createElement(TabShell, { renderPolo: WorkbenchProbe }),
+    createElement(SideEffectProbe),
   )
   const shell = createElement(
     TabShellProvider,
@@ -218,6 +248,10 @@ beforeEach(() => {
   narrowViewportActive = false
   installMatchMedia()
   layoutSnapshots = []
+  deepLinkRegistrations = 0
+  deepLinkUnsubscribed = 0
+  deepLinkCallbacks.length = 0
+  sideEffectObservations.length = 0
 })
 
 afterEach(() => {
@@ -230,7 +264,9 @@ afterEach(() => {
 })
 
 const {
+  act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -281,8 +317,74 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     await waitFor(() => {
       if (!screen.getByTestId('app-topbar')) throw new Error('shell not restored')
     })
-    expect(screen.queryByText('旧空间 App')).toBeNull()
-    expect(document.querySelector('webview')).toBeNull()
+    // Hydrated narrow Home restored (real narrow boundary path).
+    expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+
+    // Hydrated narrow non-Home route: activating the Polo workbench tab via
+    // the production TabBar click fails closed to the REAL WindowWidthGuard
+    // (the guarded route's production escape is the window resize).
+    fireEvent.click(screen.getByLabelText('Close Polo 助手').closest('div')!)
+    await waitFor(() => {
+      if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing for narrow non-Home route')
+    })
+    expect(screen.getByTestId('window-width-guard')).toBeTruthy()
+    expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
+  }, 30_000)
+
+  it('pre-hydration side effects stay scope-neutral: no stale route marker, no listener registrations until ready; keyed remount cleans up exactly once', async () => {
+    seedStalePreviousScope()
+
+    const { rerender } = render(buildShellTree('scope-a'))
+
+    // Hydration completes (synchronously for a ProductSpace-keyed window):
+    // marker publishes the CURRENT route, listeners register (bootstrap may
+    // re-subscribe on dependency churn — the LIVE count must be exactly one
+    // per channel, and none may exist before ready).
+    await waitFor(() => {
+      if (document.documentElement.dataset.activeTab !== 'home') throw new Error('marker not published')
+    })
+    expect(deepLinkRegistrations).toBeGreaterThanOrEqual(1)
+    expect(deepLinkRegistrations - deepLinkUnsubscribed).toBe(1)
+
+    // Keyed scope switch: the provider remounts under a NEW key — the old
+    // subscription/listener cleanup runs and the new scope registers; the
+    // live count returns to exactly one after B's hydration.
+    act(() => {
+      rerender(buildShellTree('scope-b'))
+    })
+    await waitFor(() => {
+      if (document.documentElement.dataset.activeTab !== 'home') throw new Error('marker not published for scope-b')
+    })
+    expect(deepLinkRegistrations - deepLinkUnsubscribed).toBe(1)
+
+
+    // Unmount: cleanup accounting balances exactly — every registration was
+    // cleaned up exactly once.
+    act(() => {
+      rerender(null as unknown as ReactNode)
+    })
+    expect(deepLinkUnsubscribed).toBe(deepLinkRegistrations)
+
+    // PRE-HYDRATION observations (recorded by the passive-effect probe that
+    // runs after TabShell's own passive effects but before the provider's
+    // hydration): the very first observation must be scope-NEUTRAL — no
+    // stale route marker published, no listener registered.
+    expect(sideEffectObservations.length).toBeGreaterThan(0)
+    expect(sideEffectObservations[0]).toEqual({
+      marker: undefined,
+      deepLinkRegistrations: 0,
+    })
+    // No observation may ever show the STALE route marker ('polo' active
+    // while pre-hydration). Post-switch pre-hydration observations
+    // legitimately show monotonically growing counters (the global atoms
+    // accumulate across keyed remounts); only the very first observation
+    // pins the full neutral state.
+    for (const observation of sideEffectObservations) {
+      if (observation.marker === 'polo') {
+        throw new Error('stale route marker published pre-hydration')
+      }
+    }
   }, 30_000)
 })
 

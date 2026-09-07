@@ -35,22 +35,37 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
   useEffect(() => {
     const root = document.documentElement
+    // Scope-neutral pre-hydration (Review R33/R34): the process-global tab
+    // atoms still hold the PREVIOUS scope's route until hydration completes —
+    // never publish a stale route marker; leave the root marker neutral.
+    if (!isReady) {
+      delete root.dataset.activeTab
+      return () => {
+        delete root.dataset.activeTab
+      }
+    }
     root.dataset.activeTab = activeTab.type
     return () => {
       delete root.dataset.activeTab
     }
-  }, [activeTab.type])
+  }, [isReady, activeTab.type])
 
   useEffect(() => {
+    // Scope-neutral pre-hydration (Review R33/R34): do not register the
+    // deep-link handler with closures over the previous scope's tabs.
+    if (!isReady) return
     return window.electronAPI.onDeepLinkNavigate((nav) => {
       if (nav.view || nav.action || nav.joinToken || nav.tabType === 'polo') {
         const poloTab = openTabs.find((tab) => tab.type === 'polo')
         if (poloTab) activateTab(poloTab.id)
       }
     })
-  }, [activateTab, openTabs])
+  }, [isReady, activateTab, openTabs])
 
   useEffect(() => {
+    // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay
+    // unregistered until the keyed provider establishes the new scope.
+    if (!isReady) return
     const handleKeyDown = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey
       if (!mod || event.altKey || isEditableTarget(event.target)) return
@@ -94,7 +109,7 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activateHome, activateTab, activeTabId, closeTab, openTabs])
+  }, [isReady, activateHome, activateTab, activeTabId, closeTab, openTabs])
 
   // PRE-HYDRATION FAIL-CLOSED boundary (Review R33 security finding):
   // `openTabsAtom`/`activeTabAtom` are process-global and still hold the
