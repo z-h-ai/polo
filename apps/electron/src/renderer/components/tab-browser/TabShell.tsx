@@ -96,10 +96,26 @@ export function TabShell({ renderPolo }: TabShellProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activateHome, activateTab, activeTabId, closeTab, openTabs])
 
+  // PRE-HYDRATION FAIL-CLOSED boundary (Review R33 security finding):
+  // `openTabsAtom`/`activeTabAtom` are process-global and still hold the
+  // PREVIOUS account/ProductSpace scope's tab titles, URLs and active route
+  // until this keyed provider's hydration establishes the NEW scope. The
+  // hook-order-safe early return renders a scope-neutral boundary on EVERY
+  // width — the stale TabBar/TabContent/webview/active route can never be
+  // mounted or displayed, and it must not resurface on scope switches.
+  if (!isReady) {
+    return (
+      <div
+        className="h-full min-h-0 bg-background"
+        data-testid="shell-scope-loading"
+      />
+    )
+  }
+
   // Narrow-route guard decision lives AFTER every hook in this component:
   // rendering the frozen guard must not change the hook count between
   // renders (React "fewer hooks" crash on route transitions).
-  if (narrowViewport && isReady && activeTab.type !== 'home') {
+  if (narrowViewport && activeTab.type !== 'home') {
     return <WindowWidthGuard />
   }
 
