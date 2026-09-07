@@ -282,8 +282,15 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
   const catalogEntryId = CatalogEntryIdSchema.safeParse(input.catalogEntryId)
   const artifactInstanceId = ArtifactInstanceIdSchema.safeParse(input.artifactInstanceId)
   const versionId = ArtifactVersionIdSchema.safeParse(input.versionId)
+  // Canonical policy: preserve the EXACT renderer bytes. `trim()` is used
+  // for non-blank VALIDATION only — it never rewrites the value. The
+  // shared schemas validate non-blankness the same way while keeping the
+  // original string, so the renderer identity, the captured authority and
+  // the fresh row are compared byte-for-byte; a unilateral trim here would
+  // both launder distinct values and falsely drift whitespace-padded legal
+  // values.
   const catalogRevision = typeof input.catalogRevision === 'string'
-    ? input.catalogRevision.trim()
+    ? input.catalogRevision
     : ''
   // The sealed authoritative sources and availability are REQUIRED identity
   // fields: an identity without them can never be proven against the
@@ -296,7 +303,7 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
     || !catalogEntryId.success
     || !artifactInstanceId.success
     || !versionId.success
-    || catalogRevision.length === 0
+    || catalogRevision.trim().length === 0
     || catalogRevision.length > 512
     || typeof input.version !== 'string'
     || input.version.trim().length === 0
@@ -318,10 +325,11 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
 }
 
 /**
- * Structural validation + canonical normalization of renderer-sealed
- * identity sources. The request arrives in the canonical null-coalesced
- * form; every member is re-normalized here so a malicious or stale renderer
- * cannot smuggle a shape that only compares equal by accident.
+ * Structural validation of renderer-sealed identity sources. Values keep
+ * their EXACT bytes (trim is non-blank validation only, never a rewrite):
+ * the canonical comparable form is derived without altering member values,
+ * so a whitespace-padded legal source compares against the identical
+ * binding bytes, and any genuinely different value still fails closed.
  */
 function validateIdentitySources(
   value: unknown,
@@ -340,14 +348,14 @@ function validateIdentitySources(
       )
     }
     const source = rawSource as { kind?: unknown; name?: unknown; circleId?: unknown }
-    const kind = typeof source.kind === 'string' ? source.kind.trim() : ''
-    const name = typeof source.name === 'string' ? source.name.trim() : null
-    const circleId = typeof source.circleId === 'string' ? source.circleId.trim() : null
+    const kind = typeof source.kind === 'string' ? source.kind : ''
+    const name = typeof source.name === 'string' ? source.name : null
+    const circleId = typeof source.circleId === 'string' ? source.circleId : null
     if (
-      kind.length === 0
+      kind.trim().length === 0
       || kind.length > 128
-      || (name !== null && (name.length === 0 || name.length > 256))
-      || (circleId !== null && (circleId.length === 0 || circleId.length > 128))
+      || (name !== null && (name.trim().length === 0 || name.length > 256))
+      || (circleId !== null && (circleId.trim().length === 0 || circleId.length > 128))
     ) {
       throw new LocalAppRuntimeError(
         'INVALID_REQUEST',
@@ -594,7 +602,31 @@ async function assertProductSpaceAccountCurrent(app: ProductSpaceAppIdentity): P
   return { accessToken: tokens.accessToken }
 }
 
-async function loadAuthoritativeProductSpaceApps(
+/**
+ * Explicit discriminated outcome for the fresh-Catalog revalidation. The
+ * MISSING verdict carries the ALREADY schema-validated fresh Catalog so the
+ * retained-tombstone cleanup path can still prove the fresh revision — no
+ * string/error parsing ever reconstructs it.
+ */
+type AuthoritativeProductSpaceAppsOutcome =
+  | {
+    kind: 'live'
+    apps: ProductSpaceAppIdentity[]
+    accessToken: string
+    client: AdminClient
+    context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+    catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+  }
+  | {
+    kind: 'missing'
+    apps: ProductSpaceAppIdentity[]
+    accessToken: string
+    client: AdminClient
+    context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+    catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+  }
+
+async function loadAuthoritativeProductSpaceAppsOutcome(
   rawApps: unknown,
   options: {
     /**
@@ -606,13 +638,7 @@ async function loadAuthoritativeProductSpaceApps(
      */
     driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
   } = {},
-): Promise<{
-  apps: ProductSpaceAppIdentity[]
-  accessToken: string
-  client: AdminClient
-  context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
-  catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
-}> {
+): Promise<AuthoritativeProductSpaceAppsOutcome> {
   const apps = parseProductSpaceAppIdentityBatch(
     rawApps,
     'ProductSpace App identities',
@@ -659,11 +685,16 @@ async function loadAuthoritativeProductSpaceApps(
     if (!entry) {
       // Authoritative absence: the CURRENT distribution genuinely has no
       // such entry. This is the ONLY verdict that may route an uninstall to
-      // the retained-tombstone cleanup gate.
-      throw new LocalAppRuntimeError(
-        'CATALOG_ENTRY_MISSING',
-        'The ProductSpace Catalog no longer lists this entry',
-      )
+      // the retained-tombstone cleanup gate — WITH the fresh Catalog kept
+      // for the mandatory revision proof.
+      return {
+        kind: 'missing',
+        apps,
+        accessToken,
+        client,
+        context,
+        catalog,
+      }
     }
     if (entry.kind !== 'app') {
       // KIND DRIFT: the entry ID exists but is no longer an App (skill /
@@ -689,7 +720,42 @@ async function loadAuthoritativeProductSpaceApps(
     }
   }
   await assertProductSpaceAccountCurrent(first)
-  return { apps, accessToken, client, context, catalog }
+  return {
+    kind: 'live',
+    apps,
+    accessToken,
+    client,
+    context,
+    catalog,
+  }
+}
+
+async function loadAuthoritativeProductSpaceApps(
+  rawApps: unknown,
+  options: {
+    driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
+  } = {},
+): Promise<{
+  apps: ProductSpaceAppIdentity[]
+  accessToken: string
+  client: AdminClient
+  context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+  catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+}> {
+  const outcome = await loadAuthoritativeProductSpaceAppsOutcome(rawApps, options)
+  if (outcome.kind === 'missing') {
+    throw new LocalAppRuntimeError(
+      'CATALOG_ENTRY_MISSING',
+      'The ProductSpace Catalog no longer lists this entry',
+    )
+  }
+  return {
+    apps: outcome.apps,
+    accessToken: outcome.accessToken,
+    client: outcome.client,
+    context: outcome.context,
+    catalog: outcome.catalog,
+  }
 }
 
 function matchesConfirmedRelease(
@@ -1135,50 +1201,45 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         }
       }
 
-      // LIVE PHASE — fresh fetch + comparison against the CAPTURED binding
-      // only (never a post-await re-read of current authority state).
-      let liveUninstall = false
-      let loadedLive: Awaited<ReturnType<typeof loadAuthoritativeProductSpaceApps>> | null = null
-      try {
-        loadedLive = await loadAuthoritativeProductSpaceApps([rawApp], {
-          driftCode: 'CATALOG_IDENTITY_DRIFT',
-        })
-        liveUninstall = true
-      } catch (error) {
-        // ONLY CATALOG_ENTRY_MISSING may fall back to retained-tombstone
-        // cleanup — and the exact retained tombstone must exist in the
-        // pre-await captured binding. KIND drift and artifact/version drift
-        // are LIVE identity drift and stay fail-closed. Auth/network/schema/
-        // space-state failures also stay fail-closed.
-        const authoritativeMissing = error instanceof LocalAppRuntimeError
-          && error.code === 'CATALOG_ENTRY_MISSING'
-        if (!authoritativeMissing) throw error
-        if (!bindingTombstone) {
-          throw new LocalAppRuntimeError(
-            'NOT_AUTHORIZED',
-            'Missing entry has no exact retained tombstone in the trusted binding',
-          )
-        }
+      // FRESH PHASE — fresh fetch with an EXPLICIT discriminated outcome:
+      // the missing verdict carries the already schema-validated fresh
+      // Catalog, so the retained-tombstone path proves the fresh revision
+      // too. Comparison runs against the CAPTURED binding only (never a
+      // post-await re-read of current authority state).
+      const outcome = await loadAuthoritativeProductSpaceAppsOutcome([rawApp], {
+        driftCode: 'CATALOG_IDENTITY_DRIFT',
+      })
+
+      // UNIFIED POST-AWAIT FENCE — before live/missing classification: an
+      // account/space switch or sign-out parked behind the fresh fetch must
+      // stop the uninstall BEFORE any destructive side effect (the previous
+      // design surfaced such changes only AFTER the registry had run).
+      await assertProductSpaceAccountCurrent(app)
+
+      // REVISION PROOF — BOTH branches, before ANY registry call: the fresh
+      // Catalog revision must equal the pre-await captured binding revision
+      // AND the renderer request revision. A revision-only R2 (tuple,
+      // sources, availability all unchanged, only the server revision
+      // advanced) means the renderer's page predates the current Catalog —
+      // the operation must be re-confirmed from a refreshed page, never
+      // laundered through identical row content or through a retained
+      // tombstone.
+      if (
+        outcome.catalog.catalogRevision !== bindingAtEntry.catalogRevision
+        || outcome.catalog.catalogRevision !== app.catalogRevision
+      ) {
+        throw new LocalAppRuntimeError(
+          'CATALOG_IDENTITY_DRIFT',
+          'The fresh Catalog revision drifted from the captured uninstall binding',
+        )
       }
-      if (liveUninstall) {
-        // REVISION PROOF FIRST: the fresh Catalog revision must equal the
-        // pre-await captured binding revision. A revision-only R2 (tuple,
-        // sources, availability all unchanged, only the server revision
-        // advanced) means the renderer's page predates the current Catalog —
-        // the operation must be re-confirmed from a refreshed page, never
-        // laundered through identical row content.
-        if (loadedLive!.catalog.catalogRevision !== bindingAtEntry.catalogRevision) {
-          throw new LocalAppRuntimeError(
-            'CATALOG_IDENTITY_DRIFT',
-            'The fresh Catalog revision drifted from the captured uninstall binding',
-          )
-        }
+      if (outcome.kind === 'live') {
         // Compare the live row against the PRE-AWAIT captured binding: full
         // tuple must match the binding entry, canonical sources must equal
         // the binding sources, and BOTH the binding and the live row must be
         // available. A concurrent authority commit during the fresh fetch
         // cannot influence this comparison.
-        const liveRow = loadedLive!.catalog.entries.find(
+        const liveRow = outcome.catalog.entries.find(
           candidate => candidate.catalogEntryId === app.catalogEntryId && candidate.kind === 'app',
         ) as (TrustedProductSpaceCatalogEntry & { kind: 'app'; sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }> }) | undefined
         if (!bindingEntry || !liveRow) {
@@ -1217,11 +1278,32 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             'The ProductSpace Catalog App sources changed since the confirmed revalidation',
           )
         }
+      } else {
+        // Authoritative missing at the SAME revision: the exact retained
+        // tombstone must exist in the pre-await captured binding. KIND/tuple
+        // drift never lands here (the outcome helper classifies them as
+        // live drift); missing without tombstone evidence fails closed.
+        if (!bindingTombstone) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'Missing entry has no exact retained tombstone in the trusted binding',
+          )
+        }
       }
-      void liveUninstall
-      const scope = productSpaceBundleScope(app)
-      await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
-      unregisterLocalAppExecutions(scope)
+
+      // FINAL ATOMIC SIDE EFFECT — the minimal region from the last fence
+      // checks to the registry mutation runs under the global switch mutex:
+      // a ProductSpace switch/revoke/account replacement can never insert
+      // itself between verification and destruction. All network/credential
+      // awaits already completed ABOVE the lock (lock order: the switch lock
+      // must never be held across the Admin session lock or network I/O).
+      // The checks are synchronous and re-run INSIDE the lock.
+      await runUnderSwitchMutex(async () => {
+        assertProductSpaceAppOperationCurrent(app)
+        const scope = productSpaceBundleScope(app)
+        await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
+        unregisterLocalAppExecutions(scope)
+      })
       await assertProductSpaceAccountCurrent(app)
     },
   )

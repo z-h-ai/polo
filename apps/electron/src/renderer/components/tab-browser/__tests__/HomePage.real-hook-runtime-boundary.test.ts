@@ -26,15 +26,28 @@ if (typeof window === 'undefined') {
 }
 setupI18n()
 
-// The runtime-status spy is typed from the REAL Electron API member — the
-// production contract `ElectronAPI['localApps']['getRuntimeStatuses']` — so a
-// signature drift or an `any`-erased stub can never mask a boundary breach.
+// The runtime-status spies are typed from the REAL Electron API members —
+// the production contracts `ElectronAPI['localApps']['getRuntimeStatuses']`
+// and `ElectronAPI['localApps']['getRuntimeStatus']` — so a signature drift
+// or an `any`-erased stub can never mask a boundary breach. BOTH the plural
+// and the singular member are counted: neither may be an uncounted stub.
 type GetRuntimeStatuses = ElectronAPI['localApps']['getRuntimeStatuses']
+type GetRuntimeStatus = ElectronAPI['localApps']['getRuntimeStatus']
+let runtimeStatusesCalls = 0
 let runtimeStatusCalls = 0
 const getRuntimeStatusesSpy: GetRuntimeStatuses = (request: LocalAppBatchStatusRequest) => {
-  runtimeStatusCalls += 1
+  runtimeStatusesCalls += 1
   void request
   return Promise.resolve<LocalAppRuntimeStatus[]>([])
+}
+const getRuntimeStatusSpy: GetRuntimeStatus = (scope: CatalogLocalAppScope) => {
+  runtimeStatusCalls += 1
+  void scope
+  return Promise.resolve<LocalAppRuntimeStatus>({
+    appId: scope.catalogAppId,
+    scope,
+    status: 'not_installed',
+  })
 }
 
 const openApp = jest.fn()
@@ -80,6 +93,7 @@ function rawCatalogResponse() {
 }
 
 beforeEach(() => {
+  runtimeStatusesCalls = 0
   runtimeStatusCalls = 0
   openApp.mockClear()
   adminGetStatus.mockClear()
@@ -109,11 +123,7 @@ beforeEach(() => {
       state: 'not_installed' as const,
     })),
     getRuntimeStatuses: getRuntimeStatusesSpy,
-    getRuntimeStatus: async (scope: CatalogLocalAppScope) => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'not_installed' as const,
-    }),
+    getRuntimeStatus: getRuntimeStatusSpy,
   }
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
@@ -202,12 +212,16 @@ describe('HomePage × production useAppCatalog runtime boundary (POO-43 / POO-47
     await waitFor(() => {
       if (!screen.getByTestId('home-quick-entry-polo')) throw new Error('Home not mounted')
     })
+    // Zero runtime-status IPC so far (mount + activation).
+    expectRuntimeBoundaryIntact()
+
     // Explicit CATALOG barrier: release the gated real productSpaceGetCatalog
     // response and wait until the production hook hydrated the page.
     releaseCatalog!(rawCatalogResponse())
     await waitFor(() => {
       if (!screen.getByTestId('home-all-apps-open')) throw new Error('catalog not hydrated')
     })
+    expectRuntimeBoundaryIntact()
 
     // Interaction: open the all-apps view driven by the SAME production hook.
     fireEvent.click(screen.getByTestId('home-all-apps-open'))
@@ -232,14 +246,25 @@ describe('HomePage × production useAppCatalog runtime boundary (POO-43 / POO-47
     await waitFor(() => {
       if (!screen.getByText('Installed')) throw new Error('install states not reconciled')
     })
+    expectRuntimeBoundaryIntact()
 
     // Interaction: search filter and navigation back to Home.
     fireEvent.change(screen.getByTestId('all-apps-search'), { target: { value: 'Real Hook' } })
     fireEvent.click(screen.getByTestId('all-apps-back'))
+    await waitFor(() => {
+      if (!screen.getByTestId('home-all-apps-open')) throw new Error('back navigation pending')
+    })
 
-    // THE BOUNDARY: the production runtime-status IPC member was never
-    // called through any render or interaction, and no running badge exists.
-    expect(runtimeStatusCalls).toBe(0)
+    // THE BOUNDARY, asserted at EVERY stage: NEITHER production
+    // runtime-status IPC member (plural batch NOR singular per-scope) was
+    // ever called through any render, barrier or interaction, and no
+    // running badge exists.
+    expectRuntimeBoundaryIntact()
     expect(screen.queryByText('Running')).toBeNull()
   })
 })
+
+function expectRuntimeBoundaryIntact(): void {
+  expect(runtimeStatusesCalls).toBe(0)
+  expect(runtimeStatusCalls).toBe(0)
+}
