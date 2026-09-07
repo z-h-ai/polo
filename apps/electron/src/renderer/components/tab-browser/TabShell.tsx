@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { useTabShell } from '@/context/TabShellContext'
+import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
@@ -16,7 +17,21 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function TabShell({ renderPolo }: TabShellProps) {
-  const { activeTab, openTabs, activeTabId, activateHome, activateTab, closeTab } = useTabShell()
+  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
+  // Narrow-route boundary (Review R31/R32), PROVIDER-OWNED: evaluated only
+  // with TabShellProvider-hydrated state, never the unhydrated ambient tab
+  // atom — lifecycle screens render before this component and can never be
+  // blocked by a stale tab route.
+  //
+  // - Provider hydration ALWAYS re-activates Home first (setActiveTabId
+  //   (HOME_TAB_ID) in hydrate()), so a ready narrow session that begins
+  //   with a stale non-Home route reaches Home through the production
+  //   initialization path; pre-hydration the narrow surface is therefore
+  //   the Home-only boundary (no workbench/webview/preview mounts).
+  // - Once initialized, a genuinely unsupported non-Home route at narrow
+  //   width fails closed to the frozen fullscreen guard.
+  const narrowViewport = useNarrowViewport()
+  const narrowHome = narrowViewport && (!isReady || activeTab.type === 'home')
 
   useEffect(() => {
     const root = document.documentElement
@@ -81,10 +96,17 @@ export function TabShell({ renderPolo }: TabShellProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activateHome, activateTab, activeTabId, closeTab, openTabs])
 
+  // Narrow-route guard decision lives AFTER every hook in this component:
+  // rendering the frozen guard must not change the hook count between
+  // renders (React "fewer hooks" crash on route transitions).
+  if (narrowViewport && isReady && activeTab.type !== 'home') {
+    return <WindowWidthGuard />
+  }
+
   return (
     <div className="h-full min-h-0 bg-background">
       <TabBar />
-      <TabContent renderPolo={renderPolo} />
+      <TabContent renderPolo={renderPolo} narrowHome={narrowHome} />
     </div>
   )
 }
