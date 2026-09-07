@@ -97,6 +97,8 @@ function renderView(apps: CatalogApp[], options: {
           artifactInstanceId: target.artifactInstanceId!,
           versionId: target.catalogVersion!.versionId,
           version: target.catalogVersion!.version,
+          sources: [{ kind: 'enterprise_import', name: 'Organization A', circleId: null }],
+          availability: 'available' as const,
         },
         state: 'installed' as const,
         currentVersion: '1.0.0',

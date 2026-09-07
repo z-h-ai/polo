@@ -75,7 +75,6 @@ function signedOutCatalogHook() {
       throw new Error('resolveLaunch behavior not configured')
     },
     resolveRemoteUrl: async () => 'https://trusted.example.com',
-    getStatus: () => undefined,
     getInstallState: () => undefined,
     installProductSpaceBundle: async () => {},
     uninstallProductSpaceBundle: async () => {},
@@ -120,6 +119,7 @@ mock.module('sonner', () => ({
 }))
 
 const {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -127,7 +127,7 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { formatBytes, HomePage, selectAllAppsForDisplay, __resetHomeQuickWritersForTests, __homeQuickWritersCountForTests, __homeQuickWriterStatsForTests } = await import('../HomePage')
+const { formatBytes, HomePage, selectAllAppsForDisplay, __resetHomeQuickWritersForTests, __homeQuickWritersCountForTests, __homeQuickWriterStatsForTests, __homeQuickWriterSettledForTests } = await import('../HomePage')
 const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
   catalogStateMessage,
@@ -990,7 +990,11 @@ describe('HomePage quick access (POO-43)', () => {
       },
     }
     renderHome()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    // Event-driven lifecycle barrier: the writer's hydration gate and
+    // persistence queue settled (no elapsed-time wait).
+    await act(async () => {
+      expect(await __homeQuickWriterSettledForTests(contextKey)).toBe(true)
+    })
     // The loading placeholder hides the quick grid — the persisted entry is
     // NOT rendered and NOT pruned.
     expect(screen.queryByText('Delayed App A')).toBeNull()
@@ -1009,8 +1013,10 @@ describe('HomePage quick access (POO-43)', () => {
         errorCode: 'NETWORK_ERROR',
       },
     }
-    viewRerender()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    act(() => { viewRerender() })
+    await act(async () => {
+      expect(await __homeQuickWriterSettledForTests(contextKey)).toBe(true)
+    })
     expect(setHomeQuickAccess).not.toHaveBeenCalled()
     expect(quickAccessByContext.get(contextKey)).toEqual([
       { id: persistedId, addedAt: 1 },
@@ -1018,8 +1024,10 @@ describe('HomePage quick access (POO-43)', () => {
 
     // AUTHORITATIVE Catalog commits: the entry resolves and stays.
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    viewRerender()
-    await new Promise(resolve => setTimeout(resolve, 50))
+    act(() => { viewRerender() })
+    await act(async () => {
+      expect(await __homeQuickWriterSettledForTests(contextKey)).toBe(true)
+    })
     expect(setHomeQuickAccess).not.toHaveBeenCalled()
     expect(quickAccessByContext.get(contextKey)).toEqual([
       { id: persistedId, addedAt: 1 },
@@ -1028,12 +1036,14 @@ describe('HomePage quick access (POO-43)', () => {
     // The authoritative Catalog then stops listing the App: exactly ONE
     // prune+persist against the committed snapshot.
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
-    viewRerender()
+    act(() => { viewRerender() })
     await waitFor(() => {
       expect(setHomeQuickAccess).toHaveBeenCalledTimes(1)
     })
     expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [])
     expect(quickAccessByContext.get(contextKey)).toEqual([])
+    // Flush the durable-ack state update inside act (no unwrapped warnings).
+    await act(async () => {})
   })
 
   it('renders denied rows with retained identity and no install/open capability (observation 391939f5…)', async () => {
@@ -1717,34 +1727,6 @@ describe('HomePage quick access (POO-43)', () => {
     mountB.unmount()
     mountC.unmount()
     await waitFor(() => { if (__homeQuickWritersCountForTests() !== 0) throw new Error('registry drain pending') })
-  })
-
-  it('Home work cards render NO live runtime running badge (POO-47 scope stays out)', async () => {
-    const appA = pinnedApp('noruntime-app-a', 'noruntime-entry-a', 'noruntime-artifact-a', 'NoRuntime A')
-    let getStatusCalls = 0
-    const hook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    // Typed spy derived from the hook's OWN getStatus type: the return value
-    // satisfies the real signature, no `any` masks a contract violation.
-    const getStatusSpy: typeof hook.getStatus = () => {
-      getStatusCalls += 1
-      return undefined
-    }
-    hook.getStatus = getStatusSpy
-    appCatalogHook = hook
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')}`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    quickAccessByContext.set(contextKey, [{ id: keyA, addedAt: 1 }])
-
-    renderHome()
-    await waitForNextScopeLoad(0, contextKey)
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry')).toBeTruthy()
-    })
-    // POO-43 must not consult live runtime state on the Home cards and must
-    // never render a running badge — that UI belongs to POO-47.
-    expect(getStatusCalls).toBe(0)
-    expect(screen.queryByText('Running')).toBeNull()
   })
 
   it('removing the last persisted entry persists an explicitly empty collection', async () => {

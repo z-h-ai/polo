@@ -285,6 +285,11 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
   const catalogRevision = typeof input.catalogRevision === 'string'
     ? input.catalogRevision.trim()
     : ''
+  // The sealed authoritative sources and availability are REQUIRED identity
+  // fields: an identity without them can never be proven against the
+  // captured authority binding, so it fails closed as a malformed request.
+  const sources = validateIdentitySources(input.sources)
+  const availability = validateIdentityAvailability(input.availability)
   if (
     !accountId.success
     || !productSpaceId.success
@@ -307,7 +312,78 @@ function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentit
     versionId: versionId.data,
     version: input.version,
     catalogRevision,
+    sources,
+    availability,
   }
+}
+
+/**
+ * Structural validation + canonical normalization of renderer-sealed
+ * identity sources. The request arrives in the canonical null-coalesced
+ * form; every member is re-normalized here so a malicious or stale renderer
+ * cannot smuggle a shape that only compares equal by accident.
+ */
+function validateIdentitySources(
+  value: unknown,
+): ProductSpaceAppIdentity['sources'] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 1_000) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'ProductSpace App identity sources are required',
+    )
+  }
+  return value.map(rawSource => {
+    if (!rawSource || typeof rawSource !== 'object') {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'ProductSpace App identity source is invalid',
+      )
+    }
+    const source = rawSource as { kind?: unknown; name?: unknown; circleId?: unknown }
+    const kind = typeof source.kind === 'string' ? source.kind.trim() : ''
+    const name = typeof source.name === 'string' ? source.name.trim() : null
+    const circleId = typeof source.circleId === 'string' ? source.circleId.trim() : null
+    if (
+      kind.length === 0
+      || kind.length > 128
+      || (name !== null && (name.length === 0 || name.length > 256))
+      || (circleId !== null && (circleId.length === 0 || circleId.length > 128))
+    ) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'ProductSpace App identity source is invalid',
+      )
+    }
+    return { kind, name, circleId }
+  })
+}
+
+function validateIdentityAvailability(value: unknown): ProductSpaceAppIdentity['availability'] {
+  if (
+    value !== 'available'
+    && value !== 'unavailable'
+    && value !== 'blocked'
+    && value !== 'withdrawn'
+  ) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'ProductSpace App identity availability is invalid',
+    )
+  }
+  return value
+}
+
+/**
+ * Canonical comparable form of authoritative sources: null-coalesced
+ * members sorted by their JSON encoding, so order can never influence the
+ * binding comparison.
+ */
+function canonicalIdentitySources(
+  sources: ReadonlyArray<{ kind: string; name?: string | null; circleId?: string | null }>,
+): string {
+  return JSON.stringify(sources
+    .map(source => ({ circleId: source.circleId ?? null, kind: source.kind, name: source.name ?? null }))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
 }
 
 function productSpaceBundleScope(app: ProductSpaceAppIdentity): CatalogLocalAppScope {
@@ -1034,6 +1110,31 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           && candidate.version === app.version,
       )
 
+      // The renderer-sealed identity must match the captured binding BEYOND
+      // the bare tuple: the sealed sources and availability are proven
+      // against whichever authoritative record (live entry or retained
+      // tombstone) backs this identity. A stale page whose row content was
+      // silently re-rendered from a different revision cannot launder its
+      // request through the tuple check alone.
+      const authoritativeRef = bindingEntry ?? bindingTombstone
+      if (authoritativeRef) {
+        if (
+          canonicalIdentitySources(app.sources)
+          !== canonicalIdentitySources(authoritativeRef.sources)
+        ) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The uninstall request sources drifted from the trusted binding',
+          )
+        }
+        if (app.availability !== authoritativeRef.availability) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The uninstall request availability drifted from the trusted binding',
+          )
+        }
+      }
+
       // LIVE PHASE — fresh fetch + comparison against the CAPTURED binding
       // only (never a post-await re-read of current authority state).
       let liveUninstall = false
@@ -1060,6 +1161,18 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         }
       }
       if (liveUninstall) {
+        // REVISION PROOF FIRST: the fresh Catalog revision must equal the
+        // pre-await captured binding revision. A revision-only R2 (tuple,
+        // sources, availability all unchanged, only the server revision
+        // advanced) means the renderer's page predates the current Catalog —
+        // the operation must be re-confirmed from a refreshed page, never
+        // laundered through identical row content.
+        if (loadedLive!.catalog.catalogRevision !== bindingAtEntry.catalogRevision) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The fresh Catalog revision drifted from the captured uninstall binding',
+          )
+        }
         // Compare the live row against the PRE-AWAIT captured binding: full
         // tuple must match the binding entry, canonical sources must equal
         // the binding sources, and BOTH the binding and the live row must be
@@ -1095,13 +1208,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             'The ProductSpace Catalog App is no longer available (availability drift)',
           )
         }
-        const canonical = (sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>): string =>
-          JSON.stringify(sources
-            .map(source => ({ circleId: source.circleId ?? null, kind: source.kind, name: source.name ?? null }))
-            .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
         if (
-          canonical(liveRow.sources)
-          !== canonical(bindingEntry.sources)
+          canonicalIdentitySources(liveRow.sources)
+          !== canonicalIdentitySources(bindingEntry.sources)
         ) {
           throw new LocalAppRuntimeError(
             'CATALOG_IDENTITY_DRIFT',

@@ -324,6 +324,12 @@ function identityForProductSpaceApp(
     || !app.catalogEntryId
     || !app.artifactInstanceId
     || !app.catalogVersion
+    // The RAW authoritative sources and availability are part of the sealed
+    // identity contract: an app projected without them (stale cache, foreign
+    // fixture) can never produce a provable identity.
+    || !app.catalogSources
+    || app.catalogSources.length === 0
+    || !app.rawAvailability
   ) throw new Error(i18n.t('homeApps.errors.staleContext'))
   return {
     accountId: catalog.accountId,
@@ -333,6 +339,12 @@ function identityForProductSpaceApp(
     artifactInstanceId: app.artifactInstanceId,
     versionId: app.catalogVersion.versionId,
     version: app.catalogVersion.version,
+    sources: app.catalogSources.map(source => ({
+      kind: source.kind,
+      name: source.name ?? null,
+      circleId: source.circleId ?? null,
+    })),
+    availability: app.rawAvailability,
   }
 }
 
@@ -410,6 +422,15 @@ function mapProductSpaceCatalogToCacheEntry(
       permissions: entry.permissions,
       sortOrder: index,
       availability: effectiveAvailability,
+      // RAW authoritative sources + availability, sealed into operation
+      // identities. The effective `availability` above is a lossy UI
+      // projection ('blocked' collapses into 'unavailable') and the
+      // `sourceNames` above is a deduped display projection — neither may be
+      // used to seal an identity.
+      catalogSources: (entry.sources ?? []).map(source => ({ ...source })),
+      rawAvailability: entry.availability === 'available' || entry.availability === 'unavailable' || entry.availability === 'blocked'
+        ? entry.availability
+        : availability === 'withdrawn' ? 'withdrawn' : 'unavailable',
     }
   }
   for (const [index, rawEntry] of catalogResult.entries.entries()) {

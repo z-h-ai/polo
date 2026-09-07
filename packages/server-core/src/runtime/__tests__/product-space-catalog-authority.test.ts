@@ -239,7 +239,7 @@ describe('ProductSpace Catalog authority', () => {
     const tombstones = recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-healed', [entry()])
     expect(tombstones).toEqual([])
     expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.catalogRevision).toBe('rev-healed')
-    expect(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.entries[0]!.catalogEntryId).toBe('entry-a')
+    expect(String(getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!.entries[0]!.catalogEntryId)).toBe('entry-a')
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 
@@ -560,7 +560,7 @@ describe('ProductSpace Catalog authority', () => {
       expect(tombstones).toEqual([])
       const record = getProductSpaceCatalogAuthorityRecord('account-a', 'space-a')!
       expect(record.tombstones).toEqual([])
-      expect(record.entries.map(e => e.catalogEntryId)).toEqual(['entry-fresh'])
+      expect(record.entries.map(e => String(e.catalogEntryId))).toEqual(['entry-fresh'])
       expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
       expect(hasProductSpaceCatalogAuthorityTuple(
         'account-a', 'space-a', 'entry-fresh', 'artifact-fresh', 'version-fresh', '2.0.0',

@@ -447,6 +447,11 @@ function productSpaceAppIdentity() {
     artifactInstanceId: 'artifact-instance-a',
     versionId: 'version-a',
     version: '2.3.4',
+    // Canonical renderer-sealed sources/availability: they mirror the
+    // name-less enterprise_import source and the raw 'available' availability
+    // of the default authoritative Catalog row.
+    sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+    availability: 'available' as const,
   }
 }
 
@@ -719,6 +724,8 @@ describe('local app main-process authorization boundary', () => {
         artifactInstanceId: 'artifact-w',
         versionId: 'version-w',
         version: '2.0.0',
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
         withdrawnAt: 1,
       }],
     })
@@ -730,6 +737,8 @@ describe('local app main-process authorization boundary', () => {
       versionId: 'version-w',
       version: '2.0.0',
       catalogRevision: 'revision-a',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'withdrawn' as const,
     }
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
     await uninstall(context, withdrawnIdentity, { preserveData: true })
@@ -754,7 +763,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-instance-a',
       versionId: 'version-a',
       version: '2.3.4',
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
     getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
@@ -792,7 +801,7 @@ describe('local app main-process authorization boundary', () => {
       name: 'ProductSpace App',
       description: '',
       availability: 'available' as const,
-      sources: [{ kind: 'enterprise_import' as const, name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' as const }],
       permissions: [],
     }
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
@@ -802,13 +811,13 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: base.artifactInstanceId,
       versionId: base.versionId,
       version: base.version,
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
 
     const driftCatalogs: Array<[string, Record<string, unknown>]> = [
       ['source kind drift', { sources: [{ kind: 'creator_circle' as const, circleId: 'circle-1' as never, name: 'Circle' }] }],
-      ['source set change', { sources: [{ kind: 'enterprise_import' as const, name: 'Organization A' }, { kind: 'creator_circle' as const, circleId: 'circle-2' as never, name: 'Circle 2' }] }],
+      ['source set change', { sources: [{ kind: 'enterprise_import' as const }, { kind: 'creator_circle' as const, circleId: 'circle-2' as never, name: 'Circle 2' }] }],
       ['availability blocked', { availability: 'blocked' as const }],
       ['availability unavailable', { availability: 'unavailable' as const }],
     ]
@@ -816,7 +825,7 @@ describe('local app main-process authorization boundary', () => {
       getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
         contractVersion: 1,
         productSpaceId: 'organization-a',
-        catalogRevision: 'rev-source-drift',
+        catalogRevision: 'revision-a',
         entries: [{ ...currentRow, ...override }],
       }))
       const callsBefore = scopedRegistry.uninstall.mock.calls.length
@@ -832,7 +841,7 @@ describe('local app main-process authorization boundary', () => {
     getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
       contractVersion: 1,
       productSpaceId: 'organization-a',
-      catalogRevision: 'rev-clean',
+      catalogRevision: 'revision-a',
       entries: [currentRow],
     }))
     seedTrustedBinding('account-a', 'organization-a', [{
@@ -840,7 +849,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: base.artifactInstanceId,
       versionId: base.versionId,
       version: base.version,
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
     await uninstall(context, base, { preserveData: true })
@@ -851,13 +860,14 @@ describe('local app main-process authorization boundary', () => {
   it('TOCTOU: concurrent authority commit during parked fresh fetch cannot launder the R1 request (DRIFT, registry 0)', async () => {
     const base = productSpaceAppIdentity()
     const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
-    // Main-owned binding R1: confirmed with enterprise_import sources.
+    // Main-owned binding R1: confirmed with the canonical name-less
+    // enterprise_import source — the request identity seals the same.
     seedTrustedBinding('account-a', 'organization-a', [{
       catalogEntryId: base.catalogEntryId,
       artifactInstanceId: base.artifactInstanceId,
       versionId: base.versionId,
       version: base.version,
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
     // fresh fetch PARKED: the handler awaits while a concurrent R2 commit
@@ -931,6 +941,75 @@ describe('local app main-process authorization boundary', () => {
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
   })
 
+  it('R28: rejects a REVISION-ONLY fresh Catalog change (byte-equivalent row) as CATALOG_IDENTITY_DRIFT with zero registry calls', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding R1: revision-a with exactly the row content the
+    // fresh revision-b Catalog returns below.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    // The fresh Catalog advanced its revision while the App row stayed
+    // BYTE-EQUIVALENT (same kind/tuple/sources/availability): identical row
+    // content must NEVER launder a stale revision-a page. The uninstall is
+    // refused so the renderer refreshes and re-confirms against the current
+    // revision.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-revision-only-r2',
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const }],
+        permissions: [],
+      }],
+    }))
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28: rejects request-vs-binding sealed source/availability mismatch BEFORE the fresh fetch (zero Catalog reads, zero registry calls)', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Binding: the confirmed row carries a creator_circle source.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      availability: 'available' as const,
+    }])
+    getProductSpaceCatalog.mockClear()
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    // Sealed SOURCES differ from the binding: a re-rendered page cannot
+    // smuggle different sources through the bare-tuple check.
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    // Sealed AVAILABILITY differs from the binding.
+    await expect(uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    // Both rejections happened BEFORE the fresh Catalog fetch.
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
   it('rejects uninstalling an OLD republished tuple when the same entry/artifact is re-released at a NEW version (live drift, not tombstone)', async () => {
     // Sequence: the old version WAS withdrawn and retained as a trusted
     // tombstone; the same stable entry + artifact is then REPUBLISHED at a
@@ -941,9 +1020,9 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-instance-a',
       versionId: 'version-old',
       version: '2.0.0',
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
-    }])
+    }], { catalogRevision: 'revision-republished' })
     seedTombstoneBinding(
       'account-a', 'organization-a',
       'catalog-entry-a', 'artifact-instance-a', 'version-old', '2.0.0',
@@ -977,7 +1056,9 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-instance-a',
       versionId: 'version-old',
       version: '2.0.0',
-      catalogRevision: 'revision-a',
+      catalogRevision: 'revision-republished',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'available' as const,
     }, { preserveData: true })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
@@ -1004,7 +1085,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: base.artifactInstanceId,
       versionId: base.versionId,
       version: base.version,
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
 
@@ -1017,7 +1098,7 @@ describe('local app main-process authorization boundary', () => {
       getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
         contractVersion: 1,
         productSpaceId: 'organization-a',
-        catalogRevision: 'rev-drift',
+        catalogRevision: 'revision-a',
         entries: [{ ...currentEntry(), ...drifted }],
       }))
       const callsBefore = scopedRegistry.uninstall.mock.calls.length
@@ -1026,13 +1107,17 @@ describe('local app main-process authorization boundary', () => {
       expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
     }
 
-    // Genuinely missing entry + trusted retained tombstone → cleanup.
+    // Genuinely missing entry + trusted retained tombstone → cleanup. The
+    // request is the withdrawn view's sealed identity: it carries the
+    // tombstone's sources and the raw 'withdrawn' availability.
     seedTrustedBinding('account-a', 'organization-a', [], {
       tombstones: [{
         catalogEntryId: base.catalogEntryId,
         artifactInstanceId: base.artifactInstanceId,
         versionId: base.versionId,
         version: base.version,
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
         withdrawnAt: 1,
       }],
     })
@@ -1042,7 +1127,7 @@ describe('local app main-process authorization boundary', () => {
       catalogRevision: 'rev-missing',
       entries: [],
     }))
-    await uninstall(context, base, { preserveData: true })
+    await uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true })
     expect(scopedRegistry.uninstall).toHaveBeenCalled()
 
     // Missing entry WITHOUT tombstone evidence → fail closed.
@@ -1061,6 +1146,8 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-never',
       versionId: 'version-never',
       version: '1.0.0',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'available' as const,
     }, { preserveData: true })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
 
@@ -1083,7 +1170,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: base.artifactInstanceId,
       versionId: base.versionId,
       version: base.version,
-      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
     await expect(uninstall(context, base, { preserveData: true }))
@@ -1113,7 +1200,7 @@ describe('local app main-process authorization boundary', () => {
       artifactInstanceId: 'artifact-w',
       versionId: 'version-w',
       version: '2.0.0',
-      sources: [{ kind: 'enterprise_import', name: 'Organization W' }],
+      sources: [{ kind: 'enterprise_import' }],
       availability: 'available' as const,
     }])
     seedTombstoneBinding()
@@ -1129,6 +1216,8 @@ describe('local app main-process authorization boundary', () => {
       versionId: 'version-w',
       version: '2.0.0',
       catalogRevision: 'revision-a',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'available' as const,
     }, { preserveData: true })).rejects.toMatchObject({ errorCode: 'UNAUTHORIZED', status: 401 })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
@@ -1257,6 +1346,8 @@ describe('local app main-process authorization boundary', () => {
       versionId: `authority-version-${index}`,
       version: '1.0.0',
       catalogRevision: 'revision-a',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'withdrawn' as const,
     }))
     const set = authorityTuplesByScope.get(authorityScopeKey('account-a', 'organization-a'))!
     for (const identity of identities) {
@@ -1367,6 +1458,8 @@ describe('local app main-process authorization boundary', () => {
         versionId: `version-${index}`,
         version: '2.3.4',
         catalogRevision: 'revision-a',
+        sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+        availability: 'available' as const,
       }))
       getProductSpaceCatalog.mockImplementation(async () => ({
         contractVersion: 1,
@@ -1425,6 +1518,8 @@ describe('local app main-process authorization boundary', () => {
         versionId: `version-${index}`,
         version: '2.3.4',
         catalogRevision: 'revision-a',
+        sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+        availability: 'available' as const,
       }))
       getProductSpaceCatalog.mockImplementation(async () => ({
         contractVersion: 1,

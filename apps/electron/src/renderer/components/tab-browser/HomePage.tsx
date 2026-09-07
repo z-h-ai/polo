@@ -244,6 +244,22 @@ export function __homeQuickWriterStatsForTests(contextKey: string): {
   }
 }
 
+/**
+ * Test-only EVENT-DRIVEN barrier: resolves after the context writer's
+ * hydration gate has settled and every queued mutation task has finished —
+ * never after an elapsed-time wait. Resolves `false` when work is still
+ * pending (busy tasks or an in-flight activation), so tests can assert a
+ * deterministic settled lifecycle before negative persistence expectations.
+ */
+export function __homeQuickWriterSettledForTests(contextKey: string): Promise<boolean> {
+  const writer = homeQuickWriters.get(contextKey)
+  if (!writer) return Promise.resolve(true)
+  return writer.gate
+    .catch(() => undefined)
+    .then(() => writer.queue)
+    .then(() => writer.busy === 0 && !writer.hydrating)
+}
+
 export function HomePage() {
   const { t } = useTranslation()
   const { openApp } = useTabShell()

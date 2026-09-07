@@ -69,21 +69,12 @@ function isValidAuthorityEntry(entry: unknown): entry is ProductSpaceCatalogAuth
   return AuthorityEntrySchema.safeParse(entry).success
 }
 
-export interface ProductSpaceCatalogAuthorityEntry {
-  kind: 'app'
-  catalogEntryId: string
-  artifactInstanceId: string
-  versionId: string
-  version: string
-  name: string
-  description: string
-  iconUrl?: string
-  availability: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
-  unavailableReason?: string
-  sources: Array<{ kind: string; name: string; circleId?: string }>
-  permissions: string[]
-  withdrawnAt?: number
-}
+/**
+ * DERIVED from AuthorityEntrySchema (single authoritative shape): a schema
+ * edit changes this type in the same commit, so the persisted entry type can
+ * never silently diverge from the runtime parser.
+ */
+export type ProductSpaceCatalogAuthorityEntry = z.output<typeof AuthorityEntrySchema>
 
 interface ProductSpaceCatalogAuthorityRecord {
   /** Explicit EXHAUSTIVE discriminant — every durable record carries one. */
@@ -406,12 +397,15 @@ function stripToAuthorityEntry(
   ) return null
   // Credential stripping: the Catalog DTO carries no download data, and the
   // version checksum (delivery-adjacent) is dropped here so the persisted
-  // authority can explain and manage but never feed delivery.
+  // authority can explain and manage but never feed delivery. The branded
+  // ID fields are a compile-time projection of values that were ALREADY
+  // validated by the shared branded schemas (ProductSpaceCatalogEntrySchema
+  // runs before this projection on every caller path).
   return {
     kind: 'app',
-    catalogEntryId: entry.catalogEntryId,
-    artifactInstanceId: entry.artifactInstanceId,
-    versionId: entry.version.versionId,
+    catalogEntryId: entry.catalogEntryId as ProductSpaceCatalogAuthorityEntry['catalogEntryId'],
+    artifactInstanceId: entry.artifactInstanceId as ProductSpaceCatalogAuthorityEntry['artifactInstanceId'],
+    versionId: entry.version.versionId as ProductSpaceCatalogAuthorityEntry['versionId'],
     version: entry.version.version,
     name: entry.name,
     description: typeof entry.description === 'string' ? entry.description : '',
@@ -423,7 +417,7 @@ function stripToAuthorityEntry(
       ? entry.availability
       : 'unavailable',
     ...(typeof entry.unavailableReason === 'string'
-      ? { unavailableReason: entry.unavailableReason }
+      ? { unavailableReason: entry.unavailableReason as ProductSpaceCatalogAuthorityEntry['unavailableReason'] }
       : {}),
     sources: Array.isArray(entry.sources)
       ? entry.sources.flatMap(source => {
@@ -434,7 +428,7 @@ function stripToAuthorityEntry(
             kind: candidate.kind,
             name: candidate.name,
             ...(typeof candidate.circleId === 'string' ? { circleId: candidate.circleId } : {}),
-          }]
+          }] as ProductSpaceCatalogAuthorityEntry['sources']
         })
       : [],
     permissions: Array.isArray(entry.permissions)

@@ -639,6 +639,9 @@ describe('useAppCatalog ProductSpace launch binding', () => {
         artifactInstanceId: 'artifact-instance-a',
         versionId: 'version-a',
         version: '2.3.4',
+        // The identity seals the authoritative sources + raw availability.
+        sources: [{ kind: 'enterprise_import', name: 'Studio A', circleId: null }],
+        availability: 'available',
       },
     })
 
@@ -744,6 +747,9 @@ describe('withdrawn tombstones emitted by the Main catalog authority', () => {
       artifactInstanceId: 'artifact-w',
       versionId: 'version-w',
       version: '1.5.0',
+      // The withdrawn identity seals the tombstone sources + raw availability.
+      sources: [{ kind: 'enterprise_import', name: 'Studio W', circleId: null }],
+      availability: 'withdrawn',
     }])
 
     // A tombstone can never be opened.
@@ -1530,6 +1536,8 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
             artifactInstanceId: target.artifactInstanceId!,
             versionId: target.catalogVersion!.versionId,
             version: target.catalogVersion!.version,
+            sources: [{ kind: 'enterprise_import', name: 'Organization A', circleId: null }],
+            availability: 'available' as const,
           },
           state: 'installed' as const,
           currentVersion: target.catalogVersion!.version,
@@ -1654,6 +1662,8 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
                 artifactInstanceId: target.artifactInstanceId!,
                 versionId: target.catalogVersion!.versionId,
                 version: target.catalogVersion!.version,
+                sources: [{ kind: 'enterprise_import', name: 'Organization A', circleId: null }],
+                availability: 'available' as const,
               },
               state: 'installed' as const,
               currentVersion: target.catalogVersion!.version,

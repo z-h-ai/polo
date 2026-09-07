@@ -254,6 +254,20 @@ export interface CatalogApp {
    * no longer be launched without silently deleting it.
    */
   availability?: 'available' | 'withdrawn' | 'unavailable';
+  /**
+   * Normalized RAW authoritative sources of the Catalog entry this app was
+   * projected from. The UI-facing `sourceNames` above is a display
+   * projection (deduped names); operation identities seal THESE sources so
+   * Main can prove them against its captured authority binding.
+   */
+  catalogSources?: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>;
+  /**
+   * RAW Catalog availability of the authoritative entry (including
+   * 'withdrawn' for retained tombstones). The effective `availability` above
+   * is intentionally lossy ('blocked' collapses into 'unavailable'), so
+   * operation identities seal THIS value instead.
+   */
+  rawAvailability?: 'available' | 'unavailable' | 'blocked' | 'withdrawn';
 }
 
 export interface AppCatalogResponse {
