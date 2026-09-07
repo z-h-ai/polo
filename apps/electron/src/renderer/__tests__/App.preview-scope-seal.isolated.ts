@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement } from 'react'
+import { createElement, useLayoutEffect } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
@@ -139,6 +139,27 @@ const productSpaceState = {
 const productSpaceStateHolder = { current: productSpaceState }
 mock.module('@/hooks/useProductSpaceContext', () => ({
   useProductSpaceContextState: () => productSpaceStateHolder.current,
+}))
+
+// Review R35 fix (open observation 471a35caae45abdaebbebf21): stable sibling
+// FIRST-COMMIT observer. ProductSpaceSwitchDialog is rendered immediately
+// AFTER the ProductSpace-keyed TabShellProvider inside the real App tree, so
+// this useLayoutEffect snapshots the WHOLE document after every commit but
+// BEFORE any passive effect runs. Scope B's first committed layout is
+// therefore captured before passive closePreview can ever execute — the
+// render-time seal is the only mechanism that can keep the origin-scope
+// preview out of this snapshot.
+const siblingLayoutSnapshots: Array<{ scopeKey: string | null; html: string }> = []
+mock.module('@/components/product-space/ProductSpaceSwitchDialog', () => ({
+  ProductSpaceSwitchDialog: () => {
+    useLayoutEffect(() => {
+      siblingLayoutSnapshots.push({
+        scopeKey: productSpaceStateHolder.current.productSpaceContextKey,
+        html: document.body.innerHTML,
+      })
+    })
+    return null
+  },
 }))
 
 // ─── Fail-fast electronAPI fixture ───────────────────────────────────────────
@@ -396,14 +417,6 @@ function assertNarrowHomeMounted(): void {
 
 // ─── R35: preview scope-seal across A→B keyed switch (Review R34 issue 1) ────
 
-// Whole-tree snapshots: captured at each deterministic phase boundary from
-// the test (preview overlays portal to document.body, so the snapshot covers
-// the whole provider subtree INCLUDING portal-mounted preview surfaces).
-const layoutSnapshots: string[] = []
-function snapshotLayout(): void {
-  layoutSnapshots.push(document.body.innerHTML)
-}
-
 function scopeAState() {
   return {
     accountId: FIXTURE_ACCOUNT_ID,
@@ -481,29 +494,40 @@ describe('App preview scope-seal across A→B keyed switch (Review R34 issue 1)'
     await waitFor(() => {
       if (!screen.getByTestId('file-preview-overlay')) throw new Error('origin preview missing')
     }, { timeout: 10_000 })
-    snapshotLayout()
-    const scopeASnapshotsWithPreview = layoutSnapshots.filter(s => s.includes('file-preview-overlay'))
-    expect(scopeASnapshotsWithPreview.length).toBeGreaterThan(0)
 
-    // A→B keyed switch: swap the authoritative ProductSpace state and fire a
-    // production push event so App re-renders with the B context key.
+    // A→B keyed switch: swap the authoritative ProductSpace state and fire
+    // the production push subscription captured from the real
+    // onLlmConnectionsChanged registration — the same Main→renderer push
+    // event that re-renders App in production drives the transition.
     await act(async () => {
       productSpaceStateHolder.current = scopeBState()
-      const listener = electronApiInstance.onLlmConnectionsChanged as (cb: unknown) => void
-      // Re-register first: the fixture subscription captures the callback.
-      const register = electronApiInstance.onLlmConnectionsChanged as unknown as (cb: unknown) => () => void
-      void register
-      // The captured subscription from onLlmConnectionsChanged fires.
       fireLlmChanged([])
     })
 
-    // SYNCHRONOUS rejection (render-time scope seal): immediately after the
-    // A→B switch re-render, the stale origin-scope preview is NOT mounted —
-    // no overlay element, no content, no path.
+    // TARGET-SCOPE FIRST COMMITTED LAYOUT (core Review R35 evidence): the
+    // stable sibling useLayoutEffect captured scope B's first commit BEFORE
+    // passive effects ran. Deleting the render-time seal and keeping only
+    // passive closePreview cannot pass here — passive close executes only
+    // AFTER this layout committed, so only the synchronous render-time
+    // rejection explains a clean first B layout.
+    const firstScopeBCommit = siblingLayoutSnapshots.find(s => s.scopeKey?.endsWith('|space-b'))
+    expect(firstScopeBCommit).toBeDefined()
+    expect(firstScopeBCommit!.html.includes('file-preview-overlay')).toBe(false)
+    expect(firstScopeBCommit!.html.includes('secret.png')).toBe(false)
+    // The scope-neutral pre-hydration boundary is present in B's first
+    // commit: the keyed provider remounts before its shell restores.
+    expect(firstScopeBCommit!.html.includes('shell-scope-loading')).toBe(true)
+    // Observer sanity: the SAME observer recorded the origin-scope overlay
+    // mounted under scope A, so the absences above are real B-scope facts
+    // and not an observer blind spot.
+    expect(siblingLayoutSnapshots.some(s =>
+      s.scopeKey?.endsWith('|space-a') && s.html.includes('file-preview-overlay'),
+    )).toBe(true)
+
+    // After the switch re-render (passive effects flushed): the stale
+    // origin-scope preview is gone — no overlay element, no content, no path.
     expect(screen.queryByTestId('file-preview-overlay')).toBeNull()
     expect(document.body.innerHTML.includes('secret.png')).toBe(false)
-    snapshotLayout()
-    expect(layoutSnapshots[layoutSnapshots.length - 1]!.includes('file-preview-overlay')).toBe(false)
 
     // Hydration completes: the normal scope-B surface restores and the stale
     // preview stays gone.

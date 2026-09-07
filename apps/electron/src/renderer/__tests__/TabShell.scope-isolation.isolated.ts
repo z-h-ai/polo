@@ -27,11 +27,6 @@ if (typeof window === 'undefined') {
 }
 setupI18n()
 
-// NOTE: the REAL WindowWidthGuard module (real useNarrowViewport +
-// WindowWidthGuard) is intentionally NOT mocked — Review R34 requires the
-// narrow/wide cases to execute their true boundary paths. The controllable
-// matchMedia fixture below drives the real hook.
-
 // Fail-fast electronAPI for the reduced TabShell tree: subscriptions and the
 // localApps members the restored Home surface touches are enumerated; any
 // other access is a fixture gap and must throw.
@@ -69,12 +64,41 @@ const localAppsStub: Record<string, unknown> = {
   uninstall: async () => {},
   uninstallProductSpaceBundle: async () => {},
 }
-// Side-effect instrumentation (Review R34 issue 2): pre-hydration must not
-// register the deep-link subscription or keydown listeners; hydration
-// registers exactly once; keyed remount cleans up exactly once.
+// Side-effect instrumentation (Review R34 issue 2, completed per Review R35):
+// pre-hydration must not register the deep-link subscription or keydown
+// listeners; hydration registers exactly once; keyed remount and final
+// unmount clean up exactly once. The reduced probe tree has exactly ONE
+// producer of each side effect — TabShell — so the production deep-link API
+// subscription and every window add/removeEventListener('keydown') are both
+// counted with LIVE state (a stale closure or premature registration is
+// observable per commit, not just in aggregate totals).
 let deepLinkRegistrations = 0
 let deepLinkUnsubscribed = 0
+let keydownRegistrations = 0
+let keydownUnsubscribed = 0
 const deepLinkCallbacks: Array<unknown> = []
+const liveKeydownListeners = new Set<EventListenerOrEventListenerObject>()
+
+// Recognizable production keydown instrumentation: this reduced tree has
+// exactly one window keydown registrant (TabShell's shortcut handler), so
+// counting every window keydown add/remove and tracking the live listener
+// set identifies TabShell's own listener without depending on its private
+// closure internals.
+const nativeAddEventListener = window.addEventListener.bind(window)
+const nativeRemoveEventListener = window.removeEventListener.bind(window)
+window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+  if (type === 'keydown') {
+    keydownRegistrations += 1
+    liveKeydownListeners.add(listener)
+  }
+  return nativeAddEventListener(type, listener, options)
+}) as typeof window.addEventListener
+window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+  if (type === 'keydown' && liveKeydownListeners.delete(listener)) {
+    keydownUnsubscribed += 1
+  }
+  return nativeRemoveEventListener(type, listener, options)
+}) as typeof window.removeEventListener
 
 const localAppsProxy = new Proxy(localAppsStub, {
   get(_target, prop: string | symbol) {
@@ -154,16 +178,30 @@ const contextValue = {
 
 let layoutSnapshots: string[] = []
 
+// Per-provider-key record of every committed layout of the keyed shell, so
+// scope A's and scope B's PRE-HYDRATION first committed layouts can each be
+// asserted (Review R35: the scope-B remount boundary must be proven, not
+// only the initial scope).
+interface LayoutObservation {
+  providerKey: string
+  html: string
+}
+const layoutObservations: LayoutObservation[] = []
+
 /**
- * Records the FIRST committed layout of everything rendered inside it.
- * useLayoutEffect runs synchronously after the DOM commit but before paint,
- * so the snapshot is exactly what would have been displayed at the boundary
- * between a keyed scope switch and hydration completion.
+ * Records every committed layout of everything rendered inside it, tagged by
+ * the enclosing provider key. useLayoutEffect runs synchronously after the
+ * DOM commit but before paint, so the snapshot is exactly what would have
+ * been displayed at the boundary between a keyed scope switch and hydration
+ * completion.
  */
-function LayoutSnapshot({ children }: { children: ReactNode }) {
+function LayoutSnapshot({ providerKey, children }: { providerKey: string, children: ReactNode }) {
   useLayoutEffect(() => {
     const host = document.querySelector('[data-testid="r33-snapshot-host"]')
-    if (host) layoutSnapshots.push(host.innerHTML)
+    if (host) {
+      layoutSnapshots.push(host.innerHTML)
+      layoutObservations.push({ providerKey, html: host.innerHTML })
+    }
   })
   return createElement('div', { 'data-testid': 'r33-snapshot-host' }, children)
 }
@@ -171,18 +209,24 @@ function LayoutSnapshot({ children }: { children: ReactNode }) {
 // Passive-effect probe rendered as a SIBLING AFTER TabShell: its passive
 // effect runs after TabShell's passive effects but BEFORE the provider's
 // hydration effect, so it observes exactly the pre-hydration side-effect
-// window (Review R34 issue 2).
+// window (Review R34 issue 2). Each observation is tagged with the provider
+// key so scope A's AND scope B's pre-hydration boundaries are asserted
+// independently (Review R35).
 interface SideEffectObservation {
+  providerKey: string
   marker: string | undefined
-  deepLinkRegistrations: number
+  deepLinkLive: number
+  keydownLive: number
 }
 const sideEffectObservations: SideEffectObservation[] = []
 
-function SideEffectProbe(): ReactNode {
+function SideEffectProbe({ providerKey }: { providerKey: string }): ReactNode {
   useEffect(() => {
     sideEffectObservations.push({
+      providerKey,
       marker: document.documentElement.dataset.activeTab,
-      deepLinkRegistrations,
+      deepLinkLive: deepLinkRegistrations - deepLinkUnsubscribed,
+      keydownLive: liveKeydownListeners.size,
     })
   })
   return null
@@ -199,12 +243,13 @@ function buildShellTree(providerKey: string): ReactNode {
     require('../context/TabShellContext') as typeof import('../context/TabShellContext')
   const { TabShell } =
     require('../components/tab-browser/TabShell') as typeof import('../components/tab-browser/TabShell')
-  const inner = createElement(
-    LayoutSnapshot,
-    null,
-    createElement(TabShell, { renderPolo: WorkbenchProbe }),
-    createElement(SideEffectProbe),
-  )
+  const inner = createElement(LayoutSnapshot, {
+    providerKey,
+    children: [
+      createElement(TabShell, { key: 'tab-shell', renderPolo: WorkbenchProbe }),
+      createElement(SideEffectProbe, { key: 'side-effect-probe', providerKey }),
+    ],
+  })
   const shell = createElement(
     TabShellProvider,
     {
@@ -244,12 +289,21 @@ function installMatchMedia(): void {
   })) as unknown as typeof window.matchMedia
 }
 
+// The WindowWidthGuard module is NOT mocked (Review R34/R35 requirement):
+// the real useNarrowViewport hook and the real WindowWidthGuard component
+// execute their true boundary paths, driven by the controllable matchMedia
+// fixture above (dynamic `matches` getter on `narrowViewportActive`).
+
 beforeEach(() => {
   narrowViewportActive = false
   installMatchMedia()
   layoutSnapshots = []
+  layoutObservations.length = 0
   deepLinkRegistrations = 0
   deepLinkUnsubscribed = 0
+  keydownRegistrations = 0
+  keydownUnsubscribed = 0
+  liveKeydownListeners.clear()
   deepLinkCallbacks.length = 0
   sideEffectObservations.length = 0
 })
@@ -332,59 +386,101 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
   }, 30_000)
 
-  it('pre-hydration side effects stay scope-neutral: no stale route marker, no listener registrations until ready; keyed remount cleans up exactly once', async () => {
+  it('pre-hydration side effects stay scope-neutral for scope A AND scope B: no stale route marker, no live deep-link/keydown listener until ready; keyed remount and final unmount clean up exactly', async () => {
     seedStalePreviousScope()
 
     const { rerender } = render(buildShellTree('scope-a'))
 
-    // Hydration completes (synchronously for a ProductSpace-keyed window):
-    // marker publishes the CURRENT route, listeners register (bootstrap may
-    // re-subscribe on dependency churn — the LIVE count must be exactly one
-    // per channel, and none may exist before ready).
+    // Scope-A first committed LAYOUT boundary (provider-key tagged): the
+    // fail-closed scope-neutral shell — the stale previous-scope surfaces are
+    // never mounted or displayed.
+    const scopeALayouts = layoutObservations.filter(l => l.providerKey === 'scope-a')
+    expect(scopeALayouts.length).toBeGreaterThan(0)
+    expect(scopeALayouts[0]!.html.includes('shell-scope-loading')).toBe(true)
+    expect(scopeALayouts[0]!.html.includes('旧空间 App')).toBe(false)
+    expect(scopeALayouts[0]!.html.includes('old-scope.example.com')).toBe(false)
+    expect(scopeALayouts[0]!.html.includes('<webview')).toBe(false)
+    expect(scopeALayouts[0]!.html.includes('polo-app-root')).toBe(false)
+
+    // Hydration: marker publishes the CURRENT route and the CURRENT scope
+    // holds EXACTLY ONE live deep-link subscription and ONE live keydown
+    // listener (registration may churn during bootstrap — liveness is what
+    // must be exactly one, none may exist before ready).
     await waitFor(() => {
       if (document.documentElement.dataset.activeTab !== 'home') throw new Error('marker not published')
     })
     expect(deepLinkRegistrations).toBeGreaterThanOrEqual(1)
     expect(deepLinkRegistrations - deepLinkUnsubscribed).toBe(1)
+    expect(keydownRegistrations).toBeGreaterThanOrEqual(1)
+    expect(liveKeydownListeners.size).toBe(1)
 
-    // Keyed scope switch: the provider remounts under a NEW key — the old
-    // subscription/listener cleanup runs and the new scope registers; the
-    // live count returns to exactly one after B's hydration.
+    // Scope-A PRE-HYDRATION effect boundary: EVERY marker-neutral observation
+    // of scope A — recorded after TabShell's own passive effects but before
+    // the provider's hydration effect — shows zero live listeners on both
+    // channels, and the very first observation of the tree is scope A's
+    // fully neutral boundary.
+    const scopeAPreHydration = sideEffectObservations.filter(o => o.providerKey === 'scope-a' && o.marker === undefined)
+    expect(scopeAPreHydration.length).toBeGreaterThan(0)
+    for (const observation of scopeAPreHydration) {
+      expect(observation.deepLinkLive).toBe(0)
+      expect(observation.keydownLive).toBe(0)
+    }
+    expect(sideEffectObservations[0]).toEqual({
+      providerKey: 'scope-a',
+      marker: undefined,
+      deepLinkLive: 0,
+      keydownLive: 0,
+    })
+
+    // Keyed scope switch A→B: A's cleanup runs, B mounts pre-hydrated.
     act(() => {
       rerender(buildShellTree('scope-b'))
     })
+
+    // Scope-B first committed LAYOUT boundary: the SAME scope-neutral shell —
+    // no stale previous-scope surfaces, nothing inherited from scope A.
+    const scopeBLayouts = layoutObservations.filter(l => l.providerKey === 'scope-b')
+    expect(scopeBLayouts.length).toBeGreaterThan(0)
+    expect(scopeBLayouts[0]!.html.includes('shell-scope-loading')).toBe(true)
+    expect(scopeBLayouts[0]!.html.includes('旧空间 App')).toBe(false)
+    expect(scopeBLayouts[0]!.html.includes('old-scope.example.com')).toBe(false)
+    expect(scopeBLayouts[0]!.html.includes('<webview')).toBe(false)
+    expect(scopeBLayouts[0]!.html.includes('polo-app-root')).toBe(false)
+
+    // Scope-B PRE-HYDRATION effect boundary: scope A's listeners were already
+    // cleaned up and scope B has not registered anything — zero live on both
+    // channels, no stale route marker (a transient stale keydown closure or
+    // a premature B-remount registration cannot escape this).
+    const scopeBPreHydration = sideEffectObservations.filter(o => o.providerKey === 'scope-b' && o.marker === undefined)
+    expect(scopeBPreHydration.length).toBeGreaterThan(0)
+    for (const observation of scopeBPreHydration) {
+      expect(observation.deepLinkLive).toBe(0)
+      expect(observation.keydownLive).toBe(0)
+    }
+    // No observation may ever publish the STALE route marker ('polo' active
+    // while pre-hydration is the R33 regression signature).
+    for (const observation of sideEffectObservations) {
+      expect(observation.marker).not.toBe('polo')
+    }
+
+    // Scope-B hydrated: again EXACTLY ONE live listener per channel.
     await waitFor(() => {
       if (document.documentElement.dataset.activeTab !== 'home') throw new Error('marker not published for scope-b')
     })
     expect(deepLinkRegistrations - deepLinkUnsubscribed).toBe(1)
+    expect(liveKeydownListeners.size).toBe(1)
 
-
-    // Unmount: cleanup accounting balances exactly — every registration was
-    // cleaned up exactly once.
+    // Final unmount: cleanup accounting balances EXACTLY — every deep-link
+    // registration and every keydown registration was cleaned up exactly
+    // once, nothing stays live, and the route marker returns to neutral.
+    // (No hydrated-marker wait after unmount — the shell is gone.)
     act(() => {
       rerender(null as unknown as ReactNode)
     })
     expect(deepLinkUnsubscribed).toBe(deepLinkRegistrations)
-
-    // PRE-HYDRATION observations (recorded by the passive-effect probe that
-    // runs after TabShell's own passive effects but before the provider's
-    // hydration): the very first observation must be scope-NEUTRAL — no
-    // stale route marker published, no listener registered.
-    expect(sideEffectObservations.length).toBeGreaterThan(0)
-    expect(sideEffectObservations[0]).toEqual({
-      marker: undefined,
-      deepLinkRegistrations: 0,
-    })
-    // No observation may ever show the STALE route marker ('polo' active
-    // while pre-hydration). Post-switch pre-hydration observations
-    // legitimately show monotonically growing counters (the global atoms
-    // accumulate across keyed remounts); only the very first observation
-    // pins the full neutral state.
-    for (const observation of sideEffectObservations) {
-      if (observation.marker === 'polo') {
-        throw new Error('stale route marker published pre-hydration')
-      }
-    }
+    expect(keydownUnsubscribed).toBe(keydownRegistrations)
+    expect(liveKeydownListeners.size).toBe(0)
+    expect(document.documentElement.dataset.activeTab).toBeUndefined()
   }, 30_000)
 })
 
