@@ -394,6 +394,15 @@ const {
 const { runUnderSwitchMutex } = await import('@polo-ai/server-core/runtime/product-space-executions')
 const { PRODUCT_SPACE_CONTRACT_VERSION, ProductSpaceExecutionScopeSchema } =
   await import('@polo-ai/shared/product-spaces')
+// TEST-ONLY internal seam via an explicit relative source path: the typed
+// switch-mutex event registry lets this regression prove FIFO lock order
+// without any timing window. The internal module is deliberately NOT
+// re-exported through product-space-executions or any package exports map —
+// this relative import reaches the same source module instance the
+// production handler's runUnderSwitchMutex executes on.
+const { pendingSwitchLockTasks, switchLockEventLog } = await import(
+  '../../../../../../packages/server-core/src/runtime/switch-lock-internal'
+)
 
 function createCatalog(count: number): AppCatalogCacheEntry {
   return {
@@ -1264,29 +1273,48 @@ describe('local app main-process authorization boundary', () => {
     })
 
     // 2. Defer the registry uninstall and observe the RPC INSIDE the atomic
-    // region before queuing the revoke.
-    let registryEntered = false
+    // region: the mock resolves the `entered` Deferred synchronously at the
+    // top of the side effect, so awaiting it is event-driven — no polling,
+    // no timeout, no timing window.
     let releaseRegistry!: () => void
     const registryGate = new Promise<void>(resolve => { releaseRegistry = resolve })
+    let registrySettled = false
+    let signalRegistryEntered!: () => void
+    const registryEntered = new Promise<void>(resolve => { signalRegistryEntered = resolve })
     scopedRegistry.uninstall.mockImplementationOnce(async () => {
-      registryEntered = true
+      signalRegistryEntered()
       await registryGate
+      registrySettled = true
     })
     const pending = uninstall(context, base, { preserveData: true })
-    for (let i = 0; i < 300 && !registryEntered; i++) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    if (!registryEntered) throw new Error('uninstall never reached the registry side effect')
+    await registryEntered
 
-    // 3. Queue the revoke while the side effect is still pending. The switch
-    // mutex must keep it BLOCKED: it can neither settle nor interleave the
-    // atomic region — the execution unregister runs only with the registry.
+    // Typed switch-mutex evidence through the test-only internal seam
+    // (relative source import — the internal module is NOT re-exported
+    // through product-space-executions or any package exports map). The
+    // identical pending/event state proves the same module instance backs
+    // the production handler. Exactly the uninstall's runtime-public-mutex
+    // task is RUNNING.
+    expect(switchLockEventLog().map(event => event.token)).toEqual([
+      { phase: 'runtime-public-mutex' },
+    ])
+    expect(pendingSwitchLockTasks()).toBe(1)
+
+    // 3. Queue the production revoke SYNCHRONOUSLY: withSwitchLock registers
+    // its typed token before its first await, so the FIFO order behind the
+    // running uninstall is observable immediately — no timers, no sleep, no
+    // Date.now window.
     let revokeSettled = false
     const revoke = revokeRuntimeProductSpaceFence().then(() => { revokeSettled = true })
-    for (let i = 0; i < 10; i++) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-      expect(revokeSettled).toBe(false)
-    }
+    expect(switchLockEventLog().map(event => event.token)).toEqual([
+      { phase: 'runtime-public-mutex' },
+      { phase: 'runtime-revoke-fence' },
+    ])
+    expect(pendingSwitchLockTasks()).toBe(2)
+    // Both fence-clearing operations of the revoke can only run once it
+    // acquires the mutex — it cannot have settled, and the atomic region
+    // (execution unregister runs only with the registry) is not interleaved.
+    expect(revokeSettled).toBe(false)
     expect(
       listRegisteredProductSpaceExecutions().filter(execution => execution.kind === 'local_app'),
     ).toHaveLength(1)
@@ -1296,6 +1324,7 @@ describe('local app main-process authorization boundary', () => {
     // completed destructive operation into NOT_AUTHORIZED.
     releaseRegistry!()
     await pending
+    expect(registrySettled).toBe(true)
     expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
       kind: 'catalog',
       accountId: 'account-a',
@@ -1303,9 +1332,12 @@ describe('local app main-process authorization boundary', () => {
       catalogAppId: base.artifactInstanceId,
     }, { preserveData: true })
     // The queued revoke then completes normally and clears the fence; the
-    // final fence/registry/execution state is consistent.
+    // final fence/registry/execution state is consistent and the switch
+    // mutex drains completely (typed FIFO order fully settled).
     await revoke
     expect(revokeSettled).toBe(true)
+    expect(pendingSwitchLockTasks()).toBe(0)
+    expect(switchLockEventLog()).toEqual([])
     expect(getRuntimeActiveProductSpace()).toBeNull()
     expect(
       listRegisteredProductSpaceExecutions().filter(execution => execution.kind === 'local_app'),
