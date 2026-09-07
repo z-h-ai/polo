@@ -386,9 +386,14 @@ const {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
+  getRuntimeActiveProductSpace,
   listRegisteredProductSpaceExecutions,
+  registerProductSpaceExecution,
+  revokeRuntimeProductSpaceFence,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
 const { runUnderSwitchMutex } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { PRODUCT_SPACE_CONTRACT_VERSION, ProductSpaceExecutionScopeSchema } =
+  await import('@polo-ai/shared/product-spaces')
 
 function createCatalog(count: number): AppCatalogCacheEntry {
   return {
@@ -1215,6 +1220,96 @@ describe('local app main-process authorization boundary', () => {
     await expect(uninstall(context, paddedIdentity, { preserveData: true }))
       .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
     expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R29: a revoke queued behind the uninstall mutex can never flip the completed destructive uninstall into NOT_AUTHORIZED', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // 1. Legal live uninstall: trusted binding + fresh Catalog at the SAME
+    // revision.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    // A live local_app execution record that the uninstall must unregister
+    // (subject artifact instance == the uninstall's scope catalogAppId, the
+    // production unregister matching rule).
+    registerProductSpaceExecution({
+      scope: ProductSpaceExecutionScopeSchema.parse({
+        contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+        executionId: 'local-app:organization-a:r29-exec',
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        workspaceId: 'ws-window-a',
+        subject: {
+          kind: 'artifact_instance',
+          artifactType: 'app',
+          artifactInstanceId: base.artifactInstanceId,
+          versionId: base.versionId,
+          version: base.version,
+        },
+      }),
+      kind: 'local_app',
+      name: 'R29 Uninstall Exec',
+      ref: 'local-app:organization-a:r29-exec',
+      generation: 0,
+      isActive: async () => true,
+      stop: async () => 'stopped' as const,
+    })
+
+    // 2. Defer the registry uninstall and observe the RPC INSIDE the atomic
+    // region before queuing the revoke.
+    let registryEntered = false
+    let releaseRegistry!: () => void
+    const registryGate = new Promise<void>(resolve => { releaseRegistry = resolve })
+    scopedRegistry.uninstall.mockImplementationOnce(async () => {
+      registryEntered = true
+      await registryGate
+    })
+    const pending = uninstall(context, base, { preserveData: true })
+    for (let i = 0; i < 300 && !registryEntered; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    if (!registryEntered) throw new Error('uninstall never reached the registry side effect')
+
+    // 3. Queue the revoke while the side effect is still pending. The switch
+    // mutex must keep it BLOCKED: it can neither settle nor interleave the
+    // atomic region — the execution unregister runs only with the registry.
+    let revokeSettled = false
+    const revoke = revokeRuntimeProductSpaceFence().then(() => { revokeSettled = true })
+    for (let i = 0; i < 10; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(revokeSettled).toBe(false)
+    }
+    expect(
+      listRegisteredProductSpaceExecutions().filter(execution => execution.kind === 'local_app'),
+    ).toHaveLength(1)
+
+    // 4. Release the registry: the uninstall RPC RESOLVES TRUTHFULLY — the
+    // queued revoke running afterwards can never retroactively turn the
+    // completed destructive operation into NOT_AUTHORIZED.
+    releaseRegistry!()
+    await pending
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: base.artifactInstanceId,
+    }, { preserveData: true })
+    // The queued revoke then completes normally and clears the fence; the
+    // final fence/registry/execution state is consistent.
+    await revoke
+    expect(revokeSettled).toBe(true)
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+    expect(
+      listRegisteredProductSpaceExecutions().filter(execution => execution.kind === 'local_app'),
+    ).toHaveLength(0)
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
   })
 

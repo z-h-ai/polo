@@ -326,8 +326,10 @@ function hookWithCatalog(
 }
 
 describe('HomePage quick access (POO-43)', () => {
-  it('always shows the fixed Polo assistant and opens the Polo tab', () => {
+  it('always shows the fixed Polo assistant and opens the Polo tab', async () => {
     renderHome()
+    // Flush mount-triggered hydration settlements inside act.
+    await act(async () => {})
 
     const poloEntry = screen.getByTestId('home-quick-entry-polo')
     expect(within(poloEntry).getByText('Polo Assistant')).toBeTruthy()
@@ -335,8 +337,9 @@ describe('HomePage quick access (POO-43)', () => {
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
   })
 
-  it('hides space management entries when no ProductSpace context exists', () => {
+  it('hides space management entries when no ProductSpace context exists', async () => {
     renderHome()
+    await act(async () => {})
 
     expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
     expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
@@ -542,13 +545,14 @@ describe('HomePage quick access (POO-43)', () => {
     expect(openApp).not.toHaveBeenCalled()
   })
 
-  it('keeps Polo visible while the current Catalog is loading or failed', () => {
+  it('keeps Polo visible while the current Catalog is loading or failed', async () => {
     appCatalogHook = hookWithCatalog(
       enterpriseCatalogWith([]),
       {},
       { catalog: null, loading: true },
     )
     const loading = renderHome()
+    await act(async () => {})
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
     expect(screen.getByTestId('home-quick-access-loading')).toBeTruthy()
     loading.unmount()
@@ -559,6 +563,7 @@ describe('HomePage quick access (POO-43)', () => {
       { catalog: null, loading: false, errorCode: 'NETWORK_ERROR' },
     )
     renderHome()
+    await act(async () => {})
     expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
     expect(screen.getByText('Could not load the App catalog')).toBeTruthy()
   })
@@ -2201,7 +2206,7 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.getByText('Manage App A')).toBeTruthy()
   })
 
-  it('shows the add-shortcut tile only with free slots and a Catalog', () => {
+  it('shows the add-shortcut tile only with free slots and a Catalog', async () => {
     const appA: CatalogApp = {
       id: 'tile-app-a',
       organizationId: 'organization-a',
@@ -2214,12 +2219,14 @@ describe('HomePage quick access (POO-43)', () => {
     }
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const view = renderHome()
+    await act(async () => {})
     expect(screen.getByTestId('home-quick-access-add')).toBeTruthy()
     view.unmount()
 
     // No ProductSpace context → no add tile.
     appCatalogHook = signedOutCatalogHook()
     const signedOut = renderHome()
+    await act(async () => {})
     expect(signedOut.queryByTestId('home-quick-access-add')).toBeNull()
   })
 })

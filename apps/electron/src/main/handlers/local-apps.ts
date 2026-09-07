@@ -1298,13 +1298,20 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // awaits already completed ABOVE the lock (lock order: the switch lock
       // must never be held across the Admin session lock or network I/O).
       // The checks are synchronous and re-run INSIDE the lock.
+      //
+      // This block is the FINAL LINEARIZATION POINT and its completion is
+      // the uninstall's returned outcome: once the registry mutation and
+      // execution unregister succeed here, the RPC MUST resolve truthfully.
+      // A revoke queued behind this mutex correctly runs AFTER it and may
+      // clear the fence — it can never retroactively turn the completed
+      // destructive operation into NOT_AUTHORIZED (the previous trailing
+      // async account recheck did exactly that and invited unsafe retries).
       await runUnderSwitchMutex(async () => {
         assertProductSpaceAppOperationCurrent(app)
         const scope = productSpaceBundleScope(app)
         await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
         unregisterLocalAppExecutions(scope)
       })
-      await assertProductSpaceAccountCurrent(app)
     },
   )
 
