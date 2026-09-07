@@ -57,6 +57,8 @@ import {
 } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
+import { activeTabIdAtom } from '@/atoms/tab-browser'
+import { HOME_TAB_ID } from '../shared/tab-browser-types'
 import { extractBadges } from '@/lib/mentions'
 import { getDefaultStore } from 'jotai'
 import {
@@ -413,9 +415,15 @@ export default function App() {
     currentAdminUserIdRef.current = nextAccountId
     setCurrentAdminUser(user)
   }, [])
-  // REQ-010/POO-41 frozen guard: below 640px the workbench/hub is replaced
-  // by the fullscreen narrow-window guard.
+  // REQ-010/POO-41 frozen guard, ROUTE-SCOPED (Review R31): below 640px the
+  // POLO WORKBENCH and other non-Home tab surfaces still fail closed to the
+  // fullscreen narrow-window guard, but the POO-43 member Home is a REQUIRED
+  // mobile surface (390x844 parity) and renders normally through the
+  // production route. The active tab lives in the ambient Jotai store, so
+  // this predicate tracks the real route without reordering the providers.
   const narrowViewport = useNarrowViewport()
+  const activeTabId = useAtomValue(activeTabIdAtom)
+  const narrowGuardedRoute = narrowViewport && activeTabId !== HOME_TAB_ID
   const productSpaceRefreshGenerationRef = useRef(0)
   const invalidateProductSpaceDeepLinkRefresh = useCallback(() => {
     productSpaceRefreshGenerationRef.current += 1
@@ -2819,9 +2827,10 @@ export default function App() {
     },
   }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
 
-  // Narrow-window guard (POO-41 frozen): below 640px the workbench/hub is
-  // hidden and the fullscreen guard renders instead of any product UI.
-  if (narrowViewport) {
+  // Narrow-window guard (POO-41 frozen, route-scoped per Review R31): the
+  // workbench/non-Home tab surfaces are replaced by the fullscreen guard;
+  // the Home tab keeps rendering the required POO-43 mobile surface.
+  if (narrowGuardedRoute) {
     return <WindowWidthGuard />
   }
 

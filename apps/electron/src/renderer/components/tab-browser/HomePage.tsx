@@ -791,7 +791,7 @@ export function HomePage() {
             {/* Frozen launcher hero: row with bottom-aligned side action at
             desktop/tablet; stacks under the text at the ≤760px breakpoint
             exactly like the frozen ≤760px `.hero` column rule. */}
-            <div className="flex items-end justify-between gap-[24px] max-[760px]:flex-col max-[760px]:items-start">
+            <div className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end">
               <div>
                 <h1 className="m-0 text-[36px] font-semibold leading-[1.08] tracking-[-0.05em]">
                   {t('homeApps.home.greeting')}
@@ -877,7 +877,7 @@ export function HomePage() {
                 <article
                   data-testid="home-quick-entry-polo"
                   onClick={openPoloAssistant}
-                  className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[20px] shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
+                  className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
                 >
                   <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-accent/12 text-accent text-[17px]">✦</span>
                   <h3 className="m-0 text-[16px] font-semibold">{t('homeApps.home.poloTitle')}</h3>
@@ -901,13 +901,13 @@ export function HomePage() {
                 </article>
                 {catalog.state.loading && !catalog.state.catalog ? (
                   <div
-                    className="flex min-h-[222px] max-[1080px]:min-h-[210px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
+                    className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
                     data-testid="home-quick-access-loading"
                   >
                     <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : catalog.state.errorCode && !catalog.state.catalog ? (
-                  <div className="flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-6 text-center">
+                  <div className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-6 text-center">
                     <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
                     <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
                     <p className="mt-1 max-w-md text-xs text-muted-foreground">
@@ -927,7 +927,7 @@ export function HomePage() {
                           data-testid="home-quick-entry"
                           data-identity-key={uiKeyForApp(app)}
                           onClick={() => { void openCatalogApp(app) }}
-                          className="flex min-h-[222px] max-[1080px]:min-h-[210px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[20px] shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]"
+                          className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
                         >
                           <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-success/12 text-success text-[17px]">{artGlyph}</span>
                           <h3 className="m-0 text-[16px] font-semibold">{app.name}</h3>
@@ -961,7 +961,7 @@ export function HomePage() {
                         type="button"
                         data-testid="home-quick-access-add"
                         onClick={() => setManageOpen(true)}
-                        className="flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col items-center justify-center gap-3 rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
+                        className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center gap-3 rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
                       >
                         <Icons.Plus className="size-6" strokeWidth={1.5} />
                         <span className="text-[12px]">{t('homeApps.quick.add')}</span>

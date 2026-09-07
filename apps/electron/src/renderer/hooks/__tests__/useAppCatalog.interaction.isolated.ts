@@ -413,7 +413,8 @@ describe('useAppCatalog creator circle relations', () => {
     expect(getProductSpaceInstallStates).not.toHaveBeenCalled()
   })
 
-  it('clears derived creator circles when a Catalog refresh fails', async () => {    // The wrapper stub maps entries from catalog.apps; for this test the
+  it('clears derived creator circles when a Catalog refresh fails', async () => {
+    // The wrapper stub maps entries from catalog.apps; for this test the
     // product-space RPC is replaced directly so raw entries (with
     // creator_circle sources) reach the hook.
     const entriesWithCircle = [{
