@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useAtomValue } from 'jotai'
-import { skillsAtom } from '@/atoms/skills'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -291,9 +289,12 @@ export function HomePage() {
    */
   const quickHydratedContextRef = useRef<string | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
-  // Frozen POO-41 assistant card: the source line reports the enabled Skill
-  // count from the live skills store ("Polo 内置 · N 个 Skill 已启用").
-  const skills = useAtomValue(skillsAtom)
+  // The frozen assistant-card Skill count is deliberately omitted: the only
+  // Skill store reachable from Home is the process-global workspace
+  // skillsAtom, which is not keyed by account/ProductSpace/owner epoch — a
+  // target-scope first commit could display the previous scope's count
+  // (R39 review). It returns to the frozen neutral "Polo 内置" until a
+  // scope-keyed authoritative source exists.
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
     launch: BundleAppLaunch
@@ -763,29 +764,33 @@ export function HomePage() {
     }
   }
 
-  // Frozen POO-41 home-card contract: creator_circle-sourced Apps present
-  // their source as 「认证创作者 · {creator}」; other sources keep the plain
-  // joined source names.
+  // Frozen POO-41 home-card contract: every server-authoritative
+  // catalogSources entry stays visible with its identity — creator_circle
+  // entries carry the localized 认证创作者 label, other entries keep their
+  // organization/source name, and multiplicity is preserved.
   const renderQuickEntrySource = (app: CatalogApp) => {
-    const creatorCircle = app.catalogSources?.find(
-      (source) => source.kind === 'creator_circle' && source.name,
-    )
-    if (creatorCircle?.name) {
-      return t('homeApps.home.certifiedCreatorSource', { creator: creatorCircle.name })
-    }
-    return app.sourceNames?.length
-      ? app.sourceNames.join(' · ')
-      : t('homeApps.allApps.unknownSource')
+    const sources = app.catalogSources?.length
+      ? app.catalogSources
+      : (app.sourceNames ?? []).map((name) => ({ kind: '', name }))
+    if (sources.length === 0) return t('homeApps.allApps.unknownSource')
+    return sources
+      .map((source) => (
+        source.kind === 'creator_circle' && source.name
+          ? t('homeApps.home.certifiedCreatorSource', { creator: source.name })
+          : source.name || t('homeApps.allApps.unknownSource')
+      ))
+      .join(' · ')
   }
 
   return (
     // Frozen POO-41 `.main` mirror: the centered 1260px column with the
-    // breakpoint paddings INSIDE it, content-sized exactly like the frozen
-    // `.main` (the frozen page clips overflow at the body — no internal
-    // scrolling), so the launcher geometry tracks the reference at every
-    // viewport.
+    // breakpoint paddings INSIDE it. The column is ALSO the viewport-bounded
+    // vertical scroll owner (h-full min-h-0 overflow-y-auto): html/body/#root
+    // are overflow-hidden globally, so this element must own scrolling or
+    // every launcher row and Catalog App below the fold becomes unreachable
+    // (R39 review, hub unreachable-overflow defect).
     <main
-      className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+      className="mx-auto h-full min-h-0 w-full max-w-[1260px] overflow-y-auto bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
       <div className="space-y-[34px]">
@@ -906,7 +911,7 @@ export function HomePage() {
                 >
                   <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent text-[17px]">✦</span>
                   <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
-                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSourceWithSkills', { count: skills.length })}</p>
+                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
                   <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                     {t('homeApps.home.poloDescription')}
                   </p>
@@ -956,8 +961,8 @@ export function HomePage() {
                         >
                           <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success text-[17px]">{artGlyph}</span>
                           <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
-                          <p className="mt-[4px] truncate text-[12px] text-muted-foreground">
-                            {app.sourceNames?.length ? app.sourceNames.join(' · ') : t('homeApps.allApps.unknownSource')}
+                          <p className="mt-[4px] truncate text-[12px] leading-[normal] text-muted-foreground">
+                            {renderQuickEntrySource(app)}
                           </p>
                           <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                             {app.description || t('homeApps.noDescription')}

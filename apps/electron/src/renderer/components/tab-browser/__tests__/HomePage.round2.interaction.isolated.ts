@@ -362,6 +362,126 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.queryByTestId('all-apps-row')).toBeNull()
   })
 
+  it('home-app-hub owns viewport-bounded vertical scrolling: max-five work Apps and full Catalog rows stay reachable (R39 review)', async () => {
+    // MAXIMUM five work Apps pinned — the frozen launcher grid then holds the
+    // fixed Polo assistant plus five cards that overflow any realistic
+    // viewport, so the hub itself must own the vertical scroll (R39 review:
+    // html/body/#root are overflow-hidden and no ancestor may swallow it).
+    const apps: CatalogApp[] = ['Work App A', 'Work App B', 'Work App C', 'Work App D', 'Work App E'].map((name, index) => ({
+      id: `scroll-app-${index}`,
+      organizationId: 'organization-a',
+      name,
+      description: `${name} description`,
+      deliveryMode: 'remote_url',
+      remoteUrl: `https://scroll-${index}.example.com`,
+      sortOrder: index,
+      availability: 'available',
+      catalogEntryId: `cat-scroll-${index}`,
+      artifactInstanceId: `arti-scroll-${index}`,
+      catalogSources: [{ kind: 'creator_circle', name: `Scroll Circle ${index}` }],
+    }))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    quickAccessByContext.set(contextKey, apps.map((app, index) => ({
+      id: appCatalogHook.uiIdentityKeyForApp(app),
+      addedAt: 1 + index,
+    })))
+
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(5)
+    })
+
+    // The hub is the scroll owner: viewport-bounded, internally scrollable.
+    const hub = screen.getByTestId('home-app-hub')
+    expect(hub.className).toContain('h-full')
+    expect(hub.className).toContain('min-h-0')
+    expect(hub.className).toContain('overflow-y-auto')
+
+    // Every allowed entry renders inside the hub — including the LAST row.
+    expect(screen.getByText('Work App E')).toBeTruthy()
+    expect(within(hub).getAllByText(/Scroll Circle 4/).length).toBeGreaterThan(0)
+
+    // Full Catalog: every row renders in the same scroll owner.
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+    })
+    const rows = screen.getAllByTestId('all-apps-row')
+    expect(rows).toHaveLength(5)
+    expect(rows[rows.length - 1]!.textContent).toContain('Work App E')
+  })
+
+  it('A→B ProductSpace transition: the first committed target Home layout exposes no prior-scope Apps, sources, or Skill metadata (R39 review)', async () => {
+    const appA: CatalogApp = {
+      id: 'ctx-a-app',
+      organizationId: 'organization-a',
+      name: 'Scope A App',
+      description: 'Scope A description',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://a.example.com',
+      sortOrder: 0,
+      availability: 'available',
+      catalogSources: [{ kind: 'creator_circle', name: 'Scope A Circle' }],
+    }
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    const keyA = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    quickAccessByContext.set(keyA, [{ id: appCatalogHook.uiIdentityKeyForApp(appA), addedAt: 1 }])
+    const view = renderHome()
+    await waitFor(() => expect(screen.getByText('Scope A App')).toBeTruthy())
+    // Context A commits the certified-creator presentation for its own source.
+    expect(screen.getByTestId('home-app-hub').textContent).toContain('Scope A Circle')
+
+    // A→B: the committed ProductSpace context transitions to a different
+    // account + ProductSpace (a different owner epoch).
+    const appB: CatalogApp = {
+      id: 'ctx-b-app',
+      organizationId: 'organization-b',
+      name: 'Scope B App',
+      description: 'Scope B description',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://b.example.com',
+      sortOrder: 0,
+      availability: 'available',
+      catalogSources: [{ kind: 'creator_circle', name: 'Scope B Circle' }],
+    }
+    const catalogB = {
+      ...enterpriseCatalogWith([appB]),
+      accountId: 'account-b',
+      organizationId: 'organization-b',
+    }
+    const hookB = hookWithCatalog(catalogB)
+    const keyB = `v1:${
+      createProductSpaceContextKey('account-b', 'organization-b')
+    }`
+    quickAccessByContext.set(keyB, [{ id: hookB.uiIdentityKeyForApp(appB), addedAt: 1 }])
+    act(() => {
+      appCatalogHook = hookB
+      homeRerender(homeTree(hookB))
+    })
+
+    // FIRST committed target Home layout: no prior-scope App identity,
+    // sources, or Skill metadata may appear — the assistant card renders the
+    // frozen neutral source label (the dynamic Skill count is deliberately
+    // omitted: no scope-keyed Skill source exists at Home).
+    const hub = screen.getByTestId('home-app-hub')
+    const firstCommitText = hub.textContent ?? ''
+    expect(firstCommitText).not.toContain('Scope A App')
+    expect(firstCommitText).not.toContain('Scope A Circle')
+    expect(firstCommitText).not.toContain('Skill 已启用')
+    expect(firstCommitText).not.toContain('skills enabled')
+    expect(firstCommitText).toContain('Built into Polo')
+
+    // Context B's own data lands afterwards.
+    await waitFor(() => expect(screen.getByText('Scope B App')).toBeTruthy())
+    expect(screen.getByTestId('home-app-hub').textContent).toContain('Scope B Circle')
+    view.unmount()
+  })
+
   it('hides space management entries when no ProductSpace context exists', async () => {
     renderHome()
     await act(async () => {})

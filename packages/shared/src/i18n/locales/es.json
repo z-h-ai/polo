@@ -739,7 +739,6 @@
   "homeApps.home.openAssistant": "Abrir asistente",
   "homeApps.home.poloDescription": "Investiga, organiza y ejecuta con las Skills habilitadas en tu espacio actual.",
   "homeApps.home.poloSource": "Integrado en Polo",
-  "homeApps.home.poloSourceWithSkills": "Polo integrado · {{count}} Skills habilitadas",
   "homeApps.home.poloTitle": "Asistente de Polo",
   "homeApps.home.sectionDescription": "El asistente de Polo siempre va primero; el resto proviene de tu espacio.",
   "homeApps.home.sectionTitle": "Apps frecuentes",

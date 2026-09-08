@@ -739,7 +739,6 @@
   "homeApps.home.openAssistant": "打开助手",
   "homeApps.home.poloDescription": "使用当前空间已经启用的 Skills 完成研究、整理和执行。",
   "homeApps.home.poloSource": "Polo 内置",
-  "homeApps.home.poloSourceWithSkills": "Polo 内置 · {{count}} 个 Skill 已启用",
   "homeApps.home.poloTitle": "Polo 助手",
   "homeApps.home.sectionDescription": "Polo 助手固定在第一位，其余入口来自我的空间。",
   "homeApps.home.sectionTitle": "常用 Apps",

@@ -739,7 +739,6 @@
   "homeApps.home.openAssistant": "Open assistant",
   "homeApps.home.poloDescription": "Research, organize, and execute with the Skills enabled in your current space.",
   "homeApps.home.poloSource": "Built into Polo",
-  "homeApps.home.poloSourceWithSkills": "Polo built-in · {{count}} skills enabled",
   "homeApps.home.poloTitle": "Polo Assistant",
   "homeApps.home.sectionDescription": "The Polo assistant is always first; the rest come from your space.",
   "homeApps.home.sectionTitle": "Pinned Apps",

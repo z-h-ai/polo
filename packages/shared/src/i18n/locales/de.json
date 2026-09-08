@@ -739,7 +739,6 @@
   "homeApps.home.openAssistant": "Assistant öffnen",
   "homeApps.home.poloDescription": "Forschen, ordnen und ausführen mit den in Ihrem aktuellen Space aktivierten Skills.",
   "homeApps.home.poloSource": "In Polo integriert",
-  "homeApps.home.poloSourceWithSkills": "Polo integriert · {{count}} Skills aktiviert",
   "homeApps.home.poloTitle": "Polo-Assistent",
   "homeApps.home.sectionDescription": "Der Polo-Assistant steht immer an erster Stelle; die weiteren kommen aus Ihrem Space.",
   "homeApps.home.sectionTitle": "Häufig genutzte Apps",

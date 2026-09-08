@@ -739,7 +739,6 @@
   "homeApps.home.openAssistant": "Asszisztens megnyitása",
   "homeApps.home.poloDescription": "Kutatás, rendszerezés és végrehajtás az aktuális terén engedélyezett Skillekkel.",
   "homeApps.home.poloSource": "Beépített Polo-ban",
-  "homeApps.home.poloSourceWithSkills": "Polo beépített · {{count}} Skill engedélyezve",
   "homeApps.home.poloTitle": "Polo asszisztens",
   "homeApps.home.sectionDescription": "A Polo asszisztens mindig az első; a többi a teréből származik.",
   "homeApps.home.sectionTitle": "Gyakori Appok",
