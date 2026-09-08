@@ -6,6 +6,11 @@ import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { activeTabIdAtom } from '@/atoms/tab-browser'
 import { HOME_TAB_ID, POLO_TAB_ID } from '../../shared/tab-browser-types'
+import { useProductSpaceContext } from '../context/ProductSpaceContext'
+import {
+  createProductSpaceContextKey,
+  resetProductSpaceStorageMemoryForTests,
+} from '../lib/product-space-storage'
 
 // Register only when no window exists yet, and pin a macOS userAgent —
 // shared-process pattern from TopBar.registry-poller.test.ts: happy-dom
@@ -83,90 +88,44 @@ mock.module('@/hooks/useTheme', () => ({
   }),
 }))
 
-// ─── Logged-in ProductSpace bootstrap state (authoritative boundary value) ──
-// ONLY the ProductSpace bootstrap STATE hook is replaced so
-// `MaybeProductSpaceProvider` receives a complete authoritative context.
-// HomePage, TabShell, TabBar, the active-tab atom, `useNarrowViewport`, and
-// App's guard decision all stay production-real.
+// ─── REAL ProductSpace state hook, driven by fixture IPC ────────────────────
+// Review R37 (open observation 471a35caae45abdaebbebf21): the A→B transition
+// is driven by the PRODUCTION requestSwitch chain — requestSwitch →
+// productSpaceListActiveExecutions → prepareTrustedSwitch →
+// stopPreparedSwitchExecutions → target re-verification → target Catalog
+// staging gate → commitPreparedSwitch → publishCommittedSelection. The state
+// hook is NOT mocked and no unrelated event forces the rerender. The fixture
+// below enumerates the exact IPC surface the production chain touches with
+// schema-faithful responses (personal origin space + enterprise target
+// space, both active).
 const FIXTURE_ACCOUNT_ID = 'acct-r35-fixture'
-const FIXTURE_SPACE_ID = 'organization-a'
-const productSpaceState = {
-  accountId: FIXTURE_ACCOUNT_ID,
-  flowState: 'ready',
-  productSpaces: [{
-    id: FIXTURE_SPACE_ID,
-    kind: 'personal',
-    name: '我的空间',
-    role: 'member',
-    accessMode: 'active',
-  }],
-  allProductSpaces: [{
-    id: FIXTURE_SPACE_ID,
-    kind: 'personal',
-    name: '我的空间',
-    role: 'member',
-    accessMode: 'active',
-  }],
-  personalProductSpaceId: FIXTURE_SPACE_ID,
-  activeProductSpace: {
-    id: FIXTURE_SPACE_ID,
-    kind: 'personal',
-    name: '我的空间',
-  },
-  activeProductSpaceId: FIXTURE_SPACE_ID,
-  productSpaceContextKey: `${FIXTURE_ACCOUNT_ID}|${FIXTURE_SPACE_ID}`,
-  contextVersion: 1,
-  pendingSwitch: null,
-  unavailableSpaceIds: new Set<string>(),
-  error: null,
-  bootstrap: async () => 'ready' as const,
-  refreshProductSpaces: async () => {},
-  retryBootstrap: async () => 'ready' as const,
-  requestSwitch: async () => {},
-  confirmStopAndSwitch: async () => {},
-  retryFailedStops: async () => {},
-  retryTargetLoad: async () => {},
-  cancelSwitch: async () => {},
-  stopSwitchExecution: async () => {},
-  dismissTargetAccessLost: () => {},
-  clearAccount: () => {},
-  rollbackToOrigin: async () => false,
-  enterContractBlocked: () => {},
+const SPACE_A_ID = 'space-a'
+const SPACE_B_ID = 'space-b'
+const SPACE_A = {
+  id: SPACE_A_ID,
+  kind: 'personal' as const,
+  name: '我的空间',
+  accessMode: 'active' as const,
+  payer: { kind: 'account' as const },
 }
-// Mutable holder: the test drives an A→B keyed scope switch by swapping the
-// authoritative state and firing the production `onLlmConnectionsChanged`
-// push event (a real Main→renderer subscription) to re-render App.
-const productSpaceStateHolder = { current: productSpaceState }
-mock.module('@/hooks/useProductSpaceContext', () => ({
-  useProductSpaceContextState: () => productSpaceStateHolder.current,
-}))
-
-// Review R35 fix (open observation 471a35caae45abdaebbebf21): stable sibling
-// FIRST-COMMIT observer. ProductSpaceSwitchDialog is rendered immediately
-// AFTER the ProductSpace-keyed TabShellProvider inside the real App tree, so
-// this useLayoutEffect snapshots the WHOLE document after every commit but
-// BEFORE any passive effect runs. Scope B's first committed layout is
-// therefore captured before passive closePreview can ever execute — the
-// render-time seal is the only mechanism that can keep the origin-scope
-// preview out of this snapshot.
-const siblingLayoutSnapshots: Array<{ scopeKey: string | null; html: string }> = []
-mock.module('@/components/product-space/ProductSpaceSwitchDialog', () => ({
-  ProductSpaceSwitchDialog: () => {
-    useLayoutEffect(() => {
-      siblingLayoutSnapshots.push({
-        scopeKey: productSpaceStateHolder.current.productSpaceContextKey,
-        html: document.body.innerHTML,
-      })
-    })
-    return null
-  },
-}))
+const SPACE_B = {
+  id: SPACE_B_ID,
+  kind: 'enterprise' as const,
+  enterpriseId: 'ent-r35-fixture',
+  name: 'Space B',
+  role: 'member' as const,
+  accessMode: 'active' as const,
+  payer: { kind: 'enterprise' as const, enterpriseId: 'ent-r35-fixture' },
+}
+// The context key format is produced by the PRODUCTION key builder.
+const A_KEY = createProductSpaceContextKey(FIXTURE_ACCOUNT_ID, SPACE_A_ID)
+const B_KEY = createProductSpaceContextKey(FIXTURE_ACCOUNT_ID, SPACE_B_ID)
 
 // ─── Fail-fast electronAPI fixture ───────────────────────────────────────────
 // Every property the real App graph touches at import/bootstrap/render time
-// under the narrow-Home route is enumerated with a deterministic result. ANY
-// unknown property access throws immediately (no catch-all undefined), so a
-// production regression surfaces as a loud fixture failure.
+// is enumerated with a deterministic result. ANY unknown property access
+// throws immediately (no catch-all undefined), so a production regression
+// surfaces as a loud fixture failure.
 const FIXTURE_USER = {
   id: FIXTURE_ACCOUNT_ID,
   username: 'r35-fixture',
@@ -204,16 +163,41 @@ const electronApiExplicit: Record<string, unknown> = {
   getTheme: async () => 'light',
   // Workspaces
   getWorkspaces: async () => [],
-  // Home surface: real useAppCatalog mounts; the fail-closed catalog response
-  // keeps the launcher section (error tile beside the fixed Polo card)
-  // without fixture coupling — the narrow-Home route/layout is the target.
+  // Home surface: real useAppCatalog mounts with an EMPTY but SUCCESSFUL
+  // unified Catalog (the same channel the switch staging gate re-validates
+  // the target space against before committing).
   productSpaceGetCatalog: async () => ({
-    success: false as const,
-    errorCode: 'request_failed',
-    message: 'catalog intentionally unavailable in the R33 route probe',
+    success: true as const,
+    entries: [] as unknown[],
+    withdrawnEntries: [] as unknown[],
+    catalogRevision: 'rev-r35-empty',
+    accessMode: 'online',
   }),
   getHomeQuickAccess: async () => [],
   setHomeQuickAccess: async (_contextKey: unknown, apps: unknown[]) => apps,
+  // ProductSpace bootstrap chain (REAL useProductSpaceContextState):
+  productSpaceList: async () => ({
+    success: true as const,
+    contractVersion: 1,
+    personalProductSpaceId: SPACE_A_ID,
+    productSpaces: [SPACE_A, SPACE_B],
+  }),
+  productSpaceGetRestrictionState: async () => ({ success: true, restricted: false }),
+  productSpaceCleanupLegacyState: async () => ({
+    success: true,
+    results: { legacyAuthorizationCache: true, legacyCatalogCache: true },
+  }),
+  productSpaceListActiveExecutions: async () => ({ success: true, executions: [] }),
+  productSpacePrepareSwitch: async () => ({
+    success: true as const,
+    token: 'r35-switch-token',
+    executions: [] as unknown[],
+  }),
+  productSpaceStopSwitchExecutions: async () => ({ success: true, executions: [] }),
+  productSpaceCommitSwitch: async () => ({ success: true }),
+  // Device-local preference store backing @/lib/product-space-storage.
+  getProductSpaceContextStorage: async () => ({}),
+  updateProductSpaceContextStorage: async () => ({}),
   // Sessions / LLM / drafts / notifications — loaded when app becomes ready.
   listSessions: async () => [],
   getSessions: async () => [],
@@ -231,12 +215,6 @@ const electronApiExplicit: Record<string, unknown> = {
   // Update check: no update available.
   getUpdateInfo: async () => ({ available: false, latestVersion: null }),
   getDismissedUpdateVersion: async () => null,
-  // Production push event: captured so the test can drive App re-renders
-  // through a real Main→renderer subscription (the A→B keyed switch).
-  onLlmConnectionsChanged: (callback: (connections: unknown[]) => void) => {
-    llmConnectionsListener = callback
-    return () => { llmConnectionsListener = null }
-  },
   // Onboarding surface: darwin needs no git-bash onboarding step.
   checkGitBash: async () => ({ platform: 'darwin', found: true, installed: true }),
   // GUI notification channel probe (useNotifications, render-time).
@@ -338,36 +316,73 @@ function installMatchMedia(): void {
   }) as unknown as typeof window.matchMedia
 }
 
-/** Production transition: the OS-level window resize across the 640px line. */
-function resizeViewport(width: number): void {
-  narrowViewportActive = width <= 640
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
-  for (const listener of narrowQueryListeners) {
-    listener({ matches: narrowViewportActive })
-  }
-}
-
 const electronApiInstance = failFastElectronApi() as unknown as Record<string, unknown>
 Object.defineProperty(window, 'electronAPI', {
   configurable: true,
   value: electronApiInstance,
 })
 
-// Production preview seeding: TopBar is rendered INSIDE AppShellProvider in
-// the wide workbench, so a mocked TopBar probe can call the REAL
-// AppShellContext.onOpenFile — the same production entry a user's file-link
-// click drives — to seed the origin-scope preview.
+// Production committed-key recorder: publishCommittedSelection dispatches
+// 'polo:product-space-changed' with the authoritative context key after the
+// trusted transaction commits. This is the production transition signal.
+const committedContextKeys: string[] = []
+window.addEventListener('polo:product-space-changed', (event) => {
+  const detail = (event as CustomEvent<{ contextKey?: string }>).detail
+  if (detail?.contextKey) committedContextKeys.push(detail.contextKey)
+})
+
+// Production preview seeding + production switch trigger: TopBar is rendered
+// INSIDE AppShellProvider and the ProductSpace provider in the wide
+// workbench, so the probe buttons call the REAL AppShellContext.onOpenFile
+// and the REAL ProductSpaceContext.requestSwitch — the same production
+// entries a user's file-link click and space selection drive.
 let openPreviewProbePath: string | null = null
 mock.module('@/components/app-shell/TopBar', () => ({
   TopBar: () => {
     const { useAppShellContext } = require('../context/AppShellContext') as typeof import('../context/AppShellContext')
     const { onOpenFile } = useAppShellContext()
-    return createElement('button', {
-      'data-testid': 'r35-topbar-probe',
-      onClick: () => {
-        if (openPreviewProbePath) onOpenFile(openPreviewProbePath)
-      },
+    const productSpace = useProductSpaceContext()
+    return createElement(
+      'div',
+      null,
+      createElement('button', {
+        'data-testid': 'r35-topbar-probe',
+        onClick: () => {
+          if (openPreviewProbePath) onOpenFile(openPreviewProbePath)
+        },
+      }),
+      createElement('button', {
+        'data-testid': 'r35-switch-space-probe',
+        onClick: () => {
+          // The production space-selection entry (the same context API the
+          // switch dialog's user selection drives) → requestSwitch.
+          if (productSpace) productSpace.onSelectProductSpace(SPACE_B_ID)
+        },
+      }),
+    )
+  },
+}))
+
+// Review R35/R37 fix (open observation 471a35caae45abdaebbebf21): stable
+// sibling FIRST-COMMIT observer. ProductSpaceSwitchDialog is rendered
+// immediately AFTER the ProductSpace-keyed TabShellProvider inside the real
+// App tree, so this useLayoutEffect snapshots the WHOLE document after every
+// commit but BEFORE any passive effect runs, tagged with the COMMITTED
+// ProductSpace context key read from the real context value. Scope B's first
+// committed layout is therefore captured before passive closePreview can
+// ever execute — the render-time seal is the only mechanism that can keep
+// the origin-scope preview out of this snapshot.
+const siblingLayoutSnapshots: Array<{ scopeKey: string | null; html: string }> = []
+mock.module('@/components/product-space/ProductSpaceSwitchDialog', () => ({
+  ProductSpaceSwitchDialog: () => {
+    const productSpace = useProductSpaceContext()
+    useLayoutEffect(() => {
+      siblingLayoutSnapshots.push({
+        scopeKey: productSpace?.productSpaceContextKey ?? null,
+        html: document.body.innerHTML,
+      })
     })
+    return null
   },
 }))
 Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
@@ -379,6 +394,10 @@ beforeEach(() => {
   // previews are opened — is mounted).
   narrowViewportActive = false
   installMatchMedia()
+  resetProductSpaceStorageMemoryForTests()
+  committedContextKeys.length = 0
+  siblingLayoutSnapshots.length = 0
+  openPreviewProbePath = null
   getDefaultStore().set(activeTabIdAtom, HOME_TAB_ID)
   return i18n.changeLanguage('en')
 })
@@ -389,7 +408,6 @@ afterEach(() => {
 })
 
 const {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -400,90 +418,16 @@ const {
 // App.tsx uses a DEFAULT export.
 const { default: App } = await import('../App')
 
-function renderApp(): void {
-  render(createElement(I18nextProvider, { i18n }, createElement(App)))
-}
-
-function assertNarrowHomeMounted(): void {
-  expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
-  expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-  // Excluded work surfaces are absent (not merely CSS-hidden).
-  expect(screen.queryByTestId('polo-app-root')).toBeNull()
-  expect(document.querySelector('webview')).toBeNull()
-  expect(screen.queryByTestId('file-preview-overlay')).toBeNull()
-  expect(screen.queryByTestId('window-width-guard')).toBeNull()
-}
-
-
-// ─── R35: preview scope-seal across A→B keyed switch (Review R34 issue 1) ────
-
-function scopeAState() {
-  return {
-    accountId: FIXTURE_ACCOUNT_ID,
-    flowState: 'ready',
-    productSpaces: [{
-      id: 'space-a',
-      kind: 'personal',
-      name: 'Space A',
-      role: 'member',
-      accessMode: 'active',
-    }],
-    allProductSpaces: [{
-      id: 'space-a',
-      kind: 'personal',
-      name: 'Space A',
-      role: 'member',
-      accessMode: 'active',
-    }],
-    personalProductSpaceId: 'space-a',
-    activeProductSpace: {
-      id: 'space-a',
-      kind: 'personal',
-      name: 'Space A',
-    },
-    activeProductSpaceId: 'space-a',
-    productSpaceContextKey: `${FIXTURE_ACCOUNT_ID}|space-a`,
-    contextVersion: 1,
-    pendingSwitch: null,
-    unavailableSpaceIds: new Set<string>(),
-    error: null,
-    bootstrap: async () => 'ready' as const,
-    refreshProductSpaces: async () => {},
-    retryBootstrap: async () => 'ready' as const,
-    requestSwitch: async () => {},
-    confirmStopAndSwitch: async () => {},
-    retryFailedStops: async () => {},
-    retryTargetLoad: async () => {},
-    cancelSwitch: async () => {},
-    stopSwitchExecution: async () => {},
-    dismissTargetAccessLost: () => {},
-    clearAccount: () => {},
-    rollbackToOrigin: async () => false,
-    enterContractBlocked: () => {},
-  }
-}
-
-function scopeBState() {
-  return {
-    ...scopeAState(),
-    activeProductSpace: { id: 'space-b', kind: 'personal', name: 'Space B' },
-    activeProductSpaceId: 'space-b',
-    personalProductSpaceId: 'space-b',
-    productSpaceContextKey: `${FIXTURE_ACCOUNT_ID}|space-b`,
-    contextVersion: 2,
-  } as unknown as ReturnType<typeof scopeAState>
-}
-
-describe('App preview scope-seal across A→B keyed switch (Review R34 issue 1)', () => {
-  it('never mounts the origin-scope preview in the target scope first committed layout; the scope-neutral ready boundary is present', async () => {
-    productSpaceStateHolder.current = scopeAState()
-
+describe('App preview scope-seal across A→B keyed switch (Review R34/R35)', () => {
+  it('drives the production ProductSpace switch A→B; the origin-scope preview never mounts in the target scope first committed layout and the scope-neutral boundary is present', async () => {
     render(createElement(I18nextProvider, { i18n }, createElement(App)))
 
-    // Scope A ready.
+    // Real bootstrap through the production useProductSpaceContextState +
+    // App startup route: the trusted transaction publishes scope A.
     await waitFor(() => {
       if (!screen.getByTestId('home-app-hub')) throw new Error('app not ready')
     }, { timeout: 20_000 })
+    expect(committedContextKeys).toContain(A_KEY)
 
     // Seed the origin-scope preview through the production onOpenFile entry
     // (a real user file-link click drives the same handler).
@@ -494,35 +438,36 @@ describe('App preview scope-seal across A→B keyed switch (Review R34 issue 1)'
     await waitFor(() => {
       if (!screen.getByTestId('file-preview-overlay')) throw new Error('origin preview missing')
     }, { timeout: 10_000 })
+    expect(siblingLayoutSnapshots.some(s =>
+      s.scopeKey === A_KEY && s.html.includes('file-preview-overlay'),
+    )).toBe(true)
 
-    // A→B keyed switch: swap the authoritative ProductSpace state and fire
-    // the production push subscription captured from the real
-    // onLlmConnectionsChanged registration — the same Main→renderer push
-    // event that re-renders App in production drives the transition.
-    await act(async () => {
-      productSpaceStateHolder.current = scopeBState()
-      fireLlmChanged([])
-    })
+    // A→B keyed switch through the PRODUCTION transition: the probe button
+    // calls the real ProductSpaceContext.requestSwitch, which runs the
+    // trusted prepare → stop → verify → catalog staging → commit chain and
+    // publishes the B context key. No state-hook mock and no unrelated
+    // rerender event participates.
+    fireEvent.click(screen.getByTestId('r35-switch-space-probe'))
 
-    // TARGET-SCOPE FIRST COMMITTED LAYOUT (core Review R35 evidence): the
-    // stable sibling useLayoutEffect captured scope B's first commit BEFORE
-    // passive effects ran. Deleting the render-time seal and keeping only
-    // passive closePreview cannot pass here — passive close executes only
-    // AFTER this layout committed, so only the synchronous render-time
-    // rejection explains a clean first B layout.
-    const firstScopeBCommit = siblingLayoutSnapshots.find(s => s.scopeKey?.endsWith('|space-b'))
+    // The transition actually produced the B context key: the production
+    // 'polo:product-space-changed' event carries it after the commit.
+    await waitFor(() => {
+      if (!committedContextKeys.includes(B_KEY)) throw new Error('switch did not publish the space-b context key')
+    }, { timeout: 20_000 })
+
+    // TARGET-SCOPE FIRST COMMITTED LAYOUT (core evidence): the stable
+    // sibling useLayoutEffect captured scope B's first commit BEFORE passive
+    // effects ran. Deleting the render-time seal and keeping only passive
+    // closePreview cannot pass here — passive close executes only AFTER this
+    // layout committed, so only the synchronous render-time rejection
+    // explains a clean first B layout.
+    const firstScopeBCommit = siblingLayoutSnapshots.find(s => s.scopeKey === B_KEY)
     expect(firstScopeBCommit).toBeDefined()
     expect(firstScopeBCommit!.html.includes('file-preview-overlay')).toBe(false)
     expect(firstScopeBCommit!.html.includes('secret.png')).toBe(false)
     // The scope-neutral pre-hydration boundary is present in B's first
     // commit: the keyed provider remounts before its shell restores.
     expect(firstScopeBCommit!.html.includes('shell-scope-loading')).toBe(true)
-    // Observer sanity: the SAME observer recorded the origin-scope overlay
-    // mounted under scope A, so the absences above are real B-scope facts
-    // and not an observer blind spot.
-    expect(siblingLayoutSnapshots.some(s =>
-      s.scopeKey?.endsWith('|space-a') && s.html.includes('file-preview-overlay'),
-    )).toBe(true)
 
     // After the switch re-render (passive effects flushed): the stale
     // origin-scope preview is gone — no overlay element, no content, no path.
@@ -538,10 +483,3 @@ describe('App preview scope-seal across A→B keyed switch (Review R34 issue 1)'
     expect(document.body.innerHTML.includes('secret.png')).toBe(false)
   }, 60_000)
 })
-
-function fireLlmChanged(connections: unknown[]): void {
-  const cb = llmConnectionsListener
-  if (cb) (cb as (connections: unknown[]) => void)(connections)
-}
-
-let llmConnectionsListener: ((connections: unknown[]) => void) | null = null

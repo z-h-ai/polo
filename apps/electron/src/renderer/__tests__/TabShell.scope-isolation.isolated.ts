@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement, useEffect, useLayoutEffect, type ReactNode } from 'react'
+import { StrictMode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
@@ -11,6 +12,8 @@ import {
 } from '@/atoms/tab-browser'
 import { HOME_TAB_ID, POLO_TAB, type AppDefinition } from '../../shared/tab-browser-types'
 import type { ProductSpaceContextValue } from '@/context/ProductSpaceContext'
+import { useTabShell } from '@/context/TabShellContext'
+import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 
 // Register only when no window exists yet, and pin a macOS userAgent —
 // shared-process pattern from TopBar.registry-poller.test.ts. This file runs
@@ -153,18 +156,30 @@ function seedStalePreviousScope(): string {
   return staleTab.id
 }
 
-const contextValue = {
+// Distinct REAL provider scopes for the A→B keyed remount.
+const SCOPE_A = { key: 'scope-a', accountId: 'acct-r37-fixture', productSpaceId: 'organization-a' }
+const SCOPE_B = { key: 'scope-b', accountId: 'acct-r37-fixture', productSpaceId: 'organization-b' }
+type ProviderScope = typeof SCOPE_A
+
+const contextValueForScope = (scope: ProviderScope) => ({
   // Shape mirrors the production ProductSpaceContextValue consumers read;
   // asserted to the production contract type below (branded IDs are compile-
-  // time projections of the string fixtures).
-  accountId: 'acct-r34-fixture',
-  activeProductSpaceId: 'organization-a',
-  activeProductSpace: { id: 'organization-a', kind: 'enterprise', name: 'Organization A' },
+  // time projections of the string fixtures). A and B use DISTINCT real
+  // ProductSpace scopes — different productSpaceId AND different
+  // account-scoped context key in the production format — so the keyed
+  // remount is bound to an actual scope change, not just a React key.
+  accountId: scope.accountId,
+  activeProductSpaceId: scope.productSpaceId,
+  activeProductSpace: {
+    id: scope.productSpaceId,
+    kind: 'enterprise',
+    name: scope.productSpaceId === SCOPE_A.productSpaceId ? 'Organization A' : 'Organization B',
+  },
   productSpaces: [],
   allProductSpaces: [],
-  personalProductSpaceId: 'organization-a',
-  productSpaceContextKey: 'acct-r34-fixture|organization-a',
-  contextVersion: 3,
+  personalProductSpaceId: SCOPE_A.productSpaceId,
+  productSpaceContextKey: createProductSpaceContextKey(scope.accountId, scope.productSpaceId),
+  contextVersion: scope.productSpaceId === SCOPE_A.productSpaceId ? 3 : 4,
   pendingSwitch: null,
   onSelectProductSpace: () => {},
   onRefreshProductSpaces: () => {},
@@ -174,7 +189,7 @@ const contextValue = {
   onCancelSwitch: () => {},
   onDismissTargetAccessLost: () => {},
   onStopSwitchExecution: () => {},
-}
+})
 
 let layoutSnapshots: string[] = []
 
@@ -210,10 +225,13 @@ function LayoutSnapshot({ providerKey, children }: { providerKey: string, childr
 // effect runs after TabShell's passive effects but BEFORE the provider's
 // hydration effect, so it observes exactly the pre-hydration side-effect
 // window (Review R34 issue 2). Each observation is tagged with the provider
-// key so scope A's AND scope B's pre-hydration boundaries are asserted
-// independently (Review R35).
+// key AND the provider's own hydration phase read from the REAL tab-shell
+// context (useTabShell().isReady) — Review R37 requires the readiness field
+// to be an independent record, so pre-hydration records are selected by
+// `isReady === false`, never by the marker they are asserted against.
 interface SideEffectObservation {
   providerKey: string
+  isReady: boolean
   marker: string | undefined
   deepLinkLive: number
   keydownLive: number
@@ -221,9 +239,11 @@ interface SideEffectObservation {
 const sideEffectObservations: SideEffectObservation[] = []
 
 function SideEffectProbe({ providerKey }: { providerKey: string }): ReactNode {
+  const { isReady } = useTabShell()
   useEffect(() => {
     sideEffectObservations.push({
       providerKey,
+      isReady,
       marker: document.documentElement.dataset.activeTab,
       deepLinkLive: deepLinkRegistrations - deepLinkUnsubscribed,
       keydownLive: liveKeydownListeners.size,
@@ -236,7 +256,7 @@ function WorkbenchProbe(): ReactNode {
   return createElement('div', { 'data-testid': 'polo-app-root' })
 }
 
-function buildShellTree(providerKey: string): ReactNode {
+function buildShellTree(scope: ProviderScope): ReactNode {
   const { ProductSpaceProvider } =
     require('@/context/ProductSpaceContext') as typeof import('@/context/ProductSpaceContext')
   const { TabShellProvider } =
@@ -244,20 +264,23 @@ function buildShellTree(providerKey: string): ReactNode {
   const { TabShell } =
     require('../components/tab-browser/TabShell') as typeof import('../components/tab-browser/TabShell')
   const inner = createElement(LayoutSnapshot, {
-    providerKey,
+    providerKey: scope.key,
     children: [
       createElement(TabShell, { key: 'tab-shell', renderPolo: WorkbenchProbe }),
-      createElement(SideEffectProbe, { key: 'side-effect-probe', providerKey }),
+      createElement(SideEffectProbe, { key: 'side-effect-probe', providerKey: scope.key }),
     ],
   })
   const shell = createElement(
     TabShellProvider,
     {
-      key: providerKey,
+      key: scope.key,
       workspaceId: 'ws-r34',
+      // Distinct REAL scope: the storage partition + hydration scope differ
+      // between A and B, so the keyed remount is bound to an actual
+      // ProductSpace scope change.
       productSpaceScope: {
-        accountId: 'acct-r34-fixture',
-        productSpaceId: 'organization-a',
+        accountId: scope.accountId,
+        productSpaceId: scope.productSpaceId,
       },
       children: inner,
     },
@@ -266,7 +289,7 @@ function buildShellTree(providerKey: string): ReactNode {
     I18nextProvider,
     { i18n },
     createElement(ProductSpaceProvider, {
-      value: contextValue as unknown as ProductSpaceContextValue,
+      value: contextValueForScope(scope) as unknown as ProductSpaceContextValue,
       children: shell,
     }),
   )
@@ -333,7 +356,7 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
   it('wide: first committed layout after a keyed scope switch shows NO stale tab title/URL/webview/active route, then the shell restores', async () => {
     seedStalePreviousScope()
 
-    render(buildShellTree('scope-new'))
+    render(buildShellTree({ key: 'scope-new', accountId: 'acct-r37-fixture', productSpaceId: 'organization-a' }))
 
     // FIRST committed layout: fail-closed scope-neutral boundary — the stale
     // previous-scope surfaces are never mounted or displayed on any width.
@@ -359,7 +382,7 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     installMatchMedia()
     seedStalePreviousScope()
 
-    render(buildShellTree('scope-new-narrow'))
+    render(buildShellTree({ key: 'scope-new-narrow', accountId: 'acct-r37-fixture', productSpaceId: 'organization-a' }))
 
     expect(layoutSnapshots).toHaveLength(1)
     expect(layoutSnapshots[0]!.includes('旧空间 App')).toBe(false)
@@ -389,7 +412,7 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
   it('pre-hydration side effects stay scope-neutral for scope A AND scope B: no stale route marker, no live deep-link/keydown listener until ready; keyed remount and final unmount clean up exactly', async () => {
     seedStalePreviousScope()
 
-    const { rerender } = render(buildShellTree('scope-a'))
+    const { rerender } = render(buildShellTree(SCOPE_A))
 
     // Scope-A first committed LAYOUT boundary (provider-key tagged): the
     // fail-closed scope-neutral shell — the stale previous-scope surfaces are
@@ -414,19 +437,22 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(keydownRegistrations).toBeGreaterThanOrEqual(1)
     expect(liveKeydownListeners.size).toBe(1)
 
-    // Scope-A PRE-HYDRATION effect boundary: EVERY marker-neutral observation
+    // Scope-A PRE-HYDRATION effect boundary: EVERY isReady=false observation
     // of scope A — recorded after TabShell's own passive effects but before
     // the provider's hydration effect — shows zero live listeners on both
-    // channels, and the very first observation of the tree is scope A's
-    // fully neutral boundary.
-    const scopeAPreHydration = sideEffectObservations.filter(o => o.providerKey === 'scope-a' && o.marker === undefined)
+    // channels and no route marker. The selection predicate is the recorded
+    // readiness field, NEVER the marker, so a non-neutral pre-hydration
+    // record fails here instead of being filtered away.
+    const scopeAPreHydration = sideEffectObservations.filter(o => o.providerKey === SCOPE_A.key && o.isReady === false)
     expect(scopeAPreHydration.length).toBeGreaterThan(0)
     for (const observation of scopeAPreHydration) {
+      expect(observation.marker).toBeUndefined()
       expect(observation.deepLinkLive).toBe(0)
       expect(observation.keydownLive).toBe(0)
     }
     expect(sideEffectObservations[0]).toEqual({
-      providerKey: 'scope-a',
+      providerKey: SCOPE_A.key,
+      isReady: false,
       marker: undefined,
       deepLinkLive: 0,
       keydownLive: 0,
@@ -434,7 +460,7 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
 
     // Keyed scope switch A→B: A's cleanup runs, B mounts pre-hydrated.
     act(() => {
-      rerender(buildShellTree('scope-b'))
+      rerender(buildShellTree(SCOPE_B))
     })
 
     // Scope-B first committed LAYOUT boundary: the SAME scope-neutral shell —
@@ -450,12 +476,19 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     // Scope-B PRE-HYDRATION effect boundary: scope A's listeners were already
     // cleaned up and scope B has not registered anything — zero live on both
     // channels, no stale route marker (a transient stale keydown closure or
-    // a premature B-remount registration cannot escape this).
-    const scopeBPreHydration = sideEffectObservations.filter(o => o.providerKey === 'scope-b' && o.marker === undefined)
+    // a premature B-remount registration cannot escape this). Selection is
+    // by the recorded readiness field, never by the marker.
+    const scopeBPreHydration = sideEffectObservations.filter(o => o.providerKey === SCOPE_B.key && o.isReady === false)
     expect(scopeBPreHydration.length).toBeGreaterThan(0)
     for (const observation of scopeBPreHydration) {
+      expect(observation.marker).toBeUndefined()
       expect(observation.deepLinkLive).toBe(0)
       expect(observation.keydownLive).toBe(0)
+    }
+    // Both scopes transitioned through the hydration phase boundary in the
+    // recorded evidence.
+    for (const key of [SCOPE_A.key, SCOPE_B.key]) {
+      expect(sideEffectObservations.some(o => o.providerKey === key && o.isReady === true)).toBe(true)
     }
     // No observation may ever publish the STALE route marker ('polo' active
     // while pre-hydration is the R33 regression signature).
@@ -474,6 +507,63 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     // registration and every keydown registration was cleaned up exactly
     // once, nothing stays live, and the route marker returns to neutral.
     // (No hydrated-marker wait after unmount — the shell is gone.)
+    act(() => {
+      rerender(null as unknown as ReactNode)
+    })
+    expect(deepLinkUnsubscribed).toBe(deepLinkRegistrations)
+    expect(keydownUnsubscribed).toBe(keydownRegistrations)
+    expect(liveKeydownListeners.size).toBe(0)
+    expect(document.documentElement.dataset.activeTab).toBeUndefined()
+  }, 30_000)
+
+  it('StrictMode: pre-hydration neutrality, exactly one live listener per ready scope, and exact cleanup across keyed remount and unmount', async () => {
+    seedStalePreviousScope()
+
+    const { rerender } = render(
+      createElement(StrictMode, null, buildShellTree(SCOPE_A)),
+    )
+
+    // Scope-A ready under StrictMode's double effect invocation: the LIVE
+    // counts are still exactly one per channel.
+    await waitFor(() => {
+      if (document.documentElement.dataset.activeTab !== 'home') throw new Error('marker not published')
+    })
+    expect(deepLinkRegistrations - deepLinkUnsubscribed).toBe(1)
+    expect(liveKeydownListeners.size).toBe(1)
+
+    // Every StrictMode pre-hydration record of scope A stays fully neutral.
+    // StrictMode double-invokes the mount-time effects, so the neutral
+    // pre-hydration window is recorded AT LEAST TWICE — the doubled records
+    // prove the StrictMode variant is actually active (not a silent
+    // duplicate of the non-StrictMode test).
+    const scopeAPreHydration = sideEffectObservations.filter(o => o.providerKey === SCOPE_A.key && o.isReady === false)
+    expect(scopeAPreHydration.length).toBeGreaterThanOrEqual(2)
+    for (const observation of scopeAPreHydration) {
+      expect(observation.marker).toBeUndefined()
+      expect(observation.deepLinkLive).toBe(0)
+      expect(observation.keydownLive).toBe(0)
+    }
+
+    // Keyed remount A→B under StrictMode.
+    act(() => {
+      rerender(createElement(StrictMode, null, buildShellTree(SCOPE_B)))
+    })
+    await waitFor(() => {
+      if (document.documentElement.dataset.activeTab !== 'home') throw new Error('marker not published for scope-b')
+    })
+    expect(deepLinkRegistrations - deepLinkUnsubscribed).toBe(1)
+    expect(liveKeydownListeners.size).toBe(1)
+
+    const scopeBPreHydration = sideEffectObservations.filter(o => o.providerKey === SCOPE_B.key && o.isReady === false)
+    expect(scopeBPreHydration.length).toBeGreaterThan(0)
+    for (const observation of scopeBPreHydration) {
+      expect(observation.marker).toBeUndefined()
+      expect(observation.deepLinkLive).toBe(0)
+      expect(observation.keydownLive).toBe(0)
+    }
+
+    // Final unmount: StrictMode's simulated remounts are included in the
+    // balance — every registration was cleaned up exactly once.
     act(() => {
       rerender(null as unknown as ReactNode)
     })
