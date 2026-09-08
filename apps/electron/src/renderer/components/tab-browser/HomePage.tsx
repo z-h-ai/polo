@@ -784,13 +784,16 @@ export function HomePage() {
 
   return (
     // Frozen POO-41 `.main` mirror: the centered 1260px column with the
-    // breakpoint paddings INSIDE it. The column is ALSO the viewport-bounded
-    // vertical scroll owner (h-full min-h-0 overflow-y-auto): html/body/#root
-    // are overflow-hidden globally, so this element must own scrolling or
-    // every launcher row and Catalog App below the fold becomes unreachable
-    // (R39 review, hub unreachable-overflow defect).
+    // breakpoint paddings INSIDE it, content-sized exactly like the frozen
+    // `.main` element. Scrolling is owned by the DEDICATED wrapper above
+    // (h-full min-h-0 overflow-y-auto): html/body/#root are overflow-hidden
+    // globally and the region element must stay content-sized, so the
+    // wrapper — never the region — owns viewport-bounded scrolling. Every
+    // launcher row and Catalog App below the fold stays reachable (R39/R40
+    // review).
+    <div className="h-full min-h-0 overflow-y-auto">
     <main
-      className="mx-auto h-full min-h-0 w-full max-w-[1260px] overflow-y-auto bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+      className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
       <div className="space-y-[34px]">
@@ -1126,5 +1129,6 @@ export function HomePage() {
       </Dialog>
 
     </main>
+    </div>
   )
 }

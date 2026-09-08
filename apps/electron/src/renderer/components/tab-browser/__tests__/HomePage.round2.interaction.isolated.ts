@@ -394,11 +394,15 @@ describe('HomePage quick access (POO-43)', () => {
       expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(5)
     })
 
-    // The hub is the scroll owner: viewport-bounded, internally scrollable.
+    // The scroll owner is the hub's dedicated wrapper (viewport-bounded,
+    // internally scrollable); the hub region itself stays content-sized
+    // (the frozen `.main` geometry).
     const hub = screen.getByTestId('home-app-hub')
-    expect(hub.className).toContain('h-full')
-    expect(hub.className).toContain('min-h-0')
-    expect(hub.className).toContain('overflow-y-auto')
+    const scrollOwner = hub.parentElement
+    expect(scrollOwner.className).toContain('h-full')
+    expect(scrollOwner.className).toContain('min-h-0')
+    expect(scrollOwner.className).toContain('overflow-y-auto')
+    expect(hub.className).not.toContain('h-full')
 
     // Every allowed entry renders inside the hub — including the LAST row.
     expect(screen.getByText('Work App E')).toBeTruthy()
