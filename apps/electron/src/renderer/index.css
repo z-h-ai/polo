@@ -194,6 +194,9 @@
   --muted-foreground: var(--foreground-50);
   --card: var(--background);
   --card-foreground: var(--foreground);
+  /* Frozen POO-41 card surface (source-derived --surface): the elevated
+     white card body on the near-white launcher background. */
+  --surface: #ffffff;
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -323,6 +326,8 @@
   --muted-foreground: var(--foreground-50);
   --card: var(--background);
   --card-foreground: var(--foreground);
+  /* Frozen POO-41 dark card surface (source-derived dark --surface). */
+  --surface: oklch(0.205 0.014 270);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -452,6 +457,7 @@ html[data-font="inter"] {
   /* === LEGACY COMPATIBILITY === */
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-surface: var(--surface);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-secondary: var(--secondary);

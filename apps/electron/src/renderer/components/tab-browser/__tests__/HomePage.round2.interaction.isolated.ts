@@ -362,11 +362,12 @@ describe('HomePage quick access (POO-43)', () => {
     expect(screen.queryByTestId('all-apps-row')).toBeNull()
   })
 
-  it('home-app-hub owns viewport-bounded vertical scrolling: max-five work Apps and full Catalog rows stay reachable (R39 review)', async () => {
+  it('dedicated wrapper owns viewport-bounded vertical scrolling while home-app-hub stays content-sized: max-five work Apps and full Catalog rows stay reachable (R39/R41 review)', async () => {
     // MAXIMUM five work Apps pinned — the frozen launcher grid then holds the
     // fixed Polo assistant plus five cards that overflow any realistic
-    // viewport, so the hub itself must own the vertical scroll (R39 review:
-    // html/body/#root are overflow-hidden and no ancestor may swallow it).
+    // viewport, so the dedicated wrapper must own the vertical scroll
+    // (html/body/#root are overflow-hidden and no other ancestor may swallow
+    // it; the home-app-hub region itself stays content-sized).
     const apps: CatalogApp[] = ['Work App A', 'Work App B', 'Work App C', 'Work App D', 'Work App E'].map((name, index) => ({
       id: `scroll-app-${index}`,
       organizationId: 'organization-a',
@@ -394,11 +395,15 @@ describe('HomePage quick access (POO-43)', () => {
       expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(5)
     })
 
-    // The scroll owner is the hub's dedicated wrapper (viewport-bounded,
-    // internally scrollable); the hub region itself stays content-sized
-    // (the frozen `.main` geometry).
+    // The hub's dedicated PARENT wrapper is the viewport-bounded scroll
+    // owner (h-full min-h-0 overflow-y-auto); the home-app-hub region itself
+    // stays content-sized (the frozen `.main` geometry). Fail hard when the
+    // wrapper is missing — a null wrapper would mean no scroll owner at all.
     const hub = screen.getByTestId('home-app-hub')
     const scrollOwner = hub.parentElement
+    if (!scrollOwner) {
+      throw new Error('dedicated scroll-owner wrapper is missing: home-app-hub has no parent element in the committed tree')
+    }
     expect(scrollOwner.className).toContain('h-full')
     expect(scrollOwner.className).toContain('min-h-0')
     expect(scrollOwner.className).toContain('overflow-y-auto')
