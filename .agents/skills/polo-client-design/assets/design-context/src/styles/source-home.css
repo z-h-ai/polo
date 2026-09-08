@@ -1,0 +1,71 @@
+/* Translated from HomePage.tsx / AppIcon.tsx / TabBar.tsx Tailwind classes.
+   The real app root font-size is 15px (index.css --font-size-base), so all
+   Tailwind rem utilities resolve at 15px/1rem; px values below are the
+   Tailwind rem values written verbatim (1rem = 15px, 0.25rem = 3.75px).
+   Breakpoints are Tailwind's sm=40rem / md=48rem (600px / 720px). */
+
+.source-home { height:100%; min-height:0; overflow-y:auto; background:var(--background); color:var(--foreground); padding:30px 15px; }
+.source-home-frame { width:100%; height:100%; min-height:0; overflow:hidden; background:var(--background); color:var(--foreground); }
+/* TabBar.tsx: fixed, z-panel, h-[var(--tabbar-height)], border-foreground/10,
+   bg-background/95, pl 86px on mac (8px elsewhere), pr-2. */
+.source-tabbar { position:fixed; inset:0 0 auto; z-index:50; display:flex; align-items:center; height:var(--tabbar-height); padding:0 7.5px 0 86px; border-bottom:1px solid color-mix(in srgb,var(--foreground) 10%,transparent); background:color-mix(in srgb,var(--background) 95%,transparent); }
+/* TabBar home button: ghost icon h-7 w-7 rounded-md mr-1. Static active tab is
+   Polo, so the home button has no bg (only active when home tab selected). */
+.source-tabbar__home { width:26.25px; height:26.25px; margin-right:3.75px; display:flex; align-items:center; justify-content:center; padding:0; border:0; border-radius:5.625px; background:transparent; color:var(--foreground); }
+.source-tabbar__home:hover { background:color-mix(in srgb,var(--foreground) 3%,transparent); }
+.source-tabbar__home svg { width:15px; height:15px; }
+/* TabBar tabs row: h-full items-end gap-1. */
+.source-tabbar__tabs { height:100%; min-width:0; flex:1; display:flex; align-items:flex-end; gap:3.75px; overflow:hidden; }
+/* Active tab: h-8 min-w-[120px] max-w-[220px] flex-1 gap-1.5 rounded-t-md
+   border-foreground/10 border-b-transparent bg-foreground/8 px-2 text-xs. */
+.source-tabbar__tab { position:relative; z-index:1; display:flex; flex:1 1 120px; align-items:center; gap:5.625px; min-width:120px; max-width:220px; height:30px; margin-bottom:-1px; padding:0 7.5px; overflow:hidden; border:1px solid color-mix(in srgb,var(--foreground) 10%,transparent); border-bottom-color:transparent; border-radius:5.625px 5.625px 0 0; background:color-mix(in srgb,var(--foreground) 8%,transparent); color:var(--foreground); font-size:0.75rem; line-height:1.3333; text-align:left; transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1); }
+/* TabBar TabIcon polo favicon: h-3.5 w-3.5 (13.125px). */
+.source-tabbar__tab img { width:13.125px; height:13.125px; flex:none; object-fit:contain; }.source-tabbar__tab span:nth-child(2){min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* TabBar close button: h-5 w-5 rounded-sm text-foreground/45, hover bg 10% +
+   full foreground; its X icon is size-3.5 (13.125px). */
+.source-tabbar__close{width:18.75px;height:18.75px;display:flex;align-items:center;justify-content:center;flex:none;border-radius:3.75px;color:color-mix(in srgb,var(--foreground) 45%,transparent)}
+.source-tabbar__close:hover{background:color-mix(in srgb,var(--foreground) 10%,transparent);color:var(--foreground)}
+.source-tabbar__close svg{width:13.125px;height:13.125px}
+/* TabContent home branch: --content-top-offset is 36px on home. */
+.source-home-frame__content{height:100%;min-height:0;padding-top:36px}
+/* HomePage main: px-4 py-8 sm:px-8 → 15px sides, 30px top/bottom, 30px at sm. */
+@media (min-width:600px) { .source-home { padding-left:30px; padding-right:30px; } }
+/* HomePage content: mx-auto max-w-7xl space-y-10. */
+.source-home__content { width:100%; max-width:1050px; margin:0 auto; display:flex; flex-direction:column; gap:37.5px; }
+/* HomePage heading row: mb-4 gap-4. */
+.source-home__heading { display:flex; align-items:flex-end; justify-content:space-between; gap:15px; margin-bottom:15px; }
+.source-home h1,.source-home h2 { margin:0; font-weight:600; color:var(--foreground); }
+/* text-lg = 1.125rem/1.75 line-height at 15px root. */
+.source-home h1 { font-size:1.125rem; line-height:1.5556; }
+/* External-apps h2: text-base = 1rem. */
+.source-home h2 { font-size:1rem; line-height:1.5; }
+/* Built-in h2: text-sm font-medium. */
+.source-home__builtin h2 { font-size:0.875rem; line-height:1.4286; font-weight:500; }
+/* Descriptions: mt-1 text-xs = 0.75rem/1.3333. */
+.source-home p { margin:3.75px 0 0; color:var(--fg-50); font-size:0.75rem; line-height:1.3333; }
+/* Built-in frame: rounded-xl p-4 border-foreground/10 bg-foreground-2. */
+.source-home__builtin { border:1px solid color-mix(in srgb,var(--foreground) 10%,transparent); border-radius:0.75rem; background:var(--fg-2); padding:15px; }
+/* App grid: gap-x-4 gap-y-5, 3 → 4 (sm) → 6 (md) columns. */
+.source-home__grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); column-gap:15px; row-gap:18.75px; }
+.source-home__grid--builtin { margin-top:15px; }
+/* OrganizationAppCard grid: HomePage.tsx renders org cards in a
+   sm:grid-cols-2 xl:grid-cols-3 responsive grid with gap-4. */
+.source-home__grid--cards { grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:15px; row-gap:15px; }
+@media (min-width:600px) { .source-home__grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media (min-width:720px) { .source-home__grid { grid-template-columns:repeat(6,minmax(0,1fr)); } }
+/* AppIcon button: gap-3 p-3 rounded-lg hover bg-foreground/4, -translate-y-0.5. */
+.source-app-icon { min-width:0; display:flex; flex-direction:column; align-items:center; align-self:stretch; gap:11.25px; padding:11.25px; border:1px solid transparent; border-radius:0.5rem; color:var(--foreground); background:transparent; text-align:center; outline:none; transition:transform 200ms ease-out,border-color 200ms ease-out,background-color 200ms ease-out,box-shadow 200ms ease-out; }
+.source-app-icon.is-hovered { transform:translateY(-1.875px); border-color:color-mix(in srgb,var(--foreground) 10%,transparent); background:color-mix(in srgb,var(--foreground) 4%,transparent); box-shadow:var(--shadow-minimal); }
+/* AppIcon art: size-[76px] rounded-lg shadow-xs; hover scale 1.04 + border 16% +
+   shadow-minimal. */
+.source-app-icon__art { width:76px; height:76px; display:flex; flex-shrink:0; align-items:center; justify-content:center; overflow:hidden; border:1px solid color-mix(in srgb,var(--foreground) 10%,transparent); border-radius:0.5rem; background:var(--background-elevated); box-shadow:0 1px 2px 0 rgba(0,0,0,.05); transition:transform 200ms ease-out,border-color 200ms ease-out,box-shadow 200ms ease-out; }
+.source-app-icon.is-hovered .source-app-icon__art { transform:scale(1.04); border-color:color-mix(in srgb,var(--foreground) 16%,transparent); box-shadow:var(--shadow-minimal); }
+.source-app-icon__art img { width:100%; height:100%; object-fit:contain; }
+/* Add-tile art: dashed border-foreground/20 bg-foreground/3, hover accent. */
+.source-app-icon__art--add { overflow:visible; border-style:dashed; border-color:color-mix(in srgb,var(--foreground) 20%,transparent); background:var(--fg-3); color:color-mix(in srgb,var(--foreground) 55%,transparent); }
+.source-app-icon.is-hovered .source-app-icon__art--add { border-color:color-mix(in srgb,var(--accent) 45%,transparent); background:color-mix(in srgb,var(--accent) 8%,var(--background)); color:var(--accent); }
+/* Label: min-h-9 text-sm font-medium leading-[18px]; transition-colors default
+   timing. */
+.source-app-icon__label { min-height:33.75px; max-width:104px; display:-webkit-box; overflow:hidden; -webkit-box-orient:vertical; -webkit-line-clamp:2; color:color-mix(in srgb,var(--foreground) 85%,transparent); font-size:0.875rem; font-weight:500; line-height:18px; transition:color 150ms cubic-bezier(.4,0,.2,1); }
+.source-app-icon__label--add { max-width:112px; color:color-mix(in srgb,var(--foreground) 70%,transparent); }
+.source-app-icon.is-hovered .source-app-icon__label { color:var(--foreground); }

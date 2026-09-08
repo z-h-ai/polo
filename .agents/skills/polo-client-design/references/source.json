@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "repository": "z-h-ai/polo",
+  "release": {
+    "tag": "v0.16.3",
+    "name": "v0.16.3",
+    "published_at": "2026-08-10T16:29:28Z",
+    "commit": "18e7914c0d432e6d10dad2473c04d6221fa088d9",
+    "draft": false,
+    "prerelease": false
+  },
+  "coverage": {
+    "paths": [
+      "apps/electron/src/renderer",
+      "apps/electron/resources/themes",
+      "packages/ui/src",
+      "packages/shared/src/config/theme.ts",
+      "apps/webui/src"
+    ],
+    "blob_count": 793,
+    "inventory_sha256": "27cda8be7a4a12d15fb6b958fa99fd8ecedba578e8a6b02bea038bd034926c47"
+  },
+  "focal_files": [
+    {"path": "apps/electron/src/renderer/index.css", "sha256": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf", "summary": "Electron runtime theme, typography, surfaces, shadows, and z-index tokens"},
+    {"path": "packages/ui/src/styles/index.css", "sha256": "255b11d49846e7149df8f85b9f10135fd3c4b0ecc46b324d2364a6fd9c5aa037", "summary": "Shared UI theme and reusable utility styles"},
+    {"path": "packages/shared/src/config/theme.ts", "sha256": "910d8d7e24d21aba3b8da184c17037fb4115e1addbf0a40646070b00d149d1b5", "summary": "Theme schema, resolution, defaults, and CSS conversion"},
+    {"path": "apps/electron/resources/themes/default.json", "sha256": "77ee715b277abf7a28d6d6a34e9967989cf403b81b561ea52e57a431b1ad15da", "summary": "Bundled Default preset resource"},
+    {"path": "apps/electron/src/renderer/components/app-shell/panel-constants.ts", "sha256": "6c90b01ebfb77a215d343e70089c16fefe66ec332ddbdd64a9ff376d8e446576", "summary": "Panel geometry and resize constants"},
+    {"path": "apps/electron/src/renderer/components/app-shell/AppShell.tsx", "sha256": "f16455b6bcae51c07d21a23633bc7dfb818e978158d1dc72ddac83011e864680", "summary": "Desktop and compact shell composition"},
+    {"path": "packages/ui/src/lib/layout.ts", "sha256": "837eff69b1c1da7e13aeb651267c5343b16b12db1e1dd4491fafd9889257c5f4", "summary": "Shared chat and overlay layout constants"},
+    {"path": "packages/ui/src/index.ts", "sha256": "34369da6a2c8fb039da5d95e367ecadc220ef74421334d8586c38ddd1b84a429", "summary": "Public shared UI exports and reuse surface"},
+    {"path": "apps/electron/src/renderer/components/ui/button.tsx", "sha256": "e56add5b1f26ed895240de77465af39a6979bb7e5b37b3a321508ea591a30ff4", "summary": "Renderer button variants, sizes, and states"},
+    {"path": "apps/electron/src/renderer/components/ui/input.tsx", "sha256": "0a6e49bf01196a7c25c3bae99fa89434d5f420731dce4af47889feafb36787cb", "summary": "Renderer input sizing and states"},
+    {"path": "apps/electron/src/renderer/components/ui/dialog.tsx", "sha256": "d4bdd018aa44956acc2a4c26eda8e8b749df351d7eed3742cd8e896834f09a43", "summary": "Dialog surface, overlay, motion, and accessibility structure"},
+    {"path": "apps/electron/src/renderer/components/ui/HeaderIconButton.tsx", "sha256": "b29861ad2b84d26e48c820f3c5caccdd53891f60c9c24faef4f2c4e374f0c255", "summary": "Header icon-button and tooltip contract"},
+    {"path": "packages/ui/src/components/ui/StyledDropdown.tsx", "sha256": "571056686590252b9f0ac75a822d1e15e8f2057fdf8aba83473a264925ff7018", "summary": "Shared dropdown styling and open-state behavior"},
+    {"path": "apps/electron/src/renderer/components/settings/SettingsUIConstants.ts", "sha256": "f86bb51f791c0c1d1cd7ac267b96f8af939f1b5ab829437d87e0acc333f2d2ef", "summary": "Settings label and description typography"},
+    {"path": "apps/electron/src/renderer/components/settings/SettingsInput.tsx", "sha256": "9a302b5c9d948221de14157cf629f2ed3f00370b46c473867ee8edab6fb49c3f", "summary": "Settings input composition and validation state"},
+    {"path": "apps/electron/src/renderer/components/settings/SettingsToggle.tsx", "sha256": "6761b2b07f2e1703072447324f5b4278da40d45c4aa59c57ab9f14eec9d7cb4d", "summary": "Settings toggle row composition"}
+  ],
+  "token_snapshot": "references/tokens.json",
+  "design_context": {
+    "version": "1.0.0",
+    "root": "assets/design-context",
+    "imported_from_commit": "01f4447cf77612ca2c62d9c7155601a51bdb7b5b",
+    "file_count": 157,
+    "inventory_sha256": "731ea063e1ad0cb49bf08e527d20170c5ce3a970f92bc2a42996b0adaac7a1b4",
+    "prototype": {
+      "path": "assets/design-context/prototype.html",
+      "bytes": 578324,
+      "sha256": "1d06fd4cfc8b35742386d69ebd25869cc5dffd86e47020ad8c87f08c77ce3c55"
+    },
+    "component_gallery": {
+      "index": "assets/design-context/components/index.html",
+      "html_count": 71
+    }
+  },
+  "notes": [
+    "Released source is authoritative for observable behavior; comments alone do not create mandatory rules.",
+    "The skill-owned assets/design-context package is the design SOT; upstream paths and commits are comparison provenance only.",
+    "The current HTML context import revision differs from the v0.16.3 comparison baseline; SOT precedence is explicit until a requested refresh aligns them."
+  ]
+}
