@@ -2245,14 +2245,14 @@ describe('HomePage quick access (POO-43)', () => {
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const view = renderHome()
     await act(async () => {})
-    expect(screen.getByTestId('home-quick-access-add')).toBeTruthy()
+    expect(screen.getByTestId('home-manage-quick-access')).toBeTruthy()
     view.unmount()
 
     // No ProductSpace context → no add tile.
     appCatalogHook = signedOutCatalogHook()
     const signedOut = renderHome()
     await act(async () => {})
-    expect(signedOut.queryByTestId('home-quick-access-add')).toBeNull()
+    expect(signedOut.queryByTestId('home-manage-quick-access')).toBeNull()
   })
 })
 

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useAtomValue } from 'jotai'
+import { skillsAtom } from '@/atoms/skills'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -289,6 +291,9 @@ export function HomePage() {
    */
   const quickHydratedContextRef = useRef<string | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
+  // Frozen POO-41 assistant card: the source line reports the enabled Skill
+  // count from the live skills store ("Polo 内置 · N 个 Skill 已启用").
+  const skills = useAtomValue(skillsAtom)
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
     launch: BundleAppLaunch
@@ -758,13 +763,29 @@ export function HomePage() {
     }
   }
 
+  // Frozen POO-41 home-card contract: creator_circle-sourced Apps present
+  // their source as 「认证创作者 · {creator}」; other sources keep the plain
+  // joined source names.
+  const renderQuickEntrySource = (app: CatalogApp) => {
+    const creatorCircle = app.catalogSources?.find(
+      (source) => source.kind === 'creator_circle' && source.name,
+    )
+    if (creatorCircle?.name) {
+      return t('homeApps.home.certifiedCreatorSource', { creator: creatorCircle.name })
+    }
+    return app.sourceNames?.length
+      ? app.sourceNames.join(' · ')
+      : t('homeApps.allApps.unknownSource')
+  }
+
   return (
-    // Frozen POO-41 `.main` mirror: the scroll container IS the centered
-    // 1260px column with the breakpoint paddings INSIDE it, so the launcher
-    // content aligns with the frozen reference column (padding outside the
-    // max-width widened the card grid and shifted the whole content band).
+    // Frozen POO-41 `.main` mirror: the centered 1260px column with the
+    // breakpoint paddings INSIDE it, content-sized exactly like the frozen
+    // `.main` (the frozen page clips overflow at the body — no internal
+    // scrolling), so the launcher geometry tracks the reference at every
+    // viewport.
     <main
-      className="mx-auto h-full w-full max-w-[1260px] overflow-y-auto bg-background px-[18px] pb-[50px] pt-[30px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+      className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
       <div className="space-y-[34px]">
@@ -885,7 +906,7 @@ export function HomePage() {
                 >
                   <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent text-[17px]">✦</span>
                   <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
-                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSourceWithSkills', { count: skills.length })}</p>
                   <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                     {t('homeApps.home.poloDescription')}
                   </p>
@@ -958,19 +979,6 @@ export function HomePage() {
                         </article>
                       )
                     })}
-                    {catalog.productSpace
-                      && catalogCommitted
-                      && homeWorkCards.length < MAX_HOME_QUICK_ACCESS_APPS && (
-                      <button
-                        type="button"
-                        data-testid="home-quick-access-add"
-                        onClick={() => setManageOpen(true)}
-                        className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center gap-[12px] rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
-                      >
-                        <Icons.Plus className="size-6" strokeWidth={1.5} />
-                        <span className="text-[12px]">{t('homeApps.quick.add')}</span>
-                      </button>
-                    )}
                   </>
                 )}
               </div>

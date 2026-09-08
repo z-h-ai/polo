@@ -42,9 +42,12 @@ export function WindowWidthGuard() {
   return (
     <div
       data-testid="window-width-guard"
-      className="fixed inset-0 z-[100] grid place-items-center bg-background p-[24px] text-center"
+      className="fixed inset-0 z-[100] grid place-items-center bg-background p-[24px] text-center text-[16px]"
     >
-      <div className="max-w-[320px]">
+      {/* 326px: the frozen column is 320px; Electron rounds CJK advances up
+          at this size, wrapping the frozen description one glyph early — the
+          +6px restores the frozen wrap point. */}
+      <div className="max-w-[326px]">
         <p className="mb-[7px] text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
           {t('productSpace.windowGuard.eyebrow')}
         </p>

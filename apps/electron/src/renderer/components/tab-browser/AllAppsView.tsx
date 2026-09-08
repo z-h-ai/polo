@@ -424,7 +424,7 @@ export function AllAppsView({
   }, [groups, pageLimit])
   const displayedCount = displayedGroups.reduce((sum, group) => sum + group.apps.length, 0)
   return (
-    <section aria-labelledby="all-apps-heading" data-testid="all-apps-view">
+    <section aria-labelledby="all-apps-heading" data-testid="all-apps-view" className="text-[16px]">
       <div className="mb-[26px] flex items-end justify-between gap-5">
         <div className="min-w-0">
           <p className="m-0 text-xs text-muted-foreground">{spaceName}</p>
