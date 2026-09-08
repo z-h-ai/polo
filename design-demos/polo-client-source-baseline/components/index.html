@@ -300,18 +300,34 @@ const FRAMES = [
   },
   {
     "type": "frame",
-    "title": "Reauth 重新认证",
-    "href": "./lifecycle/reauth.html",
+    "title": "Onboarding · 设置智能体",
+    "href": "./lifecycle/onboarding-api-setup.html",
     "size": "viewport",
     "x": 1568,
     "y": 1284
   },
   {
     "type": "frame",
+    "title": "Onboarding · Polo AI Backend",
+    "href": "./lifecycle/onboarding-api-setup-pi.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "Reauth 重新认证",
+    "href": "./lifecycle/reauth.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 1880
+  },
+  {
+    "type": "frame",
     "title": "Workspace 选择",
     "href": "./lifecycle/workspace-picker.html",
     "size": "viewport",
-    "x": 0,
+    "x": 1568,
     "y": 1880
   },
   {
@@ -319,17 +335,17 @@ const FRAMES = [
     "title": "组织加入",
     "href": "./lifecycle/organization-onboarding.html",
     "size": "viewport",
-    "x": 784,
-    "y": 1880
+    "x": 0,
+    "y": 2476
   },
   {
     "type": "break",
-    "advance": 2476
+    "advance": 3072
   },
   {
     "type": "section",
     "label": "工作台",
-    "note": "Home 启动器、组织应用卡、桌面应用菜单"
+    "note": "Home 启动器、组织应用卡、桌面应用菜单、Workspace 切换"
   },
   {
     "type": "frame",
@@ -349,20 +365,36 @@ const FRAMES = [
   },
   {
     "type": "frame",
-    "title": "组织应用卡",
-    "href": "./workbench/organization-app-card.html",
-    "size": "panel",
+    "title": "Workspace 切换 · Topbar",
+    "href": "./workbench/space-switcher-topbar.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "Workspace 切换 · Compact 抽屉",
+    "href": "./workbench/space-switcher-compact.html",
+    "size": "viewport",
     "x": 0,
     "y": 688
   },
   {
+    "type": "frame",
+    "title": "组织应用卡",
+    "href": "./workbench/organization-app-card.html",
+    "size": "panel",
+    "x": 0,
+    "y": 1284
+  },
+  {
     "type": "break",
-    "advance": 1154
+    "advance": 1750
   },
   {
     "type": "section",
     "label": "助手会话",
-    "note": "聊天空态、会话气泡、权限请求卡"
+    "note": "聊天空态、会话气泡、流式/错误/详情、会话列表、会话信息、多选、远程发送、Auth 卡"
   },
   {
     "type": "frame",
@@ -382,15 +414,151 @@ const FRAMES = [
   },
   {
     "type": "frame",
-    "title": "会话气泡",
-    "href": "./assistant/chat-conversation.html",
-    "size": "tall",
+    "title": "会话多选面板",
+    "href": "./assistant/multi-select-panel.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "多选批量菜单",
+    "href": "./assistant/multi-select-menu.html",
+    "size": "viewport",
     "x": 0,
     "y": 688
   },
   {
+    "type": "frame",
+    "title": "发送到 Workspace",
+    "href": "./assistant/send-remote-list.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "发送 · 全部离线",
+    "href": "./assistant/send-remote-offline.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 688
+  },
+  {
+    "type": "frame",
+    "title": "发送 · 传输中",
+    "href": "./assistant/send-remote-transferring.html",
+    "size": "viewport",
+    "x": 0,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "新建聊天 FAB",
+    "href": "./assistant/fab-new-chat.html",
+    "size": "viewport",
+    "x": 784,
+    "y": 1284
+  },
+  {
+    "type": "frame",
+    "title": "会话气泡",
+    "href": "./assistant/chat-conversation.html",
+    "size": "tall",
+    "x": 0,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "会话 · 流式响应",
+    "href": "./assistant/chat-streaming.html",
+    "size": "tall",
+    "x": 564,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "会话 · 错误气泡",
+    "href": "./assistant/chat-error.html",
+    "size": "tall",
+    "x": 1128,
+    "y": 1880
+  },
+  {
+    "type": "frame",
+    "title": "会话 · 完整回合",
+    "href": "./assistant/chat-detail.html",
+    "size": "tall",
+    "x": 0,
+    "y": 2776
+  },
+  {
+    "type": "frame",
+    "title": "任务徽章 + 下拉菜单",
+    "href": "./assistant/chat-active-tasks.html",
+    "size": "tall",
+    "x": 564,
+    "y": 2776
+  },
+  {
+    "type": "frame",
+    "title": "会话侧栏",
+    "href": "./assistant/session-sidebar.html",
+    "size": "panel",
+    "x": 0,
+    "y": 3672
+  },
+  {
+    "type": "frame",
+    "title": "凭证请求卡",
+    "href": "./assistant/chat-auth-request.html",
+    "size": "panel",
+    "x": 344,
+    "y": 3672
+  },
+  {
+    "type": "frame",
+    "title": "凭证完成",
+    "href": "./assistant/chat-auth-completed.html",
+    "size": "panel",
+    "x": 688,
+    "y": 3672
+  },
+  {
+    "type": "frame",
+    "title": "凭证取消",
+    "href": "./assistant/chat-auth-cancelled.html",
+    "size": "panel",
+    "x": 0,
+    "y": 4138
+  },
+  {
+    "type": "frame",
+    "title": "会话信息 Popover",
+    "href": "./assistant/session-info-popover.html",
+    "size": "panel",
+    "x": 344,
+    "y": 4138
+  },
+  {
+    "type": "frame",
+    "title": "文件查看器",
+    "href": "./assistant/file-viewer.html",
+    "size": "panel",
+    "x": 688,
+    "y": 4138
+  },
+  {
+    "type": "frame",
+    "title": "文件查看器空态",
+    "href": "./assistant/file-viewer-empty.html",
+    "size": "panel",
+    "x": 0,
+    "y": 4604
+  },
+  {
     "type": "break",
-    "advance": 1584
+    "advance": 5070
   },
   {
     "type": "section",
@@ -438,8 +606,40 @@ const FRAMES = [
     "y": 1584
   },
   {
+    "type": "frame",
+    "title": "Skill 列表",
+    "href": "./resources/skills-list.html",
+    "size": "panel",
+    "x": 344,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "Skill 详情",
+    "href": "./resources/skill-detail.html",
+    "size": "panel",
+    "x": 688,
+    "y": 1584
+  },
+  {
+    "type": "frame",
+    "title": "Source 列表",
+    "href": "./resources/sources-list.html",
+    "size": "panel",
+    "x": 0,
+    "y": 2050
+  },
+  {
+    "type": "frame",
+    "title": "Source 详情",
+    "href": "./resources/source-detail.html",
+    "size": "panel",
+    "x": 344,
+    "y": 2050
+  },
+  {
     "type": "break",
-    "advance": 2050
+    "advance": 2516
   },
   {
     "type": "section",
@@ -635,15 +835,31 @@ const FRAMES = [
   },
   {
     "type": "frame",
-    "title": "快捷键对话框",
-    "href": "./system/shortcuts-dialog.html",
-    "size": "tall",
+    "title": "验证码登录",
+    "href": "./system/phone-auth.html",
+    "size": "viewport",
+    "x": 1568,
+    "y": 92
+  },
+  {
+    "type": "frame",
+    "title": "验证码登录 · 输入验证码",
+    "href": "./system/phone-auth-verify.html",
+    "size": "viewport",
     "x": 0,
     "y": 688
   },
   {
+    "type": "frame",
+    "title": "快捷键对话框",
+    "href": "./system/shortcuts-dialog.html",
+    "size": "tall",
+    "x": 0,
+    "y": 1284
+  },
+  {
     "type": "break",
-    "advance": 1584
+    "advance": 2180
   }
 ];
 const SIZES = {"viewport":{"w":1440,"h":900},"tall":{"w":1000,"h":1500},"panel":{"w":560,"h":640}};

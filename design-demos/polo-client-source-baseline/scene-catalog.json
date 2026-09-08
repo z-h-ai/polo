@@ -20,9 +20,9 @@
       "id": "onboarding",
       "label": "首次启动引导",
       "group": "lifecycle",
-      "states": ["admin-login", "admin-kicked", "welcome", "git-bash", "provider-select", "local-model", "credentials", "copilot-code", "claude-code", "complete"],
+      "states": ["admin-login", "admin-kicked", "welcome", "git-bash", "provider-select", "api-setup", "api-setup-pi", "local-model", "credentials", "copilot-code", "claude-code", "phone-auth", "phone-auth-verify", "complete"],
       "regions": ["onboarding-card", "onboarding-progress"],
-      "source": ["src/renderer/components/onboarding/OnboardingWizard.tsx", "src/renderer/components/onboarding/GitBashWarning.tsx", "src/renderer/components/onboarding/ProviderSelectStep.tsx", "src/renderer/components/onboarding/LocalModelStep.tsx", "src/renderer/components/onboarding/CredentialsStep.tsx"]
+      "source": ["src/renderer/components/onboarding/OnboardingWizard.tsx", "src/renderer/components/onboarding/GitBashWarning.tsx", "src/renderer/components/onboarding/ProviderSelectStep.tsx", "src/renderer/components/onboarding/APISetupStep.tsx", "src/renderer/components/onboarding/LocalModelStep.tsx", "src/renderer/components/onboarding/CredentialsStep.tsx", "src/renderer/components/onboarding/AdminLoginStep.tsx", "src/renderer/components/onboarding/AdminLoginMethodTabs.tsx", "src/renderer/components/onboarding/PhoneAuthStep.tsx", "src/renderer/components/onboarding/phone-auth-utils.ts"]
     },
     {
       "id": "reauth",
@@ -36,7 +36,7 @@
       "id": "workspace-picker",
       "label": "空间选择",
       "group": "lifecycle",
-      "states": ["loading", "list", "error", "create", "open-folder", "connect-remote"],
+      "states": ["loading", "list", "error", "create", "open-folder", "connect-remote", "connect-remote-create", "server-browser"],
       "regions": ["workspace-picker", "workspace-list"],
       "source": ["src/renderer/components/workspace"]
     },
@@ -57,12 +57,52 @@
       "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/tab-browser/OrganizationAppCard.tsx", "src/renderer/components/workspace"]
     },
     {
+      "id": "space-switcher",
+      "label": "Workspace/组织切换",
+      "group": "workbench",
+      "states": ["topbar", "topbar-open", "sidebar-open", "compact", "organization"],
+      "regions": ["workbench-bar", "space-switcher", "space-switcher-menu"],
+      "source": ["src/renderer/components/app-shell/WorkspaceSwitcher.tsx", "src/renderer/components/app-shell/CompactWorkspaceSwitcher.tsx", "src/renderer/components/app-shell/TopBar.tsx", "src/renderer/components/organization/OrganizationSwitcher.tsx", "packages/ui/src/components/ui/StyledDropdown.tsx", "packages/ui/src/components/ui/drawer.tsx"]
+    },
+    {
       "id": "chat",
       "label": "Polo 助手会话",
       "group": "assistant",
-      "states": ["normal", "conversation", "detail", "streaming", "error", "empty", "archived", "loading", "restricted"],
+      "states": ["normal", "conversation", "streaming", "error", "detail", "empty", "archived", "loading", "restricted", "active-tasks", "auth-request", "auth-request-basic", "auth-completed", "auth-cancelled", "fab"],
       "regions": ["workbench-bar", "session-sidebar", "chat-header", "message-list", "composer"],
-      "source": ["src/renderer/pages/ChatPage.tsx", "src/renderer/components/app-shell", "packages/ui/src/components/chat/UserMessageBubble.tsx"]
+      "source": ["src/renderer/pages/ChatPage.tsx", "src/renderer/components/chat/ChatDisplay.tsx", "src/renderer/components/chat/MessageBubble.tsx", "src/renderer/components/app-shell", "packages/ui/src/components/chat/UserMessageBubble.tsx", "packages/ui/src/components/chat/TurnCard.tsx", "packages/ui/src/lib/layout.ts"]
+    },
+    {
+      "id": "session-info",
+      "label": "会话信息面板",
+      "group": "assistant",
+      "states": ["popover", "viewer", "viewer-empty"],
+      "regions": ["session-info-popover", "file-viewer"],
+      "source": ["src/renderer/components/app-shell/SessionInfoPopover.tsx", "src/renderer/components/files/FileViewer.tsx"]
+    },
+    {
+      "id": "multi-select",
+      "label": "会话多选操作",
+      "group": "assistant",
+      "states": ["panel", "menu"],
+      "regions": ["multi-select-panel", "batch-menu"],
+      "source": ["src/renderer/components/app-shell/MultiSelectPanel.tsx", "src/renderer/components/app-shell/BatchSessionMenu.tsx"]
+    },
+    {
+      "id": "send-remote",
+      "label": "发送到远程 Workspace",
+      "group": "assistant",
+      "states": ["list", "offline", "transferring"],
+      "regions": ["send-remote-dialog"],
+      "source": ["src/renderer/components/app-shell/SendToWorkspaceDialog.tsx", "src/renderer/components/app-shell/ActiveTasksBar.tsx", "src/renderer/components/app-shell/TaskActionMenu.tsx"]
+    },
+    {
+      "id": "conversations",
+      "label": "会话列表数据态",
+      "group": "assistant",
+      "states": ["date-grouped", "unread-mode", "status-mode", "search", "menu-open", "empty"],
+      "regions": ["session-sidebar", "session-list", "session-item", "session-search", "session-menu"],
+      "source": ["src/renderer/components/app-shell/SessionList.tsx", "src/renderer/components/app-shell/SessionItem.tsx", "src/renderer/components/app-shell/SessionMenu.tsx", "src/renderer/components/app-shell/SessionMenuParts.tsx", "src/renderer/components/app-shell/SessionSearchHeader.tsx", "src/renderer/components/app-shell/SessionStatusIcon.tsx", "src/renderer/components/ui/entity-list.tsx", "src/renderer/components/ui/entity-row.tsx", "src/renderer/components/ui/entity-list-badge.tsx", "src/renderer/config/session-status-config.tsx", "src/renderer/utils/session.ts", "packages/shared/src/statuses", "packages/shared/src/colors/defaults.ts"]
     },
     {
       "id": "chat-permission",
@@ -76,17 +116,17 @@
       "id": "skills",
       "label": "Skill 详情",
       "group": "resources",
-      "states": ["list", "detail", "empty", "loading", "failure", "restricted"],
+      "states": ["list", "detail", "detail-menu", "empty", "loading", "failure", "restricted"],
       "regions": ["resource-header", "resource-detail", "resource-actions"],
-      "source": ["src/renderer/pages/SkillInfoPage.tsx"]
+      "source": ["src/renderer/pages/SkillInfoPage.tsx", "src/renderer/components/app-shell/SkillsListPanel.tsx", "src/renderer/components/app-shell/SkillMenu.tsx", "src/renderer/components/ui/skill-avatar.tsx", "src/renderer/components/info", "src/renderer/components/ui/EditPopover.tsx"]
     },
     {
       "id": "sources",
       "label": "Source 详情",
       "group": "resources",
-      "states": ["list", "detail", "empty", "loading", "failure", "restricted"],
+      "states": ["list", "detail", "detail-menu", "empty", "loading", "failure", "restricted"],
       "regions": ["resource-header", "resource-detail", "resource-actions"],
-      "source": ["src/renderer/pages/SourceInfoPage.tsx"]
+      "source": ["src/renderer/pages/SourceInfoPage.tsx", "src/renderer/components/app-shell/SourcesListPanel.tsx", "src/renderer/components/app-shell/SourceMenu.tsx", "src/renderer/components/ui/source-avatar.tsx", "src/renderer/components/info"]
     },
     {
       "id": "automations",
@@ -119,6 +159,14 @@
       "states": ["list", "app", "appearance", "input", "workspace", "permissions", "labels", "messaging", "server", "shortcuts", "preferences", "account-security", "detail", "loading", "failure", "restricted"],
       "regions": ["settings-navigator", "settings-content", "settings-form"],
       "source": ["src/renderer/pages/settings/SettingsNavigator.tsx", "src/renderer/pages/settings", "src/renderer/components/settings"]
+    },
+    {
+      "id": "messaging",
+      "label": "消息连接对话",
+      "group": "settings",
+      "states": ["telegram-connect", "telegram-reconfigure", "whatsapp-qr", "whatsapp-connected", "lark-connect", "pairing-code", "supergroup-pairing"],
+      "regions": ["messaging-dialog"],
+      "source": ["src/renderer/components/messaging"]
     },
     {
       "id": "organization",

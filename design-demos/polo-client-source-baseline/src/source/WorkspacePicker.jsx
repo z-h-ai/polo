@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Cloud, FolderOpen, FolderPlus, Plus, X } from 'lucide-react'
+import { SourceWorkspaceCreateNewStep, SourceWorkspaceOpenFolderStep, SourceWorkspaceConnectRemoteStep, SourceWorkspaceConnectRemoteCreateStep, SourceServerDirectoryBrowser } from './WorkspaceSteps.jsx'
 
 // WorkspacePicker.tsx (loading / empty with a real zero-workspace dataset) and
 // WorkspaceCreationScreen.tsx → AddWorkspaceStep_Choice.tsx (choice step),
@@ -19,7 +20,16 @@ const primaryButton = { display: 'inline-flex', width: '100%', height: 33.75, al
 
 export function SourceWorkspacePicker({ state }) {
   if (state === 'loading') return <CreationScreenFrame><PickerLoading /></CreationScreenFrame>
-  if (['create', 'open-folder', 'connect-remote'].includes(state)) return <CreationScreenFrame><CreationChoice /></CreationScreenFrame>
+  // AddWorkspace flow: the creation steps translate
+  // AddWorkspaceStep_{CreateNew,OpenFolder,ConnectRemote}.tsx forms with named
+  // deterministic fixtures (see WorkspaceSteps.jsx). connect-remote-create is
+  // the same component's "create new workspace on server" branch and
+  // server-browser opens the ServerDirectoryBrowser dialog.
+  if (state === 'create') return <CreationScreenFrame><SourceWorkspaceCreateNewStep /></CreationScreenFrame>
+  if (state === 'open-folder') return <CreationScreenFrame><SourceWorkspaceOpenFolderStep /></CreationScreenFrame>
+  if (state === 'connect-remote') return <CreationScreenFrame><SourceWorkspaceConnectRemoteStep /></CreationScreenFrame>
+  if (state === 'connect-remote-create') return <CreationScreenFrame><SourceWorkspaceConnectRemoteCreateStep /></CreationScreenFrame>
+  if (state === 'server-browser') return <SourceServerDirectoryBrowser />
   return <PickerEmpty />
 }
 

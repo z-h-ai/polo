@@ -21,6 +21,8 @@ export default defineConfig({
       // Render the same icon package as the Electron Renderer. The export
       // tool subsequently inlines its generated SVG into prototype.html.
       'lucide-react': resolve(devNodeModules, 'lucide-react'),
+      // WhatsApp QR code rendering — same package as the Electron Renderer.
+      'qrcode.react': resolve(devNodeModules, 'qrcode.react'),
     },
     dedupe: ['react', 'react-dom'],
   },
