@@ -342,7 +342,6 @@ afterEach(() => {
 const {
   act,
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -355,79 +354,74 @@ function renderApp(): void {
   render(createElement(I18nextProvider, { i18n }, createElement(App)))
 }
 
-function assertNarrowHomeMounted(): void {
-  expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
-  expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-  // Excluded work surfaces are absent (not merely CSS-hidden).
+function assertGuardMounted(): void {
+  expect(screen.getByTestId('window-width-guard')).toBeTruthy()
+  // The guard REPLACES every work surface at 390x844 (the frozen POO-41
+  // authoritative mobile result): the Home launcher, the workbench, and any
+  // webview layer are unmounted — absent, not merely CSS-hidden.
+  expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
+  expect(screen.queryByTestId('home-quick-entry-polo')).toBeNull()
+  expect(screen.queryByTestId('home-app-hub')).toBeNull()
   expect(screen.queryByTestId('polo-app-root')).toBeNull()
   expect(document.querySelector('webview')).toBeNull()
   expect(screen.queryByTestId('file-preview-overlay')).toBeNull()
+}
+
+function assertHomeRestored(): void {
+  expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
+  expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   expect(screen.queryByTestId('window-width-guard')).toBeNull()
 }
 
-describe('App × production narrow-Home route at 390x844 (Review R32)', () => {
-  it('hydrates a stale non-Home tab route to the narrow Home surface through the real App bootstrap', async () => {
-    // The ambient atom STARTS at POLO_TAB_ID (stale). Production
-    // initialization (TabShellProvider hydration re-activates Home) must
-    // bring the narrow session to the Home surface — no test-side reset.
+describe('App × frozen narrow-window guard at 390x844 (Review R38 restores the POO-41 contract)', () => {
+  it('renders the frozen WindowWidthGuard for EVERY route at 390x844 while the stale non-Home tab route hydrates behind it', async () => {
+    // The ambient atom STARTS at POLO_TAB_ID (stale). Production hydration
+    // (TabShellProvider re-activates Home) still runs — behind the guard —
+    // but NO work surface may mount at the frozen mobile width.
     renderApp()
     await waitFor(
       () => {
-        if (!screen.getByTestId('home-quick-access-section')) throw new Error('launcher section missing')
+        if (!screen.getByTestId('window-width-guard')) throw new Error('frozen guard missing at 390x844')
       },
       { timeout: 20_000 },
     )
-    assertNarrowHomeMounted()
+    assertGuardMounted()
   }, 60_000)
 
-  it('fails closed to the frozen guard when the Polo workbench tab is activated at 390x844, and returns Home on resize', async () => {
+  it('restores the production Home surface when the window widens past 640px, and re-narrowing fails closed to the guard again', async () => {
     renderApp()
     await waitFor(
       () => {
-        if (!screen.getByTestId('home-quick-access-section')) throw new Error('launcher section missing')
+        if (!screen.getByTestId('window-width-guard')) throw new Error('frozen guard missing at 390x844')
       },
       { timeout: 20_000 },
     )
+    assertGuardMounted()
 
-    // Supported user transition: clicking the Polo tab in the tab strip
-    // (the same activateTab the production TabBar click handler runs).
-    fireEvent.click(screen.getByLabelText('Close Polo 助手').closest('div')!)
-    await waitFor(
-      () => {
-        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing for workbench route')
-      },
-      { timeout: 10_000 },
-    )
-    // The guarded route replaces the Home surface and all excluded surfaces.
-    expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
-    expect(screen.queryByTestId('polo-app-root')).toBeNull()
-
-    // The frozen guard's own escape is the window resize across 640px:
-    // widening restores the wide workbench layout (workbench mounted again),
-    // and re-narrowing with the (initialized) non-Home route still active
-    // fails closed to the guard — the Home surface requires the supported
-    // Home route, which production re-establishes through the tab strip or
-    // hydration, not automatically.
+    // The frozen guard's own escape is the OS-level window resize across the
+    // 640px line: at 641px+ the production Home surface comes back through
+    // the real matchMedia resize path (hydration already re-activated Home).
     await act(async () => {
       resizeViewport(1000)
     })
     await waitFor(
       () => {
-        if (!screen.getByTestId('polo-app-root')) throw new Error('workbench missing after widening')
+        if (!screen.getByTestId('home-quick-access-section')) throw new Error('Home surface missing after widening')
       },
       { timeout: 10_000 },
     )
-    expect(screen.queryByTestId('window-width-guard')).toBeNull()
+    assertHomeRestored()
 
+    // Re-narrowing fails closed again — every route, Home included.
     await act(async () => {
       resizeViewport(390)
     })
     await waitFor(
       () => {
-        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing after re-narrowing on the workbench route')
+        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing after re-narrowing')
       },
       { timeout: 10_000 },
     )
-    expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
+    assertGuardMounted()
   }, 60_000)
 })

@@ -759,11 +759,15 @@ export function HomePage() {
   }
 
   return (
+    // Frozen POO-41 `.main` mirror: the scroll container IS the centered
+    // 1260px column with the breakpoint paddings INSIDE it, so the launcher
+    // content aligns with the frozen reference column (padding outside the
+    // max-width widened the card grid and shifted the whole content band).
     <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-[18px] pb-[50px] pt-[30px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+      className="mx-auto h-full w-full max-w-[1260px] overflow-y-auto bg-background px-[18px] pb-[50px] pt-[30px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
-      <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
+      <div className="space-y-[34px]">
         {view === 'all-apps' && catalog.productSpace ? (
           <AllAppsView
             spaceName={activeProductSpace?.name
@@ -793,7 +797,7 @@ export function HomePage() {
             exactly like the frozen ≤760px `.hero` column rule. */}
             <div className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end">
               <div>
-                <h1 className="m-0 text-[36px] font-semibold leading-[1.08] tracking-[-0.05em]">
+                <h1 className="m-0 text-[36px] font-bold leading-[1.08] tracking-[-0.05em]">
                   {t('homeApps.home.greeting')}
                 </h1>
                 <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
@@ -807,7 +811,7 @@ export function HomePage() {
                   type="button"
                   data-testid="home-circles-link"
                   onClick={() => setShowCirclesCard(value => !value)}
-                  className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 >
                   {t('homeApps.home.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
                 </button>
@@ -842,20 +846,20 @@ export function HomePage() {
             )}
 
             <section className="mt-[34px]">
-              <div className="mb-[18px] flex items-start justify-between gap-4">
+              <div className="mb-[18px] flex items-start justify-between gap-[16px]">
                 <div>
-                  <h2 className="m-0 text-[20px] tracking-[-0.03em]">{t('homeApps.home.sectionTitle')}</h2>
+                  <h2 className="m-0 text-[20px] font-bold leading-[normal] tracking-[-0.03em]">{t('homeApps.home.sectionTitle')}</h2>
                   <p className="mt-[6px] text-[14px] leading-[1.45] text-muted-foreground">
                     {t('homeApps.home.sectionDescription')}
                   </p>
                 </div>
                 {catalog.productSpace && (
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-[8px]">
                     <button
                       type="button"
                       data-testid="home-manage-quick-access"
                       onClick={() => setManageOpen(true)}
-                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
                       {t('homeApps.quick.manage')}
                     </button>
@@ -863,7 +867,7 @@ export function HomePage() {
                       type="button"
                       data-testid="home-all-apps-open"
                       onClick={() => setView('all-apps')}
-                      className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
                       {t('homeApps.quick.allApps')}
                     </button>
@@ -879,9 +883,9 @@ export function HomePage() {
                   onClick={openPoloAssistant}
                   className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
                 >
-                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-accent/12 text-accent text-[17px]">✦</span>
-                  <h3 className="m-0 text-[16px] font-semibold">{t('homeApps.home.poloTitle')}</h3>
-                  <p className="mt-[4px] text-[12px] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent text-[17px]">✦</span>
+                  <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
+                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
                   <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                     {t('homeApps.home.poloDescription')}
                   </p>
@@ -889,7 +893,7 @@ export function HomePage() {
                     <Button
                       type="button"
                       size="sm"
-                      className="min-h-[32px] rounded-lg border border-accent bg-accent px-3 text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
+                      className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
                       onClick={(event) => {
                         event.stopPropagation()
                         openPoloAssistant()
@@ -907,7 +911,7 @@ export function HomePage() {
                     <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : catalog.state.errorCode && !catalog.state.catalog ? (
-                  <div className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-6 text-center">
+                  <div className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-[24px] text-center">
                     <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
                     <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
                     <p className="mt-1 max-w-md text-xs text-muted-foreground">
@@ -929,8 +933,8 @@ export function HomePage() {
                           onClick={() => { void openCatalogApp(app) }}
                           className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
                         >
-                          <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-success/12 text-success text-[17px]">{artGlyph}</span>
-                          <h3 className="m-0 text-[16px] font-semibold">{app.name}</h3>
+                          <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success text-[17px]">{artGlyph}</span>
+                          <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
                           <p className="mt-[4px] truncate text-[12px] text-muted-foreground">
                             {app.sourceNames?.length ? app.sourceNames.join(' · ') : t('homeApps.allApps.unknownSource')}
                           </p>
@@ -942,7 +946,7 @@ export function HomePage() {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="min-h-[32px] rounded-lg border-0 px-3 text-[12px] text-muted-foreground hover:text-foreground"
+                              className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 void openCatalogApp(app)
@@ -961,7 +965,7 @@ export function HomePage() {
                         type="button"
                         data-testid="home-quick-access-add"
                         onClick={() => setManageOpen(true)}
-                        className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center gap-3 rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
+                        className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center gap-[12px] rounded-[17px] border border-dashed border-foreground/20 bg-transparent text-center text-muted-foreground hover:border-accent/45 hover:text-accent"
                       >
                         <Icons.Plus className="size-6" strokeWidth={1.5} />
                         <span className="text-[12px]">{t('homeApps.quick.add')}</span>

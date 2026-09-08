@@ -343,12 +343,10 @@ afterEach(() => {
 const {
   act,
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
 } = await import('@testing-library/react')
-
 const { TabShell } =
   await import('../components/tab-browser/TabShell') as typeof import('../components/tab-browser/TabShell')
 
@@ -377,13 +375,16 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(document.querySelector('webview')).toBeNull()
   }, 30_000)
 
-  it('narrow: first committed layout after a keyed scope switch shows NO stale surfaces, then the shell restores', async () => {
+  it('narrow: first committed layout shows the scope-neutral boundary, then hydration fails closed to the frozen guard for the Home route too', async () => {
     narrowViewportActive = true
     installMatchMedia()
     seedStalePreviousScope()
 
     render(buildShellTree({ key: 'scope-new-narrow', accountId: 'acct-r37-fixture', productSpaceId: 'organization-a' }))
 
+    // PRE-HYDRATION first committed layout is unchanged (Review R33/R34
+    // boundary preserved): the scope-neutral shell — no stale surfaces —
+    // regardless of viewport width.
     expect(layoutSnapshots).toHaveLength(1)
     expect(layoutSnapshots[0]!.includes('旧空间 App')).toBe(false)
     expect(layoutSnapshots[0]!.includes('old-scope.example.com')).toBe(false)
@@ -391,22 +392,19 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(layoutSnapshots[0]!.includes('polo-app-root')).toBe(false)
     expect(layoutSnapshots[0]!.includes('shell-scope-loading')).toBe(true)
 
+    // After hydration the frozen narrow-window boundary covers EVERY route
+    // (Review R38 restores the POO-41 contract): the REAL WindowWidthGuard
+    // replaces the shell — the Home launcher, TabBar, workbench and webview
+    // layers stay unmounted at ≤640px.
     await waitFor(() => {
-      if (!screen.getByTestId('app-topbar')) throw new Error('shell not restored')
-    })
-    // Hydrated narrow Home restored (real narrow boundary path).
-    expect(screen.getByTestId('home-quick-access-section')).toBeTruthy()
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-
-    // Hydrated narrow non-Home route: activating the Polo workbench tab via
-    // the production TabBar click fails closed to the REAL WindowWidthGuard
-    // (the guarded route's production escape is the window resize).
-    fireEvent.click(screen.getByLabelText('Close Polo 助手').closest('div')!)
-    await waitFor(() => {
-      if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing for narrow non-Home route')
+      if (!screen.getByTestId('window-width-guard')) throw new Error('frozen guard missing after hydration at narrow width')
     })
     expect(screen.getByTestId('window-width-guard')).toBeTruthy()
     expect(screen.queryByTestId('home-quick-access-section')).toBeNull()
+    expect(screen.queryByTestId('home-quick-entry-polo')).toBeNull()
+    expect(screen.queryByTestId('polo-app-root')).toBeNull()
+    expect(screen.queryByTestId('app-topbar')).toBeNull()
+    expect(document.querySelector('webview')).toBeNull()
   }, 30_000)
 
   it('pre-hydration side effects stay scope-neutral for scope A AND scope B: no stale route marker, no live deep-link/keydown listener until ready; keyed remount and final unmount clean up exactly', async () => {

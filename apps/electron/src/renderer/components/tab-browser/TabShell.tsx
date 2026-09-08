@@ -18,20 +18,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function TabShell({ renderPolo }: TabShellProps) {
   const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
-  // Narrow-route boundary (Review R31/R32), PROVIDER-OWNED: evaluated only
-  // with TabShellProvider-hydrated state, never the unhydrated ambient tab
-  // atom — lifecycle screens render before this component and can never be
-  // blocked by a stale tab route.
-  //
-  // - Provider hydration ALWAYS re-activates Home first (setActiveTabId
-  //   (HOME_TAB_ID) in hydrate()), so a ready narrow session that begins
-  //   with a stale non-Home route reaches Home through the production
-  //   initialization path; pre-hydration the narrow surface is therefore
-  //   the Home-only boundary (no workbench/webview/preview mounts).
-  // - Once initialized, a genuinely unsupported non-Home route at narrow
-  //   width fails closed to the frozen fullscreen guard.
+  // Frozen narrow-window boundary (Review R38, restores the POO-41 contract):
+  // at/below the frozen 640px line EVERY route fails closed to the frozen
+  // WindowWidthGuard — the POO-41 authoritative 390x844 result is the guard
+  // screen, not a narrow work surface. Hook order is untouched: the hook is
+  // read before every early return and the decision renders after all hooks.
   const narrowViewport = useNarrowViewport()
-  const narrowHome = narrowViewport && (!isReady || activeTab.type === 'home')
 
   useEffect(() => {
     const root = document.documentElement
@@ -130,14 +122,14 @@ export function TabShell({ renderPolo }: TabShellProps) {
   // Narrow-route guard decision lives AFTER every hook in this component:
   // rendering the frozen guard must not change the hook count between
   // renders (React "fewer hooks" crash on route transitions).
-  if (narrowViewport && activeTab.type !== 'home') {
+  if (narrowViewport) {
     return <WindowWidthGuard />
   }
 
   return (
     <div className="h-full min-h-0 bg-background">
       <TabBar />
-      <TabContent renderPolo={renderPolo} narrowHome={narrowHome} />
+      <TabContent renderPolo={renderPolo} />
     </div>
   )
 }
