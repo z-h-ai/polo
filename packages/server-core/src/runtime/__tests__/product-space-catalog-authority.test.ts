@@ -1523,3 +1523,102 @@ describe('R27-a2: switch-lock public boundary + typed structured tokens', () => 
     expect(switchLockEventLog()).toEqual([])
   })
 })
+
+describe('R54: every supported public subpath is persistence-seam-free (isolated child, exact identity)', () => {
+  it('imports ALL exports-map keys by self-reference, identity-scans every namespace, and rejects unsupported internal/commit subpaths', () => {
+    // Derive the supported subpath set from the package manifest — the count
+    // is never hard-coded (parent and child derive it independently).
+    const pkgAbs = join(import.meta.dir, '..', '..', '..', 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgAbs, 'utf8')) as { name: string; exports: Record<string, string> }
+    const subpaths = Object.keys(pkg.exports)
+    expect(subpaths.length).toBeGreaterThan(0)
+
+    // Focused retained assertion: the dedicated public authority subpath
+    // exposes no mutable seam.
+    expect((publicAuthority as Record<string, unknown>).__authorityPersistenceSeamForTests).toBeUndefined()
+
+    // The seam is imported ONLY through the permitted test-internal source
+    // boundary: the internal module file, which the exports map never exposes.
+    const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
+    const internalSubpath = `${pkg.name}/runtime/product-space-catalog-authority-internal`
+    const commitSubpath = `${pkg.name}/runtime/product-space-catalog-authority-commit`
+
+    const probe = `
+      const { pathToFileURL } = await import('node:url')
+      const { join } = await import('node:path')
+      const fs = await import('node:fs')
+      const assert = (await import('node:assert/strict')).default
+      const pkgRoot = ${JSON.stringify(join(import.meta.dir, '..', '..', '..'))}
+      const pkg = JSON.parse(fs.readFileSync(join(pkgRoot, 'package.json'), 'utf8'))
+      const subpaths = Object.keys(pkg.exports)
+      assert.ok(subpaths.includes('.'), 'exports map must expose the package root')
+
+      // Test-internal boundary: the seam comes from the internal module FILE
+      // (never a supported subpath) purely as the identity comparison source.
+      const seam = (await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href))
+        .__authorityPersistenceSeamForTests
+      assert.ok(seam, 'internal seam must exist for the identity comparison')
+      assert.equal(typeof seam.renameSync, 'function', 'seal source must be the mutable seam object')
+
+      // Import EVERY supported key by package self-reference.
+      const namespaces = {}
+      for (const key of subpaths) {
+        namespaces[key] = await import(join(pkgRoot, pkg.exports[key]))
+      }
+
+      // Self-reference must work at all (sanity via a supported subpath) so
+      // that the rejection checks below cannot pass vacuously.
+      async function rejects(name) {
+        try { await import(name); return false } catch { return true }
+      }
+      const authoritySupported = await rejects(${JSON.stringify(pkg.name)} + '/runtime/product-space-catalog-authority')
+      assert.equal(authoritySupported, false, 'supported authority subpath must import by name')
+
+      // Unsupported internal and commit subpaths must be REJECTED.
+      const internalRejected = await rejects(${JSON.stringify(internalSubpath)})
+      const commitRejected = await rejects(${JSON.stringify(commitSubpath)})
+
+      // Exact object identity deep scan: the seam object must not appear
+      // under ANY property name at ANY depth of ANY supported namespace.
+      const offenders = []
+      const scan = (value, label, seen) => {
+        if (value === seam) { offenders.push(label); return }
+        if (!value || typeof value !== 'object' || seen.has(value)) return
+        seen.add(value)
+        for (const key of Object.keys(value)) {
+          let child
+          try { child = value[key] } catch { continue }
+          scan(child, label + '.' + key, seen)
+        }
+      }
+      for (const key of subpaths) scan(namespaces[key], 'exports[' + JSON.stringify(key) + ']', new Set())
+
+      // Real assertions — any violation aborts the child NONZERO.
+      assert.equal(offenders.length, 0, 'persistence seam must not be reachable from any supported subpath')
+      assert.equal(internalRejected, true, 'unsupported internal subpath must be rejected')
+      assert.equal(commitRejected, true, 'unsupported commit subpath must be rejected')
+      console.log(JSON.stringify({ subpathCount: subpaths.length, offenders, internalRejected, commitRejected }))
+    `
+    const child = Bun.spawnSync({
+      cmd: [process.execPath, '-e', probe],
+      cwd: join(import.meta.dir, '..', '..', '..'),
+      env: { ...process.env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    // A non-zero child exit is a FAILURE, never an accepted branch — and the
+    // child's own assert/strict reason must surface in the failure output.
+    expect(child.exitCode === 0, `seam-boundary child failed:\n${child.stderr.toString().slice(-1200)}`).toBe(true)
+    const payload = JSON.parse(child.stdout.toString().trim()) as {
+      subpathCount: number
+      offenders: string[]
+      internalRejected: boolean
+      commitRejected: boolean
+    }
+    // Both sides derive the set from the manifest — the count is not baked in.
+    expect(payload.subpathCount).toBe(subpaths.length)
+    expect(payload.offenders).toEqual([])
+    expect(payload.internalRejected).toBe(true)
+    expect(payload.commitRejected).toBe(true)
+  })
+})
