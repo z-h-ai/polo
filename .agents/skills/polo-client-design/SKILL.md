@@ -1,35 +1,38 @@
 ---
 name: polo-client-design
-description: Apply or manually refresh the versioned Polo desktop-client design specification for Electron UI implementation, prototypes, settings screens, component changes, and UI review.
+description: Apply and iterate the Polo desktop-client design specification and bundled prototypes, or reconcile confirmed designs with a published release. Use for client UI design, implementation and review.
 ---
 
 # Polo Client Design
 
-This skill directory is the single source of truth (SOT) for Polo desktop-client design. Its references define the rules and its bundled `assets/design-context/` contains the canonical editable prototype source, self-contained HTML, component gallery, scene catalog, and evidence. Ordinary use is offline: do not query GitHub, inspect a `design-demos` copy, or re-derive rules from the current worktree unless the user explicitly asks to update the SOT.
+This repository-owned skill is the design SOT. Its normative references and editable `assets/design-context/` define target behavior; `references/source.json.release`, source hashes and `tokens.json` describe published evidence. Approved designs may become the public specification on `main` before product implementation or release.
+
+## Choose the mode
+
+- **Use the specification** (including new pages reusing existing components): follow the saved rules below. Keep page-specific content in its task. Do not create a public design change unless common rules change.
+- **Iterate design**, e.g. “迭代设置页布局” or “确认当前设计并集成”: read [design-iteration.md](references/design-iteration.md). Work from `main` in an independent worktree, edit candidate rules and bundled prototype source, show before/after states, obtain confirmation of the exact design, validate, then integrate a standalone commit under repository rules. Design confirmation and Git publication authorization are separate; reuse authorization already given.
+- **Refresh release evidence**, e.g. “更新到最新已发布版本” or “核对新版本是否实现已确认设计”: read [update-workflow.md](references/update-workflow.md). Pin a stable Release and reconcile each confirmed target. Preserve pending and partially implemented targets; show conflicts with a repair recommendation.
+
+Ordinary use is offline. Do not query GitHub, inspect a `design-demos` copy, or re-derive rules from the current product checkout. Read [source.md](references/source.md) only when exact provenance or delivery status matters.
 
 ## Use the saved specification
 
-1. Read [references/foundations.md](references/foundations.md) for theme, type, spacing, radius, and elevation rules.
-2. Read only the task-relevant detail:
-   - Shells, panels, page structure, or responsive behavior: [references/layout.md](references/layout.md)
-   - Controls, settings, menus, dialogs, and reuse choices: [references/components.md](references/components.md)
-   - Hover, focus, open, disabled, loading, errors, and motion: [references/interaction-states.md](references/interaction-states.md)
-3. For prototypes or visual review, read [references/html-context.md](references/html-context.md), then reuse the bundled scene or component HTML.
-4. When exact values or upstream provenance matter, consult [references/source.md](references/source.md) and the generated [references/tokens.json](references/tokens.json).
+1. Read [foundations.md](references/foundations.md) for theme, type, spacing, radius and elevation.
+2. Read task-relevant [layout.md](references/layout.md), [components.md](references/components.md), or [interaction-states.md](references/interaction-states.md).
+3. For prototypes and visual review, read [html-context.md](references/html-context.md), then reuse bundled scenes and component HTML.
+4. Record the adopted public design commit in implementation tasks. Existing tasks keep their pinned version; compare changes explicitly before upgrading. New tasks use current `main`.
 
-For design and prototype decisions, the bundled context wins; production source paths recorded there are provenance, not runtime dependencies. During implementation, locate and reuse the named production component when it exists: prefer an exported component from `@polo-ai/ui`, then an Electron renderer primitive, then an established feature component. Create a new primitive only when none expresses the required behavior.
+Normative targets override editable prototype source, which overrides generated HTML, then screenshots. Report internal mismatches. **Observed** released behavior and **unproven** notes are evidence labels, not implicit product decisions. Explicitly approved targets may differ from released values; preserve those values' source labels.
 
-Treat rules marked **observed** as implementation evidence, not a universal product decision. Treat **unproven** notes as context only. Within the SOT, normative references override prototype fixtures, and prototype fixtures override screenshots. Upstream source is consulted only during an explicit refresh. Report an internal mismatch instead of silently choosing a value.
+Reuse an exported `@polo-ai/ui` component, then a renderer primitive, then an established feature component when one expresses the behavior. Upstream paths are provenance, not prototype runtime dependencies.
 
-## Update the saved specification
+## Checks
 
-Enter update mode only for an explicit request such as:
+From the repository root:
 
-```text
-$polo-client-design 更新到最新已发布版本
-$polo-client-design 更新到已发布版本 vX.Y.Z
+```bash
+python3 .agents/skills/polo-client-design/scripts/validate_skill.py
+python3 .agents/skills/polo-client-design/scripts/validate_skill.py --for-promotion
 ```
 
-Read and follow [references/update-workflow.md](references/update-workflow.md). An update must pin a real non-draft, non-prerelease GitHub Release to its full commit, compare the complete covered UI source set from a temporary checkout, review semantic changes, update the affected normative references and bundled design-context source, regenerate HTML/tokens, and pass validation. Merely changing release metadata or file hashes is not success.
-
-On any release lookup, source, or semantic-review failure, leave the last valid specification intact and list the unfinished items. Never commit, push, publish, or modify product UI as part of a specification refresh unless separately requested.
+The default checks permit structured drafts. Promotion rejects drafts and stale confirmations, but permits approved designs with `pending` delivery. Static checks do not prove source fidelity, browser behavior, or product acceptance. This skill does not authorize product UI changes, automatic approvals, production releases, or task orchestration.

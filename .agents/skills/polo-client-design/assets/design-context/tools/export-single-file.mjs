@@ -45,7 +45,7 @@ const manifestPath = resolve(root, 'prototype-manifest.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 // Exporting is mechanical; it must never promote an in-progress reconstruction
 // to a verified, source-faithful baseline.
-manifest.verification = { ...manifest.verification, static: 'pending_reexport', browser: 'not_run_for_reconstruction', visual: 'not_run_for_reconstruction', interactive: 'not_run_for_reconstruction' }
+// Verification records are historical evidence, never inferred or reset by export.
 manifest.artifacts.singleFileBytes = statSync(output).size
 manifest.artifacts.singleFileSha256 = createHash('sha256').update(readFileSync(output)).digest('hex')
 manifest.artifacts.moduleBuild = 'dist/'

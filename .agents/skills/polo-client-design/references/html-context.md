@@ -31,3 +31,8 @@ Fixture account, workspace, organization, catalog, conversation, and permission 
 ## Editing
 
 Edit modular source and styles, not generated HTML. Regenerate `prototype.html` with `tools/export-single-file.mjs` and component pages with `tools/export-component-gallery.mjs`, then run `tools/validate-prototype.mjs` and the skill validator. Any change to generated HTML without the matching source change fails the SOT model.
+
+
+After export run `python3 .agents/skills/polo-client-design/scripts/sync_asset_metadata.py` from the repository root. It updates only artifact sizes, counts and digests, without changing version, approvals, delivery or release evidence. Static validation is read-only.
+
+For common-rule changes follow [design-iteration.md](design-iteration.md). Source fidelity needs a scoped source comparison, browser verification needs actual browser evidence, and product acceptance needs product-level evidence. Bind each new evidence record to its exact artifact hash/design commit and scope. Old screenshots and imported verification labels describe historical observations only; they do not verify a regenerated candidate.

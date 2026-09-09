@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
 
 from _common import REPO_ROOT, SKILL_DIR, SOURCE_PATH, ToolError, dump_json, inventory, load_json, resolve_commit, sha256_bytes, show_bytes
 from extract_tokens import extract
+from design_status import validate_design
 
 
 DESIGN_CONTEXT = SKILL_DIR / "assets" / "design-context"
@@ -95,6 +98,8 @@ def validate_design_context(source: dict) -> list[str]:
     gallery = context.get("component_gallery", {})
     if gallery.get("index") != "assets/design-context/components/index.html":
         errors.append("design_context component gallery index is not canonical")
+    if artifacts.get("componentGallery", {}).get("htmlCount") != len(component_files):
+        errors.append("prototype manifest component gallery count is stale")
     if gallery.get("html_count") != len(component_files):
         errors.append(f"component gallery count is {gallery.get('html_count')}, actual {len(component_files)}")
     for component in component_files:
@@ -131,6 +136,9 @@ def validate_links(path: Path) -> list[str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate release evidence, design status and prototype independently")
+    parser.add_argument("--for-promotion", action="store_true")
+    args = parser.parse_args()
     errors: list[str] = []
     source = load_json(SOURCE_PATH)
     release = source.get("release", {})
@@ -181,7 +189,25 @@ def main() -> int:
     except (OSError, ToolError) as exc:
         errors.append(str(exc))
 
-    errors.extend(validate_design_context(source))
+    release_errors = list(errors)
+    design_errors = validate_design(source, SKILL_DIR, args.for_promotion)
+    asset_errors = validate_design_context(source)
+    try:
+        result = subprocess.run(["node", str(DESIGN_CONTEXT / "tools/validate-prototype.mjs")],
+                                text=True, capture_output=True)
+        if result.returncode:
+            asset_errors.append("prototype structure: " + (result.stdout or result.stderr).strip())
+    except OSError as exc:
+        asset_errors.append(f"cannot run prototype structure check: {exc}")
+    errors.extend(design_errors + asset_errors)
+    print(f"{'FAIL' if release_errors else 'PASS'}: pinned release evidence {release['tag']} ({commit}); local hashes and tokens")
+    print(f"{'FAIL' if design_errors else 'PASS'}: design confirmation {'and promotion eligibility' if args.for_promotion else 'structure/content'}")
+    if not source.get('design_changes'):
+        print("INFO: migrated baseline; no historical user confirmation or delivery claim added")
+    for change in source.get('design_changes', []):
+        print(f"INFO: {change.get('id')} design={change.get('design_status')} delivery={change.get('delivery_status')}")
+    print(f"{'FAIL' if asset_errors else 'PASS'}: prototype structure and asset integrity")
+    print("INFO: source fidelity, browser validation and product acceptance require separate scoped evidence")
 
     markdown_files = [SKILL_DIR / "SKILL.md", *sorted((SKILL_DIR / "references").glob("*.md"))]
     for path in markdown_files:
@@ -197,9 +223,8 @@ def main() -> int:
         for error in errors:
             print(f"FAIL: {error}")
         return 1
-    print(f"PASS: polo-client-design is consistent with {release['tag']} ({commit})")
     print(f"PASS: {coverage['blob_count']} covered blobs and {len(source['focal_files'])} focal hashes verified")
-    print("PASS: references, deterministic tokens, bundled HTML SOT, and docs/DESIGN.md entrypoint verified")
+    print("PASS: references, deterministic tokens, bundled HTML structure, and docs/DESIGN.md entrypoint verified")
     return 0
 
 

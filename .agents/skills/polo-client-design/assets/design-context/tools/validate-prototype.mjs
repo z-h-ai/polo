@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve, relative } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -47,10 +47,11 @@ for (const legacyImport of ["'./regions/TopBar.jsx'", "'./regions/NavigationRail
   if (appShellSource.includes(legacyImport)) errors.push('active router imports rejected generic mock module: ' + legacyImport)
 }
 if (appShellSource.includes('className="app-shell"')) errors.push('active router renders rejected generic app-shell')
-const report = { ok: errors.length === 0, root, requiredFiles: required.length, scenes: catalog.scenes.length, warnings, errors, checkedAt: new Date().toISOString() }
-if (report.ok) {
-  manifest.verification = { ...manifest.verification, static: 'passed', sourceFidelity: 'static-source-derived' }
-  writeFileSync(resolve(root, 'prototype-manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+const report = {
+  ok: errors.length === 0, check: 'prototype-structure-and-assets',
+  requiredFiles: required.length, scenes: catalog.scenes.length, warnings, errors,
+  sourceFidelity: 'not_assessed', browser: 'not_assessed', productAcceptance: 'not_assessed',
+  writePerformed: false,
 }
 console.log(JSON.stringify(report, null, 2))
 if (errors.length) process.exitCode = 1

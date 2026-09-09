@@ -129,5 +129,8 @@ class DesignContextTests(unittest.TestCase):
         self.assertEqual(digest, source["design_context"]["inventory_sha256"])
 
 
+from test_design_iteration import IterationTests
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
