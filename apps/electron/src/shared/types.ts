@@ -223,6 +223,9 @@ import type {
   LocalAppStartResult,
   LocalAppLogsOptions,
   LocalAppUninstallOptions,
+  ProductSpaceAppIdentity,
+  ProductSpaceAppInstallState,
+  ProductSpaceBundleInstallRequest,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -609,6 +612,13 @@ export interface ElectronAPI {
       arch: 'arm64' | 'x64'
     }>
     install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
+    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp>
+    getProductSpaceInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    getProductSpaceWithdrawnInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    uninstallProductSpaceBundle(
+      app: ProductSpaceAppIdentity,
+      options?: LocalAppUninstallOptions,
+    ): Promise<void>
     cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
     start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
     stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
@@ -892,6 +902,13 @@ export interface ElectronAPI {
     contextKey: string,
     apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
   ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getHomeQuickAccess(
+    contextKey: string,
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
+  setHomeQuickAccess(
+    contextKey: string,
+    apps: import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[],
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
   getOrganizationContextStorage(
     accountId: string,
   ): Promise<
@@ -955,6 +972,8 @@ export interface ElectronAPI {
       accessMode?: 'online' | 'offline'
       warningCode?: string | null
       entries: ReadonlyArray<Record<string, unknown>>
+      /** Credential-stripped tombstones emitted from the Main catalog authority. */
+      withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
     }
     | {
       success: false
@@ -963,6 +982,21 @@ export interface ElectronAPI {
       status?: number
       accessMode?: 'denied'
       catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
+    }
+  >
+  productSpaceResolveLaunch(
+    productSpaceId: string,
+    catalogEntryId: string,
+  ): Promise<
+    | {
+      success: true
+      launch: import('@polo-ai/shared/product-spaces').ResolveLaunchResponse
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
     }
   >
   productSpacePrepareSwitch(

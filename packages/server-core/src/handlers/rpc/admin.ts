@@ -1,6 +1,7 @@
 import {
   AdminClient,
   AdminError,
+  type AdminErrorDetails,
   denyAppCatalogAccessForAccount,
   denyCachedAppCatalogAuthorization,
   denyCachedAppCatalogAuthorizationForAccount,
@@ -72,6 +73,13 @@ import {
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
+  CatalogEntryIdSchema,
+  ProductSpaceIdSchema,
+  createProductSpaceContextKey,
+} from '@polo-ai/shared/product-spaces'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { RpcServer } from '@polo-ai/server-core/transport'
+import {
   beginAccountTransition,
   settleAccountTransition,
   setSyncTrustedProductSpaceAccountId,
@@ -79,11 +87,138 @@ import {
   setTrustedProductSpaceListFetcher,
   type TrustedProductSpaceListResult,
 } from './trusted-product-space-account'
-import { revokeRuntimeProductSpaceFence } from '../../runtime/product-space-executions'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import type { RpcServer } from '@polo-ai/server-core/transport'
+import {
+  getRuntimeActiveProductSpace,
+  getRuntimeFenceGeneration,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
+  isSwitchInProgress,
+  revokeRuntimeProductSpaceFence,
+  revokeRuntimeProductSpaceFenceIfBoundLocked,
+} from '../../runtime/product-space-executions'
+import { withSwitchLock } from '../../runtime/switch-lock-internal'
+import { revokeProductSpaceCatalogAuthority } from '../../runtime/product-space-catalog-authority'
+// INTERNAL commit entry: the ONLY grant-capable mutator, reachable solely
+// from this schema-validated Admin Catalog commit path (not exported by the
+// package `exports` map — asserted by the authority boundary tests).
+import { recordProductSpaceCatalogAuthoritativeEntries } from '../../runtime/product-space-catalog-authority-commit'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
+
+// Latest-request fence per (account, ProductSpace) for the unified Catalog —
+// a BOUNDED in-flight structure: each scope tracks its latest (global
+// monotonic) invocation and the number of in-flight requests; the scope
+// entry is deleted once every request for that scope has finished, so
+// renderer-supplied identifiers cannot grow the map without bound. Global
+// invocation IDs prevent ABA revival across scope re-creation.
+interface ProductSpaceCatalogSyncScope {
+  latestInvocation: number
+  inFlight: number
+  /**
+   * Invocations that passed the pre-check and are about to commit. The set
+   * is per-INVOCATION: an older request settling (even last) can never
+   * release a newer request's reservation.
+   */
+  pendingCommitInvocations: Set<number>
+}
+const productSpaceCatalogSyncScopes = new Map<string, ProductSpaceCatalogSyncScope>()
+let nextProductSpaceCatalogSyncInvocation = 0
+
+function beginProductSpaceCatalogSync(scopeKey: string): number {
+  const invocation = ++nextProductSpaceCatalogSyncInvocation
+  let scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) {
+    scope = {
+      latestInvocation: 0,
+      inFlight: 0,
+      pendingCommitInvocations: new Set<number>(),
+    }
+    productSpaceCatalogSyncScopes.set(scopeKey, scope)
+  }
+  scope.latestInvocation = invocation
+  scope.inFlight += 1
+  return invocation
+}
+
+/**
+ * Marks a request as having passed its pre-check and heading for the
+ * session-current commit zone: its final CAS must stay decidable even when
+ * another (older) request settles last and drains the in-flight count.
+ */
+function markProductSpaceCatalogCommitPending(
+  scopeKey: string,
+  invocation: number,
+): void {
+  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) return
+  scope.pendingCommitInvocations.add(invocation)
+}
+
+function isLatestProductSpaceCatalogSync(scopeKey: string, invocation: number): boolean {
+  return productSpaceCatalogSyncScopes.get(scopeKey)?.latestInvocation === invocation
+}
+
+/**
+ * Settles one finished request. The scope entry survives while a commit is
+ * still pending in the session-current zone or another request is in
+ * flight; a fully idle scope (no in-flight requests, no pending commits) is
+ * deleted immediately so the map stays bounded.
+ */
+function settleProductSpaceCatalogSync(scopeKey: string): void {
+  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) return
+  scope.inFlight = Math.max(0, scope.inFlight - 1)
+  if (scope.inFlight === 0 && scope.pendingCommitInvocations.size === 0) {
+    productSpaceCatalogSyncScopes.delete(scopeKey)
+  }
+}
+
+/**
+ * Releases a consumed commit from the session-current zone: once the scope
+ * is fully idle its entry is deleted.
+ */
+/**
+ * Releases THIS invocation's own reservation. A request that never marked
+ * (list/Catalog failure, notModified, superseded) has nothing to release and
+ * can never consume a newer request's pending reservation.
+ */
+function releaseProductSpaceCatalogCommit(
+  scopeKey: string,
+  invocation: number,
+): void {
+  const scope = productSpaceCatalogSyncScopes.get(scopeKey)
+  if (!scope) return
+  scope.pendingCommitInvocations.delete(invocation)
+  if (scope.inFlight === 0 && scope.pendingCommitInvocations.size === 0) {
+    productSpaceCatalogSyncScopes.delete(scopeKey)
+  }
+}
+
+/**
+ * Test-only: force-bump the ProductSpace Catalog latest-request fence,
+ * simulating a newer request's registration-and-exit without a second full
+ * session (the registered invocation permanently supersedes older ones).
+ */
+export function __bumpProductSpaceCatalogSyncFenceForTests(scopeKey: string): void {
+  beginProductSpaceCatalogSync(scopeKey)
+  settleProductSpaceCatalogSync(scopeKey)
+}
+
+/** Test-only: scope count for fence-bounds regressions. */
+export function __productSpaceCatalogSyncScopeCountForTests(): number {
+  return productSpaceCatalogSyncScopes.size
+}
+
+/** Test-only: whether an invocation is still the fence's latest. */
+export function __isLatestProductSpaceCatalogSyncForTests(scopeKey: string, invocation: number): boolean {
+  return isLatestProductSpaceCatalogSync(scopeKey, invocation)
+}
+
+/** Test-only: the latest registered invocation for a scope (or null). */
+export function __latestProductSpaceCatalogSyncInvocationForTests(scopeKey: string): number | null {
+  return productSpaceCatalogSyncScopes.get(scopeKey)?.latestInvocation ?? null
+}
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
@@ -100,6 +235,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
   RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
   RPC_CHANNELS.productSpace.CATALOG,
+  RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -713,6 +849,118 @@ export function registerAdminHandlers(
     }
   })
 
+  type ProductSpaceDenialOrigin = 'remote_authority' | 'local_scope_guard'
+
+  /**
+   * Typed denial representation: the origin is a DECLARED readonly field on
+   * an AdminError subclass — no dynamic property attachment, no forced
+   * casts. `instanceof` + the field give the revocation policy an auditable
+   * discriminator.
+   */
+  class ProductSpaceDenialError extends AdminError {
+    readonly denialOrigin: ProductSpaceDenialOrigin
+
+    constructor(
+      message: string,
+      errorCode: AdminErrorCode,
+      origin: ProductSpaceDenialOrigin,
+      options?: { status?: number; details?: AdminErrorDetails },
+    ) {
+      super(message, errorCode, options)
+      this.name = 'ProductSpaceDenialError'
+      this.denialOrigin = origin
+    }
+  }
+
+  function denialOriginOf(error: unknown): ProductSpaceDenialOrigin | null {
+    return error instanceof ProductSpaceDenialError ? error.denialOrigin : null
+  }
+
+  /**
+   * THE exact-scope revocation primitive shared by every ProductSpace
+   * catalog-scope denial (Catalog sync and direct-open resolution alike).
+   * ONE switch-lock critical section decides EVERYTHING: the optional
+   * latest-wins CAS, the durable authority deletion, and the fence
+   * compare-and-revoke — a newer commit can never interleave between the
+   * check and the state writes. Failures propagate after both halves ran.
+   */
+  async function revokeProductSpaceTrustedScope(options: {
+    accountId: string
+    productSpaceId: string
+    /** Fence generation observed when the denial's request entered scope. */
+    fenceGeneration: number | null
+    /** Latest-wins CAS evaluated inside the critical section. */
+    requireLatestInvocation?: () => boolean
+    /** Denial invocation identity for the test-observable token. */
+    invocation?: number
+  }): Promise<'revoked' | 'superseded'> {
+    return withSwitchLock(async (): Promise<'revoked' | 'superseded'> => {
+      if (options.requireLatestInvocation && !options.requireLatestInvocation()) {
+        return 'superseded'
+      }
+      let firstError: unknown = null
+      // SYNCHRONOUS: the authority mutation is a same-tick file operation.
+      // There must be NO yield between the final latest CAS, the authority
+      // mutation and the fence mutation — a yield here would let a queued R2
+      // register a newer invocation inside the critical section and split
+      // the linearization.
+      try {
+        revokeProductSpaceCatalogAuthority(options.accountId, options.productSpaceId)
+      } catch (error) {
+        firstError = error
+      }
+      revokeRuntimeProductSpaceFenceIfBoundLocked({
+        accountId: options.accountId,
+        productSpaceId: options.productSpaceId,
+        fenceGeneration: options.fenceGeneration ?? getRuntimeFenceGeneration(),
+      })
+      if (firstError) throw firstError
+      return 'revoked'
+    }, {
+      phase: 'catalog-authority-revoke',
+      accountId: options.accountId,
+      productSpaceId: options.productSpaceId,
+      invocation: options.invocation ?? -1,
+    })
+  }
+
+  interface CatalogScopeRevocationPolicy {
+    productSpaceId: string
+    /**
+     * Awaitable fail-closed revocation for EXACTLY this scope. Receives the
+     * denial error and the verified scope (account id + the policy's own
+     * productSpaceId). Must throw on failure — callOrganization answers
+     * CATALOG_SCOPE_REVOKE_FAILED instead of pretending the state closed.
+     * Returns 'superseded' when the denial's latest-wins CAS (evaluated
+     * INSIDE the revocation critical section) finds a newer committed
+     * invocation: the caller then answers REQUEST_SUPERSEDED with zero
+     * state writes.
+     */
+    onDenied: (
+      error: AdminError,
+      scope: { accountId: string; productSpaceId: string },
+    ) => 'superseded' | void | Promise<'superseded' | void>
+  }
+
+  interface CallOrganizationOptions<T> {
+    onCurrentSuccess?: (
+      result: T,
+      session: AdminSessionSnapshot,
+    ) => void | Promise<void>
+    // ALWAYS-SETTLE cleanup contract: runs exactly once after the callback
+    // has settled — whether the session-current CAS applied, was skipped, or
+    // the commit-zone work threw. Receives the callback result (or null when
+    // the callback never completed).
+    onSettled?: (result: T | null) => void
+    /**
+     * Catalog-scope semantics: org/space-level 403/FORBIDDEN and membership
+     * denials stay IN-PAGE (login session preserved, only the failing
+     * request fails); 401/TOKEN_REVOKED still end the session. The bundled
+     * policy makes the deny hook structurally mandatory.
+     */
+    catalogScope?: CatalogScopeRevocationPolicy
+  }
+
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (
@@ -720,13 +968,31 @@ export function registerAdminHandlers(
       accessToken: string,
       userId: string,
     ) => Promise<T>,
-    onCurrentSuccess?: (
-      result: T,
-      session: AdminSessionSnapshot,
-    ) => void | Promise<void>,
+    optionsOrOnCurrentSuccess?:
+      | CallOrganizationOptions<T>
+      | ((
+        result: T,
+        session: AdminSessionSnapshot,
+      ) => void | Promise<void>),
+    // Legacy positional ALWAYS-SETTLE cleanup contract (non-catalog callers).
+    legacyOnSettled?: (result: T | null) => void,
   ) => {
+    const objectOptions = typeof optionsOrOnCurrentSuccess === 'object' && optionsOrOnCurrentSuccess !== null
+      ? optionsOrOnCurrentSuccess as CallOrganizationOptions<T>
+      : null
+    const onCurrentSuccess = objectOptions
+      ? objectOptions.onCurrentSuccess
+      : optionsOrOnCurrentSuccess as ((result: T, session: AdminSessionSnapshot) => void | Promise<void>) | undefined
+    const onSettled = objectOptions ? objectOptions.onSettled : legacyOnSettled
+    // Presence of a catalogScope policy enables catalog-scope error
+    // semantics AND carries the mandatory deny hook: a ProductSpace handler
+    // cannot opt into scoped 403s while forgetting the fail-closed
+    // revocation.
+    const catalogScope = objectOptions?.catalogScope ?? null
     let requestContext: AdminRequestContext | null = null
     let manager: CredentialManager | null = null
+    let settledResult: T | null = null
+    let verifiedUserId: string | null = null
     try {
       const adminUrl = requireAdminUrl()
       manager = getCredentialManager()
@@ -754,6 +1020,7 @@ export function registerAdminHandlers(
         }
       }
       requestContext = { session: tokenResult.session }
+      verifiedUserId = tokenResult.tokens.userId
       const result = await callback(
         createAuthenticatedAdminClient(
           adminUrl,
@@ -764,6 +1031,7 @@ export function registerAdminHandlers(
         tokenResult.tokens.accessToken,
         tokenResult.tokens.userId,
       )
+      settledResult = result
       const current = onCurrentSuccess
         ? await sessions.mutateIfCurrent(
             manager,
@@ -777,7 +1045,10 @@ export function registerAdminHandlers(
       if (error instanceof AdminSessionChangedError) {
         return staleAdminSessionResult()
       }
-      if (isSessionEndingAuthFailure(error)) {
+      const sessionEnding = catalogScope
+        ? isSessionEndingCatalogScopedError(error)
+        : isSessionEndingAuthFailure(error)
+      if (sessionEnding) {
         if (!manager || !requestContext) return staleAdminSessionResult()
         const ended = await endAdminSession(
           manager,
@@ -786,10 +1057,56 @@ export function registerAdminHandlers(
           requestContext.session,
         )
         if (!ended) return staleAdminSessionResult()
+      } else if (
+        catalogScope
+        && error instanceof AdminError
+        && classifyAdminAuthorizationFailure(
+          error,
+          { catalogScoped: true },
+        ) === 'catalog_scope'
+      ) {
+        // The space itself denied this member: revoke that space's trusted
+        // state BEFORE answering so installs/opens/uninstalls and launch
+        // resolution fail closed while the login session survives. The
+        // revocation is AWAITED — the response is only produced after the
+        // durable fail-closed outcome (or its failure) is known. The
+        // latest-wins CAS is evaluated INSIDE the revocation's critical
+        // section and may still return 'superseded'.
+        try {
+          const verdict = await catalogScope.onDenied(
+            error,
+            {
+              accountId: verifiedUserId ?? '',
+              productSpaceId: catalogScope.productSpaceId,
+            },
+          )
+          if (verdict === 'superseded') {
+            log?.warn(
+              `[Admin] ${operation} catalog-scope denial is stale (a newer request already committed); zero state writes`,
+            )
+            return {
+              success: false as const,
+              errorCode: 'REQUEST_SUPERSEDED',
+              message: 'A newer ProductSpace catalog request replaced this one',
+            }
+          }
+        } catch (revokeError) {
+          log?.warn(
+            `[Admin] ${operation} catalog-scope revocation failed:`,
+            revokeError instanceof Error ? revokeError.message : String(revokeError),
+          )
+          return {
+            success: false as const,
+            errorCode: 'CATALOG_SCOPE_REVOKE_FAILED',
+            message: 'The denied ProductSpace state could not be durably revoked',
+          }
+        }
       }
       const adminError = toAdminRpcError(error)
       log?.warn(`[Admin] ${operation} failed:`, adminError.message)
       return { success: false as const, ...adminError }
+    } finally {
+      onSettled?.(settledResult)
     }
   }
 
@@ -1719,36 +2036,341 @@ export function registerAdminHandlers(
       if (typeof productSpaceId !== 'string' || !productSpaceId) {
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
       }
+      // The requested identifier is validated BEFORE it can touch the
+      // fence: a renderer-supplied arbitrary string never becomes a
+      // long-lived scope key.
+      const requestedSpaceId = ProductSpaceIdSchema.safeParse(productSpaceId)
+      if (!requestedSpaceId.success) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
+      }
+      // The fence scope key is only knowable after authentication (it binds
+      // the verified account), so the settle hook releases via this captured
+      // key once the callback has entered the authenticated scope. The
+      // reservation is owned by the marking invocation: only a request that
+      // actually marked may release.
+      let syncScopeKey: string | null = null
+      let markedCommitInvocation: number | null = null
+      // This request's fence registration; null until the callback entered
+      // the authenticated scope. The catalog-scope denial decision re-checks
+      // latest-wins AGAINST THIS invocation inside its revocation critical
+      // section: a stale denial must never revoke a newer request's
+      // committed state.
+      let denialInvocation: number | null = null
+      // Fence generation observed at scope entry — the revocation only
+      // applies while the live fence is still EXACTLY this one.
+      let fenceGenerationAtEntry: number | null = null
       return callOrganization(
         'getProductSpaceCatalog',
-        async (client, accessToken) => {
-          const list = await client.listProductSpaces(accessToken)
-          const context = list.productSpaces.find(
-            space => space.id === (productSpaceId as never),
+        async (client, accessToken, userId) => {
+          // The fence registration happens the moment the request enters the
+          // authenticated ProductSpace Catalog scope — BEFORE any ProductSpace
+          // list or Catalog await — so an older in-flight response can never
+          // commit past a newer request, even when the newer request exits
+          // early (e.g. its list validation finds the space withdrawn).
+          const catalogSyncKey = createProductSpaceContextKey(
+            userId as never,
+            requestedSpaceId.data,
           )
-          if (!context) {
-            throw new AdminError(
-              'The requested ProductSpace is not available for this account',
+          syncScopeKey = catalogSyncKey
+          const syncInvocation = beginProductSpaceCatalogSync(catalogSyncKey)
+          denialInvocation = syncInvocation
+          fenceGenerationAtEntry = getRuntimeFenceGeneration()
+          const supersededCatalogResult = () => ({
+            success: false as const,
+            errorCode: 'REQUEST_SUPERSEDED',
+            message: 'A newer ProductSpace catalog request replaced this one',
+          })
+          try {
+            const list = await client.listProductSpaces(accessToken)
+            const context = list.productSpaces.find(
+              space => space.id === requestedSpaceId.data,
+            )
+            if (!context || context.accessMode !== 'active') {
+              throw new AdminError(
+                'The requested ProductSpace is not available for this account',
+                'FORBIDDEN',
+              )
+            }
+            if (context.id !== requestedSpaceId.data) {
+              throw new AdminError(
+                'The requested ProductSpace is not available for this account',
+                'FORBIDDEN',
+              )
+            }
+
+            const result = await client.getProductSpaceCatalog(
+              accessToken,
+              context,
+              typeof knownRevision === 'string' && knownRevision
+                ? knownRevision
+                : undefined,
+            )
+            if ('notModified' in result) {
+              if (!isLatestProductSpaceCatalogSync(catalogSyncKey, syncInvocation)) {
+                return supersededCatalogResult()
+              }
+              // The notModified short-circuit commits nothing; settle the
+              // scope without a pending authority commit.
+              return { notModified: true as const, catalogRevision: knownRevision as string }
+            }
+            if (!isLatestProductSpaceCatalogSync(catalogSyncKey, syncInvocation)) {
+              return supersededCatalogResult()
+            }
+            // The authority write happens in the session-current commit zone
+            // (onCurrentSuccess), where a FINAL CAS re-checks this fence
+            // under the session lock — a failing CAS downgrades the response
+            // to REQUEST_SUPERSEDED with zero authority writes. The pending
+            // reservation is ALWAYS released by callOrganization's settle
+            // contract afterwards — even when the session changed (commit
+            // skipped) or the authority write threw. The reservation is
+            // owned by THIS invocation: an older unmarked request settling
+            // last can never release it.
+            markProductSpaceCatalogCommitPending(catalogSyncKey, syncInvocation)
+            markedCommitInvocation = syncInvocation
+            return {
+              __authorityCommit: {
+                scopeKey: catalogSyncKey,
+                invocation: syncInvocation,
+                accountId: userId,
+                productSpaceId: requestedSpaceId.data,
+                catalogRevision: result.catalogRevision,
+                entries: result.entries,
+              },
+              notModified: false as const,
+              contractVersion: result.contractVersion,
+              productSpaceId: result.productSpaceId,
+              catalogRevision: result.catalogRevision,
+              entries: result.entries,
+            } as never
+          } finally {
+            // NOTE: the scope entry is deliberately NOT settled here. It must
+            // survive until callOrganization's ALWAYS-SETTLE hook runs — i.e.
+            // AFTER a catalog-scope denial's revocation decision — so the
+            // decision-time latest CAS reads a live registration. The settle
+            // (and full state deletion) happens in onSettled below.
+          }
+        },
+        {
+          onCurrentSuccess: result => {
+            const commit = (result as {
+              __authorityCommit?: {
+              scopeKey: string
+              invocation: number
+              accountId: string
+              productSpaceId: string
+              catalogRevision: string
+              entries: ReadonlyArray<Record<string, unknown>>
+            }
+            willCommitAuthority?: boolean
+          }).__authorityCommit
+          if (!commit) return
+          delete (result as { __authorityCommit?: unknown }).__authorityCommit
+          // FINAL CAS + authority write inside the SAME switch-lock critical
+          // section the catalog-scope denial revocation uses: a denial
+          // decision can never interleave between this CAS check and the
+          // authority write (and vice versa) — the freshest verified state
+          // and a stale denial are strictly serialized. A CAS failure
+          // downgrades the response to REQUEST_SUPERSEDED with ZERO
+          // authority writes.
+          return withSwitchLock(async () => {
+            if (!isLatestProductSpaceCatalogSync(commit.scopeKey, commit.invocation)) {
+              Object.assign(result, {
+                success: false,
+                errorCode: 'REQUEST_SUPERSEDED',
+                message: 'A newer ProductSpace catalog request replaced this one',
+              })
+              return
+            }
+            const withdrawnEntries = recordProductSpaceCatalogAuthoritativeEntries(
+              commit.accountId,
+              commit.productSpaceId,
+              commit.catalogRevision,
+              commit.entries,
+            )
+            ;(result as {
+              withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+            }).withdrawnEntries = withdrawnEntries.map(entry => ({
+              kind: 'app' as const,
+              catalogEntryId: entry.catalogEntryId,
+              artifactInstanceId: entry.artifactInstanceId,
+              version: {
+                versionId: entry.versionId,
+                version: entry.version,
+              },
+              name: entry.name,
+              description: entry.description,
+              ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
+              availability: 'withdrawn' as const,
+              sources: entry.sources,
+              permissions: entry.permissions,
+            }))
+          }, {
+            phase: 'catalog-authority-commit',
+            accountId: commit.accountId,
+            productSpaceId: commit.productSpaceId,
+            invocation: commit.invocation,
+          })
+        },
+          // ALWAYS-SETTLE: release the pending commit reservation no matter
+        // how the request concluded (committed, CAS-skipped by a session
+        // change, or authority write failure) — the scope entry is recycled
+          // as soon as it is fully idle. Only THIS request's own marked
+          // reservation is released; an unmarked failure (list/Catalog error,
+          // notModified, superseded) must never steal a newer request's
+          // pending reservation on the same scope.
+          onSettled: () => {
+            if (syncScopeKey !== null && markedCommitInvocation !== null) {
+              releaseProductSpaceCatalogCommit(syncScopeKey, markedCommitInvocation)
+            }
+            // ALWAYS-SETTLE the scope itself — after the denial decision —
+            // so the bounded in-flight structure is fully deleted once idle.
+            if (syncScopeKey !== null) {
+              settleProductSpaceCatalogSync(syncScopeKey)
+            }
+          },
+          // Catalog-scope error semantics: a 403/FORBIDDEN (governance
+          // restriction, membership loss for this space) must NOT end the
+          // login session — the member stays on the home with the frozen
+          // restricted view and can return to their personal space. Only
+          // genuine session failures (401/TOKEN_REVOKED/…) end it. The
+          // revocation is ONE switch-lock critical section: the latest-wins
+          // CAS is evaluated at DECISION time inside the lock, so a newer
+          // invocation that registered while this denial waited still wins
+          // ('superseded' → REQUEST_SUPERSEDED with zero state writes).
+          catalogScope: {
+            productSpaceId: requestedSpaceId.data,
+            onDenied: async (_error, scope) => {
+              const verdict = await revokeProductSpaceTrustedScope({
+                accountId: scope.accountId,
+                productSpaceId: scope.productSpaceId,
+                fenceGeneration: fenceGenerationAtEntry,
+                invocation: denialInvocation ?? undefined,
+                requireLatestInvocation: () =>
+                  syncScopeKey !== null
+                  && denialInvocation !== null
+                  && isLatestProductSpaceCatalogSync(syncScopeKey, denialInvocation),
+              })
+              return verdict === 'superseded' ? 'superseded' : undefined
+            },
+          },
+        },
+      )
+    })
+
+  // Direct-open preparation for POO-47. Main derives the host tuple and
+  // resolves against a fresh server-authoritative Catalog. The renderer can
+  // name only an entry in the currently committed ProductSpace; old ids,
+  // cross-space ids, offline state and a concurrent switch all fail closed.
+  server.handle(
+    RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
+    async (_ctx, rawProductSpaceId: unknown, rawCatalogEntryId: unknown) => {
+      const productSpaceId = ProductSpaceIdSchema.safeParse(rawProductSpaceId)
+      const catalogEntryId = CatalogEntryIdSchema.safeParse(rawCatalogEntryId)
+      if (!productSpaceId.success || !catalogEntryId.success) {
+        return {
+          success: false as const,
+          errorCode: 'VALIDATION_ERROR',
+          message: 'Launch request is invalid',
+        }
+      }
+      // Typed denial origins: only REMOTE authority denials (the server's
+      // own membership/catalog verdicts — including a list that lacks the
+      // requested space or marks it inactive) prove the member lost access
+      // and may revoke the trusted authority/fence for this scope. The LOCAL
+      // stale-scope guard is a request-scoped rejection, never a revocation.
+      let fenceGenerationAtEntry: number | null = null
+      return callOrganization(
+        'resolveProductSpaceLaunch',
+        async (client, accessToken, userId) => {
+          const requireCurrentLaunchScope = () => {
+            if (
+              getRuntimeActiveProductSpace() !== productSpaceId.data
+              || !isRuntimeFenceBoundToAccount(userId)
+              || isRuntimeOfflineReadOnly()
+              || isRuntimeProductSpaceRestricted(productSpaceId.data)
+              || isSwitchInProgress()
+            ) {
+              throw new ProductSpaceDenialError(
+                'Launch is not allowed outside the current active ProductSpace',
+                'FORBIDDEN',
+                'local_scope_guard',
+              )
+            }
+          }
+          requireCurrentLaunchScope()
+          fenceGenerationAtEntry = getRuntimeFenceGeneration()
+
+          // Wraps REAL server calls: a thrown AdminError from them is a
+          // remote authority verdict.
+          const tagRemoteAuthority = async <S>(call: Promise<S>): Promise<S> => {
+            try {
+              return await call
+            } catch (error) {
+              if (error instanceof AdminError && denialOriginOf(error) === null) {
+                throw new ProductSpaceDenialError(
+                  error.message,
+                  error.errorCode,
+                  'remote_authority',
+                  { status: error.status, details: error.details },
+                )
+              }
+              throw error
+            }
+          }
+
+          const platform = process.platform
+          const arch = process.arch
+          if (
+            (platform !== 'darwin' && platform !== 'win32' && platform !== 'linux')
+            || (arch !== 'arm64' && arch !== 'x64')
+          ) {
+            throw new AdminError('This host cannot resolve App launches', 'VALIDATION_ERROR')
+          }
+
+          const list = await tagRemoteAuthority(client.listProductSpaces(accessToken))
+          const context = list.productSpaces.find(
+            space => space.id === productSpaceId.data,
+          )
+          if (!context || context.accessMode !== 'active') {
+            // The server ANSWERED, but this space does not exist for the
+            // member or is not active: an authoritative remote denial.
+            throw new ProductSpaceDenialError(
+              'The requested ProductSpace is not available for launch',
               'FORBIDDEN',
+              'remote_authority',
             )
           }
-          const result = await client.getProductSpaceCatalog(
+          const catalog = await tagRemoteAuthority(client.getProductSpaceCatalog(accessToken, context))
+          if ('notModified' in catalog) {
+            throw new AdminError('Fresh ProductSpace Catalog is required for launch', 'SERVER_ERROR')
+          }
+          requireCurrentLaunchScope()
+          const launch = await tagRemoteAuthority(client.resolveProductSpaceLaunch(
             accessToken,
             context,
-            typeof knownRevision === 'string' && knownRevision
-              ? knownRevision
-              : undefined,
-          )
-          if ('notModified' in result) {
-            return { notModified: true as const, catalogRevision: knownRevision as string }
-          }
-          return {
-            notModified: false as const,
-            contractVersion: result.contractVersion,
-            productSpaceId: result.productSpaceId,
-            catalogRevision: result.catalogRevision,
-            entries: result.entries,
-          }
+            catalog,
+            catalogEntryId.data,
+            { platform, arch },
+          ))
+          requireCurrentLaunchScope()
+          return { launch }
+        },
+        {
+          // Catalog-scope error semantics for direct-open resolution too: a
+          // 403/FORBIDDEN stays IN-PAGE — the login session survives and the
+          // member can return to their personal space. Only genuine session
+          // failures end it.
+          catalogScope: {
+            productSpaceId: productSpaceId.data,
+            onDenied: async (error, scope) => {
+              if (denialOriginOf(error) !== 'remote_authority') return
+              await revokeProductSpaceTrustedScope({
+                accountId: scope.accountId,
+                productSpaceId: scope.productSpaceId,
+                fenceGeneration: fenceGenerationAtEntry,
+              })
+            },
+          },
         },
       )
     },
@@ -2937,6 +3559,21 @@ function isSessionEndingAuthFailure(error: unknown): boolean {
     && classifyAdminAuthorizationFailure(
       error,
       { catalogScoped: false },
+    ) === 'session'
+}
+
+/**
+ * Catalog-scoped error semantics for ProductSpace Catalog/launch calls: only
+ * genuine account-session failures (401, UNAUTHORIZED, TOKEN_REVOKED,
+ * ACCOUNT_DISABLED) end the login session. Org/space-level denials
+ * (FORBIDDEN, MEMBERSHIP_*, NOT_FOUND, 403) stay in-page so the member can
+ * return to their personal space.
+ */
+function isSessionEndingCatalogScopedError(error: unknown): boolean {
+  return error instanceof AdminError
+    && classifyAdminAuthorizationFailure(
+      error,
+      { catalogScoped: true },
     ) === 'session'
 }
 

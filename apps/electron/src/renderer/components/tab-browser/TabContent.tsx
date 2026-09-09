@@ -5,7 +5,6 @@ import { useTabShell } from '@/context/TabShellContext'
 import type { TabInstance } from '../../../shared/tab-browser-types'
 
 interface TabContentProps {
-  onAddApp: () => void
   renderPolo: () => ReactNode
 }
 
@@ -17,7 +16,7 @@ function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
   )
 }
 
-export function TabContent({ onAddApp, renderPolo }: TabContentProps) {
+export function TabContent({ renderPolo }: TabContentProps) {
   const { activeTab, openTabs } = useTabShell()
   const activeType = activeTab.type
 
@@ -27,7 +26,7 @@ export function TabContent({ onAddApp, renderPolo }: TabContentProps) {
         {renderPolo()}
       </div>
 
-      {activeType === 'home' && <HomePage onAddApp={onAddApp} />}
+      {activeType === 'home' && <HomePage />}
 
       {openTabs
         .filter((tab) => tab.type === 'webapp')

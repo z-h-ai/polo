@@ -108,7 +108,7 @@ function AppHomeHarness() {
         ProductSpaceProvider,
         {
           value: contextValue,
-          children: createElement(HomePage, { onAddApp: () => {} }),
+          children: createElement(HomePage),
         },
       )
     : createElement('div', { 'data-testid': 'product-space-flow' }, context.flowState)
@@ -223,6 +223,8 @@ beforeEach(async () => {
         entries: [{
           kind: 'app',
           catalogEntryId: 'offline-app',
+          artifactInstanceId: 'offline-app-instance',
+          version: { versionId: 'offline-app-version', version: '1.0.0' },
           name: 'Offline App',
           description: 'Prepared locally',
           availability: 'available',
@@ -282,7 +284,7 @@ afterEach(() => {
 })
 
 describe('restricted offline App to HomePage start flow', () => {
-  it('restores the verified ProductSpace and starts a prepared local app', async () => {
+  it('restores the verified ProductSpace but fails a new launch closed', async () => {
     render(createElement(
       I18nextProvider,
       { i18n },
@@ -290,18 +292,22 @@ describe('restricted offline App to HomePage start flow', () => {
     ))
 
     await waitFor(() => {
+      expect(screen.getByTestId('home-all-apps-open')).toBeTruthy()
+    })
+
+    // The offline App lives in the all-Apps directory view.
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
       expect(screen.getByText('Offline App')).toBeTruthy()
       expect(screen.getByText(/You are offline/)).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByTestId('organization-app-action-offline-app'))
-
-    await waitFor(() => {
-      expect(start).toHaveBeenCalledTimes(1)
-      expect(openApp).toHaveBeenCalledWith(expect.objectContaining({
-        name: 'Offline App',
-        url: 'http://127.0.0.1:9876',
-      }))
-    })
+    const openButton = screen.getByTestId(
+      'all-apps-action-["product-space-ui","account-offline","11111111-1111-4111-8111-111111111111","offline-app","offline-app-instance"]',
+    ) as HTMLButtonElement
+    expect(openButton.disabled).toBe(true)
+    expect(start).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
   })
 })

@@ -52,9 +52,19 @@ import {
   stopAllRegisteredProductSpaceExecutions,
   stopRegisteredExecutionsOnce,
   stopRegisteredProductSpaceExecutionsForSpace,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '../../runtime/product-space-executions'
+import {
+  productSpaceSwitchToken,
+  withSwitchLock,
+  type ProductSpaceListFetchToken,
+  type ProductSpaceFinalizeToken,
+  type ProductSpaceRestoreOfflineToken,
+} from '../../runtime/switch-lock-internal'
+
+const PRODUCT_SPACE_LIST_FETCH_TOKEN: ProductSpaceListFetchToken = { phase: 'product-space-list-fetch' }
+const PRODUCT_SPACE_FINALIZE_TOKEN: ProductSpaceFinalizeToken = { phase: 'product-space-finalize' }
+const PRODUCT_SPACE_RESTORE_OFFLINE_TOKEN: ProductSpaceRestoreOfflineToken = { phase: 'product-space-restore-offline' }
 import { runLegacyLocalAppCleaner } from '../../runtime/legacy-state-cleaners'
 import { clearLegacySkillCaches } from './admin'
 import {
@@ -682,7 +692,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           success: true as const,
           restricted: isRuntimeProductSpaceRestricted(productSpaceId),
         }
-      })
+      }, productSpaceSwitchToken(productSpaceId))
     },
   )
 
@@ -891,7 +901,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             to: targetProductSpaceId,
             executions: planned,
           }
-        })
+        }, PRODUCT_SPACE_LIST_FETCH_TOKEN)
       } finally {
         releaseSwitchActivityClaim(prepareActivityOwner)
       }
@@ -1026,7 +1036,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           }
           current.status = 'ready'
           return 'ready'
-        })
+        }, PRODUCT_SPACE_FINALIZE_TOKEN)
         if (finalized === 'ready') {
           return { success: true as const, executions: [] }
         }
@@ -1235,7 +1245,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           fenceGeneration: getRuntimeFenceGeneration(),
         })
         return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
-      })
+      }, productSpaceSwitchToken(targetProductSpaceId))
     },
   )
 
@@ -1392,7 +1402,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           activeProductSpaceId: activeId,
         },
       }
-    })
+    }, PRODUCT_SPACE_RESTORE_OFFLINE_TOKEN)
   })
 
   // One-shot pre-release direct-switch cleanup. Steps run in order and every

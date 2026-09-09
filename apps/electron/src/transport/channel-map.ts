@@ -126,6 +126,10 @@ export const CHANNEL_MAP = {
   // Local App Bundle runtime
   'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
   'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
+  'localApps.installProductSpaceBundle': invoke(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE),
+  'localApps.getProductSpaceInstallStates': invoke(RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES),
+  'localApps.getProductSpaceWithdrawnInstallStates': invoke(RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES),
+  'localApps.uninstallProductSpaceBundle': invoke(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE),
   'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
   'localApps.start': invoke(RPC_CHANNELS.localApps.START),
   'localApps.stop': invoke(RPC_CHANNELS.localApps.STOP),
@@ -177,6 +181,7 @@ export const CHANNEL_MAP = {
   productSpaceRestrictActiveSpace: invoke(RPC_CHANNELS.productSpace.RESTRICT_ACTIVE_SPACE),
   productSpaceGetRestrictionState: invoke(RPC_CHANNELS.productSpace.GET_RESTRICTION_STATE),
   productSpaceGetCatalog: invoke(RPC_CHANNELS.productSpace.CATALOG),
+  productSpaceResolveLaunch: invoke(RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
   productSpacePrepareSwitch: invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH),
   productSpaceStopSwitchExecutions: invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS),
   productSpaceCommitSwitch: invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH),
@@ -269,6 +274,8 @@ export const CHANNEL_MAP = {
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
   getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
   setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
+  getHomeQuickAccess: invoke(RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS),
+  setHomeQuickAccess: invoke(RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS),
   getOrganizationContextStorage: invoke(
     RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   ),

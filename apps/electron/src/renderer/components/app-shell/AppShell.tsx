@@ -83,6 +83,7 @@ import { getResizeGradientStyle } from "@/hooks/useResizeGradient"
 import { useAction, useActionLabel } from "@/actions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
+import { useTabShell } from "@/context/TabShellContext"
 import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
@@ -1079,10 +1080,17 @@ function AppShellContent({
   useAction('nav.focusNavigator', () => focusZone('navigator', { intent: 'keyboard' }))
   useAction('nav.focusChat', () => focusZone('chat', { intent: 'keyboard' }))
 
-  // Tab navigation between zones
+  // Tab navigation between zones. The capture is keyboard-active ONLY while
+  // this workbench shell is the VISIBLE surface (the active tab is Polo):
+  // on the POO-43 Home/Catalog surfaces the shell layer is display-hidden,
+  // and plain Tab must fall through to native traversal so the launcher
+  // controls (management entry, All Apps, every App action) stay reachable
+  // and the dedicated launcher scroll owner advances with focus (R42).
+  const { activeTab: shellActiveTab } = useTabShell()
+  const isWorkbenchSurfaceActive = shellActiveTab.type === 'polo'
   useAction('nav.nextZone', () => {
     focusNextZone()
-  }, { enabled: () => !document.querySelector('[role="dialog"]') })
+  }, { enabled: () => !document.querySelector('[role="dialog"]') && isWorkbenchSurfaceActive })
 
   // Shift+Tab cycles permission mode through enabled modes (textarea handles its own, this handles when focus is elsewhere)
   // In multi-panel, targets the focused panel's session

@@ -26,6 +26,9 @@ import type {
   LocalAppLogsOptions,
   LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
+  ProductSpaceAppIdentity,
+  ProductSpaceAppInstallState,
+  ProductSpaceBundleInstallRequest,
 } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
@@ -42,14 +45,26 @@ import {
   isRuntimeProductSpaceRestricted,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
+  runUnderSwitchMutex,
   unregisterProductSpaceExecution,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '@polo-ai/server-core/runtime/product-space-executions'
 import {
   PRODUCT_SPACE_CONTRACT_VERSION,
+  AccountIdSchema,
+  ArtifactInstanceIdSchema,
+  ArtifactVersionIdSchema,
+  CatalogEntryIdSchema,
+  ProductSpaceIdSchema,
   ProductSpaceExecutionScopeSchema,
+  type TrustedProductSpaceCatalogEntry,
 } from '@polo-ai/shared/product-spaces'
+import {
+  getProductSpaceCatalogAuthorityRecord,
+  loadProductSpaceCatalogAuthorityTupleSet,
+  loadProductSpaceWithdrawnTombstoneTupleSet,
+  productSpaceCatalogAuthorityTupleKey,
+} from '@polo-ai/server-core/runtime/product-space-catalog-authority'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
 import type { HandlerDeps } from './handler-deps'
@@ -257,6 +272,492 @@ function hostArchitecture(): 'arm64' | 'x64' {
   return process.arch === 'arm64' ? 'arm64' : 'x64'
 }
 
+function validateProductSpaceAppIdentity(value: unknown): ProductSpaceAppIdentity {
+  if (!value || typeof value !== 'object') {
+    throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace App identity is required')
+  }
+  const input = value as Partial<ProductSpaceAppIdentity>
+  const accountId = AccountIdSchema.safeParse(input.accountId)
+  const productSpaceId = ProductSpaceIdSchema.safeParse(input.productSpaceId)
+  const catalogEntryId = CatalogEntryIdSchema.safeParse(input.catalogEntryId)
+  const artifactInstanceId = ArtifactInstanceIdSchema.safeParse(input.artifactInstanceId)
+  const versionId = ArtifactVersionIdSchema.safeParse(input.versionId)
+  // Canonical policy: preserve the EXACT renderer bytes. `trim()` is used
+  // for non-blank VALIDATION only — it never rewrites the value. The
+  // shared schemas validate non-blankness the same way while keeping the
+  // original string, so the renderer identity, the captured authority and
+  // the fresh row are compared byte-for-byte; a unilateral trim here would
+  // both launder distinct values and falsely drift whitespace-padded legal
+  // values.
+  const catalogRevision = typeof input.catalogRevision === 'string'
+    ? input.catalogRevision
+    : ''
+  // The sealed authoritative sources and availability are REQUIRED identity
+  // fields: an identity without them can never be proven against the
+  // captured authority binding, so it fails closed as a malformed request.
+  const sources = validateIdentitySources(input.sources)
+  const availability = validateIdentityAvailability(input.availability)
+  if (
+    !accountId.success
+    || !productSpaceId.success
+    || !catalogEntryId.success
+    || !artifactInstanceId.success
+    || !versionId.success
+    || catalogRevision.trim().length === 0
+    || catalogRevision.length > 512
+    || typeof input.version !== 'string'
+    || input.version.trim().length === 0
+    || input.version.length > 512
+  ) {
+    throw new LocalAppRuntimeError('INVALID_REQUEST', 'ProductSpace App identity is invalid')
+  }
+  return {
+    accountId: accountId.data,
+    productSpaceId: productSpaceId.data,
+    catalogEntryId: catalogEntryId.data,
+    artifactInstanceId: artifactInstanceId.data,
+    versionId: versionId.data,
+    version: input.version,
+    catalogRevision,
+    sources,
+    availability,
+  }
+}
+
+/**
+ * Structural validation of renderer-sealed identity sources. Values keep
+ * their EXACT bytes (trim is non-blank validation only, never a rewrite):
+ * the canonical comparable form is derived without altering member values,
+ * so a whitespace-padded legal source compares against the identical
+ * binding bytes, and any genuinely different value still fails closed.
+ */
+function validateIdentitySources(
+  value: unknown,
+): ProductSpaceAppIdentity['sources'] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 1_000) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'ProductSpace App identity sources are required',
+    )
+  }
+  return value.map(rawSource => {
+    if (!rawSource || typeof rawSource !== 'object') {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'ProductSpace App identity source is invalid',
+      )
+    }
+    const source = rawSource as { kind?: unknown; name?: unknown; circleId?: unknown }
+    const kind = typeof source.kind === 'string' ? source.kind : ''
+    const name = typeof source.name === 'string' ? source.name : null
+    const circleId = typeof source.circleId === 'string' ? source.circleId : null
+    if (
+      kind.trim().length === 0
+      || kind.length > 128
+      || (name !== null && (name.trim().length === 0 || name.length > 256))
+      || (circleId !== null && (circleId.trim().length === 0 || circleId.length > 128))
+    ) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'ProductSpace App identity source is invalid',
+      )
+    }
+    return { kind, name, circleId }
+  })
+}
+
+function validateIdentityAvailability(value: unknown): ProductSpaceAppIdentity['availability'] {
+  if (
+    value !== 'available'
+    && value !== 'unavailable'
+    && value !== 'blocked'
+    && value !== 'withdrawn'
+  ) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'ProductSpace App identity availability is invalid',
+    )
+  }
+  return value
+}
+
+/**
+ * Canonical comparable form of authoritative sources: null-coalesced
+ * members sorted by their JSON encoding, so order can never influence the
+ * binding comparison.
+ */
+function canonicalIdentitySources(
+  sources: ReadonlyArray<{ kind: string; name?: string | null; circleId?: string | null }>,
+): string {
+  return JSON.stringify(sources
+    .map(source => ({ circleId: source.circleId ?? null, kind: source.kind, name: source.name ?? null }))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
+}
+
+function productSpaceBundleScope(app: ProductSpaceAppIdentity): CatalogLocalAppScope {
+  return {
+    kind: 'catalog',
+    accountId: app.accountId,
+    organizationId: app.productSpaceId,
+    catalogAppId: app.artifactInstanceId,
+  }
+}
+
+/**
+ * One-pass restricted withdrawn-management validation for an entire batch:
+ * every identity's FULL tuple (catalogEntryId + artifactInstanceId +
+ * versionId + version) must exist in the Main-owned persisted Catalog
+ * authority, and duplicate identities are rejected. O(authority + requests):
+ * the authority tuple set is read exactly once, never per item.
+ */
+/**
+ * Collision-free JSON tuple over the FULL ProductSpace App identity
+ * (accountId + productSpaceId + catalogEntryId + artifactInstanceId +
+ * versionId + version). Shared by the withdrawn-authority and fresh-Catalog
+ * duplicate-detection passes so both paths can never drift on the identity
+ * contract.
+ */
+function productSpaceAppIdentityKey(app: ProductSpaceAppIdentity): string {
+  return JSON.stringify([
+    app.accountId,
+    app.productSpaceId,
+    app.catalogEntryId,
+    app.artifactInstanceId,
+    app.versionId,
+    app.version,
+  ])
+}
+
+/**
+ * Shared shape/scope validation for EVERY ProductSpace App identity batch:
+ * bounded length, syntactic identity validation, one account + one
+ * ProductSpace per batch, and duplicate-identity rejection (full identity
+ * tuple). Authorization differs per channel and stays with the callers:
+ * fresh-Catalog tuple validation for the authoritative channel, persisted
+ * authority tuples for the restricted withdrawn channel.
+ */
+function parseProductSpaceAppIdentityBatch(
+  rawApps: unknown,
+  errorPrefix: string,
+): ProductSpaceAppIdentity[] {
+  if (
+    !Array.isArray(rawApps)
+    || rawApps.length === 0
+    || rawApps.length > MAX_CATALOG_STATUS_SCOPES
+  ) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      `${errorPrefix}: between 1 and ${MAX_CATALOG_STATUS_SCOPES} ProductSpace App identities are required`,
+    )
+  }
+  const apps = rawApps.map(validateProductSpaceAppIdentity)
+  const first = apps[0]!
+  if (apps.some(app => (
+    app.accountId !== first.accountId
+    || app.productSpaceId !== first.productSpaceId
+  ))) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      `${errorPrefix}: a batch must target one account and ProductSpace`,
+    )
+  }
+  const seenIdentityKeys = new Set<string>()
+  for (const app of apps) {
+    const identityKey = productSpaceAppIdentityKey(app)
+    if (seenIdentityKeys.has(identityKey)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        `${errorPrefix}: duplicate ProductSpace App identities are not allowed`,
+      )
+    }
+    seenIdentityKeys.add(identityKey)
+  }
+  return apps
+}
+
+/**
+ * RESTRICTED withdrawn-management gate: every identity's FULL tuple
+ * (catalogEntryId + artifactInstanceId + versionId + version) must come from
+ * the Main-owned persisted Catalog authority. A renderer cannot declare an
+ * identity withdrawn — fabricated catalog/version tuples or unknown artifact
+ * instances are rejected before any registry read.
+ */
+/**
+ * RETAINED-TOMBSTONE gate for no-fresh-Catalog cleanup: every identity's
+ * FULL tuple must be a WITHDRAWN TOMBSTONE of the process-trusted authority
+ * record — deliberately NOT the live∪tombstone union. A live (or stale-
+ * version live) App can never pass this gate; the live path must go through
+ * the fresh-Catalog revalidation instead.
+ */
+function assertRetainedTombstoneProductSpaceAppAuthority(apps: ProductSpaceAppIdentity[]): void {
+  const first = apps[0]!
+  const tombstoneTuples = loadProductSpaceWithdrawnTombstoneTupleSet(
+    first.accountId,
+    first.productSpaceId,
+  )
+  for (const app of apps) {
+    const tupleKey = productSpaceCatalogAuthorityTupleKey(
+      app.catalogEntryId,
+      app.artifactInstanceId,
+      app.versionId,
+      app.version,
+    )
+    if (!tombstoneTuples.has(tupleKey)) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'Retained cleanup requires a withdrawn tombstone identity from the trusted Catalog authority',
+      )
+    }
+  }
+}
+
+function assertWithdrawnProductSpaceAppAuthority(apps: ProductSpaceAppIdentity[]): void {
+  const first = apps[0]!
+  const authorityTuples = loadProductSpaceCatalogAuthorityTupleSet(
+    first.accountId,
+    first.productSpaceId,
+  )
+  for (const app of apps) {
+    const tupleKey = productSpaceCatalogAuthorityTupleKey(
+      app.catalogEntryId,
+      app.artifactInstanceId,
+      app.versionId,
+      app.version,
+    )
+    if (!authorityTuples.has(tupleKey)) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'Withdrawn ProductSpace App identity is not in the trusted Catalog authority',
+      )
+    }
+  }
+}
+
+/**
+ * Shared installation projection for the authoritative (fresh-Catalog
+ * validated) and the restricted withdrawn-management channel: scope echo is
+ * verified per identity, and only non-secret install state is projected.
+ */
+function projectProductSpaceInstallStates(
+  apps: ProductSpaceAppIdentity[],
+  statuses: LocalAppRuntimeStatus[],
+): ProductSpaceAppInstallState[] {
+  return statuses.map((status, index) => {
+    const app = apps[index]!
+    const expectedScope = productSpaceBundleScope(app)
+    if (
+      status.scope?.kind !== 'catalog'
+      || status.scope.accountId !== expectedScope.accountId
+      || status.scope.organizationId !== expectedScope.organizationId
+      || status.scope.catalogAppId !== expectedScope.catalogAppId
+    ) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'ProductSpace installation state belongs to another App',
+      )
+    }
+    const installing = status.status === 'downloading'
+      || status.status === 'installing'
+      || status.installationStatus !== undefined
+    return {
+      app,
+      state: installing
+        ? 'installing'
+        : status.currentVersion
+        ? 'installed'
+        : 'not_installed',
+      ...(status.currentVersion ? { currentVersion: status.currentVersion } : {}),
+      ...(typeof status.progress?.percent === 'number'
+        ? { progressPercent: status.progress.percent }
+        : {}),
+    }
+  })
+}
+
+function assertProductSpaceAppOperationCurrent(app: ProductSpaceAppIdentity): void {
+  assertScopeInsideActiveProductSpace(productSpaceBundleScope(app))
+  if (
+    !isRuntimeFenceBoundToAccount(app.accountId)
+    || isRuntimeProductSpaceRestricted(app.productSpaceId)
+    || isSwitchInProgress()
+  ) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'ProductSpace App management requires the current unrestricted ProductSpace',
+    )
+  }
+}
+
+async function assertProductSpaceAccountCurrent(app: ProductSpaceAppIdentity): Promise<{
+  accessToken: string
+}> {
+  assertProductSpaceAppOperationCurrent(app)
+  const tokens = await getCredentialManager().getAdminTokens()
+  if (!tokens || tokens.userId !== app.accountId) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'ProductSpace App management belongs to another or signed-out account',
+    )
+  }
+  return { accessToken: tokens.accessToken }
+}
+
+/**
+ * Explicit discriminated outcome for the fresh-Catalog revalidation. The
+ * MISSING verdict carries the ALREADY schema-validated fresh Catalog so the
+ * retained-tombstone cleanup path can still prove the fresh revision — no
+ * string/error parsing ever reconstructs it.
+ */
+type AuthoritativeProductSpaceAppsOutcome =
+  | {
+    kind: 'live'
+    apps: ProductSpaceAppIdentity[]
+    accessToken: string
+    client: AdminClient
+    context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+    catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+  }
+  | {
+    kind: 'missing'
+    apps: ProductSpaceAppIdentity[]
+    accessToken: string
+    client: AdminClient
+    context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+    catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+  }
+
+async function loadAuthoritativeProductSpaceAppsOutcome(
+  rawApps: unknown,
+  options: {
+    /**
+     * Error code for a live-drift mismatch (entry EXISTS but its
+     * artifact/version differs from the request). Defaults to the legacy
+     * `RELEASE_CHANGED`; the uninstall IPC uses the granular
+     * `CATALOG_IDENTITY_DRIFT` so live drift can never be confused with an
+     * authoritative missing-entry verdict.
+     */
+    driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
+  } = {},
+): Promise<AuthoritativeProductSpaceAppsOutcome> {
+  const apps = parseProductSpaceAppIdentityBatch(
+    rawApps,
+    'ProductSpace App identities',
+  )
+  const first = apps[0]!
+  const { accessToken } = await assertProductSpaceAccountCurrent(first)
+  const adminUrl = getAdminUrl()
+  if (!adminUrl) {
+    throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Polo Admin is not configured')
+  }
+  const client = new AdminClient(adminUrl)
+  const list = await client.listProductSpaces(accessToken)
+  const context = list.productSpaces.find(space => space.id === first.productSpaceId)
+  if (!context || context.accessMode !== 'active') {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'The requested ProductSpace is not active',
+    )
+  }
+  const catalog = await client.getProductSpaceCatalog(accessToken, context)
+  if ('notModified' in catalog) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'A fresh ProductSpace Catalog is required',
+    )
+  }
+  // One index for the entire batch: the Catalog may hold up to 10,000
+  // entries and the request up to 10,000 identities, so per-request
+  // `entries.find` scans would cost O(catalog × request) on the Main thread.
+  const entriesById = new Map<string, (typeof catalog.entries)[number]>(
+    catalog.entries.map(entry => [entry.catalogEntryId as string, entry] as const),
+  )
+  const seenIdentityKeys = new Set<string>()
+  for (const app of apps) {
+    const identityKey = productSpaceAppIdentityKey(app)
+    if (seenIdentityKeys.has(identityKey)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'Duplicate ProductSpace App identities are not allowed',
+      )
+    }
+    seenIdentityKeys.add(identityKey)
+    const entry = entriesById.get(app.catalogEntryId)
+    if (!entry) {
+      // Authoritative absence: the CURRENT distribution genuinely has no
+      // such entry. This is the ONLY verdict that may route an uninstall to
+      // the retained-tombstone cleanup gate — WITH the fresh Catalog kept
+      // for the mandatory revision proof.
+      return {
+        kind: 'missing',
+        apps,
+        accessToken,
+        client,
+        context,
+        catalog,
+      }
+    }
+    if (entry.kind !== 'app') {
+      // KIND DRIFT: the entry ID exists but is no longer an App (skill /
+      // built-in row took the stable ID). This is a LIVE identity drift —
+      // it must never fall through to retained-tombstone cleanup.
+      throw new LocalAppRuntimeError(
+        options.driftCode ?? 'RELEASE_CHANGED',
+        'The ProductSpace Catalog entry kind changed (live drift)',
+      )
+    }
+    if (
+      entry.artifactInstanceId !== app.artifactInstanceId
+      || entry.version.versionId !== app.versionId
+      || entry.version.version !== app.version
+    ) {
+      // Live drift: the entry STILL EXISTS but its artifact/version differs
+      // from the request. This is a LIVE App mismatch — never a tombstone
+      // cleanup candidate.
+      throw new LocalAppRuntimeError(
+        options.driftCode ?? 'RELEASE_CHANGED',
+        'The ProductSpace Catalog App identity changed (live drift)',
+      )
+    }
+  }
+  await assertProductSpaceAccountCurrent(first)
+  return {
+    kind: 'live',
+    apps,
+    accessToken,
+    client,
+    context,
+    catalog,
+  }
+}
+
+async function loadAuthoritativeProductSpaceApps(
+  rawApps: unknown,
+  options: {
+    driftCode?: 'RELEASE_CHANGED' | 'CATALOG_IDENTITY_DRIFT'
+  } = {},
+): Promise<{
+  apps: ProductSpaceAppIdentity[]
+  accessToken: string
+  client: AdminClient
+  context: Awaited<ReturnType<AdminClient['listProductSpaces']>>['productSpaces'][number]
+  catalog: Exclude<Awaited<ReturnType<AdminClient['getProductSpaceCatalog']>>, { notModified: true }>
+}> {
+  const outcome = await loadAuthoritativeProductSpaceAppsOutcome(rawApps, options)
+  if (outcome.kind === 'missing') {
+    throw new LocalAppRuntimeError(
+      'CATALOG_ENTRY_MISSING',
+      'The ProductSpace Catalog no longer lists this entry',
+    )
+  }
+  return {
+    apps: outcome.apps,
+    accessToken: outcome.accessToken,
+    client: outcome.client,
+    context: outcome.context,
+    catalog: outcome.catalog,
+  }
+}
+
 function matchesConfirmedRelease(
   request: LocalAppCatalogInstallRequest,
   app: CatalogApp,
@@ -460,6 +961,10 @@ function deriveCatalogReleaseStatus(
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
+  RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+  RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+  RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
   RPC_CHANNELS.localApps.STOP,
@@ -512,6 +1017,303 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     platform: hostPlatform(),
     arch: hostArchitecture(),
   }))
+
+  server.handle(
+    RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+    async (_ctx, rawApps: unknown): Promise<ProductSpaceAppInstallState[]> => {
+      const { apps } = await loadAuthoritativeProductSpaceApps(rawApps)
+      const scopes = apps.map(productSpaceBundleScope)
+      const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
+      await assertProductSpaceAccountCurrent(apps[0]!)
+      if (statuses.length !== scopes.length) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'ProductSpace installation state response is incomplete',
+        )
+      }
+      return projectProductSpaceInstallStates(apps, statuses)
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    async (_ctx, rawApps: unknown): Promise<ProductSpaceAppInstallState[]> => {
+      const apps = parseProductSpaceAppIdentityBatch(
+        rawApps,
+        'Withdrawn ProductSpace App identities',
+      )
+      const first = apps[0]!
+      // RESTRICTED withdrawn-management gate: every identity's FULL tuple
+      // (catalogEntryId + artifactInstanceId + versionId + version) must
+      // come from the Main-owned persisted Catalog authority. A renderer
+      // cannot declare an identity withdrawn — fabricated catalog/version
+      // tuples or unknown artifact instances are rejected before any
+      // registry read, so arbitrary local Apps can be neither probed nor
+      // targeted. The fresh Catalog stays the only authority for
+      // install/start/open.
+      assertWithdrawnProductSpaceAppAuthority(apps)
+      await assertProductSpaceAccountCurrent(first)
+      const scopes = apps.map(productSpaceBundleScope)
+      const statuses = await getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
+      // Post-await fence (same shape as the fresh state channel): the
+      // account/space gates are re-verified AFTER the registry await, so a
+      // switch or sign-out during the pending read fails the response closed.
+      await assertProductSpaceAccountCurrent(first)
+      if (statuses.length !== scopes.length) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Withdrawn ProductSpace installation state response is incomplete',
+        )
+      }
+      return projectProductSpaceInstallStates(apps, statuses)
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE,
+    async (ctx, rawRequest: ProductSpaceBundleInstallRequest) => {
+      const rawApp = rawRequest && typeof rawRequest === 'object'
+        ? (rawRequest as Partial<ProductSpaceBundleInstallRequest>).app
+        : null
+      const loaded = await loadAuthoritativeProductSpaceApps([rawApp])
+      const app = loaded.apps[0]!
+      const entry = loaded.catalog.entries.find(
+        candidate => candidate.catalogEntryId === app.catalogEntryId,
+      )!
+      if (entry.availability !== 'available') {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'This ProductSpace App is not available for installation',
+        )
+      }
+      const launch = await loaded.client.resolveProductSpaceLaunch(
+        loaded.accessToken,
+        loaded.context,
+        loaded.catalog,
+        entry.catalogEntryId,
+        { platform: hostPlatform(), arch: hostArchitecture() },
+      )
+      await assertProductSpaceAccountCurrent(app)
+      if (
+        launch.subject.kind !== 'artifact_instance'
+        || launch.subject.artifactType !== 'app'
+        || launch.subject.artifactInstanceId !== app.artifactInstanceId
+        || launch.subject.versionId !== app.versionId
+        || launch.subject.version !== app.version
+        || launch.productSpaceId !== app.productSpaceId
+        || launch.catalogEntryId !== app.catalogEntryId
+        || Date.parse(launch.expiresAt) <= Date.now()
+      ) {
+        throw new LocalAppRuntimeError(
+          'RELEASE_CHANGED',
+          'The resolved ProductSpace App launch identity changed',
+        )
+      }
+      if (launch.delivery.kind !== 'bundle') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'This ProductSpace App does not use bundle installation',
+        )
+      }
+      return getScopedLocalAppRuntimeRegistry().install({
+        scope: productSpaceBundleScope(app),
+        version: launch.subject.version,
+        downloadUrl: launch.delivery.downloadUrl,
+        checksum: launch.delivery.checksum,
+        sizeBytes: launch.delivery.sizeBytes,
+        platform: hostPlatform(),
+        arch: hostArchitecture(),
+      }, { signal: ctx.signal })
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE,
+    async (_ctx, rawApp: unknown, options?: LocalAppUninstallOptions) => {
+      // Withdrawn-inclusive uninstall: a withdrawn App is no longer listed in
+      // the fresh Catalog, so the authoritative-tuple revalidation cannot
+      // apply. Instead the FULL identity tuple (catalogEntryId +
+      // artifactInstanceId + versionId + version) MUST come from the
+      // Main-owned persisted Catalog authority — a renderer cannot
+      // self-declare withdrawn, and fabricated or forged-version identities
+      // are rejected BEFORE the registry can touch any installation
+      // directory. This path is limited to stop/uninstall/local-data
+      // cleanup; it never accepts renderer download or launch data, and
+      // install/start/open stay behind the fresh-Catalog availability
+      // checks.
+      const app = validateProductSpaceAppIdentity(rawApp)
+      await assertProductSpaceAccountCurrent(app)
+
+      // CAPTURE PHASE — BEFORE any fresh-fetch await: read the Main-owned
+      // confirmed binding ONCE and treat it as an immutable snapshot for the
+      // rest of this uninstall. No later authority mutation (a concurrent
+      // Catalog commit) can influence this comparison baseline.
+      const bindingAtEntry = getProductSpaceCatalogAuthorityRecord(app.accountId, app.productSpaceId)
+      if (!bindingAtEntry) {
+        // Cold-start default-distrust: without a process-trusted binding the
+        // uninstall fails closed.
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'No trusted ProductSpace authority binding exists for this App',
+        )
+      }
+      if (bindingAtEntry.catalogRevision !== app.catalogRevision) {
+        throw new LocalAppRuntimeError(
+          'CATALOG_IDENTITY_DRIFT',
+          'The uninstall request references a stale Catalog revision',
+        )
+      }
+      const bindingEntry = bindingAtEntry.entries.find(
+        candidate => candidate.catalogEntryId === app.catalogEntryId
+          && candidate.artifactInstanceId === app.artifactInstanceId
+          && candidate.versionId === app.versionId
+          && candidate.version === app.version,
+      )
+      const bindingTombstone = bindingAtEntry.tombstones.find(
+        candidate => candidate.catalogEntryId === app.catalogEntryId
+          && candidate.artifactInstanceId === app.artifactInstanceId
+          && candidate.versionId === app.versionId
+          && candidate.version === app.version,
+      )
+
+      // The renderer-sealed identity must match the captured binding BEYOND
+      // the bare tuple: the sealed sources and availability are proven
+      // against whichever authoritative record (live entry or retained
+      // tombstone) backs this identity. A stale page whose row content was
+      // silently re-rendered from a different revision cannot launder its
+      // request through the tuple check alone.
+      const authoritativeRef = bindingEntry ?? bindingTombstone
+      if (authoritativeRef) {
+        if (
+          canonicalIdentitySources(app.sources)
+          !== canonicalIdentitySources(authoritativeRef.sources)
+        ) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The uninstall request sources drifted from the trusted binding',
+          )
+        }
+        if (app.availability !== authoritativeRef.availability) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The uninstall request availability drifted from the trusted binding',
+          )
+        }
+      }
+
+      // FRESH PHASE — fresh fetch with an EXPLICIT discriminated outcome:
+      // the missing verdict carries the already schema-validated fresh
+      // Catalog, so the retained-tombstone path proves the fresh revision
+      // too. Comparison runs against the CAPTURED binding only (never a
+      // post-await re-read of current authority state).
+      const outcome = await loadAuthoritativeProductSpaceAppsOutcome([rawApp], {
+        driftCode: 'CATALOG_IDENTITY_DRIFT',
+      })
+
+      // UNIFIED POST-AWAIT FENCE — before live/missing classification: an
+      // account/space switch or sign-out parked behind the fresh fetch must
+      // stop the uninstall BEFORE any destructive side effect (the previous
+      // design surfaced such changes only AFTER the registry had run).
+      await assertProductSpaceAccountCurrent(app)
+
+      // REVISION PROOF — BOTH branches, before ANY registry call: the fresh
+      // Catalog revision must equal the pre-await captured binding revision
+      // AND the renderer request revision. A revision-only R2 (tuple,
+      // sources, availability all unchanged, only the server revision
+      // advanced) means the renderer's page predates the current Catalog —
+      // the operation must be re-confirmed from a refreshed page, never
+      // laundered through identical row content or through a retained
+      // tombstone.
+      if (
+        outcome.catalog.catalogRevision !== bindingAtEntry.catalogRevision
+        || outcome.catalog.catalogRevision !== app.catalogRevision
+      ) {
+        throw new LocalAppRuntimeError(
+          'CATALOG_IDENTITY_DRIFT',
+          'The fresh Catalog revision drifted from the captured uninstall binding',
+        )
+      }
+      if (outcome.kind === 'live') {
+        // Compare the live row against the PRE-AWAIT captured binding: full
+        // tuple must match the binding entry, canonical sources must equal
+        // the binding sources, and BOTH the binding and the live row must be
+        // available. A concurrent authority commit during the fresh fetch
+        // cannot influence this comparison.
+        const liveRow = outcome.catalog.entries.find(
+          candidate => candidate.catalogEntryId === app.catalogEntryId && candidate.kind === 'app',
+        ) as (TrustedProductSpaceCatalogEntry & { kind: 'app'; sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }> }) | undefined
+        if (!bindingEntry || !liveRow) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The live Catalog row no longer matches the trusted binding',
+          )
+        }
+        // The live row keeps the shared Catalog shape (version is a nested
+        // object); the trusted binding entry carries versionId/version as
+        // flattened authority fields.
+        const liveTuple = JSON.stringify([
+          liveRow.artifactInstanceId, liveRow.version.versionId, liveRow.version.version,
+        ])
+        const bindingTuple = JSON.stringify([
+          bindingEntry.artifactInstanceId, bindingEntry.versionId, bindingEntry.version,
+        ])
+        if (liveTuple !== bindingTuple) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The live Catalog App tuple drifted from the trusted binding',
+          )
+        }
+        if (bindingEntry.availability !== 'available' || liveRow.availability !== 'available') {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The ProductSpace Catalog App is no longer available (availability drift)',
+          )
+        }
+        if (
+          canonicalIdentitySources(liveRow.sources)
+          !== canonicalIdentitySources(bindingEntry.sources)
+        ) {
+          throw new LocalAppRuntimeError(
+            'CATALOG_IDENTITY_DRIFT',
+            'The ProductSpace Catalog App sources changed since the confirmed revalidation',
+          )
+        }
+      } else {
+        // Authoritative missing at the SAME revision: the exact retained
+        // tombstone must exist in the pre-await captured binding. KIND/tuple
+        // drift never lands here (the outcome helper classifies them as
+        // live drift); missing without tombstone evidence fails closed.
+        if (!bindingTombstone) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'Missing entry has no exact retained tombstone in the trusted binding',
+          )
+        }
+      }
+
+      // FINAL ATOMIC SIDE EFFECT — the minimal region from the last fence
+      // checks to the registry mutation runs under the global switch mutex:
+      // a ProductSpace switch/revoke/account replacement can never insert
+      // itself between verification and destruction. All network/credential
+      // awaits already completed ABOVE the lock (lock order: the switch lock
+      // must never be held across the Admin session lock or network I/O).
+      // The checks are synchronous and re-run INSIDE the lock.
+      //
+      // This block is the FINAL LINEARIZATION POINT and its completion is
+      // the uninstall's returned outcome: once the registry mutation and
+      // execution unregister succeed here, the RPC MUST resolve truthfully.
+      // A revoke queued behind this mutex correctly runs AFTER it and may
+      // clear the fence — it can never retroactively turn the completed
+      // destructive operation into NOT_AUTHORIZED (the previous trailing
+      // async account recheck did exactly that and invited unsafe retries).
+      await runUnderSwitchMutex(async () => {
+        assertProductSpaceAppOperationCurrent(app)
+        const scope = productSpaceBundleScope(app)
+        await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
+        unregisterLocalAppExecutions(scope)
+      })
+    },
+  )
 
   server.handle(
     RPC_CHANNELS.localApps.INSTALL,
@@ -729,7 +1531,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     // section is all in-memory: the shared trusted-start gate (mirror
     // account, account generation, transition epoch, account-bound fence)
     // and fence checks never acquire the Admin session lock.
-    return withSwitchLock(async () => {
+    return runUnderSwitchMutex(async () => {
       const activeProductSpaceId = getRuntimeActiveProductSpace()
       if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
         throw new LocalAppRuntimeError(

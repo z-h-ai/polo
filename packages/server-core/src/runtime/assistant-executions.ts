@@ -11,9 +11,9 @@ import {
   isSwitchInProgress,
   registerProductSpaceExecution,
   unregisterProductSpaceExecution,
-  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from './product-space-executions'
+import { withSwitchLock } from './switch-lock-internal'
 import {
   captureTrustedStartGate,
   isTrustedStartGateCurrent,
@@ -139,7 +139,7 @@ export async function registerAssistantExecutionForSend(input: {
       registerProductSpaceExecution(execution)
     }
     liveStartReservations.set(input.sessionId, reservation)
-  })
+  }, { phase: 'assistant-switch', productSpaceId: input.productSpaceId })
   return reservation
 }
 

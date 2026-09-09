@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { statSync } from 'node:fs'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { AppCatalogCacheEntry } from '@polo-ai/shared/admin'
 import type {
@@ -27,6 +28,48 @@ let accountAccessDenied = false
 let appAccessDenied = false
 let catalog: AppCatalogCacheEntry = createCatalog(1)
 
+// Trusted Catalog authority fixture: Main-owned FULL identity tuples
+// (catalogEntryId + artifactInstanceId + versionId + version) the renderer
+// may reference for withdrawn management, keyed by account|space (seeded
+// per test).
+const authorityTuplesByScope = new Map<string, Set<string>>()
+
+function authorityScopeKey(accountId = 'account-a', productSpaceId = 'organization-a'): string {
+  return `${accountId}|${productSpaceId}`
+}
+
+function seedAuthorityBinding(
+  accountId = 'account-a',
+  productSpaceId = 'organization-a',
+  catalogEntryId = 'catalog-entry-a',
+  artifactInstanceId = 'artifact-instance-a',
+  versionId = 'version-a',
+  version = '2.3.4',
+): void {
+  const scope = authorityScopeKey(accountId, productSpaceId)
+  const set = authorityTuplesByScope.get(scope) ?? new Set<string>()
+  set.add(JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version]))
+  authorityTuplesByScope.set(scope, set)
+}
+
+function seedAuthorityTuples(
+  productSpaceId = 'organization-a',
+  count: number,
+  prefix = 'authority',
+): void {
+  const set = authorityTuplesByScope.get(authorityScopeKey('account-a', productSpaceId))
+    ?? new Set<string>()
+  for (let index = 0; index < count; index += 1) {
+    set.add(JSON.stringify([
+      `${prefix}-entry-${index}`,
+      `${prefix}-artifact-${index}`,
+      `${prefix}-version-${index}`,
+      '1.0.0',
+    ]))
+  }
+  authorityTuplesByScope.set(authorityScopeKey('account-a', productSpaceId), set)
+}
+
 const getCachedAppCatalog = mock(() => catalog)
 const getAppCatalogAccessMode = mock(() => accessMode)
 const getAppReleaseDownload = mock(async (
@@ -43,6 +86,61 @@ const getAppReleaseDownload = mock(async (
   runtime: 'static' as const,
   platform: 'darwin' as const,
   arch: 'arm64' as const,
+}))
+const listProductSpaces = mock(async () => ({
+  contractVersion: 1,
+  defaultProductSpaceId: 'organization-a',
+  productSpaces: [{
+    id: 'organization-a',
+    kind: 'enterprise' as const,
+    enterpriseId: 'enterprise-a',
+    name: 'Organization A',
+    role: 'manager' as const,
+    accessMode: 'active' as const,
+  }],
+}))
+const defaultProductSpaceCatalog = async () => ({
+  contractVersion: 1,
+  productSpaceId: 'organization-a',
+  catalogRevision: 'revision-a',
+  entries: [{
+    kind: 'app' as const,
+    catalogEntryId: 'catalog-entry-a',
+    artifactInstanceId: 'artifact-instance-a',
+    version: {
+      versionId: 'version-a',
+      version: '2.3.4',
+      checksum: 'b'.repeat(64),
+    },
+    name: 'ProductSpace App',
+    description: '',
+    availability: 'available' as const,
+    sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+    permissions: [],
+  }],
+})
+const getProductSpaceCatalog = mock(defaultProductSpaceCatalog)
+const resolveProductSpaceLaunch = mock(async () => ({
+  contractVersion: 1,
+  productSpaceId: 'organization-a',
+  catalogEntryId: 'catalog-entry-a',
+  resolvedAt: '2099-01-01T00:00:00.000Z',
+  expiresAt: '2099-01-01T00:10:00.000Z',
+  subject: {
+    kind: 'artifact_instance' as const,
+    artifactType: 'app' as const,
+    artifactInstanceId: 'artifact-instance-a',
+    versionId: 'version-a',
+    version: '2.3.4',
+  },
+  payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
+  delivery: {
+    kind: 'bundle' as const,
+    downloadUrl: 'https://catalog.example/product-space-app.zip',
+    expiresAt: '2099-01-01T00:10:00.000Z',
+    checksum: 'b'.repeat(64),
+    sizeBytes: 456,
+  },
 }))
 const scopedInstall = mock(async (request: {
   scope: CatalogLocalAppScope
@@ -156,6 +254,9 @@ const scopedRegistry = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: class {
     getAppReleaseDownload = getAppReleaseDownload
+    listProductSpaces = listProductSpaces
+    getProductSpaceCatalog = getProductSpaceCatalog
+    resolveProductSpaceLaunch = resolveProductSpaceLaunch
   },
   analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
   createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
@@ -173,6 +274,66 @@ mock.module('@polo-ai/shared/admin', () => ({
 
 mock.module('@polo-ai/shared/config', () => ({
   getAdminUrl: () => 'https://admin.example.com',
+}))
+
+const withdrawnTombstonesByScope = new Map<string, Set<string>>()
+
+function seedTombstoneBinding(
+  accountId = 'account-a',
+  productSpaceId = 'organization-a',
+  catalogEntryId = 'catalog-entry-w',
+  artifactInstanceId = 'artifact-w',
+  versionId = 'version-w',
+  version = '2.0.0',
+): void {
+  const scope = authorityScopeKey(accountId, productSpaceId)
+  const set = withdrawnTombstonesByScope.get(scope) ?? new Set<string>()
+  set.add(JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version]))
+  withdrawnTombstonesByScope.set(scope, set)
+}
+
+const trustedRecordByScope = new Map<string, {
+  kind: 'authority'
+  entries: Array<{ catalogEntryId: string; artifactInstanceId: string; versionId: string; version: string; sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }> }>
+}>()
+
+function seedTrustedBinding(
+  accountId: string,
+  productSpaceId: string,
+  bindings: Array<{
+    catalogEntryId: string
+    artifactInstanceId: string
+    versionId: string
+    version: string
+    sources: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>
+    availability?: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
+  }>,
+  options: { catalogRevision?: string; tombstones?: Array<Record<string, unknown>> } = {},
+): void {
+  trustedRecordByScope.set(authorityScopeKey(accountId, productSpaceId), {
+    kind: 'authority',
+    catalogRevision: options.catalogRevision ?? 'revision-a',
+    entries: bindings.map(binding => ({
+      ...binding,
+      availability: binding.availability ?? ('available' as const),
+    })),
+    tombstones: options.tombstones ?? [],
+  } as never)
+}
+
+mock.module('@polo-ai/server-core/runtime/product-space-catalog-authority', () => ({
+  getProductSpaceCatalogAuthorityRecord: (accountId: string, productSpaceId: string) =>
+    trustedRecordByScope.get(authorityScopeKey(accountId, productSpaceId)) ?? null,
+  loadProductSpaceCatalogAuthorityTupleSet: (accountId: string, productSpaceId: string) =>
+    authorityTuplesByScope.get(authorityScopeKey(accountId, productSpaceId)) ?? new Set<string>(),
+  loadProductSpaceWithdrawnTombstoneTupleSet: (accountId: string, productSpaceId: string) =>
+    withdrawnTombstonesByScope.get(authorityScopeKey(accountId, productSpaceId)) ?? new Set<string>(),
+  productSpaceCatalogAuthorityTupleKey: (
+    catalogEntryId: string,
+    artifactInstanceId: string,
+    versionId: string,
+    version: string,
+  ) => JSON.stringify([catalogEntryId, artifactInstanceId, versionId, version]),
 }))
 
 mock.module('@polo-ai/shared/credentials', () => ({
@@ -225,9 +386,23 @@ const {
   setRuntimeActiveProductSpace,
   setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
+  getRuntimeActiveProductSpace,
   listRegisteredProductSpaceExecutions,
-  withSwitchLock,
+  registerProductSpaceExecution,
+  revokeRuntimeProductSpaceFence,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { runUnderSwitchMutex } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { PRODUCT_SPACE_CONTRACT_VERSION, ProductSpaceExecutionScopeSchema } =
+  await import('@polo-ai/shared/product-spaces')
+// TEST-ONLY internal seam via an explicit relative source path: the typed
+// switch-mutex event registry lets this regression prove FIFO lock order
+// without any timing window. The internal module is deliberately NOT
+// re-exported through product-space-executions or any package exports map —
+// this relative import reaches the same source module instance the
+// production handler's runUnderSwitchMutex executes on.
+const { pendingSwitchLockTasks, switchLockEventLog } = await import(
+  '../../../../../../packages/server-core/src/runtime/switch-lock-internal'
+)
 
 function createCatalog(count: number): AppCatalogCacheEntry {
   return {
@@ -277,6 +452,23 @@ function confirmedRelease() {
   }
 }
 
+function productSpaceAppIdentity() {
+  return {
+    accountId: 'account-a',
+    productSpaceId: 'organization-a',
+    catalogRevision: 'revision-a',
+    catalogEntryId: 'catalog-entry-a',
+    artifactInstanceId: 'artifact-instance-a',
+    versionId: 'version-a',
+    version: '2.3.4',
+    // Canonical renderer-sealed sources/availability: they mirror the
+    // name-less enterprise_import source and the raw 'available' availability
+    // of the default authoritative Catalog row.
+    sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+    availability: 'available' as const,
+  }
+}
+
 describe('local app main-process authorization boundary', () => {
   const handlers = new Map<string, Handler>()
   const context = {
@@ -292,9 +484,16 @@ describe('local app main-process authorization boundary', () => {
     accountAccessDenied = false
     appAccessDenied = false
     catalog = createCatalog(1)
+    authorityTuplesByScope.clear()
+    withdrawnTombstonesByScope.clear()
+    trustedRecordByScope.clear()
+    seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1
     getAppReleaseDownload.mockClear()
+    listProductSpaces.mockClear()
+    getProductSpaceCatalog.mockClear()
+    resolveProductSpaceLaunch.mockClear()
     handlers.clear()
     for (const handlerMock of [
       getCachedAppCatalog,
@@ -356,7 +555,1338 @@ describe('local app main-process authorization boundary', () => {
       setRuntimeActiveProductSpaceAccount(signedInAccountId)
     }
     setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
+    setRuntimeOfflineReadOnly(false)
     resetExecutionRegistry()
+  })
+
+  it('installs a bundle only after revalidating the exact ProductSpace Catalog tuple', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!
+    const installed = await install(context, { app: productSpaceAppIdentity() })
+
+    expect(listProductSpaces).toHaveBeenCalledWith('account-a-access')
+    expect(getProductSpaceCatalog).toHaveBeenCalledTimes(1)
+    expect(resolveProductSpaceLaunch).toHaveBeenCalledWith(
+      'account-a-access',
+      expect.objectContaining({ id: 'organization-a' }),
+      expect.objectContaining({ productSpaceId: 'organization-a' }),
+      'catalog-entry-a',
+      expect.objectContaining({ platform: expect.any(String), arch: expect.any(String) }),
+    )
+    expect(scopedInstall).toHaveBeenCalledWith(expect.objectContaining({
+      scope: {
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'artifact-instance-a',
+      },
+      version: '2.3.4',
+      checksum: 'b'.repeat(64),
+    }), expect.objectContaining({ signal: context.signal }))
+    expect(installed).toMatchObject({
+      appId: 'artifact-instance-a',
+      currentVersion: '2.3.4',
+    })
+  })
+
+  it('fails closed before install when an artifact version tuple is stale', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL_PRODUCT_SPACE_BUNDLE)!
+    await expect(install(context, {
+      app: { ...productSpaceAppIdentity(), versionId: 'stale-version' },
+    })).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
+    expect(resolveProductSpaceLaunch).not.toHaveBeenCalled()
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('projects installation state without exposing Runtime lifecycle controls', async () => {
+    scopedStatuses.mockImplementationOnce(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+      currentVersion: '2.3.4',
+      runningVersion: '2.3.4',
+    })))
+    const getStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+    )!
+    const states = await getStates(context, [productSpaceAppIdentity()])
+    expect(states).toEqual([{
+      app: productSpaceAppIdentity(),
+      state: 'installed',
+      currentVersion: '2.3.4',
+    }])
+  })
+
+  it('rejects duplicate ProductSpace App identities in one batch', async () => {
+    const getStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+    )!
+    await expect(getStates(context, [
+      productSpaceAppIdentity(),
+      productSpaceAppIdentity(),
+    ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
+  it('projects withdrawn install states through the install identity without consulting the Catalog', async () => {
+    scopedStatuses.mockImplementationOnce(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'installed' as const,
+      currentVersion: '2.3.4',
+    })))
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    // The identity is NOT in the fresh Catalog (withdrawn) — the restricted
+    // withdrawn channel must project the retained installation from the
+    // Main-authority artifact-instance binding alone.
+    const states = await getWithdrawnStates(context, [productSpaceAppIdentity()])
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+    expect(scopedStatuses).toHaveBeenCalledWith([{
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'artifact-instance-a',
+    }])
+    expect(states).toEqual([{
+      app: productSpaceAppIdentity(),
+      state: 'installed',
+      currentVersion: '2.3.4',
+    }])
+  })
+
+  it('rejects withdrawn identities that are not in the trusted Catalog authority', async () => {
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    // Real binding, but the batch names an UNKNOWN artifact instance.
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      artifactInstanceId: '../../another-installed-app' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Another space's binding is not valid here either.
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      productSpaceId: 'organization-b' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Fabricated SQL/XSS-shaped catalogEntryId on a REAL artifact instance —
+    // the FULL tuple check rejects it (the state channel is not
+    // artifact-scoped anymore).
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      catalogEntryId: "x' OR 1=1 --" as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      catalogEntryId: '<script>alert(1)</script>' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Forged versionId / version on a REAL catalog+artifact binding.
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      versionId: 'forged-version' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(getWithdrawnStates(context, [{
+      ...productSpaceAppIdentity(),
+      version: '999.0.0' as never,
+    }])).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Duplicate identities in one batch are rejected too.
+    await expect(getWithdrawnStates(context, [
+      productSpaceAppIdentity(),
+      productSpaceAppIdentity(),
+    ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(scopedStatuses).not.toHaveBeenCalled()
+  })
+
+  it('fails the withdrawn install-state channel closed on empty, cross-space, or signed-out batches', async () => {
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    await expect(getWithdrawnStates(context, []))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(getWithdrawnStates(context, [
+      productSpaceAppIdentity(),
+      { ...productSpaceAppIdentity(), productSpaceId: 'organization-b' },
+    ])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+
+    signedInAccountId = null
+    await expect(getWithdrawnStates(context, [productSpaceAppIdentity()]))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    signedInAccountId = 'account-a'
+    setRuntimeActiveProductSpace('organization-b')
+    await expect(getWithdrawnStates(context, [productSpaceAppIdentity()]))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedStatuses).not.toHaveBeenCalled()
+  })
+
+  it('routes a withdrawn retained installation to the retained-tombstone gate after the fresh Catalog proves the entry gone', async () => {
+    // A withdrawn tombstone identity that exists ONLY in the Main authority
+    // (the fresh Catalog mock still lists catalog-entry-a with a DIFFERENT
+    // identity) — the fresh fetch runs FIRST and its authoritative
+    // missing-entry verdict routes the uninstall to the restricted
+    // stop/uninstall/local-data path when the FULL tombstone tuple matches.
+    seedTombstoneBinding(
+      'account-a',
+      'organization-a',
+      'catalog-entry-w',
+      'artifact-w',
+      'version-w',
+      '2.0.0',
+    )
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      tombstones: [{
+        catalogEntryId: 'catalog-entry-w',
+        artifactInstanceId: 'artifact-w',
+        versionId: 'version-w',
+        version: '2.0.0',
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
+        withdrawnAt: 1,
+      }],
+    })
+    const withdrawnIdentity = {
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      versionId: 'version-w',
+      version: '2.0.0',
+      catalogRevision: 'revision-a',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'withdrawn' as const,
+    }
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    await uninstall(context, withdrawnIdentity, { preserveData: true })
+
+    // The current Catalog IS fetched first; its authoritative missing-entry
+    // verdict is what routes the request to the retained-tombstone gate.
+    expect(getProductSpaceCatalog).toHaveBeenCalled()
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'artifact-w',
+    }, { preserveData: true })
+  })
+
+  it('rejects KIND drift: old app tombstone + a live same-ID non-app row must NEVER reach the registry', async () => {
+    // Old app tombstone retained; the STABLE entry ID now belongs to a
+    // non-app (skill) live row in the current Catalog. The uninstall must
+    // fail closed as live identity drift — registry zero calls.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-kind-drift',
+      entries: [{
+        kind: 'skill' as const,
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: { versionId: 'version-a', version: '2.3.4' },
+        name: 'Same-ID Skill',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+        enabled: true,
+        permissions: [],
+      }],
+    }))
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('rejects SOURCE drift (enterprise_import → creator_circle, set change) and AVAILABILITY drift (blocked/unavailable) as CATALOG_IDENTITY_DRIFT with zero registry calls', async () => {
+    const base = productSpaceAppIdentity()
+    const currentRow = {
+      kind: 'app' as const,
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+      name: 'ProductSpace App',
+      description: '',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const }],
+      permissions: [],
+    }
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding mirrors the CONFIRMED sources of this identity.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+
+    const driftCatalogs: Array<[string, Record<string, unknown>]> = [
+      ['source kind drift', { sources: [{ kind: 'creator_circle' as const, circleId: 'circle-1' as never, name: 'Circle' }] }],
+      ['source set change', { sources: [{ kind: 'enterprise_import' as const }, { kind: 'creator_circle' as const, circleId: 'circle-2' as never, name: 'Circle 2' }] }],
+      ['availability blocked', { availability: 'blocked' as const }],
+      ['availability unavailable', { availability: 'unavailable' as const }],
+    ]
+    for (const [label, override] of driftCatalogs) {
+      getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogRevision: 'revision-a',
+        entries: [{ ...currentRow, ...override }],
+      }))
+      const callsBefore = scopedRegistry.uninstall.mock.calls.length
+      await expect(uninstall(context, base, { preserveData: true }))
+        .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+      expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+      void label
+    }
+
+    // Unchanged canonical sources + available → live uninstall succeeds.
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    // default catalog source uses enterpriseId-only shape; mirror it.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      entries: [currentRow],
+    }))
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    await uninstall(context, base, { preserveData: true })
+    expect(scopedRegistry.uninstall).toHaveBeenCalled()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('TOCTOU: concurrent authority commit during parked fresh fetch cannot launder the R1 request (DRIFT, registry 0)', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding R1: confirmed with the canonical name-less
+    // enterprise_import source — the request identity seals the same.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    // fresh fetch PARKED: the handler awaits while a concurrent R2 commit
+    // changes the Main-owned binding (source kind + availability).
+    const r2Row = {
+      kind: 'app',
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+      name: 'ProductSpace App',
+      description: '',
+      availability: 'available',
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      permissions: [],
+    }
+    let parkFetch: ((catalog: unknown) => void) | undefined
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => {
+      const catalog = await new Promise<any>(resolve => { parkFetch = resolve })
+      return catalog
+    })
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+
+    const pending = uninstall(context, base, { preserveData: true })
+    for (let i = 0; i < 50 && !parkFetch; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    if (!parkFetch) throw new Error('fetch pending')
+
+    // Concurrent R2 commit: the authority binding mutates to R2 sources.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      availability: 'available' as const,
+    }], { catalogRevision: 'rev-r2' })
+
+    // Release the parked fetch: the handler compares the live R2 rows
+    // against the PRE-AWAIT captured R1 binding — sources drift → DRIFT.
+    parkFetch!({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-r2-live',
+      entries: [r2Row],
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('TOCTOU: authority already at R2 while renderer carries R1 revision → fail closed before registry', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding ALREADY at R2 (creator_circle sources); the
+    // renderer still carries an R1 revision identity.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      availability: 'available' as const,
+    }], { catalogRevision: 'rev-r2' })
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28: rejects a REVISION-ONLY fresh Catalog change (byte-equivalent row) as CATALOG_IDENTITY_DRIFT with zero registry calls', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Main-owned binding R1: revision-a with exactly the row content the
+    // fresh revision-b Catalog returns below.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    // The fresh Catalog advanced its revision while the App row stayed
+    // BYTE-EQUIVALENT (same kind/tuple/sources/availability): identical row
+    // content must NEVER launder a stale revision-a page. The uninstall is
+    // refused so the renderer refreshes and re-confirms against the current
+    // revision.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-revision-only-r2',
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const }],
+        permissions: [],
+      }],
+    }))
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28: rejects request-vs-binding sealed source/availability mismatch BEFORE the fresh fetch (zero Catalog reads, zero registry calls)', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Binding: the confirmed row carries a creator_circle source.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'creator_circle', circleId: 'circle-1', name: 'Circle 1' }],
+      availability: 'available' as const,
+    }])
+    getProductSpaceCatalog.mockClear()
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    // Sealed SOURCES differ from the binding: a re-rendered page cannot
+    // smuggle different sources through the bare-tuple check.
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    // Sealed AVAILABILITY differs from the binding.
+    await expect(uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    // Both rejections happened BEFORE the fresh Catalog fetch.
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28-a1: rejects a revision-drifted authoritative MISSING even with an exact retained tombstone (fresh rev-b vs binding rev-a) with zero registry calls', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Binding rev-a holds the exact retained tombstone T.
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      catalogRevision: 'revision-a',
+      tombstones: [{
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        versionId: base.versionId,
+        version: base.version,
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
+        withdrawnAt: 1,
+      }],
+    })
+    // The fresh Catalog advanced to rev-b AND no longer lists the entry:
+    // the retained-tombstone cleanup path must prove the fresh revision too
+    // — a stale page can never launder its uninstall through a tombstone.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-b-missing',
+      entries: [],
+    }))
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28-a1: same-revision authoritative missing with the exact retained tombstone still cleans up', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      catalogRevision: 'revision-a',
+      tombstones: [{
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        versionId: base.versionId,
+        version: base.version,
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
+        withdrawnAt: 1,
+      }],
+    })
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      entries: [],
+    }))
+    await uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true })
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: base.artifactInstanceId,
+    }, { preserveData: true })
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28-a1: a ProductSpace switch parked behind the fresh fetch stops the LIVE uninstall before the registry', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    let parkFetch: ((catalog: unknown) => void) | undefined
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => {
+      return new Promise<any>(resolve => { parkFetch = resolve })
+    })
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    const pending = uninstall(context, base, { preserveData: true })
+    for (let i = 0; i < 50 && !parkFetch; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    if (!parkFetch) throw new Error('fresh fetch never parked')
+    // The committed ProductSpace switches to organization-b while the fetch
+    // is parked — the unified post-await fence must refuse BEFORE the
+    // registry side effect.
+    setRuntimeActiveProductSpace('organization-b')
+    parkFetch!({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      entries: [{
+        kind: 'app',
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available',
+        sources: [{ kind: 'enterprise_import' }],
+        permissions: [],
+      }],
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    // Restore global runtime state.
+    setRuntimeActiveProductSpace('organization-a')
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28-a1: a sign-out parked behind the fresh fetch stops the retained-tombstone cleanup before the registry', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      catalogRevision: 'revision-a',
+      tombstones: [{
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        versionId: base.versionId,
+        version: base.version,
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
+        withdrawnAt: 1,
+      }],
+    })
+    let parkFetch: ((catalog: unknown) => void) | undefined
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => {
+      return new Promise<any>(resolve => { parkFetch = resolve })
+    })
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    const pending = uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true })
+    for (let i = 0; i < 50 && !parkFetch; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    if (!parkFetch) throw new Error('fresh fetch never parked')
+    // The account signs out while the fetch parks — the unified post-await
+    // account fence must refuse the tombstone cleanup BEFORE the registry.
+    signedInAccountId = null
+    parkFetch!({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      entries: [],
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    // Restore global state.
+    signedInAccountId = 'account-a'
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R28-a1: schema-valid whitespace round trip — identical padded bytes across request/binding/fresh succeed, single-sided differences still drift', async () => {
+    const paddedRevision = ' rev-a '
+    const paddedName = ' Organization A '
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // Binding stores the EXACT padded bytes (shared nonBlankString schemas
+    // keep the original value; trim is non-blank validation only).
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+      sources: [{ kind: 'enterprise_import', name: paddedName }],
+      availability: 'available' as const,
+    }], { catalogRevision: paddedRevision })
+    const paddedIdentity = {
+      ...productSpaceAppIdentity(),
+      catalogRevision: paddedRevision,
+      sources: [{ kind: 'enterprise_import', name: paddedName, circleId: null }],
+    }
+    const paddedCatalog = () => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: paddedRevision,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: { versionId: 'version-a', version: '2.3.4', checksum: 'b'.repeat(64) },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: paddedName }],
+        permissions: [],
+      }],
+    })
+    // Identical padded bytes on ALL three surfaces → uninstall succeeds.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => paddedCatalog())
+    await uninstall(context, paddedIdentity, { preserveData: true })
+    expect(scopedRegistry.uninstall).toHaveBeenCalled()
+
+    // A single-sided difference (the fresh name loses the padding) is
+    // NOT trimmed into agreement — it drifts with zero registry calls.
+    scopedRegistry.uninstall.mockClear()
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    const unpadded = paddedCatalog()
+    unpadded.entries = [{
+      ...unpadded.entries[0]!,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Organization A' }],
+    }]
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => unpadded)
+    await expect(uninstall(context, paddedIdentity, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('R29: a revoke queued behind the uninstall mutex can never flip the completed destructive uninstall into NOT_AUTHORIZED', async () => {
+    const base = productSpaceAppIdentity()
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    // 1. Legal live uninstall: trusted binding + fresh Catalog at the SAME
+    // revision.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    // A live local_app execution record that the uninstall must unregister
+    // (subject artifact instance == the uninstall's scope catalogAppId, the
+    // production unregister matching rule).
+    registerProductSpaceExecution({
+      scope: ProductSpaceExecutionScopeSchema.parse({
+        contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+        executionId: 'local-app:organization-a:r29-exec',
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        workspaceId: 'ws-window-a',
+        subject: {
+          kind: 'artifact_instance',
+          artifactType: 'app',
+          artifactInstanceId: base.artifactInstanceId,
+          versionId: base.versionId,
+          version: base.version,
+        },
+      }),
+      kind: 'local_app',
+      name: 'R29 Uninstall Exec',
+      ref: 'local-app:organization-a:r29-exec',
+      generation: 0,
+      isActive: async () => true,
+      stop: async () => 'stopped' as const,
+    })
+
+    // 2. Defer the registry uninstall and observe the RPC INSIDE the atomic
+    // region: the mock resolves the `entered` Deferred synchronously at the
+    // top of the side effect, so awaiting it is event-driven — no polling,
+    // no timeout, no timing window.
+    let releaseRegistry!: () => void
+    const registryGate = new Promise<void>(resolve => { releaseRegistry = resolve })
+    let registrySettled = false
+    let signalRegistryEntered!: () => void
+    const registryEntered = new Promise<void>(resolve => { signalRegistryEntered = resolve })
+    scopedRegistry.uninstall.mockImplementationOnce(async () => {
+      signalRegistryEntered()
+      await registryGate
+      registrySettled = true
+    })
+    const pending = uninstall(context, base, { preserveData: true })
+    await registryEntered
+
+    // Typed switch-mutex evidence through the test-only internal seam
+    // (relative source import — the internal module is NOT re-exported
+    // through product-space-executions or any package exports map). The
+    // identical pending/event state proves the same module instance backs
+    // the production handler. Exactly the uninstall's runtime-public-mutex
+    // task is RUNNING.
+    expect(switchLockEventLog().map(event => event.token)).toEqual([
+      { phase: 'runtime-public-mutex' },
+    ])
+    expect(pendingSwitchLockTasks()).toBe(1)
+
+    // 3. Queue the production revoke SYNCHRONOUSLY: withSwitchLock registers
+    // its typed token before its first await, so the FIFO order behind the
+    // running uninstall is observable immediately — no timers, no sleep, no
+    // Date.now window.
+    let revokeSettled = false
+    const revoke = revokeRuntimeProductSpaceFence().then(() => { revokeSettled = true })
+    expect(switchLockEventLog().map(event => event.token)).toEqual([
+      { phase: 'runtime-public-mutex' },
+      { phase: 'runtime-revoke-fence' },
+    ])
+    expect(pendingSwitchLockTasks()).toBe(2)
+    // Both fence-clearing operations of the revoke can only run once it
+    // acquires the mutex — it cannot have settled, and the atomic region
+    // (execution unregister runs only with the registry) is not interleaved.
+    expect(revokeSettled).toBe(false)
+    expect(
+      listRegisteredProductSpaceExecutions().filter(execution => execution.kind === 'local_app'),
+    ).toHaveLength(1)
+
+    // 4. Release the registry: the uninstall RPC RESOLVES TRUTHFULLY — the
+    // queued revoke running afterwards can never retroactively turn the
+    // completed destructive operation into NOT_AUTHORIZED.
+    releaseRegistry!()
+    await pending
+    expect(registrySettled).toBe(true)
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: base.artifactInstanceId,
+    }, { preserveData: true })
+    // The queued revoke then completes normally and clears the fence; the
+    // final fence/registry/execution state is consistent and the switch
+    // mutex drains completely (typed FIFO order fully settled).
+    await revoke
+    expect(revokeSettled).toBe(true)
+    expect(pendingSwitchLockTasks()).toBe(0)
+    expect(switchLockEventLog()).toEqual([])
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+    expect(
+      listRegisteredProductSpaceExecutions().filter(execution => execution.kind === 'local_app'),
+    ).toHaveLength(0)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('rejects uninstalling an OLD republished tuple when the same entry/artifact is re-released at a NEW version (live drift, not tombstone)', async () => {
+    // Sequence: the old version WAS withdrawn and retained as a trusted
+    // tombstone; the same stable entry + artifact is then REPUBLISHED at a
+    // new version. Uninstalling the OLD tuple must fail closed as live
+    // drift — registry and files are untouched.
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-old',
+      version: '2.0.0',
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }], { catalogRevision: 'revision-republished' })
+    seedTombstoneBinding(
+      'account-a', 'organization-a',
+      'catalog-entry-a', 'artifact-instance-a', 'version-old', '2.0.0',
+    )
+    getProductSpaceCatalog.mockImplementation(async () => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-republished',
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: {
+          versionId: 'version-new',
+          version: '3.0.0',
+          checksum: 'b'.repeat(64),
+        },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+        permissions: [],
+      }],
+    }))
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, {
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-old',
+      version: '2.0.0',
+      catalogRevision: 'revision-republished',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'available' as const,
+    }, { preserveData: true })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('covers each per-field drift (artifactInstanceId / versionId / version) as fail-closed live drift, and separates missing-entry routes', async () => {
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    const base = productSpaceAppIdentity()
+    const currentEntry = (): Record<string, unknown> => ({
+      kind: 'app',
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      version: { versionId: base.versionId, version: base.version, checksum: 'b'.repeat(64) },
+      name: 'ProductSpace App',
+      description: '',
+      availability: 'available',
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      permissions: [],
+    })
+
+    // Trusted binding: base entry available (live path must match it).
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+
+    // Per-field drift: artifact / versionId / version each → DRIFT.
+    for (const drifted of [
+      { artifactInstanceId: 'artifact-drifted' },
+      { version: { versionId: 'version-drifted', version: '8.8.8' } },
+      { version: { versionId: base.versionId, version: '9.9.9' } },
+    ] as const) {
+      getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogRevision: 'revision-a',
+        entries: [{ ...currentEntry(), ...drifted }],
+      }))
+      const callsBefore = scopedRegistry.uninstall.mock.calls.length
+      await expect(uninstall(context, base, { preserveData: true }))
+        .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+      expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    }
+
+    // Genuinely missing entry + trusted retained tombstone → cleanup. The
+    // request is the withdrawn view's sealed identity: it carries the
+    // tombstone's sources and the raw 'withdrawn' availability.
+    seedTrustedBinding('account-a', 'organization-a', [], {
+      tombstones: [{
+        catalogEntryId: base.catalogEntryId,
+        artifactInstanceId: base.artifactInstanceId,
+        versionId: base.versionId,
+        version: base.version,
+        sources: [{ kind: 'enterprise_import', name: null }],
+        availability: 'withdrawn' as const,
+        withdrawnAt: 1,
+      }],
+    })
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      entries: [],
+    }))
+    await uninstall(context, { ...base, availability: 'withdrawn' as const }, { preserveData: true })
+    expect(scopedRegistry.uninstall).toHaveBeenCalled()
+
+    // Missing entry WITHOUT tombstone evidence → fail closed.
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      entries: [],
+    }))
+    await expect(uninstall(context, {
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-a',
+      catalogEntryId: 'catalog-entry-never',
+      artifactInstanceId: 'artifact-never',
+      versionId: 'version-never',
+      version: '1.0.0',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'available' as const,
+    }, { preserveData: true })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+
+    // Inactive space → NOT_AUTHORIZED (never a tombstone fallback).
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listProductSpaces.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      defaultProductSpaceId: 'organization-a',
+      productSpaces: [{
+        id: 'organization-a',
+        kind: 'enterprise' as const,
+        enterpriseId: 'enterprise-a',
+        name: 'Organization A',
+        role: 'manager' as const,
+        accessMode: 'billing_restricted' as const,
+      }],
+    }))
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: base.catalogEntryId,
+      artifactInstanceId: base.artifactInstanceId,
+      versionId: base.versionId,
+      version: base.version,
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    await expect(uninstall(context, base, { preserveData: true }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listProductSpaces.mockImplementation(async (): Promise<any> => ({
+      contractVersion: 1,
+      defaultProductSpaceId: 'organization-a',
+      productSpaces: [{
+        id: 'organization-a',
+        kind: 'enterprise' as const,
+        enterpriseId: 'enterprise-a',
+        name: 'Organization A',
+        role: 'manager' as const,
+        accessMode: 'active' as const,
+      }],
+    }))
+  })
+
+  it('fails tombstone-evidenced cleanup closed when the fresh fetch itself fails (401)', async () => {
+    // Even WITH retained-tombstone evidence, a fresh-fetch auth failure must
+    // stay fail-closed: 401/403/network are never tombstone fallbacks.
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      versionId: 'version-w',
+      version: '2.0.0',
+      sources: [{ kind: 'enterprise_import' }],
+      availability: 'available' as const,
+    }])
+    seedTombstoneBinding()
+    getProductSpaceCatalog.mockImplementation(async () => {
+      throw Object.assign(new Error('session expired'), { errorCode: 'UNAUTHORIZED', status: 401 })
+    })
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    await expect(uninstall(context, {
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      versionId: 'version-w',
+      version: '2.0.0',
+      catalogRevision: 'revision-a',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'available' as const,
+    }, { preserveData: true })).rejects.toMatchObject({ errorCode: 'UNAUTHORIZED', status: 401 })
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('rejects fabricated withdrawn uninstall identities before the registry can run', async () => {
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+      sources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      availability: 'available' as const,
+    }])
+    // Fabricated SQL/XSS-shaped catalogEntryId on a REAL artifact instance —
+    // the FULL tuple check rejects it before any registry call.
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      catalogEntryId: "x'; DROP TABLE catalog --" as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      catalogEntryId: '<img src=x onerror=alert(1)>' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // Forged versionId on a REAL catalog+artifact binding: the entry EXISTS
+    // (live drift) → CATALOG_IDENTITY_DRIFT fail-closed, NEVER a tombstone
+    // fallback.
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      versionId: 'forged-version' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+
+    // LIVE uninstall: the fresh Catalog matches the FULL identity exactly —
+    // success WITHOUT any tombstone evidence. The Main-owned canonical
+    // source/availability binding matches the live row.
+    seedAuthorityBinding()
+    seedTrustedBinding('account-a', 'organization-a', [{
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+      sources: [{ kind: 'enterprise_import' }],
+    }])
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    await uninstall(context, productSpaceAppIdentity(), { preserveData: true })
+    expect(getProductSpaceCatalog).toHaveBeenCalled()
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'artifact-instance-a',
+    }, { preserveData: true })
+
+    // STALE VERSION drift: the live Catalog holds a different version for
+    // the entry → fail closed even with the OLD tuple present in the union.
+    getProductSpaceCatalog.mockImplementation(async () => ({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'revision-upgraded',
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: {
+          versionId: 'version-upgraded',
+          version: '3.0.0',
+          checksum: 'b'.repeat(64),
+        },
+        name: 'ProductSpace App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+        permissions: [],
+      }],
+    }))
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    // NOTE: earlier sub-cases in this test already produced successful
+    // registry uninstalls; assert the DELTA instead of a global count.
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+
+    // FRESH FETCH FAILURE (auth/network/schema): fail closed even when the
+    // identity HAS retained-tombstone evidence (covered in its own test
+    // below — here the fabricated/stale variants stay fail-closed too).
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      version: '999.0.0' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    // Unknown artifact instance: the destructive path (preserveData=false)
+    // must be refused before the registry can delete any app directory.
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      artifactInstanceId: '../../another-installed-app' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    // A REAL full-tuple authority binding for another space stays invalid here.
+    seedAuthorityBinding('account-a', 'organization-b', 'catalog-entry-b', 'artifact-b', 'version-b', '1.0.0')
+    await expect(uninstall(context, {
+      ...productSpaceAppIdentity(),
+      productSpaceId: 'organization-b' as never,
+      catalogEntryId: 'catalog-entry-b' as never,
+      artifactInstanceId: 'artifact-b' as never,
+      versionId: 'version-b' as never,
+      version: '1.0.0' as never,
+    }, { preserveData: false })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    // R24: the fresh-Catalog revalidation now runs for every uninstall —
+    // what matters is that the destructive registry path never runs for the
+    // cross-space/fabricated variants above.
+    const callsBefore = scopedRegistry.uninstall.mock.calls.length
+    expect(scopedRegistry.uninstall.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('validates a full 10,000-identity withdrawn batch against a 20,000-tuple authority in one pass', async () => {
+    // Product upper bound: 10,000 request identities against an authority
+    // holding 10,000 live + 10,000 tombstone tuples. A per-item authority
+    // scan would be ~200,000,000 comparisons on the Main thread; the
+    // one-shot tuple set keeps the whole batch linear.
+    seedAuthorityTuples('organization-a', 20_000)
+    const identities = Array.from({ length: 10_000 }, (_, index) => ({
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogEntryId: `authority-entry-${index}`,
+      artifactInstanceId: `authority-artifact-${index}`,
+      versionId: `authority-version-${index}`,
+      version: '1.0.0',
+      catalogRevision: 'revision-a',
+      sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+      availability: 'withdrawn' as const,
+    }))
+    const set = authorityTuplesByScope.get(authorityScopeKey('account-a', 'organization-a'))!
+    for (const identity of identities) {
+      set.add(JSON.stringify([
+        identity.catalogEntryId,
+        identity.artifactInstanceId,
+        identity.versionId,
+        identity.version,
+      ]))
+    }
+    scopedStatuses.mockImplementation(async (scopes: CatalogLocalAppScope[]) =>
+      scopes.map(item => ({
+        appId: item.catalogAppId,
+        scope: item,
+        status: 'not_installed' as const,
+      })))
+
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+    const startedAt = Date.now()
+    const states = await getWithdrawnStates(context, identities) as unknown[]
+    const elapsedMs = Date.now() - startedAt
+
+    expect(states).toHaveLength(10_000)
+    expect(elapsedMs).toBeLessThan(5_000)
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+  })
+
+  it('re-fails the withdrawn state response closed when the account or space changes during the registry await', async () => {
+    let releaseStatuses!: (statuses: LocalAppRuntimeStatus[]) => void
+    scopedStatuses.mockImplementationOnce(async (scopes: CatalogLocalAppScope[]) => {
+      void scopes
+      return await new Promise<LocalAppRuntimeStatus[]>(resolve => {
+        releaseStatuses = resolve
+      })
+    })
+    const statusRow: LocalAppRuntimeStatus = {
+      appId: 'artifact-instance-a',
+      scope: {
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'artifact-instance-a',
+      },
+      status: 'installed',
+      currentVersion: '2.3.4',
+    }
+    const getWithdrawnStates = handlers.get(
+      RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES,
+    )!
+
+    // Space switch while the registry read is pending.
+    const pendingSpaceSwitch = getWithdrawnStates(context, [productSpaceAppIdentity()])
+    for (let i = 0; i < 300 && !releaseStatuses; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(releaseStatuses).toBeTruthy()
+    setRuntimeActiveProductSpace('organization-b')
+    releaseStatuses!([statusRow])
+    await expect(pendingSpaceSwitch).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    // Sign-out while the registry read is pending.
+    setRuntimeActiveProductSpace('organization-a')
+    let releaseSecond!: (statuses: LocalAppRuntimeStatus[]) => void
+    scopedStatuses.mockImplementationOnce(async (scopes: CatalogLocalAppScope[]) => {
+      void scopes
+      return await new Promise<LocalAppRuntimeStatus[]>(resolve => {
+        releaseSecond = resolve
+      })
+    })
+    const pendingSignOut = getWithdrawnStates(context, [productSpaceAppIdentity()])
+    for (let i = 0; i < 300 && !releaseSecond; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(releaseSecond).toBeTruthy()
+    signedInAccountId = null
+    releaseSecond!([statusRow])
+    await expect(pendingSignOut).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    // No stale projection escaped either window.
+    expect(scopedStatuses).toHaveBeenCalledTimes(2)
+    signedInAccountId = 'account-a'
+  })
+
+  it('fails withdrawn uninstall closed when signed out or outside the active ProductSpace', async () => {
+    const uninstall = handlers.get(RPC_CHANNELS.localApps.UNINSTALL_PRODUCT_SPACE_BUNDLE)!
+    signedInAccountId = null
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+
+    signedInAccountId = 'account-a'
+    setRuntimeActiveProductSpace('organization-b')
+    await expect(uninstall(context, productSpaceAppIdentity(), { preserveData: true }))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+  })
+
+  it('validates a full 10,000-identity batch against a 10,000-entry Catalog in one pass', async () => {
+    try {
+      const count = 10_000
+      const identities = Array.from({ length: count }, (_, index) => ({
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogEntryId: `catalog-entry-${index}`,
+        artifactInstanceId: `artifact-instance-${index}`,
+        versionId: `version-${index}`,
+        version: '2.3.4',
+        catalogRevision: 'revision-a',
+        sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+        availability: 'available' as const,
+      }))
+      getProductSpaceCatalog.mockImplementation(async () => ({
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogRevision: 'revision-a',
+        entries: identities.map(identity => ({
+          kind: 'app' as const,
+          catalogEntryId: identity.catalogEntryId,
+          artifactInstanceId: identity.artifactInstanceId,
+          version: {
+            versionId: identity.versionId,
+            version: identity.version,
+            checksum: 'b'.repeat(64),
+          },
+          name: `App ${identity.catalogEntryId}`,
+          description: '',
+          availability: 'available' as const,
+          sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+          permissions: [],
+        })),
+      }))
+      scopedStatuses.mockImplementation(async (scopes: CatalogLocalAppScope[]) =>
+        scopes.map(item => ({
+          appId: item.catalogAppId,
+          scope: item,
+          status: 'not_installed' as const,
+        })))
+
+      const getStates = handlers.get(
+        RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+      )!
+      // With the old per-request entries.find this was O(catalog × request)
+      // (~100,000,000 comparisons on the Main thread); the indexed check
+      // keeps the full-size batch linear and fast.
+      const startedAt = Date.now()
+      const states = await getStates(context, identities) as Array<{ app: { catalogEntryId: string } }>
+      const elapsedMs = Date.now() - startedAt
+
+      expect(states).toHaveLength(count)
+      expect(states[count - 1]!.app.catalogEntryId).toBe('catalog-entry-9999')
+      expect(elapsedMs).toBeLessThan(5_000)
+      expect(getProductSpaceCatalog).toHaveBeenCalledTimes(1)
+    } finally {
+      getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    }
+  })
+
+  it('fails the full-size batch closed when one identity drifted', async () => {
+    try {
+      const count = 1_000
+      const identities = Array.from({ length: count }, (_, index) => ({
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogEntryId: `catalog-entry-${index}`,
+        artifactInstanceId: `artifact-instance-${index}`,
+        versionId: `version-${index}`,
+        version: '2.3.4',
+        catalogRevision: 'revision-a',
+        sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+        availability: 'available' as const,
+      }))
+      getProductSpaceCatalog.mockImplementation(async () => ({
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogRevision: 'revision-a',
+        entries: identities.map(identity => ({
+          kind: 'app' as const,
+          catalogEntryId: identity.catalogEntryId,
+          artifactInstanceId: identity.artifactInstanceId,
+          version: {
+            versionId: identity.versionId,
+            version: identity.version,
+            checksum: 'b'.repeat(64),
+          },
+          name: `App ${identity.catalogEntryId}`,
+          description: '',
+          availability: 'available' as const,
+          sources: [{ kind: 'enterprise_import' as const, enterpriseId: 'enterprise-a' }],
+          permissions: [],
+        })),
+      }))
+
+      const getStates = handlers.get(
+        RPC_CHANNELS.localApps.GET_PRODUCT_SPACE_INSTALL_STATES,
+      )!
+      await expect(getStates(context, [
+        ...identities.slice(0, 999),
+        { ...identities[999]!, versionId: 'drifted-version' },
+      ])).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
+    } finally {
+      getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    }
   })
 
   it('registers a restart as a fresh running execution so switching stays blocked', async () => {
@@ -465,7 +1995,7 @@ describe('local app main-process authorization boundary', () => {
     // work. Bounded assertion.
     releaseProvider()
     const lockAcquiredDuringBoot = await Promise.race([
-      withSwitchLock(async () => true),
+      runUnderSwitchMutex(async () => true),
       new Promise<boolean>(resolve => setTimeout(() => resolve(false), 250)),
     ])
     expect(lockAcquiredDuringBoot).toBe(true)
@@ -1516,6 +3046,8 @@ describe('local app production status projection (R34-3)', () => {
     accessMode = 'online'
     appAccessDenied = false
     catalog = createCatalog(1)
+    authorityTuplesByScope.clear()
+    seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1
     handlers.clear()

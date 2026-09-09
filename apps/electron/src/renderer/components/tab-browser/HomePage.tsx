@@ -1,22 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
-import type {
-  HomeRecentAppKind,
-  HomeRecentAppPreference,
-} from '@polo-ai/shared/config/home-recent'
+import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
+import type { HomeQuickAccessApp } from '@polo-ai/shared/config/home-quick-access'
 import {
-  createLocalAppScopeKey,
-  type LocalAppRuntimeStatus,
-} from '@polo-ai/shared/protocol'
+  MAX_HOME_QUICK_ACCESS_APPS,
+} from '@polo-ai/shared/config/home-quick-access'
 import { AppIcon } from './AppIcon'
-import {
-  OrganizationAppCard,
-  type CatalogPrimaryAction,
-} from './OrganizationAppCard'
+import { AllAppsView } from './AllAppsView'
+import { ManageHomeAppsDialog } from './ManageHomeAppsDialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -29,50 +24,53 @@ import {
 import { useAppCatalog } from '@/hooks/useAppCatalog'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
-import {
-  BUILTIN_APP_IDS,
-  type AppDefinition,
-} from '../../../shared/tab-browser-types'
+import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
+import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
   getHomeAppErrorCode,
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
 import {
-  createHomeRecentContextKey,
-  loadHomeRecentApps,
-  saveHomeRecentApps,
-} from '@/lib/home-recent-apps'
+  createHomeQuickAccessContextKey,
+  loadHomeQuickAccess,
+  resolveHomeQuickAccessApps,
+  saveHomeQuickAccess,
+  toggleHomeQuickAccessApp,
+} from '@/lib/home-quick-access'
 
-interface HomePageProps {
-  onAddApp: () => void
-}
-
-const MAX_RECENT_APPS = 6
-export const ORGANIZATION_APP_PAGE_SIZE = 60
-
-export function selectOrganizationAppsForDisplay(
+/**
+ * Full "当前空间全部 Apps" projection: current Catalog Apps plus the
+ * withdrawn tombstones the Catalog hook retains for explanation. A stopped
+ * distribution must never disappear without a trace — installed members keep
+ * a visible, non-launchable row with its frozen withdrawn status and, when
+ * still installed, its uninstall entry. Dedup uses the full stable Catalog
+ * UI identity tuple (organizationId + catalogEntryId + artifactInstanceId):
+ * one row per artifact instance, a version upgrade replaces the live row
+ * instead of pairing it with a stale withdrawn row, and the same artifact
+ * reissued under a DIFFERENT catalog entry keeps its live and withdrawn rows
+ * distinct. The live entry wins a key collision and rows keep Catalog order.
+ */
+export function selectAllAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
-  statuses: Readonly<Record<string, LocalAppRuntimeStatus>>,
-  statusErrorScopeKeys: Readonly<Record<string, true>> = {},
 ): CatalogApp[] {
   if (!catalog) return []
-  const withdrawnWithLocalData = (catalog.withdrawnApps ?? []).filter(app => {
-    if (app.deliveryMode !== 'local_bundle') return false
-    const scopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: app.id,
-    })
-    const status = statuses[scopeKey]
-    return Boolean(
-      (status && status.status !== 'not_installed')
-      || statusErrorScopeKeys[scopeKey],
-    )
-  })
-  return [...catalog.apps, ...withdrawnWithLocalData]
-    .sort((left, right) => left.sortOrder - right.sortOrder)
+  const identityKey = (app: CatalogApp): string => JSON.stringify([
+    app.organizationId ?? null,
+    app.catalogEntryId ?? app.id ?? null,
+    app.artifactInstanceId ?? null,
+  ])
+  const merged = new Map<string, CatalogApp>()
+  for (const app of [...catalog.apps, ...(catalog.withdrawnApps ?? [])]) {
+    const key = identityKey(app)
+    const existing = merged.get(key)
+    if (!existing
+      || (existing.availability === 'withdrawn' && app.availability !== 'withdrawn')
+    ) {
+      merged.set(key, app)
+    }
+  }
+  return [...merged.values()].sort((left, right) => left.sortOrder - right.sortOrder)
 }
 
 export function formatBytes(t: TFunction, sizeBytes: number): string {
@@ -96,155 +94,589 @@ export function formatBytes(t: TFunction, sizeBytes: number): string {
   } ${t(unitKeys[unit]!)}`
 }
 
-function catalogTabDefinition(
-  scopeKey: string,
-  app: CatalogApp,
-  url: string,
-): AppDefinition {
-  return {
-    id: `organization:${scopeKey}`,
-    name: app.name,
-    url,
-    iconUrl: app.iconUrl,
-    type: 'webapp',
-    createdAt: 0,
-    order: app.sortOrder,
+type BundleAppLaunch = ResolveLaunchResponse & {
+  subject: Extract<ResolveLaunchResponse['subject'], { kind: 'artifact_instance' }>
+  delivery: Extract<ResolveLaunchResponse['delivery'], { kind: 'bundle' }>
+}
+
+function isBundleAppLaunch(launch: ResolveLaunchResponse): launch is BundleAppLaunch {
+  return launch.subject.kind === 'artifact_instance'
+    && launch.subject.artifactType === 'app'
+    && launch.delivery.kind === 'bundle'
+}
+
+export function createEnterpriseWorkflowUrl(
+  adminUrl: string,
+  enterpriseId: string,
+  workflow: 'members' | 'publishing',
+): string {
+  const url = workflow === 'members'
+    ? new URL(`/enterprise/${encodeURIComponent(enterpriseId)}/members`, adminUrl)
+    : new URL('/organization-apps', adminUrl)
+  if (workflow === 'publishing') url.searchParams.set('organizationId', enterpriseId)
+  return url.toString()
+}
+
+/**
+ * MODULE-LEVEL per-context quick-access writer registry. Every context key
+ * owns an INDEPENDENT single-writer queue, hydration gate and transaction
+ * baseline (intent/confirmed). The lifetime is bound to the CONTEXT, not to
+ * any HomePage mount:
+ *
+ * - a durable acknowledgement always advances its OWN context's baseline,
+ *   even while another context is displayed or the component is unmounted —
+ *   only the React UI update is gated by the current context + mount;
+ * - a hung save in context A never blocks context B (separate queues);
+ * - an immediate remount rejoins the SAME writer — no second racing queue;
+ * - queued mutations wait for the context's hydration gate, so they build
+ *   on the persisted collection instead of an empty intent;
+ * - a rejected save rolls the unconfirmed suffix of THAT context back to
+ *   its last acknowledgement.
+ *
+ * Cleanup: idle (busy===0) writers of non-active contexts are swept. Sweeping
+ * never loses pending durable writes, and a swept baseline is re-derived
+ * from the persisted store on the next activation via the hydration gate.
+ */
+interface HomeQuickContextWriter {
+  queue: Promise<void>
+  /** Queued-but-unsettled mutation tasks. */
+  busy: number
+  /** Mount ids currently owning this context (multiple mounts allowed). */
+  owners: Set<number>
+  /**
+   * Live mount notification channels: hydration, persisted acks and
+   * rollbacks are BROADCAST to every owner so all simultaneous mounts of a
+   * context display the same confirmed baseline.
+   */
+  subscribers: Map<number, (entries: HomeQuickAccessApp[]) => void>
+  gate: Promise<boolean>
+  resolveGate: (hydrated: boolean) => void
+  hydrated: boolean
+  /** True while an activation load is still in flight. */
+  hydrating: boolean
+  /** Monotonic activation token: only the CURRENT attempt may settle state. */
+  activationToken: number
+  /** Observable bounded-retry counter for the activation load. */
+  hydrationAttempts: number
+  intent: HomeQuickAccessApp[]
+  confirmed: HomeQuickAccessApp[]
+}
+
+const homeQuickWriters = new Map<string, HomeQuickContextWriter>()
+let nextHomeQuickMountId = 0
+let homeQuickActivationSequence = 0
+/** Bounded hydration retries while owners remain (initial + 1 retry). */
+const MAX_HYDRATION_ATTEMPTS = 2
+
+function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
+  let writer = homeQuickWriters.get(contextKey)
+  if (!writer) {
+    let resolveGate!: (hydrated: boolean) => void
+    const gate = new Promise<boolean>(resolve => { resolveGate = resolve })
+    writer = {
+      queue: Promise.resolve(),
+      busy: 0,
+      owners: new Set<number>(),
+      subscribers: new Map<number, (entries: HomeQuickAccessApp[]) => void>(),
+      gate,
+      resolveGate,
+      hydrated: false,
+      hydrating: false,
+      activationToken: 0,
+      hydrationAttempts: 0,
+      intent: [],
+      confirmed: [],
+    }
+    homeQuickWriters.set(contextKey, writer)
+  }
+  return writer
+}
+
+/**
+ * Cleanup: a writer is dropped ONLY when no mount owns it, no mutation task
+ * is pending AND no hydration is in flight. Sweeping therefore can never
+ * delete a writer another mount still uses, never lose pending durable
+ * writes, and never interrupt an activation load; a swept baseline is
+ * re-derived from the persisted store on the next activation.
+ */
+function sweepHomeQuickWriters(): void {
+  for (const [key, writer] of homeQuickWriters) {
+    if (writer.owners.size === 0 && writer.busy === 0 && !writer.hydrating) {
+      homeQuickWriters.delete(key)
+    }
   }
 }
 
-function catalogRecentId(scopeKey: string): string {
-  return scopeKey
+/** Broadcast one confirmed snapshot to every live owner of the writer. */
+function notifyHomeQuickSubscribers(
+  writer: HomeQuickContextWriter,
+  entries: HomeQuickAccessApp[],
+): void {
+  for (const notify of writer.subscribers.values()) {
+    notify(entries)
+  }
 }
 
-function AddExternalAppTile({ onClick }: { onClick: () => void }) {
-  const { t } = useTranslation()
-  return (
-    <button
-      type="button"
-      className="titlebar-no-drag group flex min-w-0 flex-col items-center gap-3 rounded-lg border border-transparent p-3 text-center outline-none transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-foreground/10 hover:bg-foreground/4 hover:shadow-minimal focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onClick}
-      data-testid="add-external-app"
-    >
-      <span className="flex h-[76px] w-[76px] items-center justify-center rounded-lg border border-dashed border-foreground/20 bg-foreground/3 shadow-xs transition-all duration-200 ease-out group-hover:scale-[1.04] group-hover:border-accent/45 group-hover:bg-accent/8">
-        <Icons.Plus className="h-8 w-8 text-foreground/55 group-hover:text-accent" strokeWidth={1.5} />
-      </span>
-      <span className="min-h-9 max-w-[112px] text-sm font-medium leading-[18px] text-foreground/70 group-hover:text-foreground">
-        {t('homeApps.addExternal.title')}
-      </span>
-    </button>
-  )
+/** Test-only: drop every writer (tests reset the persisted store too). */
+export function __resetHomeQuickWritersForTests(): void {
+  homeQuickWriters.clear()
 }
 
-export function HomePage({ onAddApp }: HomePageProps) {
+/** Test-only: number of retained per-context writers (bounded-registry proof). */
+export function __homeQuickWritersCountForTests(): number {
+  return homeQuickWriters.size
+}
+
+/** Test-only: subscriber/owner/busy snapshot of one writer. */
+export function __homeQuickWriterStatsForTests(contextKey: string): {
+  owners: number
+  subscribers: number
+  busy: number
+  hydrated: boolean
+} | null {
+  const writer = homeQuickWriters.get(contextKey)
+  if (!writer) return null
+  return {
+    owners: writer.owners.size,
+    subscribers: writer.subscribers.size,
+    busy: writer.busy,
+    hydrated: writer.hydrated,
+  }
+}
+
+/**
+ * Test-only EVENT-DRIVEN barrier: resolves after the context writer's
+ * hydration gate has settled and every queued mutation task has finished —
+ * never after an elapsed-time wait. Resolves `false` when work is still
+ * pending (busy tasks or an in-flight activation), so tests can assert a
+ * deterministic settled lifecycle before negative persistence expectations.
+ */
+export function __homeQuickWriterSettledForTests(contextKey: string): Promise<boolean> {
+  const writer = homeQuickWriters.get(contextKey)
+  if (!writer) return Promise.resolve(true)
+  return writer.gate
+    .catch(() => undefined)
+    .then(() => writer.queue)
+    .then(() => writer.busy === 0 && !writer.hydrating)
+}
+
+export function HomePage() {
   const { t } = useTranslation()
-  const { installedApps, openApp, removeApp } = useTabShell()
+  const { openApp } = useTabShell()
+  const launchHandoff = useProductSpaceAppLaunchHandoff()
   const catalog = useAppCatalog()
-  const [recentApps, setRecentApps] = useState<HomeRecentAppPreference[]>([])
-  const recentLoadGenerationRef = useRef(0)
-  const recentMutationGenerationRef = useRef(0)
+  const [view, setView] = useState<'home' | 'all-apps'>('home')
+  const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
+  /**
+   * Display fence for hydration results: a load that started for context X
+   * must never display into context Y that was switched to afterwards. The
+   * TRANSACTION baseline it advances belongs to the per-context writer (see
+   * the module-level registry) and is context-scoped anyway.
+   */
+  const quickMountedRef = useRef(false)
+  /** This mount's registry identity (owner token in the writer registry). */
+  const homeQuickMountIdRef = useRef(0)
+  if (homeQuickMountIdRef.current === 0) {
+    homeQuickMountIdRef.current = ++nextHomeQuickMountId
+  }
+  /** The context key this mount currently owns in the registry. */
+  const ownedHomeQuickContextKeyRef = useRef<string | null>(null)
+  /**
+   * The ProductSpace context the CURRENT entries were hydrated (or last
+   * mutated) for. `null` between a context switch and its hydration, so the
+   * prune effect can never judge the previous context's entries against the
+   * new context's Catalog and persist a wiped config.
+   */
+  const quickHydratedContextRef = useRef<string | null>(null)
+  const [manageOpen, setManageOpen] = useState(false)
+  // The frozen assistant-card Skill count is deliberately omitted: the only
+  // Skill store reachable from Home is the process-global workspace
+  // skillsAtom, which is not keyed by account/ProductSpace/owner epoch — a
+  // target-scope first commit could display the previous scope's count
+  // (R39 review). It returns to the frozen neutral "Polo 内置" until a
+  // scope-keyed authoritative source exists.
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
-    appConfigVersion: string
+    launch: BundleAppLaunch
   } | null>(null)
   const installTargetApp = installTarget?.app ?? null
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
+  const [showCirclesCard, setShowCirclesCard] = useState(false)
   const [preserveData, setPreserveData] = useState(true)
-  const [logsTarget, setLogsTarget] = useState<CatalogApp | null>(null)
-  const [logs, setLogs] = useState('')
-  const [logsLoading, setLogsLoading] = useState(false)
-  const logsRequestGenerationRef = useRef(0)
-  const logsTargetScopeKeyRef = useRef<string | null>(null)
-  const [organizationAppLimit, setOrganizationAppLimit] = useState(
-    ORGANIZATION_APP_PAGE_SIZE,
-  )
 
-  const externalApps = useMemo(
-    () => installedApps
-      .filter(app => app.type === 'webapp' && !BUILTIN_APP_IDS.has(app.id))
-      .sort((left, right) => left.order - right.order),
-    [installedApps],
-  )
-  const builtinApps = useMemo(
-    () => installedApps
-      .filter(app => BUILTIN_APP_IDS.has(app.id))
-      .sort((left, right) => left.order - right.order),
-    [installedApps],
-  )
-  const organizationApps = useMemo(
-    () => selectOrganizationAppsForDisplay(
-      catalog.state.catalog,
-      catalog.state.statuses,
-      catalog.state.statusErrorScopeKeys,
-    ),
-    [
-      catalog.state.catalog,
-      catalog.state.statusErrorScopeKeys,
-      catalog.state.statuses,
-    ],
-  )
-  const displayedOrganizationApps = organizationApps.slice(0, organizationAppLimit)
-  useEffect(() => {
-    setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
-  }, [
-    catalog.productSpace?.productSpaceContextKey,
-    catalog.state.catalog?.appConfigVersion,
-  ])
-  useEffect(() => {
-    // Logs are scoped to the exact account/organization/App tuple. Advancing
-    // this independent request generation prevents an older organization
-    // context from publishing into a later dialog.
-    logsRequestGenerationRef.current += 1
-    logsTargetScopeKeyRef.current = null
-    setLogsTarget(null)
-    setLogs('')
-    setLogsLoading(false)
-  }, [catalog.productSpace?.productSpaceContextKey])
   const activeProductSpace = catalog.productSpace?.activeProductSpace
-  const recentContextKey = createHomeRecentContextKey(
+  const spaceKind = activeProductSpace?.kind ?? null
+  const quickContextKey = createHomeQuickAccessContextKey(
     catalog.productSpace?.productSpaceContextKey,
   )
-
-  useEffect(() => {
-    const generation = recentLoadGenerationRef.current + 1
-    recentLoadGenerationRef.current = generation
-    const mutationGeneration = recentMutationGenerationRef.current
-    setRecentApps([])
-    void loadHomeRecentApps(recentContextKey)
-      .then(apps => {
-        // A local open in this same context fences the older hydration result:
-        // launcher history may never move backwards after a user mutation.
-        if (
-          recentLoadGenerationRef.current === generation
-          && recentMutationGenerationRef.current === mutationGeneration
-        ) {
-          setRecentApps(apps)
+  const quickContextKeyRef = useRef(quickContextKey)
+  quickContextKeyRef.current = quickContextKey
+  /**
+   * THE quick-access transaction primitive (pin, manage toggle and prune
+   * all share it). Mutations are appended to the CONTEXT'S OWN single-writer
+   * queue: each task awaits that context's hydration gate, applies its
+   * change to the context's synchronous intent, and persists IN ORDER. A
+   * successful save advances the context's durable baseline UNCONDITIONALLY —
+   * only the React UI update is gated by the current context + mount — and a
+   * rejected save rolls that context's unconfirmed suffix back to its last
+   * acknowledgement. A hung save in one context never blocks another.
+   */
+  const enqueueQuickMutation = useCallback((
+    contextKey: string,
+    apply: (entries: HomeQuickAccessApp[]) => {
+      next: HomeQuickAccessApp[] | null
+      rejected?: boolean
+    },
+  ): void => {
+    const writer = getHomeQuickWriter(contextKey)
+    writer.busy += 1
+    const task = writer.queue
+      .catch(() => {})
+      .then(async () => {
+        const hydrated = await writer.gate
+        if (!hydrated) {
+          // HYDRATION LOST: the mutation must NOT be silently dropped. A
+          // queued task that could never build on a hydrated baseline takes
+          // the visible error path (rollback broadcast + toast) — no pseudo
+          // acks.
+          toast.error(t('homeApps.quick.loadFailed'))
+          throw new Error('hydration unavailable')
         }
+        const { next, rejected } = apply(writer.intent)
+        if (rejected || next === null) return
+        const saved = await saveHomeQuickAccess(contextKey, next)
+        // Durable baseline: advances for THIS context regardless of which
+        // context is displayed or whether the component is mounted — then
+        // BROADCASTS to every live owner of the context.
+        writer.intent = saved
+        writer.confirmed = saved
+        notifyHomeQuickSubscribers(writer, saved)
       })
       .catch(() => {
-        // Launcher history is non-critical; keep the current section usable.
+        // Save rejected (or hydration lost): roll THIS context's unconfirmed
+        // suffix back to its last persisted acknowledgement and broadcast
+        // the rollback so every live mount converges on the same state.
+        writer.intent = writer.confirmed
+        notifyHomeQuickSubscribers(writer, writer.confirmed)
       })
-  }, [recentContextKey])
+      .finally(() => {
+        writer.busy -= 1
+        // The final owner may have unmounted while this task was in flight:
+        // once busy reaches 0 the writer is sweepable.
+        sweepHomeQuickWriters()
+      })
+    writer.queue = task
+  }, [t])
+  // UI selection + quick-entry persistence use the collision-free stable
+  // artifact identity key (account + space + entry + artifact instance), NOT
+  // the runtime scope: a catalogEntryId reused across artifact instances
+  // must keep its live row, withdrawn row, and quick-entry slot independent,
+  // and an artifact swap must fail-closed drop the old shortcut instead of
+  // silently re-binding it.
+  const uiKeyForApp = catalog.uiIdentityKeyForApp
 
-  const recordRecent = (
-    id: string,
-    kind: HomeRecentAppKind,
-  ) => {
-    recentMutationGenerationRef.current += 1
-    setRecentApps(current => {
-      const next = [
-        { id, kind, openedAt: Date.now() },
-        ...current.filter(item => !(item.id === id && item.kind === kind)),
-      ].slice(0, MAX_RECENT_APPS)
-      void saveHomeRecentApps(recentContextKey, next).catch(() => {
-        // Opening an App must not fail because preference persistence failed.
-      })
-      return next
+  const availableApps = useMemo(
+    () => (catalog.state.catalog?.apps ?? []).filter(
+      app => app.availability === 'available',
+    ),
+    [catalog.state.catalog],
+  )
+  const allApps = useMemo(
+    () => selectAllAppsForDisplay(catalog.state.catalog),
+    [catalog.state.catalog],
+  )
+  const quickApps = useMemo(
+    () => resolveHomeQuickAccessApps(quickEntries, availableApps, uiKeyForApp),
+    [availableApps, quickEntries, uiKeyForApp],
+  )
+  // Authoritative pinned identity keys: derived from the persisted quick
+  // entries, never from local All Apps view state.
+  const quickPinnedIds = useMemo(
+    () => new Set(quickEntries.map(entry => entry.id)),
+    [quickEntries],
+  )
+  // Home work cards render ONLY the persisted quick entries of the current
+  // account + ProductSpace context, resolved against its Catalog. There is
+  // deliberately NO first-run default curation: an explicitly empty (or
+  // unpersisted) collection stays empty — across first mount, remounts and
+  // A→B→A context round-trips — instead of silently surfacing Catalog apps
+  // the member never pinned.
+  const homeWorkCards = quickApps
+
+  useEffect(() => {
+    // Fail-closed across space transitions: a ProductSpace identity change
+    // resets the home view and closes in-place dialogs. The DISPLAY is
+    // switched to the new context; the OLD context's writer keeps owning its
+    // in-flight writes and advances its own baseline independently.
+    const contextKey = quickContextKey
+    // Ownership transfer for THIS mount: release the previously owned
+    // context's writer, acquire the new one. Other mounts' ownership is
+    // untouched.
+    const mountId = homeQuickMountIdRef.current
+    const previousOwned = ownedHomeQuickContextKeyRef.current
+    if (previousOwned !== null && previousOwned !== contextKey) {
+      const previousWriter = homeQuickWriters.get(previousOwned)
+      previousWriter?.owners.delete(mountId)
+      previousWriter?.subscribers.delete(mountId)
+    }
+    const writer = getHomeQuickWriter(contextKey)
+    writer.owners.add(mountId)
+    ownedHomeQuickContextKeyRef.current = contextKey
+    quickHydratedContextRef.current = null
+    setView('home')
+    setManageOpen(false)
+    setQuickEntries([])
+    // Every mount of the context subscribes: hydration, persisted acks and
+    // rollbacks broadcast to ALL live owners, so simultaneous mounts stay in
+    // lockstep on the shared confirmed baseline.
+    writer.subscribers.set(mountId, entries => {
+      if (
+        quickMountedRef.current
+        && quickContextKeyRef.current === contextKey
+      ) {
+        quickHydratedContextRef.current = contextKey
+        setQuickEntries(entries)
+      }
     })
+    if (writer.hydrated) {
+      // Same-context remount or A→B→A: the SHARED writer already holds the
+      // transaction baseline — display it without a second racing queue.
+      setQuickEntries(writer.confirmed)
+      quickHydratedContextRef.current = contextKey
+      sweepHomeQuickWriters()
+      return
+    }
+    // Fresh activation for THIS mount: only ONE load may be in flight per
+    // context (a second mount joining during hydration awaits the SAME gate
+    // and displays the shared baseline). Every mount waits for the gate and
+    // displays from the baseline through its own state setter.
+    //
+    // SINGLE TERMINAL ACTIVATION LOOP: the initial attempt and its bounded
+    // retry live inside ONE async loop with ONE terminal finally, guarded by
+    // an activation epoch. The stable deferred gate is created once per
+    // activation and resolves exactly once at the terminal outcome. The
+    // loop keeps `hydrating` true across attempts — a third owner joining
+    // mid-retry joins the SAME activation instead of starting a duplicate.
+    // All stale callbacks / context switches / owner changes fail closed on
+    // the activation epoch.
+    if (!writer.hydrating) {
+      writer.hydrating = true
+      writer.hydrationAttempts = 0
+      let resolveGate!: (hydrated: boolean) => void
+      writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
+      writer.resolveGate = resolveGate
+      const activationEpoch = ++homeQuickActivationSequence
+      writer.activationToken = activationEpoch
+      void (async (): Promise<void> => {
+        try {
+          for (let attempt = 1; attempt <= MAX_HYDRATION_ATTEMPTS; attempt++) {
+            writer.hydrationAttempts = attempt
+            try {
+              const entries = await loadHomeQuickAccess(contextKey)
+              if (writer.activationToken !== activationEpoch) return
+              // Terminal SUCCESS: the baseline ALWAYS advances for this
+              // context, then BROADCASTS to every live owner.
+              writer.intent = entries
+              writer.confirmed = entries
+              writer.hydrated = true
+              writer.resolveGate(true)
+              notifyHomeQuickSubscribers(writer, entries)
+              return
+            } catch {
+              if (writer.activationToken !== activationEpoch) return
+              if (attempt === MAX_HYDRATION_ATTEMPTS || writer.owners.size === 0) {
+                // Terminal FAILURE: the gate resolves FALSE exactly once so
+                // queued mutations take their VISIBLE failure path (rollback
+                // broadcast + toast) — never a silent pseudo-ack.
+                writer.resolveGate(false)
+                return
+              }
+              // Bounded observable retry — SAME gate, same activation; the
+              // loop keeps `hydrating` true so joining owners ride along.
+            }
+          }
+        } finally {
+          // ONE terminal cleanup for the WHOLE activation: only the current
+          // epoch may clear the in-flight flag or sweep.
+          if (writer.activationToken === activationEpoch) {
+            writer.hydrating = false
+            sweepHomeQuickWriters()
+          }
+        }
+      })()
+    }
+    sweepHomeQuickWriters()
+  }, [quickContextKey])
+
+  useEffect(() => {
+    const mountId = homeQuickMountIdRef.current
+    quickMountedRef.current = true
+    return () => {
+      quickMountedRef.current = false
+      // Release ONLY this mount's ownership and notification channel:
+      // another live mount sharing a context keeps its writer (gate,
+      // baseline, queue, remaining subscribers) fully intact.
+      const owned = ownedHomeQuickContextKeyRef.current
+      if (owned !== null) {
+        const writer = homeQuickWriters.get(owned)
+        writer?.owners.delete(mountId)
+        writer?.subscribers.delete(mountId)
+        ownedHomeQuickContextKeyRef.current = null
+      }
+      sweepHomeQuickWriters()
+    }
+  }, [])
+
+  // Prune quick-access entries that no longer resolve to an available App
+  // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids). Runs
+  // only for entries that were hydrated in THIS context — during the switch
+  // commit the stale previous-context entries must never be pruned against
+  // the new Catalog and persisted into the new context. It also requires an
+  // AUTHORITATIVE Catalog snapshot to have been committed for this context:
+  // before that (loading, catalog=null, failure, denied) the stored entries
+  // are preserved untouched — pruning against an empty/unavailable view
+  // would permanently destroy valid shortcuts.
+  const catalogCommitted = catalog.state.catalog !== null
+    && catalog.state.accessMode !== 'denied'
+  useEffect(() => {
+    if (quickHydratedContextRef.current !== quickContextKey) return
+    if (!catalogCommitted) return
+    if (quickEntries.length === 0) return
+    const availableIds = new Set<string>()
+    for (const app of availableApps) {
+      try {
+        availableIds.add(uiKeyForApp(app))
+      } catch {
+        continue
+      }
+    }
+    const hasUnresolvable = quickEntries.some(entry => !availableIds.has(entry.id))
+    if (!hasUnresolvable) return
+    // Prune shares the same single-writer transaction primitive: the filter
+    // re-runs against the intent at EXECUTION time, so a concurrent pin is
+    // never clobbered, and a no-op second run persists nothing.
+    enqueueQuickMutation(quickContextKey, entries => {
+      const pruned = entries.filter(entry => availableIds.has(entry.id))
+      if (pruned.length === entries.length) return { next: null }
+      return { next: pruned }
+    })
+  }, [availableApps, catalogCommitted, enqueueQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
+
+  const openPoloAssistant = () => {
+    openApp(POLO_APP_DEFINITION)
   }
 
-  const openPersonalApp = (app: AppDefinition) => {
-    openApp(app)
-    recordRecent(app.id, BUILTIN_APP_IDS.has(app.id) ? 'builtin' : 'external')
+
+  /**
+   * Ack-committed quick-access toggle (pin and manage-dialog both route
+   * here) — a queued task on the SAME single-writer primitive as prune. The
+   * toggle applies at EXECUTION time against the hydrated intent, so a
+   * click before hydration can never wipe the stored collection.
+   */
+  const persistQuickToggle = useCallback((
+    contextKey: string,
+    scopeKey: string,
+    enabled: boolean,
+  ): boolean => {
+    enqueueQuickMutation(contextKey, entries => {
+      const { next, rejected } = toggleHomeQuickAccessApp(entries, scopeKey, enabled)
+      if (rejected) {
+        toast.error(t('homeApps.manage.limitReached', {
+          max: MAX_HOME_QUICK_ACCESS_APPS,
+        }))
+        return { next: null, rejected: true }
+      }
+      return { next }
+    })
+    return true
+  }, [enqueueQuickMutation, t])
+
+  // 显示在首页: pin a catalog App into the home quick access — queued on the
+  // same single-writer primitive as every other quick-access mutation.
+  const pinApp = useCallback((app: CatalogApp) => {
+    persistQuickToggle(quickContextKey, uiKeyForApp(app), true)
+  }, [persistQuickToggle, quickContextKey, uiKeyForApp])
+
+  // Authoritative committed-context lease for enterprise workflow jumps:
+  // account (from the committed ProductSpaceContext authority — present even
+  // while the Catalog snapshot is loading or failed) + enterprise + context
+  // key + the MONOTONIC contextVersion (it increases on every committed
+  // account/space change and never repeats, so an A→B→A round-trip that
+  // restores account/enterprise/contextKey still fails the re-verification).
+  interface EnterpriseWorkflowContextLease {
+    accountId: string | undefined
+    enterpriseId: string | null
+    contextKey: string | undefined
+    contextVersion: number | undefined
+  }
+  const liveLeaseRef = useRef<EnterpriseWorkflowContextLease>({
+    accountId: undefined,
+    enterpriseId: null,
+    contextKey: undefined,
+    contextVersion: undefined,
+  })
+  // The live lease is synced ONLY at the committed boundary (layout effect):
+  // render — including concurrently discarded ProductSpace renders — never
+  // writes the ref, so a committed A continuation always observes the truly
+  // committed lease.
+  useLayoutEffect(() => {
+    liveLeaseRef.current = {
+      accountId: catalog.productSpace?.accountId,
+      enterpriseId: activeProductSpace?.kind === 'enterprise'
+        ? activeProductSpace.enterpriseId
+        : null,
+      contextKey: catalog.productSpace?.productSpaceContextKey,
+      contextVersion: catalog.productSpace?.contextVersion,
+    }
+  })
+
+  // Click-time lease snapshot of the committed context: the adminGetStatus()
+  // await must not outlive it. After the await, the snapshot is compared
+  // against the committed live lease — any change to account, enterprise, or
+  // the monotonic context lease fails closed, even when a round-trip returns
+  // to the click-time identity.
+  const openEnterpriseWorkflow = async (workflow: 'members' | 'publishing') => {
+    if (activeProductSpace?.kind !== 'enterprise') return
+    const clickLease: EnterpriseWorkflowContextLease = {
+      accountId: catalog.productSpace?.accountId,
+      enterpriseId: activeProductSpace.enterpriseId as string,
+      contextKey: catalog.productSpace?.productSpaceContextKey,
+      contextVersion: catalog.productSpace?.contextVersion,
+    }
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      const live = liveLeaseRef.current
+      if (
+        !status.loggedIn
+        || !status.adminUrl
+        || status.userId !== clickLease.accountId
+        || live.accountId !== clickLease.accountId
+        || live.enterpriseId !== clickLease.enterpriseId
+        || live.contextKey !== clickLease.contextKey
+        || live.contextVersion !== clickLease.contextVersion
+      ) throw new Error(t('homeApps.errors.staleContext'))
+      await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(
+        status.adminUrl,
+        clickLease.enterpriseId ?? '',
+        workflow,
+      ))
+    } catch (error) {
+      toast.error(t('homeSpace.workflows.openFailed'), {
+        description: error instanceof Error ? error.message : t('homeApps.errors.openGeneric'),
+      })
+    }
+  }
+
+  const toggleQuickAccess = (
+    _app: CatalogApp,
+    scopeKey: string,
+    enabled: boolean,
+  ): boolean => {
+    // Ack-based commit, identical to pinApp: the dialog's `enabled` flag is
+    // an intent until the persistence resolves; a reject or superseded
+    // context/generation rolls the intent back to the last persisted
+    // snapshot.
+    return persistQuickToggle(quickContextKey, scopeKey, enabled)
   }
 
   const openCatalogApp = async (app: CatalogApp) => {
@@ -253,60 +685,24 @@ export function HomePage({ onAddApp }: HomePageProps) {
       return
     }
     try {
-      const scopeKey = catalog.scopeKeyForApp(app)
-      if (app.deliveryMode === 'remote_url') {
-        const remoteUrl = await catalog.resolveRemoteUrl(app)
-        openApp(catalogTabDefinition(scopeKey, app, remoteUrl))
-      } else {
-        const result = await catalog.start(app)
-        openApp(catalogTabDefinition(scopeKey, app, result.url))
-      }
-      recordRecent(catalogRecentId(scopeKey), 'organization')
-    } catch (error) {
-      toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'open'),
-      })
-    }
-  }
-
-  const handlePrimaryAction = async (
-    app: CatalogApp,
-    action: CatalogPrimaryAction,
-  ) => {
-    if (action === 'install' || action === 'update') {
-      const appConfigVersion = catalog.state.catalog?.appConfigVersion
-      if (!appConfigVersion) {
-        toast.error(t('homeApps.errors.staleContext'))
-        return
-      }
-      setInstallTarget({ app, appConfigVersion })
-      return
-    }
-    if (action === 'cancel') {
-      try {
-        await catalog.cancelInstall(app)
-        toast.success(t('homeApps.toast.installCancelled', { name: app.name }))
-      } catch (error) {
-        toast.error(t('homeApps.errors.cancelInstall'), {
-          description: homeAppOperationErrorText(t, error, 'cancel'),
-        })
-      }
-      return
-    }
-    if (action === 'retry') {
-      const status = catalog.getStatus(app)
-      if (!status?.currentVersion) {
-        const appConfigVersion = catalog.state.catalog?.appConfigVersion
-        if (!appConfigVersion) {
-          toast.error(t('homeApps.errors.staleContext'))
+      const accountId = catalog.state.catalog?.accountId
+      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
+      const launch = await catalog.resolveLaunch(app)
+      if (isBundleAppLaunch(launch)) {
+        const installState = catalog.getInstallState(app)
+        if (
+          installState?.state !== 'installed'
+          || installState.currentVersion !== launch.subject.version
+        ) {
+          setInstallTarget({ app, launch })
           return
         }
-        setInstallTarget({ app, appConfigVersion })
-        return
       }
-    }
-    if (action === 'open' || action === 'retry') {
-      await openCatalogApp(app)
+      launchHandoff.publish(accountId, launch)
+    } catch (error) {
+      toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
+        description: homeAppOperationErrorText(t, error, 'open', spaceKind),
+      })
     }
   }
 
@@ -314,27 +710,23 @@ export function HomePage({ onAddApp }: HomePageProps) {
     const target = installTarget
     if (!target) return
     setInstallTarget(null)
-    const { app, appConfigVersion } = target
+    const { app } = target
     try {
-      await catalog.install(app, appConfigVersion)
+      await catalog.installProductSpaceBundle(app)
       toast.success(t('homeApps.toast.installed', { name: app.name }))
+      const accountId = catalog.state.catalog?.accountId
+      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
+      const launch = await catalog.resolveLaunch(app)
+      if (!isBundleAppLaunch(launch)) {
+        throw new Error(t('homeApps.errors.staleContext'))
+      }
+      launchHandoff.publish(accountId, launch)
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
-          description: homeAppOperationErrorText(t, error, 'install'),
+          description: homeAppOperationErrorText(t, error, 'install', spaceKind),
         })
       }
-    }
-  }
-
-  const handleStop = async (app: CatalogApp) => {
-    try {
-      await catalog.stop(app)
-      toast.success(t('homeApps.toast.stopped', { name: app.name }))
-    } catch (error) {
-      toast.error(t('homeApps.errors.stopTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'stop'),
-      })
     }
   }
 
@@ -343,315 +735,284 @@ export function HomePage({ onAddApp }: HomePageProps) {
     if (!app) return
     setUninstallTarget(null)
     try {
-      await catalog.uninstall(app, preserveData)
+      await catalog.uninstallProductSpaceBundle(app, preserveData)
       toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
     } catch (error) {
       toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'uninstall'),
+        description: homeAppOperationErrorText(t, error, 'uninstall', spaceKind),
       })
     } finally {
       setPreserveData(true)
     }
   }
 
-  const showLogs = async (app: CatalogApp) => {
-    const scopeKey = catalog.scopeKeyForApp(app)
-    const requestGeneration = logsRequestGenerationRef.current + 1
-    logsRequestGenerationRef.current = requestGeneration
-    logsTargetScopeKeyRef.current = scopeKey
-    const isCurrentRequest = () => (
-      logsRequestGenerationRef.current === requestGeneration
-      && logsTargetScopeKeyRef.current === scopeKey
-    )
-    setLogsTarget(app)
-    setLogs('')
-    setLogsLoading(true)
-    try {
-      const nextLogs = await catalog.getLogs(app)
-      if (isCurrentRequest()) setLogs(nextLogs)
-    } catch (error) {
-      if (isCurrentRequest()) {
-        setLogs(homeAppOperationErrorText(t, error, 'logs'))
-      }
-    } finally {
-      if (isCurrentRequest()) setLogsLoading(false)
+  const selectedQuickIds = useMemo(
+    () => new Set(quickEntries.map(entry => entry.id)),
+    [quickEntries],
+  )
+
+  const quickTileFor = (app: CatalogApp) => {
+    const scopeKey = uiKeyForApp(app)
+    return {
+      key: scopeKey,
+      definition: {
+        id: `catalog-tile:${scopeKey}`,
+        name: app.name,
+        iconUrl: app.iconUrl,
+        type: 'webapp' as const,
+      },
     }
   }
 
-  const compatibleWithHost = (app: CatalogApp): boolean => {
-    if (app.deliveryMode !== 'local_bundle') return true
-    const release = app.currentRelease
-    const host = catalog.state.host
-    if (!release || !host) return true
-    return (!release.platform || release.platform === host.platform)
-      && (!release.arch || release.arch === host.arch)
+  // Frozen POO-41 home-card contract: every server-authoritative
+  // catalogSources entry stays visible with its identity — creator_circle
+  // entries carry the localized 认证创作者 label, other entries keep their
+  // organization/source name, and multiplicity is preserved.
+  const renderQuickEntrySource = (app: CatalogApp) => {
+    const sources = app.catalogSources?.length
+      ? app.catalogSources
+      : (app.sourceNames ?? []).map((name) => ({ kind: '', name }))
+    if (sources.length === 0) return t('homeApps.allApps.unknownSource')
+    return sources
+      .map((source) => (
+        source.kind === 'creator_circle' && source.name
+          ? t('homeApps.home.certifiedCreatorSource', { creator: source.name })
+          : source.name || t('homeApps.allApps.unknownSource')
+      ))
+      .join(' · ')
   }
-
-  const resolvedRecent = (() => {
-    const entries: Array<{
-      key: string
-      definition: AppDefinition
-      onOpen: () => void
-    }> = []
-    const seen = new Set<string>()
-
-    for (const item of recentApps) {
-      if (item.kind === 'organization') {
-        const app = organizationApps.find(candidate => {
-          try {
-            return catalogRecentId(catalog.scopeKeyForApp(candidate)) === item.id
-          } catch {
-            return false
-          }
-        })
-        if (!app || app.availability !== 'available') continue
-        const status = catalog.getStatus(app)
-        const url = app.remoteUrl || status?.url || 'http://127.0.0.1'
-        const scopeKey = catalog.scopeKeyForApp(app)
-        const key = `organization:${scopeKey}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        entries.push({
-          key,
-          definition: catalogTabDefinition(scopeKey, app, url),
-          onOpen: () => { void openCatalogApp(app) },
-        })
-        continue
-      }
-      const app = installedApps.find(candidate => candidate.id === item.id)
-      if (!app) continue
-      const key = `${item.kind}:${app.id}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      entries.push({
-        key,
-        definition: app,
-        onOpen: () => openPersonalApp(app),
-      })
-    }
-
-    return entries.slice(0, MAX_RECENT_APPS)
-  })()
-  const remainingBuiltinApps = builtinApps.filter(app => (
-    !resolvedRecent.some(item => item.key === `builtin:${app.id}`)
-  ))
 
   return (
+    // Frozen POO-41 `.main` mirror: the centered 1260px column with the
+    // breakpoint paddings INSIDE it, content-sized exactly like the frozen
+    // `.main` element. Scrolling is owned by the DEDICATED wrapper above
+    // (h-full min-h-0 overflow-y-auto): html/body/#root are overflow-hidden
+    // globally and the region element must stay content-sized, so the
+    // wrapper — never the region — owns viewport-bounded scrolling. Every
+    // launcher row and Catalog App below the fold stays reachable (R39/R40
+    // review).
+    <div className="h-full min-h-0 overflow-y-auto">
     <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-11 pb-[72px] pt-[46px] text-foreground"
+      className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
-      <div className="mx-auto w-full max-w-[1260px] space-y-[34px]">
-        {catalog.productSpace && (
-          <HomeSpaceContext
+      <div className="space-y-[34px]">
+        {view === 'all-apps' && catalog.productSpace ? (
+          <AllAppsView
             spaceName={activeProductSpace?.name
               || t('homeApps.organization.current')}
             spaceKind={activeProductSpace?.kind ?? null}
-            creatorCircles={catalog.creatorCircles}
-            spaceKey={catalog.productSpace.productSpaceContextKey}
+            apps={allApps}
+            loading={catalog.state.loading}
+            refreshing={catalog.state.refreshing}
+            warningCode={catalog.state.warningCode}
+            errorCode={catalog.state.errorCode}
+            offline={catalog.state.accessMode === 'offline'}
+            restricted={catalog.state.accessMode === 'denied'}
+            pinnedIds={quickPinnedIds}
+            identityKeyForApp={uiKeyForApp}
+            getInstallState={catalog.getInstallState}
+            circleCount={catalog.creatorCircles?.length ?? 0}
+            onPin={pinApp}
+            onRefresh={() => { void catalog.sync(true) }}
+            onOpen={(target) => { void openCatalogApp(target) }}
+            onUninstall={setUninstallTarget}
+            onBack={() => setView('home')}
           />
-        )}
-        <section aria-labelledby="recent-apps-heading">
-          <div className="mb-[18px] flex items-end justify-between gap-4">
-            <div>
-              <h1 id="recent-apps-heading" className="text-[22px] font-bold leading-[1.25] tracking-[-0.03em]">
-                {t('homeApps.recent.title')}
-              </h1>
-              <p className="mt-[7px] text-[13px] leading-[1.5] text-muted-foreground">
-                {t('homeApps.recent.description')}
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
-            {resolvedRecent.map(item => (
-              <AppIcon
-                key={item.key}
-                app={item.definition}
-                onOpen={item.onOpen}
-              />
-            ))}
-          </div>
-          {remainingBuiltinApps.length > 0 && (
-            <div
-              className="rounded-[17px] border border-foreground/10 bg-foreground/2 p-[16px]"
-              data-testid="builtin-app-launcher"
-            >
-              <h2 className="text-[14px] font-medium">{t('homeApps.builtin.title')}</h2>
-              <p className="mt-[4px] text-[12px] text-muted-foreground">
-                {t('homeApps.builtin.description')}
-              </p>
-              <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
-                {remainingBuiltinApps.map(app => (
-                  <AppIcon
-                    key={app.id}
-                    app={app}
-                    onOpen={openPersonalApp}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-
-        {catalog.productSpace && (
-          <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
-            <div className="mb-[18px] flex items-start justify-between gap-4">
+        ) : (
+          <div data-testid="home-quick-access-section">
+            {/* Frozen launcher hero: row with bottom-aligned side action at
+            desktop/tablet; stacks under the text at the ≤760px breakpoint
+            exactly like the frozen ≤760px `.hero` column rule. */}
+            <div className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end">
               <div>
-                <h2 id="organization-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
-                  {t('homeApps.organization.title', {
-                    name: activeProductSpace?.name || t('homeApps.organization.current'),
+                <h1 className="m-0 text-[36px] font-bold leading-[1.08] tracking-[-0.05em]">
+                  {t('homeApps.home.greeting')}
+                </h1>
+                <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
+                  {t('homeApps.home.greetingLead', {
+                    space: activeProductSpace?.name ?? t('homeApps.organization.current'),
                   })}
-                </h2>
-                <p className="mt-[6px] text-[14px] text-muted-foreground">
-                  {activeProductSpace?.kind === 'enterprise'
-                    ? t('homeApps.organization.enterpriseDescription')
-                    : t('homeApps.organization.creatorDescription')}
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={catalog.state.refreshing}
-                onClick={() => { void catalog.sync(true) }}
-              >
-                <Icons.RefreshCw className={catalog.state.refreshing ? 'animate-spin' : ''} />
-                {t('homeApps.actions.refresh')}
-              </Button>
+              {catalog.productSpace && activeProductSpace?.kind === 'personal' && (
+                <button
+                  type="button"
+                  data-testid="home-circles-link"
+                  onClick={() => setShowCirclesCard(value => !value)}
+                  className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                >
+                  {t('homeApps.home.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
+                </button>
+              )}
             </div>
 
-            {catalog.state.warningCode && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <Icons.WifiOff className="size-4 shrink-0" />
-                {catalogStateMessage(t, catalog.state.warningCode, 'warning')}
+            {catalog.state.accessMode === 'denied' && (
+              <div
+                className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+                data-testid="home-restricted-banner"
+              >
+                {t('homeApps.organization.accessError')}
               </div>
             )}
 
-            {catalog.state.statusErrorCode && (
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <span className="flex items-center gap-2">
-                  <Icons.CircleAlert className="size-4 shrink-0" />
-                  {t('homeApps.errors.statusReadFailed')}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { void catalog.refreshRuntimeStatuses() }}
-                >
-                  {t('homeApps.actions.tryAgain')}
-                </Button>
-              </div>
+            {catalog.productSpace && activeProductSpace?.kind === 'enterprise' && (
+              <HomeSpaceContext
+                spaceName={activeProductSpace?.name
+                  || t('homeApps.organization.current')}
+                spaceKind="enterprise"
+                creatorCircles={catalog.creatorCircles}
+                spaceKey={catalog.productSpace.productSpaceContextKey}
+                enterpriseRole={activeProductSpace?.kind === 'enterprise'
+                  ? activeProductSpace.role
+                  : undefined}
+                enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
+                  ? activeProductSpace.accessMode
+                  : undefined}
+                onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
+                onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
+              />
             )}
 
-            {catalog.state.loading ? (
-              <div className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10">
-                <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : catalog.state.errorCode && !catalog.state.catalog ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center">
-                <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {t('homeApps.organization.loadFailed')}
-                </p>
-                <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                  {catalogStateMessage(t, catalog.state.errorCode, 'error')}
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => { void catalog.sync(true) }}
-                >
-                  {t('homeApps.actions.tryAgain')}
-                </Button>
-              </div>
-            ) : organizationApps.length === 0 ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-foreground/15 px-6 text-center">
-                <Icons.LayoutGrid className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {t('homeApps.organization.empty')}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {activeProductSpace?.kind === 'enterprise'
-                    ? t('homeApps.organization.emptyEnterprise')
-                    : t('homeApps.organization.emptyCreator')}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {displayedOrganizationApps.map(app => {
-                    const scopeKey = catalog.scopeKeyForApp(app)
-                    const status = catalog.getStatus(app)
-                    return (
-                      <OrganizationAppCard
-                        key={scopeKey}
-                        app={app}
-                        status={status}
-                        statusLoading={Boolean(
-                          catalog.state.statusLoadingScopeKeys?.[scopeKey],
-                        )}
-                        statusUnavailable={Boolean(
-                          !status
-                          && !catalog.state.statusLoadingScopeKeys?.[scopeKey]
-                          && catalog.state.statusErrorScopeKeys?.[scopeKey],
-                        )}
-                        compatible={compatibleWithHost(app)}
-                        offline={catalog.state.accessMode === 'offline'}
-                        onPrimaryAction={(target, action) => {
-                          void handlePrimaryAction(target, action)
-                        }}
-                        onStop={(target) => { void handleStop(target) }}
-                        onUninstall={setUninstallTarget}
-                        onViewLogs={(target) => { void showLogs(target) }}
-                      />
-                    )
-                  })}
+            <section className="mt-[34px]">
+              <div className="mb-[18px] flex items-start justify-between gap-[16px]">
+                <div>
+                  <h2 className="m-0 text-[20px] font-bold leading-[normal] tracking-[-0.03em]">{t('homeApps.home.sectionTitle')}</h2>
+                  <p className="mt-[6px] text-[14px] leading-[1.45] text-muted-foreground">
+                    {t('homeApps.home.sectionDescription')}
+                  </p>
                 </div>
-                {displayedOrganizationApps.length < organizationApps.length && (
-                  <div className="mt-5 flex justify-center">
-                    <Button
+                {catalog.productSpace && (
+                  <div className="flex shrink-0 items-center gap-[8px]">
+                    <button
                       type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setOrganizationAppLimit(current => (
-                          current + ORGANIZATION_APP_PAGE_SIZE
-                        ))
-                      }}
+                      data-testid="home-manage-quick-access"
+                      onClick={() => setManageOpen(true)}
+                      className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
-                      {t('homeApps.actions.loadMore')}
-                    </Button>
+                      {t('homeApps.quick.manage')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="home-all-apps-open"
+                      onClick={() => setView('all-apps')}
+                      className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    >
+                      {t('homeApps.quick.allApps')}
+                    </button>
                   </div>
                 )}
-              </>
-            )}
-          </section>
-        )}
+              </div>
 
-        <section aria-labelledby="external-apps-heading">
-          <div className="mb-[18px]">
-            <h2 id="external-apps-heading" className="text-[20px] font-[720] leading-[1.2] tracking-[-0.03em]">
-              {t('homeApps.external.title')}
-            </h2>
-            <p className="mt-[6px] text-[14px] text-muted-foreground">
-              {t('homeApps.external.description')}
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-[16px] sm:grid-cols-4 md:grid-cols-6">
-            {externalApps.map(app => (
-              <AppIcon
-                key={app.id}
-                app={app}
-                onOpen={openPersonalApp}
-                onRemove={(target) => { void removeApp(target.id) }}
+              <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+                {/* The fixed Polo assistant card always renders — loading and
+                    error tiles only occupy the work-App slots beside it. */}
+                <article
+                  data-testid="home-quick-entry-polo"
+                  onClick={openPoloAssistant}
+                  className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
+                >
+                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent text-[17px]">✦</span>
+                  <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
+                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+                  <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+                    {t('homeApps.home.poloDescription')}
+                  </p>
+                  <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openPoloAssistant()
+                      }}
+                    >
+                      {t('homeApps.home.openAssistant')}
+                    </Button>
+                  </div>
+                </article>
+                {catalog.state.loading && !catalog.state.catalog ? (
+                  <div
+                    className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
+                    data-testid="home-quick-access-loading"
+                  >
+                    <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : catalog.state.errorCode && !catalog.state.catalog ? (
+                  <div className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-[24px] text-center">
+                    <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
+                    <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
+                    <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                      {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
+                    </p>
+                    <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => { void catalog.sync(true) }}>
+                      {t('homeApps.actions.tryAgain')}
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    {homeWorkCards.map((app, index) => {
+                      const artGlyph = index % 2 === 0 ? '▣' : '▦'
+                      return (
+                        <article
+                          key={uiKeyForApp(app)}
+                          data-testid="home-quick-entry"
+                          data-identity-key={uiKeyForApp(app)}
+                          onClick={() => { void openCatalogApp(app) }}
+                          className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
+                        >
+                          <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success text-[17px]">{artGlyph}</span>
+                          <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
+                          <p className="mt-[4px] truncate text-[12px] leading-[normal] text-muted-foreground">
+                            {renderQuickEntrySource(app)}
+                          </p>
+                          <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+                            {app.description || t('homeApps.noDescription')}
+                          </p>
+                          <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void openCatalogApp(app)
+                              }}
+                            >
+                              {t('common.open')}
+                            </Button>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </>
+                )}
+              </div>
+            </section>
+            {catalog.productSpace && activeProductSpace?.kind === 'personal' && showCirclesCard && (
+              <HomeSpaceContext
+                spaceName={activeProductSpace?.name
+                  || t('homeApps.organization.current')}
+                spaceKind="personal"
+                creatorCircles={catalog.creatorCircles}
+                spaceKey={catalog.productSpace.productSpaceContextKey}
               />
-            ))}
-            <AddExternalAppTile onClick={onAddApp} />
+            )}
           </div>
-        </section>
+        )}
       </div>
+
+      <ManageHomeAppsDialog
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        apps={availableApps}
+        identityKeyForApp={uiKeyForApp}
+        selectedIds={selectedQuickIds}
+        maxSlots={MAX_HOME_QUICK_ACCESS_APPS}
+        onToggle={toggleQuickAccess}
+      />
 
       <Dialog open={Boolean(installTarget)} onOpenChange={(open) => {
         if (!open) setInstallTarget(null)
@@ -659,7 +1020,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
+              {installTargetApp && catalog.getInstallState(installTargetApp)?.state === 'installed'
                 ? t('homeApps.install.updateTitle', {
                     name: installTargetApp.name,
                   })
@@ -671,21 +1032,21 @@ export function HomePage({ onAddApp }: HomePageProps) {
               {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
-          {installTargetApp?.currentRelease && (
+          {installTargetApp && installTarget && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.version')}
                   </p>
-                  <p className="mt-1 font-medium">{installTargetApp.currentRelease.version}</p>
+                  <p className="mt-1 font-medium">{installTarget.launch.subject.version}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.downloadSize')}
                   </p>
                   <p className="mt-1 font-medium">
-                    {formatBytes(t, installTargetApp.currentRelease.sizeBytes)}
+                    {formatBytes(t, installTarget.launch.delivery.sizeBytes)}
                   </p>
                 </div>
               </div>
@@ -715,7 +1076,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
               {t('common.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
-              {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
+              {installTargetApp && catalog.getInstallState(installTargetApp)?.state === 'installed'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
             </Button>
@@ -767,33 +1128,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(logsTarget)} onOpenChange={(open) => {
-        if (!open) {
-          logsRequestGenerationRef.current += 1
-          logsTargetScopeKeyRef.current = null
-          setLogsTarget(null)
-          setLogs('')
-          setLogsLoading(false)
-        }
-      }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t('homeApps.logs.title', {
-                name: logsTarget?.name ?? t('homeApps.appFallback'),
-              })}
-            </DialogTitle>
-            <DialogDescription>
-              {t('homeApps.logs.description')}
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="max-h-[420px] min-h-40 overflow-auto rounded-lg bg-foreground/5 p-3 text-xs leading-relaxed">
-            {logsLoading
-              ? t('homeApps.logs.loading')
-              : logs || t('homeApps.logs.empty')}
-          </pre>
-        </DialogContent>
-      </Dialog>
     </main>
+    </div>
   )
 }

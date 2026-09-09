@@ -4,13 +4,13 @@ import {
   describe,
   expect,
   it,
+  jest,
   mock,
 } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import type {
   AppCatalogCacheEntry,
   AppCatalogSyncResult,
-  CatalogApp,
   DeniedAppCatalogSnapshot,
 } from '@polo-ai/shared/admin'
 import type {
@@ -21,8 +21,11 @@ import type {
 } from '@polo-ai/shared/protocol'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
+import { setupI18n, i18n } from '@polo-ai/shared/i18n'
+import type { CatalogApp } from '@polo-ai/shared/admin'
 
 GlobalRegistrator.register()
+setupI18n()
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -142,6 +145,25 @@ let setAvailableRelease = mock(async (
   scope,
   status: 'not_installed',
 }))
+let getProductSpaceInstallStates: (identities: any[]) => Promise<any[]> = mock(async (identities: any[]) =>
+  identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+let getProductSpaceWithdrawnInstallStates: any = mock(async (identities: any[]) =>
+  identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+let installProductSpaceBundle = mock(async (request: any) => ({
+  appId: request.app.artifactInstanceId,
+  scope: {
+    kind: 'catalog' as const,
+    accountId: request.app.accountId,
+    organizationId: request.app.productSpaceId,
+    catalogAppId: request.app.artifactInstanceId,
+  },
+  status: 'installed' as const,
+  currentVersion: request.app.version,
+}))
+let uninstallProductSpaceBundle = mock(async (
+  _identity: any,
+  _options: { preserveData: boolean },
+) => {})
 
 function productSpaceContext(organizationId: string, accountId = 'account-a') {
   return {
@@ -159,15 +181,36 @@ function productSpaceContext(organizationId: string, accountId = 'account-a') {
   }
 }
 
+let launchHandoffPublish = mock((_accountId: string, _launch: unknown) => ({
+  handoffId: 'test-handoff',
+}))
 mock.module('@/context/ProductSpaceContext', () => ({
   useOptionalProductSpaceContext: () => productSpaceContextState,
+  useProductSpaceAppLaunchHandoff: () => ({
+    publish: launchHandoffPublish,
+    take: () => null,
+    onLaunch: () => () => {},
+    commitContext: () => {},
+    dispose: () => {},
+  }),
+}))
+
+mock.module('@/context/TabShellContext', () => ({
+  useTabShell: () => ({
+    installedApps: [],
+    openApp: () => {},
+    removeApp: async () => {},
+  }),
 }))
 
 const {
   act,
   cleanup,
+  fireEvent,
   renderHook,
+  screen,
   waitFor,
+  within,
 } = await import('@testing-library/react')
 const { useAppCatalog } = await import('../useAppCatalog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
@@ -222,6 +265,25 @@ beforeEach(() => {
     scope,
     status: 'not_installed',
   }))
+  getProductSpaceInstallStates = mock(async (identities: any[]) =>
+    identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+  getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+    identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+  installProductSpaceBundle = mock(async (request: any) => ({
+    appId: request.app.artifactInstanceId,
+    scope: {
+      kind: 'catalog' as const,
+      accountId: request.app.accountId,
+      organizationId: request.app.productSpaceId,
+      catalogAppId: request.app.artifactInstanceId,
+    },
+    status: 'installed' as const,
+    currentVersion: request.app.version,
+  }))
+  uninstallProductSpaceBundle = mock(async (
+    _identity: any,
+    _options: { preserveData: boolean },
+  ) => {})
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
@@ -274,6 +336,14 @@ beforeEach(() => {
         }
       }),
       localApps: {
+        getProductSpaceInstallStates: (identities: any[]) =>
+          getProductSpaceInstallStates(identities),
+        getProductSpaceWithdrawnInstallStates: (identities: any[]) =>
+          getProductSpaceWithdrawnInstallStates(identities),
+        installProductSpaceBundle: (request: any) =>
+          installProductSpaceBundle(request),
+        uninstallProductSpaceBundle: (identity: any, options: any) =>
+          uninstallProductSpaceBundle(identity, options),
         getHostInfo: async () => ({ platform: 'darwin', arch: 'arm64' }),
         getRuntimeStatuses: (
           request: { scopes: CatalogLocalAppScope[] },
@@ -309,6 +379,40 @@ afterEach(() => {
 })
 
 describe('useAppCatalog creator circle relations', () => {
+  it('R31: projects the built-in Polo assistant OUT of the work-App list (assistant-only Catalog hydrates to zero work Apps)', async () => {
+    // A schema-valid Catalog ALWAYS contains exactly one built-in Polo
+    // assistant. The work-App projection must never surface it: an
+    // assistant-only Catalog hydrates to an EMPTY work-App list so All Apps
+    // can show the frozen empty state while Home keeps its fixed Polo card.
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: 'rev-assistant-only',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'built_in_app',
+        catalogEntryId: 'cat_builtin_polo_assistant',
+        name: 'Polo 助手',
+        description: '内置 Polo 助手',
+        availability: 'available',
+        builtInAppId: 'polo_assistant',
+      }],
+      withdrawnEntries: [],
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('rev-assistant-only')
+    })
+    // The built-in assistant is projected OUT: zero work Apps, no circles,
+    // and no install-state IPC is even needed for an empty work-App list.
+    expect(result.current.state.catalog?.apps).toHaveLength(0)
+    expect(result.current.state.errorCode).toBeNull()
+    expect(getProductSpaceInstallStates).not.toHaveBeenCalled()
+  })
+
   it('clears derived creator circles when a Catalog refresh fails', async () => {
     // The wrapper stub maps entries from catalog.apps; for this test the
     // product-space RPC is replaced directly so raw entries (with
@@ -471,1266 +575,1550 @@ describe('useAppCatalog creator circle relations', () => {
   })
 })
 
-describe('useAppCatalog scoped async state', () => {
-  it('keeps a local app status unknown until its initial batch resolves', async () => {
-    const pendingStatuses = deferred<LocalAppRuntimeStatus[]>()
-    getRuntimeStatuses = mock(() => pendingStatuses.promise)
-    const view = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(view.result.current.state.catalog?.apps).toHaveLength(1)
-    })
-    const catalogApp = view.result.current.state.catalog!.apps[0]!
-    const scope = view.result.current.scopeForApp(catalogApp)
-    const scopeKey = createLocalAppScopeKey(scope)
-
-    expect(view.result.current.state.loading).toBe(false)
-    expect(view.result.current.state.statusLoadingScopeKeys[scopeKey]).toBe(true)
-    expect(view.result.current.getStatus(catalogApp)).toBeUndefined()
-
-    pendingStatuses.resolve([{
-      appId: catalogApp.id,
-      scope,
-      status: 'not_installed',
-    }])
-    await waitFor(() => {
-      expect(view.result.current.state.statusLoadingScopeKeys[scopeKey])
-        .toBeUndefined()
-      expect(view.result.current.getStatus(catalogApp)?.status)
-        .toBe('not_installed')
-    })
-  })
-
-  it('keeps a cached Catalog 403 out of the account auth-failure channel', async () => {
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
-      success: false,
-      errorCode: 'FORBIDDEN',
-      message: 'Admin request is not permitted',
-      status: 403,
-    }))
-    const failures: Array<{ code: string; status?: number }> = []
-    const unsubscribe = subscribeToAdminAuthFailures(error => {
-      failures.push(error)
-    })
-
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.errorCode).toBe('FORBIDDEN')
-    })
-    expect(failures).toEqual([])
-    unsubscribe()
-  })
-
-  for (const [errorCode, status] of [
-    ['FORBIDDEN', 403],
-    ['MEMBERSHIP_REMOVED', 409],
-    ['NETWORK_ERROR', undefined],
-  ] as const) {
-    it(`hydrates the first denied ${errorCode} Catalog with real local status and management`, async () => {
-      const localApp = app(
-        'organization-a',
-        `retained-${errorCode.toLowerCase()}`,
-      )
-      const deniedCatalog: DeniedAppCatalogSnapshot = {
-        accountId: 'account-a',
-        organizationId: 'organization-a',
-        appConfigVersion: 'denied-catalog',
-        authorizationStatus: 'denied',
-        apps: [{
-          id: localApp.id,
-          organizationId: localApp.organizationId,
-          name: localApp.name,
-          description: localApp.description,
-          deliveryMode: localApp.deliveryMode,
-          sortOrder: localApp.sortOrder,
-          availability: 'unavailable',
-        }],
-        syncedAt: 1,
-      }
-      syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
-        success: false,
-        errorCode,
-        message: 'Organization access is unavailable',
-        status,
-        accessMode: 'denied',
-        catalog: deniedCatalog,
-      }))
-      getRuntimeStatuses = mock(async (
-        request: { scopes: CatalogLocalAppScope[] },
-      ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-        appId: scope.catalogAppId,
-        scope,
-        status: 'running',
-        currentVersion: '1.0.0',
-        runningVersion: '1.0.0',
-      })))
-
-      const { result } = renderHook(() => useAppCatalog())
-      await waitFor(() => {
-        expect(result.current.state.catalog?.authorizationStatus).toBe('denied')
-        expect(result.current.getStatus(
-          result.current.state.catalog!.apps[0]!,
-        )?.status).toBe('running')
-      })
-
-      const retainedApp = result.current.state.catalog!.apps[0]!
-      expect(retainedApp.availability).toBe('unavailable')
-      expect(retainedApp).not.toHaveProperty('currentRelease')
-      expect(retainedApp).not.toHaveProperty('permissions')
-      expect(result.current.state.accessMode).toBe('denied')
-      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
-      expect(getRuntimeStatuses).toHaveBeenCalledWith({
-        scopes: [{
-          kind: 'catalog',
-          accountId: 'account-a',
-          organizationId: 'organization-a',
-          catalogAppId: retainedApp.id,
-        }],
-      })
-
-      await expect(result.current.install(retainedApp, 'denied-catalog'))
-        .rejects.toThrow()
-      await expect(result.current.start(retainedApp)).rejects.toThrow()
-      expect(installLocalApp).not.toHaveBeenCalled()
-      expect(startLocalApp).not.toHaveBeenCalled()
-
-      await expect(result.current.getLogs(retainedApp))
-        .resolves.toBe('retained logs')
-      await act(async () => {
-        await result.current.stop(retainedApp)
-        await result.current.uninstall(retainedApp, true)
-      })
-      expect(getLocalAppLogs).toHaveBeenCalled()
-      expect(stopLocalApp).toHaveBeenCalled()
-      expect(uninstallLocalApp).toHaveBeenCalledWith(
-        expect.objectContaining({ catalogAppId: retainedApp.id }),
-        { preserveData: true },
-      )
-    })
-  }
-
-  it('rejects deferred retained logs after a same-context re-authorization', async () => {
-    const retainedApp: CatalogApp = {
-      ...app('organization-a'),
-      availability: 'withdrawn',
-    }
-    const availableApp: CatalogApp = {
-      ...retainedApp,
-      availability: 'available',
-    }
-    let syncCall = 0
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
-      syncCall += 1
-      return syncCall === 1
-        ? {
-            success: true,
-            catalog: {
-              ...catalog('organization-a', 'withdrawn', []),
-              withdrawnApps: [retainedApp],
-            },
-            source: 'cache',
-            refreshed: false,
-            accessMode: 'online',
-          }
-        : syncResult('organization-a', 're-authorized', [availableApp])
-    })
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'running',
-      currentVersion: '1.0.0',
-      runningVersion: '1.0.0',
-    })))
-    const pendingTail = deferred<string>()
-    getLocalAppLogs = mock(() => pendingTail.promise)
-
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog?.withdrawnApps?.[0]?.availability)
-        .toBe('withdrawn')
-    })
-    const admittedApp = result.current.state.catalog!.withdrawnApps![0]!
-    const pendingLogs = result.current.getLogs(admittedApp)
-    await waitFor(() => expect(getLocalAppLogs).toHaveBeenCalledTimes(1))
-
-    await act(async () => {
-      await result.current.sync(true)
-    })
-    expect(result.current.state.catalog?.apps[0]?.availability).toBe('available')
-
-    pendingTail.resolve('stale retained logs')
-    await expect(pendingLogs).rejects.toThrow()
-  })
-
-  it('propagates an account-disabled Catalog response into the auth-failure channel', async () => {
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
-      success: false,
-      errorCode: 'ACCOUNT_DISABLED',
-      message: 'Admin account is disabled',
-      status: 403,
-    }))
-    const failures: Array<{ code: string; status?: number }> = []
-    const unsubscribe = subscribeToAdminAuthFailures(error => {
-      failures.push(error)
-    })
-
-    renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(failures).toEqual([{ code: 'ACCOUNT_DISABLED', status: 403 }])
-    })
-    unsubscribe()
-  })
-
-  for (const errorCode of [
-    'FORBIDDEN',
-    'MEMBERSHIP_REMOVED',
-    'unknown_body_error',
-  ]) {
-    it(`treats Catalog HTTP 401 with ${errorCode} as account session loss`, async () => {
-      syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
-        success: false,
-        errorCode,
-        message: 'Admin session is unauthorized',
-        status: 401,
-      }))
-      const failures: Array<{ code: string; status?: number }> = []
-      const unsubscribe = subscribeToAdminAuthFailures(error => {
-        failures.push(error)
-      })
-
-      const { result } = renderHook(() => useAppCatalog())
-      await waitFor(() => {
-        expect(failures).toEqual([{ code: errorCode, status: 401 }])
-      })
-      expect(result.current.state.catalog).toBeNull()
-      expect(result.current.state.accessMode).toBeNull()
-      expect(getRuntimeStatuses).not.toHaveBeenCalled()
-      unsubscribe()
-    })
-  }
-
-  it('keeps denied installed app data manageable after a later NOT_FOUND', async () => {
-    const localApp = app('organization-a', 'installed-app')
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'running',
-      currentVersion: '1.0.0',
-      runningVersion: '1.0.0',
-    })))
-    let syncCount = 0
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
-      syncCount += 1
-      return syncCount === 1
-        ? syncResult('organization-a', 'cached', [localApp])
-        : {
-            success: false,
-            errorCode: 'NOT_FOUND',
-            message: 'Organization is unavailable',
-            status: 404,
-          }
-    })
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
-        .toBe('running')
-    })
-    await act(async () => {
-      await result.current.sync(true)
-    })
-
-    expect(result.current.state.catalog).toMatchObject({
-      authorizationStatus: 'denied',
-      apps: [{
-        id: 'installed-app',
-        availability: 'unavailable',
+describe('useAppCatalog ProductSpace launch binding', () => {
+  function installStrictCatalogAndResolver(overrides: Record<string, unknown> = {}) {
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'strict-revision-1',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app',
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        version: { versionId: 'version-a', version: '2.3.4' },
+        name: 'Bound App',
+        description: 'Bound to one artifact instance',
+        availability: 'available',
+        sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
+        permissions: [],
       }],
     })
-    expect(result.current.state.accessMode).toBe('denied')
-    expect(result.current.state.errorCode).toBe('NOT_FOUND')
-    expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
-      .toBe('running')
-    await expect(result.current.start(result.current.state.catalog!.apps[0]!))
-      .rejects.toThrow()
-    expect(startLocalApp).not.toHaveBeenCalled()
-    await act(async () => {
-      await result.current.stop(result.current.state.catalog!.apps[0]!)
-    })
-    expect(stopLocalApp).toHaveBeenCalled()
-  })
-
-  it('discards a start result that returns after organization access is denied', async () => {
-    const pendingStart = deferred<LocalAppStartResult>()
-    startLocalApp = mock(() => pendingStart.promise)
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog?.appConfigVersion).toBe('initial')
-    })
-    const localApp = result.current.state.catalog!.apps[0]!
-    let start!: Promise<LocalAppStartResult>
-    act(() => {
-      start = result.current.start(localApp)
-    })
-    await waitFor(() => {
-      expect(startLocalApp).toHaveBeenCalledTimes(1)
-    })
-
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
-      success: false,
-      errorCode: 'NOT_FOUND',
-      message: 'Organization is unavailable',
-      status: 404,
-    }))
-    await act(async () => {
-      await result.current.sync(true)
-    })
-    await act(async () => {
-      pendingStart.resolve({
-        appId: localApp.id,
-        scope: result.current.scopeForApp(result.current.state.catalog!.apps[0]!),
-        version: '1.0.0',
-        url: 'http://127.0.0.1:9999',
-        port: 9999,
-      })
-      await expect(start).rejects.toThrow()
-    })
-
-    expect(result.current.state.catalog?.authorizationStatus).toBe('denied')
-  })
-
-  it('retries a superseded startup sync until the no-cache caller receives the committed catalog', async () => {
-    let calls = 0
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
-      calls += 1
-      return calls === 1
-        ? {
-            success: false,
-            errorCode: 'REQUEST_SUPERSEDED',
-            message: 'A newer startup sync owns the result',
-          }
-        : syncResult('organization-a', 'committed-no-cache')
-    })
-
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog?.appConfigVersion)
-        .toBe('committed-no-cache')
-    })
-
-    expect(syncCatalog).toHaveBeenCalledTimes(2)
-    expect(result.current.state.errorCode).toBeNull()
-  })
-
-  it('retries a superseded refresh instead of leaving the Home caller on old cache', async () => {
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog?.appConfigVersion).toBe('initial')
-    })
-    let calls = 0
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
-      calls += 1
-      return calls === 1
-        ? {
-            success: false,
-            errorCode: 'REQUEST_SUPERSEDED',
-            message: 'A newer startup sync owns the result',
-          }
-        : syncResult('organization-a', 'committed-after-cache')
-    })
-
-    await act(async () => {
-      await result.current.sync(true)
-    })
-
-    expect(syncCatalog).toHaveBeenCalledTimes(2)
-    expect(result.current.state.catalog?.appConfigVersion)
-      .toBe('committed-after-cache')
-    expect(result.current.state.errorCode).toBeNull()
-  })
-
-  it('discards an out-of-order response after the organization changes', async () => {
-    const organizationA = deferred<AppCatalogSyncResult>()
-    const organizationB = deferred<AppCatalogSyncResult>()
-    syncCatalog = mock((
-      organizationId: string,
-      _options?: { force?: boolean },
-    ) => (
-      organizationId === 'organization-a'
-        ? organizationA.promise
-        : organizationB.promise
-    ))
-    const { result, rerender } = renderHook(() => useAppCatalog())
-
-    productSpaceContextState = productSpaceContext('organization-b')
-    rerender()
-    await act(async () => {
-      organizationB.resolve(syncResult('organization-b', 'newer'))
-      await organizationB.promise
-    })
-    await waitFor(() => {
-      expect(result.current.state.catalog?.organizationId).toBe('organization-b')
-    })
-
-    await act(async () => {
-      organizationA.resolve(syncResult('organization-a', 'stale'))
-      await organizationA.promise
-    })
-
-    expect(result.current.state.catalog?.organizationId).toBe('organization-b')
-    expect(Object.values(result.current.state.statuses)).toEqual([
-      expect.objectContaining({
-        scope: expect.objectContaining({ organizationId: 'organization-b' }),
-      }),
-    ])
-  })
-
-  it('discards a Catalog response across legacy-colliding contexts', async () => {
-    const accountA = 'account:west'
-    const organizationAId = '组织'
-    const accountB = 'account'
-    const organizationBId = 'west:组织'
-    expect(`${accountA}:${organizationAId}`)
-      .toBe(`${accountB}:${organizationBId}`)
-
-    const catalogA = deferred<AppCatalogSyncResult>()
-    syncCatalog = mock((
-      organizationId: string,
-      _options?: { force?: boolean },
-    ) => (
-      organizationId === organizationAId
-        ? catalogA.promise
-        : Promise.resolve(syncResult(
-            organizationBId,
-            'current-b',
-            undefined,
-            accountB,
-          ))
-    ))
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ) => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'installed',
-      currentVersion: '1.0.0',
-    })))
-    productSpaceContextState = productSpaceContext(organizationAId, accountA)
-    const { result, rerender } = renderHook(() => useAppCatalog())
-
-    productSpaceContextState = productSpaceContext(organizationBId, accountB)
-    rerender()
-    await waitFor(() => {
-      expect(result.current.state.catalog).toMatchObject({
-        accountId: accountB,
-        organizationId: organizationBId,
-        appConfigVersion: 'current-b',
-      })
-      expect(Object.values(result.current.state.statuses)).toEqual([
-        expect.objectContaining({
-          status: 'installed',
-          scope: expect.objectContaining({
-            accountId: accountB,
-            organizationId: organizationBId,
-          }),
-        }),
-      ])
-    })
-
-    await act(async () => {
-      catalogA.resolve(syncResult(
-        organizationAId,
-        'stale-a',
-        undefined,
-        accountA,
-      ))
-      await catalogA.promise
-    })
-
-    expect(result.current.state.catalog).toMatchObject({
-      accountId: accountB,
-      organizationId: organizationBId,
-      appConfigVersion: 'current-b',
-    })
-    expect(Object.values(result.current.state.statuses)).toEqual([
-      expect.objectContaining({
-        status: 'installed',
-        scope: expect.objectContaining({
-          accountId: accountB,
-          organizationId: organizationBId,
-        }),
-      }),
-    ])
-  })
-
-  it('discards a status response across legacy-colliding contexts', async () => {
-    const accountA = 'account:west'
-    const organizationAId = '组织'
-    const accountB = 'account'
-    const organizationBId = 'west:组织'
-    const statusA = deferred<LocalAppRuntimeStatus[]>()
-    syncCatalog = mock(async (
-      organizationId: string,
-      _options?: { force?: boolean },
-    ) => syncResult(
-      organizationId,
-      `catalog-${organizationId}`,
-      undefined,
-      organizationId === organizationAId ? accountA : accountB,
-    ))
-    getRuntimeStatuses = mock((
-      request: { scopes: CatalogLocalAppScope[] },
-    ) => (
-      request.scopes[0]?.accountId === accountA
-        ? statusA.promise
-        : Promise.resolve(request.scopes.map(scope => ({
-            appId: scope.catalogAppId,
-            scope,
-            status: 'installed' as const,
-            currentVersion: '1.0.0',
-          })))
-    ))
-    productSpaceContextState = productSpaceContext(organizationAId, accountA)
-    const { result, rerender } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog).toMatchObject({
-        accountId: accountA,
-        organizationId: organizationAId,
-      })
-      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
-    })
-
-    productSpaceContextState = productSpaceContext(organizationBId, accountB)
-    rerender()
-    await waitFor(() => {
-      expect(result.current.state.catalog).toMatchObject({
-        accountId: accountB,
-        organizationId: organizationBId,
-      })
-      expect(Object.values(result.current.state.statuses)).toEqual([
-        expect.objectContaining({
-          status: 'installed',
-          scope: expect.objectContaining({
-            accountId: accountB,
-            organizationId: organizationBId,
-          }),
-        }),
-      ])
-    })
-
-    await act(async () => {
-      statusA.resolve([{
-        appId: 'shared-app-id',
-        scope: {
-          kind: 'catalog',
-          accountId: accountA,
-          organizationId: organizationAId,
-          catalogAppId: 'shared-app-id',
+    api.productSpaceResolveLaunch = mock(async () => ({
+      success: true as const,
+      launch: {
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogEntryId: 'catalog-entry-a',
+        resolvedAt: '2099-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:10:00.000Z',
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: 'artifact-instance-a',
+          versionId: 'version-a',
+          version: '2.3.4',
         },
-        status: 'running',
-        currentVersion: '1.0.0',
-        runningVersion: '1.0.0',
-      }])
-      await statusA.promise
-    })
-
-    expect(result.current.state.catalog).toMatchObject({
-      accountId: accountB,
-      organizationId: organizationBId,
-    })
-    expect(Object.values(result.current.state.statuses)).toEqual([
-      expect.objectContaining({
-        status: 'installed',
-        scope: expect.objectContaining({
-          accountId: accountB,
-          organizationId: organizationBId,
-        }),
-      }),
-    ])
-  })
-
-  it('does not deduplicate the same app id across organizations and rejects the stale operation', async () => {
-    const accountA = 'account:west'
-    const organizationAId = '组织'
-    const accountB = 'account'
-    const organizationBId = 'west:组织'
-    const startA = deferred<LocalAppStartResult>()
-    const startB = deferred<LocalAppStartResult>()
-    startLocalApp = mock((scope: CatalogLocalAppScope) => (
-      scope.accountId === accountA ? startA.promise : startB.promise
-    ))
-    syncCatalog = mock(async (
-      organizationId: string,
-      _options?: { force?: boolean },
-    ) => syncResult(
-      organizationId,
-      `catalog-${organizationId}`,
-      undefined,
-      organizationId === organizationAId ? accountA : accountB,
-    ))
-    productSpaceContextState = productSpaceContext(organizationAId, accountA)
-    const { result, rerender } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog).toMatchObject({
-        accountId: accountA,
-        organizationId: organizationAId,
-      })
-    })
-
-    let promiseA!: Promise<LocalAppStartResult>
-    act(() => {
-      promiseA = result.current.start(result.current.state.catalog!.apps[0]!)
-    })
-
-    productSpaceContextState = productSpaceContext(organizationBId, accountB)
-    rerender()
-    await waitFor(() => {
-      expect(result.current.state.catalog).toMatchObject({
-        accountId: accountB,
-        organizationId: organizationBId,
-      })
-    })
-
-    let promiseB!: Promise<LocalAppStartResult>
-    act(() => {
-      promiseB = result.current.start(result.current.state.catalog!.apps[0]!)
-    })
-    await act(async () => {
-      startB.resolve({
-        appId: 'shared-app-id',
-        scope: {
-          kind: 'catalog',
-          accountId: accountB,
-          organizationId: organizationBId,
-          catalogAppId: 'shared-app-id',
+        payer: { kind: 'personal' as const, accountId: 'account-a' },
+        delivery: {
+          kind: 'web_url' as const,
+          url: 'https://app.example.test',
+          launchToken: 'fresh-launch-token',
         },
-        version: '1.0.0',
-        url: 'http://127.0.0.1:9877',
-        port: 9877,
-      })
-      await promiseB
-    })
-    startA.resolve({
-      appId: 'shared-app-id',
-      scope: {
-        kind: 'catalog',
-        accountId: accountA,
-        organizationId: organizationAId,
-        catalogAppId: 'shared-app-id',
+        ...overrides,
       },
-      version: '1.0.0',
-      url: 'http://127.0.0.1:9876',
-      port: 9876,
-    })
+    }))
+    return api.productSpaceResolveLaunch as ReturnType<typeof mock>
+  }
 
-    await expect(promiseA).rejects.toThrow()
-    expect(startLocalApp).toHaveBeenCalledTimes(2)
-    expect(startLocalApp.mock.calls.map(call => [
-      call[0].accountId,
-      call[0].organizationId,
-    ])).toEqual([
-      [accountA, organizationAId],
-      [accountB, organizationBId],
-    ])
-    expect(result.current.state.catalog).toMatchObject({
-      accountId: accountB,
-      organizationId: organizationBId,
-    })
-  })
-
-  it('keeps a successful start result when the same organization refreshes', async () => {
-    const pendingStart = deferred<LocalAppStartResult>()
-    startLocalApp = mock(() => pendingStart.promise)
-    let syncCount = 0
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
-      syncCount += 1
-      return syncResult('organization-a', `catalog-${syncCount}`)
-    })
+  it('carries the exact ProductSpace, artifact instance, and version', async () => {
+    const resolver = installStrictCatalogAndResolver()
     const { result } = renderHook(() => useAppCatalog())
     await waitFor(() => {
-      expect(result.current.state.catalog?.appConfigVersion).toBe('catalog-1')
-    })
-    const catalogApp = result.current.state.catalog!.apps[0]!
-
-    let started!: Promise<LocalAppStartResult>
-    act(() => {
-      started = result.current.start(catalogApp)
-    })
-    await waitFor(() => {
-      expect(result.current.getStatus(catalogApp)?.status).toBe('starting')
+      expect(result.current.state.catalog?.apps[0]?.artifactInstanceId)
+        .toBe('artifact-instance-a')
     })
 
-    await act(async () => {
-      await result.current.sync(true)
-    })
-    expect(result.current.state.catalog?.appConfigVersion).toBe('catalog-2')
+    const app = result.current.state.catalog!.apps[0]!
+    const launch = await result.current.resolveLaunch(app)
 
-    const localUrl = 'http://127.0.0.1:9911'
-    let startResult!: LocalAppStartResult
-    await act(async () => {
-      pendingStart.resolve({
-        appId: catalogApp.id,
-        scope: {
-          kind: 'catalog',
-          accountId: 'account-a',
-          organizationId: 'organization-a',
-          catalogAppId: catalogApp.id,
-        },
-        version: '1.0.0',
-        url: localUrl,
-        port: 9911,
-      })
-      startResult = await started
+    expect(resolver).toHaveBeenCalledWith('organization-a', 'catalog-entry-a')
+    expect(launch.subject).toMatchObject({
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
     })
-
-    expect(startResult).toMatchObject({ url: localUrl })
-    expect(startLocalApp).toHaveBeenCalledTimes(1)
   })
 
-  it('sends stop once while start for the same scope is still pending', async () => {
-    const pendingStart = deferred<LocalAppStartResult>()
-    startLocalApp = mock(() => pendingStart.promise)
+  it('rejects a valid-looking launch response for another ProductSpace', async () => {
+    installStrictCatalogAndResolver({ productSpaceId: 'organization-b' })
     const { result } = renderHook(() => useAppCatalog())
     await waitFor(() => {
       expect(result.current.state.catalog?.apps).toHaveLength(1)
     })
-    const catalogApp = result.current.state.catalog!.apps[0]!
 
-    let started!: Promise<LocalAppStartResult>
-    let startOutcome!: Promise<'fulfilled' | 'rejected'>
-    act(() => {
-      started = result.current.start(catalogApp)
-      startOutcome = started.then(
-        () => 'fulfilled',
-        () => 'rejected',
-      )
-    })
-    await waitFor(() => {
-      expect(startLocalApp).toHaveBeenCalledTimes(1)
-    })
-
-    let stopped!: Promise<void>
-    act(() => {
-      stopped = result.current.stop(catalogApp)
-    })
-    await waitFor(() => {
-      expect(stopLocalApp).toHaveBeenCalledTimes(1)
-    })
-    await act(async () => {
-      await stopped
-    })
-
-    await act(async () => {
-      pendingStart.resolve({
-        appId: catalogApp.id,
-        scope: {
-          kind: 'catalog',
-          accountId: 'account-a',
-          organizationId: 'organization-a',
-          catalogAppId: catalogApp.id,
-        },
-        version: '1.0.0',
-        url: 'http://127.0.0.1:9912',
-        port: 9912,
-      })
-      expect(await startOutcome).toBe('rejected')
-    })
-
-    expect(stopLocalApp).toHaveBeenCalledWith(expect.objectContaining({
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: 'shared-app-id',
-    }))
-    expect(stopLocalApp).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps STOP status when older full and START-finally reads resolve later', async () => {
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
-        .toBe('not_installed')
-    })
-
-    const fullRead = deferred<LocalAppRuntimeStatus[]>()
-    const startFinallyRead = deferred<LocalAppRuntimeStatus[]>()
-    const stopFinallyRead = deferred<LocalAppRuntimeStatus[]>()
-    const statusReads = [fullRead, startFinallyRead, stopFinallyRead]
-    let readIndex = 0
-    getRuntimeStatuses = mock(() => statusReads[readIndex++]!.promise)
-
-    let pendingSync!: Promise<void>
-    act(() => {
-      pendingSync = result.current.sync(true)
-    })
-    await waitFor(() => {
-      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
-    })
-    const catalogApp = result.current.state.catalog!.apps[0]!
-    const runtimeScope = result.current.scopeForApp(catalogApp)
-    const runningStatus: LocalAppRuntimeStatus = {
-      appId: catalogApp.id,
-      scope: runtimeScope,
-      status: 'running',
-      currentVersion: '1.0.0',
-      runningVersion: '1.0.0',
-    }
-    const stoppedStatus: LocalAppRuntimeStatus = {
-      appId: catalogApp.id,
-      scope: runtimeScope,
-      status: 'stopped',
-      currentVersion: '1.0.0',
-    }
-
-    let startOutcome!: Promise<'fulfilled' | 'rejected'>
-    act(() => {
-      startOutcome = result.current.start(catalogApp).then(
-        () => 'fulfilled',
-        () => 'rejected',
-      )
-    })
-    await waitFor(() => {
-      expect(getRuntimeStatuses).toHaveBeenCalledTimes(2)
-    })
-
-    let pendingStop!: Promise<void>
-    act(() => {
-      pendingStop = result.current.stop(catalogApp)
-    })
-    await waitFor(() => {
-      expect(getRuntimeStatuses).toHaveBeenCalledTimes(3)
-    })
-    await act(async () => {
-      stopFinallyRead.resolve([stoppedStatus])
-      await pendingStop
-    })
-    expect(result.current.getStatus(catalogApp)?.status).toBe('stopped')
-
-    await act(async () => {
-      startFinallyRead.resolve([runningStatus])
-      expect(await startOutcome).toBe('rejected')
-    })
-    await act(async () => {
-      fullRead.resolve([runningStatus])
-      await pendingSync
-    })
-
-    expect(getRuntimeStatuses).toHaveBeenCalledTimes(3)
-    expect(result.current.getStatus(catalogApp)?.status).toBe('stopped')
-  })
-
-  it('cancels an in-flight install through an independent cancellation channel', async () => {
-    const pendingInstall = deferred<void>()
-    installLocalApp = mock(() => pendingInstall.promise)
-    cancelInstall = mock(async () => {
-      pendingInstall.reject(new Error('cancelled'))
-      return true
-    })
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog?.apps).toHaveLength(1)
-      expect(result.current.state.host).not.toBeNull()
-    })
-    const catalogApp = result.current.state.catalog!.apps[0]!
-
-    let installOutcome!: Promise<'fulfilled' | 'rejected'>
-    act(() => {
-      installOutcome = result.current.install(catalogApp, 'initial').then(
-        () => 'fulfilled',
-        () => 'rejected',
-      )
-    })
-    await waitFor(() => {
-      expect(result.current.getStatus(catalogApp)?.status).toBe('downloading')
-    })
-
-    let cancelPromise!: Promise<void>
-    act(() => {
-      cancelPromise = result.current.cancelInstall(catalogApp)
-    })
-    await act(async () => {
-      await cancelPromise
-      expect(await installOutcome).toBe('rejected')
-    })
-
-    expect(installLocalApp).toHaveBeenCalledTimes(1)
-    expect(cancelInstall).toHaveBeenCalledTimes(1)
-    expect(cancelInstall).toHaveBeenCalledWith(expect.objectContaining({
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: 'shared-app-id',
-    }))
-    expect(result.current.getStatus(catalogApp)?.status).toBe('not_installed')
-  })
-
-  it('refreshes a changed Release and requires confirmation of the new fingerprint', async () => {
-    const releaseA: CatalogApp = {
-      ...app('organization-a'),
-      permissions: ['selected files', 'camera', 'camera'],
-      currentRelease: {
-        version: '1.0.0',
-        runtime: 'static',
-        downloadUrl: 'https://example.com/a.zip',
-        checksum: 'a'.repeat(64),
-        sizeBytes: 100,
-        platform: 'darwin',
-        arch: 'arm64',
-      },
-    }
-    const releaseB: CatalogApp = {
-      ...releaseA,
-      currentRelease: {
-        ...releaseA.currentRelease!,
-        version: '2.0.0',
-        downloadUrl: 'https://example.com/b.zip',
-        checksum: 'b'.repeat(64),
-        sizeBytes: 200,
-      },
-    }
-    let syncCount = 0
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
-      syncCount += 1
-      return syncResult(
-        'organization-a',
-        syncCount === 1 ? 'release-a' : 'release-b',
-        [syncCount === 1 ? releaseA : releaseB],
-      )
-    })
-    installLocalApp = mock(async () => {
-      throw Object.assign(new Error('Release changed'), {
-        code: 'RELEASE_CHANGED',
-      })
-    })
-
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.catalog?.appConfigVersion).toBe('release-a')
-      expect(result.current.state.host).not.toBeNull()
-    })
-    const confirmedApp = result.current.state.catalog!.apps[0]!
-
-    await act(async () => {
-      await expect(result.current.install(
-        confirmedApp,
-        'release-a',
-      )).rejects.toMatchObject({
-        code: 'RELEASE_CHANGED',
-      })
-    })
-
-    expect(installLocalApp).toHaveBeenCalledWith({
-      scope: {
-        kind: 'catalog',
-        accountId: 'account-a',
-        organizationId: 'organization-a',
-        catalogAppId: 'shared-app-id',
-      },
-      appConfigVersion: 'release-a',
-      permissions: ['camera', 'selected files'],
-      release: {
-        version: '1.0.0',
-        runtime: 'static',
-        checksum: 'a'.repeat(64),
-        sizeBytes: 100,
-        platform: 'darwin',
-        arch: 'arm64',
-      },
-    })
-    expect(syncCatalog).toHaveBeenCalledTimes(2)
-    expect(result.current.state.catalog).toMatchObject({
-      appConfigVersion: 'release-b',
-      apps: [{
-        currentRelease: {
-          version: '2.0.0',
-          checksum: 'b'.repeat(64),
-          sizeBytes: 200,
-        },
-      }],
-    })
-  })
-
-  it('merges a completed single-app refresh without dropping other app statuses', async () => {
-    const apps = [
-      app('organization-a', 'app-a'),
-      app('organization-a', 'app-b'),
-    ]
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> =>
-      syncResult('organization-a', 'two-apps', apps))
-    let appAStarted = false
-    startLocalApp = mock(async (
-      scope: CatalogLocalAppScope,
-    ): Promise<LocalAppStartResult> => {
-      appAStarted = true
-      return {
-        appId: scope.catalogAppId,
-        scope,
-        version: '1.0.0',
-        url: 'http://127.0.0.1:9876',
-        port: 9876,
-      }
-    })
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: scope.catalogAppId === 'app-a'
-        ? (appAStarted ? 'running' : 'installed')
-        : 'running',
-      currentVersion: '1.0.0',
-    })))
-
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(Object.keys(result.current.state.statuses)).toHaveLength(2)
-    })
-    const [appA, appB] = result.current.state.catalog!.apps
-
-    await act(async () => {
-      await result.current.start(appA!)
-    })
-
-    expect(getRuntimeStatuses.mock.calls.map(call => call[0].scopes.length))
-      .toEqual([2, 1])
-    expect(result.current.getStatus(appA!)?.status).toBe('running')
-    expect(result.current.getStatus(appB!)?.status).toBe('running')
-    expect(Object.keys(result.current.state.statuses)).toHaveLength(2)
-  })
-
-  it('opens a prepared app from a restricted offline catalog without enabling install', async () => {
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
-      ...syncResult('organization-a', 'offline'),
-      source: 'cache',
-      refreshed: false,
-      accessMode: 'offline',
-      warningCode: 'NETWORK_ERROR',
-    }))
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'installed',
-      currentVersion: '1.0.0',
-    })))
-    const { result } = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(result.current.state.accessMode).toBe('offline')
-      expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
-        .toBe('installed')
-    })
-    const catalogApp = result.current.state.catalog!.apps[0]!
-
-    let started!: LocalAppStartResult
-    await act(async () => {
-      started = await result.current.start(catalogApp)
-    })
-    expect(started).toMatchObject({
-      url: 'http://127.0.0.1:9876',
-    })
-    expect(startLocalApp).toHaveBeenCalledWith(expect.objectContaining({
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: 'shared-app-id',
-    }))
-    await expect(result.current.install(
-      catalogApp,
-      result.current.state.catalog!.appConfigVersion,
+    await expect(result.current.resolveLaunch(
+      result.current.state.catalog!.apps[0]!,
     )).rejects.toThrow()
-    expect(installLocalApp).not.toHaveBeenCalled()
   })
 
-  it('uses one batch status RPC and no per-app release RPC for large catalogs', async () => {
-    for (const count of [1_000, 1_001, 10_000]) {
-      const apps = Array.from(
-        { length: count },
-        (_, index) => app('organization-a', `app-${index}`),
-      )
-      syncCatalog = mock(async (): Promise<AppCatalogSyncResult> =>
-        syncResult('organization-a', `catalog-${count}`, apps))
-      getRuntimeStatuses = mock(async (
-        request: { scopes: CatalogLocalAppScope[] },
-      ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-        appId: scope.catalogAppId,
-        scope,
-        status: 'installed',
-        currentVersion: '1.0.0',
-      })))
-      setAvailableRelease = mock(async (
-        scope: CatalogLocalAppScope,
-      ): Promise<LocalAppRuntimeStatus> => ({
-        appId: scope.catalogAppId,
-        scope,
-        status: 'installed',
-      }))
-
-      const view = renderHook(() => useAppCatalog())
-      await waitFor(() => {
-        expect(Object.keys(view.result.current.state.statuses)).toHaveLength(count)
-      }, { timeout: 5_000 })
-
-      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
-      expect(getRuntimeStatuses.mock.calls[0]![0].scopes).toHaveLength(count)
-      expect(setAvailableRelease).not.toHaveBeenCalled()
-      view.unmount()
-    }
-  })
-
-  it('reads the installed withdrawn app after 10,000 visible apps in a second batch', async () => {
-    const visibleApps = Array.from(
-      { length: 10_000 },
-      (_, index) => app('organization-a', `visible-${index}`),
-    )
-    const withdrawn = {
-      ...app('organization-a', 'installed-withdrawn'),
-      availability: 'withdrawn' as const,
-    }
-    const catalogResult = syncResult(
-      'organization-a',
-      'visible-plus-withdrawn',
-      visibleApps,
-    )
-    catalogResult.catalog.withdrawnApps = [withdrawn]
-    syncCatalog = mock(async () => catalogResult)
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: scope.catalogAppId === withdrawn.id ? 'running' : 'not_installed',
-      ...(scope.catalogAppId === withdrawn.id
-        ? { currentVersion: '1.0.0', runningVersion: '1.0.0' }
-        : {}),
-    })))
-
-    const view = renderHook(() => useAppCatalog())
+  it('binds installation and removal to the exact Catalog artifact version', async () => {
+    installStrictCatalogAndResolver()
+    const { result } = renderHook(() => useAppCatalog())
     await waitFor(() => {
-      expect(Object.keys(view.result.current.state.statuses)).toHaveLength(10_001)
-    }, { timeout: 10_000 })
-
-    expect(getRuntimeStatuses.mock.calls.map(call => call[0].scopes.length))
-      .toEqual([10_000, 1])
-    expect(view.result.current.getStatus(withdrawn)).toMatchObject({
-      appId: 'installed-withdrawn',
-      status: 'running',
-      currentVersion: '1.0.0',
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
     })
-    view.unmount()
-  })
+    const catalogApp = result.current.state.catalog!.apps[0]!
 
-  it('merges successful status batches and preserves trusted state when the second batch fails', async () => {
-    const apps = Array.from(
-      { length: 10_001 },
-      (_, index) => app('organization-a', `app-${index}`),
-    )
-    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> =>
-      syncResult('organization-a', 'partial-batch', apps))
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'installed',
-      currentVersion: '1.0.0',
-    })))
-
-    const view = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(Object.keys(view.result.current.state.statuses)).toHaveLength(10_001)
-    }, { timeout: 10_000 })
-
-    let batch = 0
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => {
-      batch += 1
-      if (batch === 2) throw new Error('second batch unavailable')
-      return request.scopes.map(scope => ({
-        appId: scope.catalogAppId,
-        scope,
-        status: 'running',
-        currentVersion: '1.0.0',
-        runningVersion: '1.0.0',
-      }))
-    })
-    await act(async () => {
-      await view.result.current.refreshRuntimeStatuses()
+    await result.current.installProductSpaceBundle(catalogApp)
+    expect(installProductSpaceBundle).toHaveBeenCalledWith({
+      app: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogRevision: 'strict-revision-1',
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+        // The identity seals the authoritative sources + raw availability.
+        sources: [{ kind: 'enterprise_import', name: 'Studio A', circleId: null }],
+        availability: 'available',
+      },
     })
 
-    expect(view.result.current.getStatus(apps[0]!)?.status).toBe('running')
-    expect(view.result.current.getStatus(apps.at(-1)!)?.status).toBe('installed')
-    expect(Object.values(view.result.current.state.statuses)
-      .some(status => status.status === 'not_installed')).toBe(false)
-    expect(view.result.current.state.statusErrorCode).toBe('status_read_failed')
-    expect(view.result.current.state.statusErrorScopeKeys[
-      view.result.current.scopeKeyForApp(apps[0]!)
-    ]).toBeUndefined()
-    expect(view.result.current.state.statusErrorScopeKeys[
-      view.result.current.scopeKeyForApp(apps.at(-1)!)
-    ]).toBe(true)
-
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: 'stopped',
-      currentVersion: '1.0.0',
-    })))
-    await act(async () => {
-      await view.result.current.refreshRuntimeStatuses()
-    })
-    expect(view.result.current.getStatus(apps.at(-1)!)?.status).toBe('stopped')
-    expect(view.result.current.state.statusErrorCode).toBeNull()
-    expect(view.result.current.state.statusErrorScopeKeys).toEqual({})
-    view.unmount()
-  })
-
-  it('reads the maximum retained tombstone boundary without truncation', async () => {
-    const visibleApps = Array.from(
-      { length: 10_000 },
-      (_, index) => app('organization-a', `visible-${index}`),
-    )
-    const withdrawnApps = Array.from(
-      { length: 10_000 },
-      (_, index) => ({
-        ...app('organization-a', `withdrawn-${index}`),
-        availability: 'withdrawn' as const,
+    await result.current.uninstallProductSpaceBundle(catalogApp, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogRevision: 'strict-revision-1',
+        catalogEntryId: 'catalog-entry-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
       }),
+      { preserveData: true },
     )
-    const catalogResult = syncResult(
-      'organization-a',
-      'maximum-tombstones',
-      visibleApps,
-    )
-    catalogResult.catalog.withdrawnApps = withdrawnApps
-    syncCatalog = mock(async () => catalogResult)
-    getRuntimeStatuses = mock(async (
-      request: { scopes: CatalogLocalAppScope[] },
-    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
-      appId: scope.catalogAppId,
-      scope,
-      status: scope.catalogAppId === 'withdrawn-9999'
-        ? 'installed'
-        : 'not_installed',
-      ...(scope.catalogAppId === 'withdrawn-9999'
-        ? { currentVersion: '1.0.0' }
-        : {}),
-    })))
+  })
+})
 
-    const view = renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      expect(Object.keys(view.result.current.state.statuses)).toHaveLength(20_000)
-    }, { timeout: 15_000 })
+describe('withdrawn tombstones emitted by the Main catalog authority', () => {
+  function strictEntry(version: { versionId: string; version: string } = {
+    versionId: 'version-a',
+    version: '2.3.4',
+  }) {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'catalog-entry-a',
+      artifactInstanceId: 'artifact-instance-a',
+      version,
+      name: 'Bound App',
+      description: 'Bound to one artifact instance',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+      permissions: ['camera'],
+    }
+  }
 
-    expect(getRuntimeStatuses.mock.calls.map(call => call[0].scopes.length))
-      .toEqual([10_000, 10_000])
-    expect(view.result.current.getStatus(withdrawnApps.at(-1)!)).toMatchObject({
-      appId: 'withdrawn-9999',
-      status: 'installed',
-      currentVersion: '1.0.0',
+  function withdrawnTombstoneEntry() {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      version: { versionId: 'version-w', version: '1.5.0' },
+      name: 'Withdrawn App',
+      description: 'No longer distributed',
+      availability: 'withdrawn' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio W' }],
+      permissions: [],
+    }
+  }
+
+  function withdrawnInstallStatesInstalled() {
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      })))
+  }
+
+  it('hydrates persisted tombstones on renderer restart and keeps them uninstallable', async () => {
+    const api = window.electronAPI as any
+    // Restart scenario: the FIRST response already carries the Main
+    // authority's persisted tombstone alongside the live entries.
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'restart-revision-1',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [strictEntry()],
+      withdrawnEntries: [withdrawnTombstoneEntry()],
     })
+    withdrawnInstallStatesInstalled()
+    const { result } = renderHook(() => useAppCatalog())
+
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const tombstone = result.current.state.catalog?.withdrawnApps?.[0]
+    expect(tombstone).toMatchObject({
+      id: 'catalog-entry-w',
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      catalogVersion: { versionId: 'version-w', version: '1.5.0' },
+      availability: 'withdrawn',
+      sourceNames: ['Studio W'],
+      deliveryMode: 'resolve_launch',
+    })
+    expect(tombstone?.currentRelease).toBeUndefined()
+    expect(tombstone?.remoteUrl).toBeUndefined()
+
+    // The retained installation stays visible and uninstallable through the
+    // restricted withdrawn identity channel.
+    await waitFor(() => {
+      expect(result.current.getInstallState(tombstone!)?.state).toBe('installed')
+    })
+    expect(getProductSpaceWithdrawnInstallStates).toHaveBeenCalledWith([{
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      catalogRevision: 'restart-revision-1',
+      catalogEntryId: 'catalog-entry-w',
+      artifactInstanceId: 'artifact-w',
+      versionId: 'version-w',
+      version: '1.5.0',
+      // The withdrawn identity seals the tombstone sources + raw availability.
+      sources: [{ kind: 'enterprise_import', name: 'Studio W', circleId: null }],
+      availability: 'withdrawn',
+    }])
+
+    // A tombstone can never be opened.
+    await expect(result.current.resolveLaunch(tombstone!)).rejects.toThrow()
+
+    // Uninstall routes through the withdrawn identity.
+    await result.current.uninstallProductSpaceBundle(tombstone!, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'catalog-entry-w',
+        artifactInstanceId: 'artifact-w',
+      }),
+      { preserveData: true },
+    )
+  })
+
+  it('does not create tombstones on version upgrades and keeps install states fresh', async () => {
+    const api = window.electronAPI as any
+    let entries = [strictEntry()]
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'upgrade-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries,
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    expect(result.current.state.catalog?.withdrawnApps ?? []).toHaveLength(0)
+    const v1 = result.current.state.catalog!.apps[0]!
+
+    // Version upgrade v1 -> v2: the SAME catalogEntryId + artifactInstanceId.
+    entries = [strictEntry({ versionId: 'version-b', version: '3.0.0' })]
+    await act(async () => {
+      await result.current.sync(true)
+    })
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.catalogVersion?.version).toBe('3.0.0')
+    })
+    // NO tombstone for the old version; the live row replaced it.
+    expect(result.current.state.catalog?.withdrawnApps ?? []).toHaveLength(0)
+    expect(result.current.state.catalog!.apps).toHaveLength(1)
+
+    const v2 = result.current.state.catalog!.apps[0]!
+    expect(v2.catalogVersion).toEqual({ versionId: 'version-b', version: '3.0.0' })
+    // Install state keys stayed consistent (no stale active/withdrawn mix).
+    await waitFor(() => {
+      expect(result.current.getInstallState(v2)).toBeDefined()
+    })
+    // Direct open resolves against the fresh v2 context.
+    const apiResolve = window.electronAPI as any
+    apiResolve.productSpaceResolveLaunch = mock(async () => ({
+      success: true as const,
+      launch: {
+        contractVersion: 1,
+        productSpaceId: 'organization-a',
+        catalogEntryId: 'catalog-entry-a',
+        resolvedAt: '2099-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:10:00.000Z',
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: 'artifact-instance-a',
+          versionId: 'version-b',
+          version: '3.0.0',
+        },
+        payer: { kind: 'personal' as const, accountId: 'account-a' },
+        delivery: {
+          kind: 'web_url' as const,
+          url: 'https://v2.example.com',
+          launchToken: 'v2-launch-token',
+        },
+      },
+    }))
+    const resolved = await result.current.resolveLaunch(v2)
+    expect(resolved.subject).toMatchObject({ versionId: 'version-b', version: '3.0.0' })
+    // The stale v1 object can never resolve (version drift fails closed).
+    await expect(result.current.resolveLaunch(v1)).rejects.toThrow()
+  })
+
+  it('shows a tombstone after the entry disappears from the fresh Catalog', async () => {
+    const api = window.electronAPI as any
+    let payload: { entries: unknown[]; withdrawnEntries?: unknown[] } = { entries: [strictEntry()] }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'disappear-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      ...payload,
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+
+    // Main authority diff: the entry stopped being distributed and returns
+    // as a withdrawn tombstone while the fresh entries no longer list it.
+    payload = { entries: [], withdrawnEntries: [withdrawnTombstoneEntry()] }
+    await act(async () => {
+      await result.current.sync(true)
+    })
+
+    const tombstone = result.current.state.catalog?.withdrawnApps?.[0]
+    expect(tombstone).toBeTruthy()
+    expect(result.current.state.catalog?.apps).toHaveLength(0)
+    await expect(result.current.resolveLaunch(tombstone!)).rejects.toThrow()
+  })
+
+  it('keeps live and withdrawn install states separate when a catalogEntryId is reused across artifact instances', async () => {
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'collision-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-new',
+        version: { versionId: 'version-new', version: '2.0.0' },
+        name: 'Reused Entry',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+      withdrawnEntries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-old',
+        version: { versionId: 'version-old', version: '1.0.0' },
+        name: 'Reused Entry (old)',
+        description: '',
+        availability: 'withdrawn' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+    })
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      })))
+    getProductSpaceInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      }))) as never
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const live = result.current.state.catalog!.apps[0]!
+    const tombstone = result.current.state.catalog!.withdrawnApps?.[0]!
+    expect(tombstone).toMatchObject({
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-old',
+      availability: 'withdrawn',
+    })
+
+    // Both rows keep SEPARATE install states despite the shared
+    // catalogEntryId.
+    await waitFor(() => {
+      expect(result.current.getInstallState(live)?.state).toBe('installed')
+      expect(result.current.getInstallState(tombstone)?.state).toBe('installed')
+    })
+    expect(result.current.getInstallState(live)?.currentVersion).toBe('2.0.0')
+    expect(result.current.getInstallState(tombstone)?.currentVersion).toBe('1.0.0')
+
+    // The withdrawn old instance stays uninstallable.
+    await result.current.uninstallProductSpaceBundle(tombstone!, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-old',
+        versionId: 'version-old',
+      }),
+      { preserveData: true },
+    )
+    // ...and the live new instance keeps its own uninstall path too.
+    await result.current.uninstallProductSpaceBundle(live, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-new',
+      }),
+      { preserveData: true },
+    )
+  })
+
+  it('never merges install operations across colon-colliding catalog identities in one hook', async () => {
+    const api = window.electronAPI as any
+    let installDispatched = 0
+    const installGates: Array<() => void> = []
+    installProductSpaceBundle = mock((request: any) => {
+      installDispatched += 1
+      return new Promise<void>(resolve => {
+        installGates.push(resolve)
+      }).then(() => ({
+        appId: request.app.artifactInstanceId,
+        scope: {
+          kind: 'catalog' as const,
+          accountId: request.app.accountId,
+          organizationId: request.app.productSpaceId,
+          catalogAppId: request.app.artifactInstanceId,
+        },
+        status: 'installed' as const,
+        currentVersion: request.app.version,
+      }))
+    })
+
+    // One mounted hook (one ProductSpace context): the catalog swaps between
+    // two identities whose delimiter-joined op keys would both be
+    // 'product-space:a:b:c:v'.
+    let current = {
+      kind: 'app' as const,
+      catalogEntryId: 'c',
+      artifactInstanceId: 'a:b',
+      version: { versionId: 'v', version: '1.0.0' },
+      name: 'Collision A',
+      description: '',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio' }],
+      permissions: [],
+    }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'op-key-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [current],
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const appA = result.current.state.catalog!.apps[0]!
+    const pendingA = result.current.installProductSpaceBundle(appA)
+    await waitFor(() => expect(installDispatched).toBe(1))
+
+    // Swap the catalog to the colliding identity while A's install is still
+    // in flight, then install B: it must dispatch its OWN IPC instead of
+    // riding A's in-flight promise.
+    current = {
+      ...current,
+      catalogEntryId: 'b:c',
+      artifactInstanceId: 'a',
+      name: 'Collision B',
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.catalogEntryId).toBe('b:c')
+    })
+    const appB = result.current.state.catalog!.apps[0]!
+    const pendingB = result.current.installProductSpaceBundle(appB)
+    await waitFor(() => expect(installDispatched).toBe(2))
+
+    installGates.forEach(release => release())
+    await Promise.all([pendingA, pendingB])
+    // Each identity dispatched exactly one install.
+    expect(installDispatched).toBe(2)
+  })
+
+  it('single-flights concurrent same-instance installs without bypassing the in-flight slot', async () => {
+    const api = window.electronAPI as any
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'single-flight-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-sf',
+        artifactInstanceId: 'artifact-sf',
+        version: { versionId: 'version-sf', version: '1.0.0' },
+        name: 'Single Flight App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio SF' }],
+        permissions: [],
+      }],
+    })
+    let installDispatched = 0
+    const installGates: Array<() => void> = []
+    installProductSpaceBundle = mock((request: any) => {
+      installDispatched += 1
+      return new Promise<void>(resolve => {
+        installGates.push(resolve)
+      }).then(() => ({
+        appId: request.app.artifactInstanceId,
+        scope: {
+          kind: 'catalog' as const,
+          accountId: request.app.accountId,
+          organizationId: request.app.productSpaceId,
+          catalogAppId: request.app.artifactInstanceId,
+        },
+        status: 'installed' as const,
+        currentVersion: request.app.version,
+      }))
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const app = result.current.state.catalog!.apps[0]!
+    const first = result.current.installProductSpaceBundle(app)
+    const second = result.current.installProductSpaceBundle(app)
+    await waitFor(() => expect(installDispatched).toBe(1))
+    // The concurrent duplicate rides the in-flight slot: no second IPC.
+    installGates.forEach(release => release())
+    await Promise.all([first, second])
+    expect(installDispatched).toBe(1)
+  })
+
+  it('never merges uninstall operations across colon-collision identities, cross-scope reuse, or versions', async () => {
+    const api = window.electronAPI as any
+    let uninstallDispatched = 0
+    const uninstallGates: Array<() => void> = []
+    uninstallProductSpaceBundle = mock((identity: any, _options: { preserveData: boolean }) => {
+      uninstallDispatched += 1
+      return new Promise<void>(resolve => {
+        uninstallGates.push(resolve)
+      })
+    })
+
+    let current = {
+      kind: 'app' as const,
+      catalogEntryId: 'c',
+      artifactInstanceId: 'a:b',
+      version: { versionId: 'v', version: '1.0.0' },
+      name: 'Collision A',
+      description: '',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio' }],
+      permissions: [],
+    }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'uninstall-key-revision',
+      productSpaceId: 'space-a',
+      accessMode: 'online' as const,
+      entries: [current],
+    })
+    api.productSpaceResolveLaunch = async () => ({
+      success: true as const,
+      launch: {
+        contractVersion: 1,
+        productSpaceId: 'space-a',
+        catalogEntryId: current.catalogEntryId,
+        resolvedAt: '2099-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:10:00.000Z',
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: current.artifactInstanceId,
+          versionId: current.version.versionId,
+          version: current.version.version,
+        },
+        payer: { kind: 'personal' as const, accountId: 'account-a' },
+        delivery: {
+          kind: 'web_url' as const,
+          url: 'https://app.example.test',
+          launchToken: 'launch-token-value',
+        },
+      },
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const appA = result.current.state.catalog!.apps[0]!
+
+    // Uninstall A (colon-joined key would be product-space:a:b:c:v) and hold
+    // the slot open.
+    const pendingA = result.current.uninstallProductSpaceBundle(appA, true)
+    await waitFor(() => expect(uninstallDispatched).toBe(1))
+
+    // Swap the catalog to the COLLIDING identity (artifact a, entry b:c —
+    // same delimiter-joined key) while A's uninstall is in flight: B must
+    // dispatch its OWN uninstall instead of riding A's promise.
+    current = {
+      ...current,
+      catalogEntryId: 'b:c',
+      artifactInstanceId: 'a',
+      name: 'Collision B',
+    }
+    await result.current.sync(true)
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.catalogEntryId).toBe('b:c')
+    })
+    const appB = result.current.state.catalog!.apps[0]!
+    const pendingB = result.current.uninstallProductSpaceBundle(appB, true)
+    await waitFor(() => expect(uninstallDispatched).toBe(2))
+
+    // Release both gates: each identity completes its own uninstall.
+    uninstallGates.forEach(release => release())
+    await Promise.all([pendingA, pendingB])
+    expect(uninstallDispatched).toBe(2)
+  })
+
+  it('single-flights concurrent uninstalls of the same stable instance across version updates', async () => {
+    const api = window.electronAPI as any
+    let uninstallDispatched = 0
+    const uninstallGates: Array<() => void> = []
+    uninstallProductSpaceBundle = mock((identity: any, _options: { preserveData: boolean }) => {
+      uninstallDispatched += 1
+      return new Promise<void>(resolve => {
+        uninstallGates.push(resolve)
+      })
+    })
+
+    let version = { versionId: 'version-1', version: '1.0.0' }
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'uninstall-version-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-sf',
+        artifactInstanceId: 'artifact-sf',
+        version,
+        name: 'Versioned App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio SF' }],
+        permissions: [],
+      }],
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const appV1 = result.current.state.catalog!.apps[0]!
+
+    // Two concurrent uninstalls of the same stable instance: the second must
+    // ride the in-flight slot (no bypass), even though a version update
+    // between them changes the version tuple.
+    const first = result.current.uninstallProductSpaceBundle(appV1, true)
+    await waitFor(() => expect(uninstallDispatched).toBe(1))
+
+    version = { versionId: 'version-2', version: '2.0.0' }
+    await result.current.sync(true)
+    const appV2 = result.current.state.catalog!.apps[0]!
+    const second = result.current.uninstallProductSpaceBundle(appV2, true)
+
+    uninstallGates.forEach(release => release())
+    await Promise.all([first, second])
+    // The single-flight slot belongs to the stable instance: exactly one IPC.
+    expect(uninstallDispatched).toBe(1)
+  })
+
+  it('keeps live and withdrawn install states separate when the same artifactInstanceId is reissued under a new catalogEntryId', async () => {
+    const api = window.electronAPI as any
+    // Legal cross-version history: entry-old (artifact-X, v1) was withdrawn
+    // and the artifact was REISSUED as entry-new (artifact-X, v2). Both
+    // identities share the SAME runtime scope (artifact-X) but must remain
+    // separately addressable install states.
+    api.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      contractVersion: 1,
+      catalogRevision: 'reissue-revision',
+      productSpaceId: 'organization-a',
+      accessMode: 'online' as const,
+      entries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-new',
+        artifactInstanceId: 'artifact-X',
+        version: { versionId: 'version-2', version: '2.0.0' },
+        name: 'Reissued App',
+        description: '',
+        availability: 'available' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+      withdrawnEntries: [{
+        kind: 'app' as const,
+        catalogEntryId: 'entry-old',
+        artifactInstanceId: 'artifact-X',
+        version: { versionId: 'version-1', version: '1.0.0' },
+        name: 'Reissued App (old)',
+        description: '',
+        availability: 'withdrawn' as const,
+        sources: [{ kind: 'enterprise_import' as const, name: 'Studio A' }],
+        permissions: [],
+      }],
+    })
+    // The retained installation reports through BOTH channels (the runtime
+    // scope is the shared artifact instance).
+    getProductSpaceInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      }))) as never
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({
+        app: identity,
+        state: 'installed' as const,
+        currentVersion: identity.version as string,
+      })))
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const live = result.current.state.catalog!.apps[0]!
+    const withdrawn = result.current.state.catalog!.withdrawnApps?.[0]!
+
+    // Both echoed states COEXIST (no reconciliation wipe).
+    await waitFor(() => {
+      expect(result.current.getInstallState(live)?.state).toBe('installed')
+      expect(result.current.getInstallState(withdrawn)?.state).toBe('installed')
+    })
+    expect(result.current.getInstallState(live)?.currentVersion).toBe('2.0.0')
+    expect(result.current.getInstallState(withdrawn)?.currentVersion).toBe('1.0.0')
+
+    // The withdrawn row keeps its uninstall entry (its own identity).
+    await result.current.uninstallProductSpaceBundle(withdrawn, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-old',
+        artifactInstanceId: 'artifact-X',
+        versionId: 'version-1',
+      }),
+      { preserveData: true },
+    )
+    // ...and the live row uninstalls as its own identity too.
+    await result.current.uninstallProductSpaceBundle(live, true)
+    expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        catalogEntryId: 'entry-new',
+        artifactInstanceId: 'artifact-X',
+        versionId: 'version-2',
+      }),
+      { preserveData: true },
+    )
+  })
+})
+
+
+describe('real ProductSpace payload projection through useAppCatalog into the UI', () => {
+  function rawEntry(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'entry-live',
+      artifactInstanceId: 'artifact-live',
+      version: { versionId: 'version-live', version: '1.0.0' },
+      name: 'Live App',
+      description: 'launchable',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio L' }],
+      permissions: [],
+      ...overrides,
+    }
+  }
+
+  async function mountCatalog(entries: unknown[], spaceId = 'organization-a', accountId = 'account-a') {
+    productSpaceContextState = productSpaceContext(spaceId, accountId)
+    const catalogApi = window.electronAPI as unknown as {
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        knownRevision?: string,
+      ) => Promise<unknown>
+    }
+    catalogApi.productSpaceGetCatalog = async () => ({
+      success: true as const,
+      notModified: false as const,
+      catalogRevision: `rev-${spaceId}-${accountId}`,
+      productSpaceId: spaceId,
+      accessMode: 'online' as const,
+      entries,
+    })
+    const react = await import('@testing-library/react')
+    const { result } = react.renderHook(() => useAppCatalog())
+    await react.waitFor(() => {
+      if (result.current.state.catalog === null) throw new Error('catalog pending')
+    })
+    return result
+  }
+
+  it('a version_blocked raw entry reaches the blocked badge, reason reveal, and pin gating', async () => {
+    const result = await mountCatalog([
+      rawEntry(),
+      rawEntry({
+        catalogEntryId: 'entry-blocked',
+        artifactInstanceId: 'artifact-blocked',
+        name: 'Blocked App',
+        availability: 'blocked',
+        unavailableReason: 'version_blocked',
+      }),
+    ])
+    // The production mapper normalizes the blocked raw entry.
+    const blockedApp = result.current.state.catalog!.apps.find(
+      (app: CatalogApp) => app.catalogEntryId === 'entry-blocked',
+    )
+    expect(blockedApp).toMatchObject({
+      availability: 'unavailable',
+      unavailableReason: 'version_blocked',
+    })
+    // A blocked App can never enter the home pin source (available only).
+    expect(
+      result.current.state.catalog!.apps.filter(
+        (app: CatalogApp) => app.availability === 'available',
+      ).map((app: CatalogApp) => app.catalogEntryId),
+    ).toEqual(['entry-live'])
+
+    // AllAppsView rendered with the REAL mapped apps and the REAL identity
+    // keys from the hook (no test-side algorithm).
+    const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+    react.render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(AllAppsView, {
+        spaceName: 'Space',
+        spaceKind: 'enterprise',
+        apps: result.current.state.catalog!.apps,
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        offline: false,
+        restricted: false,
+        circleCount: 0,
+        pinnedIds: new Set<string>(),
+        onPin: () => {},
+        getInstallState: () => undefined,
+        identityKeyForApp: result.current.uiIdentityKeyForApp,
+        onRefresh: () => {},
+        onOpen: () => {},
+        onUninstall: () => {},
+        onBack: () => {},
+      }),
+    ))
+    const blockedKey = result.current.uiIdentityKeyForApp(blockedApp!)
+    expect(react.screen.getByText('Blocked')).toBeTruthy()
+    const reasonControl = react.screen.getByTestId(`all-apps-reason-${blockedKey}`)
+    expect((reasonControl as HTMLElement).getAttribute('aria-expanded')).toBe('false')
+    react.fireEvent.click(reasonControl)
+    expect(react.screen.getByTestId(`all-apps-reason-text-${blockedKey}`).textContent)
+      .toContain('Version blocked')
+    expect((reasonControl as HTMLElement).getAttribute('aria-expanded')).toBe('true')
+    expect(react.screen.queryByTestId(`all-apps-pin-${blockedKey}`)).toBeNull()
+    const liveApp = result.current.state.catalog!.apps.find(
+      (app: CatalogApp) => app.catalogEntryId === 'entry-live',
+    )
+    expect(react.screen.getByTestId(`all-apps-pin-${result.current.uiIdentityKeyForApp(liveApp!)}`))
+      .toBeTruthy()
+    react.cleanup()
+  })
+
+  it('schema-valid same-name Apps stay distinct through real pin/open/uninstall, and the parser rejects duplicates', async () => {
+    const { ProductSpaceCatalogResponseSchema } = await import('@polo-ai/shared/product-spaces')
+    // Production fixture: SAME NAME with DISTINCT entry AND artifact ids
+    // (both collision-relevant axes) — must be ACCEPTED by the real parser.
+    const schemaValidEntries = [
+      {
+        kind: 'built_in_app' as const,
+        builtInAppId: 'polo_assistant' as const,
+        catalogEntryId: 'assistant-entry',
+        name: 'Polo',
+        description: '',
+        availability: 'available' as const,
+      },
+      rawEntry({
+        catalogEntryId: 'entry-alpha',
+        artifactInstanceId: 'artifact-alpha',
+        version: { versionId: 'version-alpha', version: '1.1.0' },
+        name: 'Same Name App',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-beta',
+        artifactInstanceId: 'artifact-beta',
+        version: { versionId: 'version-beta', version: '1.2.0' },
+        name: 'Same Name App',
+      }),
+    ]
+    const parsed = ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-schema-valid',
+      entries: schemaValidEntries,
+    })
+    expect(parsed.success).toBe(true)
+
+    // Parser boundary: duplicate catalogEntryId is fail-closed rejected...
+    const duplicateEntry = ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-dup-entry',
+      entries: [
+        ...schemaValidEntries,
+        rawEntry({
+          catalogEntryId: 'entry-alpha',
+          artifactInstanceId: 'artifact-another',
+          version: { versionId: 'version-another', version: '9.0.0' },
+          name: 'Same Name App',
+        }),
+      ],
+    })
+    expect(duplicateEntry.success).toBe(false)
+    // ...and duplicate artifactInstanceId is fail-closed rejected too.
+    const duplicateArtifact = ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: 'organization-a',
+      catalogRevision: 'rev-dup-artifact',
+      entries: [
+        ...schemaValidEntries,
+        rawEntry({
+          catalogEntryId: 'entry-another',
+          artifactInstanceId: 'artifact-alpha',
+          version: { versionId: 'version-another', version: '9.0.0' },
+          name: 'Same Name App',
+        }),
+      ],
+    })
+    expect(duplicateArtifact.success).toBe(false)
+
+    // Drive the schema-valid payload through the real mapper into the UI.
+    const result = await mountCatalog(schemaValidEntries)
+    const apps: CatalogApp[] = result.current.state.catalog!.apps.filter(
+      (app: CatalogApp) => app.catalogEntryId !== 'assistant-entry',
+    )
+    expect(apps).toHaveLength(2)
+    const keys = apps.map(app => result.current.uiIdentityKeyForApp(app))
+    expect(new Set(keys).size).toBe(2)
+
+    const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+    const onPin = jest.fn()
+    const onOpen = jest.fn()
+    const onUninstall = jest.fn()
+    react.render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(AllAppsView, {
+        spaceName: 'Space',
+        spaceKind: 'enterprise',
+        apps: result.current.state.catalog!.apps,
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        offline: false,
+        restricted: false,
+        circleCount: 0,
+        pinnedIds: new Set<string>(),
+        onPin,
+        getInstallState: (target: CatalogApp) => ({
+          app: {
+            accountId: 'account-a',
+            productSpaceId: 'organization-a',
+            catalogRevision: 'rev-e2e',
+            catalogEntryId: target.catalogEntryId!,
+            artifactInstanceId: target.artifactInstanceId!,
+            versionId: target.catalogVersion!.versionId,
+            version: target.catalogVersion!.version,
+            sources: [{ kind: 'enterprise_import', name: 'Organization A', circleId: null }],
+            availability: 'available' as const,
+          },
+          state: 'installed' as const,
+          currentVersion: target.catalogVersion!.version,
+        }),
+        identityKeyForApp: result.current.uiIdentityKeyForApp,
+        onRefresh: () => {},
+        onOpen,
+        onUninstall,
+        onBack: () => {},
+      }),
+    ))
+    expect(react.screen.getAllByTestId('all-apps-row')).toHaveLength(2)
+    for (const key of keys) {
+      react.fireEvent.click(react.screen.getByTestId(`all-apps-pin-${key}`))
+    }
+    expect(onPin).toHaveBeenCalledTimes(2)
+    const pinnedTargets = new Set(onPin.mock.calls.map((call: any[]) => {
+      const app = call[0] as CatalogApp
+      return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+    }))
+    expect(pinnedTargets).toEqual(new Set([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ]))
+    for (const app of apps) {
+      react.fireEvent.click(react.screen.getByTestId(
+        `all-apps-action-${result.current.uiIdentityKeyForApp(app)}`,
+      ))
+    }
+    expect(onOpen.mock.calls.map((call: any[]) => {
+      const app = call[0] as CatalogApp
+      return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+    }).sort()).toEqual([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ])
+    // BOTH same-name rows are installed → both uninstallable, complete targets.
+    const uninstallButtons = react.screen.getAllByTestId(/^all-apps-uninstall-/)
+    expect(uninstallButtons).toHaveLength(2)
+    for (const button of uninstallButtons) {
+      react.fireEvent.click(button)
+    }
+    expect(onUninstall.mock.calls.map((call: any[]) => {
+      const app = call[0] as CatalogApp
+      return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+    }).sort()).toEqual([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ])
+    react.cleanup()
+  })
+
+  it('both account/space contexts render from raw payloads and drive pin/open/uninstall with complete targets', async () => {
+    const { AllAppsView } = await import('@/components/tab-browser/AllAppsView')
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+
+    // BOTH collision directions live in EVERY context, with install states
+    // bound to that context's account+space.
+    const rawEntries = [
+      rawEntry({
+        catalogEntryId: 'entry-s1',
+        name: 'Shared S1',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-s2',
+        name: 'Shared S2',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-old',
+        name: 'Dup Old',
+        version: { versionId: 'version-old', version: '1.0.0' },
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-dup',
+        artifactInstanceId: 'artifact-new',
+        name: 'Dup New',
+        version: { versionId: 'version-new', version: '2.0.0' },
+      }),
+    ]
+
+    for (const scope of [
+      { accountId: 'account-a', productSpaceId: 'organization-a' },
+      { accountId: 'account-b', productSpaceId: 'organization-b' },
+    ]) {
+      const result = await mountCatalog(rawEntries, scope.productSpaceId, scope.accountId)
+      const apps: CatalogApp[] = result.current.state.catalog!.apps
+      expect(apps).toHaveLength(4)
+      // Production keys from the REAL hook are context-bound.
+      const keys = apps.map(app => result.current.uiIdentityKeyForApp(app))
+      expect(new Set(keys).size).toBe(4)
+
+      const onPin = jest.fn()
+      const onOpen = jest.fn()
+      const onUninstall = jest.fn()
+      react.render(createElement(
+        I18nextProvider,
+        { i18n },
+        createElement(AllAppsView, {
+          spaceName: scope.productSpaceId,
+          spaceKind: 'enterprise',
+          apps,
+          loading: false,
+          refreshing: false,
+          warningCode: null,
+          errorCode: null,
+          offline: false,
+          restricted: false,
+          circleCount: 0,
+          pinnedIds: new Set<string>(),
+          onPin,
+          getInstallState: (target: CatalogApp) => target.artifactInstanceId === 'artifact-old'
+            || target.artifactInstanceId === 'artifact-new'
+            ? {
+              app: {
+                accountId: scope.accountId,
+                productSpaceId: scope.productSpaceId,
+                catalogRevision: 'rev-schema-valid',
+                catalogEntryId: target.catalogEntryId!,
+                artifactInstanceId: target.artifactInstanceId!,
+                versionId: target.catalogVersion!.versionId,
+                version: target.catalogVersion!.version,
+                sources: [{ kind: 'enterprise_import', name: 'Organization A', circleId: null }],
+                availability: 'available' as const,
+              },
+              state: 'installed' as const,
+              currentVersion: target.catalogVersion!.version,
+            }
+            : undefined,
+          identityKeyForApp: result.current.uiIdentityKeyForApp,
+          onRefresh: () => {},
+          onOpen,
+          onUninstall,
+          onBack: () => {},
+        }),
+      ))
+
+      // Pin: every row pinnable through its own production key, target carries
+      // the COMPLETE identity.
+      for (const key of keys) {
+        react.fireEvent.click(react.screen.getByTestId(`all-apps-pin-${key}`))
+      }
+      expect(onPin).toHaveBeenCalledTimes(4)
+      for (const call of onPin.mock.calls) {
+        const app = call[0] as CatalogApp
+        expect(app.organizationId).toBe(scope.productSpaceId)
+        expect(app.catalogEntryId).toBeTruthy()
+        expect(app.artifactInstanceId).toBeTruthy()
+        expect(app.catalogVersion?.versionId).toBeTruthy()
+        expect(app.catalogVersion?.version).toBeTruthy()
+      }
+      expect(new Set(onPin.mock.calls.map((call: any[]) => {
+        const app = call[0] as CatalogApp
+        return `${app.catalogEntryId}:${app.artifactInstanceId}`
+      })).size).toBe(4)
+
+      // Open: each row's action targets exactly its own identity.
+      for (const app of apps) {
+        react.fireEvent.click(react.screen.getByTestId(
+          `all-apps-action-${result.current.uiIdentityKeyForApp(app)}`,
+        ))
+      }
+      expect(onOpen).toHaveBeenCalledTimes(4)
+      const opened = onOpen.mock.calls.map((call: any[]) => {
+        const app = call[0] as CatalogApp
+        return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+      }).sort()
+      expect(opened).toEqual([
+        'entry-dup:artifact-new:2.0.0',
+        'entry-dup:artifact-old:1.0.0',
+        'entry-s1:artifact-live:1.0.0',
+        'entry-s2:artifact-live:1.0.0',
+      ])
+
+      // Uninstall: BOTH collision directions are installed in this context,
+      // each uninstall targeting its complete distinct identity.
+      const uninstallButtons = react.screen.getAllByTestId(/^all-apps-uninstall-/)
+      expect(uninstallButtons).toHaveLength(2)
+      react.fireEvent.click(uninstallButtons[0]!)
+      react.fireEvent.click(uninstallButtons[1]!)
+      expect(onUninstall).toHaveBeenCalledTimes(2)
+      const uninstalled = onUninstall.mock.calls.map((call: any[]) => {
+        const app = call[0] as CatalogApp
+        return `${app.catalogEntryId}:${app.artifactInstanceId}:${app.catalogVersion?.version}`
+      }).sort()
+      expect(uninstalled).toEqual([
+        'entry-dup:artifact-new:2.0.0',
+        'entry-dup:artifact-old:1.0.0',
+      ])
+      // The context binding of the install states is the rendering scope.
+      const installedArtifacts = apps
+        .filter(app => app.artifactInstanceId === 'artifact-old'
+          || app.artifactInstanceId === 'artifact-new')
+        .map(app => result.current.uiIdentityKeyForApp(app))
+      expect(new Set(installedArtifacts).size).toBe(2)
+
+      react.cleanup()
+      cleanup()
+      // The two contexts' production keys never collide with each other.
+      if (scope.accountId === 'account-a') {
+        (globalThis as Record<string, unknown>).__spaceAKeys = keys
+      } else {
+        const spaceAKeys = (globalThis as Record<string, unknown>).__spaceAKeys as string[]
+        for (const key of keys) {
+          expect(spaceAKeys).not.toContain(key)
+        }
+      }
+    }
+  })
+})
+
+const { HomePage, __resetHomeQuickWritersForTests } = await import('@/components/tab-browser/HomePage')
+
+describe('raw Catalog payload drives the production Home pin/open/uninstall paths', () => {
+
+  function rawEntry(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: 'app' as const,
+      catalogEntryId: 'entry-live',
+      artifactInstanceId: 'artifact-live',
+      version: { versionId: 'version-live', version: '1.0.0' },
+      name: 'Live App',
+      description: 'launchable',
+      availability: 'available' as const,
+      sources: [{ kind: 'enterprise_import' as const, name: 'Studio L' }],
+      permissions: [],
+      ...overrides,
+    }
+  }
+
+  const scopeA = { accountId: 'account-a', productSpaceId: 'organization-a' }
+
+  function wireElectronApi(options: {
+    entries: Array<Record<string, unknown>>
+    resolveLaunch?: (productSpaceId: string, catalogEntryId: string) => unknown
+  }) {
+    let saveCalls: Array<{ key: string; apps: Array<{ id: string; addedAt: number }> }> = []
+    let resolveCalls: Array<{ productSpaceId: string; catalogEntryId: string }> = []
+    let uninstallCalls: Array<{ identity: Record<string, unknown>; options: { preserveData: boolean } }> = []
+    // Layer the test-specific RPCs on TOP of the full beforeEach electronAPI
+    // stub, so every runtime channel the hook touches stays functional.
+    const base = (window.electronAPI ?? {}) as Record<string, any>
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        ...base,
+        localApps: {
+          ...base.localApps,
+          uninstallProductSpaceBundle: async (identity: any, opts: { preserveData: boolean }) => {
+            uninstallCalls.push({ identity, options: opts })
+          },
+        },
+        getHomeQuickAccess: async () => [],
+        setHomeQuickAccess: async (key: string, apps: Array<{ id: string; addedAt: number }>) => {
+          saveCalls.push({ key, apps })
+          return apps
+        },
+        productSpaceResolveLaunch: (productSpaceId: string, catalogEntryId: string) => {
+          resolveCalls.push({ productSpaceId, catalogEntryId })
+          const launch = options.resolveLaunch?.(productSpaceId, catalogEntryId)
+          return launch ?? { success: false as const, errorCode: 'SERVER_ERROR', message: 'not configured' }
+        },
+        productSpaceGetCatalog: (productSpaceId: string) => ({
+          success: true as const,
+          notModified: false as const,
+          catalogRevision: 'rev-e2e',
+          productSpaceId,
+          accessMode: 'online' as const,
+          entries: options.entries,
+        }),
+        adminGetStatus: async () => ({ loggedIn: false }),
+      },
+    })
+    return {
+      saveCalls,
+      resolveCalls,
+      uninstallCalls,
+      setInstalled(_artifacts: string[]) {
+        getProductSpaceInstallStates = async (identities: any[]) =>
+          identities.map(identity => ({
+            app: identity,
+            state: (identity.artifactInstanceId === 'artifact-alpha'
+              || identity.artifactInstanceId === 'artifact-beta')
+              ? ('installed' as const)
+              : ('not_installed' as const),
+            currentVersion: identity.version as string,
+          }))
+      },
+    }
+  }
+
+  it('pin, open and uninstall carry the complete identity through the REAL persistence, resolve-launch and uninstall RPCs (both collision directions)', async () => {
+    const react = await import('@testing-library/react')
+    const { createElement } = await import('react')
+    const { I18nextProvider } = await import('react-i18next')
+
+    // Schema-valid production fixture (ProductSpaceCatalogResponseSchema):
+    // same NAME with DISTINCT entry + artifact ids across BOTH collision
+    // axes; validated by the real parser boundary.
+    const { ProductSpaceCatalogResponseSchema } = await import('@polo-ai/shared/product-spaces')
+    const entries = [
+      {
+        kind: 'built_in_app' as const,
+        builtInAppId: 'polo_assistant' as const,
+        catalogEntryId: 'assistant-entry',
+        name: 'Polo',
+        description: '',
+        availability: 'available' as const,
+      },
+      rawEntry({
+        catalogEntryId: 'entry-alpha',
+        artifactInstanceId: 'artifact-alpha',
+        version: { versionId: 'version-alpha', version: '1.1.0' },
+        name: 'Same Name App',
+      }),
+      rawEntry({
+        catalogEntryId: 'entry-beta',
+        artifactInstanceId: 'artifact-beta',
+        version: { versionId: 'version-beta', version: '1.2.0' },
+        name: 'Same Name App',
+      }),
+    ]
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1,
+      productSpaceId: scopeA.productSpaceId,
+      catalogRevision: 'rev-e2e',
+      entries,
+    }).success).toBe(true)
+
+    const api = wireElectronApi({
+      entries,
+      resolveLaunch: (productSpaceId, catalogEntryId) => {
+        const appEntry = entries.find(
+          candidate => candidate.catalogEntryId === catalogEntryId,
+        ) as { artifactInstanceId: string; version: { versionId: string; version: string } }
+        return {
+          success: true as const,
+          launch: {
+            contractVersion: 1,
+            productSpaceId,
+            catalogEntryId,
+            resolvedAt: '2099-01-01T00:00:00.000Z',
+            expiresAt: '2099-01-01T00:10:00.000Z',
+            subject: {
+              kind: 'artifact_instance',
+              artifactType: 'app',
+              artifactInstanceId: appEntry.artifactInstanceId,
+              versionId: appEntry.version.versionId,
+              version: appEntry.version.version,
+            },
+            payer: { kind: 'personal', accountId: scopeA.accountId },
+            delivery: { kind: 'web_url', url: 'https://launched.example.com', launchToken: 't' },
+          },
+        }
+      },
+    })
+    api.setInstalled(['artifact-alpha', 'artifact-beta'])
+    getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
+      identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
+
+    const view = react.render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage),
+    ))
+    // The REAL hook syncs on mount; wait for the mapped catalog.
+    await waitFor(() => {
+      expect(within(view.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
+    })
+
+    // ---- PIN through the production persistence RPC ----
+    fireEvent.click(within(view.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    // The apps come from the REAL mapper (read through the same rendered
+    // rows): iterate the rows' own production identity keys.
+    const appEntries = (entries as Array<{
+      kind: string
+      catalogEntryId: string
+      artifactInstanceId: string
+      version: { versionId: string; version: string }
+      name: string
+    }>).filter(entry => entry.kind === 'app')
+    const apps: CatalogApp[] = appEntries.map(entry => ({
+      id: entry.catalogEntryId,
+      catalogEntryId: entry.catalogEntryId,
+      artifactInstanceId: entry.artifactInstanceId,
+      catalogVersion: entry.version,
+      organizationId: scopeA.productSpaceId,
+      name: entry.name,
+      description: '',
+      deliveryMode: 'resolve_launch' as const,
+      sortOrder: 0,
+      availability: 'available' as const,
+    }))
+    const { result } = react.renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      if (result.current.state.catalog === null) throw new Error('probe catalog pending')
+    })
+    const hook = result.current
+    for (const app of hook.state.catalog!.apps) {
+      fireEvent.click(within(view.container).getByTestId(
+        `all-apps-pin-${hook.uiIdentityKeyForApp(app)}`,
+      ))
+    }
+    await waitFor(() => {
+      if (api.saveCalls.length < 2) throw new Error('pin saves pending')
+    })
+    expect(api.saveCalls.every(call => call.key === `v1:${createProductSpaceContextKey(scopeA.accountId, scopeA.productSpaceId)}`)).toBe(true)
+    // The single-writer queue accumulates: the LAST write carries both.
+    // NOTE: the persisted id is deliberately VERSION-STABLE (account+space+
+    // entry+artifact) — pinning survives version upgrades; the OPEN path
+    // re-validates against the CURRENT Catalog (resolve-launch re-checks
+    // entry/artifact/version) and uninstall binds the full version identity.
+    const pinnedIds = (api.saveCalls[1]?.apps ?? []).map(entry => entry.id)
+    expect(pinnedIds).toHaveLength(2)
+    const decoded = pinnedIds.map(id => JSON.parse(id))
+    for (const tuple of decoded) {
+      expect(tuple[0]).toBe('product-space-ui')
+      expect(tuple[1]).toBe(scopeA.accountId)
+      expect(tuple[2]).toBe(scopeA.productSpaceId)
+    }
+    expect(new Set(decoded.map(tuple => `${tuple[3]}:${tuple[4]}`))).toEqual(new Set([
+      'entry-alpha:artifact-alpha',
+      'entry-beta:artifact-beta',
+    ]))
+
+    // ---- OPEN through the production resolve-launch RPC ----
+    // Pin the subject mapping in CARD ORDER (first resolve per entry wins).
+    let resolveDupCursor = 0
+    const resolveSeenEntryByCatalogEntryId = new Map<string, Record<string, unknown>>()
+    const resolveEntryByCatalogEntryId = (catalogEntryId: string): Record<string, unknown> => {
+      const seen = resolveSeenEntryByCatalogEntryId.get(catalogEntryId)
+      if (seen) return seen
+      const candidates = entries.filter(candidate => candidate.catalogEntryId === catalogEntryId)
+      const entry = candidates.length > 1
+        ? candidates[resolveDupCursor % candidates.length]!
+        : candidates[0]!
+      if (candidates.length > 1) resolveDupCursor += 1
+      resolveSeenEntryByCatalogEntryId.set(catalogEntryId, entry)
+      return entry
+    }
+    fireEvent.click(within(view.container).getByTestId('all-apps-back'))
+    await waitFor(() => {
+      expect(within(view.container).queryByTestId('all-apps-view')).toBeNull()
+    })
+    // A background install-state refresh may advance the hook generation
+    // mid-open (fail-closed stale-context): keep clicking the still-
+    // unpublished rows until every distinct subject has been published.
+    const publishedSubjectSet = () => new Set(launchHandoffPublish.mock.calls.map((call: any[]) => {
+      const launch = call[1] as { subject: { artifactInstanceId: string; versionId: string; version: string } }
+      return `${launch.subject.artifactInstanceId}:${launch.subject.versionId}:${launch.subject.version}`
+    }))
+    // Production semantics: the schema guarantees unique entry AND artifact
+    // ids, so resolve-by-entry is unambiguous — each card's publish subject
+    // is its own artifact+version.
+    // Bounded, event-driven retry: each round clicks a live card and then
+    // waits for the NEXT resolve-launch RPC (a real observable barrier)
+    // before re-evaluating the published-subject coverage.
+    const resolvesBefore = api.resolveCalls.length
+    for (let round = 0; round < 8 && publishedSubjectSet().size < 2; round++) {
+      const before = api.resolveCalls.length
+      const liveCards = Array.from(
+        view.container.querySelectorAll('[data-testid="home-quick-entry"]'),
+      )
+      const target = liveCards[round % Math.max(1, liveCards.length)]
+      if (!target) break
+      fireEvent.click(target)
+      await waitFor(() => {
+        if (api.resolveCalls.length <= before) return undefined
+        return true
+      })
+    }
+    void resolvesBefore
+    // Every entry (all three catalogEntryIds) went through the REAL
+    // resolve-launch RPC.
+    expect(api.resolveCalls.length).toBeGreaterThanOrEqual(2)
+    expect(api.resolveCalls.every(call => call.productSpaceId === scopeA.productSpaceId)).toBe(true)
+    expect(new Set(api.resolveCalls.map(call => call.catalogEntryId))).toEqual(new Set([
+      'entry-alpha', 'entry-beta',
+    ]))
+    // The launch handoff carries the account + full subject identity
+    // (artifactInstanceId + versionId + version) for every opened row.
+    expect(launchHandoffPublish.mock.calls.length).toBeGreaterThanOrEqual(2)
+    const publishedAccounts = new Set(launchHandoffPublish.mock.calls.map((call: any[]) => call[0]))
+    expect(publishedAccounts).toEqual(new Set([scopeA.accountId]))
+    const publishedSubjects = new Set(launchHandoffPublish.mock.calls.map((call: any[]) => {
+      const launch = call[1] as { subject: { artifactInstanceId: string; versionId: string; version: string } }
+      return `${launch.subject.artifactInstanceId}:${launch.subject.versionId}:${launch.subject.version}`
+    }))
+    expect(publishedSubjects).toEqual(new Set([
+      'artifact-alpha:version-alpha:1.1.0',
+      'artifact-beta:version-beta:1.2.0',
+    ]))
+
+    // ---- UNINSTALL through the production uninstall RPC (both collision
+    // directions are installed rows) ----
+    fireEvent.click(within(view.container).getByTestId('home-all-apps-open'))
+    await waitFor(() => {
+      expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
+    })
+    const uninstallButtons = within(view.container).getAllByTestId(/^all-apps-uninstall-/)
+    expect(uninstallButtons).toHaveLength(2)
+    for (const button of uninstallButtons) {
+      fireEvent.click(button)
+      // The confirm dialog's destructive action carries the uninstall copy.
+      const confirm = await waitFor(() => {
+        const dialog = document.querySelector('[role="dialog"]')
+        const buttons = dialog ? Array.from(dialog.querySelectorAll('button')) : []
+        const target = buttons.find(candidate => candidate.textContent === 'Uninstall')
+        if (!target) throw new Error('confirm pending')
+        return target
+      })
+      fireEvent.click(confirm)
+      await waitFor(() => {
+        if (api.uninstallCalls.length === 0) throw new Error('uninstall rpc pending')
+      }, { timeout: 2000 })
+    }
+    await waitFor(() => {
+      if (api.uninstallCalls.length < 2) throw new Error('uninstall pending')
+    })
+    expect(api.uninstallCalls).toHaveLength(2)
+    const uninstalledKeys = new Set(api.uninstallCalls.map(call => JSON.stringify([
+      call.identity.accountId,
+      call.identity.productSpaceId,
+      call.identity.catalogEntryId,
+      call.identity.artifactInstanceId,
+      call.identity.versionId,
+      call.identity.version,
+    ])))
+    expect(uninstalledKeys.size).toBe(2)
+    for (const call of api.uninstallCalls) {
+      expect(call.identity.accountId).toBe(scopeA.accountId)
+      expect(call.identity.productSpaceId).toBe(scopeA.productSpaceId)
+      expect(call.options.preserveData).toBe(true)
+    }
+    const uninstalledPairs = api.uninstallCalls.map(call =>
+      `${call.identity.catalogEntryId}:${call.identity.artifactInstanceId}:${call.identity.version}`).sort()
+    expect(uninstalledPairs).toEqual([
+      'entry-alpha:artifact-alpha:1.1.0',
+      'entry-beta:artifact-beta:1.2.0',
+    ])
+
     view.unmount()
+    __resetHomeQuickWritersForTests()
   })
 })

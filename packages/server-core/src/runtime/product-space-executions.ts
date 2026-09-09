@@ -461,7 +461,67 @@ export async function revokeRuntimeProductSpaceFence(): Promise<void> {
   await withSwitchLock(async () => {
     setRuntimeOfflineReadOnly(false)
     setRuntimeActiveProductSpace(null)
-  })
+  }, { phase: 'runtime-revoke-fence' } as const)
+}
+
+export type RuntimeFenceRevokeOutcome =
+  | 'revoked'
+  | 'already_clear'
+  | 'scope_moved'
+  | 'generation_moved'
+
+export interface ExpectedRuntimeFenceScope {
+  accountId: string
+  productSpaceId: string
+  /**
+   * Fence generation observed when the caller's request entered the
+   * ProductSpace scope. Revocation only applies while the CURRENT fence is
+   * exactly the observed one: a concurrently committed switch (new account,
+   * new space, or a torn-down-and-rebuilt fence) is never torn down by an
+   * older denial.
+   */
+  fenceGeneration: number
+}
+
+/**
+ * Catalog-denial fence decision — MUST be called while HOLDING the switch
+ * lock. Compare-and-revoke in the caller's critical section: the expected
+ * account+space+generation binding is captured BEFORE the lock; the live
+ * fence must still match exactly. An in-flight A→B switch that re-commits
+ * the fence after the observation therefore leaves the new B fence
+ * untouched.
+ */
+export function revokeRuntimeProductSpaceFenceIfBoundLocked(
+  expected: ExpectedRuntimeFenceScope,
+): RuntimeFenceRevokeOutcome {
+  if (runtimeActiveProductSpaceId === null) return 'already_clear'
+  if (
+    runtimeActiveProductSpaceId !== expected.productSpaceId
+    || runtimeActiveAccountId !== expected.accountId
+  ) {
+    return 'scope_moved'
+  }
+  if (runtimeFenceGeneration !== expected.fenceGeneration) {
+    return 'generation_moved'
+  }
+  setRuntimeOfflineReadOnly(false)
+  setRuntimeActiveProductSpace(null)
+  return 'revoked'
+}
+
+/**
+ * Catalog-denial fence revocation: acquires the switch lock and delegates
+ * to the locked decision, so the compare and the revoke complete in ONE
+ * critical section. Awaits the lock — the caller cannot observe its own
+ * error path before the fence state is durably decided — and propagates
+ * lock/operation failures to the caller.
+ */
+export async function revokeRuntimeProductSpaceFenceIfBound(
+  expected: ExpectedRuntimeFenceScope,
+): Promise<RuntimeFenceRevokeOutcome> {
+  return withSwitchLock(async (): Promise<RuntimeFenceRevokeOutcome> =>
+    revokeRuntimeProductSpaceFenceIfBoundLocked(expected),
+  { phase: 'runtime-revoke-fence-if-bound' })
 }
 
 /**
@@ -614,22 +674,27 @@ export async function stopRegisteredProductSpaceExecutionsForSpace(
  * blocking, termination, target verification and the fence commit all run
  * inside this lock so no interleaved registration can slip between
  * enumeration and commit.
+ *
+ * The mutex itself and its test observation registry live in the
+ * package-INTERNAL module `./switch-lock-internal` (absent from the package
+ * `exports` map). This public subpath exposes only:
+ * - `runUnderSwitchMutex` — the narrow, unlabeled production mutex runner
+ *   needed by the local-app start path;
+ * - the surrounding switch transaction/fence APIs.
+ * It does NOT re-export the labeled scheduler or its observation registry.
  */
-let switchLockTail: Promise<unknown> = Promise.resolve()
+import { withSwitchLock } from './switch-lock-internal'
 
-export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = switchLockTail
-  let release!: () => void
-  switchLockTail = new Promise<void>(resolve => {
-    release = resolve
-  })
-  await previous.catch(() => {})
-  try {
-    return await operation()
-  } finally {
-    release()
-  }
+/**
+ * PUBLIC narrow mutex runner for the local-app start path: runs `operation`
+ * under the same switch mutex as switch transactions. Deliberately carries
+ * NO labels and exposes NO observation registry — the scheduler test seam
+ * lives only in the package-internal instrumentation module.
+ */
+export async function runUnderSwitchMutex<T>(operation: () => Promise<T>): Promise<T> {
+  return withSwitchLock(operation, { phase: 'runtime-public-mutex' })
 }
+
 
 /**
  * While a switch transaction is in flight — including the async window

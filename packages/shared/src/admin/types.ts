@@ -200,7 +200,7 @@ export interface ListOrganizationsResponse {
   organizations: OrganizationSummary[];
 }
 
-export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle';
+export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle' | 'resolve_launch';
 
 export interface AppReleaseSummary {
   id?: string;
@@ -227,6 +227,17 @@ export interface AppReleaseDownload {
 
 export interface CatalogApp {
   id: string;
+  /** ProductSpace Catalog identity. Present for the unified member Catalog. */
+  catalogEntryId?: string;
+  artifactInstanceId?: string;
+  catalogVersion?: {
+    versionId: string;
+    version: string;
+    checksum?: string;
+  };
+  /** All authoritative distribution sources; never inferred from the name. */
+  sourceNames?: string[];
+  unavailableReason?: string;
   organizationId: string;
   name: string;
   description: string;
@@ -243,6 +254,20 @@ export interface CatalogApp {
    * no longer be launched without silently deleting it.
    */
   availability?: 'available' | 'withdrawn' | 'unavailable';
+  /**
+   * Normalized RAW authoritative sources of the Catalog entry this app was
+   * projected from. The UI-facing `sourceNames` above is a display
+   * projection (deduped names); operation identities seal THESE sources so
+   * Main can prove them against its captured authority binding.
+   */
+  catalogSources?: ReadonlyArray<{ kind: string; name?: string; circleId?: string }>;
+  /**
+   * RAW Catalog availability of the authoritative entry (including
+   * 'withdrawn' for retained tombstones). The effective `availability` above
+   * is intentionally lossy ('blocked' collapses into 'unavailable'), so
+   * operation identities seal THIS value instead.
+   */
+  rawAvailability?: 'available' | 'unavailable' | 'blocked' | 'withdrawn';
 }
 
 export interface AppCatalogResponse {
@@ -286,6 +311,12 @@ export interface DeniedCatalogApp extends Pick<
   | 'creatorName'
   | 'deliveryMode'
   | 'sortOrder'
+  // Non-secret stable UI identity: retained so the frozen restricted view
+  // can key/address rows (live vs withdrawn) without exposing any delivery
+  // capability.
+  | 'catalogEntryId'
+  | 'artifactInstanceId'
+  | 'sourceNames'
 > {
   availability: 'unavailable';
 }

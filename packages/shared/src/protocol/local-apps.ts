@@ -133,6 +133,63 @@ export interface LocalAppCatalogInstallRequest {
   permissions: string[]
 }
 
+/**
+ * One normalized authoritative source, sealed in canonical
+ * null-coalesced form (idempotent under re-normalization) so Main can
+ * compare the renderer-confirmed sources against its captured authority
+ * binding byte-for-byte without re-deriving absent fields.
+ */
+export interface ProductSpaceAppIdentitySource {
+  kind: string
+  name: string | null
+  circleId: string | null
+}
+
+/**
+ * Immutable identity copied from one validated ProductSpace Catalog entry.
+ * Main re-fetches the authoritative Catalog and compares every field before
+ * reading installation state, installing, or uninstalling a bundle.
+ */
+export interface ProductSpaceAppIdentity {
+  accountId: string
+  productSpaceId: string
+  catalogEntryId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+  /**
+   * The catalog revision the renderer confirmed when building this
+   * identity. Renderer-supplied: it serves ONLY as an index — Main proves
+   * it against its own pre-await captured authority binding.
+   */
+  catalogRevision: string
+  /**
+   * The normalized authoritative sources of the rendered entry, in canonical
+   * null-coalesced form. Renderer-sealed from the SAME entry the operation
+   * was confirmed against; Main proves them against its pre-await captured
+   * authority binding before any registry call.
+   */
+  sources: ReadonlyArray<ProductSpaceAppIdentitySource>
+  /**
+   * The RAW authoritative availability of the rendered entry (including
+   * 'withdrawn' for retained tombstones). The UI-effective availability is a
+   * lossy projection ('blocked' collapses into 'unavailable') and is
+   * therefore never used for identity sealing.
+   */
+  availability: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
+}
+
+export interface ProductSpaceBundleInstallRequest {
+  app: ProductSpaceAppIdentity
+}
+
+export interface ProductSpaceAppInstallState {
+  app: ProductSpaceAppIdentity
+  state: 'not_installed' | 'installing' | 'installed'
+  currentVersion?: string
+  progressPercent?: number
+}
+
 export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {
   scope: LegacyLocalAppScope
 }
@@ -326,6 +383,8 @@ export type LocalAppErrorCode =
   | 'RUNTIME_UNAVAILABLE'
   | 'DEPENDENCY_INSTALL_FAILED'
   | 'RELEASE_CHANGED'
+  | 'CATALOG_ENTRY_MISSING'
+  | 'CATALOG_IDENTITY_DRIFT'
   | 'NOT_AUTHORIZED'
   | 'NOT_INSTALLED'
   | 'SWITCH_IN_PROGRESS'

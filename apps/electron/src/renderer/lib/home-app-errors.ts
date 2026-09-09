@@ -1,12 +1,12 @@
 import type { TFunction } from 'i18next'
 
-export type HomeAppOperation =
-  | 'cancel'
-  | 'install'
-  | 'logs'
-  | 'open'
-  | 'stop'
-  | 'uninstall'
+/**
+ * POO-43 member operations only: runtime stop/log/cancel controls belong to
+ * the POO-47 Runtime and must never resurface through these home messages.
+ */
+export type HomeAppOperation = 'install' | 'open' | 'uninstall'
+
+export type HomeAppSpaceKind = 'personal' | 'enterprise' | null
 
 export function getHomeAppErrorCode(error: unknown): string | null {
   if (!error || typeof error !== 'object') return null
@@ -22,10 +22,14 @@ export function homeAppOperationErrorText(
   t: TFunction,
   error: unknown,
   operation: HomeAppOperation,
+  spaceKind: HomeAppSpaceKind = null,
 ): string {
   const code = getHomeAppErrorCode(error)
   if (code === 'NOT_AUTHORIZED' || code === 'FORBIDDEN' || code === 'UNAUTHORIZED') {
-    return t('homeApps.errors.unavailable')
+    // Personal-space circle grants never use organization phrasing.
+    return spaceKind === 'enterprise'
+      ? t('homeApps.errors.unavailable')
+      : t('homeApps.status.unauthorizedPersonal')
   }
   if (code === 'PLATFORM_MISMATCH' || code === 'ARCH_MISMATCH') {
     return t('homeApps.status.incompatible')
@@ -58,11 +62,8 @@ export function homeAppOperationErrorText(
   }
 
   const fallbackKeys: Record<HomeAppOperation, string> = {
-    cancel: 'homeApps.errors.cancelInstallGeneric',
     install: 'homeApps.errors.installGeneric',
-    logs: 'homeApps.errors.logsGeneric',
     open: 'homeApps.errors.openGeneric',
-    stop: 'homeApps.errors.stopGeneric',
     uninstall: 'homeApps.errors.uninstallGeneric',
   }
   return t(fallbackKeys[operation])
@@ -72,14 +73,16 @@ export function catalogStateMessage(
   t: TFunction,
   code: string | null,
   kind: 'warning' | 'error',
+  spaceKind: HomeAppSpaceKind = null,
 ): string {
   if (code === 'INVALID_SEMVER') {
     return t('homeApps.organization.invalidVersionWarning')
   }
   if (code === 'NETWORK_ERROR' || code === 'SERVER_ERROR' || code === 'TIMEOUT') {
-    return kind === 'warning'
-      ? t('homeApps.organization.offlineWarning')
-      : t('homeApps.organization.networkError')
+    if (kind === 'warning') return t('homeApps.organization.offlineWarning')
+    return spaceKind === 'enterprise'
+      ? t('homeApps.organization.networkError')
+      : t('homeApps.space.networkError')
   }
   if (
     code === 'FORBIDDEN'
@@ -89,9 +92,12 @@ export function catalogStateMessage(
     || code === 'MEMBERSHIP_SUSPENDED'
     || code === 'ORGANIZATION_UNAVAILABLE'
   ) {
-    return t('homeApps.organization.accessError')
+    return spaceKind === 'enterprise'
+      ? t('homeApps.organization.accessError')
+      : t('homeApps.space.accessError')
   }
-  return kind === 'warning'
-    ? t('homeApps.organization.refreshWarning')
-    : t('homeApps.organization.loadError')
+  if (kind === 'warning') return t('homeApps.organization.refreshWarning')
+  return spaceKind === 'enterprise'
+    ? t('homeApps.organization.loadError')
+    : t('homeApps.space.loadError')
 }

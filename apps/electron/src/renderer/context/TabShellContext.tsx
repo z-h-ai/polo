@@ -51,7 +51,6 @@ interface TabShellContextValue {
   openApp: (app: AppDefinition) => void
   closeTab: (tabId: string) => void
   reorderTabs: (draggedTabId: string, targetTabId: string) => void
-  addApp: (app: AppDefinition) => Promise<void>
   removeApp: (appId: string) => Promise<void>
   updateTabInfo: (update: { id: string } & Partial<Omit<TabInstance, 'id'>>) => void
   registerWebAppNavigation: (tabId: string, controls: WebAppNavigationControls | null) => void
@@ -85,6 +84,7 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
 }
 
 export function TabShellProvider({ workspaceId, productSpaceScope, children }: TabShellProviderProps) {
+  const isProductSpaceWindow = Boolean(productSpaceScope)
   const [installedApps, setInstalledAppsState] = useAtom(installedAppsAtom)
   const [openTabs, setOpenTabs] = useAtom(openTabsAtom)
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
@@ -127,7 +127,12 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       // The Main side derives the installed-apps partition from trusted
       // state (account + fence + window workspace) — the renderer never
       // names the scope.
-      const persistedApps = await window.electronAPI.getTabBrowserApps().catch(() => [])
+      // ProductSpace member windows never hydrate the legacy External App
+      // sideload store. Keeping the old records on disk is migration-safe,
+      // but they cannot restore a launcher or tab and bypass the Catalog.
+      const persistedApps = isProductSpaceWindow
+        ? []
+        : await window.electronAPI.getTabBrowserApps().catch(() => [])
       if (cancelled) return
 
       const apps = normalizeInstalledApps(persistedApps)
@@ -144,7 +149,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     return () => {
       cancelled = true
     }
-  }, [setActiveTabId, setInstalledApps, setOpenTabs, storageScope])
+  }, [isProductSpaceWindow, setActiveTabId, setInstalledApps, setOpenTabs, storageScope])
 
   useEffect(() => {
     if (!hydratedRef.current) return
@@ -161,10 +166,6 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       normalized.filter((app) => !BUILTIN_APP_IDS.has(app.id)),
     )
   }, [setInstalledAppsState])
-
-  const addApp = useCallback(async (app: AppDefinition) => {
-    await persistApps([...installedApps.filter((item) => item.id !== app.id), app])
-  }, [installedApps, persistApps])
 
   const removeApp = useCallback(async (appId: string) => {
     if (BUILTIN_APP_IDS.has(appId)) return
@@ -215,7 +216,6 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
       nextTabs.splice(targetIndex, 0, dragged)
       reorderTabsWrite(nextTabs)
     },
-    addApp,
     removeApp,
     updateTabInfo,
     registerWebAppNavigation,
@@ -224,7 +224,6 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     activeTabId,
     activeWebAppNavigation,
     activateTabWrite,
-    addApp,
     closeTabWrite,
     installedApps,
     isReady,

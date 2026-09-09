@@ -17,6 +17,10 @@ interface HomeSpaceContextProps {
    * across a space transition.
    */
   spaceKey?: string
+  enterpriseRole?: 'owner' | 'manager' | 'member'
+  enterpriseAccessMode?: 'active' | 'read_only'
+  onOpenMemberManagement?: () => void
+  onOpenCreatorPublishing?: () => void
 }
 
 /**
@@ -32,6 +36,10 @@ export function HomeSpaceContext({
   spaceKind,
   creatorCircles,
   spaceKey,
+  enterpriseRole,
+  enterpriseAccessMode,
+  onOpenMemberManagement,
+  onOpenCreatorPublishing,
 }: HomeSpaceContextProps) {
   const { t } = useTranslation()
   const [view, setView] = useState<'context' | 'circles'>('context')
@@ -105,6 +113,48 @@ export function HomeSpaceContext({
               ? t('homeSpace.context.enterpriseDescription')
               : t('homeSpace.context.personalDescription')}
           </p>
+          {spaceKind === 'enterprise' && enterpriseRole && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2" data-testid="enterprise-workflow-links">
+              <button
+                type="button"
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-foreground/8 px-3 py-2 text-left hover:bg-foreground/4"
+                onClick={onOpenMemberManagement}
+                data-testid="enterprise-member-management-link"
+              >
+                <Icons.Users className="size-4 text-accent" />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold">{t('homeSpace.workflows.members')}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {enterpriseAccessMode === 'read_only'
+                      ? t('homeSpace.workflows.restricted')
+                      : enterpriseRole === 'member'
+                      ? t('homeSpace.workflows.viewOnly')
+                      : t('homeSpace.workflows.manageable')}
+                  </span>
+                </span>
+                <Icons.ExternalLink className="size-3.5 text-muted-foreground" />
+              </button>
+              <button
+                type="button"
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-foreground/8 px-3 py-2 text-left hover:bg-foreground/4"
+                onClick={onOpenCreatorPublishing}
+                data-testid="enterprise-creator-publishing-link"
+              >
+                <Icons.UploadCloud className="size-4 text-accent" />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold">{t('homeSpace.workflows.publishing')}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {enterpriseAccessMode === 'read_only'
+                      ? t('homeSpace.workflows.restricted')
+                      : enterpriseRole === 'member'
+                      ? t('homeSpace.workflows.viewOnly')
+                      : t('homeSpace.workflows.publishable')}
+                  </span>
+                </span>
+                <Icons.ExternalLink className="size-3.5 text-muted-foreground" />
+              </button>
+            </div>
+          )}
           {showCirclesEntry && (
             <button
               type="button"

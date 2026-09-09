@@ -122,7 +122,7 @@ const CatalogVersionSummarySchema = z.object({
   version: nonBlankString(512),
   checksum: checksum.optional(),
 }).strict()
-const CatalogSourceSchema = z.discriminatedUnion('kind', [
+export const CatalogSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('polo'), name: z.literal('Polo') }).strict(),
   z.object({ kind: z.literal('creator_circle'), circleId: CreatorCircleIdSchema, name: nonBlankString(256) }).strict(),
   z.object({ kind: z.literal('enterprise_import'), name: nonBlankString(256) }).strict(),
@@ -479,6 +479,13 @@ function assertLaunchSubjectMatchesCatalogEntry(
     response.subject.kind !== 'artifact_instance'
     || response.subject.artifactType !== entry.kind
     || response.subject.artifactInstanceId !== entry.artifactInstanceId
+    || response.subject.versionId !== entry.version.versionId
+    || response.subject.version !== entry.version.version
+  ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
+  if (
+    entry.version.checksum
+    && response.delivery.kind === 'bundle'
+    && response.delivery.checksum !== entry.version.checksum
   ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
 }
 

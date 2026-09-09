@@ -413,8 +413,11 @@ export default function App() {
     currentAdminUserIdRef.current = nextAccountId
     setCurrentAdminUser(user)
   }, [])
-  // REQ-010/POO-41 frozen guard: below 640px the workbench/hub is replaced
-  // by the fullscreen narrow-window guard.
+  // Narrow-viewport surface boundary (Review R31/R32): the route-scoped
+  // narrow guard and the Home-only narrow rendering boundary live inside the
+  // ready shell (TabShell/TabContent, provider-owned hydrated route), so the
+  // lifecycle screens below are NEVER blocked by the unhydrated ambient tab
+  // atom. The narrow viewport only drives retained-preview cleanup here.
   const narrowViewport = useNarrowViewport()
   const productSpaceRefreshGenerationRef = useRef(0)
   const invalidateProductSpaceDeepLinkRefresh = useCallback(() => {
@@ -2295,6 +2298,9 @@ export default function App() {
   // show an in-app preview overlay or open externally. Replaces the old
   // handleOpenFile/handleOpenUrl that always opened in external apps.
   const linkInterceptor = useLinkInterceptor({
+    // Scope seal (Review R33/R34): every opened preview is stamped with the
+    // immutable ProductSpace context key that opened it.
+    scopeKey: () => productSpace.productSpaceContextKey ?? null,
     openFileExternal: async (path) => {
       try {
         await window.electronAPI.openFile(path)
@@ -2338,6 +2344,28 @@ export default function App() {
     readFileDataUrl: (path) => window.electronAPI.readFileDataUrl(path),
     readFileBinary: (path) => window.electronAPI.readFileBinary(path),
   })
+  // Entering the narrow viewport closes any retained file preview: the
+  // narrow-Home surface never mounts the preview renderer, and a retained
+  // preview must not resurface when the window is widened again.
+  // Review R33/R34: a preview SEALED to a previous scope (stale epoch/key)
+  // is closed as well — the render-time rejection below covers the first
+  // committed layout; this passive close releases the retained state.
+  useEffect(() => {
+    if (!linkInterceptor.previewState) return
+    const stale = narrowViewport
+      || linkInterceptor.previewState.scopeKey !== (productSpace.productSpaceContextKey ?? null)
+    if (stale) linkInterceptor.closePreview()
+  }, [narrowViewport, linkInterceptor.previewState, linkInterceptor.closePreview, productSpace.productSpaceContextKey])
+
+  // Render-time scope seal (Review R33/R34): a preview opened under a
+  // PREVIOUS account/ProductSpace epoch is rejected SYNCHRONOUSLY — the
+  // target scope's first committed layout never mounts or displays the
+  // stale preview overlay/content/path. (The passive close above then
+  // releases the retained state.)
+  const previewScopeKey = linkInterceptor.previewState?.scopeKey ?? null
+  const previewStale =
+    linkInterceptor.previewState !== null
+    && previewScopeKey !== (productSpace.productSpaceContextKey ?? null)
 
   const connectionState = useTransportConnectionState()
   const showTransportConnectionBanner = shouldShowTransportConnectionBanner(connectionState)
@@ -2819,12 +2847,6 @@ export default function App() {
     },
   }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
 
-  // Narrow-window guard (POO-41 frozen): below 640px the workbench/hub is
-  // hidden and the fullscreen guard renders instead of any product UI.
-  if (narrowViewport) {
-    return <WindowWidthGuard />
-  }
-
   // Loading state - show splash screen
   if (appState === 'loading') {
     return <SplashScreen isExiting={false} />
@@ -3150,15 +3172,21 @@ export default function App() {
               />
               {/* File preview overlay — lives INSIDE the ProductSpace-keyed
                   boundary so a committed switch unmounts any origin-space file
-                  preview together with the rest of the origin projection. */}
-              {linkInterceptor.previewState && (
-                <FilePreviewRenderer
-                  state={linkInterceptor.previewState}
-                  onClose={linkInterceptor.closePreview}
-                  loadDataUrl={linkInterceptor.readFileDataUrl}
-                  loadPdfData={linkInterceptor.readFileBinary}
-                  isDark={isDark}
-                />
+                  preview together with the rest of the origin projection.
+                  Review R31/R32: a narrow viewport never mounts the preview
+                  renderer — retained previews are closed on entry (effect at
+                  the useNarrowViewport declaration) so the POO-43 Home
+                  surface can never be overlaid by a preview. */}
+              {linkInterceptor.previewState && !previewStale && !narrowViewport && (
+                <div data-testid="file-preview-overlay">
+                  <FilePreviewRenderer
+                    state={linkInterceptor.previewState}
+                    onClose={linkInterceptor.closePreview}
+                    loadDataUrl={linkInterceptor.readFileDataUrl}
+                    loadPdfData={linkInterceptor.readFileBinary}
+                    isDark={isDark}
+                  />
+                </div>
               )}
             </TabShellProvider>
             <ProductSpaceSwitchDialog />

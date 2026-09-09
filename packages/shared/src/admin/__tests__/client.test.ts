@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { AdminClient } from '../client.ts';
 import { AdminError } from '../types.ts';
+import { parseProductSpaceCatalogResponseForProductSpace } from '../../product-spaces/index.ts';
 
 let originalFetch: typeof globalThis.fetch;
 let fetchCalls: { url: string; init: RequestInit }[] = [];
@@ -1452,5 +1453,105 @@ describe('AdminClient', () => {
         'Content-Type': 'application/json',
       });
     }
+  });
+
+  it('resolves an App launch against the exact trusted ProductSpace Catalog tuple', async () => {
+    const context = {
+      id: 'space-a',
+      kind: 'enterprise',
+      enterpriseId: 'enterprise-a',
+      name: 'Studio A',
+      role: 'member',
+      accessMode: 'active',
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+    } as const;
+    const catalog = {
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'revision-a',
+      entries: [
+        {
+          kind: 'built_in_app',
+          catalogEntryId: 'polo-entry',
+          builtInAppId: 'polo_assistant',
+          name: 'Polo',
+          description: '',
+          availability: 'available',
+        },
+        {
+          kind: 'app',
+          catalogEntryId: 'entry-a',
+          artifactInstanceId: 'artifact-a',
+          version: { versionId: 'version-a', version: '1.2.3' },
+          name: 'App A',
+          description: '',
+          availability: 'available',
+          sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
+          permissions: [],
+        },
+      ],
+    } as const;
+    mockJsonFetch({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogEntryId: 'entry-a',
+      resolvedAt: '2026-09-04T12:00:00.000Z',
+      expiresAt: '2026-09-04T12:10:00.000Z',
+      subject: {
+        kind: 'artifact_instance',
+        artifactType: 'app',
+        artifactInstanceId: 'artifact-a',
+        versionId: 'version-a',
+        version: '1.2.3',
+      },
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+      delivery: {
+        kind: 'web_url',
+        url: 'https://app.example.test',
+        launchToken: 'fresh-launch-token',
+      },
+    });
+    const client = new AdminClient('https://admin.example.com');
+
+    const launch = await client.resolveProductSpaceLaunch(
+      'access-token',
+      context as never,
+      parseProductSpaceCatalogResponseForProductSpace(catalog, context as never),
+      'entry-a' as never,
+      { platform: 'darwin', arch: 'arm64' },
+    );
+
+    expect(launch.subject).toMatchObject({ artifactInstanceId: 'artifact-a' });
+    expect(fetchCalls[0]).toMatchObject({
+      url: 'https://admin.example.com/api/product-spaces/space-a/catalog/entry-a/resolve-launch',
+      init: {
+        method: 'POST',
+        body: JSON.stringify({ platform: 'darwin', arch: 'arm64' }),
+      },
+    });
+
+    mockJsonFetch({
+      ...launch,
+      subject: { ...launch.subject, artifactInstanceId: 'artifact-from-another-entry' },
+    });
+    await expect(client.resolveProductSpaceLaunch(
+      'access-token',
+      context as never,
+      parseProductSpaceCatalogResponseForProductSpace(catalog, context as never),
+      'entry-a' as never,
+      { platform: 'darwin', arch: 'arm64' },
+    )).rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+
+    mockJsonFetch({
+      ...launch,
+      subject: { ...launch.subject, versionId: 'version-b', version: '2.0.0' },
+    });
+    await expect(client.resolveProductSpaceLaunch(
+      'access-token',
+      context as never,
+      parseProductSpaceCatalogResponseForProductSpace(catalog, context as never),
+      'entry-a' as never,
+      { platform: 'darwin', arch: 'arm64' },
+    )).rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
   });
 });

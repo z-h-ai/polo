@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import * as Icons from 'lucide-react'
 
 const NARROW_VIEWPORT_QUERY = '(max-width: 640px)'
 
@@ -26,9 +25,11 @@ export function useNarrowViewport(): boolean {
 }
 
 /**
- * Frozen POO-41 narrow-window guard (product.css `.window-guard` /
- * `.guard-card`): a fullscreen fallback shown instead of the workbench when
- * the window is too narrow to safely render the ProductSpace shell.
+ * Frozen POO-41 narrow-window guard (source-derived `.guard`): a fullscreen
+ * fallback shown instead of the workbench when the window is too narrow to
+ * safely render the ProductSpace shell. Geometry matches the frozen source:
+ * centered column (max 320px), 11px uppercase eyebrow, 24px bold title,
+ * 14px/1.55 muted copy.
  */
 export function WindowWidthGuard() {
   const { t } = useTranslation()
@@ -36,19 +37,19 @@ export function WindowWidthGuard() {
   return (
     <div
       data-testid="window-width-guard"
-      className="fixed inset-0 z-[100] grid place-items-center bg-background p-6"
+      className="fixed inset-0 z-[100] grid place-items-center bg-background p-[24px] text-center text-[16px]"
     >
-      <div className="max-w-[330px] text-center">
-        <span className="mx-auto mb-[18px] grid size-[52px] place-items-center rounded-[12px] bg-workbench-info/10 text-workbench-info">
-          <Icons.TriangleAlert className="size-[26px]" strokeWidth={1.7} />
-        </span>
-        <p className="mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-muted-foreground">
+      {/* 326px: the frozen column is 320px; Electron rounds CJK advances up
+          at this size, wrapping the frozen description one glyph early — the
+          +6px restores the frozen wrap point. */}
+      <div className="max-w-[326px]">
+        <p className="mb-[7px] text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
           {t('productSpace.windowGuard.eyebrow')}
         </p>
-        <h1 className="mb-2 text-xl font-semibold text-foreground">
+        <h1 className="m-0 text-[24px] font-bold leading-[1.08] tracking-[-0.05em] text-foreground">
           {t('productSpace.windowGuard.title')}
         </h1>
-        <p className="text-[13px] leading-[1.55] text-muted-foreground">
+        <p className="mt-0 text-[14px] leading-[1.55] text-muted-foreground">
           {t('productSpace.windowGuard.description')}
         </p>
       </div>

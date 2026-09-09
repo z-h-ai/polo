@@ -166,6 +166,10 @@ export const RPC_CHANNELS = {
   localApps: {
     GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
+    INSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:installProductSpaceBundle',
+    GET_PRODUCT_SPACE_INSTALL_STATES: 'local-apps:getProductSpaceInstallStates',
+    GET_PRODUCT_SPACE_WITHDRAWN_INSTALL_STATES: 'local-apps:getProductSpaceWithdrawnInstallStates',
+    UNINSTALL_PRODUCT_SPACE_BUNDLE: 'local-apps:uninstallProductSpaceBundle',
     CANCEL_INSTALL: 'local-apps:cancelInstall',
     START: 'local-apps:start',
     STOP: 'local-apps:stop',
@@ -288,6 +292,8 @@ export const RPC_CHANNELS = {
     WRITE: 'preferences:write',
     GET_HOME_RECENT_APPS: 'preferences:getHomeRecentApps',
     SET_HOME_RECENT_APPS: 'preferences:setHomeRecentApps',
+    GET_HOME_QUICK_ACCESS: 'preferences:getHomeQuickAccess',
+    SET_HOME_QUICK_ACCESS: 'preferences:setHomeQuickAccess',
     GET_ORGANIZATION_CONTEXT_STORAGE: 'preferences:getOrganizationContextStorage',
     UPDATE_ORGANIZATION_CONTEXT_STORAGE: 'preferences:updateOrganizationContextStorage',
     GET_PRODUCT_SPACE_CONTEXT_STORAGE: 'preferences:getProductSpaceContextStorage',
@@ -296,6 +302,7 @@ export const RPC_CHANNELS = {
   productSpace: {
     LIST: 'product-space:list',
     CATALOG: 'product-space:catalog',
+    RESOLVE_LAUNCH: 'product-space:resolveLaunch',
     LIST_ACTIVE_EXECUTIONS: 'product-space:listActiveExecutions',
     STOP_ALL_EXECUTIONS: 'product-space:stopAllExecutions',
     STOP_EXECUTION: 'product-space:stopExecution',
