@@ -531,9 +531,8 @@ html[data-font="inter"] {
     font-family: var(--font-default);
     background: transparent;
     color: var(--foreground);
-    /* No font-smoothing override: the frozen POO-41 reference renders with
-       the browser-default subpixel AA; forcing grayscale here thins dense
-       CJK/Latin text and diverges from the frozen glyph rendering. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* Scrollbar styling */

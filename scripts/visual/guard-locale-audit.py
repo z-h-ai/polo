@@ -26,6 +26,17 @@ BASE = "http://127.0.0.1:19050"
 LOCALES = ["zh-Hans", "en", "de", "es", "hu", "ja", "pl"]
 
 
+EXPECTED_COPY = {
+    'zh-Hans': {'eyebrow': '窗口保护', 'title': '窗口过窄'},
+    'en': {'eyebrow': 'Window protection', 'title': 'Window too narrow'},
+    'de': {'eyebrow': 'Fensterschutz', 'title': 'Fenster zu schmal'},
+    'es': {'eyebrow': 'Protección de ventana', 'title': 'Ventana demasiado estrecha'},
+    'hu': {'eyebrow': 'Ablakvédelem', 'title': 'Az ablak túl keskeny'},
+    'ja': {'eyebrow': 'ウィンドウ保護', 'title': 'ウィンドウが狭すぎます'},
+    'pl': {'eyebrow': 'Ochrona okna', 'title': 'Okno zbyt wąskie'},
+}
+
+
 def main():
     out = {}
     failures = []
@@ -74,6 +85,11 @@ def main():
                 failures.append(f"{loc}: horizontal overflow")
             if not metrics["guardWithinViewport"]:
                 failures.append(f"{loc}: guard exceeds the viewport")
+            expected = EXPECTED_COPY.get(loc, {})
+            if metrics.get("eyebrow") != expected.get("eyebrow"):
+                failures.append(f"{loc}: eyebrow copy mismatch: got {metrics.get('eyebrow')!r}, want {expected.get('eyebrow')!r}")
+            if metrics.get("title") != expected.get("title"):
+                failures.append(f"{loc}: title copy mismatch: got {metrics.get('title')!r}, want {expected.get('title')!r}")
             ctx.close()
         try:
             browser.close()
