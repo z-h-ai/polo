@@ -3,7 +3,6 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
-  __authorityPersistenceSeamForTests,
   __dropAuthorityProcessCacheForTests,
   getProductSpaceCatalogAuthorityRecord,
   hasProductSpaceCatalogAuthorityTuple,
@@ -15,6 +14,10 @@ import {
 } from '../product-space-catalog-authority'
 import { recordProductSpaceCatalogAuthoritativeEntries } from '../product-space-catalog-authority-commit'
 import * as publicAuthority from '../product-space-catalog-authority'
+// The mutable persistence seam is INTERNAL-ONLY: it is deliberately absent
+// from the supported public subpath, so tests import it from the internal
+// module file (which the package exports map never exposes).
+import { __authorityPersistenceSeamForTests } from '../product-space-catalog-authority-internal'
 
 function tuple(
   catalogEntryId = 'entry-a',
@@ -1200,6 +1203,33 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
     const oldFileSnapshot = readFileSync(authorityFile(), 'utf8')
     const tempPath = `${authorityFile()}.${process.pid}.tmp`
     const seam = __authorityPersistenceSeamForTests
+
+    // PUBLIC BOUNDARY: the mutable persistence seam must never be reachable
+    // through the supported public subpath, and the package exports map must
+    // never expose the internal seam module as a supported subpath.
+    expect((publicAuthority as Record<string, unknown>).__authorityPersistenceSeamForTests).toBeUndefined()
+    expect(Object.keys(publicAuthority).some(key => key.toLowerCase().includes('seam'))).toBe(false)
+    const pkg = JSON.parse(readFileSync(
+      join(import.meta.dir, '..', '..', '..', 'package.json'), 'utf8',
+    )) as { exports: Record<string, string> }
+    const authorityExports = Object.entries(pkg.exports)
+      .filter(([subpath]) => subpath.includes('product-space-catalog-authority'))
+    expect(authorityExports.length).toBeGreaterThan(0)
+    for (const [subpath, target] of authorityExports) {
+      expect(target.endsWith('product-space-catalog-authority.ts')).toBe(true)
+      expect(target).not.toContain('product-space-catalog-authority-internal')
+      void subpath
+    }
+    expect(Object.values(pkg.exports).some(target => (
+      target.includes('product-space-catalog-authority-internal')
+    ))).toBe(false)
+
+    // LEAK GUARD: every seam member must be the real fs function before this
+    // test starts mutating — a leftover from any earlier test fails here.
+    expect(seam.writeFileSync).toBe(writeFileSync)
+    expect(seam.renameSync).toBe(renameSync)
+    expect(seam.unlinkSync).toBe(unlinkSync)
+
     const restoreSeam = (): void => {
       seam.writeFileSync = writeFileSync
       seam.renameSync = renameSync
@@ -1305,46 +1335,50 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
       }
     }
 
-    // P3: a COLD child process must exercise the same seam: its commit
-    // attempt fails with the exact injected error, both scopes fail closed,
-    // old bytes stay intact — and it must exit 0 with a parsed
-    // assertion-bearing payload (any non-zero exit fails this test).
+    // P3: a COLD child process must exercise the same seam and run its OWN
+    // real assertions (node:assert/strict): the injected rename failure must
+    // surface with the exact code, both scopes must fail closed, and the old
+    // bytes must stay intact. A failed invariant makes the child exit
+    // NONZERO (uncaught AssertionError); a passing child exits 0 and prints
+    // a parsed assertion-bearing JSON payload.
     const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
     const probe = `
       const { pathToFileURL } = await import('node:url')
       const fs = await import('node:fs')
+      const assert = (await import('node:assert/strict')).default
       const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
       const result = {
-        ok: false, seamUsed: false, commitThrew: false, commitCode: '',
-        aTrusted: false, bTrusted: false, oldBytesIntact: false, reason: '',
+        seamUsed: false, commitThrew: false, commitCode: '',
+        aTrusted: false, bTrusted: false, oldBytesIntact: false,
       }
+      const file = process.env.POLO_AI_CONFIG_DIR + '/product-space-catalog-authority.json'
+      const old = fs.readFileSync(file, 'utf8')
+      const injected = Object.assign(new Error('cold injected rename failure'), { code: 'ESEAM_COLD_RENAME' })
+      mod.__authorityPersistenceSeamForTests.renameSync = () => { result.seamUsed = true; throw injected }
       try {
-        const file = process.env.POLO_AI_CONFIG_DIR + '/product-space-catalog-authority.json'
-        const old = fs.readFileSync(file, 'utf8')
-        const injected = Object.assign(new Error('cold injected rename failure'), { code: 'ESEAM_COLD_RENAME' })
-        mod.__authorityPersistenceSeamForTests.renameSync = () => { result.seamUsed = true; throw injected }
-        try {
-          mod.recordProductSpaceCatalogAuthoritativeEntries(
-            'account-a', 'space-a', 'rev-cold-seam',
-            [{ kind: 'app', catalogEntryId: 'entry-p3', artifactInstanceId: 'artifact-p3',
-               version: { versionId: 'version-p3', version: '9.0.0' }, name: 'P3', description: '',
-               availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
-               permissions: [] }])
-        } catch (error) {
-          result.commitThrew = true
-          result.commitCode = error && error.code ? error.code : String(error)
-        }
-        result.aTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
-          'account-a', 'space-a', 'entry-old-a', 'artifact-old-a', 'version-1', '1.0.0')
-        result.bTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
-          'account-b', 'space-b', 'entry-old-b', 'artifact-old-b', 'version-1', '1.0.0')
-        result.oldBytesIntact = fs.readFileSync(file, 'utf8') === old
-        result.ok = result.seamUsed && result.commitThrew
-          && result.commitCode === 'ESEAM_COLD_RENAME'
-          && !result.aTrusted && !result.bTrusted && result.oldBytesIntact
+        mod.recordProductSpaceCatalogAuthoritativeEntries(
+          'account-a', 'space-a', 'rev-cold-seam',
+          [{ kind: 'app', catalogEntryId: 'entry-p3', artifactInstanceId: 'artifact-p3',
+             version: { versionId: 'version-p3', version: '9.0.0' }, name: 'P3', description: '',
+             availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
+             permissions: [] }])
       } catch (error) {
-        result.reason = String(error)
+        result.commitThrew = true
+        result.commitCode = error && error.code ? error.code : String(error)
       }
+      result.aTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+        'account-a', 'space-a', 'entry-old-a', 'artifact-old-a', 'version-1', '1.0.0')
+      result.bTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+        'account-b', 'space-b', 'entry-old-b', 'artifact-old-b', 'version-1', '1.0.0')
+      result.oldBytesIntact = fs.readFileSync(file, 'utf8') === old
+      // Real assertions — a violation aborts the child NONZERO. Only the
+      // commit call itself is error-caught (that IS the protocol under test).
+      assert.equal(result.seamUsed, true, 'the injected seam must be invoked')
+      assert.equal(result.commitThrew, true, 'the cold commit must throw')
+      assert.equal(result.commitCode, 'ESEAM_COLD_RENAME', 'exact injected error code')
+      assert.equal(result.aTrusted, false, 'scope A must fail closed in the cold process')
+      assert.equal(result.bTrusted, false, 'scope B must fail closed in the cold process')
+      assert.equal(result.oldBytesIntact, true, 'old authority bytes must stay intact')
       console.log(JSON.stringify(result))
     `
     const p3 = Bun.spawnSync({
@@ -1357,25 +1391,25 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
     // A non-zero cold-child exit is a FAILURE, never an accepted branch.
     expect(p3.exitCode).toBe(0)
     const p3Out = JSON.parse(p3.stdout.toString().trim()) as {
-      ok: boolean
       seamUsed: boolean
       commitThrew: boolean
       commitCode: string
       aTrusted: boolean
       bTrusted: boolean
       oldBytesIntact: boolean
-      reason: string
     }
-    expect(p3Out.reason).toBe('')
     expect(p3Out.seamUsed).toBe(true)
     expect(p3Out.commitThrew).toBe(true)
     expect(p3Out.commitCode).toBe('ESEAM_COLD_RENAME')
     expect(p3Out.aTrusted).toBe(false)
     expect(p3Out.bTrusted).toBe(false)
     expect(p3Out.oldBytesIntact).toBe(true)
-    expect(p3Out.ok).toBe(true)
 
-    // Seam fully restored: a fresh commit succeeds and recovers the scope.
+    // Seam fully restored (identity proven — no mutation leaks across tests):
+    // a fresh commit succeeds and recovers the scope.
+    expect(seam.writeFileSync).toBe(writeFileSync)
+    expect(seam.renameSync).toBe(renameSync)
+    expect(seam.unlinkSync).toBe(unlinkSync)
     // The seeded entry-old-a is carried as a withdrawn tombstone by design.
     const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
       'account-a', 'space-a', 'rev-recovered', [entry()],

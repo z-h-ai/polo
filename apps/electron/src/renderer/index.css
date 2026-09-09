@@ -173,9 +173,11 @@
   /* Frozen POO-41 card surface (source-derived --surface): the elevated
      white card body on the near-white launcher background. */
   --surface: #ffffff;
-  /* Frozen POO-41 card shadow (source-derived): the xs elevation used by
-     cards and inputs in both light and dark themes. */
-  --shadow-xs: 0 1px 2px rgb(25 23 32 / 8%), 0 8px 22px rgb(25 23 32 / 4%);
+  /* Genuinely small global xs elevation (Tailwind-default scale). The large
+     card-specific elevation is scoped to the Home/Catalog card regions via
+     --shadow-xs overrides there — shared textarea/switch/onboarding controls
+     must not inherit card elevation. */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -299,6 +301,19 @@
   --muted-foreground: oklch(0.68 0.01 270);
 }
 
+/* The accepted card elevation (source-derived two-layer shadow) is scoped to
+   the Home and Catalog card regions ONLY — shared textarea/switch/onboarding
+   controls outside these regions keep the small global xs shadow. */
+[data-testid='home-app-hub'],
+[data-testid='all-apps-view'] {
+  --shadow-xs: 0 1px 2px rgb(25 23 32 / 8%), 0 8px 22px rgb(25 23 32 / 4%);
+}
+
+.dark [data-testid='home-app-hub'],
+.dark [data-testid='all-apps-view'] {
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 26px rgb(0 0 0 / 16%);
+}
+
 /* Dark Mode */
 .dark {
   /* === 6 BASE COLORS (must match DEFAULT_THEME.dark in theme.ts) === */
@@ -354,7 +369,7 @@
   --card-foreground: var(--foreground);
   /* Frozen POO-41 dark card surface (source-derived dark --surface). */
   --surface: oklch(0.205 0.014 270);
-  --shadow-xs: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 26px rgb(0 0 0 / 16%);
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
