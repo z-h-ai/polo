@@ -234,7 +234,12 @@ def stylesheet_hiding_rules(root: Node) -> list[tuple[str, str]]:
             for selector, body in parse_css_blocks(strip_css_comments(text_content(node))):
                 normalized = normalize_declaration(body)
                 if any(declaration in normalized for declaration in HIDING_DECLARATIONS):
-                    rules.append((selector, normalized))
+                    # Selector lists: split on top-level commas — each
+                    # alternative is evaluated independently.
+                    for part in selector.split(","):
+                        part = part.strip()
+                        if part:
+                            rules.append((part, normalized))
     return rules
 
 
@@ -500,6 +505,8 @@ def check_contract_binding(
         candidate = (contract_dir / classification_target(target)).resolve()
         groups.setdefault(candidate, []).append(target)
 
+    CANONICAL_RAW_TARGET = f"./{REFERENCE_FILENAME}"
+
     canonical_targets = groups.get(reference_resolved, [])
     if len(canonical_targets) == 0:
         if links:
@@ -518,6 +525,15 @@ def check_contract_binding(
             "bind the aligned reference; exactly one canonical link is required"
         )
     else:
+        # The single canonical target must be the EXACT direct relative form
+        # with neither query nor fragment (classification strips those, so a
+        # `#desktop`/`?raw=1`-decorated canonical target is rejected here).
+        raw_canonical = canonical_targets[0]
+        if raw_canonical != CANONICAL_RAW_TARGET:
+            failures.append(
+                "binding: the canonical link must be the exact direct relative target "
+                f"{CANONICAL_RAW_TARGET!r} without query or fragment; found {raw_canonical!r}"
+            )
         if not inside_references(reference_resolved):
             failures.append(
                 "binding: the bound reference resolves outside the repository-owned references "
