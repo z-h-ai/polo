@@ -40,6 +40,25 @@ def main():
         failures.append('reference: source lines must use the authoritative circle names with versions')
     if '创作室' in markup:
         failures.append('reference: invented creator-studio names present')
+
+    # Both available rows must carry the ordered unpinned action pair
+    # (显示在首页 ghost, then primary 打开) and the 可用 status — parsed per
+    # row article in DOM order.
+    articles = re.findall(r'<article class="card catalog-card">.*?</article>', markup, flags=re.S)
+    commercial_rows = [a for a in articles if '<h3>商务写作</h3>' in a]
+    if len(commercial_rows) != 2:
+        failures.append(f'reference: expected exactly two 商务写作 rows, got {len(commercial_rows)}')
+    else:
+        for index, article in enumerate(commercial_rows):
+            actions = re.findall(r'<button class="button ([a-z]+)"[^>]*>([^<]+)</button>', article)
+            ordered = [(cls, label.strip()) for cls, label in actions]
+            expected = [('ghost', '显示在首页'), ('primary', '打开')]
+            if ordered != expected:
+                failures.append(
+                    f'商务写作 row {index + 1}: ordered actions must be '
+                    f'显示在首页(ghost) then 打开(primary), got {ordered}')
+            if '<p class="status">可用</p>' not in article:
+                failures.append(f'商务写作 row {index + 1}: 可用 status line missing')
     if re.search(r'catalog-card[^"]*highlighted|highlighted[^"]*catalog-card', markup):
         failures.append('reference: highlighted row must not exist in the searched state')
     if '显示 2 / 7 个 Apps' not in markup:

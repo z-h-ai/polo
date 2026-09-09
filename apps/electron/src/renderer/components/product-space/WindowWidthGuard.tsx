@@ -25,11 +25,6 @@ export function useNarrowViewport(): boolean {
 }
 
 /**
- * Frozen POO-41 narrow-window guard (product.css `.window-guard` /
- * `.guard-card`): a fullscreen fallback shown instead of the workbench when
- * the window is too narrow to safely render the ProductSpace shell.
- */
-/**
  * Frozen POO-41 narrow-window guard (source-derived `.guard`): a fullscreen
  * fallback shown instead of the workbench when the window is too narrow to
  * safely render the ProductSpace shell. Geometry matches the frozen source:

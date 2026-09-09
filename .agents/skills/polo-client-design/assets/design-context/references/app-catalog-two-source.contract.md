@@ -17,9 +17,13 @@ threshold is unchanged and every in-region difference counts.
 - Exactly TWO independent rows — same App name `商务写作`, distinct artifact
   instances and sources:
   1. 来自 桥见圈子 · 桥见圈子来源的商务写作 App。 · 桥见圈子 · v1.6.0 · 可用 ·
-     actions 显示在首页 + 打开
+     actions 显示在首页 + 打开（primary）
   2. 来自 北极星共创社 · 北极星圈子来源的同名 App。 · 北极星共创社 · v2.0.0 · 可用 ·
-     action 打开
+     actions 显示在首页 + 打开（primary）
+
+  Both rows carry the identical ordered action pair (unpinned quick-access
+  state: 显示在首页 ghost, then primary 打开) and the 可用 status line —
+  matching the production clean/unpinned fixture row-for-row.
 - Exact visible count: `显示 2 / 7 个 Apps`.
 
 ## Acceptance binding (next Acceptance plan) — all fields REQUIRED
