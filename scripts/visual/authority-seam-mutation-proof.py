@@ -14,12 +14,16 @@ FAIL each time with the EXPECTED scenario-specific failure signature:
                             instead of rethrowing. Expected: only the WRITE
                             scenario fails ('injected write failure'); the
                             rename scenario never runs.
-  M3 (public leak)        — src/runtime/index.ts re-exports the internal
-                            seam, so the mutable object becomes reachable
-                            through the supported @polo-ai/server-core/runtime
-                            subpath. Expected: the R54 all-public-subpath
-                            child guard fails (nonzero) with the exact
-                            'persistence seam must not be reachable' reason.
+  M3 (public leak)        — src/runtime/index.ts re-exports a host function
+                            from the authority barrel and attaches the
+                            internal seam as a NESTED PROPERTY on that
+                            exported function, so the seam becomes reachable
+                            by property descent (not by direct namespace
+                            re-export) through the supported
+                            @polo-ai/server-core/runtime subpath. Expected:
+                            the all-public-subpath child guard fails (nonzero)
+                            with the exact 'persistence seam must not be
+                            reachable' reason.
 
 The production files are then restored byte-for-byte and the focused test is
 RERUN — it must PASS after restoration (exit 0). Exits 0 only if all mutated
@@ -64,8 +68,11 @@ M3_RUNTIME_ANCHOR = "export * from './null-browser-pane-manager.ts'\n"
 M3_RUNTIME_LEAK = (
     M3_RUNTIME_ANCHOR,
     M3_RUNTIME_ANCHOR
-    + "export { __authorityPersistenceSeamForTests } from './product-space-catalog-authority-internal.ts'\n",
-    'M3 public-leak',
+    + "export { revokeProductSpaceCatalogAuthority } from './product-space-catalog-authority.ts'\n"
+    + "import { __authorityPersistenceSeamForTests as __m3seam } from './product-space-catalog-authority-internal.ts'\n"
+    + "import { revokeProductSpaceCatalogAuthority as __m3host } from './product-space-catalog-authority.ts'\n"
+    + ";(__m3host as unknown as Record<string, unknown>).__leakedPersistenceSeam = __m3seam\n",
+    'M3 public-leak-nested-property',
     'persistence seam must not be reachable',
     '',
 )

@@ -1560,10 +1560,14 @@ describe('R54: every supported public subpath is persistence-seam-free (isolated
       assert.ok(seam, 'internal seam must exist for the identity comparison')
       assert.equal(typeof seam.renameSync, 'function', 'seal source must be the mutable seam object')
 
-      // Import EVERY supported key by package self-reference.
+      // Import EVERY supported key strictly through the package
+      // self-reference CONTRACT: '.' resolves as pkg.name; every other key
+      // as pkg.name + key.slice(1). Never the filesystem target directly —
+      // a subpath that stops resolving by package name must FAIL here.
+      const selfSpecifier = (key) => key === '.' ? ${JSON.stringify(pkg.name)} : ${JSON.stringify(pkg.name)} + key.slice(1)
       const namespaces = {}
       for (const key of subpaths) {
-        namespaces[key] = await import(join(pkgRoot, pkg.exports[key]))
+        namespaces[key] = await import(selfSpecifier(key))
       }
 
       // Self-reference must work at all (sanity via a supported subpath) so
@@ -1580,15 +1584,30 @@ describe('R54: every supported public subpath is persistence-seam-free (isolated
 
       // Exact object identity deep scan: the seam object must not appear
       // under ANY property name at ANY depth of ANY supported namespace.
+      // The walk crosses OBJECTS AND FUNCTIONS (attachable properties),
+      // enumerates Reflect.ownKeys (symbols + non-enumerables included),
+      // and reads descriptors safely — data values are followed, getters
+      // are invoked inside try/catch so throwing accessors cannot crash
+      // the guard, and the seen-set blocks reference cycles.
       const offenders = []
       const scan = (value, label, seen) => {
         if (value === seam) { offenders.push(label); return }
-        if (!value || typeof value !== 'object' || seen.has(value)) return
+        if (!value || (typeof value !== 'object' && typeof value !== 'function')) return
+        if (seen.has(value)) return
         seen.add(value)
-        for (const key of Object.keys(value)) {
-          let child
-          try { child = value[key] } catch { continue }
-          scan(child, label + '.' + key, seen)
+        let keys
+        try { keys = Reflect.ownKeys(value) } catch { return }
+        for (const key of keys) {
+          let desc
+          try { desc = Object.getOwnPropertyDescriptor(value, key) } catch { continue }
+          if (!desc) continue
+          if ('value' in desc) {
+            scan(desc.value, label + '.' + String(key), seen)
+          } else if (desc.get) {
+            try {
+              scan(desc.get.call(value), label + '.' + String(key) + '()', seen)
+            } catch { /* throwing getter — unreachable value, nothing to compare */ }
+          }
         }
       }
       for (const key of subpaths) scan(namespaces[key], 'exports[' + JSON.stringify(key) + ']', new Set())
