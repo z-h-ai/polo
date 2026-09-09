@@ -4,6 +4,7 @@ import { createElement, useLayoutEffect } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
+import { ProductSpaceCatalogResponseSchema } from '@polo-ai/shared/product-spaces'
 import { activeTabIdAtom } from '@/atoms/tab-browser'
 import { HOME_TAB_ID, POLO_TAB_ID } from '../../shared/tab-browser-types'
 import { useProductSpaceContext } from '../context/ProductSpaceContext'
@@ -168,21 +169,29 @@ const electronApiExplicit: Record<string, unknown> = {
   // the target space against before committing).
   // Schema-valid Catalog DTO: notModified + the schema-required built-in
   // Polo assistant entry (the work-App projection stays empty).
+  // Schema-valid Catalog DTO: the fixture is validated by the AUTHORITATIVE
+  // zod schema at construction (parse throws on any drift — no `as unknown`
+  // escape), so the preview seal test exercises the exact wire contract.
   productSpaceGetCatalog: async () => ({
+    ...ProductSpaceCatalogResponseSchema.parse({
+      contractVersion: 1,
+      productSpaceId: 'ps-r42-preview',
+      catalogRevision: 'rev-r42-preview-1',
+      entries: [
+        {
+          kind: 'built_in_app',
+          builtInAppId: 'polo_assistant',
+          catalogEntryId: 'cat-preview-polo-assistant',
+          name: 'Polo 助手',
+          description: 'Polo 内置助手',
+          availability: 'available',
+        },
+      ],
+    }),
     success: true as const,
     notModified: false,
-    entries: [
-      {
-        kind: 'built_in_app',
-        builtInAppId: 'polo_assistant',
-        name: 'Polo 助手',
-        description: 'Polo 内置助手',
-        availability: 'available',
-      },
-    ] as unknown[],
-    withdrawnEntries: [] as unknown[],
-    catalogRevision: 'rev-r35-empty',
     accessMode: 'online',
+    warningCode: null,
   }),
   getHomeQuickAccess: async () => [],
   setHomeQuickAccess: async (_contextKey: unknown, apps: unknown[]) => apps,

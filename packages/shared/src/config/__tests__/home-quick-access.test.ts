@@ -9,7 +9,7 @@ import {
   MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH,
   sanitizeHomeQuickAccess,
 } from '../home-quick-access.ts'
-import { createProductSpaceContextKey } from '../../product-spaces/index.ts'
+import { createProductSpaceContextKey, type AccountId, type ProductSpaceId } from '../../product-spaces/index.ts'
 
 const QUICK_ACCESS_MODULE_PATH = pathToFileURL(
   join(import.meta.dir, '..', 'home-quick-access.ts'),
@@ -212,23 +212,28 @@ describe('Home quick-access identity ceilings (R42: derived from the production 
   const ESC = '\u0000'.repeat(512)
 
   it('accepts a context key exactly at the four-tuple encoder ceiling and rejects one glyph beyond', () => {
-    const atLimit = createProductSpaceContextKey(ESC, ESC)
-    expect(atLimit.length).toBe(MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH)
+    // The production write path persists `v1:${productSpaceContextKey}`
+    // (createHomeQuickAccessContextKey) — the ceiling budgets the COMPLETE
+    // persisted encoding, wrapper included.
+    const rawAtLimit = createProductSpaceContextKey(ESC as AccountId, ESC as ProductSpaceId)
+    const persistedAtLimit = `v1:${rawAtLimit}`
+    expect(persistedAtLimit.length).toBe(MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH)
     const configDir = mkdtempSync(join(tmpdir(), 'polo-home-quick-ceiling-'))
     expect(() =>
       JSON.parse(
         runEval(
           configDir,
-          `setHomeQuickAccess(${JSON.stringify(atLimit)}, []); console.log('ok')`,
+          `setHomeQuickAccess(${JSON.stringify(persistedAtLimit)}, []); console.log('ok')`,
         ),
       ),
     ).not.toBeNull()
-    const beyond = createProductSpaceContextKey(ESC + '!', ESC)
-    expect(beyond.length).toBeGreaterThan(MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH)
+    const rawBeyond = createProductSpaceContextKey((ESC + '!') as AccountId, ESC as ProductSpaceId)
+    const persistedBeyond = `v1:${rawBeyond}`
+    expect(persistedBeyond.length).toBeGreaterThan(MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH)
     expect(() =>
       runEval(
         mkdtempSync(join(tmpdir(), 'polo-home-quick-ceiling-')),
-        `setHomeQuickAccess(${JSON.stringify(beyond)}, []); console.log('ok')`,
+        `setHomeQuickAccess(${JSON.stringify(persistedBeyond)}, []); console.log('ok')`,
       ),
     ).toThrow()
   })

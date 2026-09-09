@@ -44,8 +44,12 @@ const MAX_ESCAPED_ENTITY_ID_LENGTH = MAX_ADMIN_ENTITY_ID_LENGTH * 6
 //                 ])
 // Each escaped element is budgeted at the shared 6x worst-case JSON escape
 // expansion of a 512-character admin entity ID.
-const CONTEXT_KEY_SKELETON_LENGTH =
-  createProductSpaceContextKey('' as AccountId, '' as ProductSpaceId).length
+// The PERSISTED context key carries the versioned wrapper prefix applied by
+// the renderer's createHomeQuickAccessContextKey (`v1:${contextKey}`) — the
+// ceiling must budget the complete persisted encoding (R43 review: raw
+// ceiling 6169 vs persisted maximum 6172).
+const CONTEXT_KEY_PERSISTED_SKELETON_LENGTH =
+  `v1:${createProductSpaceContextKey('' as AccountId, '' as ProductSpaceId)}`.length
 const APP_ID_SKELETON_LENGTH = JSON.stringify([
   'product-space-ui',
   '',
@@ -55,7 +59,7 @@ const APP_ID_SKELETON_LENGTH = JSON.stringify([
 ]).length
 
 export const MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH =
-  CONTEXT_KEY_SKELETON_LENGTH + (2 * MAX_ESCAPED_ENTITY_ID_LENGTH)
+  CONTEXT_KEY_PERSISTED_SKELETON_LENGTH + (2 * MAX_ESCAPED_ENTITY_ID_LENGTH)
 
 export const MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH =
   APP_ID_SKELETON_LENGTH + (4 * MAX_ESCAPED_ENTITY_ID_LENGTH)
