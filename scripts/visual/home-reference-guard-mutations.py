@@ -51,39 +51,42 @@ CANONICAL = f"[`space-home-poo43-aligned-light-zh-Hans-desktop.html`]({CANONICAL
 # ── data-driven reject cases ──
 # (label, provenance: [R65 case IDs], target, old, new, intended fragment)
 REJECT_CASES = [
-    ("R59-A1 manage button -> span hidden", ["extra: R59-A1 preserved"],
+    ("R59-A1 manage button -> span hidden", ["R59-A1 manage button -> span hidden"],
      "reference", MANAGE, "<span hidden>管理首页 Apps</span>", "管理首页 Apps"),
-    ("R59-A2 all-apps button -> non-interactive span", ["extra: R59-A2 preserved"],
+    ("R59-A2 all-apps button -> non-interactive span", ["R59-A2 all-apps button -> non-interactive span"],
      "reference", ALL_APPS, "<span>全部 Apps</span>", "全部 Apps"),
-    ("R59-A3 canonical link -> nonexistent reference", ["extra: R59-A3 preserved"],
+    ("R59-A3 canonical link -> nonexistent reference", ["R59-A3 canonical link -> nonexistent reference"],
      "contract",
      "(./space-home-poo43-aligned-light-zh-Hans-desktop.html)",
      "(./space-home-poo43-aligned-nonexistent.html)",
      "alternative candidate or nonexistent binding"),
-    ("B1 required string removed", ["extra: B1 preserved"],
+    ("B1 required string removed", ["B1 required string removed"],
      "reference", MANAGE, "", "管理首页 Apps"),
-    ("B2 forbidden string added (运行中 badge)", ["extra: B2 preserved"],
+    ("B2 forbidden string added (运行中 badge)", ["B2 forbidden string added (运行中 badge)"],
      "reference", "<h3>客户访谈整理</h3>",
      '<h3>客户访谈整理</h3><span class="badge">运行中</span>',
      "reference contains excluded control/copy"),
-    ("B3 contract threshold weakened to 0.01", ["extra: B3 preserved"],
+    ("B3 contract threshold weakened to 0.01", ["B3 contract threshold weakened to 0.01"],
      "contract", "`0.02`", "`0.01`", "threshold claims must be exactly 0.02"),
-    ("B6 contract tablet binding removed", ["extra: B6 preserved"],
+    ("B4 contract exclusion permitted", ["B4 contract exclusion permitted"],
+     "contract", "exclusions are not permitted", "exclusions are permitted for icon tiles",
+     "'permitted exclusions' claim"),
+    ("B6 contract tablet binding removed", ["B6 contract tablet binding removed"],
      "contract", "1024×768", "1023×767", "tablet viewport binding"),
-    ("R61 control outside actions group", ["R63: control moved outside actions group"],
+    ("R61 control outside actions group", ["R61 control outside actions group", "R63: control moved outside actions group"],
      "reference",
      f'<div class="head-actions">{MANAGE}{ALL_APPS}</div>',
      f'{MANAGE}<div class="head-actions">{ALL_APPS}</div>', "actions group"),
     ("R61 ambiguous duplicate same-target contract links",
-     ["extra: R61 ambiguous duplicate preserved"],
+     ["R61 ambiguous duplicate same-target contract links"],
      "contract", CANONICAL,
      CANONICAL + "\n[second candidate](./space-home-poo43-aligned-light-zh-Hans-desktop.html)",
      "ambiguous"),
-    ("R61 conflicting extra threshold statement", ["extra: R61 conflicting threshold preserved"],
+    ("R61 conflicting extra threshold statement", ["R61 conflicting extra threshold statement"],
      "contract", "The `0.02` region threshold is unchanged",
      "The `0.02` region threshold is unchanged. The catalog threshold is separately `0.03`",
      "threshold claims must be exactly 0.02"),
-    ("R61 card action role ghost->danger", ["R63: work action ghost to danger"],
+    ("R61 card action role ghost->danger", ["R61 card action role ghost->danger", "R63: work action ghost to danger"],
      "reference", '<button class="button ghost">打开</button>',
      '<button class="button danger">打开</button>', "actions mismatch"),
     # ── the 8 exact R63 regressions ──
@@ -204,27 +207,13 @@ REJECT_CASES.append((
     "[`space-home-poo43-aligned-light-zh-Hans-desktop.html`](./space-home-poo43-aligned-light-zh-Hans-desktop.html?raw=1)",
     "without query or fragment",
 ))
-REJECT_CASES.append((
-    "R67 comma selector list with matching alternative",
-    ["extra: R67 comma selector list reject"],
-    "reference",
-    ".quiet-link { display: inline-flex;",
-    ".unused, .quiet-link { display: none; }\n.quiet-link { display: inline-flex;",
-    "管理首页 Apps",
-))
+# R67 grouped-selector reject is a SPECIAL genuine-cascade case: the hiding
+# rule is inserted AFTER the baseline visible declaration (immediately before
+# .quiet-link:hover) so Chromium cascade order really hides the controls, and
+# a deterministic Chromium computed-style proof must confirm that before the
+# guard rejection counts.  See run_grouped_selector_case() in main().
 
 # ── special reject mutations (functional) ──
-
-def m_css_hidden_class(paths):
-    p = paths["reference"]
-    text = p.read_text(encoding="utf-8")
-    assert ".quiet-link { display: inline-flex;" in text
-    text = text.replace(
-        ".quiet-link { display: inline-flex;",
-        ".visually-hidden { display: none; }\n.quiet-link { display: inline-flex;", 1,
-    ).replace(MANAGE, '<button class="quiet-link visually-hidden">管理首页 Apps</button>', 1)
-    p.write_text(text, encoding="utf-8")
-
 
 def m_b5_reference_missing(paths):
     paths["reference"].unlink()
@@ -265,7 +254,7 @@ def m_css_rule_plus_ancestor_class(rule_text, ancestor_class):
 
 SPECIAL_REJECT_CASES = [
     ("R61 stylesheet-hidden class control",
-     ["extra: R61 stylesheet-hidden preserved"],
+     ["R61 stylesheet-hidden class control"],
      m_css_rule_plus_button_class(".visually-hidden { display: none; }", "visually-hidden"),
      "expected exactly one visible interactive <button>管理首页 Apps"),
     ("R63-1 formatted display newline none",
@@ -324,6 +313,28 @@ ALLOW_CASES = [
      ".unused, .unrelated-quiet { display: none; }\n.quiet-link { display: inline-flex;"),
 ]
 
+# ── Prior sealed case IDs (R59/R6x B-series + R61 + isolation) ──
+# Every previously sealed case must remain durably represented: deleting any
+# prior case removes its provenance entry and fails the suite.
+SEALED_PRIOR_CASE_IDS = [
+    "R59-A1 manage button -> span hidden",
+    "R59-A2 all-apps button -> non-interactive span",
+    "R59-A3 canonical link -> nonexistent reference",
+    "B1 required string removed",
+    "B2 forbidden string added (运行中 badge)",
+    "B3 contract threshold weakened to 0.01",
+    "B4 contract exclusion permitted",
+    "B5 aligned reference missing",
+    "B6 contract tablet binding removed",
+    "B7 frozen oracle byte drift",
+    "R61 control outside actions group",
+    "R61 stylesheet-hidden class control",
+    "R61 ambiguous duplicate same-target contract links",
+    "R61 conflicting extra threshold statement",
+    "R61 card action role ghost->danger",
+    "supplied-path isolation from module globals",
+]
+
 # ── R65 provenance manifest (immutable harness case ID -> tracked labels) ──
 R65_PROVENANCE: dict[str, list[str]] = {}
 for _label, _provenance, *_rest in REJECT_CASES:
@@ -338,6 +349,23 @@ for _label, _provenance, *_rest in ALLOW_CASES:
     for _r65_id in _provenance:
         if not _r65_id.startswith("extra:"):
             R65_PROVENANCE.setdefault(_r65_id, []).append(_label)
+
+# Prior-sealed provenance: same mechanism, scoped to the sealed IDs.
+SEALED_PRIOR_PROVENANCE: dict[str, list[str]] = {}
+for _label, _provenance, *_rest in REJECT_CASES:
+    for _sealed_id in _provenance:
+        if _sealed_id in SEALED_PRIOR_CASE_IDS:
+            SEALED_PRIOR_PROVENANCE.setdefault(_sealed_id, []).append(_label)
+for _label, _provenance, _fn, _fragment in SPECIAL_REJECT_CASES:
+    for _sealed_id in _provenance:
+        if _sealed_id in SEALED_PRIOR_CASE_IDS:
+            SEALED_PRIOR_PROVENANCE.setdefault(_sealed_id, []).append(_label)
+for _label, _provenance, *_rest in ALLOW_CASES:
+    for _sealed_id in _provenance:
+        if _sealed_id in SEALED_PRIOR_CASE_IDS:
+            SEALED_PRIOR_PROVENANCE.setdefault(_sealed_id, []).append(_label)
+# The isolation case registers its provenance at runtime (see
+# run_isolation_case) — deleting it leaves the ID missing and fails the suite.
 
 R65_HARNESS_REJECT_IDS = [
     "R63-1 formatted display newline none",
@@ -452,6 +480,9 @@ def run_isolation_case():
         text = paths["reference"].read_text(encoding="utf-8")
         paths["reference"].write_text(text.replace(MANAGE, "", 1), encoding="utf-8")
         drift_failures = guard.check(paths["oracle"], paths["reference"], paths["contract"], base)
+        SEALED_PRIOR_PROVENANCE.setdefault(
+            "supplied-path isolation from module globals", [],
+        ).append("supplied-path isolation from module globals")
         CASES.append({
             "kind": "isolation",
             "case": "supplied-path isolation from module globals",
@@ -464,6 +495,64 @@ def run_isolation_case():
         )
     finally:
         guard.ORACLE, guard.REFERENCE, guard.CONTRACT, guard.REFERENCES_DIR = saved
+        temp.cleanup()
+
+
+def chromium_buttons_hidden(reference_path: Path) -> dict:
+    """Deterministic Chromium computed-style proof: every required control
+    must compute to display:none in the mutated reference."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(reference_path.as_uri(), wait_until="load")
+        page.wait_for_timeout(300)
+        state = page.evaluate(
+            """() => {
+              const find = (label) => Array.from(document.querySelectorAll('button'))
+                .find((b) => b.textContent.trim() === label);
+              const out = {};
+              for (const label of ['管理首页 Apps', '全部 Apps']) {
+                const el = find(label);
+                out[label] = el ? getComputedStyle(el).display : 'missing';
+              }
+              return out;
+            }"""
+        )
+        browser.close()
+        return state
+
+
+def run_grouped_selector_case() -> bool:
+    """Genuine cascade-order grouped-selector reject: insert the matching
+    `.unused, .quiet-link { display: none; }` rule after the baseline visible
+    declaration (immediately before .quiet-link:hover), prove in Chromium
+    that both required controls compute to display:none, then require the
+    guard rejection."""
+    temp, base, paths = sandbox()
+    try:
+        apply_reject_mutation(
+            "reference",
+            ".quiet-link:hover",
+            ".unused, .quiet-link { display: none; }\n.quiet-link:hover",
+            paths,
+        )
+        chromium = chromium_buttons_hidden(paths["reference"])
+        chromium_hidden = all(value == "none" for value in chromium.values())
+        failures = guard.check(paths["oracle"], paths["reference"], paths["contract"], base)
+        intended = any("管理首页 Apps" in failure for failure in failures)
+        CASES.append({
+            "kind": "reject",
+            "case": "R67 grouped selector list with matching alternative (genuine cascade hide)",
+            "chromiumProofHidden": chromium_hidden,
+            "chromiumProof": chromium,
+            "guardFailed": bool(failures),
+            "intendedReasonObserved": intended,
+            "failures": failures[:3],
+        })
+        return chromium_hidden and intended
+    finally:
         temp.cleanup()
 
 
@@ -488,6 +577,8 @@ def main() -> int:
 
     ok &= run_isolation_case()
 
+    ok &= run_grouped_selector_case()
+
     for label, provenance, target, old, new in ALLOW_CASES:
         case_label = f"{label} [provenance: {', '.join(provenance)}]"
         def allow_mutate(paths, target=target, old=old, new=new):
@@ -508,6 +599,11 @@ def main() -> int:
     missing_reject = [r65_id for r65_id in R65_HARNESS_REJECT_IDS if r65_id not in R65_PROVENANCE]
     missing_allow = [r65_id for r65_id in R65_HARNESS_ALLOW_IDS if r65_id not in R65_PROVENANCE]
     provenance_complete = not missing_reject and not missing_allow
+    missing_prior_sealed = [
+        sealed_id for sealed_id in SEALED_PRIOR_CASE_IDS
+        if sealed_id not in SEALED_PRIOR_PROVENANCE
+    ]
+    prior_sealed_complete = not missing_prior_sealed
 
     reject_cases = [c for c in CASES if c["kind"] == "reject"]
     allow_cases = [c for c in CASES if c["kind"] == "allow"]
@@ -534,6 +630,7 @@ def main() -> int:
         and clean
         and rerun_green
         and provenance_complete
+        and prior_sealed_complete
         and category_counts_ok
         and len(passed_reject) == len(reject_cases)
         and len(passed_allow) == len(allow_cases)
@@ -552,6 +649,9 @@ def main() -> int:
         "provenanceComplete": provenance_complete,
         "provenanceMissingReject": missing_reject,
         "provenanceMissingAllow": missing_allow,
+        "priorSealedComplete": prior_sealed_complete,
+        "priorSealedProvenance": SEALED_PRIOR_PROVENANCE,
+        "priorSealedMissing": missing_prior_sealed,
         "trackedFilesByteForByteClean": clean,
         "trackedDigestSet": sorted(tracked_before),
         "baselineGuardGreenAfterSuite": rerun_green,
