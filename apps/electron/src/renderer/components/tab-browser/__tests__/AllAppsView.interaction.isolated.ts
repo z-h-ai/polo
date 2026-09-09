@@ -13,7 +13,7 @@ mock.module('@/lib/use-compact-viewport', () => ({
   useCompactViewport: () => compactViewport,
 }))
 
-const { cleanup, fireEvent, render, screen } = await import('@testing-library/react')
+const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
 const {
   AllAppsView,
   catalogAppBlockedStatusKey,
@@ -134,6 +134,26 @@ describe('groupAllAppsForDisplay', () => {
     expect(groupAllAppsForDisplay(apps, 'enterprise')).toEqual([
       { key: 'all', label: '', apps },
     ])
+  })
+})
+
+describe('All Apps visible-count label (R42: paginated mounted rows)', () => {
+  it('counts MOUNTED rows initially (60) and every row after Load more (70)', async () => {
+    const apps = Array.from({ length: 70 }, (_, index) => app(`bulk-${index}`))
+    renderView(apps)
+
+    const count = screen.getByTestId('all-apps-count')
+    // Initial page: exactly ALL_APPS_PAGE_SIZE (60) rows are mounted, so the
+    // label must claim 60 — not the 70 filtered entries.
+    expect(screen.getAllByTestId('all-apps-row')).toHaveLength(60)
+    expect(count.textContent).toBe('60 / 70 Apps')
+
+    // After Load more: every filtered row is mounted and the label claims 70.
+    fireEvent.click(screen.getByTestId('all-apps-load-more'))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('all-apps-row')).toHaveLength(70)
+    })
+    expect(count.textContent).toBe('70 / 70 Apps')
   })
 })
 

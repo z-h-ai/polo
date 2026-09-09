@@ -166,9 +166,20 @@ const electronApiExplicit: Record<string, unknown> = {
   // Home surface: real useAppCatalog mounts with an EMPTY but SUCCESSFUL
   // unified Catalog (the same channel the switch staging gate re-validates
   // the target space against before committing).
+  // Schema-valid Catalog DTO: notModified + the schema-required built-in
+  // Polo assistant entry (the work-App projection stays empty).
   productSpaceGetCatalog: async () => ({
     success: true as const,
-    entries: [] as unknown[],
+    notModified: false,
+    entries: [
+      {
+        kind: 'built_in_app',
+        builtInAppId: 'polo_assistant',
+        name: 'Polo 助手',
+        description: 'Polo 内置助手',
+        availability: 'available',
+      },
+    ] as unknown[],
     withdrawnEntries: [] as unknown[],
     catalogRevision: 'rev-r35-empty',
     accessMode: 'online',

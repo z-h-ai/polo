@@ -1,3 +1,9 @@
+import {
+  createProductSpaceContextKey,
+  type AccountId,
+  type ProductSpaceId,
+} from '../product-spaces/index.ts';
+
 /**
  * Home quick-access preference (POO-43).
  *
@@ -26,16 +32,33 @@ export const MAX_HOME_QUICK_ACCESS_APPS = 5
 const MAX_ADMIN_ENTITY_ID_LENGTH = 512
 const MAX_ESCAPED_ENTITY_ID_LENGTH = MAX_ADMIN_ENTITY_ID_LENGTH * 6
 
-// Same ceiling contract as home-recent: covers the complete Catalog scope
-// tuple JSON for the entry id and the versioned <account, product-space>
-// context key without weakening the shared 512-character entity ID contract.
+// Ceilings DERIVED from the exact production encoders the quick-access
+// layer persists verbatim (R42 review: the previous hand-budgeted skeletons
+// counted two/three variable elements while the real tuples carry the
+// versioned contract literal plus two/four escaped identifiers):
+//   context key = createProductSpaceContextKey(accountId, productSpaceId)
+//               = JSON.stringify(['product-space', <version>, accountId, productSpaceId])
+//   app id      = JSON.stringify([
+//                   'product-space-ui', accountId, organizationId,
+//                   catalogEntryId, artifactInstanceId,
+//                 ])
+// Each escaped element is budgeted at the shared 6x worst-case JSON escape
+// expansion of a 512-character admin entity ID.
+const CONTEXT_KEY_SKELETON_LENGTH =
+  createProductSpaceContextKey('' as AccountId, '' as ProductSpaceId).length
+const APP_ID_SKELETON_LENGTH = JSON.stringify([
+  'product-space-ui',
+  '',
+  '',
+  '',
+  '',
+]).length
+
 export const MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH =
-  'v1:'.length + JSON.stringify(['', '']).length
-  + (2 * MAX_ESCAPED_ENTITY_ID_LENGTH)
+  CONTEXT_KEY_SKELETON_LENGTH + (2 * MAX_ESCAPED_ENTITY_ID_LENGTH)
 
 export const MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH =
-  JSON.stringify(['catalog', '', '', '']).length
-  + (3 * MAX_ESCAPED_ENTITY_ID_LENGTH)
+  APP_ID_SKELETON_LENGTH + (4 * MAX_ESCAPED_ENTITY_ID_LENGTH)
 
 /**
  * Validates and clips a quick-access list while PRESERVING the user's

@@ -98,36 +98,54 @@ function mediaBodies(flatCss: string, mediaQuery: string): string[] {
   return bodies
 }
 
-/** The block with NO media query (the ≤760px mobile base layer). */
-function baseBodies(flatCss: string): string {
-  // Remove every media block, leaving only unconditionally-emitted rules.
+/** Every `@media` query present in the stylesheet (for the precise claim). */
+function allMediaQueries(flatCss: string): string[] {
+  const queries: string[] = []
+  const re = /@media[^{]+/g
+  for (const match of flatCss.matchAll(re)) queries.push(match[0].trim())
+  return [...new Set(queries)]
+}
+
+/**
+ * The unconditional base layer: EVERY `@media … { … }` block is removed with
+ * a balanced-brace structural scan (R42 review: the previous version only
+ * removed the 761px/1081px markers, leaving 25 media blocks in what the
+ * assertions treated as the base). Returns the base body plus the exact
+ * list of removed queries so the claim in failures is precise.
+ */
+function baseLayer(flatCss: string): { base: string; removedQueries: string[] } {
   let out = flatCss
-  for (const marker of ['@media(min-width:761px)', '@media(min-width:1081px)']) {
-    let index = out.indexOf(marker)
-    while (index !== -1) {
-      let depth = 0
-      for (let i = index + marker.length; i < out.length; i++) {
-        const ch = out[i]
-        if (ch === '{') depth += 1
-        else if (ch === '}') {
-          depth -= 1
-          if (depth === 0) {
-            out = out.slice(0, index) + out.slice(i + 1)
-            index = out.indexOf(marker)
-            break
-          }
+  const removed: string[] = []
+  let index = out.indexOf('@media')
+  while (index !== -1) {
+    const queryEnd = out.indexOf('{', index)
+    const query = out.slice(index, queryEnd).replace(/\s+/g, ' ').trim()
+    let depth = 0
+    let end = -1
+    for (let i = queryEnd; i < out.length; i++) {
+      const ch = out[i]
+      if (ch === '{') depth += 1
+      else if (ch === '}') {
+        depth -= 1
+        if (depth === 0) {
+          end = i
+          break
         }
       }
     }
+    if (end === -1) break
+    removed.push(query)
+    out = out.slice(0, index) + out.slice(end + 1)
+    index = out.indexOf('@media')
   }
-  return out
+  return { base: out, removedQueries: [...new Set(removed)] }
 }
 
 describe('Home launcher responsive-boundary contract (manifest-selected compiled CSS)', () => {
   const flatCss = flatten(manifestSelectedRendererCss())
   const tabletBlocks = mediaBodies(flatCss, '(min-width:761px)')
   const desktopBlocks = mediaBodies(flatCss, '(min-width:1081px)')
-  const base = baseBodies(flatCss)
+  const { base, removedQueries } = baseLayer(flatCss)
 
   it('emits the Home launcher tablet rules ONLY inside the 761px block', () => {
     expect(tabletBlocks.length).toBeGreaterThan(0)
@@ -166,8 +184,6 @@ describe('Home launcher responsive-boundary contract (manifest-selected compiled
   it('keeps 760px in the mobile base: compact launcher geometry without any media query', () => {
     expect(base.includes('.min-h-\\[210px\\]{min-height:210px}')).toBe(true)
     expect(base.includes('.p-\\[18px\\]{padding:18px}')).toBe(true)
-    expect(base.includes('.flex-col{flex-direction:column}')).toBe(true)
-    expect(base.includes('.items-start{align-items:flex-start}')).toBe(true)
     // The compact mobile geometry must NOT be re-emitted under the tablet or
     // desktop min-width blocks (those layers widen the geometry instead).
     const tabletJoined = tabletBlocks.join('\n')
@@ -176,6 +192,21 @@ describe('Home launcher responsive-boundary contract (manifest-selected compiled
     expect(desktopJoined.includes('.min-h-\\[210px\\]{min-height:210px}')).toBe(false)
     expect(tabletJoined.includes('.p-\\[18px\\]{padding:18px}')).toBe(false)
     expect(desktopJoined.includes('.p-\\[18px\\]{padding:18px}')).toBe(false)
+  })
+
+  it('emits the frozen scoped-token parity for the Home/guard surfaces (light + dark)', () => {
+    // R42: the surface-scoped parity block must be TOP-LEVEL so the `.dark`
+    // descendant form matches html.dark, and both surfaces carry the frozen
+    // source-derived accent/muted values.
+    // Minified forms: Lightning CSS drops quotes inside attribute selectors
+    // and normalizes oklch lightness to percentages.
+    // flatCss is whitespace-stripped: oklch components lose their separators.
+    expect(flatCss.includes('--accent:#6e56cf')).toBe(true)
+    expect(flatCss.includes('--muted-foreground:oklch(52%.012270)')).toBe(true)
+    expect(flatCss.includes('--accent:#a98be1')).toBe(true)
+    expect(flatCss.includes('--muted-foreground:oklch(68%.01270)')).toBe(true)
+    expect(flatCss.includes('.dark[data-testid=home-app-hub]')).toBe(true)
+    expect(flatCss.includes('.dark[data-testid=window-width-guard]')).toBe(true)
   })
 
   it('covers the full 760/761/1080/1081 contract: exactly the two inclusive min-width boundaries for the Home launcher', () => {

@@ -139,30 +139,6 @@
     rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 12px 12px 0px,
     rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.33)) 0px 24px 24px 0px;
 
-  /* === FROZEN POO-41 TOKEN PARITY (surface-scoped) === */
-  /* The POO-43 Home launcher and the narrow-window guard are gated against
-     the frozen POO-41 sources, whose accent/muted tokens are the source-
-     derived values below. Scoped here so the rest of the renderer keeps its
-     product tokens. */
-  [data-testid='home-app-hub'],
-  [data-testid='window-width-guard'] {
-    /* Frozen source-derived body font stack (source-derived.css `body`),
-       with the zh-Hans system font pinned so CJK glyph metrics on the gated
-       surfaces resolve exactly like the frozen reference (the frozen page
-       declares lang=zh-Hans; the product html is language-agnostic). */
-    font-family: Inter, "PingFang SC", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --accent: #6e56cf;
-    --success: #27956a;
-    --muted-foreground: oklch(0.52 0.012 270);
-  }
-
-  .dark [data-testid='home-app-hub'],
-  .dark [data-testid='window-width-guard'] {
-    --accent: #a98be1;
-    --success: #62c99a;
-    --muted-foreground: oklch(0.68 0.01 270);
-  }
-
   /* === MIX VARIANTS (solid interpolation toward background) === */
   /* Use -2, -3, -5, -10, -20, ..., -90, -95 for solid colors (e.g., separators, Explore mode) */
   --foreground-1\.5: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
@@ -271,6 +247,30 @@
   --z-island-popover: 410;
   --z-splash: 600;
 
+}
+
+/* === FROZEN POO-41 TOKEN PARITY (surface-scoped) === */
+/* The POO-43 Home launcher and the narrow-window guard are gated against
+   the frozen POO-41 sources, whose accent/muted tokens are the source-
+   derived values below. Scoped here so the rest of the renderer keeps its
+   product tokens. */
+[data-testid='home-app-hub'],
+[data-testid='window-width-guard'] {
+  /* Frozen source-derived body font stack (source-derived.css `body`),
+     with the zh-Hans system font pinned so CJK glyph metrics on the gated
+     surfaces resolve exactly like the frozen reference (the frozen page
+     declares lang=zh-Hans; the product html is language-agnostic). */
+  font-family: Inter, "PingFang SC", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --accent: #6e56cf;
+  --success: #27956a;
+  --muted-foreground: oklch(0.52 0.012 270);
+}
+
+.dark [data-testid='home-app-hub'],
+.dark [data-testid='window-width-guard'] {
+  --accent: #a98be1;
+  --success: #62c99a;
+  --muted-foreground: oklch(0.68 0.01 270);
 }
 
 /* Dark Mode */

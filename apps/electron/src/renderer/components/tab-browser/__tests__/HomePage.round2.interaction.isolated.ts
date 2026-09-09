@@ -469,8 +469,11 @@ describe('HomePage quick access (POO-43)', () => {
     }`
     quickAccessByContext.set(keyB, [{ id: hookB.uiIdentityKeyForApp(appB), addedAt: 1 }])
     act(() => {
+      // Stable root: mutate ONLY the hook value; the rendered root shape
+      // (ProductSpaceProvider > I18nextProvider > HomePage) is untouched, so
+      // React updates the SAME mounted tree instead of remounting.
       appCatalogHook = hookB
-      homeRerender(homeTree(hookB))
+      viewRerender()
     })
 
     // FIRST committed target Home layout: no prior-scope App identity,
@@ -485,9 +488,13 @@ describe('HomePage quick access (POO-43)', () => {
     expect(firstCommitText).not.toContain('skills enabled')
     expect(firstCommitText).toContain('Built into Polo')
 
-    // Context B's own data lands afterwards.
+    // Context B's own data lands afterwards: the hydrated B state carries B
+    // identity only.
     await waitFor(() => expect(screen.getByText('Scope B App')).toBeTruthy())
-    expect(screen.getByTestId('home-app-hub').textContent).toContain('Scope B Circle')
+    const hydratedText = screen.getByTestId('home-app-hub').textContent ?? ''
+    expect(hydratedText).toContain('Scope B Circle')
+    expect(hydratedText).not.toContain('Scope A App')
+    expect(hydratedText).not.toContain('Scope A Circle')
     view.unmount()
   })
 

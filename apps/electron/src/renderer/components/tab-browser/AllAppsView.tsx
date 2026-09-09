@@ -470,7 +470,9 @@ export function AllAppsView({
           </span>
         </label>
         <span className="shrink-0 pb-1 text-xs text-muted-foreground" data-testid="all-apps-count">
-          {t('homeApps.allApps.countVisible', { visible: filteredApps.length, total: apps.length })}
+          {/* visible = the MOUNTED (paginated) rows, not the filtered total —
+              the label must never claim rows that are not rendered yet. */}
+          {t('homeApps.allApps.countVisible', { visible: displayedCount, total: apps.length })}
         </span>
       </div>
 
@@ -576,7 +578,12 @@ export function AllAppsView({
             )
           }))}
           {displayedCount < filteredApps.length && (
-            <Button type="button" variant="secondary" onClick={() => setPageLimit(limit => limit + ALL_APPS_PAGE_SIZE)}>
+            <Button
+              type="button"
+              variant="secondary"
+              data-testid="all-apps-load-more"
+              onClick={() => setPageLimit(limit => limit + ALL_APPS_PAGE_SIZE)}
+            >
               {t('homeApps.actions.loadMore')}
             </Button>
           )}

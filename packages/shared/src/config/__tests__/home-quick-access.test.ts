@@ -4,6 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import {
+  MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH,
+  MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH,
+  sanitizeHomeQuickAccess,
+} from '../home-quick-access.ts'
+import { createProductSpaceContextKey } from '../../product-spaces/index.ts'
+
 const QUICK_ACCESS_MODULE_PATH = pathToFileURL(
   join(import.meta.dir, '..', 'home-quick-access.ts'),
 ).href
@@ -196,5 +203,72 @@ describe('Home quick-access preferences', () => {
       { id: 'b', addedAt: 2 },
       { id: 'a', addedAt: 1 },
     ])
+  })
+})
+
+describe('Home quick-access identity ceilings (R42: derived from the production encoders)', () => {
+  // 512 NUL control characters JSON-escape to exactly 6 chars each — the
+  // shared MAX_ESCAPED_ENTITY_ID_LENGTH worst case (512 * 6 = 3072).
+  const ESC = '\u0000'.repeat(512)
+
+  it('accepts a context key exactly at the four-tuple encoder ceiling and rejects one glyph beyond', () => {
+    const atLimit = createProductSpaceContextKey(ESC, ESC)
+    expect(atLimit.length).toBe(MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH)
+    const configDir = mkdtempSync(join(tmpdir(), 'polo-home-quick-ceiling-'))
+    expect(() =>
+      JSON.parse(
+        runEval(
+          configDir,
+          `setHomeQuickAccess(${JSON.stringify(atLimit)}, []); console.log('ok')`,
+        ),
+      ),
+    ).not.toBeNull()
+    const beyond = createProductSpaceContextKey(ESC + '!', ESC)
+    expect(beyond.length).toBeGreaterThan(MAX_HOME_QUICK_ACCESS_CONTEXT_KEY_LENGTH)
+    expect(() =>
+      runEval(
+        mkdtempSync(join(tmpdir(), 'polo-home-quick-ceiling-')),
+        `setHomeQuickAccess(${JSON.stringify(beyond)}, []); console.log('ok')`,
+      ),
+    ).toThrow()
+  })
+
+  it('accepts an app id exactly at the five-tuple identity ceiling and rejects one glyph beyond', () => {
+    const atLimit = JSON.stringify([
+      'product-space-ui',
+      ESC,
+      ESC,
+      ESC,
+      ESC,
+    ])
+    expect(atLimit.length).toBe(MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH)
+    expect(
+      sanitizeHomeQuickAccess([{ id: atLimit, addedAt: 1 }]),
+    ).toHaveLength(1)
+    expect(
+      sanitizeHomeQuickAccess([{ id: atLimit + '!', addedAt: 1 }]),
+    ).toHaveLength(0)
+  })
+
+  it('budgets JSON escaping expansion (quotes, backslashes) inside the derived ceiling', () => {
+    // Quotes/backslashes escape at 2x (not the 6x worst case) — the derived
+    // ceiling must BUDGET the expansion without rejecting in-budget ids.
+    const mixed = JSON.stringify([
+      'product-space-ui',
+      '"'.repeat(512),
+      '\\'.repeat(512),
+      ESC,
+      ESC,
+    ])
+    expect(mixed.length).toBeLessThanOrEqual(MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH)
+    expect(
+      sanitizeHomeQuickAccess([{ id: mixed, addedAt: 1 }]),
+    ).toHaveLength(1)
+    // A plain ASCII id one glyph beyond the ceiling is rejected.
+    expect(
+      sanitizeHomeQuickAccess([
+        { id: 'x'.repeat(MAX_HOME_QUICK_ACCESS_APP_ID_LENGTH + 1), addedAt: 1 },
+      ]),
+    ).toHaveLength(0)
   })
 })

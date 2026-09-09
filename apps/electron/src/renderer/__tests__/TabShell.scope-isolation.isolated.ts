@@ -11,8 +11,8 @@ import {
   openTabsAtom,
 } from '@/atoms/tab-browser'
 import { HOME_TAB_ID, POLO_TAB, type AppDefinition } from '../../shared/tab-browser-types'
-import type { ProductSpaceContextValue } from '@/context/ProductSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
+import type { ProductSpaceContextValue } from '@/context/ProductSpaceContext'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 
 // Register only when no window exists yet, and pin a macOS userAgent —
@@ -261,8 +261,6 @@ function buildShellTree(scope: ProviderScope): ReactNode {
     require('@/context/ProductSpaceContext') as typeof import('@/context/ProductSpaceContext')
   const { TabShellProvider } =
     require('../context/TabShellContext') as typeof import('../context/TabShellContext')
-  const { TabShell } =
-    require('../components/tab-browser/TabShell') as typeof import('../components/tab-browser/TabShell')
   const inner = createElement(LayoutSnapshot, {
     providerKey: scope.key,
     children: [
@@ -347,6 +345,7 @@ const {
   screen,
   waitFor,
 } = await import('@testing-library/react')
+
 const { TabShell } =
   await import('../components/tab-browser/TabShell') as typeof import('../components/tab-browser/TabShell')
 
@@ -571,7 +570,3 @@ describe('TabShell keyed-scope pre-hydration isolation (Review R33 security)', (
     expect(document.documentElement.dataset.activeTab).toBeUndefined()
   }, 30_000)
 })
-
-// TabShell import is used inside buildShellTree via require for the keyed
-// remount; keep a direct binding reference for the module graph.
-void TabShell

@@ -4,7 +4,7 @@ import { createElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { getDefaultStore } from 'jotai'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
-import { activeTabIdAtom } from '@/atoms/tab-browser'
+import { activeTabIdAtom, openAppTabAtom } from '@/atoms/tab-browser'
 import { HOME_TAB_ID, POLO_TAB_ID } from '../../shared/tab-browser-types'
 
 // Register only when no window exists yet, and pin a macOS userAgent —
@@ -342,6 +342,7 @@ afterEach(() => {
 const {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -412,13 +413,100 @@ describe('App × frozen narrow-window guard at 390x844 (Review R38 restores the 
     )
     assertHomeRestored()
 
-    // Re-narrowing fails closed again — every route, Home included.
+    // ROUTE: Catalog — entered through the production All Apps control.
+    fireEvent.click(screen.getByTestId('home-all-apps-open'))
+    await waitFor(
+      () => {
+        if (!screen.getByTestId('all-apps-view')) throw new Error('Catalog surface missing after widening')
+      },
+      { timeout: 10_000 },
+    )
+    // The narrow fixture's Catalog fails closed into its error tile —
+    // the route itself (the All Apps view) is the assertion target here.
     await act(async () => {
       resizeViewport(390)
     })
     await waitFor(
       () => {
-        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing after re-narrowing')
+        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing over Catalog after re-narrowing')
+      },
+      { timeout: 10_000 },
+    )
+    assertGuardMounted()
+
+    // Back to 641px+: the production Home surface returns. The launcher VIEW
+    // state itself resets on the guarded remount (the Home component
+    // unmounted under the guard), which is the production remount behavior —
+    // the ROUTE coverage above (Catalog visible at 641px+) is what the route
+    // matrix pins.
+    await act(async () => {
+      resizeViewport(1000)
+    })
+    await waitFor(
+      () => {
+        if (!screen.getByTestId('home-quick-access-section')) throw new Error('Home surface missing after re-widening')
+      },
+      { timeout: 10_000 },
+    )
+    expect(screen.queryByTestId('window-width-guard')).toBeNull()
+
+    // ROUTE: Polo workbench — entered through the production tab write path
+    // (TabShellContext.openApp → openAppTabAtom, the same production write
+    // the R33 review accepted).
+    await act(async () => {
+      getDefaultStore().set(activeTabIdAtom, POLO_TAB_ID)
+    })
+    await waitFor(
+      () => {
+        if (!screen.getByTestId('polo-app-root')) throw new Error('workbench missing for Polo route')
+      },
+      { timeout: 10_000 },
+    )
+    await act(async () => {
+      resizeViewport(390)
+    })
+    await waitFor(
+      () => {
+        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing over Polo route after re-narrowing')
+      },
+      { timeout: 10_000 },
+    )
+    assertGuardMounted()
+
+    // Back to 641px+: the Polo workbench hydrates again.
+    await act(async () => {
+      resizeViewport(1000)
+    })
+    await waitFor(
+      () => {
+        if (!screen.getByTestId('polo-app-root')) throw new Error('workbench missing after re-widening')
+      },
+      { timeout: 10_000 },
+    )
+
+    // ROUTE: webapp — entered through the production openApp write path.
+    await act(async () => {
+      getDefaultStore().set(openAppTabAtom, {
+        id: 'webapp-route-fixture',
+        name: 'Route WebApp',
+        url: 'https://webapp-route.example.com',
+        type: 'webapp' as const,
+        createdAt: 1,
+        order: 99,
+      })
+    })
+    await waitFor(
+      () => {
+        if (document.documentElement.dataset.activeTab !== 'webapp') throw new Error('webapp route not active')
+      },
+      { timeout: 10_000 },
+    )
+    await act(async () => {
+      resizeViewport(390)
+    })
+    await waitFor(
+      () => {
+        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing over webapp route after re-narrowing')
       },
       { timeout: 10_000 },
     )
