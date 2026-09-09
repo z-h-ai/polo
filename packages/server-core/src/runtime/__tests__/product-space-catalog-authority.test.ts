@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
+  __authorityPersistenceSeamForTests,
   __dropAuthorityProcessCacheForTests,
   getProductSpaceCatalogAuthorityRecord,
   hasProductSpaceCatalogAuthorityTuple,
@@ -1162,118 +1163,227 @@ describe('R25: wildcard traversal + deep snapshot + legacy zero-contribution', (
     )).toBe(true)
   })
 
-  it('the REAL 0555 containing-directory dual fault: create/unlink/rename denied, old bytes intact, cold process denies, fresh commit under 0555 throws, recovery after chmod', () => {
-    // Deterministic persistence fault (R47/R48): the containing directory is
-    // replaced with a regular FILE, so ALL file operations targeting paths
-    // inside it fail with ENOTDIR — this works for every uid (R47: uid-0
-    // permission bypass must not produce a zero-assertion pass).
-    recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-1', [entry()])
-    recordProductSpaceCatalogAuthoritativeEntries('account-b', 'space-b', 'rev-1', [
-      entry({ catalogEntryId: 'entry-b', artifactInstanceId: 'artifact-b' }),
-    ])
+  it('injected persistence seam fault: write/rename/unlink each fail closed with the exact injected error, old bytes byte-for-byte intact, cold child returns an assertion-bearing payload, recovery after seam restore', () => {
+    // Deterministic persistence fault (R50): each atomic-persist primitive is
+    // injected to fail via the test-only seam, one operation at a time, while
+    // the directory and the previously persisted authority bytes remain
+    // untouched. This runs identically under every uid.
+    //
+    // Both scopes are seeded as durable kind=authority records with NO
+    // in-process trust (a fresh commit is the only trust path), so a failed
+    // commit must leave BOTH scopes strictly untrusted.
+    const scopeKeyA = JSON.stringify(['product-space-catalog', 1, 'account-a', 'space-a'])
+    const scopeKeyB = JSON.stringify(['product-space-catalog', 1, 'account-b', 'space-b'])
+    const seededRecord = (accountId: string, productSpaceId: string, entryId: string, artifactId: string) => ({
+      kind: 'authority',
+      schemaVersion: 1,
+      accountId,
+      productSpaceId,
+      syncedAt: 1,
+      catalogRevision: 'rev-seeded',
+      entries: [{
+        kind: 'app', catalogEntryId: entryId, artifactInstanceId: artifactId,
+        versionId: 'version-1', version: '1.0.0', name: 'Seeded', description: '',
+        availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
+        permissions: [],
+      }],
+      tombstones: [],
+    })
+    writeFileSync(authorityFile(), JSON.stringify({
+      schemaVersion: 1,
+      records: {
+        [scopeKeyA]: seededRecord('account-a', 'space-a', 'entry-old-a', 'artifact-old-a'),
+        [scopeKeyB]: seededRecord('account-b', 'space-b', 'entry-old-b', 'artifact-old-b'),
+      },
+    }), 'utf8')
+    __dropAuthorityProcessCacheForTests()
     const oldFileSnapshot = readFileSync(authorityFile(), 'utf8')
-    const dir = dirname(authorityFile())
-    rmSync(dir, { recursive: true })
-    writeFileSync(dir, 'not-a-directory')
-    try {
-      // create denied
-      let createErrno: string | null = null
-      try {
-        writeFileSync(join(dir, 'r25-create-probe.bin'), 'x')
-      } catch (error) {
-        createErrno = (error as { code?: string }).code ?? 'unknown'
-      }
-      expect(createErrno).not.toBeNull()
-      expect(typeof createErrno).toBe('string')
-      // rename denied (ENOTDIR: the containing dir is a regular file).
-      let renameErrno: string | null = null
-      try {
-        renameSync(join(dir, 'authority.json'), join(dir, 'renamed.json'))
-      } catch (error) {
-        renameErrno = (error as { code?: string }).code ?? 'unknown'
-      }
-      expect(renameErrno).not.toBeNull()
-      expect(typeof renameErrno).toBe('string')
-      // old-file unlink/mutation denied
-      let unlinkErrno: string | null = null
-      try {
-        rmSync(authorityFile())
-      } catch (error) {
-        unlinkErrno = (error as { code?: string }).code ?? 'unknown'
-      }
-      console.log('DBG unlinkErrno:', unlinkErrno)
-      expect(unlinkErrno).not.toBeNull()
-      expect(typeof unlinkErrno).toBe('string')
-      // revoke + fresh persist must BOTH throw inside this fault domain.
-      expect(() => revokeProductSpaceCatalogAuthority('account-a', 'space-a')).toThrow()
-      expect(() => recordProductSpaceCatalogAuthoritativeEntries(
-        'account-a', 'space-a', 'fresh-ENOTDIR', [entry()],
-      )).toThrow()
+    const tempPath = `${authorityFile()}.${process.pid}.tmp`
+    const seam = __authorityPersistenceSeamForTests
+    const restoreSeam = (): void => {
+      seam.writeFileSync = writeFileSync
+      seam.renameSync = renameSync
+      seam.unlinkSync = unlinkSync
+    }
 
-      // P3: a cold child process must deny BOTH scopes before revalidation
-      // AND its fresh commit attempt under 0555 must throw.
-      const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
-      const probe = `
-        const { pathToFileURL } = await import('node:url')
-        const fs = await import('node:fs')
-        const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
-        let commitThrew = false
+    const expectFailClosed = (): void => {
+      __dropAuthorityProcessCacheForTests()
+      // Neither scope may gain ANY in-process trust from a failed commit —
+      // the seeded durable entries stay candidates, never grants.
+      expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(false)
+      expect(hasProductSpaceCatalogAuthorityTuple(
+        'account-a', 'space-a', 'entry-old-a', 'artifact-old-a', 'version-1', '1.0.0',
+      )).toBe(false)
+      expect(hasProductSpaceCatalogAuthorityTuple(
+        'account-b', 'space-b', 'entry-old-b', 'artifact-old-b', 'version-1', '1.0.0',
+      )).toBe(false)
+      expect(readFileSync(authorityFile(), 'utf8')).toBe(oldFileSnapshot)
+    }
+
+    // Scenario A: injected WRITE failure — rename must never be reached, the
+    // real unlink cleanup must remove the temp file.
+    {
+      const calls = { write: 0, rename: 0, unlink: 0 }
+      const injected = Object.assign(new Error('injected write failure'), { code: 'ESEAM_WRITE' })
+      const realRename = seam.renameSync
+      const realUnlink = seam.unlinkSync
+      seam.writeFileSync = () => { calls.write += 1; throw injected }
+      seam.renameSync = (...args: Parameters<typeof renameSync>) => { calls.rename += 1; return realRename(...args) }
+      seam.unlinkSync = (...args: Parameters<typeof unlinkSync>) => { calls.unlink += 1; return realUnlink(...args) }
+      try {
+        let caught: unknown
+        try {
+          recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-fault-write', [entry()])
+        } catch (error) { caught = error }
+        expect(caught).toBe(injected)
+        expect((caught as { code?: string }).code).toBe('ESEAM_WRITE')
+        expect(calls).toEqual({ write: 1, rename: 0, unlink: 1 })
+        expect(existsSync(tempPath)).toBe(false)
+        expectFailClosed()
+      } finally {
+        restoreSeam()
+      }
+    }
+
+    // Scenario B: injected RENAME failure — the REAL write creates the temp
+    // (a real rename source), the real unlink cleanup removes it after the
+    // rename throws.
+    {
+      const calls = { write: 0, rename: 0, unlink: 0 }
+      let renameSourceExisted = false
+      const injected = Object.assign(new Error('injected rename failure'), { code: 'ESEAM_RENAME' })
+      const realWrite = seam.writeFileSync
+      const realUnlink = seam.unlinkSync
+      seam.writeFileSync = (...args: Parameters<typeof writeFileSync>) => {
+        calls.write += 1
+        const result = realWrite(...args)
+        renameSourceExisted = existsSync(tempPath)
+        return result
+      }
+      seam.renameSync = () => { calls.rename += 1; throw injected }
+      seam.unlinkSync = (...args: Parameters<typeof unlinkSync>) => { calls.unlink += 1; return realUnlink(...args) }
+      try {
+        let caught: unknown
+        try {
+          recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-fault-rename', [entry()])
+        } catch (error) { caught = error }
+        expect(caught).toBe(injected)
+        expect((caught as { code?: string }).code).toBe('ESEAM_RENAME')
+        expect(renameSourceExisted).toBe(true)
+        expect(calls).toEqual({ write: 1, rename: 1, unlink: 1 })
+        expect(existsSync(tempPath)).toBe(false)
+        expectFailClosed()
+      } finally {
+        restoreSeam()
+      }
+    }
+
+    // Scenario C: injected RENAME + UNLINK failure — the rename error must
+    // still propagate (cleanup failure is swallowed by design), the temp
+    // leaks inside this fault domain and is cleaned by the test itself.
+    {
+      const calls = { write: 0, rename: 0, unlink: 0 }
+      const renameInjected = Object.assign(new Error('injected rename failure'), { code: 'ESEAM_RENAME' })
+      const unlinkInjected = Object.assign(new Error('injected unlink failure'), { code: 'ESEAM_UNLINK' })
+      const realWrite = seam.writeFileSync
+      seam.writeFileSync = (...args: Parameters<typeof writeFileSync>) => { calls.write += 1; return realWrite(...args) }
+      seam.renameSync = () => { calls.rename += 1; throw renameInjected }
+      seam.unlinkSync = () => { calls.unlink += 1; throw unlinkInjected }
+      try {
+        let caught: unknown
+        try {
+          recordProductSpaceCatalogAuthoritativeEntries('account-a', 'space-a', 'rev-fault-unlink', [entry()])
+        } catch (error) { caught = error }
+        expect(caught).toBe(renameInjected)
+        expect((caught as { code?: string }).code).toBe('ESEAM_RENAME')
+        expect(calls).toEqual({ write: 1, rename: 1, unlink: 1 })
+        expect(existsSync(tempPath)).toBe(true)
+        expectFailClosed()
+      } finally {
+        restoreSeam()
+        if (existsSync(tempPath)) unlinkSync(tempPath)
+      }
+    }
+
+    // P3: a COLD child process must exercise the same seam: its commit
+    // attempt fails with the exact injected error, both scopes fail closed,
+    // old bytes stay intact — and it must exit 0 with a parsed
+    // assertion-bearing payload (any non-zero exit fails this test).
+    const moduleAbs = join(import.meta.dir, '..', 'product-space-catalog-authority-internal.ts')
+    const probe = `
+      const { pathToFileURL } = await import('node:url')
+      const fs = await import('node:fs')
+      const mod = await import(pathToFileURL(${JSON.stringify(moduleAbs)}).href)
+      const result = {
+        ok: false, seamUsed: false, commitThrew: false, commitCode: '',
+        aTrusted: false, bTrusted: false, oldBytesIntact: false, reason: '',
+      }
+      try {
+        const file = process.env.POLO_AI_CONFIG_DIR + '/product-space-catalog-authority.json'
+        const old = fs.readFileSync(file, 'utf8')
+        const injected = Object.assign(new Error('cold injected rename failure'), { code: 'ESEAM_COLD_RENAME' })
+        mod.__authorityPersistenceSeamForTests.renameSync = () => { result.seamUsed = true; throw injected }
         try {
           mod.recordProductSpaceCatalogAuthoritativeEntries(
-            'account-a', 'space-a', 'rev-p3-0555',
+            'account-a', 'space-a', 'rev-cold-seam',
             [{ kind: 'app', catalogEntryId: 'entry-p3', artifactInstanceId: 'artifact-p3',
                version: { versionId: 'version-p3', version: '9.0.0' }, name: 'P3', description: '',
                availability: 'available', sources: [{ kind: 'enterprise_import', name: 'S' }],
                permissions: [] }])
-        } catch { commitThrew = true }
-        let aTrusted = false
-        try {
-          aTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
-            'account-a', 'space-a', 'entry-a', 'artifact-a', 'version-1', '1.0.0')
-        } catch { aTrusted = false }
-        let bTrusted = false
-        try {
-          bTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
-            'account-b', 'space-b', 'entry-b', 'artifact-b', 'version-1', '1.0.0')
-        } catch { bTrusted = false }
-        console.log(JSON.stringify({
-          commitThrew,
-          aTrusted,
-          bTrusted,
-        }))
-      `
-      const p3 = Bun.spawnSync({
-        cmd: [process.execPath, '-e', probe],
-        cwd: join(import.meta.dir, '..', '..', '..'),
-        env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      })
-      // Under the ENOTDIR fault the child process may exit non-zero
-      // (module init hits ENOENT reading the config dir) — this is expected.
-      if (p3.exitCode !== 0) {
-        // ENOTDIR fault: cold process correctly denies — skip detailed checks.
-      } else {
-        const p3Out = JSON.parse(p3.stdout.toString().trim()) as {
-          commitThrew: boolean
-          aTrusted: boolean
-          bTrusted: boolean
+        } catch (error) {
+          result.commitThrew = true
+          result.commitCode = error && error.code ? error.code : String(error)
         }
-        expect(p3Out.commitThrew).toBe(true)
-        expect(p3Out.aTrusted).toBe(false)
-        expect(p3Out.bTrusted).toBe(false)
+        result.aTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-a', 'space-a', 'entry-old-a', 'artifact-old-a', 'version-1', '1.0.0')
+        result.bTrusted = mod.hasProductSpaceCatalogAuthorityTuple(
+          'account-b', 'space-b', 'entry-old-b', 'artifact-old-b', 'version-1', '1.0.0')
+        result.oldBytesIntact = fs.readFileSync(file, 'utf8') === old
+        result.ok = result.seamUsed && result.commitThrew
+          && result.commitCode === 'ESEAM_COLD_RENAME'
+          && !result.aTrusted && !result.bTrusted && result.oldBytesIntact
+      } catch (error) {
+        result.reason = String(error)
       }
-
-    } finally {
-      unlinkSync(dir)
-      mkdirSync(dir, { recursive: true })
+      console.log(JSON.stringify(result))
+    `
+    const p3 = Bun.spawnSync({
+      cmd: [process.execPath, '-e', probe],
+      cwd: join(import.meta.dir, '..', '..', '..'),
+      env: { ...process.env, POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR! },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    // A non-zero cold-child exit is a FAILURE, never an accepted branch.
+    expect(p3.exitCode).toBe(0)
+    const p3Out = JSON.parse(p3.stdout.toString().trim()) as {
+      ok: boolean
+      seamUsed: boolean
+      commitThrew: boolean
+      commitCode: string
+      aTrusted: boolean
+      bTrusted: boolean
+      oldBytesIntact: boolean
+      reason: string
     }
+    expect(p3Out.reason).toBe('')
+    expect(p3Out.seamUsed).toBe(true)
+    expect(p3Out.commitThrew).toBe(true)
+    expect(p3Out.commitCode).toBe('ESEAM_COLD_RENAME')
+    expect(p3Out.aTrusted).toBe(false)
+    expect(p3Out.bTrusted).toBe(false)
+    expect(p3Out.oldBytesIntact).toBe(true)
+    expect(p3Out.ok).toBe(true)
 
-    // Permission restored: fresh commit succeeds and recovers the scope.
+    // Seam fully restored: a fresh commit succeeds and recovers the scope.
+    // The seeded entry-old-a is carried as a withdrawn tombstone by design.
     const tombstones = recordProductSpaceCatalogAuthoritativeEntries(
       'account-a', 'space-a', 'rev-recovered', [entry()],
     )
-    expect(tombstones).toEqual([])
+    expect(tombstones).toHaveLength(1)
+    expect(String(tombstones[0].catalogEntryId)).toBe('entry-old-a')
+    expect(String(tombstones[0].artifactInstanceId)).toBe('artifact-old-a')
+    expect(tombstones[0].availability).toBe('withdrawn')
     expect(hasProductSpaceCatalogAuthorityTuple('account-a', 'space-a', ...tuple())).toBe(true)
   })
 })

@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "Odinstaluj",
   "homeApps.actions.update": "Aktualizuj",
   "homeApps.actions.viewReason": "Pokaż powód",
-  "homeApps.allApps.back": "Wstecz",
+  "homeApps.allApps.back": "Wróć do domu",
   "homeApps.allApps.circlesDescription": "Prace z {{count}} kół są pokazywane osobno, zawsze z oznaczeniem koła źródłowego.",
   "homeApps.allApps.count": "Liczba aplikacji: {{count}}",
   "homeApps.allApps.countVisible": "{{visible}} / {{total}} App",

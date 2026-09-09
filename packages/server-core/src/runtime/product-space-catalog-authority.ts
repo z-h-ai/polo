@@ -22,6 +22,7 @@ export {
   revokeProductSpaceCatalogAuthority,
   resetProductSpaceCatalogAuthorityForTests,
   __dropAuthorityProcessCacheForTests,
+  __authorityPersistenceSeamForTests,
   PRODUCT_SPACE_CATALOG_AUTHORITY_SCHEMA_VERSION,
   type ProductSpaceCatalogAuthorityEntry,
 } from './product-space-catalog-authority-internal'

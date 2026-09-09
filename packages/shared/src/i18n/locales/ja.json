@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "アンインストール",
   "homeApps.actions.update": "アップデート",
   "homeApps.actions.viewReason": "理由を表示",
-  "homeApps.allApps.back": "戻る",
+  "homeApps.allApps.back": "ホームに戻る",
   "homeApps.allApps.circlesDescription": "{{count}} つのサークルの作品がそれぞれ表示され、出所のサークルが示されます。",
   "homeApps.allApps.count": "{{count}} 個のアプリ",
   "homeApps.allApps.countVisible": "{{visible}} / {{total}} App",

@@ -347,6 +347,20 @@ function loadFile(): ProductSpaceCatalogAuthorityFile {
 }
 
 /**
+ * Test-only injection seam around the persistence primitives used by
+ * persistFileAtomic. Every member defaults to the real node:fs function and
+ * production code never reassigns any member; only tests may substitute one
+ * to inject a deterministic failure, and must restore the real function
+ * afterwards. This is the seam through which write/rename/unlink failures
+ * are injected WITHOUT touching the directory or the persisted authority.
+ */
+export const __authorityPersistenceSeamForTests: {
+  writeFileSync: typeof writeFileSync
+  renameSync: typeof renameSync
+  unlinkSync: typeof unlinkSync
+} = { writeFileSync, renameSync, unlinkSync }
+
+/**
  * write-temp-then-rename persistence. Throws on ANY persistence failure —
  * callers that need durable-revocation semantics must observe the failure
  * and never treat the in-memory view as authoritative until this returned.
@@ -355,14 +369,16 @@ function persistFileAtomic(file: ProductSpaceCatalogAuthorityFile): void {
   const path = authorityPath()
   mkdirSync(dirname(path), { recursive: true })
   const tempPath = `${path}.${process.pid}.tmp`
+  const { writeFileSync: persistWrite, renameSync: persistRename, unlinkSync: persistUnlink } =
+    __authorityPersistenceSeamForTests
   try {
-    writeFileSync(tempPath, JSON.stringify(file), 'utf8')
-    renameSync(tempPath, path)
+    persistWrite(tempPath, JSON.stringify(file), 'utf8')
+    persistRename(tempPath, path)
   } catch (error) {
     // Never leak the temp file: a leftover would make an unrelated later
     // write fail with EEXIST (its own failure domain must stay clean).
     try {
-      unlinkSync(tempPath)
+      persistUnlink(tempPath)
     } catch {}
     throw error
   }

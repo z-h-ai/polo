@@ -173,6 +173,9 @@
   /* Frozen POO-41 card surface (source-derived --surface): the elevated
      white card body on the near-white launcher background. */
   --surface: #ffffff;
+  /* Frozen POO-41 card shadow (source-derived): the xs elevation used by
+     cards and inputs in both light and dark themes. */
+  --shadow-xs: 0 1px 2px rgb(25 23 32 / 8%), 0 8px 22px rgb(25 23 32 / 4%);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -273,6 +276,29 @@
   --muted-foreground: oklch(0.68 0.01 270);
 }
 
+/* The Catalog region is gated against the accepted ALIGNED reference
+   (app-catalog-two-source contract v2). The reference page declares
+   lang=zh-Hans, so its default family list resolves CJK to PingFang SC;
+   the product html is language-agnostic and must pin the family the same
+   way the gated Home surface does. Its accent/success/muted tokens are the
+   same source-derived values the frozen POO-41 surfaces pin. */
+[data-testid='all-apps-view'] {
+  font-family: system-ui, "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* The aligned reference declares no font smoothing — the browser default
+     (subpixel) is its rendering contract; the global body override must not
+     leak into this gated region. */
+  -webkit-font-smoothing: auto;
+  --accent: #6e56cf;
+  --success: #27956a;
+  --muted-foreground: oklch(0.52 0.012 270);
+}
+
+.dark [data-testid='all-apps-view'] {
+  --accent: #a98be1;
+  --success: #62c99a;
+  --muted-foreground: oklch(0.68 0.01 270);
+}
+
 /* Dark Mode */
 .dark {
   /* === 6 BASE COLORS (must match DEFAULT_THEME.dark in theme.ts) === */
@@ -328,6 +354,7 @@
   --card-foreground: var(--foreground);
   /* Frozen POO-41 dark card surface (source-derived dark --surface). */
   --surface: oklch(0.205 0.014 270);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 26px rgb(0 0 0 / 16%);
   --popover: var(--background);
   --popover-foreground: var(--foreground);
   --border: oklch(from var(--foreground) l c h / 0.05);
@@ -431,6 +458,11 @@ html[data-font="inter"] {
   --color-workbench-info: var(--workbench-info);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
+  /* Theme-mixed tinted text (documents light/dark contrast for tinted
+     surfaces: banners, badges, status pills). */
+  --color-success-text: var(--success-text);
+  --color-destructive-text: var(--destructive-text);
+  --color-info-text: var(--info-text);
 
   /* === MIX VARIANTS (solid interpolation) === */
   --color-foreground-1\.5: var(--foreground-1\.5);

@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "Desinstalar",
   "homeApps.actions.update": "Actualizar",
   "homeApps.actions.viewReason": "Ver motivo",
-  "homeApps.allApps.back": "Atrás",
+  "homeApps.allApps.back": "Volver al inicio",
   "homeApps.allApps.circlesDescription": "Las obras de {{count}} círculos se muestran por separado, siempre etiquetadas con su círculo de origen.",
   "homeApps.allApps.count": "{{count}} Apps",
   "homeApps.allApps.countVisible": "{{visible}} / {{total}} Apps",

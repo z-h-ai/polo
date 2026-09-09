@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "Deinstallieren",
   "homeApps.actions.update": "Aktualisieren",
   "homeApps.actions.viewReason": "Grund anzeigen",
-  "homeApps.allApps.back": "Zurück",
+  "homeApps.allApps.back": "Zurück zur Startseite",
   "homeApps.allApps.circlesDescription": "Werke aus {{count}} Kreisen werden getrennt angezeigt und stets mit ihrem Quellkreis markiert.",
   "homeApps.allApps.count": "{{count}} Apps",
   "homeApps.allApps.countVisible": "{{visible}} / {{total}} Apps",

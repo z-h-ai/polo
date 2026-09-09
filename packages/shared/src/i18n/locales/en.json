@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "Uninstall",
   "homeApps.actions.update": "Update",
   "homeApps.actions.viewReason": "View reason",
-  "homeApps.allApps.back": "Back",
+  "homeApps.allApps.back": "Back to home",
   "homeApps.allApps.circlesDescription": "Works from {{count}} circles are shown separately, always labelled with their source circle.",
   "homeApps.allApps.count": "{{count}} Apps",
   "homeApps.allApps.countVisible": "{{visible}} / {{total}} Apps",

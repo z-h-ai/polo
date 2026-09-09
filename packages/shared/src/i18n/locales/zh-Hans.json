@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "卸载",
   "homeApps.actions.update": "更新",
   "homeApps.actions.viewReason": "查看原因",
-  "homeApps.allApps.back": "返回",
+  "homeApps.allApps.back": "返回首页",
   "homeApps.allApps.circlesDescription": "来自 {{count}} 个圈子的作品会分别显示，并持续标明来源圈子。",
   "homeApps.allApps.count": "{{count}} 个 App",
   "homeApps.allApps.countVisible": "显示 {{visible}} / {{total}} 个 Apps",

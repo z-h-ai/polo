@@ -697,7 +697,7 @@
   "homeApps.actions.uninstall": "Eltávolítás",
   "homeApps.actions.update": "Frissítés",
   "homeApps.actions.viewReason": "Ok megtekintése",
-  "homeApps.allApps.back": "Vissza",
+  "homeApps.allApps.back": "Vissza a kezdőlapra",
   "homeApps.allApps.circlesDescription": "{{count}} kör munkái külön jelennek meg, forrásuk szerint megjelölve.",
   "homeApps.allApps.count": "{{count}} alkalmazás",
   "homeApps.allApps.countVisible": "{{visible}} / {{total}} App",

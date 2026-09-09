@@ -5,7 +5,6 @@ import type { CatalogApp } from '@polo-ai/shared/admin'
 import type { ProductSpaceAppInstallState } from '@polo-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useCompactViewport } from '@/lib/use-compact-viewport'
 import { catalogStateMessage } from '@/lib/home-app-errors'
 import { AppArtwork } from './OrganizationAppCard'
 
@@ -101,11 +100,14 @@ function AppAvailability({
   installState,
   offline,
   spaceKind,
+  variant = 'inspector',
 }: {
   app: CatalogApp
   installState?: ProductSpaceAppInstallState
   offline: boolean
   spaceKind: 'personal' | 'enterprise' | null
+  /** row = reference-aligned catalog-card status paragraph; inspector = compact line. */
+  variant?: 'row' | 'inspector'
 }) {
   const { t } = useTranslation()
   let label = t('homeApps.status.available')
@@ -116,6 +118,20 @@ function AppAvailability({
   } else if (offline) label = t('homeApps.status.offline')
   else if (installState?.state === 'installing') label = t('homeApps.status.installing')
   else if (installState?.state === 'installed') label = t('homeApps.status.installed')
+  if (variant === 'row') {
+    const plain = !isCatalogAppUnavailable(app, offline)
+    return (
+      <p
+        className={cn(
+          'm-0 mb-[16px] mt-[16px]',
+          plain ? 'text-[16px] leading-[22px]' : 'text-[11px] leading-[1.4] text-muted-foreground',
+        )}
+        data-testid="all-apps-row-status"
+      >
+        {label}
+      </p>
+    )
+  }
   return <span className="text-[11px] text-muted-foreground">{label}</span>
 }
 
@@ -263,21 +279,38 @@ function AllAppsRow({
   return (
     <article
       className={cn(
-        'flex min-h-[222px] max-[1080px]:min-h-[210px] flex-col rounded-[17px] border bg-surface p-5 shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]',
+        'flex min-h-[250px] max-[1080px]:min-h-[210px] flex-col rounded-[17px] border bg-surface p-[20px] shadow-xs transition-shadow hover:shadow-minimal max-[1080px]:p-[18px]',
         unavailable ? 'border-foreground/10 opacity-65' : 'border-foreground/10',
       )}
       data-testid="all-apps-row"
       data-app-id={app.id}
       data-identity-key={identityKey}
     >
-      <AppArtwork app={app} />
-      <h3 className="m-0 mt-[26px] text-base font-semibold">{app.name}</h3>
+      {/* Reference-aligned fallback artwork: pale outlined glyph tile
+      (success-soft success tile, exactly as the accepted two-source
+      reference renders non-assistant rows). Icons keep the same 42px
+      tile footprint. */}
+      {app.iconUrl ? (
+        <img
+          src={app.iconUrl}
+          alt=""
+          className="mb-[26px] size-[42px] shrink-0 rounded-[13px] object-cover"
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="mb-[26px] flex size-[42px] shrink-0 items-center justify-center rounded-[13px] bg-success/11 text-[17px] text-success"
+        >
+          ▣
+        </span>
+      )}
+      <h3 className="m-0 text-[16px] font-bold leading-[22px]">{app.name}</h3>
       {app.sourceNames?.length ? (
-        <div className="mt-[6px] flex flex-wrap items-center gap-[6px]">
+        <div className="mt-[8px] flex flex-wrap items-center gap-[6px]">
           {app.sourceNames.map(sourceName => (
             <span
               key={sourceName}
-              className="inline-flex items-center rounded-md bg-accent/12 px-[7px] py-[2px] text-[10px] text-accent"
+              className="inline-flex items-center rounded-full bg-accent/12 px-[7px] py-[3px] text-[10px] leading-[1.4] text-accent"
               data-testid="all-apps-row-source"
             >
               {t('homeApps.allApps.fromSource', { source: sourceName })}
@@ -285,7 +318,7 @@ function AllAppsRow({
           ))}
         </div>
       ) : (
-        <p className="mt-[6px] text-xs text-muted-foreground">
+        <p className="mt-[8px] text-[12px] leading-[17px] text-muted-foreground">
           {app.creatorName?.trim() || t('homeApps.allApps.unknownSource')}
         </p>
       )}
@@ -293,17 +326,17 @@ function AllAppsRow({
         {app.description || t('homeApps.noDescription')}
       </p>
       {(app.creatorName?.trim() || app.catalogVersion?.version) && (
-        <p className="mt-[4px] text-xs text-muted-foreground">
+        <p className="mt-[4px] text-[12px] leading-[17px] text-muted-foreground">
           {[
             app.creatorName?.trim(),
             app.catalogVersion?.version ? `v${app.catalogVersion.version}` : null,
           ].filter(Boolean).join(' · ')}
         </p>
       )}
-      <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} />
+      <AppAvailability app={app} installState={installState} offline={offline} spaceKind={spaceKind} variant="row" />
       <div className="mt-auto flex flex-wrap items-center justify-end gap-[7px] pt-[14px]">
         {blocked && (
-          <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-danger/12 px-[7px] py-[2px] text-[10px] text-danger before:block before:size-[5px] before:rounded-full before:bg-current">
+          <span className="inline-flex min-h-[20px] items-center gap-[5px] rounded-md bg-destructive/12 px-[7px] py-[2px] text-[10px] text-destructive before:block before:size-[5px] before:rounded-full before:bg-current">
             {t('homeApps.status.blocked')}
           </span>
         )}
@@ -315,7 +348,7 @@ function AllAppsRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
             onClick={() => onPin(app)}
             data-testid={`all-apps-pin-${identityKey}`}
           >
@@ -329,7 +362,7 @@ function AllAppsRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
             aria-expanded={reasonOpen}
             aria-controls={`all-apps-reason-text-${identityKey}`}
             onClick={() => setReasonOpen(open => !open)}
@@ -341,7 +374,7 @@ function AllAppsRow({
           <Button
             type="button"
             size="sm"
-            className="min-h-[32px] rounded-lg border border-accent bg-accent px-3 text-xs font-semibold text-primary-foreground hover:bg-accent/90"
+            className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white hover:bg-accent/90"
             disabled={unavailable || installState?.state === 'installing'}
             onClick={() => onOpen(app)}
             data-testid={`all-apps-action-${identityKey}`}
@@ -355,7 +388,7 @@ function AllAppsRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-[32px] rounded-lg border-0 px-3 text-xs text-muted-foreground hover:text-foreground"
+            className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
             onClick={() => onUninstall(app)}
             data-testid={`all-apps-uninstall-${identityKey}`}
           >
@@ -366,7 +399,7 @@ function AllAppsRow({
       {blocked && reasonOpen && (
         <p
           id={`all-apps-reason-text-${identityKey}`}
-          className="mt-[10px] text-xs leading-[1.6] text-muted-foreground"
+          className="mt-[10px] text-[12px] leading-[1.6] text-muted-foreground"
           data-testid={`all-apps-reason-text-${identityKey}`}
         >
           {t(catalogAppBlockedStatusKey(app, spaceKind))}
@@ -381,7 +414,6 @@ export function AllAppsView({
   spaceKind,
   apps,
   loading,
-  refreshing,
   warningCode,
   errorCode,
   offline,
@@ -397,7 +429,6 @@ export function AllAppsView({
   onBack,
 }: AllAppsViewProps) {
   const { t } = useTranslation()
-  const compact = useCompactViewport()
   const [pageLimit, setPageLimit] = useState(ALL_APPS_PAGE_SIZE)
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -425,63 +456,54 @@ export function AllAppsView({
   const displayedCount = displayedGroups.reduce((sum, group) => sum + group.apps.length, 0)
   return (
     <section aria-labelledby="all-apps-heading" data-testid="all-apps-view" className="text-[16px]">
-      <div className="mb-[26px] flex items-end justify-between gap-5">
+      <div className="mb-[26px] flex items-end justify-between gap-[20px]">
         <div className="min-w-0">
-          <p className="m-0 text-xs text-muted-foreground">{spaceName}</p>
+          <p className="m-0 mb-[7px] text-[11px] uppercase leading-[16px] tracking-[.08em] text-muted-foreground">{spaceName}</p>
           <h1
             id="all-apps-heading"
-            className="m-0 mt-[6px] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em]"
+            className="m-0 text-[28px] font-bold leading-[1.08] tracking-[-.05em]"
           >
             {t('homeApps.allApps.title')}
           </h1>
-          <p className="mt-[10px] text-[13px] text-muted-foreground">
+          <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
             {t('homeApps.allApps.subtitle')}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" disabled={refreshing} onClick={onRefresh}>
-            <Icons.RefreshCw className={cn(refreshing && 'animate-spin')} />
-            {t('homeApps.actions.refresh')}
-          </Button>
-          <button
-            type="button"
-            data-testid="all-apps-back"
-            onClick={onBack}
-            className="inline-flex min-h-[32px] items-center rounded-lg px-[10px] text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          >
-            {t('homeApps.allApps.back')}
-          </button>
-        </div>
+        <button
+          type="button"
+          data-testid="all-apps-back"
+          onClick={onBack}
+          className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+        >
+          {t('homeApps.allApps.back')}
+        </button>
       </div>
 
       <div className="mb-[24px] flex items-end justify-between gap-[18px]">
         <label className="grid w-[min(480px,100%)] gap-[7px]">
-          <span className="text-xs text-muted-foreground">{t('homeApps.allApps.searchLabel')}</span>
-          <span className="relative block">
-            <Icons.Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="search"
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              placeholder={t('homeApps.allApps.searchPlaceholder')}
-              className="h-[42px] w-full rounded-lg border border-foreground/10 bg-background pl-[13px] pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              data-testid="all-apps-search"
-            />
-          </span>
+          <span className="text-[12px] leading-[17px] text-muted-foreground">{t('homeApps.allApps.searchLabel')}</span>
+          <input
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('homeApps.allApps.searchPlaceholder')}
+            className="h-[42px] w-full appearance-none rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_38%,var(--border))] bg-surface pl-[13px] pr-3 text-[16px] outline-3 outline-offset-0 outline-[color-mix(in_srgb,var(--accent)_12%,transparent)] focus-visible:outline-[color-mix(in_srgb,var(--accent)_25%,transparent)] [&::-webkit-search-cancel-button]:appearance-none"
+            data-testid="all-apps-search"
+          />
         </label>
-        <span className="shrink-0 pb-1 text-xs text-muted-foreground" data-testid="all-apps-count">
+        <span className="shrink-0 text-[12px] leading-[17px] text-muted-foreground" data-testid="all-apps-count">
           {/* visible = the MOUNTED (paginated) rows, not the filtered total —
               the label must never claim rows that are not rendered yet. */}
           {t('homeApps.allApps.countVisible', { visible: displayedCount, total: apps.length })}
         </span>
       </div>
 
-      <div className="mb-[18px]">
-        <h2 className="m-0 text-[20px] tracking-[-0.03em]">{t('homeApps.allApps.sectionTitle')}</h2>
+      <div className="mb-[18px] mt-[34px]">
+        <h2 className="m-0 text-[20px] font-bold leading-[1.4] tracking-[-0.03em]">{t('homeApps.allApps.sectionTitle')}</h2>
         {/* Circles are a personal-space concept: enterprise All Apps must
         never describe its entries as coming from member circles. */}
         {spaceKind !== 'enterprise' && (
-          <p className="mt-[6px] text-sm text-muted-foreground">
+          <p className="mt-[6px] text-[14px] leading-[1.45] text-muted-foreground">
             {t('homeApps.allApps.circlesDescription', { count: circleCount })}
           </p>
         )}
@@ -492,11 +514,13 @@ export function AllAppsView({
         // rows shows the stale-catalog banner; a denied snapshot shows the
         // space-aware restricted copy. Both are informational only — the
         // install/open fail-closed gates below are never relaxed.
+        // Semantic tokens: destructive (denied) / info-amber (degraded),
+        // theme-mixed text keeps light/dark contrast on tinted surfaces.
         const cachedFailure = Boolean(errorCode) && apps.length > 0
         if (restricted) {
           return (
             <div
-              className="mb-4 rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-xs text-red-900 dark:text-red-100"
+              className="mb-4 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-[12px] text-destructive-text"
               data-testid="all-apps-restricted-banner"
             >
               {catalogStateMessage(t, errorCode ?? 'FORBIDDEN', 'error', spaceKind)}
@@ -506,7 +530,7 @@ export function AllAppsView({
         if (cachedFailure) {
           return (
             <div
-              className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
+              className="mb-4 rounded-lg border border-info/20 bg-info/8 px-3 py-2 text-[12px] text-info-text"
               data-testid="all-apps-stale-catalog-banner"
             >
               {t('homeApps.organization.refreshWarning')}
@@ -515,7 +539,7 @@ export function AllAppsView({
         }
         if (warningCode || offline) {
           return (
-            <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+            <div className="mb-4 rounded-lg border border-info/20 bg-info/8 px-3 py-2 text-[12px] text-info-text">
               {offline
                 ? t('homeApps.organization.offlineWarning')
                 : catalogStateMessage(t, warningCode, 'warning', spaceKind)}
