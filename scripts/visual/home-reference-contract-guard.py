@@ -152,7 +152,7 @@ def stylesheet_hiding_classes(root: Node) -> frozenset[str]:
             css = text_content(node)
             for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
                 selectors = match.group(1)
-                body = match.group(2).replace(" ", "").lower()
+                body = re.sub(r"\s+", "", match.group(2)).lower()
                 if (
                     "display:none" in body
                     or "visibility:hidden" in body
@@ -212,6 +212,40 @@ def visible_buttons(scope: Node, hiding_classes: frozenset[str]) -> list[Node]:
     ]
 
 
+def is_interactive(node: Node) -> bool:
+    """Genuinely interactive elements: <button>, <a href>, role=button,
+    onclick-carrying elements. A <span> with the same text never qualifies."""
+    if node.tag == "button":
+        return True
+    if node.tag == "a" and "href" in node.attrs:
+        return True
+    if (node.attrs.get("role") or "").strip().lower() == "button":
+        return True
+    return "onclick" in node.attrs
+
+
+def contains_node(ancestor: Node, node: Node) -> bool:
+    current = node.parent
+    while current is not None:
+        if current is ancestor:
+            return True
+        current = current.parent
+    return False
+
+
+def visible_interactive(scope: Node, hiding_classes: frozenset[str]) -> list[Node]:
+    result = []
+    for n in walk(scope):
+        if not is_interactive(n) or is_hidden(n, hiding_classes):
+            continue
+        # `disabled` semantics apply to buttons; non-button interactive
+        # elements (<a href>, role=button) are never excluded by it.
+        if n.tag == "button" and is_disabled_button(n):
+            continue
+        result.append(n)
+    return result
+
+
 # ── structural checks ───────────────────────────────────────────────────────
 
 
@@ -229,7 +263,7 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
         )
         return
     container = containers[0]
-    if not any(container is ancestor or container in walk(ancestor) for ancestor in heads):
+    if not any(contains_node(ancestor, container) for ancestor in heads):
         failures.append("structure: the .head-actions actions group must live inside the home .section-head")
 
     # ── required controls: inside THAT container, unique, ordered ──
@@ -238,28 +272,36 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
     allapps = [b for b in inside_buttons if text_content(b).strip() == "全部 Apps"]
     if len(manage) != 1:
         failures.append(
-            "structure: expected exactly one visible interactive <button>管理首页 Apps inside the unique "
-            f".head-actions actions group, found {len(manage)} (controls outside the actions group, "
-            "hidden/aria-hidden/disabled/span-substitutes are rejected)"
+            "structure: ambiguous — expected exactly one visible interactive <button>管理首页 Apps "
+            f"inside the unique .head-actions actions group, found {len(manage)} (controls outside "
+            "the actions group, hidden/aria-hidden/disabled/span-substitutes are rejected)"
         )
     if len(allapps) != 1:
         failures.append(
-            "structure: expected exactly one visible interactive <button>全部 Apps inside the unique "
-            f".head-actions actions group, found {len(allapps)} (non-interactive substitutes rejected)"
+            "structure: ambiguous — expected exactly one visible interactive <button>全部 Apps "
+            f"inside the unique .head-actions actions group, found {len(allapps)} "
+            "(non-interactive substitutes rejected)"
         )
     if len(manage) == 1 and len(allapps) == 1:
         if inside_buttons.index(manage[0]) > inside_buttons.index(allapps[0]):
             failures.append("structure: 管理首页 Apps must appear BEFORE 全部 Apps in the actions group")
 
-    # ── duplicate ambiguity: the labels must not appear on any other
-    # visible button ANYWHERE (a valid-looking control elsewhere in
-    # .section-head does not satisfy the contract) ──
+    # ── duplicate/stray ambiguity: ANY visible interactive same-label element
+    # ANYWHERE outside the unique .head-actions (button, <a href>, role=button,
+    # …) violates the contract — the label merely existing elsewhere in
+    # .section-head never satisfies it, and a second interactive control
+    # makes the required control ambiguous ──
     for label in ("管理首页 Apps", "全部 Apps"):
-        everywhere = [b for b in visible_buttons(root, hiding) if text_content(b).strip() == label]
-        if len(everywhere) > 1:
+        strays = [
+            n
+            for n in visible_interactive(root, hiding)
+            if text_content(n).strip() == label and not contains_node(container, n)
+        ]
+        if strays:
             failures.append(
-                f"structure: ambiguous duplicate visible <button>{label}> found {len(everywhere)} times — "
-                "a control outside the actions group does not satisfy the contract"
+                f"structure: ambiguous — visible interactive same-label <{strays[0].tag}>{label}> "
+                f"control outside the unique .head-actions actions group ({len(strays)} found); "
+                "the two required controls must be the exact ordered buttons inside the container"
             )
 
     # ── cards ──
@@ -272,35 +314,55 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
         ("客户访谈整理", "▣", False, "认证创作者 · 北极星共创社", [("打开", "ghost")]),
         ("素材清洗器", "▦", False, "认证创作者 · 北极星共创社", [("打开", "ghost")]),
     ]
+    allowed_action_tokens = {"button", "primary", "ghost"}
     for card, (name, glyph, is_assistant, source, actions) in zip(cards, expected):
         classes = class_tokens(card)
         if ("assistant" in classes) != is_assistant:
             failures.append(f"structure: card {name!r} assistant-class mismatch")
-        card_text = text_content(card)
-        if name not in card_text:
-            failures.append(f"structure: card order wrong — expected {name!r} card")
-            continue
-        arts = [n for n in walk(card) if "art" in class_tokens(n)]
+        # Visible heading/name: a hidden stray span containing the expected
+        # name must not mask a visible heading drift.
+        headings = [
+            n for n in walk(card)
+            if n.tag in ("h1", "h2", "h3", "h4") and not is_hidden(n, hiding)
+        ]
+        visible_names = [text_content(h).strip() for h in headings]
+        if visible_names != [name]:
+            failures.append(
+                f"structure: card {name!r} visible heading mismatch — visible headings "
+                f"{visible_names!r} != [{name!r}]; a hidden element retaining the expected "
+                "name does not mask visible drift"
+            )
+        # Visible source line: exact source in the card.
+        sources = [
+            n for n in walk(card)
+            if "source" in class_tokens(n) and not is_hidden(n, hiding)
+        ]
+        visible_sources = [text_content(n).strip() for n in sources]
+        if visible_sources != [source]:
+            failures.append(
+                f"structure: card {name!r} visible source mismatch — {visible_sources!r} "
+                f"!= [{source!r}]"
+            )
+        arts = [n for n in walk(card) if "art" in class_tokens(n) and not is_hidden(n, hiding)]
         if not arts or text_content(arts[0]).strip() != glyph:
             failures.append(f"structure: card {name!r} tile glyph mismatch (expected {glyph!r})")
-        sources = [n for n in walk(card) if "source" in class_tokens(n)]
-        if not sources or text_content(sources[0]).strip() != source:
-            failures.append(f"structure: card {name!r} source mismatch (expected {source!r})")
+        # Action roles: exact token set — the expected role with NO unknown or
+        # conflicting role token. `ghost danger`, `primary danger`, and
+        # `ghost→danger` all fail.
         card_buttons = visible_buttons(card, hiding)
         found_actions = []
         for button in card_buttons:
             tokens = class_tokens(button)
-            if "primary" in tokens:
-                role = "primary"
-            elif "ghost" in tokens:
-                role = "ghost"
-            else:
-                role = None  # unknown role class (danger, …) — never mapped to ghost
-            found_actions.append((text_content(button).strip(), role))
-        if found_actions != actions:
+            role_tokens = tokens & {"primary", "ghost"}
+            extra_role_tokens = tokens - allowed_action_tokens
+            label = text_content(button).strip()
+            found_actions.append((label, sorted(role_tokens), sorted(extra_role_tokens)))
+        expected_actions = [(label, [role], []) for label, role in actions]
+        if found_actions != expected_actions:
             failures.append(
-                f"structure: card {name!r} actions mismatch (exact primary/ghost roles required): "
-                f"{found_actions!r} != {actions!r}"
+                f"structure: card {name!r} actions mismatch (exact role token set required — "
+                f"expected {expected_actions!r}, unknown/conflicting role tokens rejected): "
+                f"{found_actions!r}"
             )
 
 
@@ -326,11 +388,22 @@ def check_contract_binding(
         except ValueError:
             return False
 
+    # RAW canonical-form check FIRST: the canonical link target must be a
+    # clean relative path — any `..` segment is traversal even when
+    # resolution happens to land on the aligned reference.
+    for target in links:
+        if ".." in target.split("/"):
+            failures.append(
+                f"binding: contract link target contains a traversal ('..') segment: {target!r}"
+            )
+
     # Group link targets by their RESOLVED path (relative to the supplied
-    # contract) so duplicate same-target, alternative-candidate, and
-    # traversal/outside bindings are all detectable in any sandbox.
+    # contract) so duplicate same-target and alternative bindings are
+    # detectable in any sandbox.
     groups: dict[Path, list[str]] = {}
     for target in links:
+        if ".." in target.split("/"):
+            continue  # traversal targets already rejected above
         candidate = (contract_dir / target).resolve()
         groups.setdefault(candidate, []).append(target)
 
@@ -360,15 +433,20 @@ def check_contract_binding(
         if not reference_resolved.exists():
             failures.append(f"binding: contract-linked reference file does not exist: {reference_resolved}")
 
-    alternative_candidates = [
-        candidate
-        for candidate in groups
-        if candidate != reference_resolved and candidate.exists() and inside_references(candidate)
-    ]
-    if alternative_candidates:
+    # EVERY additional HTML/reference candidate link (alternative) is
+    # rejected — including nonexistent ones — regardless of where it
+    # resolves. Only the single canonical binding may exist.
+    alternatives = {
+        target
+        for candidate, targets in groups.items()
+        if candidate != reference_resolved
+        for target in targets
+        if re.search(r"\.(html?|md)$", target, re.IGNORECASE)
+    }
+    if alternatives:
         failures.append(
-            "binding: alternative candidate binding inside the references directory: "
-            f"{alternative_candidates!r}"
+            f"binding: alternative candidate reference link(s) are forbidden — exactly one "
+            f"canonical binding may exist: {sorted(alternatives)!r}"
         )
 
 
@@ -390,20 +468,23 @@ def check_contract_values(md: str, failures: list[str]) -> None:
             "a conflicting threshold statement weakens the binding"
         )
 
+    # Each exclusion clause/claim is parsed INDEPENDENTLY (split on
+    # sentence separators) so an earlier line-level negation cannot mask an
+    # affirmative permission in a later clause:
+    # "exclusions are not permitted; icon exclusions are allowed" fails.
     for line in md.splitlines():
         if not re.search(r"exclusion", line, re.IGNORECASE):
             continue
-        # A contradictory permission claim (permitted/allowed WITHOUT a
-        # negation) unambiguously weakens the binding; mere mentions of
-        # retained exclusions (e.g. "the POO-47 exclusion is preserved")
-        # are consistent and pass.
-        permits = re.search(r"\b(permitted|allowed)\b", line, re.IGNORECASE)
-        negated = re.search(r"\b(not|never|no)\b", line, re.IGNORECASE)
-        if permits and not negated:
-            failures.append(
-                "contract contains 'permitted exclusions' claim: "
-                f"{line.strip()!r}"
-            )
+        for clause in re.split(r"[;；.]", line):
+            if not re.search(r"exclusion", clause, re.IGNORECASE):
+                continue
+            permits = re.search(r"\b(permitted|allowed)\b", clause, re.IGNORECASE)
+            negated = re.search(r"\b(not|never|no)\b", clause, re.IGNORECASE)
+            if permits and not negated:
+                failures.append(
+                    "contract contains 'permitted exclusions' claim: "
+                    f"{clause.strip()!r}"
+                )
 
 
 def check(
