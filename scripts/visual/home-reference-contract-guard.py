@@ -142,25 +142,100 @@ def class_tokens(node: Node) -> set[str]:
     return set((node.attrs.get("class") or "").split())
 
 
-def stylesheet_hiding_classes(root: Node) -> frozenset[str]:
-    """Class tokens whose stylesheet rule hides the element (generic — the
-    rule bodies are evaluated, no class-name allowlist). Rules inside @media
-    blocks are treated conservatively as hiding (fail closed)."""
-    hiding: set[str] = set()
+def strip_css_comments(css: str) -> str:
+    """Remove /* … */ comments (newlines included) BEFORE any rule parsing —
+    a commented-out rule is inert even when the comment contains braces."""
+    return re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+
+
+def parse_css_blocks(css: str) -> list[tuple[str, str]]:
+    """Brace-matching rule extraction that descends into @-blocks (e.g.
+    @media). Returns (selector, body) pairs with comments already stripped."""
+    rules: list[tuple[str, str]] = []
+    index = 0
+    length = len(css)
+    while index < length:
+        brace = css.find("{", index)
+        if brace == -1:
+            break
+        selector = css[index:brace].strip()
+        depth = 1
+        cursor = brace + 1
+        while cursor < length and depth:
+            if css[cursor] == "{":
+                depth += 1
+            elif css[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        body = css[brace + 1 : cursor - 1]
+        if selector.startswith("@"):
+            rules.extend(parse_css_blocks(body))
+        else:
+            rules.append((selector, body))
+        index = cursor
+    return rules
+
+
+HIDING_DECLARATIONS = ("display:none", "visibility:hidden", "opacity:0")
+
+
+def normalize_declaration(body: str) -> str:
+    """Normalize a declaration block: strip comments, then ALL whitespace
+    (tabs/newlines/formatted splits) — `display:/*c*/none`, `display:\t none`
+    and `display:\n none` all normalize to `display:none`."""
+    stripped = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    return re.sub(r"\s+", "", stripped).lower()
+
+
+def normalize_inline_style(style: str) -> str:
+    stripped = re.sub(r"/\*.*?\*/", "", style, flags=re.S)
+    return re.sub(r"\s+", "", stripped).lower()
+
+
+def parse_compound_classes(compound: str) -> list[str]:
+    return re.findall(r"\.([A-Za-z_][\w-]*)", compound)
+
+
+def selector_applies(rule_selector: str, node: Node) -> bool:
+    """Minimal descendant-combinator selector evaluation: the LAST compound
+    must match the element's own classes and every earlier compound must
+    match some ancestor (in order). Compound selectors (`.a.b`) require all
+    their classes on one node — an unmatched ancestor or compound selector
+    stays inert (no global class-token flattening)."""
+    parts = [part for part in re.split(r"\s+", rule_selector.strip()) if part]
+    if not parts:
+        return False
+    last = parse_compound_classes(parts[-1])
+    own = class_tokens(node)
+    if not last or any(cls not in own for cls in last):
+        return False
+    remaining = list(reversed(parts[:-1]))
+    if not remaining:
+        return True
+    current = node.parent
+    index = 0
+    while current is not None and current.tag != "#root":
+        if index < len(remaining) and all(
+            cls in class_tokens(current) for cls in parse_compound_classes(remaining[index])
+        ):
+            index += 1
+            if index == len(remaining):
+                return True
+        current = current.parent
+    return False
+
+
+def stylesheet_hiding_rules(root: Node) -> list[tuple[str, str]]:
+    """(selector, normalized-body) pairs whose declarations hide the element,
+    from every <style> block (comments stripped, @-blocks descended)."""
+    rules: list[tuple[str, str]] = []
     for node in walk(root):
         if node.tag == "style":
-            css = text_content(node)
-            for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-                selectors = match.group(1)
-                body = re.sub(r"\s+", "", match.group(2)).lower()
-                if (
-                    "display:none" in body
-                    or "visibility:hidden" in body
-                    or "opacity:0" in body
-                ):
-                    for token in re.findall(r"\.([A-Za-z_][\w-]*)", selectors):
-                        hiding.add(token)
-    return frozenset(hiding)
+            for selector, body in parse_css_blocks(strip_css_comments(text_content(node))):
+                normalized = normalize_declaration(body)
+                if any(declaration in normalized for declaration in HIDING_DECLARATIONS):
+                    rules.append((selector, normalized))
+    return rules
 
 
 HIDDEN_CLASS_TOKENS = frozenset({"hidden", "invisible"})
@@ -171,7 +246,7 @@ def node_attr_hides(node: Node) -> bool:
         return True
     if (node.attrs.get("aria-hidden") or "").strip().lower() == "true":
         return True
-    style = (node.attrs.get("style") or "").replace(" ", "").lower()
+    style = normalize_inline_style(node.attrs.get("style") or "")
     return (
         "display:none" in style
         or "visibility:hidden" in style
@@ -179,17 +254,18 @@ def node_attr_hides(node: Node) -> bool:
     )
 
 
-def is_hidden(node: Node, hiding_classes: frozenset[str]) -> bool:
+def is_hidden(node: Node, hiding_rules: list[tuple[str, str]]) -> bool:
+    """Visibility from ACTUAL selector rules applied to the control or an
+    ancestor (comment/tab/newline-normalized declarations, no class-token
+    flattening), plus attribute/inline/class-name-heuristic defenses."""
     current: Node | None = node
     while current is not None and current.tag != "#root":
         if node_attr_hides(current):
             return True
+        for selector, body in hiding_rules:
+            if selector_applies(selector, current):
+                return True
         tokens = class_tokens(current)
-        if tokens & hiding_classes:
-            return True
-        # Class-name heuristic (supplements the CSS-rule evaluation): the
-        # universal `hidden`/`invisible` utility tokens hide the element
-        # even when this reference ships no matching rule.
         if tokens & HIDDEN_CLASS_TOKENS:
             return True
         current = current.parent
@@ -204,11 +280,11 @@ def is_disabled_button(node: Node) -> bool:
     return (node.attrs.get("aria-disabled") or "").strip().lower() == "true"
 
 
-def visible_buttons(scope: Node, hiding_classes: frozenset[str]) -> list[Node]:
+def visible_buttons(scope: Node, hiding_rules: list[tuple[str, str]]) -> list[Node]:
     return [
         n
         for n in walk(scope)
-        if n.tag == "button" and not is_hidden(n, hiding_classes) and not is_disabled_button(n)
+        if n.tag == "button" and not is_hidden(n, hiding_rules) and not is_disabled_button(n)
     ]
 
 
@@ -233,10 +309,10 @@ def contains_node(ancestor: Node, node: Node) -> bool:
     return False
 
 
-def visible_interactive(scope: Node, hiding_classes: frozenset[str]) -> list[Node]:
+def visible_interactive(scope: Node, hiding_rules: list[tuple[str, str]]) -> list[Node]:
     result = []
     for n in walk(scope):
-        if not is_interactive(n) or is_hidden(n, hiding_classes):
+        if not is_interactive(n) or is_hidden(n, hiding_rules):
             continue
         # `disabled` semantics apply to buttons; non-button interactive
         # elements (<a href>, role=button) are never excluded by it.
@@ -250,7 +326,7 @@ def visible_interactive(scope: Node, hiding_classes: frozenset[str]) -> list[Nod
 
 
 def check_reference_structure(root: Node, failures: list[str]) -> None:
-    hiding = stylesheet_hiding_classes(root)
+    hiding_rules = stylesheet_hiding_rules(root)
 
     # ── unique section head + unique head-actions container ──
     heads = [n for n in walk(root) if "section-head" in class_tokens(n)]
@@ -267,7 +343,7 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
         failures.append("structure: the .head-actions actions group must live inside the home .section-head")
 
     # ── required controls: inside THAT container, unique, ordered ──
-    inside_buttons = visible_buttons(container, hiding)
+    inside_buttons = visible_buttons(container, hiding_rules)
     manage = [b for b in inside_buttons if text_content(b).strip() == "管理首页 Apps"]
     allapps = [b for b in inside_buttons if text_content(b).strip() == "全部 Apps"]
     if len(manage) != 1:
@@ -294,7 +370,7 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
     for label in ("管理首页 Apps", "全部 Apps"):
         strays = [
             n
-            for n in visible_interactive(root, hiding)
+            for n in visible_interactive(root, hiding_rules)
             if text_content(n).strip() == label and not contains_node(container, n)
         ]
         if strays:
@@ -323,7 +399,7 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
         # name must not mask a visible heading drift.
         headings = [
             n for n in walk(card)
-            if n.tag in ("h1", "h2", "h3", "h4") and not is_hidden(n, hiding)
+            if n.tag in ("h1", "h2", "h3", "h4") and not is_hidden(n, hiding_rules)
         ]
         visible_names = [text_content(h).strip() for h in headings]
         if visible_names != [name]:
@@ -335,7 +411,7 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
         # Visible source line: exact source in the card.
         sources = [
             n for n in walk(card)
-            if "source" in class_tokens(n) and not is_hidden(n, hiding)
+            if "source" in class_tokens(n) and not is_hidden(n, hiding_rules)
         ]
         visible_sources = [text_content(n).strip() for n in sources]
         if visible_sources != [source]:
@@ -343,13 +419,13 @@ def check_reference_structure(root: Node, failures: list[str]) -> None:
                 f"structure: card {name!r} visible source mismatch — {visible_sources!r} "
                 f"!= [{source!r}]"
             )
-        arts = [n for n in walk(card) if "art" in class_tokens(n) and not is_hidden(n, hiding)]
+        arts = [n for n in walk(card) if "art" in class_tokens(n) and not is_hidden(n, hiding_rules)]
         if not arts or text_content(arts[0]).strip() != glyph:
             failures.append(f"structure: card {name!r} tile glyph mismatch (expected {glyph!r})")
         # Action roles: exact token set — the expected role with NO unknown or
         # conflicting role token. `ghost danger`, `primary danger`, and
         # `ghost→danger` all fail.
-        card_buttons = visible_buttons(card, hiding)
+        card_buttons = visible_buttons(card, hiding_rules)
         found_actions = []
         for button in card_buttons:
             tokens = class_tokens(button)
@@ -375,6 +451,8 @@ def check_contract_binding(
     """SELF-CONTAINED binding validation: everything resolves relative to the
     SUPPLIED contract path and compares against the SUPPLIED reference path —
     module globals are never consulted."""
+    from urllib.parse import unquote
+
     md = contract_path.read_text(encoding="utf-8")
     links = re.findall(r"\[[^\]]*\]\(([^)\s]+)\)", md)
     contract_dir = contract_path.resolve().parent
@@ -388,23 +466,38 @@ def check_contract_binding(
         except ValueError:
             return False
 
+    def is_traversal_target(target: str) -> bool:
+        """Traversal detection on the PERCENT-DECODED target: `%2e%2e`
+        decodes to `..` and `%2f` to `/`, so encoded escapes are caught by
+        the same raw-segment check."""
+        decoded = unquote(target)
+        return ".." in decoded.split("/")
+
     # RAW canonical-form check FIRST: the canonical link target must be a
-    # clean relative path — any `..` segment is traversal even when
-    # resolution happens to land on the aligned reference.
+    # clean relative path — any `..` segment (raw or percent-encoded,
+    # including encoded separators) is traversal even when resolution would
+    # land on the aligned reference.
     for target in links:
-        if ".." in target.split("/"):
+        if is_traversal_target(target):
             failures.append(
-                f"binding: contract link target contains a traversal ('..') segment: {target!r}"
+                f"binding: contract link target contains a traversal ('..') segment "
+                f"(percent-decoding included): {target!r}"
             )
 
+    def classification_target(target: str) -> str:
+        """Strip query and fragment components before extension/candidate
+        classification: `./alternate.html#desktop` and `./alternate.md?raw=1`
+        classify as their file extensions."""
+        return target.split("#", 1)[0].split("?", 1)[0]
+
     # Group link targets by their RESOLVED path (relative to the supplied
-    # contract) so duplicate same-target and alternative bindings are
-    # detectable in any sandbox.
+    # contract; query/fragment stripped) so duplicate same-target and
+    # alternative bindings are detectable in any sandbox.
     groups: dict[Path, list[str]] = {}
     for target in links:
-        if ".." in target.split("/"):
+        if is_traversal_target(target):
             continue  # traversal targets already rejected above
-        candidate = (contract_dir / target).resolve()
+        candidate = (contract_dir / classification_target(target)).resolve()
         groups.setdefault(candidate, []).append(target)
 
     canonical_targets = groups.get(reference_resolved, [])
@@ -434,14 +527,15 @@ def check_contract_binding(
             failures.append(f"binding: contract-linked reference file does not exist: {reference_resolved}")
 
     # EVERY additional HTML/reference candidate link (alternative) is
-    # rejected — including nonexistent ones — regardless of where it
-    # resolves. Only the single canonical binding may exist.
+    # rejected — including nonexistent, uppercase-extension, fragment, and
+    # query variants — regardless of where it resolves. Only the single
+    # canonical binding may exist.
     alternatives = {
         target
         for candidate, targets in groups.items()
         if candidate != reference_resolved
         for target in targets
-        if re.search(r"\.(html?|md)$", target, re.IGNORECASE)
+        if re.search(r"\.(html?|md)([?#].*)?$", classification_target(target), re.IGNORECASE)
     }
     if alternatives:
         failures.append(
@@ -472,10 +566,17 @@ def check_contract_values(md: str, failures: list[str]) -> None:
     # sentence separators) so an earlier line-level negation cannot mask an
     # affirmative permission in a later clause:
     # "exclusions are not permitted; icon exclusions are allowed" fails.
+    # Clause boundaries: ASCII/fullwidth semicolon, period, Chinese full
+    # stop, newline, exclamation, question mark, comma, and conjunction
+    # boundaries — a prior denied assertion may not mask a later
+    # allowed/permitted assertion.
+    clause_split = re.compile(
+        r"[;；.。!！?？,，\n]|\band\b|\bAnd\b|和|与",
+    )
     for line in md.splitlines():
         if not re.search(r"exclusion", line, re.IGNORECASE):
             continue
-        for clause in re.split(r"[;；.]", line):
+        for clause in clause_split.split(line):
             if not re.search(r"exclusion", clause, re.IGNORECASE):
                 continue
             permits = re.search(r"\b(permitted|allowed)\b", clause, re.IGNORECASE)
