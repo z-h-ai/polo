@@ -768,6 +768,98 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
       await second.close()
     }
   })
+
+  it('unknown throwing own and inherited init getters are never observed', async () => {
+    const server = await startRecordingServer()
+    const ownThrowing = {} as RequestInit
+    Object.defineProperty(ownThrowing, 'unknownMember', {
+      enumerable: true,
+      get: () => {
+        throw new Error('unknown own getter observed')
+      },
+    })
+    const inheritedThrowing: RequestInit = Object.create(
+      Object.defineProperty({}, 'unknownMember', {
+        enumerable: true,
+        get: () => {
+          throw new Error('unknown inherited getter observed')
+        },
+      }),
+    )
+    try {
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const first = await fetch(server.pathUrl('/v1/echo'), ownThrowing)
+        expect(first.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const second = await fetch(new Request(server.pathUrl('/v1/echo')), inheritedThrowing)
+        expect(second.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([
+        { method: 'GET', path: '/v1/echo', body: '', header: undefined },
+        { method: 'GET', path: '/v1/echo', body: '', header: undefined },
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('a caller proxy init is consumed through its get trap without prototype traversal', async () => {
+    const server = await startRecordingServer()
+    const events: string[] = []
+    const proxyInit: RequestInit = new Proxy(
+      { method: 'POST', body: 'proxy-body' },
+      {
+        get(targetObject, key, receiver) {
+          events.push(`get:${String(key)}`)
+          return Reflect.get(targetObject, key, receiver)
+        },
+        getPrototypeOf() {
+          events.push('getPrototypeOf')
+          throw new Error('getPrototypeOf trap observed')
+        },
+      },
+    )
+    try {
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const response = await fetch(server.pathUrl('/v1/echo'), proxyInit)
+        expect(response.status).toBe(200)
+        expect(events).not.toContain('getPrototypeOf')
+        expect(events.filter((event) => event === 'get:method')).toHaveLength(1)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([{ method: 'POST', path: '/v1/echo', body: 'proxy-body' }])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('hostile non-configurable redirect descriptors cannot bypass the forced error', async () => {
+    const second = await startOkServer()
+    const first = await startHttpServer((req, res, path) => {
+      if (path === '/v1/start') {
+        res.writeHead(307, { location: second.pathUrl('/outside') })
+        res.end()
+      } else {
+        respond(res, 200, OK_BODY)
+      }
+    })
+    try {
+      const hostile = {} as RequestInit
+      Object.defineProperty(hostile, 'redirect', { value: 'follow', writable: false, configurable: false })
+      await withSeam(first.pathUrl('/v1'), async (installed) => {
+        await expect(fetch(first.pathUrl('/v1/start'), hostile)).rejects.toThrow()
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(first.requests).toEqual(['/v1/start'])
+      expect(second.requests).toEqual([])
+    } finally {
+      await first.close()
+      await second.close()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

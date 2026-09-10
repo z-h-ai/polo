@@ -9,8 +9,8 @@
  * the AWS retry middleware's per-wire-attempt entry point. The second wire
  * attempt throws an internal `RetryBlockedError` before the original transport
  * runs, an unguardable request handler is latched fail-closed, and object
- * fetch inputs are bound to their intrinsic transport snapshot.
- * Observations hold only counts and numeric status, never provider content.
+ * fetch inputs are bound to their intrinsic transport snapshot. Observations
+ * hold only counts and numeric status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -73,7 +73,6 @@ function assertAllowedTarget(baseOrigin: string, basePathname: string, target: U
   }
 }
 
-/** Gate the second real wire attempt; shared by the fetch and Bedrock wrappers. */
 function gateSecondWireAttempt(observation: TransportObservation): void {
   observation.attempts += 1;
   if (observation.attempts > 1) {
@@ -84,14 +83,18 @@ function gateSecondWireAttempt(observation: TransportObservation): void {
 
 function installBedrockSendSeam(observation: TransportObservation): void {
   const clientPrototype = BedrockRuntimeClient.prototype as { send?: unknown };
-  if (typeof clientPrototype.send !== 'function') throw seamError('BedrockRuntimeClient.prototype.send is not callable');
+  if (typeof clientPrototype.send !== 'function') {
+    throw seamError('BedrockRuntimeClient.prototype.send is not callable');
+  }
   const originalSend = clientPrototype.send as (this: BedrockRuntimeClient, ...args: unknown[]) => unknown;
   const guardedHandlers = new WeakSet<object>();
   const failedInstalls = new WeakSet<object>();
   const HANDLE_NOT_WRITABLE = 'Bedrock request handler handle is not writable';
   clientPrototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]): unknown {
     const handler = (this.config as { requestHandler?: { handle?: unknown } } | undefined)?.requestHandler;
-    if (!handler || typeof handler.handle !== 'function') throw seamError('resolved Bedrock request handler has no callable handle');
+    if (!handler || typeof handler.handle !== 'function') {
+      throw seamError('resolved Bedrock request handler has no callable handle');
+    }
     const requestHandler = handler as { handle: (request: unknown, options?: unknown) => Promise<unknown> };
     if (failedInstalls.has(requestHandler)) {
       // A failed install is permanent: later sends fail with the same fixed error before originalSend or the wire.
@@ -114,11 +117,8 @@ function installBedrockSendSeam(observation: TransportObservation): void {
       // Atomic install: assign, verify, then mark; a failed install is latched and fails closed.
       try {
         requestHandler.handle = wrapped;
+        if (requestHandler.handle !== wrapped) throw seamError(HANDLE_NOT_WRITABLE);
       } catch {
-        failedInstalls.add(requestHandler);
-        throw seamError(HANDLE_NOT_WRITABLE);
-      }
-      if (requestHandler.handle !== wrapped) {
         failedInstalls.add(requestHandler);
         throw seamError(HANDLE_NOT_WRITABLE);
       }
@@ -151,21 +151,22 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // Flattened RequestInit view: every member of the original init (own or inherited) is read
-    // once with the original init as receiver; redirect is an own unconditional 'error' member.
-    const initForSnapshot = { redirect: 'error' } as Record<string, unknown>;
-    for (let cursor: object | null = init ?? null; cursor; cursor = Object.getPrototypeOf(cursor)) {
-      for (const key of Reflect.ownKeys(cursor)) {
-        if (key !== 'redirect' && !(key in initForSnapshot)) initForSnapshot[key as string] = (init as Record<string, unknown>)[key as string];
-      }
-    }
+    // A native-exact RequestInit view: known members are read once with the original init as
+    // receiver (unknown getters never fire, undefined members fall back to the Request), the
+    // original init stays on the prototype chain, redirect is own unconditional 'error'.
+    const known = { method: init?.method, headers: init?.headers, body: init?.body };
+    const initForSnapshot: Record<string, unknown> = { redirect: 'error' };
+    for (const [key, value] of Object.entries(known)) if (value !== undefined) initForSnapshot[key] = value;
+    Object.setPrototypeOf(initForSnapshot, init ?? null);
     let snapshot: Request, target: URL;
     if (typeof input === 'string' || input instanceof URL) {
       target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
       snapshot = new Request(target, initForSnapshot);
     } else if (input instanceof Request) {
       snapshot = new Request(input, initForSnapshot);
-      if (snapshot.url !== Reflect.get(Request.prototype, 'url', input)) throw seamError('request input url is not internally consistent');
+      if (snapshot.url !== Reflect.get(Request.prototype, 'url', input)) {
+        throw seamError('request input url is not internally consistent');
+      }
       target = new URL(snapshot.url);
     } else {
       throw seamError('fetch input must be a string, URL or Request');
@@ -181,7 +182,6 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
       throw error;
     }
   };
-  // Patch both globals only after all preconditions passed — a send-check failure leaves both untouched.
   installBedrockSendSeam(observation);
   globalThis.fetch = wrappedFetch as typeof globalThis.fetch;
   return { observation, bedrockConstructor: BedrockRuntimeClient };
