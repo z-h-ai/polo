@@ -14,7 +14,9 @@
  * unset. Proves: the exact-hostname server sees exactly one request, the
  * SDK-internal retry (AWS_MAX_ATTEMPTS=3) is blocked by the seam before the
  * second wire attempt, the structured 503 is observed, a suffixed lookalike
- * hostname is NOT redirected (direct connection, zero fixture hits), and the
+ * hostname is NOT redirected (direct connection, zero fixture hits), the
+ * https.request overload matrix (options-only, string/URL+options,
+ * string/URL+callback) redirects only exact-host shapes, and the
  * bundle has no external AWS runtime imports.
  */
 import { describe, expect, it } from 'bun:test'
@@ -36,6 +38,10 @@ function exactHostname(candidate) {
   let hostname = String(candidate).toLowerCase()
   if (hostname.startsWith('[') && hostname.endsWith(']')) hostname = hostname.slice(1, -1)
   return hostname
+}
+function hostnameFromHostOption(host) {
+  if (typeof host !== 'string') return null
+  try { return new URL('https://' + host).hostname } catch { return host }
 }
 function hostnameFromAuthority(authority) {
   if (typeof authority === 'string') {
@@ -62,22 +68,27 @@ http2.connect = function (authority, options, listener) {
 }
 const originalRequest = https.request
 https.request = function (...args) {
-  const urlArg = args.find((a) => typeof a === 'string' || a instanceof URL)
-  const optionsArg = args.find((a) => a && typeof a === 'object' && !Array.isArray(a) && !(a instanceof URL))
-  let hostname = null
-  if (typeof urlArg === 'string') {
-    try { hostname = new URL(urlArg).hostname } catch { hostname = null }
-  } else if (urlArg instanceof URL) {
-    hostname = urlArg.hostname
+  const urlIndex = args.findIndex((a) => typeof a === 'string' || a instanceof URL)
+  const optionsIndex = args.findIndex((a) => a && typeof a === 'object' && !Array.isArray(a) && !(a instanceof URL))
+  let url = null
+  if (urlIndex >= 0) {
+    try { url = typeof args[urlIndex] === 'string' ? new URL(args[urlIndex]) : args[urlIndex] } catch { url = null }
   }
-  if (hostname === null && optionsArg) {
-    const host = optionsArg.hostname ?? optionsArg.host
-    if (typeof host === 'string') {
-      try { hostname = new URL('https://' + host).hostname } catch { hostname = host }
-    }
+  const hostname = url
+    ? url.hostname
+    : (optionsIndex >= 0 ? hostnameFromHostOption(args[optionsIndex].hostname ?? args[optionsIndex].host) : null)
+  if (hostname === null || exactHostname(hostname) !== BEDROCK_HOST) {
+    return originalRequest.apply(this, args)
   }
-  if (hostname !== null && optionsArg && exactHostname(hostname) === BEDROCK_HOST) {
-    args[args.indexOf(optionsArg)] = { ...optionsArg, hostname: targetHost, host: targetHost, port: targetPort, rejectUnauthorized: false }
+  if (optionsIndex >= 0) {
+    args[optionsIndex] = { ...args[optionsIndex], hostname: targetHost, host: targetHost, port: targetPort, rejectUnauthorized: false }
+  } else {
+    // (url, callback) overload: rewrite the URL preserving path/query and
+    // splice an overriding options object before the callback so the local
+    // self-signed fixture TLS validates.
+    args[urlIndex] = 'https://' + targetHost + ':' + targetPort + (url.pathname || '/') + (url.search || '')
+    const callbackIndex = args.findIndex((a) => typeof a === 'function')
+    args.splice(callbackIndex >= 0 ? callbackIndex : args.length, 0, { rejectUnauthorized: false })
   }
   return originalRequest.apply(this, args)
 }
@@ -88,16 +99,49 @@ import http2 from 'node:http2'
 import { readFileSync } from 'node:fs'
 const [key, cert] = [process.argv[2], process.argv[3]].map((p) => readFileSync(p))
 const server = http2.createSecureServer({ key, cert, allowHTTP1: true })
-server.on('stream', (stream, headers) => {
-  console.log('REQUEST:' + String(headers[':path'] ?? ''))
-  stream.respond({ ':status': '503', 'content-type': 'application/json' })
-  stream.end(JSON.stringify({ __type: 'ServiceUnavailableException' }))
+// The compat 'request' handler serves BOTH h2 streams and allowHTTP1 h1
+// requests; mixing it with a raw 'stream' handler double-dispatches h2.
+server.on('request', (req, res) => {
+  console.log('REQUEST:' + String(req.url ?? ''))
+  res.writeHead(503, { 'content-type': 'application/json' })
+  res.end(JSON.stringify({ __type: 'ServiceUnavailableException' }))
 })
 server.listen(0, '127.0.0.1', () => {
   console.log('READY:' + server.address().port)
 })
 setInterval(() => {}, 1000)
 process.on('SIGTERM', () => process.exit(0))
+`
+
+// Exercises every legal https.request overload shape against the preload.
+const HARNESS_MJS = `
+import https from 'node:https'
+const BEDROCK_HOST = 'bedrock-runtime.us-east-1.amazonaws.com'
+const mode = process.argv[2]
+const modeHost = mode === 'lookalike' ? BEDROCK_HOST + '.attacker' : BEDROCK_HOST
+const target = 'https://' + modeHost
+setTimeout(() => { console.log('HARNESS-TIMEOUT'); process.exit(3) }, 30000).unref()
+function shape(label, makeRequest) {
+  return new Promise((resolve) => {
+    const req = makeRequest((res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk) => { body += chunk })
+      res.on('end', () => resolve({ shape: label, ok: true, status: res.statusCode, body }))
+    })
+    req.on('error', (error) => resolve({ shape: label, ok: false, code: error.code ?? String(error) }))
+    req.end()
+  })
+}
+const results = await Promise.all([
+  shape('options-only', (cb) => https.request({ hostname: modeHost, port: 443, path: '/shape/options-only', method: 'GET' }, cb)),
+  shape('string-options', (cb) => https.request(target + '/shape/string-options', { method: 'GET' }, cb)),
+  shape('url-options', (cb) => https.request(new URL(target + '/shape/url-options'), { method: 'GET' }, cb)),
+  shape('string-callback', (cb) => https.request(target + '/shape/string-callback', cb)),
+  shape('url-callback', (cb) => https.request(new URL(target + '/shape/url-callback'), cb)),
+])
+console.log('HARNESS:' + JSON.stringify(results))
+process.exit(0)
 `
 
 const ENTRY_TEMPLATE = (policyImport: string): string => `
@@ -323,4 +367,80 @@ describe('host transport seam in the production bundle', () => {
       rmSync(fixtureDir, { recursive: true, force: true })
     }
   }, 240000)
+
+  it('https.request overload matrix redirects only exact-host shapes', async () => {
+    const fixtureDir = mkdtempSync(join(import.meta.dir, 'host-transport-overload-'))
+    try {
+      writeFileSync(join(fixtureDir, 'preload.mjs'), PRELOAD_MJS)
+      writeFileSync(join(fixtureDir, 'server.mjs'), TLS_SERVER_MJS)
+      writeFileSync(join(fixtureDir, 'harness.mjs'), HARNESS_MJS)
+      const openssl = Bun.spawnSync({
+        cmd: [
+          'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2',
+          '-subj', '/CN=bedrock-runtime.us-east-1.amazonaws.com',
+          '-keyout', join(fixtureDir, 'key.pem'),
+          '-out', join(fixtureDir, 'cert.pem'),
+        ],
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(openssl.exitCode).toBe(0)
+
+      const runHarness = async (mode: string): Promise<{ results: Array<{ shape: string; ok: boolean; status?: number; body?: string; code?: string }>; requestLines: string[] }> => {
+        const server = Bun.spawn({
+          cmd: [HOST_NODE, join(fixtureDir, 'server.mjs'), join(fixtureDir, 'key.pem'), join(fixtureDir, 'cert.pem')],
+          stdout: 'pipe',
+          stderr: 'pipe',
+        })
+        const serverLines = collectLines(server.stdout as ReadableStream<Uint8Array>)
+        try {
+          const readyLine = await serverLines.waitForLine('READY:', 15000)
+          const tlsPort = Number(readyLine.slice('READY:'.length))
+          const harness = Bun.spawn({
+            cmd: [HOST_NODE, '--import', join(fixtureDir, 'preload.mjs'), join(fixtureDir, 'harness.mjs'), mode],
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: { ...process.env, SEAM_FIXTURE_HOST: '127.0.0.1', SEAM_FIXTURE_PORT: String(tlsPort) },
+          })
+          const harnessStdoutText = await new Response(harness.stdout).text()
+          const harnessStderrText = await new Response(harness.stderr).text()
+          const harnessExit = await harness.exited
+          if (harnessExit !== 0) {
+            throw new Error(`overload harness failed (exit ${harnessExit})\n${harnessStderrText}`)
+          }
+          const resultLine = harnessStdoutText.split('\n').find((line) => line.startsWith('HARNESS:'))
+          expect(resultLine).toBeDefined()
+          const results = JSON.parse(resultLine!.slice('HARNESS:'.length)) as Array<{ shape: string; ok: boolean; status?: number; body?: string; code?: string }>
+          const requestLines = serverLines.lines.filter((line) => line.startsWith('REQUEST:'))
+          return { results, requestLines }
+        } finally {
+          server.kill()
+          await serverLines.settled
+        }
+      }
+
+      // Exact host: every overload shape is redirected to the local fixture
+      // (its distinctive 503 body proves the response came from the fixture).
+      const exact = await runHarness('exact')
+      expect(exact.results).toHaveLength(5)
+      expect(exact.results.map((result) => result.shape)).toEqual([
+        'options-only', 'string-options', 'url-options', 'string-callback', 'url-callback',
+      ])
+      expect(exact.results.every((result) => result.ok && result.status === 503 && (result.body ?? '').includes('ServiceUnavailableException'))).toBe(true)
+      expect(exact.requestLines.length).toBe(5)
+      for (const shape of ['options-only', 'string-options', 'url-options', 'string-callback', 'url-callback']) {
+        expect(exact.requestLines.some((line) => line.includes('/shape/' + shape))).toBe(true)
+      }
+
+      // Lookalike host: no shape is redirected. Zero fixture hits is the hard
+      // no-interception proof; a hostile network may answer lookalike DNS with
+      // its own responses, so only fixture-marked successes would fail this.
+      const lookalike = await runHarness('lookalike')
+      expect(lookalike.results).toHaveLength(5)
+      expect(lookalike.results.some((result) => result.ok && (result.body ?? '').includes('ServiceUnavailableException'))).toBe(false)
+      expect(lookalike.requestLines).toEqual([])
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true })
+    }
+  }, 120000)
 })
