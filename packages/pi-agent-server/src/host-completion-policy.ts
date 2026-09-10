@@ -180,8 +180,9 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
       throw error;
     }
   };
-  globalThis.fetch = wrappedFetch as typeof globalThis.fetch;
+  // Patch both globals only after all preconditions passed — a send-check failure leaves both untouched.
   installBedrockSendSeam(observation);
+  globalThis.fetch = wrappedFetch as typeof globalThis.fetch;
   return { observation, bedrockConstructor: BedrockRuntimeClient };
 }
 

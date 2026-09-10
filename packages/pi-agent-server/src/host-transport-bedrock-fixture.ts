@@ -151,9 +151,9 @@ async function main(): Promise<void> {
         const client = makeClient(installed.bedrockConstructor, server.port)
         const outcome = await settle(converse(client))
         if (!outcome.rejected) throw new Error('send should reject on 401')
-        const o = installed.observation
-        if (o.attempts !== 1 || o.status !== 401 || o.sdkException !== true || o.retryBlocked || o.networkFailure) {
-          throw new Error(`unexpected observation ${JSON.stringify(o)}`)
+        const observation = installed.observation
+        if (observation.attempts !== 1 || observation.status !== 401 || observation.sdkException !== true || observation.retryBlocked || observation.networkFailure) {
+          throw new Error(`unexpected observation ${JSON.stringify(observation)}`)
         }
         if (server.requests.length !== 1) throw new Error(`expected 1 wire request, saw ${server.requests.length}`)
         client.destroy()
@@ -187,9 +187,9 @@ async function main(): Promise<void> {
         const client = makeClient(installed.bedrockConstructor, server.port)
         const outcome = await settle(converse(client))
         if (!outcome.rejected) throw new Error('send should reject after retry block')
-        const o = installed.observation
-        if (o.attempts !== 2 || o.status !== 503 || o.retryBlocked !== true || o.sdkException !== true) {
-          throw new Error(`unexpected observation ${JSON.stringify(o)}`)
+        const observation = installed.observation
+        if (observation.attempts !== 2 || observation.status !== 503 || observation.retryBlocked !== true || observation.sdkException !== true) {
+          throw new Error(`unexpected observation ${JSON.stringify(observation)}`)
         }
         if (server.requests.length !== 1) {
           throw new Error(`server must see exactly one attempt, saw ${server.requests.length}`)
@@ -208,11 +208,11 @@ async function main(): Promise<void> {
         const client = makeClient(installed.bedrockConstructor, server.port)
         const outcome = await settle(converse(client))
         if (!outcome.rejected) throw new Error('send should reject after destroyed attempt')
-        const o = installed.observation
+        const observation = installed.observation
         // A destroyed h2 session is classified by the SDK as non-retryable, so the
         // observation ends with exactly one real attempt marked networkFailure.
-        if (o.networkFailure !== true || o.attempts !== 1 || o.retryBlocked || o.sdkException !== true) {
-          throw new Error(`unexpected observation ${JSON.stringify(o)}`)
+        if (observation.networkFailure !== true || observation.attempts !== 1 || observation.retryBlocked || observation.sdkException !== true) {
+          throw new Error(`unexpected observation ${JSON.stringify(observation)}`)
         }
         if (server.requests.length !== 1) throw new Error(`expected 1 wire request, saw ${server.requests.length}`)
         client.destroy()
@@ -263,9 +263,9 @@ async function main(): Promise<void> {
         for await (const event of events) {
           if (event.type === 'error') break
         }
-        const o = installed.observation
-        if (o.attempts !== 2 || o.status !== 503 || o.retryBlocked !== true || o.sdkException !== true) {
-          throw new Error(`unexpected observation ${JSON.stringify(o)}`)
+        const observation = installed.observation
+        if (observation.attempts !== 2 || observation.status !== 503 || observation.retryBlocked !== true || observation.sdkException !== true) {
+          throw new Error(`unexpected observation ${JSON.stringify(observation)}`)
         }
         if (server.requests.length !== 1) {
           throw new Error(`pi-ai client must be wire-gated after one attempt, server saw ${server.requests.length}`)

@@ -12,6 +12,7 @@
  * NodeHttp2Handler (h2c) path.
  */
 import { describe, expect, it } from 'bun:test'
+import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime'
 import http from 'node:http'
 import { join } from 'node:path'
 import type { AddressInfo, Server, Socket } from 'node:net'
@@ -23,6 +24,7 @@ import {
 } from './host-completion-policy.ts'
 
 const PRISTINE_FETCH = globalThis.fetch
+const PRISTINE_SEND = BedrockRuntimeClient.prototype.send
 
 interface HttpFixture {
   port: number
@@ -80,6 +82,7 @@ async function withSeam<T>(base: string, run: (installed: InstalledTransportObse
     return await run(installed)
   } finally {
     globalThis.fetch = PRISTINE_FETCH
+    BedrockRuntimeClient.prototype.send = PRISTINE_SEND
   }
 }
 
@@ -144,6 +147,42 @@ describe('fetch seam reaches the original fetch once for allowed targets', () =>
     } finally {
       await fixture.close()
     }
+  })
+
+  it('hostname case difference still matches the same origin exactly once', async () => {
+    const server = http.createServer((_req, res) => respond(res, 200, OK_BODY))
+    const requests: string[] = []
+    server.on('request', (req) => requests.push(req.url ?? ''))
+    await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve))
+    const port = (server.address() as AddressInfo).port
+    const close = async (): Promise<void> => {
+      server.closeAllConnections?.()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+    try {
+      await withSeam(`http://localhost:${port}/v1`, async (installed) => {
+        const response = await fetch(`http://LOCALHOST:${port}/v1/one`)
+        expect(response.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(requests).toEqual(['/v1/one'])
+    } finally {
+      await close()
+    }
+  })
+
+  it('failed bedrock validation leaves both global identities untouched', () => {
+    const fetchBefore = globalThis.fetch
+    const sendBefore = BedrockRuntimeClient.prototype.send
+    try {
+      BedrockRuntimeClient.prototype.send = undefined
+      expect(() => installTransportObservation(new URL('http://127.0.0.1:9/v1'))).toThrow(/not callable/)
+      expect(globalThis.fetch).toBe(fetchBefore)
+      expect(BedrockRuntimeClient.prototype.send).toBeUndefined()
+    } finally {
+      BedrockRuntimeClient.prototype.send = sendBefore
+    }
+    expect(BedrockRuntimeClient.prototype.send).toBe(sendBefore)
   })
 
   it('effective default ports normalize for origin comparison', async () => {
