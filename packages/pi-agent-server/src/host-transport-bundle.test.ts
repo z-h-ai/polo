@@ -15,11 +15,11 @@
  * SDK-internal retry (AWS_MAX_ATTEMPTS=3) is blocked by the seam before the
  * second wire attempt, the structured 503 is observed, a suffixed lookalike
  * hostname is NOT redirected (direct connection, zero fixture hits), the
- * https.request overload matrix and the Node URL/options host-precedence
- * matrix (non-empty hostname > non-empty host > URL hostname; empty-string
- * hostname falls back to host) redirect only when the Node-effective target
- * is the exact Bedrock host, and the bundle has no external AWS runtime
- * imports.
+ * https.request overload matrix and the three-state Node URL/options host
+ * precedence (non-empty hostname > non-empty host > URL hostname; explicit
+ * empty/non-string values are invalid and never redirected) redirect only
+ * when the Node-effective target is the exact Bedrock host, and the bundle
+ * has no external AWS runtime imports.
  */
 import { describe, expect, it } from 'bun:test'
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -45,6 +45,10 @@ const HARNESS_SHAPE_ORDER = [
   'conflict-empty-string-lookalike-url-exact-host',
   'conflict-empty-url-exact-url-lookalike-host',
   'conflict-empty-url-lookalike-url-exact-host',
+  'invalid-string-exact-url-empty-hostname',
+  'invalid-url-exact-url-empty-hostname',
+  'invalid-string-exact-url-nonstring-hostname',
+  'invalid-url-exact-url-nonstring-hostname',
 ]
 const MODE_SHAPES = HARNESS_SHAPE_ORDER.slice(0, 5)
 const CONFLICT_LOOKALIKE_HOSTNAME_SHAPES = [
@@ -72,6 +76,10 @@ const FIXTURE_REDIRECTED_SHAPES = [
 const FIXTURE_NEVER_SHAPES = [
   ...CONFLICT_LOOKALIKE_HOSTNAME_SHAPES,
   ...CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES,
+  'invalid-string-exact-url-empty-hostname',
+  'invalid-url-exact-url-empty-hostname',
+  'invalid-string-exact-url-nonstring-hostname',
+  'invalid-url-exact-url-nonstring-hostname',
 ]
 // Wire paths the harness uses per shape (conflict shapes use short codes).
 const SHAPE_PATHS: Record<string, string> = {
@@ -88,6 +96,10 @@ const SHAPE_PATHS: Record<string, string> = {
   'conflict-empty-string-lookalike-url-exact-host': 'conflict-f',
   'conflict-empty-url-exact-url-lookalike-host': 'conflict-g',
   'conflict-empty-url-lookalike-url-exact-host': 'conflict-h',
+  'invalid-string-exact-url-empty-hostname': 'invalid-a',
+  'invalid-url-exact-url-empty-hostname': 'invalid-b',
+  'invalid-string-exact-url-nonstring-hostname': 'invalid-c',
+  'invalid-url-exact-url-nonstring-hostname': 'invalid-d',
 }
 
 const PRELOAD_MJS = `
@@ -106,15 +118,30 @@ function hostnameFromHostOption(host) {
   if (typeof host !== 'string') return null
   try { return new URL('https://' + host).hostname } catch { return host }
 }
-// Node-compatible effective host: a non-empty string hostname wins, else a
-// non-empty string host; empty or non-string explicit values count as unset
-// (no target is derived from them — fail-safe, never a contradicting target).
+// Node-compatible effective host, three states (never collapse distinct
+// outcomes): a non-empty string hostname wins; an empty-string hostname falls
+// back to a non-empty string host; a non-string hostname is invalid outright;
+// an empty/non-string host (with no usable hostname) is invalid too; only when
+// the relevant fields are truly absent does the URL hostname apply.
+//   { state: 'option', host }  — explicit non-empty host field
+//   { state: 'invalid' }       — explicit empty/non-string value, no fallback
+//   { state: 'url' }           — relevant fields truly absent
 function nodeOptionHost(optionsObject) {
-  for (const key of ['hostname', 'host']) {
-    const value = optionsObject ? optionsObject[key] : undefined
-    if (typeof value === 'string' && value.length > 0) return value
+  if (!optionsObject) return { state: 'url' }
+  const has = (key) => key in optionsObject
+  let sawEmptyHostname = false
+  if (has('hostname')) {
+    const hostname = optionsObject.hostname
+    if (typeof hostname === 'string' && hostname.length > 0) return { state: 'option', host: hostname }
+    if (typeof hostname !== 'string') return { state: 'invalid' }
+    sawEmptyHostname = true
   }
-  return null
+  if (has('host')) {
+    const host = optionsObject.host
+    if (typeof host === 'string' && host.length > 0) return { state: 'option', host }
+    return { state: 'invalid' }
+  }
+  return sawEmptyHostname ? { state: 'invalid' } : { state: 'url' }
 }
 function hostnameFromAuthority(authority) {
   if (typeof authority === 'string') {
@@ -147,15 +174,16 @@ https.request = function (...args) {
   if (urlIndex >= 0) {
     try { url = typeof args[urlIndex] === 'string' ? new URL(args[urlIndex]) : args[urlIndex] } catch { url = null }
   }
-  // Node-compatible host precedence: URL fields are derived first, then
-  // explicit options fields override them — a non-empty hostname wins over a
-  // non-empty host, and both override the URL hostname (an empty hostname
-  // falls back to host, not to the URL). Derive it via the single helper.
+  // Node-compatible host precedence, three states: a non-empty hostname wins
+  // over a non-empty host, and both override the URL hostname; an explicit
+  // empty/non-string value is invalid — the request is left untouched (Node
+  // rejects it or lands on a non-Bedrock default), never redirected; only
+  // truly absent fields fall back to the URL hostname.
   const optionsObject = optionsIndex >= 0 ? args[optionsIndex] : undefined
   const optionHost = nodeOptionHost(optionsObject)
-  const hostname = optionHost !== null
-    ? hostnameFromHostOption(optionHost)
-    : (url ? url.hostname : null)
+  const hostname = optionHost.state === 'option'
+    ? hostnameFromHostOption(optionHost.host)
+    : (optionHost.state === 'url' && url ? url.hostname : null)
   if (hostname === null || exactHostname(hostname) !== BEDROCK_HOST) {
     return originalRequest.apply(this, args)
   }
@@ -202,12 +230,19 @@ const target = 'https://' + modeHost
 setTimeout(() => { console.log('HARNESS-TIMEOUT'); process.exit(3) }, 30000).unref()
 function shape(label, makeRequest) {
   return new Promise((resolve) => {
-    const req = makeRequest((res) => {
-      let body = ''
-      res.setEncoding('utf8')
-      res.on('data', (chunk) => { body += chunk })
-      res.on('end', () => resolve({ shape: label, ok: true, status: res.statusCode, body }))
-    })
+    let req
+    try {
+      req = makeRequest((res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => resolve({ shape: label, ok: true, status: res.statusCode, body }))
+      })
+    } catch (error) {
+      // https.request throws synchronously for invalid option values.
+      resolve({ shape: label, ok: false, code: error.code ?? String(error) })
+      return
+    }
     req.on('error', (error) => resolve({ shape: label, ok: false, code: error.code ?? String(error) }))
     req.end()
   })
@@ -231,6 +266,13 @@ const results = await Promise.all([
   shape('conflict-empty-string-lookalike-url-exact-host', (cb) => https.request('https://' + BEDROCK_HOST + '.attacker' + '/shape/conflict-f', { hostname: '', host: BEDROCK_HOST, method: 'GET' }, cb)),
   shape('conflict-empty-url-exact-url-lookalike-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/conflict-g'), { hostname: '', host: BEDROCK_HOST + '.attacker', method: 'GET' }, cb)),
   shape('conflict-empty-url-lookalike-url-exact-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '.attacker' + '/shape/conflict-h'), { hostname: '', host: BEDROCK_HOST, method: 'GET' }, cb)),
+  // Invalid explicit hostname values: Node never sends these to the exact
+  // Bedrock host (empty hostname lands on a non-Bedrock default, non-string
+  // throws ERR_INVALID_ARG_TYPE) — the preload must not redirect either.
+  shape('invalid-string-exact-url-empty-hostname', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/invalid-a', { hostname: '', method: 'GET' }, cb)),
+  shape('invalid-url-exact-url-empty-hostname', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/invalid-b'), { hostname: '', method: 'GET' }, cb)),
+  shape('invalid-string-exact-url-nonstring-hostname', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/invalid-c', { hostname: 123, method: 'GET' }, cb)),
+  shape('invalid-url-exact-url-nonstring-hostname', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/invalid-d'), { hostname: 123, method: 'GET' }, cb)),
 ])
 console.log('HARNESS:' + JSON.stringify(results))
 process.exit(0)
@@ -530,6 +572,9 @@ describe('host transport seam in the production bundle', () => {
       expect(byShape(exact.results, CONFLICT_EXACT_HOSTNAME_SHAPES).every(isFixtureMarked)).toBe(true)
       expect(byShape(exact.results, CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(byShape(exact.results, CONFLICT_EMPTY_EXACT_HOST_SHAPES).every(isFixtureMarked)).toBe(true)
+      // Invalid explicit hostnames (empty string / non-string): Node never
+      // sends these to Bedrock — they must produce no fixture hit at all.
+      expect(byShape(exact.results, FIXTURE_NEVER_SHAPES.filter((shape) => shape.startsWith('invalid-'))).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(exact.requestLines.length).toBe(FIXTURE_REDIRECTED_SHAPES.length)
       for (const shape of FIXTURE_REDIRECTED_SHAPES) {
         expect(exact.requestLines.some((line) => line.includes('/shape/' + SHAPE_PATHS[shape]))).toBe(true)
@@ -551,10 +596,11 @@ describe('host transport seam in the production bundle', () => {
       expect(byShape(lookalike.results, CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(byShape(lookalike.results, CONFLICT_EXACT_HOSTNAME_SHAPES).every(isFixtureMarked)).toBe(true)
       expect(byShape(lookalike.results, CONFLICT_EMPTY_EXACT_HOST_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(lookalike.results, FIXTURE_NEVER_SHAPES.filter((shape) => shape.startsWith('invalid-'))).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(lookalike.requestLines.length).toBe(CONFLICT_EXACT_HOSTNAME_SHAPES.length + CONFLICT_EMPTY_EXACT_HOST_SHAPES.length)
       const lookalikeRedirectedPaths = FIXTURE_REDIRECTED_SHAPES.filter((shape) => !MODE_SHAPES.includes(shape))
       expect(lookalike.requestLines.every((line) => lookalikeRedirectedPaths.some((shape) => line.includes('/shape/' + SHAPE_PATHS[shape])))).toBe(true)
-      for (const shape of MODE_SHAPES) {
+      for (const shape of [...MODE_SHAPES, ...FIXTURE_NEVER_SHAPES]) {
         expect(lookalike.requestLines.some((line) => line.includes('/shape/' + SHAPE_PATHS[shape]))).toBe(false)
       }
     } finally {
