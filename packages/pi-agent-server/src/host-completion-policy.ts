@@ -6,10 +6,10 @@
  * the saved-original `globalThis.fetch` gets a fail-closed URL policy wrapper
  * (always `redirect: 'error'`), and the shared `BedrockRuntimeClient` send
  * wrapper guards each instance's resolved `config.requestHandler.handle` —
- * the AWS retry middleware's per-wire-attempt entry point. The second wire attempt throws
- * an internal `RetryBlockedError` before the original transport, an unguardable request
- * handler is latched fail-closed, object fetch inputs are bound to their intrinsic transport
- * snapshot, and observations hold only counts and numeric status, never provider content.
+ * the AWS retry middleware's per-wire-attempt entry point. The second wire attempt throws an
+ * internal `RetryBlockedError` before the original transport, an unguardable request handler
+ * is latched fail-closed, object fetch inputs are bound to their intrinsic transport snapshot,
+ * and observations hold only counts and numeric status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -44,8 +44,7 @@ function originKeyOf(url: URL): string {
   return `${url.protocol.toLowerCase()}//${hostname}:${port}`;
 }
 
-/** Fail closed unless the request URL is http(s) without userinfo or fragment, shares the immutable
- *  captured base origin/path and every raw pathname segment decodes exactly once (all rejected). */
+/** Fail closed: http(s) without userinfo/fragment, immutable captured base origin/path, single-decode segments. */
 function assertAllowedTarget(baseOrigin: string, basePathname: string, target: URL, label: string): void {
   const badScheme = target.protocol !== 'http:' && target.protocol !== 'https:';
   if (badScheme || target.username !== '' || target.password !== '' || target.hash !== '') {
@@ -141,40 +140,33 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   const baseOrigin = originKeyOf(baseSnapshot);
   const basePathname = baseSnapshot.pathname;
   assertAllowedTarget(baseOrigin, basePathname, baseSnapshot, 'base url');
-  const observation: TransportObservation = {
-    attempts: 0,
-    networkFailure: false,
-    retryBlocked: false,
-    sdkException: false,
-  };
+  const observation: TransportObservation = { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // One native Request(input, initForSnapshot) consumes the WebIDL dictionary via a get-trap adapter
-    // over an inert target: members read once from the original init as receiver, redirect forced to 'error'.
-    const source = init ?? {};
-    const initForSnapshot = new Proxy({} as RequestInit, {
-      get(_target, key) {
-        if (key === 'redirect') return 'error';
-        return Reflect.get(source, key, source);
-      },
-    });
-    let snapshot: Request, target: URL;
-    if (typeof input === 'string' || input instanceof URL) {
-      target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
-      snapshot = new Request(target, initForSnapshot);
-    } else if (input instanceof Request) {
-      snapshot = new Request(input, initForSnapshot);
-      if (snapshot.url !== Reflect.get(Request.prototype, 'url', input)) {
-        throw seamError('request input url is not internally consistent');
-      }
-      target = new URL(snapshot.url);
+    // One native Request(input, init) snapshot; validation and transport share this exact input.
+    // A used/locked input body without an init.body replacement fails like native fetch.
+    if (input instanceof Request && (init === undefined || !('body' in init)) && input.body !== null && (input.bodyUsed || input.body.locked)) {
+      throw new TypeError('Request body is unusable');
+    }
+    let snapshot: Request;
+    if (input instanceof Request) {
+      snapshot = new Request(input, init);
+    } else if (input instanceof URL) {
+      const target = new URL(URL.prototype.toString.call(input));
+      assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
+      snapshot = new Request(target, init);
+    } else if (typeof input === 'string') {
+      const target = new URL(input);
+      assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
+      snapshot = new Request(target, init);
     } else {
       throw seamError('fetch input must be a string, URL or Request');
     }
-    assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
+    const guarded = new Request(snapshot, { redirect: 'error' });
+    assertAllowedTarget(baseOrigin, basePathname, new URL(guarded.url), 'request url');
     gateSecondWireAttempt(observation);
     try {
-      const response = await originalFetch.call(globalThis, snapshot);
+      const response = await originalFetch.call(globalThis, guarded);
       observation.status = response.status;
       return response;
     } catch (error) {
@@ -193,12 +185,20 @@ export function classifyTransportFailure(
   flags: { deadlineExpired: boolean; providerFailed: boolean },
 ): 'deadline_exceeded' | 'retry_blocked' | 'provider_rejected_credentials'
   | 'provider_request_failed' | 'provider_error_terminal' | undefined {
-  if (flags.deadlineExpired) return 'deadline_exceeded';
-  if (observation.retryBlocked || observation.attempts > 1) return 'retry_blocked';
-  if (observation.status === 401 || observation.status === 403) return 'provider_rejected_credentials';
+  if (flags.deadlineExpired) {
+    return 'deadline_exceeded';
+  }
+  if (observation.retryBlocked || observation.attempts > 1) {
+    return 'retry_blocked';
+  }
+  if (observation.status === 401 || observation.status === 403) {
+    return 'provider_rejected_credentials';
+  }
   if (observation.networkFailure || (flags.providerFailed && typeof observation.status === 'number')) {
     return 'provider_request_failed';
   }
-  if (observation.sdkException || flags.providerFailed) return 'provider_error_terminal';
+  if (observation.sdkException || flags.providerFailed) {
+    return 'provider_error_terminal';
+  }
   return undefined;
 }

@@ -491,16 +491,20 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     }
   })
 
-  it('a Request with a shadowed url property fails closed on the internal-consistency check', async () => {
+  it('a Request with a shadowed url property binds the wire target to the validated snapshot', async () => {
     const allowed = await startOkServer()
     const attacker = await startOkServer()
     try {
       await withSeam(allowed.pathUrl('/v1'), async (installed) => {
         const evil = new Request(attacker.pathUrl('/v1/shadowed'))
         Object.defineProperty(evil, 'url', { value: allowed.pathUrl('/v1/shadowed') })
-        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/)
-        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
-        expect(allowed.requests).toEqual([])
+        // The snapshot consumes the caller-owned shadow exactly like native bun fetch: the
+        // validated snapshot and the transmitted snapshot are the same object, so the wire target
+        // is always the validated target and the intrinsic (unvalidated) target is never reached.
+        const response = await fetch(evil)
+        expect(response.status).toBe(200)
+        expect(installed.observation).toEqual({ attempts: 1, status: 200, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual(['/v1/shadowed'])
         expect(attacker.requests).toEqual([])
       })
     } finally {
@@ -661,13 +665,12 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     try {
       await withSeam(first.pathUrl('/v1'), async (installed) => {
         const request = new Request(first.pathUrl('/v1/start'), { method: 'POST', body: 'own-body' })
-        // Native Request(input, init) construction semantics through the adapter: the init view
-        // carries no method, so the snapshot is GET + moved body and the native constructor
-        // rejects GET-with-body before any wire attempt — fail-closed, redirect never reached.
+        // Native wire success on the first origin; the forced redirect:'error' then rejects the
+        // 307 before any second-origin request is made.
         await expect(fetch(request, { redirect: 'follow', headers: { 'content-type': 'text/plain' } })).rejects.toThrow()
         expect(installed.observation.attempts).toBe(1)
       })
-      expect(first.requests).toEqual([])
+      expect(first.requests).toEqual(['/v1/start'])
       expect(second.requests).toEqual([])
     } finally {
       await first.close()
@@ -953,6 +956,85 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
         { method: 'GET', path: '/v1/echo', body: '' },
         { method: 'GET', path: '/v1/echo', body: '' },
       ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('Request-input partial-init and body-ownership semantics match native construction', async () => {
+    const freshInput = () =>
+      new Request(url, { method: 'POST', body: 'original-body', headers: { 'x-original': 'yes' } })
+    const usedInput = async () => {
+      const input = freshInput()
+      await input.text()
+      return input
+    }
+    const lockedInput = () => {
+      const input = freshInput()
+      input.body?.getReader()
+      return input
+    }
+    const cases: Array<{ name: string; makeInput: () => Request | Promise<Request>; init?: RequestInit }> = [
+      { name: 'no-init', makeInput: freshInput },
+      { name: 'empty-init', makeInput: freshInput, init: {} },
+      { name: 'headers-only', makeInput: freshInput, init: { headers: { 'x-override': 'yes' } } },
+      { name: 'redirect-only', makeInput: freshInput, init: { redirect: 'manual' } },
+      { name: 'inherited-headers-only', makeInput: freshInput, init: Object.create({ headers: { 'x-override': 'inherited' } }) },
+      { name: 'undefined-accessors', makeInput: freshInput, init: (() => {
+        const init = {}
+        for (const key of ['method', 'headers', 'body']) {
+          Object.defineProperty(init, key, { enumerable: true, configurable: true, get: () => undefined })
+        }
+        return init as RequestInit
+      })() },
+      { name: 'used-body-only-replacement', makeInput: usedInput, init: { body: 'replacement-used-only' } },
+      { name: 'locked-body-only-replacement', makeInput: lockedInput, init: { body: 'replacement-locked-only' } },
+      { name: 'used-body-replacement', makeInput: usedInput, init: { method: 'PUT', body: 'replacement-used', headers: { 'x-override': 'used' } } },
+      { name: 'locked-body-replacement', makeInput: lockedInput, init: { method: 'PUT', body: 'replacement-locked', headers: { 'x-override': 'locked' } } },
+    ]
+    const server = await startRecordingServer()
+    const url = server.pathUrl('/v1/request-input')
+    try {
+      for (const testCase of cases) {
+        // Native baseline: the Request constructor alone decides method/body/headers/ownership.
+        const nativeInput = await testCase.makeInput()
+        const nativeSnapshot = testCase.omitInit ? new Request(nativeInput) : new Request(nativeInput, testCase.init)
+        const nativeMethod = nativeSnapshot.method
+        const nativeBody = nativeSnapshot.body === null ? null : await nativeSnapshot.clone().text()
+        const nativeOriginal = nativeSnapshot.headers.get('x-original')
+        const nativeOverride = nativeSnapshot.headers.get('x-override')
+
+        // The interceptor is installed before the seam install so originalFetch delegates through
+        // it; `captured` is the exact guarded snapshot the seam hands to the native transport and
+        // `capturedBody`/headers read its state pre-send (the transport consumes the body stream).
+        const previousFetch = globalThis.fetch
+        let captured: Request | undefined
+        let capturedBody: string | null = null
+        globalThis.fetch = async (passed: RequestInfo | URL, passedInit?: RequestInit) => {
+          captured = passed as Request
+          const request = passed as Request
+          capturedBody = request.body === null ? null : await request.clone().text()
+          return await previousFetch.call(globalThis, passed, passedInit)
+        }
+        try {
+          const seamInput = await testCase.makeInput()
+          await withSeam(server.pathUrl('/v1'), async (installed) => {
+            const response = testCase.omitInit ? await fetch(seamInput) : await fetch(seamInput, testCase.init)
+            expect(response.status).toBe(200)
+            expect(captured!.method).toBe(nativeMethod)
+            expect(capturedBody).toBe(nativeBody)
+            expect(captured!.headers.get('x-original')).toBe(nativeOriginal)
+            expect(captured!.headers.get('x-override')).toBe(nativeOverride)
+            expect(captured!.redirect).toBe('error')
+            expect(installed.observation.attempts).toBe(1)
+          })
+          const wire = server.seen[server.seen.length - 1]
+          expect(wire.method).toBe(nativeMethod)
+          expect(wire.body).toBe(nativeBody)
+        } finally {
+          globalThis.fetch = PRISTINE_FETCH
+        }
+      }
     } finally {
       await server.close()
     }
