@@ -8,9 +8,9 @@
  * wrapper guards each instance's resolved `config.requestHandler.handle` —
  * the AWS retry middleware's per-wire-attempt entry point. The second wire
  * attempt throws an internal `RetryBlockedError` before the original
- * transport runs, and a handler whose wrapper cannot be installed cleanly is
- * latched so every later send fails closed; observations hold only counts and
- * numeric status, never provider request/response content.
+ * transport runs, an unguardable request handler is latched fail-closed, and
+ * object fetch inputs are bound to their intrinsic transport snapshot;
+ * observations hold only counts and numeric status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -45,22 +45,19 @@ function originKeyOf(url: URL): string {
   return `${url.protocol.toLowerCase()}//${hostname}:${port}`;
 }
 
-/**
- * Fail closed unless the request URL is http(s) without userinfo or fragment,
- * shares the base origin, stays on the base path or one of its `/`-segment
- * descendants, and every raw pathname segment decodes exactly once (decode
- * failure, dot segments and decoded `/` or `\\` all rejected).
- */
-function assertAllowedTarget(baseUrl: URL, target: URL, label: string): void {
+/** Fail closed unless the request URL is http(s) without userinfo or fragment, shares the
+ *  immutable captured base origin, stays on the captured base path or one of its `/`-segment
+ *  descendants, and every raw pathname segment decodes exactly once (all violations rejected). */
+function assertAllowedTarget(baseOrigin: string, basePathname: string, target: URL, label: string): void {
   const badScheme = target.protocol !== 'http:' && target.protocol !== 'https:';
   if (badScheme || target.username !== '' || target.password !== '' || target.hash !== '') {
     throw seamError(`${label} must be http(s) without userinfo or fragment`);
   }
-  if (originKeyOf(target) !== originKeyOf(baseUrl)) {
+  if (originKeyOf(target) !== baseOrigin) {
     throw seamError('request origin differs from the installed base origin');
   }
-  const prefix = baseUrl.pathname.endsWith('/') ? baseUrl.pathname : `${baseUrl.pathname}/`;
-  if (target.pathname !== baseUrl.pathname && !target.pathname.startsWith(prefix)) {
+  const prefix = basePathname.endsWith('/') ? basePathname : `${basePathname}/`;
+  if (target.pathname !== basePathname && !target.pathname.startsWith(prefix)) {
     throw seamError('request path is not the base path or a descendant of it');
   }
   for (const segment of target.pathname.split('/')) {
@@ -75,13 +72,6 @@ function assertAllowedTarget(baseUrl: URL, target: URL, label: string): void {
       throw seamError(`${label} has a path segment escaping its base path`);
     }
   }
-}
-
-function observableTargetUrl(input: unknown): URL {
-  if (typeof input === 'string') return new URL(input);
-  if (input instanceof URL) return input;
-  if (input instanceof Request) return new URL(input.url);
-  throw seamError('fetch input must be a string, URL or Request');
 }
 
 /** Gate the second real wire attempt; shared by the fetch and Bedrock wrappers. */
@@ -101,36 +91,30 @@ function installBedrockSendSeam(observation: TransportObservation): void {
   const failedInstalls = new WeakSet<object>();
   const HANDLE_NOT_WRITABLE = 'Bedrock request handler handle is not writable';
   clientPrototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]): unknown {
-    const candidate = (this.config as { requestHandler?: unknown } | undefined)?.requestHandler as
-      | { handle?: unknown }
-      | undefined;
-    if (candidate && failedInstalls.has(candidate)) {
-      // A failed install is permanent: every later send fails with the same
-      // fixed error before originalSend, any leftover wrapper or the wire.
-      throw seamError(HANDLE_NOT_WRITABLE);
-    }
-    if (!candidate || typeof candidate.handle !== 'function') {
+    const handler = (this.config as { requestHandler?: { handle?: unknown } } | undefined)?.requestHandler;
+    if (!handler || typeof handler.handle !== 'function') {
       throw seamError('resolved Bedrock request handler has no callable handle');
     }
-    const requestHandler = candidate as { handle: (request: unknown, options?: unknown) => Promise<unknown> };
+    const requestHandler = handler as { handle: (request: unknown, options?: unknown) => Promise<unknown> };
+    if (failedInstalls.has(requestHandler)) {
+      // A failed install is permanent: later sends fail with the same fixed error before originalSend or the wire.
+      throw seamError(HANDLE_NOT_WRITABLE);
+    }
     if (!guardedHandlers.has(requestHandler)) {
       const originalHandle = requestHandler.handle;
       const wrapped = async (request: unknown, options?: unknown): Promise<unknown> => {
         gateSecondWireAttempt(observation);
         try {
           const result = await originalHandle.call(requestHandler, request, options);
-          const wireStatus = finiteInteger(
-            (result as { response?: { statusCode?: unknown } } | undefined)?.response?.statusCode,
-          );
-          if (wireStatus !== undefined) observation.status = wireStatus;
+          observation.status ??=
+            finiteInteger((result as { response?: { statusCode?: unknown } } | undefined)?.response?.statusCode);
           return result;
         } catch (error) {
           observation.networkFailure = true;
           throw error;
         }
       };
-      // Atomic install: assign, verify, then mark; failed installs are
-      // latched so every later send fails closed instead of retrying.
+      // Atomic install: assign, verify, then mark; a failed install is latched and fails closed.
       try {
         requestHandler.handle = wrapped;
       } catch {
@@ -147,9 +131,8 @@ function installBedrockSendSeam(observation: TransportObservation): void {
     if (typeof pending?.then === 'function') {
       return pending.then(undefined, (error: unknown) => {
         observation.sdkException = true;
-        observation.status ??= finiteInteger(
-          (error as { $metadata?: { httpStatusCode?: unknown } } | undefined)?.$metadata?.httpStatusCode,
-        );
+        observation.status ??=
+          finiteInteger((error as { $metadata?: { httpStatusCode?: unknown } } | undefined)?.$metadata?.httpStatusCode);
         throw error;
       });
     }
@@ -158,7 +141,11 @@ function installBedrockSendSeam(observation: TransportObservation): void {
 }
 
 export function installTransportObservation(baseUrl: URL): InstalledTransportObservation {
-  assertAllowedTarget(baseUrl, baseUrl, 'base url');
+  // Canonical base snapshot: captured once so later caller-side mutation can never move the allow-list.
+  const baseSnapshot = new URL(URL.prototype.toString.call(baseUrl));
+  const baseOrigin = originKeyOf(baseSnapshot);
+  const basePathname = baseSnapshot.pathname;
+  assertAllowedTarget(baseOrigin, basePathname, baseSnapshot, 'base url');
   const observation: TransportObservation = {
     attempts: 0,
     networkFailure: false,
@@ -167,11 +154,23 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const target = observableTargetUrl(input);
-    assertAllowedTarget(baseUrl, target, 'request url');
+    let snapshot: string | URL | Request;
+    if (typeof input === 'string') snapshot = input;
+    else if (input instanceof URL) snapshot = new URL(URL.prototype.toString.call(input));
+    else if (input instanceof Request) {
+      const cloned = new Request(input);
+      // The clone must carry the intrinsic target; an engine that honors a shadowed url property fails closed.
+      if (cloned.url !== Reflect.get(Request.prototype, 'url', input)) {
+        throw seamError('request input url is not internally consistent');
+      }
+      snapshot = cloned;
+    }
+    else throw seamError('fetch input must be a string, URL or Request');
+    const target = new URL(snapshot instanceof Request ? snapshot.url : snapshot);
+    assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
     gateSecondWireAttempt(observation);
     try {
-      const response = await originalFetch.call(globalThis, input, { ...init, redirect: 'error' });
+      const response = await originalFetch.call(globalThis, snapshot, { ...init, redirect: 'error' });
       observation.status = response.status;
       return response;
     } catch (error) {

@@ -418,6 +418,126 @@ describe('fetch seam redirect and single-attempt behavior', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Base immutability and intrinsic object-input binding (two-server evidence)
+// ---------------------------------------------------------------------------
+
+describe('fetch policy binds validation to immutable and intrinsic state', () => {
+  it('mutating the caller-owned base URL after install does not move the allow-list', async () => {
+    const allowed = await startOkServer();
+    const attacker = await startOkServer();
+    try {
+      const callerOwnedBase = new URL(allowed.pathUrl('/v1'));
+      const installed = installTransportObservation(callerOwnedBase);
+      try {
+        // Mutate the caller's URL to the attacker origin after installation,
+        // exactly like a post-install allow-list move attempt.
+        callerOwnedBase.href = attacker.pathUrl('/escape');
+        await expect(fetch(attacker.pathUrl('/escape/child'))).rejects.toThrow(/host transport seam:/);
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false });
+        expect(allowed.requests).toEqual([]);
+        expect(attacker.requests).toEqual([]);
+      } finally {
+        globalThis.fetch = PRISTINE_FETCH;
+        BedrockRuntimeClient.prototype.send = PRISTINE_SEND;
+      }
+    } finally {
+      await allowed.close();
+      await attacker.close();
+    }
+  });
+
+  it('a URL with shadowed safe-looking properties is blocked at its intrinsic target', async () => {
+    const allowed = await startOkServer();
+    const attacker = await startOkServer();
+    try {
+      await withSeam(allowed.pathUrl('/v1'), async (installed) => {
+        const evil = new URL(attacker.pathUrl('/v1/shadowed'));
+        Object.defineProperties(evil, {
+          protocol: { value: 'http:' },
+          hostname: { value: '127.0.0.1' },
+          port: { value: String(allowed.port) },
+          pathname: { value: '/v1/shadowed' },
+        });
+        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/);
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false });
+        expect(allowed.requests).toEqual([]);
+        expect(attacker.requests).toEqual([]);
+      });
+    } finally {
+      await allowed.close();
+      await attacker.close();
+    }
+  });
+
+  it('a Request with a shadowed url property fails closed on the internal-consistency check', async () => {
+    const allowed = await startOkServer();
+    const attacker = await startOkServer();
+    try {
+      await withSeam(allowed.pathUrl('/v1'), async (installed) => {
+        const evil = new Request(attacker.pathUrl('/v1/shadowed'));
+        Object.defineProperty(evil, 'url', { value: allowed.pathUrl('/v1/shadowed') });
+        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/);
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false });
+        expect(allowed.requests).toEqual([]);
+        expect(attacker.requests).toEqual([]);
+      });
+    } finally {
+      await allowed.close();
+      await attacker.close();
+    }
+  });
+
+  it('normal URL and Request calls still reach the permitted transport once with init/body intact', async () => {
+    const seen: Array<{ method?: string; path: string; body: string }> = [];
+    const server = await startHttpServer((req, res, path) => {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        seen.push({ method: req.method, path, body });
+        respond(res, 200, OK_BODY);
+      });
+    });
+    try {
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const response = await fetch(new URL(server.pathUrl('/v1/echo')), {
+          method: 'POST',
+          body: 'url-body',
+          headers: { 'content-type': 'text/plain' },
+        });
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(OK_BODY);
+        expect(installed.observation.attempts).toBe(1);
+        expect(installed.observation.status).toBe(200);
+      });
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const request = new Request(server.pathUrl('/v1/echo'), {
+          method: 'POST',
+          body: 'original-body',
+          headers: { 'content-type': 'text/plain' },
+        });
+        const second = await fetch(request, {
+          method: 'PUT',
+          body: 'override-body',
+          headers: { 'content-type': 'text/plain' },
+        });
+        expect(second.status).toBe(200);
+        expect(await second.text()).toBe(OK_BODY);
+        expect(installed.observation.attempts).toBe(1);
+        expect(installed.observation.status).toBe(200);
+      });
+      expect(seen).toEqual([
+        { method: 'POST', path: '/v1/echo', body: 'url-body' },
+        { method: 'PUT', path: '/v1/echo', body: 'override-body' },
+      ]);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Bedrock send-seam install atomicity (stub wire — no real h2 transport)
 // ---------------------------------------------------------------------------
 
