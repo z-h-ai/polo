@@ -661,10 +661,13 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     try {
       await withSeam(first.pathUrl('/v1'), async (installed) => {
         const request = new Request(first.pathUrl('/v1/start'), { method: 'POST', body: 'own-body' })
+        // Native Request(input, init) construction semantics through the adapter: the init view
+        // carries no method, so the snapshot is GET + moved body and the native constructor
+        // rejects GET-with-body before any wire attempt — fail-closed, redirect never reached.
         await expect(fetch(request, { redirect: 'follow', headers: { 'content-type': 'text/plain' } })).rejects.toThrow()
         expect(installed.observation.attempts).toBe(1)
       })
-      expect(first.requests).toEqual(['/v1/start'])
+      expect(first.requests).toEqual([])
       expect(second.requests).toEqual([])
     } finally {
       await first.close()
@@ -858,6 +861,100 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     } finally {
       await first.close()
       await second.close()
+    }
+  })
+  it('every runtime-requested RequestInit member keeps native receiver, count, value and order', async () => {
+    const controller = new AbortController()
+    const values: Record<string, unknown> = {
+      method: 'POST',
+      headers: { 'x-probe': 'all-members' },
+      body: 'all-members-body',
+      referrer: 'about:client',
+      referrerPolicy: 'origin',
+      mode: 'cors',
+      credentials: 'include',
+      cache: 'no-store',
+      integrity: 'sha256-YWJj',
+      keepalive: true,
+      signal: controller.signal,
+      duplex: 'half',
+      dispatcher: { dispatch() {} },
+      priority: 'high',
+    }
+    const makeAccessorInit = (inherited: boolean, events: Array<{ key: string; receiverIsOriginal: boolean }>): RequestInit => {
+      const holder: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(values)) {
+        Object.defineProperty(holder, key, {
+          enumerable: true,
+          configurable: true,
+          get() {
+            const receiverIsOriginal = this === init
+            events.push({ key, receiverIsOriginal })
+            return value
+          },
+        })
+      }
+      const init: object = inherited ? Object.create(holder) : holder
+      return init as RequestInit
+    }
+    const server = await startRecordingServer()
+    try {
+      // Native baseline read order (bun reads the subset of members it supports).
+      const nativeEvents: Array<{ key: string; receiverIsOriginal: boolean }> = []
+      new Request(server.pathUrl('/v1/native'), makeAccessorInit(false, nativeEvents))
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const seamEvents: Array<{ key: string; receiverIsOriginal: boolean }> = []
+        const response = await fetch(server.pathUrl('/v1/echo'), makeAccessorInit(true, seamEvents))
+        expect(response.status).toBe(200)
+        expect(seamEvents.every((event) => event.receiverIsOriginal)).toBe(true)
+        expect(seamEvents.map((event) => event.key)).toEqual(nativeEvents.map((event) => event.key))
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([{ method: 'POST', path: '/v1/echo', body: 'all-members-body', header: 'all-members' }])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('undefined method/headers/body accessors are read exactly once with the original receiver', async () => {
+    const server = await startRecordingServer()
+    const undefinedAccessorInit = (key: string, inherited: boolean, events: Array<{ key: string; receiverIsOriginal: boolean }>): RequestInit => {
+      const holder: Record<string, unknown> = {}
+      let original: object
+      Object.defineProperty(holder, key, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          const receiverIsOriginal = this === original
+          events.push({ key, receiverIsOriginal })
+          return undefined
+        },
+      })
+      original = inherited ? Object.create(holder) : holder
+      return original as RequestInit
+    }
+    try {
+      for (const key of ['method', 'headers', 'body']) {
+        for (const inherited of [false, true]) {
+          await withSeam(server.pathUrl('/v1'), async (installed) => {
+            const events: Array<{ key: string; receiverIsOriginal: boolean }> = []
+            const response = await fetch(server.pathUrl('/v1/echo'), undefinedAccessorInit(key, inherited, events))
+            expect(response.status).toBe(200)
+            expect(events).toEqual([{ key, receiverIsOriginal: true }])
+            expect(installed.observation.attempts).toBe(1)
+          })
+        }
+      }
+      expect(server.seen).toEqual([
+        { method: 'GET', path: '/v1/echo', body: '' },
+        { method: 'GET', path: '/v1/echo', body: '' },
+        { method: 'GET', path: '/v1/echo', body: '' },
+        { method: 'GET', path: '/v1/echo', body: '' },
+        { method: 'GET', path: '/v1/echo', body: '' },
+        { method: 'GET', path: '/v1/echo', body: '' },
+      ])
+    } finally {
+      await server.close()
     }
   })
 })

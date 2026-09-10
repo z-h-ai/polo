@@ -6,11 +6,10 @@
  * the saved-original `globalThis.fetch` gets a fail-closed URL policy wrapper
  * (always `redirect: 'error'`), and the shared `BedrockRuntimeClient` send
  * wrapper guards each instance's resolved `config.requestHandler.handle` —
- * the AWS retry middleware's per-wire-attempt entry point. The second wire
- * attempt throws an internal `RetryBlockedError` before the original transport
- * runs, an unguardable request handler is latched fail-closed, and object
- * fetch inputs are bound to their intrinsic transport snapshot. Observations
- * hold only counts and numeric status, never provider content.
+ * the AWS retry middleware's per-wire-attempt entry point. The second wire attempt throws
+ * an internal `RetryBlockedError` before the original transport, an unguardable request
+ * handler is latched fail-closed, object fetch inputs are bound to their intrinsic transport
+ * snapshot, and observations hold only counts and numeric status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -91,13 +90,11 @@ function installBedrockSendSeam(observation: TransportObservation): void {
   const failedInstalls = new WeakSet<object>();
   const HANDLE_NOT_WRITABLE = 'Bedrock request handler handle is not writable';
   clientPrototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]): unknown {
-    const handler = (this.config as { requestHandler?: { handle?: unknown } } | undefined)?.requestHandler;
-    if (!handler || typeof handler.handle !== 'function') {
+    const requestHandler = (this.config as { requestHandler?: { handle?: (request: unknown, options?: unknown) => Promise<unknown> } } | undefined)?.requestHandler;
+    if (!requestHandler || typeof requestHandler.handle !== 'function') {
       throw seamError('resolved Bedrock request handler has no callable handle');
     }
-    const requestHandler = handler as { handle: (request: unknown, options?: unknown) => Promise<unknown> };
     if (failedInstalls.has(requestHandler)) {
-      // A failed install is permanent: later sends fail with the same fixed error before originalSend or the wire.
       throw seamError(HANDLE_NOT_WRITABLE);
     }
     if (!guardedHandlers.has(requestHandler)) {
@@ -117,7 +114,9 @@ function installBedrockSendSeam(observation: TransportObservation): void {
       // Atomic install: assign, verify, then mark; a failed install is latched and fails closed.
       try {
         requestHandler.handle = wrapped;
-        if (requestHandler.handle !== wrapped) throw seamError(HANDLE_NOT_WRITABLE);
+        if (requestHandler.handle !== wrapped) {
+          throw seamError(HANDLE_NOT_WRITABLE);
+        }
       } catch {
         failedInstalls.add(requestHandler);
         throw seamError(HANDLE_NOT_WRITABLE);
@@ -138,7 +137,6 @@ function installBedrockSendSeam(observation: TransportObservation): void {
 }
 
 export function installTransportObservation(baseUrl: URL): InstalledTransportObservation {
-  // Canonical base snapshot: captured once so later caller-side mutation can never move the allow-list.
   const baseSnapshot = new URL(URL.prototype.toString.call(baseUrl));
   const baseOrigin = originKeyOf(baseSnapshot);
   const basePathname = baseSnapshot.pathname;
@@ -151,13 +149,15 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // A native-exact RequestInit view: known members are read once with the original init as
-    // receiver (unknown getters never fire, undefined members fall back to the Request), the
-    // original init stays on the prototype chain, redirect is own unconditional 'error'.
-    const known = { method: init?.method, headers: init?.headers, body: init?.body };
-    const initForSnapshot: Record<string, unknown> = { redirect: 'error' };
-    for (const [key, value] of Object.entries(known)) if (value !== undefined) initForSnapshot[key] = value;
-    Object.setPrototypeOf(initForSnapshot, init ?? null);
+    // One native Request(input, initForSnapshot) consumes the WebIDL dictionary via a get-trap adapter
+    // over an inert target: members read once from the original init as receiver, redirect forced to 'error'.
+    const source = init ?? {};
+    const initForSnapshot = new Proxy({} as RequestInit, {
+      get(_target, key) {
+        if (key === 'redirect') return 'error';
+        return Reflect.get(source, key, source);
+      },
+    });
     let snapshot: Request, target: URL;
     if (typeof input === 'string' || input instanceof URL) {
       target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
