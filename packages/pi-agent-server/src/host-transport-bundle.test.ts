@@ -16,12 +16,17 @@
  * second wire attempt, the structured 503 is observed, a suffixed lookalike
  * hostname is NOT redirected (direct connection, zero fixture hits), the
  * https.request overload matrix and the three-state Node URL/options host
- * precedence (own-enumerable values only, per ObjectAssign semantics:
- * non-empty hostname > non-empty host > URL hostname; explicit empty/undefined/
- * non-string values are invalid and never redirected; inherited and
- * non-enumerable properties are ignored) redirect only when the
- * Node-effective target is the exact Bedrock host, and the bundle has no
- * external AWS runtime imports.
+ * precedence, modeled on Node's MERGED-options lookup (`merged.hostname ||
+ * merged.host || 'localhost'` over `{...urlToHttpOptions(url), ...options}`):
+ * for URL overloads the URL-derived hostname is the baseline that survives a
+ * caller options object lacking `hostname` — a caller `host` never overrides
+ * it — while an own-enumerable `hostname` (any value) overwrites the baseline;
+ * a truthy non-string winner makes Node throw and falsy merged fields land on
+ * the localhost default (both never redirected); options-only overloads have
+ * no baseline; inherited and non-enumerable properties are ignored per
+ * ObjectAssign. Requests are redirected only when the Node-effective target
+ * is the exact Bedrock host, and the bundle has no external AWS runtime
+ * imports.
  */
 import { describe, expect, it } from 'bun:test'
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -65,6 +70,10 @@ const HARNESS_SHAPE_ORDER = [
   'nonstringhost-url-exact-url-nonstring-host',
   'emptyhost-string-exact-url-empty-host',
   'emptyhost-url-exact-url-empty-host',
+  'hostonly-string-exact-url-lookalike-host',
+  'hostonly-string-lookalike-url-exact-host',
+  'hostonly-url-exact-url-lookalike-host',
+  'hostonly-url-lookalike-url-exact-host',
 ]
 const MODE_SHAPES = HARNESS_SHAPE_ORDER.slice(0, 5)
 const CONFLICT_LOOKALIKE_HOSTNAME_SHAPES = [
@@ -103,13 +112,21 @@ const UNDEF_HOSTNAME_NEVER_SHAPES = [
   'undef-string-exact-url-undefined-hostname',
   'undef-url-exact-url-undefined-hostname',
 ]
-const NONSTRING_HOST_NEVER_SHAPES = [
+const NONSTRING_HOST_REDIRECTED_SHAPES = [
   'nonstringhost-string-exact-url-nonstring-host',
   'nonstringhost-url-exact-url-nonstring-host',
 ]
-const EMPTY_HOST_NEVER_SHAPES = [
+const EMPTY_HOST_REDIRECTED_SHAPES = [
   'emptyhost-string-exact-url-empty-host',
   'emptyhost-url-exact-url-empty-host',
+]
+const HOST_ONLY_REDIRECTED_SHAPES = [
+  'hostonly-string-exact-url-lookalike-host',
+  'hostonly-url-exact-url-lookalike-host',
+]
+const HOST_ONLY_NEVER_SHAPES = [
+  'hostonly-string-lookalike-url-exact-host',
+  'hostonly-url-lookalike-url-exact-host',
 ]
 const ALL_SHAPES = HARNESS_SHAPE_ORDER
 const FIXTURE_REDIRECTED_SHAPES = [
@@ -118,6 +135,9 @@ const FIXTURE_REDIRECTED_SHAPES = [
   ...CONFLICT_EMPTY_EXACT_HOST_SHAPES,
   ...INHERITED_REDIRECTED_SHAPES,
   ...NONENUM_REDIRECTED_SHAPES,
+  ...NONSTRING_HOST_REDIRECTED_SHAPES,
+  ...EMPTY_HOST_REDIRECTED_SHAPES,
+  ...HOST_ONLY_REDIRECTED_SHAPES,
 ]
 const FIXTURE_NEVER_SHAPES = [
   ...CONFLICT_LOOKALIKE_HOSTNAME_SHAPES,
@@ -129,8 +149,7 @@ const FIXTURE_NEVER_SHAPES = [
   ...INHERITED_NEVER_SHAPES,
   ...NONENUM_NEVER_SHAPES,
   ...UNDEF_HOSTNAME_NEVER_SHAPES,
-  ...NONSTRING_HOST_NEVER_SHAPES,
-  ...EMPTY_HOST_NEVER_SHAPES,
+  ...HOST_ONLY_NEVER_SHAPES,
 ]
 // Wire paths the harness uses per shape (conflict shapes use short codes).
 const SHAPE_PATHS: Record<string, string> = {
@@ -165,6 +184,10 @@ const SHAPE_PATHS: Record<string, string> = {
   'nonstringhost-url-exact-url-nonstring-host': 'nonstringhost-b',
   'emptyhost-string-exact-url-empty-host': 'emptyhost-a',
   'emptyhost-url-exact-url-empty-host': 'emptyhost-b',
+  'hostonly-string-exact-url-lookalike-host': 'hostonly-a',
+  'hostonly-string-lookalike-url-exact-host': 'hostonly-b',
+  'hostonly-url-exact-url-lookalike-host': 'hostonly-c',
+  'hostonly-url-lookalike-url-exact-host': 'hostonly-d',
 }
 
 const PRELOAD_MJS = `
@@ -184,33 +207,48 @@ function hostnameFromHostOption(host) {
   try { return new URL('https://' + host).hostname } catch { return host }
 }
 // Node-compatible effective host, three states (never collapse distinct
-// outcomes), where "explicit" means OWN ENUMERABLE only — Node's URL/options
-// merge is ObjectAssign semantics, so inherited and non-enumerable properties
-// are ignored (empirically verified: connections follow the URL hostname):
-//   non-empty string hostname  > non-empty string host  > URL hostname
-//   explicit empty/non-string values are invalid — no URL fallback, never
-//   redirected (Node throws or lands on a non-Bedrock default for those).
-//   { state: 'option', host }  — explicit non-empty host field
-//   { state: 'invalid' }       — explicit empty/non-string value, no fallback
-//   { state: 'url' }           — relevant fields truly absent
+// outcomes), modeled on Node's MERGED options for https.request: URL overloads
+// start from the ObjectAssign merge of the URL-derived http options (a
+// 'hostname' baseline, never a 'host') with the caller options, options-only
+// overloads start from the caller options alone; ClientRequest then resolves
+// the connection host via merged.hostname || merged.host || 'localhost',
+// throwing for a truthy non-string winner. Consequences (each empirically
+// verified against Node):
+//   — a caller 'host' NEVER overrides a URL-derived hostname (Node follows the
+//     URL hostname for host-only conflicts and ignores non-string/empty host
+//     values entirely when the baseline survives);
+//   — an own-enumerable 'hostname' of ANY value (including undefined/'')
+//     overwrites the URL baseline via ObjectAssign; a falsy merged hostname
+//     then consults the own-enumerable 'host', else lands on localhost;
+//   — inherited and non-enumerable properties are ignored (ObjectAssign).
+//   { state: 'option', host }  — a merged hostname/host value wins
+//   { state: 'invalid' }       — Node throws or lands on a non-Bedrock default
+//   { state: 'url' }           — the URL-derived hostname wins (URL overloads)
 function ownEnumerable(optionsObject, key) {
   return Object.prototype.propertyIsEnumerable.call(optionsObject, key)
 }
-function nodeOptionHost(optionsObject) {
-  if (!optionsObject) return { state: 'url' }
-  let sawEmptyHostname = false
+function nodeOptionHost(optionsObject, urlHostname) {
+  // urlHostname: the URL-derived baseline, or null for the options-only
+  // overload (no URL input, no baseline).
+  if (!optionsObject) return urlHostname !== null ? { state: 'url' } : { state: 'invalid' }
+  let mergedHostname
   if (ownEnumerable(optionsObject, 'hostname')) {
-    const hostname = optionsObject.hostname
-    if (typeof hostname === 'string' && hostname.length > 0) return { state: 'option', host: hostname }
-    if (typeof hostname !== 'string') return { state: 'invalid' }
-    sawEmptyHostname = true
+    mergedHostname = optionsObject.hostname
+  } else {
+    mergedHostname = urlHostname
+  }
+  if (mergedHostname) {
+    if (typeof mergedHostname !== 'string') return { state: 'invalid' }
+    return { state: 'option', host: mergedHostname }
   }
   if (ownEnumerable(optionsObject, 'host')) {
     const host = optionsObject.host
-    if (typeof host === 'string' && host.length > 0) return { state: 'option', host }
-    return { state: 'invalid' }
+    if (host) {
+      if (typeof host !== 'string') return { state: 'invalid' }
+      return { state: 'option', host }
+    }
   }
-  return sawEmptyHostname ? { state: 'invalid' } : { state: 'url' }
+  return { state: 'invalid' }
 }
 function hostnameFromAuthority(authority) {
   if (typeof authority === 'string') {
@@ -243,13 +281,14 @@ https.request = function (...args) {
   if (urlIndex >= 0) {
     try { url = typeof args[urlIndex] === 'string' ? new URL(args[urlIndex]) : args[urlIndex] } catch { url = null }
   }
-  // Node-compatible host precedence, three states: a non-empty hostname wins
-  // over a non-empty host, and both override the URL hostname; an explicit
-  // empty/non-string value is invalid — the request is left untouched (Node
-  // rejects it or lands on a non-Bedrock default), never redirected; only
-  // truly absent fields fall back to the URL hostname.
+  // Node-compatible host precedence on the merged options: the URL-derived
+  // hostname is the baseline that survives caller options lacking 'hostname'
+  // (a caller 'host' never overrides it); an own-enumerable 'hostname' of any
+  // value overwrites the baseline, a truthy non-string winner throws, and a
+  // falsy merged hostname/host lands on the localhost default — all never
+  // redirected; only exact-host effective targets rewrite the request.
   const optionsObject = optionsIndex >= 0 ? args[optionsIndex] : undefined
-  const optionHost = nodeOptionHost(optionsObject)
+  const optionHost = nodeOptionHost(optionsObject, url ? url.hostname : null)
   const hostname = optionHost.state === 'option'
     ? hostnameFromHostOption(optionHost.host)
     : (optionHost.state === 'url' && url ? url.hostname : null)
@@ -364,11 +403,20 @@ const results = await Promise.all([
   // Own-enumerable undefined hostname: explicit but invalid — never redirected.
   shape('undef-string-exact-url-undefined-hostname', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/undef-a', { hostname: undefined, method: 'GET' }, cb)),
   shape('undef-url-exact-url-undefined-hostname', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/undef-b'), { hostname: undefined, method: 'GET' }, cb)),
-  // Own-enumerable invalid host field (non-string / empty): never redirected.
+  // Own-enumerable invalid host field (non-string / empty): the URL hostname
+  // baseline survives, so Node follows the exact URL and these DO redirect.
   shape('nonstringhost-string-exact-url-nonstring-host', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/nonstringhost-a', { host: 123, method: 'GET' }, cb)),
   shape('nonstringhost-url-exact-url-nonstring-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/nonstringhost-b'), { host: 123, method: 'GET' }, cb)),
   shape('emptyhost-string-exact-url-empty-host', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/emptyhost-a', { host: '', method: 'GET' }, cb)),
   shape('emptyhost-url-exact-url-empty-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/emptyhost-b'), { host: '', method: 'GET' }, cb)),
+  // Host-only conflicts (own-enumerable 'host' without 'hostname'): the URL
+  // hostname baseline survives ObjectAssign, so the effective target is the
+  // URL hostname regardless of the caller host — exact URLs redirect,
+  // lookalike URLs stay direct.
+  shape('hostonly-string-exact-url-lookalike-host', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/hostonly-a', { host: BEDROCK_HOST + '.attacker', method: 'GET' }, cb)),
+  shape('hostonly-string-lookalike-url-exact-host', (cb) => https.request('https://' + BEDROCK_HOST + '.attacker' + '/shape/hostonly-b', { host: BEDROCK_HOST, method: 'GET' }, cb)),
+  shape('hostonly-url-exact-url-lookalike-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/hostonly-c'), { host: BEDROCK_HOST + '.attacker', method: 'GET' }, cb)),
+  shape('hostonly-url-lookalike-url-exact-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '.attacker' + '/shape/hostonly-d'), { host: BEDROCK_HOST, method: 'GET' }, cb)),
 ])
 console.log('HARNESS:' + JSON.stringify(results))
 process.exit(0)
@@ -656,8 +704,8 @@ describe('host transport seam in the production bundle', () => {
       expect(exact.results.map((result) => result.shape)).toEqual(ALL_SHAPES)
       // Frozen freeze-count drift guard: the never/redirected partition must
       // exactly cover every harness shape with no duplicates or omissions.
-      expect(FIXTURE_REDIRECTED_SHAPES).toHaveLength(13)
-      expect(FIXTURE_NEVER_SHAPES).toHaveLength(18)
+      expect(FIXTURE_REDIRECTED_SHAPES).toHaveLength(19)
+      expect(FIXTURE_NEVER_SHAPES).toHaveLength(16)
       expect([...FIXTURE_REDIRECTED_SHAPES, ...FIXTURE_NEVER_SHAPES].sort()).toEqual([...ALL_SHAPES].sort())
       expect(new Set(FIXTURE_NEVER_SHAPES).size).toBe(FIXTURE_NEVER_SHAPES.length)
       expect(new Set(FIXTURE_REDIRECTED_SHAPES).size).toBe(FIXTURE_REDIRECTED_SHAPES.length)
@@ -686,8 +734,14 @@ describe('host transport seam in the production bundle', () => {
       expect(byShape(exact.results, NONENUM_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
       expect(byShape(exact.results, NONENUM_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(byShape(exact.results, UNDEF_HOSTNAME_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(byShape(exact.results, NONSTRING_HOST_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(byShape(exact.results, EMPTY_HOST_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      // Host-only shapes: the URL hostname baseline survives caller options
+      // lacking `hostname` (Node ignores the caller host entirely), so exact
+      // URLs — even with non-string/empty/lookalike caller hosts — redirect
+      // and lookalike URLs with exact caller hosts stay direct.
+      expect(byShape(exact.results, NONSTRING_HOST_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(exact.results, EMPTY_HOST_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(exact.results, HOST_ONLY_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(exact.results, HOST_ONLY_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(exact.requestLines.length).toBe(FIXTURE_REDIRECTED_SHAPES.length)
       for (const shape of FIXTURE_REDIRECTED_SHAPES) {
         expect(exact.requestLines.some((line) => line.includes('/shape/' + SHAPE_PATHS[shape]))).toBe(true)
@@ -715,12 +769,16 @@ describe('host transport seam in the production bundle', () => {
       expect(byShape(lookalike.results, NONENUM_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
       expect(byShape(lookalike.results, NONENUM_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
       expect(byShape(lookalike.results, UNDEF_HOSTNAME_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(byShape(lookalike.results, NONSTRING_HOST_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(byShape(lookalike.results, EMPTY_HOST_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
-      // In lookalike mode the redirected fixture hits are: the fixed
-      // lookalike-URL + explicit/empty-fallback exact-hostname conflicts
-      // (conflict-b/d, empty f/h) and the fixed exact-URL inherited/nonenum
-      // shapes — the mode shapes themselves are never redirected.
+      expect(byShape(lookalike.results, NONSTRING_HOST_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(lookalike.results, EMPTY_HOST_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(lookalike.results, HOST_ONLY_REDIRECTED_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(lookalike.results, HOST_ONLY_NEVER_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      // In lookalike mode the redirected fixture hits are the fixed exact-URL
+      // shapes (inherited/nonenum lookalike hostnames, host-only and
+      // non-string/empty caller hosts — the URL hostname baseline decides) and
+      // the fixed lookalike-URL + explicit/empty-fallback exact-hostname
+      // conflicts (conflict-b/d, empty f/h) — the mode shapes themselves are
+      // never redirected.
       expect(lookalike.requestLines.length).toBe(FIXTURE_REDIRECTED_SHAPES.length - MODE_SHAPES.length)
       const lookalikeRedirectedPaths = FIXTURE_REDIRECTED_SHAPES.filter((shape) => !MODE_SHAPES.includes(shape))
       expect(lookalike.requestLines.every((line) => lookalikeRedirectedPaths.some((shape) => line.includes('/shape/' + SHAPE_PATHS[shape])))).toBe(true)
