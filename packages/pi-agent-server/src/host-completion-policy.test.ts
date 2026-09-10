@@ -529,6 +529,52 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
     }
   })
 
+  it('a store-then-throw setter latches failed installs across repeated sends', async () => {
+    const wireCalls = { count: 0 }
+    let current: unknown = wireStub(wireCalls)
+    const requestHandler: { handle: unknown } = { handle: current }
+    let firstWrite = true
+    Object.defineProperty(requestHandler, 'handle', {
+      get: () => current,
+      set: (value) => {
+        current = value
+        if (firstWrite) {
+          firstWrite = false
+          throw new Error('persisted then exploded')
+        }
+      },
+      enumerable: true,
+      configurable: true,
+    })
+    const client = bedrockClientWithHandler(requestHandler)
+    let originalSendCalls = 0
+    const pristineSend = BedrockRuntimeClient.prototype.send
+    BedrockRuntimeClient.prototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]) {
+      originalSendCalls += 1
+      return pristineSend.apply(this, args)
+    }
+    try {
+      // The seam captures this spy as originalSend; a non-zero count means a
+      // latched send reached it. The stored leftover wrapper would raise
+      // attempts, and the real handler would raise wireCalls — all must stay
+      // at their initial values across every repeat.
+      await withSeam(BASE, async (installed) => {
+        const initialObservation = { ...installed.observation }
+        for (let round = 0; round < 3; round += 1) {
+          const error = await sendOnce(client)
+          expect((error as Error).message).toBe('host transport seam: Bedrock request handler handle is not writable')
+          expect(typeof current).toBe('function')
+          expect(originalSendCalls).toBe(0)
+          expect(wireCalls.count).toBe(0)
+          expect(installed.observation).toEqual(initialObservation)
+        }
+      })
+    } finally {
+      BedrockRuntimeClient.prototype.send = PRISTINE_SEND
+      client.destroy()
+    }
+  })
+
   it('writable custom handlers keep per-attempt gating before the original wire', async () => {
     const seen: unknown[] = []
     const requestHandler = {
