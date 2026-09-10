@@ -12,7 +12,7 @@
  * NodeHttp2Handler (h2c) path.
  */
 import { describe, expect, it } from 'bun:test'
-import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime'
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime'
 import http from 'node:http'
 import { join } from 'node:path'
 import type { AddressInfo, Server, Socket } from 'node:net'
@@ -413,6 +413,150 @@ describe('fetch seam redirect and single-attempt behavior', () => {
       })
     } finally {
       await server.close()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bedrock send-seam install atomicity (stub wire — no real h2 transport)
+// ---------------------------------------------------------------------------
+
+function bedrockClientWithHandler(requestHandler: object): BedrockRuntimeClient {
+  return new BedrockRuntimeClient({
+    region: 'us-east-1',
+    credentials: { accessKeyId: 'fixture', secretAccessKey: 'fixture' },
+    maxAttempts: 1,
+    requestHandler: requestHandler as never,
+  })
+}
+
+describe('bedrock send-seam install atomicity fails closed on unusable handles', () => {
+  const BASE = 'https://bedrock-runtime.us-east-1.amazonaws.com'
+
+  async function sendOnce(client: BedrockRuntimeClient): Promise<unknown> {
+    try {
+      await client.send(new ConverseCommand({ modelId: 'fixture', messages: [] }))
+      return undefined
+    } catch (error) {
+      return error
+    }
+  }
+
+  function wireStub(wireCalls: { count: number }): (request: unknown, options?: unknown) => Promise<never> {
+    return async () => {
+      wireCalls.count += 1
+      throw new Error('WIRE_REACHED')
+    }
+  }
+
+  it('unwritable callable handle fails closed on every send with zero wire attempts', async () => {
+    const wireCalls = { count: 0 }
+    const handle = wireStub(wireCalls)
+    const requestHandler = { handle }
+    Object.defineProperty(requestHandler, 'handle', {
+      value: handle,
+      enumerable: true,
+      configurable: false,
+      writable: false,
+    })
+    const client = bedrockClientWithHandler(requestHandler)
+    try {
+      await withSeam(BASE, async (installed) => {
+        const first = await sendOnce(client)
+        expect((first as Error).message).toMatch(/host transport seam: Bedrock request handler handle is not writable/)
+        expect(wireCalls.count).toBe(0)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        // The failed install left the handler unmarked: the second send must
+        // fail closed again instead of skipping the guard.
+        const second = await sendOnce(client)
+        expect((second as Error).message).toMatch(/host transport seam: Bedrock request handler handle is not writable/)
+        expect(wireCalls.count).toBe(0)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+      })
+    } finally {
+      client.destroy()
+    }
+  })
+
+  it('a throwing handle setter converts to the stable seam error on every send', async () => {
+    const wireCalls = { count: 0 }
+    let current = wireStub(wireCalls)
+    const requestHandler: { handle: unknown } = { handle: current }
+    Object.defineProperty(requestHandler, 'handle', {
+      get: () => current,
+      set: () => {
+        throw new Error('setter exploded')
+      },
+      enumerable: true,
+      configurable: true,
+    })
+    const client = bedrockClientWithHandler(requestHandler)
+    try {
+      await withSeam(BASE, async (installed) => {
+        for (let round = 0; round < 2; round += 1) {
+          const error = await sendOnce(client)
+          expect((error as Error).message).toMatch(/host transport seam: Bedrock request handler handle is not writable/)
+          expect((error as Error).message).not.toContain('setter exploded')
+          expect(wireCalls.count).toBe(0)
+          expect(installed.observation.attempts).toBe(0)
+        }
+      })
+    } finally {
+      client.destroy()
+    }
+  })
+
+  it('a silently swallowing handle setter is caught by the install verification', async () => {
+    const wireCalls = { count: 0 }
+    let current = wireStub(wireCalls)
+    const requestHandler: { handle: unknown } = { handle: current }
+    Object.defineProperty(requestHandler, 'handle', {
+      get: () => current,
+      set: () => {},
+      enumerable: true,
+      configurable: true,
+    })
+    const client = bedrockClientWithHandler(requestHandler)
+    try {
+      await withSeam(BASE, async (installed) => {
+        const error = await sendOnce(client)
+        expect((error as Error).message).toMatch(/host transport seam: Bedrock request handler handle is not writable/)
+        expect(wireCalls.count).toBe(0)
+        expect(installed.observation.attempts).toBe(0)
+      })
+    } finally {
+      client.destroy()
+    }
+  })
+
+  it('writable custom handlers keep per-attempt gating before the original wire', async () => {
+    const seen: unknown[] = []
+    const requestHandler = {
+      handle: async (request: unknown) => {
+        seen.push(request)
+        throw new Error('WIRE_REACHED')
+      },
+    }
+    const client = bedrockClientWithHandler(requestHandler)
+    try {
+      await withSeam(BASE, async (installed) => {
+        const first = await sendOnce(client)
+        expect((first as Error).message).toBe('WIRE_REACHED')
+        expect(seen).toHaveLength(1)
+        expect(installed.observation).toEqual({
+          attempts: 1,
+          networkFailure: true,
+          retryBlocked: false,
+          sdkException: true,
+        })
+        const second = await sendOnce(client)
+        expect((second as Error).message).toMatch(/host transport seam: second wire attempt blocked/)
+        expect(seen).toHaveLength(1)
+        expect(installed.observation.attempts).toBe(2)
+        expect(installed.observation.retryBlocked).toBe(true)
+      })
+    } finally {
+      client.destroy()
     }
   })
 })

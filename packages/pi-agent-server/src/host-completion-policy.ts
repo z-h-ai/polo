@@ -110,9 +110,8 @@ function installBedrockSendSeam(observation: TransportObservation): void {
     }
     const requestHandler = candidate as { handle: (request: unknown, options?: unknown) => Promise<unknown> };
     if (!guardedHandlers.has(requestHandler)) {
-      guardedHandlers.add(requestHandler);
       const originalHandle = requestHandler.handle;
-      requestHandler.handle = async (request: unknown, options?: unknown): Promise<unknown> => {
+      const wrapped = async (request: unknown, options?: unknown): Promise<unknown> => {
         observation.attempts += 1;
         if (observation.attempts > 1) {
           observation.retryBlocked = true;
@@ -120,9 +119,7 @@ function installBedrockSendSeam(observation: TransportObservation): void {
         }
         try {
           const result = await originalHandle.call(requestHandler, request, options);
-          const wireStatus = finiteInteger(
-            (result as { response?: { statusCode?: unknown } } | undefined)?.response?.statusCode,
-          );
+          const wireStatus = finiteInteger((result as { response?: { statusCode?: unknown } } | undefined)?.response?.statusCode);
           if (wireStatus !== undefined) observation.status = wireStatus;
           return result;
         } catch (error) {
@@ -130,6 +127,10 @@ function installBedrockSendSeam(observation: TransportObservation): void {
           throw error;
         }
       };
+      // Atomic install: assign the built wrapper, verify, then mark — a failed install stays unmarked and fails closed.
+      try { requestHandler.handle = wrapped; } catch { throw seamError('Bedrock request handler handle is not writable'); }
+      if (requestHandler.handle !== wrapped) throw seamError('Bedrock request handler handle is not writable');
+      guardedHandlers.add(requestHandler);
     }
     const pending = originalSend.apply(this, args) as Promise<unknown> | undefined;
     if (typeof pending?.then === 'function') {
