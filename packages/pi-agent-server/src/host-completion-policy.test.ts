@@ -421,121 +421,257 @@ describe('fetch seam redirect and single-attempt behavior', () => {
 // Base immutability and intrinsic object-input binding (two-server evidence)
 // ---------------------------------------------------------------------------
 
+interface WireRecord {
+  method?: string
+  path: string
+  body: string
+  header?: string
+}
+
+async function startRecordingServer(): Promise<HttpFixture & { seen: WireRecord[] }> {
+  const seen: WireRecord[] = []
+  const server = await startHttpServer((req, res, path) => {
+    let body = ''
+    req.on('data', (chunk) => {
+      body += chunk
+    })
+    req.on('end', () => {
+      seen.push({ method: req.method, path, body, header: req.headers['x-probe'] })
+      respond(res, 200, OK_BODY)
+    })
+  })
+  return Object.assign(server, { seen })
+}
+
 describe('fetch policy binds validation to immutable and intrinsic state', () => {
   it('mutating the caller-owned base URL after install does not move the allow-list', async () => {
-    const allowed = await startOkServer();
-    const attacker = await startOkServer();
+    const allowed = await startOkServer()
+    const attacker = await startOkServer()
     try {
-      const callerOwnedBase = new URL(allowed.pathUrl('/v1'));
-      const installed = installTransportObservation(callerOwnedBase);
+      const callerOwnedBase = new URL(allowed.pathUrl('/v1'))
+      const installed = installTransportObservation(callerOwnedBase)
       try {
         // Mutate the caller's URL to the attacker origin after installation,
         // exactly like a post-install allow-list move attempt.
-        callerOwnedBase.href = attacker.pathUrl('/escape');
-        await expect(fetch(attacker.pathUrl('/escape/child'))).rejects.toThrow(/host transport seam:/);
-        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false });
-        expect(allowed.requests).toEqual([]);
-        expect(attacker.requests).toEqual([]);
+        callerOwnedBase.href = attacker.pathUrl('/escape')
+        await expect(fetch(attacker.pathUrl('/escape/child'))).rejects.toThrow(/host transport seam:/)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual([])
+        expect(attacker.requests).toEqual([])
       } finally {
-        globalThis.fetch = PRISTINE_FETCH;
-        BedrockRuntimeClient.prototype.send = PRISTINE_SEND;
+        globalThis.fetch = PRISTINE_FETCH
+        BedrockRuntimeClient.prototype.send = PRISTINE_SEND
       }
     } finally {
-      await allowed.close();
-      await attacker.close();
+      await allowed.close()
+      await attacker.close()
     }
-  });
+  })
 
   it('a URL with shadowed safe-looking properties is blocked at its intrinsic target', async () => {
-    const allowed = await startOkServer();
-    const attacker = await startOkServer();
+    const allowed = await startOkServer()
+    const attacker = await startOkServer()
     try {
       await withSeam(allowed.pathUrl('/v1'), async (installed) => {
-        const evil = new URL(attacker.pathUrl('/v1/shadowed'));
+        const evil = new URL(attacker.pathUrl('/v1/shadowed'))
         Object.defineProperties(evil, {
           protocol: { value: 'http:' },
           hostname: { value: '127.0.0.1' },
           port: { value: String(allowed.port) },
           pathname: { value: '/v1/shadowed' },
-        });
-        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/);
-        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false });
-        expect(allowed.requests).toEqual([]);
-        expect(attacker.requests).toEqual([]);
-      });
+        })
+        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual([])
+        expect(attacker.requests).toEqual([])
+      })
     } finally {
-      await allowed.close();
-      await attacker.close();
+      await allowed.close()
+      await attacker.close()
     }
-  });
+  })
 
   it('a Request with a shadowed url property fails closed on the internal-consistency check', async () => {
-    const allowed = await startOkServer();
-    const attacker = await startOkServer();
+    const allowed = await startOkServer()
+    const attacker = await startOkServer()
     try {
       await withSeam(allowed.pathUrl('/v1'), async (installed) => {
-        const evil = new Request(attacker.pathUrl('/v1/shadowed'));
-        Object.defineProperty(evil, 'url', { value: allowed.pathUrl('/v1/shadowed') });
-        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/);
-        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false });
-        expect(allowed.requests).toEqual([]);
-        expect(attacker.requests).toEqual([]);
-      });
+        const evil = new Request(attacker.pathUrl('/v1/shadowed'))
+        Object.defineProperty(evil, 'url', { value: allowed.pathUrl('/v1/shadowed') })
+        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual([])
+        expect(attacker.requests).toEqual([])
+      })
     } finally {
-      await allowed.close();
-      await attacker.close();
+      await allowed.close()
+      await attacker.close()
     }
-  });
+  })
 
   it('normal URL and Request calls still reach the permitted transport once with init/body intact', async () => {
-    const seen: Array<{ method?: string; path: string; body: string }> = [];
-    const server = await startHttpServer((req, res, path) => {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-      });
-      req.on('end', () => {
-        seen.push({ method: req.method, path, body });
-        respond(res, 200, OK_BODY);
-      });
-    });
+    const server = await startRecordingServer()
     try {
       await withSeam(server.pathUrl('/v1'), async (installed) => {
         const response = await fetch(new URL(server.pathUrl('/v1/echo')), {
           method: 'POST',
           body: 'url-body',
-          headers: { 'content-type': 'text/plain' },
-        });
-        expect(response.status).toBe(200);
-        expect(await response.text()).toBe(OK_BODY);
-        expect(installed.observation.attempts).toBe(1);
-        expect(installed.observation.status).toBe(200);
-      });
+          headers: { 'content-type': 'text/plain', 'x-probe': 'own-header' },
+        })
+        expect(response.status).toBe(200)
+        expect(await response.text()).toBe(OK_BODY)
+        expect(installed.observation.attempts).toBe(1)
+        expect(installed.observation.status).toBe(200)
+      })
       await withSeam(server.pathUrl('/v1'), async (installed) => {
         const request = new Request(server.pathUrl('/v1/echo'), {
           method: 'POST',
           body: 'original-body',
-          headers: { 'content-type': 'text/plain' },
-        });
+          headers: { 'content-type': 'text/plain', 'x-probe': 'request-header' },
+        })
         const second = await fetch(request, {
           method: 'PUT',
           body: 'override-body',
-          headers: { 'content-type': 'text/plain' },
-        });
-        expect(second.status).toBe(200);
-        expect(await second.text()).toBe(OK_BODY);
-        expect(installed.observation.attempts).toBe(1);
-        expect(installed.observation.status).toBe(200);
-      });
-      expect(seen).toEqual([
-        { method: 'POST', path: '/v1/echo', body: 'url-body' },
-        { method: 'PUT', path: '/v1/echo', body: 'override-body' },
-      ]);
+          headers: { 'x-probe': 'init-header' },
+        })
+        expect(second.status).toBe(200)
+        expect(await second.text()).toBe(OK_BODY)
+        expect(installed.observation.attempts).toBe(1)
+        expect(installed.observation.status).toBe(200)
+      })
+      expect(server.seen).toEqual([
+        { method: 'POST', path: '/v1/echo', body: 'url-body', header: 'own-header' },
+        { method: 'PUT', path: '/v1/echo', body: 'override-body', header: 'init-header' },
+      ])
     } finally {
-      await server.close();
+      await server.close()
     }
-  });
-});
+  })
+
+  it('consumed and locked Request bodies succeed when init.body replaces them', async () => {
+    const server = await startRecordingServer()
+    const consumed = async () => {
+      const request = new Request(server.pathUrl('/v1/echo'), { method: 'POST', body: 'old' })
+      await request.text()
+      return request
+    }
+    const locked = () => {
+      const request = new Request(server.pathUrl('/v1/echo'), { method: 'POST', body: 'old' })
+      request.body?.getReader()
+      return request
+    }
+    try {
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const consumedResponse = await fetch(await consumed(), { method: 'PUT', body: 'replacement-consumed' })
+        expect(consumedResponse.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const lockedResponse = await fetch(locked(), { method: 'PUT', body: 'replacement-locked' })
+        expect(lockedResponse.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([
+        { method: 'PUT', path: '/v1/echo', body: 'replacement-consumed' },
+        { method: 'PUT', path: '/v1/echo', body: 'replacement-locked' },
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('unusable Request bodies without an init.body replacement still fail before the wire', async () => {
+    const server = await startRecordingServer()
+    const consumed = async () => {
+      const request = new Request(server.pathUrl('/v1/echo'), { method: 'POST', body: 'old' })
+      await request.text()
+      return request
+    }
+    const locked = () => {
+      const request = new Request(server.pathUrl('/v1/echo'), { method: 'POST', body: 'old' })
+      request.body?.getReader()
+      return request
+    }
+    try {
+      // Native baseline: the same calls reject (or throw) without a replacement body.
+      const rejectionOf = (run: () => Promise<Response>): Promise<unknown> =>
+        Promise.resolve()
+          .then(run)
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+      expect(await rejectionOf(async () => fetch(await consumed(), { method: 'PUT' }))).toBeInstanceOf(Error)
+      expect(await rejectionOf(() => fetch(locked(), { method: 'PUT' }))).toBeInstanceOf(Error)
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        expect(await rejectionOf(async () => fetch(await consumed(), { method: 'PUT' }))).toBeInstanceOf(Error)
+        expect(await rejectionOf(() => fetch(locked(), { method: 'PUT' }))).toBeInstanceOf(Error)
+        // Either the seam construction or the native-equivalent fetch of the
+        // snapshot fails; either way the wire target is never reached.
+        expect(installed.observation.attempts).toBeLessThanOrEqual(2)
+        expect(installed.observation.sdkException).toBe(false)
+      })
+      expect(server.seen).toEqual([])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('inherited RequestInit fields are applied exactly like native fetch', async () => {
+    const server = await startRecordingServer()
+    const inheritedInit = () =>
+      Object.create({
+        method: 'PUT',
+        body: 'init-body',
+        headers: { 'content-type': 'text/plain', 'x-probe': 'init-header' },
+      })
+    try {
+      // Native baseline: inherited dictionary fields override the Request.
+      await fetch(
+        new Request(server.pathUrl('/v1/echo'), { method: 'POST', body: 'request-body', headers: { 'x-probe': 'request-header' } }),
+        inheritedInit(),
+      )
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const response = await fetch(
+          new Request(server.pathUrl('/v1/echo'), { method: 'POST', body: 'request-body', headers: { 'x-probe': 'request-header' } }),
+          inheritedInit(),
+        )
+        expect(response.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([
+        { method: 'PUT', path: '/v1/echo', body: 'init-body', header: 'init-header' },
+        { method: 'PUT', path: '/v1/echo', body: 'init-body', header: 'init-header' },
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('own-property init and forced redirect behavior remain correct', async () => {
+    const second = await startOkServer()
+    const first = await startHttpServer((req, res, path) => {
+      if (path === '/v1/start') {
+        res.writeHead(307, { location: second.pathUrl('/elsewhere') })
+        res.end()
+      } else {
+        respond(res, 200, OK_BODY)
+      }
+    })
+    try {
+      await withSeam(first.pathUrl('/v1'), async (installed) => {
+        const request = new Request(first.pathUrl('/v1/start'), { method: 'POST', body: 'own-body' })
+        await expect(fetch(request, { redirect: 'follow', headers: { 'content-type': 'text/plain' } })).rejects.toThrow()
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(first.requests).toEqual(['/v1/start'])
+      expect(second.requests).toEqual([])
+    } finally {
+      await first.close()
+      await second.close()
+    }
+  })
+})
 
 // ---------------------------------------------------------------------------
 // Bedrock send-seam install atomicity (stub wire — no real h2 transport)

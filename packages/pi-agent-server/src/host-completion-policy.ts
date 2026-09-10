@@ -7,10 +7,10 @@
  * (always `redirect: 'error'`), and the shared `BedrockRuntimeClient` send
  * wrapper guards each instance's resolved `config.requestHandler.handle` —
  * the AWS retry middleware's per-wire-attempt entry point. The second wire
- * attempt throws an internal `RetryBlockedError` before the original
- * transport runs, an unguardable request handler is latched fail-closed, and
- * object fetch inputs are bound to their intrinsic transport snapshot;
- * observations hold only counts and numeric status, never provider content.
+ * attempt throws an internal `RetryBlockedError` before the original transport
+ * runs, an unguardable request handler is latched fail-closed, and object
+ * fetch inputs are bound to their intrinsic transport snapshot. Observations
+ * hold only counts and numeric status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -154,23 +154,26 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    let snapshot: string | URL | Request;
-    if (typeof input === 'string') snapshot = input;
-    else if (input instanceof URL) snapshot = new URL(URL.prototype.toString.call(input));
-    else if (input instanceof Request) {
-      const cloned = new Request(input);
-      // The clone must carry the intrinsic target; an engine that honors a shadowed url property fails closed.
-      if (cloned.url !== Reflect.get(Request.prototype, 'url', input)) {
+    // One native Request(input, init) snapshot consumes WebIDL lookup, Request overrides and body
+    // replacement once; redirect:'error' rides a prototype-linked init view (fragment kept pre-construction).
+    const initForSnapshot: RequestInit = Object.assign(Object.create(init ?? null), { redirect: 'error' });
+    let snapshot: Request, target: URL;
+    if (typeof input === 'string' || input instanceof URL) {
+      target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
+      snapshot = new Request(target, initForSnapshot);
+    } else if (input instanceof Request) {
+      snapshot = new Request(input, initForSnapshot);
+      if (snapshot.url !== Reflect.get(Request.prototype, 'url', input)) {
         throw seamError('request input url is not internally consistent');
       }
-      snapshot = cloned;
+      target = new URL(snapshot.url);
+    } else {
+      throw seamError('fetch input must be a string, URL or Request');
     }
-    else throw seamError('fetch input must be a string, URL or Request');
-    const target = new URL(snapshot instanceof Request ? snapshot.url : snapshot);
     assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
     gateSecondWireAttempt(observation);
     try {
-      const response = await originalFetch.call(globalThis, snapshot, { ...init, redirect: 'error' });
+      const response = await originalFetch.call(globalThis, snapshot);
       observation.status = response.status;
       return response;
     } catch (error) {
