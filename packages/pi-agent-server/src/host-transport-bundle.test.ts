@@ -15,10 +15,11 @@
  * SDK-internal retry (AWS_MAX_ATTEMPTS=3) is blocked by the seam before the
  * second wire attempt, the structured 503 is observed, a suffixed lookalike
  * hostname is NOT redirected (direct connection, zero fixture hits), the
- * https.request overload matrix (options-only, string/URL+options,
- * string/URL+callback) and the URL/options hostname-precedence conflicts
- * redirect only when the Node-effective target is the exact Bedrock host, and
- * the bundle has no external AWS runtime imports.
+ * https.request overload matrix and the Node URL/options host-precedence
+ * matrix (non-empty hostname > non-empty host > URL hostname; empty-string
+ * hostname falls back to host) redirect only when the Node-effective target
+ * is the exact Bedrock host, and the bundle has no external AWS runtime
+ * imports.
  */
 import { describe, expect, it } from 'bun:test'
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -27,6 +28,67 @@ import { join } from 'node:path'
 import { buildPiAgentServerBundle } from '../../../scripts/build/pi-agent-server-staging.ts'
 
 const HOST_NODE = process.env.POLO_PI_HOST_NODE ?? 'node'
+
+// Shape names in harness declaration order (the harness resolves Promise.all
+// in input order, so results arrive in this exact order).
+const HARNESS_SHAPE_ORDER = [
+  'options-only',
+  'string-options',
+  'url-options',
+  'string-callback',
+  'url-callback',
+  'conflict-string-exact-url-lookalike-hostname',
+  'conflict-string-lookalike-url-exact-hostname',
+  'conflict-url-exact-url-lookalike-hostname',
+  'conflict-url-lookalike-url-exact-hostname',
+  'conflict-empty-string-exact-url-lookalike-host',
+  'conflict-empty-string-lookalike-url-exact-host',
+  'conflict-empty-url-exact-url-lookalike-host',
+  'conflict-empty-url-lookalike-url-exact-host',
+]
+const MODE_SHAPES = HARNESS_SHAPE_ORDER.slice(0, 5)
+const CONFLICT_LOOKALIKE_HOSTNAME_SHAPES = [
+  'conflict-string-exact-url-lookalike-hostname',
+  'conflict-url-exact-url-lookalike-hostname',
+]
+const CONFLICT_EXACT_HOSTNAME_SHAPES = [
+  'conflict-string-lookalike-url-exact-hostname',
+  'conflict-url-lookalike-url-exact-hostname',
+]
+const CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES = [
+  'conflict-empty-string-exact-url-lookalike-host',
+  'conflict-empty-url-exact-url-lookalike-host',
+]
+const CONFLICT_EMPTY_EXACT_HOST_SHAPES = [
+  'conflict-empty-string-lookalike-url-exact-host',
+  'conflict-empty-url-lookalike-url-exact-host',
+]
+const ALL_SHAPES = HARNESS_SHAPE_ORDER
+const FIXTURE_REDIRECTED_SHAPES = [
+  ...MODE_SHAPES,
+  ...CONFLICT_EXACT_HOSTNAME_SHAPES,
+  ...CONFLICT_EMPTY_EXACT_HOST_SHAPES,
+]
+const FIXTURE_NEVER_SHAPES = [
+  ...CONFLICT_LOOKALIKE_HOSTNAME_SHAPES,
+  ...CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES,
+]
+// Wire paths the harness uses per shape (conflict shapes use short codes).
+const SHAPE_PATHS: Record<string, string> = {
+  'options-only': 'options-only',
+  'string-options': 'string-options',
+  'url-options': 'url-options',
+  'string-callback': 'string-callback',
+  'url-callback': 'url-callback',
+  'conflict-string-exact-url-lookalike-hostname': 'conflict-a',
+  'conflict-string-lookalike-url-exact-hostname': 'conflict-b',
+  'conflict-url-exact-url-lookalike-hostname': 'conflict-c',
+  'conflict-url-lookalike-url-exact-hostname': 'conflict-d',
+  'conflict-empty-string-exact-url-lookalike-host': 'conflict-e',
+  'conflict-empty-string-lookalike-url-exact-host': 'conflict-f',
+  'conflict-empty-url-exact-url-lookalike-host': 'conflict-g',
+  'conflict-empty-url-lookalike-url-exact-host': 'conflict-h',
+}
 
 const PRELOAD_MJS = `
 import https from 'node:https'
@@ -43,6 +105,16 @@ function exactHostname(candidate) {
 function hostnameFromHostOption(host) {
   if (typeof host !== 'string') return null
   try { return new URL('https://' + host).hostname } catch { return host }
+}
+// Node-compatible effective host: a non-empty string hostname wins, else a
+// non-empty string host; empty or non-string explicit values count as unset
+// (no target is derived from them — fail-safe, never a contradicting target).
+function nodeOptionHost(optionsObject) {
+  for (const key of ['hostname', 'host']) {
+    const value = optionsObject ? optionsObject[key] : undefined
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return null
 }
 function hostnameFromAuthority(authority) {
   if (typeof authority === 'string') {
@@ -76,11 +148,12 @@ https.request = function (...args) {
     try { url = typeof args[urlIndex] === 'string' ? new URL(args[urlIndex]) : args[urlIndex] } catch { url = null }
   }
   // Node-compatible host precedence: URL fields are derived first, then
-  // explicit options fields override them — hostname wins over host, and both
-  // override the URL hostname. Derive the effective hostname accordingly.
+  // explicit options fields override them — a non-empty hostname wins over a
+  // non-empty host, and both override the URL hostname (an empty hostname
+  // falls back to host, not to the URL). Derive it via the single helper.
   const optionsObject = optionsIndex >= 0 ? args[optionsIndex] : undefined
-  const optionHost = optionsObject ? (optionsObject.hostname ?? optionsObject.host) : undefined
-  const hostname = typeof optionHost === 'string' && optionHost.length > 0
+  const optionHost = nodeOptionHost(optionsObject)
+  const hostname = optionHost !== null
     ? hostnameFromHostOption(optionHost)
     : (url ? url.hostname : null)
   if (hostname === null || exactHostname(hostname) !== BEDROCK_HOST) {
@@ -152,6 +225,12 @@ const results = await Promise.all([
   shape('conflict-string-lookalike-url-exact-hostname', (cb) => https.request('https://' + BEDROCK_HOST + '.attacker' + '/shape/conflict-b', { hostname: BEDROCK_HOST, method: 'GET' }, cb)),
   shape('conflict-url-exact-url-lookalike-hostname', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/conflict-c'), { hostname: BEDROCK_HOST + '.attacker', method: 'GET' }, cb)),
   shape('conflict-url-lookalike-url-exact-hostname', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '.attacker' + '/shape/conflict-d'), { hostname: BEDROCK_HOST, method: 'GET' }, cb)),
+  // Empty-string hostname must fall back to the non-empty host (never to the
+  // URL hostname) — same precedence matrix with hostname:'' in both input kinds.
+  shape('conflict-empty-string-exact-url-lookalike-host', (cb) => https.request('https://' + BEDROCK_HOST + '/shape/conflict-e', { hostname: '', host: BEDROCK_HOST + '.attacker', method: 'GET' }, cb)),
+  shape('conflict-empty-string-lookalike-url-exact-host', (cb) => https.request('https://' + BEDROCK_HOST + '.attacker' + '/shape/conflict-f', { hostname: '', host: BEDROCK_HOST, method: 'GET' }, cb)),
+  shape('conflict-empty-url-exact-url-lookalike-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '/shape/conflict-g'), { hostname: '', host: BEDROCK_HOST + '.attacker', method: 'GET' }, cb)),
+  shape('conflict-empty-url-lookalike-url-exact-host', (cb) => https.request(new URL('https://' + BEDROCK_HOST + '.attacker' + '/shape/conflict-h'), { hostname: '', host: BEDROCK_HOST, method: 'GET' }, cb)),
 ])
 console.log('HARNESS:' + JSON.stringify(results))
 process.exit(0)
@@ -432,44 +511,52 @@ describe('host transport seam in the production bundle', () => {
         }
       }
 
-      // Exact host: every overload shape is redirected to the local fixture
-      // (its distinctive 503 body proves the response came from the fixture).
+      // Exact host: every effective-exact shape is redirected to the local
+      // fixture (its distinctive 503 body proves the response came from it).
       const exact = await runHarness('exact')
-      expect(exact.results).toHaveLength(9)
-      expect(exact.results.map((result) => result.shape)).toEqual([
-        'options-only', 'string-options', 'url-options', 'string-callback', 'url-callback',
-        'conflict-string-exact-url-lookalike-hostname', 'conflict-string-lookalike-url-exact-hostname',
-        'conflict-url-exact-url-lookalike-hostname', 'conflict-url-lookalike-url-exact-hostname',
-      ])
+      expect(exact.results).toHaveLength(ALL_SHAPES.length)
+      expect(exact.results.map((result) => result.shape)).toEqual(ALL_SHAPES)
+      const byShape = (results: Array<{ shape: string }>, names: string[]): Array<{ ok: boolean; status?: number; body?: string }> =>
+        (results as Array<{ shape: string; ok: boolean; status?: number; body?: string }>).filter((result) => names.includes(result.shape))
       const isFixtureMarked = (result: { ok: boolean; status?: number; body?: string }): boolean =>
         result.ok && result.status === 503 && (result.body ?? '').includes('ServiceUnavailableException')
-      expect(exact.results.filter((result) => result.shape.startsWith('options-') || result.shape.startsWith('string-') || result.shape.startsWith('url-')).every(isFixtureMarked)).toBe(true)
-      // URL/options precedence: explicit lookalike options.hostname overrides
-      // the exact URL (no redirect), explicit exact options.hostname overrides
-      // the lookalike URL (redirect).
-      expect(exact.results.filter((result) => result.shape.includes('lookalike-hostname')).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(exact.results.filter((result) => result.shape.includes('exact-hostname')).every(isFixtureMarked)).toBe(true)
-      expect(exact.requestLines.length).toBe(7)
-      for (const shape of ['options-only', 'string-options', 'url-options', 'string-callback', 'url-callback']) {
-        expect(exact.requestLines.some((line) => line.includes('/shape/' + shape))).toBe(true)
+      expect(byShape(exact.results, MODE_SHAPES).every(isFixtureMarked)).toBe(true)
+      // URL/options precedence: explicit lookalike options.hostname — and an
+      // empty-string hostname falling back to a lookalike host — override the
+      // exact URL (no redirect); an explicit exact hostname (or an empty
+      // hostname falling back to an exact host) overrides the lookalike URL
+      // (redirect).
+      expect(byShape(exact.results, CONFLICT_LOOKALIKE_HOSTNAME_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      expect(byShape(exact.results, CONFLICT_EXACT_HOSTNAME_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(exact.results, CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      expect(byShape(exact.results, CONFLICT_EMPTY_EXACT_HOST_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(exact.requestLines.length).toBe(FIXTURE_REDIRECTED_SHAPES.length)
+      for (const shape of FIXTURE_REDIRECTED_SHAPES) {
+        expect(exact.requestLines.some((line) => line.includes('/shape/' + SHAPE_PATHS[shape]))).toBe(true)
       }
-      expect(exact.requestLines.some((line) => line.includes('/shape/conflict-a'))).toBe(false)
-      expect(exact.requestLines.some((line) => line.includes('/shape/conflict-b'))).toBe(true)
-      expect(exact.requestLines.some((line) => line.includes('/shape/conflict-c'))).toBe(false)
-      expect(exact.requestLines.some((line) => line.includes('/shape/conflict-d'))).toBe(true)
+      for (const shape of FIXTURE_NEVER_SHAPES) {
+        expect(exact.requestLines.some((line) => line.includes('/shape/' + SHAPE_PATHS[shape]))).toBe(false)
+      }
 
       // Lookalike host: no mode shape is redirected. Zero fixture hits is the
       // hard no-interception proof; a hostile network may answer lookalike DNS
       // with its own responses, so only fixture-marked successes would fail
       // this. The fixed conflict cases behave identically in this mode: the
-      // explicit exact options.hostname still wins and is redirected.
+      // Node-effective exact targets (explicit or empty-hostname fallback) are
+      // still redirected.
       const lookalike = await runHarness('lookalike')
-      expect(lookalike.results).toHaveLength(9)
-      expect(lookalike.results.filter((result) => !result.shape.startsWith('conflict-')).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(lookalike.results.filter((result) => result.shape.includes('lookalike-hostname')).every((result) => !isFixtureMarked(result))).toBe(true)
-      expect(lookalike.results.filter((result) => result.shape.includes('exact-hostname')).every(isFixtureMarked)).toBe(true)
-      expect(lookalike.requestLines.length).toBe(2)
-      expect(lookalike.requestLines.every((line) => line.includes('/shape/conflict-b') || line.includes('/shape/conflict-d'))).toBe(true)
+      expect(lookalike.results).toHaveLength(ALL_SHAPES.length)
+      expect(byShape(lookalike.results, MODE_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      expect(byShape(lookalike.results, CONFLICT_LOOKALIKE_HOSTNAME_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      expect(byShape(lookalike.results, CONFLICT_EMPTY_LOOKALIKE_HOST_SHAPES).every((result) => !isFixtureMarked(result))).toBe(true)
+      expect(byShape(lookalike.results, CONFLICT_EXACT_HOSTNAME_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(byShape(lookalike.results, CONFLICT_EMPTY_EXACT_HOST_SHAPES).every(isFixtureMarked)).toBe(true)
+      expect(lookalike.requestLines.length).toBe(CONFLICT_EXACT_HOSTNAME_SHAPES.length + CONFLICT_EMPTY_EXACT_HOST_SHAPES.length)
+      const lookalikeRedirectedPaths = FIXTURE_REDIRECTED_SHAPES.filter((shape) => !MODE_SHAPES.includes(shape))
+      expect(lookalike.requestLines.every((line) => lookalikeRedirectedPaths.some((shape) => line.includes('/shape/' + SHAPE_PATHS[shape])))).toBe(true)
+      for (const shape of MODE_SHAPES) {
+        expect(lookalike.requestLines.some((line) => line.includes('/shape/' + SHAPE_PATHS[shape]))).toBe(false)
+      }
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true })
     }
