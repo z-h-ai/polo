@@ -7,13 +7,15 @@
  * seam, registers the pi-ai Bedrock provider module and triggers a real
  * model call. The artifact is copied to a node_modules-free directory and
  * executed under the Node host. A `--import` preload intercepts ONLY the
- * builtin HTTPS/HTTP2 transports for the exact Bedrock runtime hostname and
- * redirects them to a local TLS 503 server — the AWS constructor, request
+ * builtin HTTPS/HTTP2 transports whose normalized hostname equals the exact
+ * Bedrock runtime hostname (strict `===`, never substring) and redirects them
+ * to a local TLS 503 server — the AWS constructor, request
  * handler and send are never replaced or mocked and AWS_ENDPOINT_URL* stays
- * unset. Proves: the server sees exactly one request, the SDK-internal retry
- * (AWS_MAX_ATTEMPTS=3) is blocked by the seam before the second wire attempt,
- * the structured 503 is observed, and the bundle has no external AWS runtime
- * imports.
+ * unset. Proves: the exact-hostname server sees exactly one request, the
+ * SDK-internal retry (AWS_MAX_ATTEMPTS=3) is blocked by the seam before the
+ * second wire attempt, the structured 503 is observed, a suffixed lookalike
+ * hostname is NOT redirected (direct connection, zero fixture hits), and the
+ * bundle has no external AWS runtime imports.
  */
 import { describe, expect, it } from 'bun:test'
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -30,10 +32,29 @@ const BEDROCK_HOST = 'bedrock-runtime.us-east-1.amazonaws.com'
 const targetHost = process.env.SEAM_FIXTURE_HOST || '127.0.0.1'
 const targetPort = Number(process.env.SEAM_FIXTURE_PORT)
 if (!targetPort) throw new Error('SEAM_FIXTURE_PORT missing')
+function exactHostname(candidate) {
+  let hostname = String(candidate).toLowerCase()
+  if (hostname.startsWith('[') && hostname.endsWith(']')) hostname = hostname.slice(1, -1)
+  return hostname
+}
+function hostnameFromAuthority(authority) {
+  if (typeof authority === 'string') {
+    try { return new URL(authority).hostname } catch { return null }
+  }
+  if (authority instanceof URL) return authority.hostname
+  if (authority && typeof authority === 'object') {
+    const host = authority.hostname ?? authority.host
+    if (typeof host === 'string') {
+      try { return new URL('https://' + host).hostname } catch { return host }
+    }
+  }
+  return null
+}
 const originalConnect = http2.connect
 http2.connect = function (authority, options, listener) {
   let rewritten = authority
-  if (typeof authority === 'string' && authority.includes(BEDROCK_HOST)) {
+  const hostname = hostnameFromAuthority(authority)
+  if (hostname !== null && exactHostname(hostname) === BEDROCK_HOST) {
     rewritten = 'https://' + targetHost + ':' + targetPort
     options = { ...options, rejectUnauthorized: false }
   }
@@ -41,13 +62,22 @@ http2.connect = function (authority, options, listener) {
 }
 const originalRequest = https.request
 https.request = function (...args) {
-  const optionsIndex = args.findIndex((a) => a && typeof a === 'object' && !Array.isArray(a))
-  if (optionsIndex >= 0) {
-    const options = args[optionsIndex]
-    const hostname = typeof options === 'string' ? options : options.hostname || options.host
-    if (typeof hostname === 'string' && hostname.includes(BEDROCK_HOST)) {
-      args[optionsIndex] = { ...options, hostname: targetHost, host: targetHost, port: targetPort, rejectUnauthorized: false }
+  const urlArg = args.find((a) => typeof a === 'string' || a instanceof URL)
+  const optionsArg = args.find((a) => a && typeof a === 'object' && !Array.isArray(a) && !(a instanceof URL))
+  let hostname = null
+  if (typeof urlArg === 'string') {
+    try { hostname = new URL(urlArg).hostname } catch { hostname = null }
+  } else if (urlArg instanceof URL) {
+    hostname = urlArg.hostname
+  }
+  if (hostname === null && optionsArg) {
+    const host = optionsArg.hostname ?? optionsArg.host
+    if (typeof host === 'string') {
+      try { hostname = new URL('https://' + host).hostname } catch { hostname = host }
     }
+  }
+  if (hostname !== null && optionsArg && exactHostname(hostname) === BEDROCK_HOST) {
+    args[args.indexOf(optionsArg)] = { ...optionsArg, hostname: targetHost, host: targetHost, port: targetPort, rejectUnauthorized: false }
   }
   return originalRequest.apply(this, args)
 }
@@ -82,6 +112,7 @@ async function main() {
   ])
   setBedrockProviderModule(bedrockProviderModule)
   const model = getModel('amazon-bedrock', 'amazon.nova-lite-v1:0')
+  if (process.env.SEAM_FIXTURE_MODEL_BASE_URL) model.baseUrl = process.env.SEAM_FIXTURE_MODEL_BASE_URL
   const events = streamSimple(model, { systemPrompt: '', messages: [{ role: 'user', content: 'bundle seam smoke' }] }, {})
   for await (const event of events) {
     if (event.type === 'error') break
@@ -150,8 +181,13 @@ function collectLines(stream: ReadableStream<Uint8Array>): {
   }
 }
 
+interface BundleScenarioResult {
+  observation: { attempts: number; status?: number; networkFailure: boolean; retryBlocked: boolean; sdkException: boolean }
+  classification: string
+}
+
 describe('host transport seam in the production bundle', () => {
-  it('single-attempt observation survives the real production build in a node_modules-free host', async () => {
+  it('redirects only the exact bedrock runtime hostname; lookalike hosts stay direct', async () => {
     // 1. Temporary entry INSIDE the package so the bun build resolves the
     //    workspace deps; only sourceEntry and distDir differ from production.
     const fixtureDir = mkdtempSync(join(import.meta.dir, 'host-transport-bundle-'))
@@ -196,34 +232,28 @@ describe('host transport seam in the production bundle', () => {
       })
       expect(openssl.exitCode).toBe(0)
 
-      // 4. Local TLS 503 server under Node — the only wire endpoint.
-      const server = Bun.spawn({
-        cmd: [HOST_NODE, join(fixtureDir, 'server.mjs'), join(fixtureDir, 'key.pem'), join(fixtureDir, 'cert.pem')],
-        stdout: 'pipe',
-        stderr: 'pipe',
-      })
-      const serverLines = collectLines(server.stdout as ReadableStream<Uint8Array>)
-      try {
-        const readyLine = await serverLines.waitForLine('READY:', 15000)
-        const tlsPort = Number(readyLine.slice('READY:'.length))
-
-        // 5. Isolated host layout: the ONLY artifact plus its ESM package.json —
-        //    no node_modules anywhere up this tree.
-        const isolated = mkdtempSync(join(tmpdir(), 'seam-host-'))
-        copyFileSync(bundlePath, join(isolated, 'index.js'))
-        writeFileSync(join(isolated, 'package.json'), JSON.stringify({ type: 'module' }))
-
-        // 6. Real host run with AWS_MAX_ATTEMPTS=3 explicitly preserved and no
-        //    AWS_ENDPOINT_URL* anywhere in the environment.
-        const hostEnv = { ...process.env }
-        delete hostEnv.AWS_ENDPOINT_URL
-        delete hostEnv.AWS_ENDPOINT_URL_BEDROCK
-        const host = Bun.spawn({
-          cmd: [HOST_NODE, '--import', join(fixtureDir, 'preload.mjs'), join(isolated, 'index.js')],
+      // Each scenario: fresh local TLS 503 server + fresh isolated host run.
+      const runScenario = async (modelBaseUrl?: string): Promise<{ result: BundleScenarioResult; requestLines: string[] }> => {
+        const server = Bun.spawn({
+          cmd: [HOST_NODE, join(fixtureDir, 'server.mjs'), join(fixtureDir, 'key.pem'), join(fixtureDir, 'cert.pem')],
           stdout: 'pipe',
           stderr: 'pipe',
-          env: {
-            ...hostEnv,
+        })
+        const serverLines = collectLines(server.stdout as ReadableStream<Uint8Array>)
+        try {
+          const readyLine = await serverLines.waitForLine('READY:', 15000)
+          const tlsPort = Number(readyLine.slice('READY:'.length))
+
+          // Isolated host layout: the ONLY artifact plus its ESM package.json —
+          // no node_modules anywhere up this tree.
+          const isolated = mkdtempSync(join(tmpdir(), 'seam-host-'))
+          copyFileSync(bundlePath, join(isolated, 'index.js'))
+          writeFileSync(join(isolated, 'package.json'), JSON.stringify({ type: 'module' }))
+
+          // Real host run with AWS_MAX_ATTEMPTS=3 explicitly preserved and no
+          // AWS_ENDPOINT_URL* anywhere in the environment.
+          const hostEnv: Record<string, string | undefined> = {
+            ...process.env,
             ELECTRON_RUN_AS_NODE: '1',
             AWS_MAX_ATTEMPTS: '3',
             AWS_REGION: 'us-east-1',
@@ -232,42 +262,65 @@ describe('host transport seam in the production bundle', () => {
             AWS_EC2_METADATA_DISABLED: 'true',
             SEAM_FIXTURE_HOST: '127.0.0.1',
             SEAM_FIXTURE_PORT: String(tlsPort),
-          },
-        })
-        const hostStderrText = await new Response(host.stderr).text()
-        const hostStdoutText = await new Response(host.stdout).text()
-        const hostExit = await host.exited
-        rmSync(isolated, { recursive: true, force: true })
-
-        // 7. Host outcome: one wire attempt, blocked SDK retry, structured 503.
-        if (hostExit !== 0) {
-          throw new Error(`bundled host failed (exit ${hostExit})\n${hostStderrText}`)
+          }
+          delete hostEnv.AWS_ENDPOINT_URL
+          delete hostEnv.AWS_ENDPOINT_URL_BEDROCK
+          if (modelBaseUrl) hostEnv.SEAM_FIXTURE_MODEL_BASE_URL = modelBaseUrl
+          const host = Bun.spawn({
+            cmd: [HOST_NODE, '--import', join(fixtureDir, 'preload.mjs'), join(isolated, 'index.js')],
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: hostEnv,
+          })
+          const hostStderrText = await new Response(host.stderr).text()
+          const hostStdoutText = await new Response(host.stdout).text()
+          const hostExit = await host.exited
+          rmSync(isolated, { recursive: true, force: true })
+          if (hostExit !== 0) {
+            throw new Error(`bundled host failed (exit ${hostExit})\n${hostStderrText}`)
+          }
+          const resultLine = hostStdoutText.split('\n').find((line) => line.startsWith('RESULT:'))
+          expect(resultLine).toBeDefined()
+          const result = JSON.parse(resultLine!.slice('RESULT:'.length)) as BundleScenarioResult
+          const requestLines = serverLines.lines.filter((line) => line.startsWith('REQUEST:'))
+          return { result, requestLines }
+        } finally {
+          server.kill()
+          await serverLines.settled
         }
-        const resultLine = hostStdoutText.split('\n').find((line) => line.startsWith('RESULT:'))
-        expect(resultLine).toBeDefined()
-        const result = JSON.parse(resultLine!.slice('RESULT:'.length)) as {
-          observation: { attempts: number; status?: number; networkFailure: boolean; retryBlocked: boolean; sdkException: boolean }
-          classification: string
-        }
-        expect(result.observation).toEqual({
-          attempts: 2,
-          status: 503,
-          networkFailure: false,
-          retryBlocked: true,
-          sdkException: true,
-        })
-        expect(result.classification).toBe('retry_blocked')
-      } finally {
-        server.kill()
-        await serverLines.settled
       }
 
-      // 8. The redirected TLS server saw exactly ONE wire request.
-      const requestLines = serverLines.lines.filter((line) => line.startsWith('REQUEST:'))
-      expect(requestLines.length).toBe(1)
-      expect(requestLines[0]).toContain('/model/amazon.nova-lite-v1')
+      // Positive: the exact hostname is redirected — one structured 503 wire
+      // attempt, blocked SDK retry, exactly one fixture request.
+      const exact = await runScenario()
+      expect(exact.result.observation).toEqual({
+        attempts: 2,
+        status: 503,
+        networkFailure: false,
+        retryBlocked: true,
+        sdkException: true,
+      })
+      expect(exact.result.classification).toBe('retry_blocked')
+      expect(exact.requestLines.length).toBe(1)
+      expect(exact.requestLines[0]).toContain('/model/amazon.nova-lite-v1')
+
+      // Negative: a suffixed lookalike hostname is NOT redirected. The request
+      // goes direct — the real DNS failure surfaces as networkFailure with no
+      // structured status (never the fixture's 503), and the seam still blocks
+      // the SDK's retry before a second wire attempt. Zero fixture hits prove
+      // substring interception would have failed this.
+      const lookalike = await runScenario('https://bedrock-runtime.us-east-1.amazonaws.com.attacker')
+      expect(lookalike.result.observation).toEqual({
+        attempts: 2,
+        status: undefined,
+        networkFailure: true,
+        retryBlocked: true,
+        sdkException: true,
+      })
+      expect(lookalike.result.classification).toBe('retry_blocked')
+      expect(lookalike.requestLines).toEqual([])
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true })
     }
-  }, 180000)
+  }, 240000)
 })
