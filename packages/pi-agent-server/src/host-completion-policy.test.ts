@@ -671,6 +671,103 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
       await second.close()
     }
   })
+
+  it('receiver-sensitive own accessor init fields are accepted with the same values as native', async () => {
+    const server = await startRecordingServer()
+    const accessorInit = (): RequestInit => {
+      const init = {}
+      for (const [key, value] of Object.entries({
+        method: 'POST',
+        body: 'accessor-body',
+        headers: { 'content-type': 'text/plain', 'x-probe': 'accessor-header' },
+      })) {
+        Object.defineProperty(init, key, {
+          enumerable: true,
+          get() {
+            if (this !== init) throw new Error(`wrong receiver for ${key}`)
+            return value
+          },
+        })
+      }
+      return init as RequestInit
+    }
+    try {
+      // Native baseline: same values reach the permitted transport.
+      await fetch(server.pathUrl('/v1/echo'), accessorInit())
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const response = await fetch(server.pathUrl('/v1/echo'), accessorInit())
+        expect(response.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([
+        { method: 'POST', path: '/v1/echo', body: 'accessor-body', header: 'accessor-header' },
+        { method: 'POST', path: '/v1/echo', body: 'accessor-body', header: 'accessor-header' },
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('receiver-sensitive inherited accessor init fields keep the original init as receiver', async () => {
+    const server = await startRecordingServer()
+    const inheritedAccessorInit = (): RequestInit => {
+      const init: object = Object.create({
+        get method(): string {
+          if (this !== init) throw new Error('wrong receiver for method')
+          return 'PUT'
+        },
+        get body(): string {
+          if (this !== init) throw new Error('wrong receiver for body')
+          return 'inherited-accessor-body'
+        },
+      })
+      return init as RequestInit
+    }
+    try {
+      await withSeam(server.pathUrl('/v1'), async (installed) => {
+        const response = await fetch(server.pathUrl('/v1/echo'), inheritedAccessorInit())
+        expect(response.status).toBe(200)
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(server.seen).toEqual([{ method: 'PUT', path: '/v1/echo', body: 'inherited-accessor-body' }])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('a redirect accessor that swallows forced values cannot re-enable following', async () => {
+    const second = await startOkServer()
+    const first = await startHttpServer((req, res, path) => {
+      if (path === '/v1/start') {
+        res.writeHead(307, { location: second.pathUrl('/outside') })
+        res.end()
+      } else {
+        respond(res, 200, OK_BODY)
+      }
+    })
+    try {
+      const writes: Array<{ receiverIsOriginal: boolean; value: unknown }> = []
+      const swallowInit: RequestInit = Object.defineProperties({} as RequestInit, {
+        redirect: {
+          enumerable: true,
+          get: () => 'follow',
+          set: (value) => {
+            writes.push({ receiverIsOriginal: false, value })
+          },
+        },
+      })
+      await withSeam(first.pathUrl('/v1'), async (installed) => {
+        await expect(fetch(first.pathUrl('/v1/start'), swallowInit)).rejects.toThrow()
+        expect(installed.observation.attempts).toBe(1)
+      })
+      expect(first.requests).toEqual(['/v1/start'])
+      expect(second.requests).toEqual([])
+      expect(writes).toEqual([])
+    } finally {
+      await first.close()
+      await second.close()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

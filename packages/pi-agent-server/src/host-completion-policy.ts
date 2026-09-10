@@ -9,8 +9,8 @@
  * the AWS retry middleware's per-wire-attempt entry point. The second wire
  * attempt throws an internal `RetryBlockedError` before the original transport
  * runs, an unguardable request handler is latched fail-closed, and object
- * fetch inputs are bound to their intrinsic transport snapshot. Observations
- * hold only counts and numeric status, never provider content.
+ * fetch inputs are bound to their intrinsic transport snapshot.
+ * Observations hold only counts and numeric status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -45,9 +45,8 @@ function originKeyOf(url: URL): string {
   return `${url.protocol.toLowerCase()}//${hostname}:${port}`;
 }
 
-/** Fail closed unless the request URL is http(s) without userinfo or fragment, shares the
- *  immutable captured base origin, stays on the captured base path or one of its `/`-segment
- *  descendants, and every raw pathname segment decodes exactly once (all violations rejected). */
+/** Fail closed unless the request URL is http(s) without userinfo or fragment, shares the immutable
+ *  captured base origin/path and every raw pathname segment decodes exactly once (all rejected). */
 function assertAllowedTarget(baseOrigin: string, basePathname: string, target: URL, label: string): void {
   const badScheme = target.protocol !== 'http:' && target.protocol !== 'https:';
   if (badScheme || target.username !== '' || target.password !== '' || target.hash !== '') {
@@ -92,9 +91,7 @@ function installBedrockSendSeam(observation: TransportObservation): void {
   const HANDLE_NOT_WRITABLE = 'Bedrock request handler handle is not writable';
   clientPrototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]): unknown {
     const handler = (this.config as { requestHandler?: { handle?: unknown } } | undefined)?.requestHandler;
-    if (!handler || typeof handler.handle !== 'function') {
-      throw seamError('resolved Bedrock request handler has no callable handle');
-    }
+    if (!handler || typeof handler.handle !== 'function') throw seamError('resolved Bedrock request handler has no callable handle');
     const requestHandler = handler as { handle: (request: unknown, options?: unknown) => Promise<unknown> };
     if (failedInstalls.has(requestHandler)) {
       // A failed install is permanent: later sends fail with the same fixed error before originalSend or the wire.
@@ -154,18 +151,21 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // One native Request(input, init) snapshot consumes WebIDL lookup, Request overrides and body
-    // replacement once; redirect:'error' rides a prototype-linked init view (fragment kept pre-construction).
-    const initForSnapshot: RequestInit = Object.assign(Object.create(init ?? null), { redirect: 'error' });
+    // Flattened RequestInit view: every member of the original init (own or inherited) is read
+    // once with the original init as receiver; redirect is an own unconditional 'error' member.
+    const initForSnapshot = { redirect: 'error' } as Record<string, unknown>;
+    for (let cursor: object | null = init ?? null; cursor; cursor = Object.getPrototypeOf(cursor)) {
+      for (const key of Reflect.ownKeys(cursor)) {
+        if (key !== 'redirect' && !(key in initForSnapshot)) initForSnapshot[key as string] = (init as Record<string, unknown>)[key as string];
+      }
+    }
     let snapshot: Request, target: URL;
     if (typeof input === 'string' || input instanceof URL) {
       target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
       snapshot = new Request(target, initForSnapshot);
     } else if (input instanceof Request) {
       snapshot = new Request(input, initForSnapshot);
-      if (snapshot.url !== Reflect.get(Request.prototype, 'url', input)) {
-        throw seamError('request input url is not internally consistent');
-      }
+      if (snapshot.url !== Reflect.get(Request.prototype, 'url', input)) throw seamError('request input url is not internally consistent');
       target = new URL(snapshot.url);
     } else {
       throw seamError('fetch input must be a string, URL or Request');
