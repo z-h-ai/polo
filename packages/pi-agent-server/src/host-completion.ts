@@ -23,13 +23,16 @@ export function checkDescriptor(request: ValidatedHostRequest): boolean {
   if (credential.type === 'api_key') return request.transportHref.startsWith('https:') || loopback
   return credential.type === 'none' && loopback
 }
-async function resolveBedrockEndpointHref(constructor: new (config: any) => BedrockClientLike, credential: { accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string }): Promise<string | null> {
+async function resolveBedrockEndpointHref(constructor: new (config: any) => BedrockClientLike, credential: { accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string }, afterAwaitStop: () => boolean): Promise<string | null> {
   let client: BedrockClientLike | null = null
   try {
     const instance = client = new constructor({ region: credential.region, maxAttempts: 1, useFipsEndpoint: false, useDualstackEndpoint: false, credentials: { accessKeyId: credential.accessKeyId, secretAccessKey: credential.secretAccessKey, ...(credential.sessionToken !== undefined ? { sessionToken: credential.sessionToken } : {}) } })
     const endpointProvider = instance.config.endpointProvider as ((params: { Region: string; UseFIPS: boolean; UseDualStack: boolean }) => { url: { href: string } | string } | PromiseLike<{ url: { href: string } | string }>) | undefined
     if (typeof endpointProvider !== 'function') return null
     const resolved = await endpointProvider({ Region: credential.region, UseFIPS: false, UseDualStack: false })
+    // The stop probe is the FIRST semantic operation after the await: a deadline that wins here
+    // keeps every provider-controlled field (url, href) at zero reads (R14 §3.2, Review R6 issue 1).
+    if (afterAwaitStop()) return null
     return canonicalOf(typeof resolved.url === 'string' ? resolved.url : resolved.url.href)
   } catch {
     return null
@@ -95,8 +98,13 @@ const stoppedResult = (budget: 'deadline_exceeded'): HostPiRoutePreparation => (
 export async function resolveHostPiRoute(context: HostPiPhaseContext): Promise<HostPiRoutePreparation> {
   const { request, credential, observation } = context
   if (request.routeKind === 'catalog' && request.provider === 'amazon-bedrock' && credential.type === 'iam') {
-    const resolvedEndpoint = await resolveBedrockEndpointHref(observation.bedrockConstructor as unknown as new (config: any) => BedrockClientLike, credential)
+    const resolvedEndpoint = await resolveBedrockEndpointHref(
+      observation.bedrockConstructor as unknown as new (config: any) => BedrockClientLike,
+      credential,
+      () => context.shouldStop('route:after-await'),
+    )
     if (context.shouldStop('route:after-await')) return stoppedResult('deadline_exceeded')
+    if (resolvedEndpoint === null) return { ok: false, failure: 'invalid_worker_message' }
     if (resolvedEndpoint !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
   }
   return { ok: true }

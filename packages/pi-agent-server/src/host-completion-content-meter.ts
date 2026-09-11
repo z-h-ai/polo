@@ -337,9 +337,18 @@ export function createContentMeter(): ContentMeter {
           const element = readArrayElement(content, index)
           if (element.kind !== 'data' || !isInertJsonDataObject(element.value)) continue
           const typeDescriptor = readOwnEnumerableDataDescriptor(element.value, 'type')
+          if (typeDescriptor.kind === 'unsafe') {
+            latchUnsafe()
+            return snapshot
+          }
           if (budget.dead) return snapshot
           if (typeDescriptor.kind !== 'data' || typeDescriptor.value !== 'text') continue
           const textDescriptor = readOwnEnumerableDataDescriptor(element.value, 'text')
+          if (textDescriptor.kind === 'unsafe') {
+            latchUnsafe()
+            return snapshot
+          }
+          if (budget.dead) return snapshot
           if (textDescriptor.kind === 'data' && typeof textDescriptor.value === 'string') parts.push(textDescriptor.value)
         }
       }
@@ -353,13 +362,22 @@ export function createContentMeter(): ContentMeter {
         if (budget.dead) return null
         if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return null
         const descriptor = readOwnEnumerableDataDescriptor(usageSource, key)
+        if (descriptor.kind === 'unsafe') {
+          latchUnsafe()
+          return null
+        }
         return descriptor.kind === 'data' && typeof descriptor.value === 'number' ? descriptor.value : null
       }
       const input = readUsageNumber('input')
+      if (budget.dead) return snapshot
       const output = readUsageNumber('output')
+      if (budget.dead) return snapshot
       const cacheRead = readUsageNumber('cacheRead')
+      if (budget.dead) return snapshot
       const cacheWrite = readUsageNumber('cacheWrite')
+      if (budget.dead) return snapshot
       const totalTokens = readUsageNumber('totalTokens')
+      if (budget.dead) return snapshot
       if (input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null) snapshot.usage = { input, output, cacheRead, cacheWrite, totalTokens }
     }
     if (budget.dead) return snapshot

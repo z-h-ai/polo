@@ -376,6 +376,41 @@ describe('host worker single-request JSONL fixtures', () => {
     }
   }, 60000)
 
+  it('reads zero provider-controlled fields when the deadline wins during the Bedrock resolver await', async () => {
+    let urlGetterReads = 0
+    let deadlineFired = false
+    const hostileResolved = {
+      get url(): { href: string } {
+        urlGetterReads += 1
+        return { href: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }
+      },
+    }
+    const observation = {
+      observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
+      bedrockConstructor: class {
+        config: Record<string, unknown>
+        destroy(): void {}
+        constructor(config: Record<string, unknown>) {
+          this.config = config
+          this.config.endpointProvider = async () => {
+            deadlineFired = true
+            return hostileResolved
+          }
+        }
+      } as unknown as new (config: any) => { config: Record<string, unknown>; destroy(): void },
+    } as unknown as InstalledTransportObservation
+    const context: HostPiPhaseContext = {
+      request: mustValidate(request({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })),
+      credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } as ValidatedHostRequest['credential'],
+      observation,
+      shouldStop: () => deadlineFired,
+    }
+    const route = await resolveHostPiRoute(context)
+    expect(route.ok).toBe(false)
+    if (!route.ok) expect(route.stopped).toBe(true)
+    expect(urlGetterReads).toBe(0)
+  })
+
   it('composes the worker-owned json_object system constraint with and without a parent system prompt', async () => {
     const mock = await startMockSse({ chunks: textChunks('test-model', '{"answer":42}', { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }) })
     try {
@@ -730,7 +765,7 @@ describe('host worker single-request JSONL fixtures', () => {
     console.log('DEBUG-trace-before:', JSON.stringify(inResolver.counters.probeTrace))
     const bedrockContext = inResolver.phaseContext({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })
     expect(await resolveHostPiRoute(bedrockContext)).toEqual({ ok: false, failure: 'deadline_exceeded', stopped: true })
-    expect(inResolver.counters.probeTrace).toEqual(['route:after-await'])
+    expect(inResolver.counters.probeTrace).toEqual(['route:after-await', 'route:after-await'])
     expect(inResolver.counters.importStarted).toEqual({ piAi: 0, bedrock: 0, oauth: 0 })
     expect(inResolver.counters.modelConstructionCalls).toBe(0)
     expect(inResolver.counters.registrationCalls).toBe(0)

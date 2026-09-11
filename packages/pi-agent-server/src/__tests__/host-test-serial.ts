@@ -88,12 +88,13 @@ function retiredBarrier(token: string): string {
 function reclaimStale(owner: LockOwner): void {
   if (!isDead(owner.pid)) return
   const barrier = retiredBarrier(owner.token)
-  let barrierCreated = false
   try {
     linkSync(currentPath(), barrier)
-    barrierCreated = true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    // EEXIST: another reclaimer won the Q(T) barrier for the same dead token. The loser must
+    // fail closed immediately without unlinking the canonical — the winner handles it (R14 §5.3).
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return
+    throw error
   }
   try {
     if (!sameInode(currentPath(), barrier)) return
@@ -103,8 +104,6 @@ function reclaimStale(owner: LockOwner): void {
     unlinkSync(currentPath())
   } catch {
     // Fail closed: retain canonical and Q(T) evidence; never unlink on uncertain state.
-  } finally {
-    void barrierCreated
   }
 }
 export async function acquireHostTestSerialLock(timeoutMs = 300000): Promise<void> {
@@ -154,13 +153,13 @@ function releaseWithToken(token: string | null): void {
   const owner = readOwnerFrom(currentPath())
   if (owner === null || owner.token !== token) return
   const barrier = retiredBarrier(token)
-  let barrierReady = false
   try {
     linkSync(currentPath(), barrier)
-    barrierReady = true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    barrierReady = true
+    // EEXIST: Q(T) barrier already exists (e.g., a reclaimer retired this token). The late
+    // release must fail closed immediately without unlinking a successor (R14 §5.3.4).
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return
+    throw error
   }
   try {
     if (!sameInode(currentPath(), barrier)) return

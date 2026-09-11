@@ -324,6 +324,42 @@ describe('content meter: terminal descriptor fail-fast and JSON-data domain', ()
     expect(modelAccessorCalls).toBe(0)
   })
 })
+describe('content meter: terminal snapshot fail-fast read counts', () => {
+  it('stops all usage field reads after the first unsafe usage descriptor', () => {
+    let cacheReadGetter = 0
+    let totalTokensGetter = 0
+    let responseModelGetter = 0
+    let modelGetter = 0
+    const h = meterHarness()
+    const usage: Record<string, unknown> = { input: 5 }
+    Object.defineProperty(usage, 'output', { get() { return 4 }, enumerable: true })
+    Object.defineProperty(usage, 'cacheRead', { get() { cacheReadGetter += 1; return 0 }, enumerable: true })
+    Object.defineProperty(usage, 'totalTokens', { get() { totalTokensGetter += 1; return 9 }, enumerable: true })
+    const message = assistantMessage([{ type: 'text', text: 'hi' }], { model: 'm' })
+    ;(message as { usage: unknown }).usage = usage
+    Object.defineProperty(message, 'responseModel', { get() { responseModelGetter += 1; return 'r' }, enumerable: true })
+    Object.defineProperty(message, 'model', { get() { modelGetter += 1; return 'm' }, enumerable: true })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(cacheReadGetter).toBe(0)
+    expect(totalTokensGetter).toBe(0)
+    expect(responseModelGetter).toBe(0)
+    expect(modelGetter).toBe(0)
+    expect(h.finish()).toBeNull()
+  })
+  it('stops content block reads after an accessor-backed type descriptor latches', () => {
+    let lateTextGetter = 0
+    const h = meterHarness()
+    const blocks = [
+      { type: 'text', text: 'ok' },
+      { type: 'text', get text() { lateTextGetter += 1; return 'x'.repeat(TEXT_LIMIT + 1) } },
+    ]
+    h.meter.onEvent(h.done('stop', assistantMessage(blocks, { usage: GOOD_USAGE, model: 'm' })))
+    expect(h.probe()).toMatchObject({ over: true })
+    // The second block's text accessor was never read: the first block's oversized text latched.
+    expect(lateTextGetter).toBe(0)
+  })
+})
 describe('content meter: exact semantic boundaries and fail-closed reads', () => {
   it('allows exactly 8192 semantic nodes and latches on the 8193rd', () => {
     const atLimit = meterHarness()
