@@ -174,13 +174,14 @@ describe('fetch seam reaches the original fetch once for allowed targets', () =>
   it('failed bedrock validation leaves both global identities untouched', () => {
     const fetchBefore = globalThis.fetch
     const sendBefore = BedrockRuntimeClient.prototype.send
+    const sendSlot = BedrockRuntimeClient.prototype as { send?: unknown }
     try {
-      BedrockRuntimeClient.prototype.send = undefined
+      sendSlot.send = undefined
       expect(() => installTransportObservation(new URL('http://127.0.0.1:9/v1'))).toThrow(/not callable/)
       expect(globalThis.fetch).toBe(fetchBefore)
       expect(BedrockRuntimeClient.prototype.send).toBeUndefined()
     } finally {
-      BedrockRuntimeClient.prototype.send = sendBefore
+      sendSlot.send = sendBefore
     }
     expect(BedrockRuntimeClient.prototype.send).toBe(sendBefore)
   })
@@ -425,7 +426,7 @@ interface WireRecord {
   method?: string
   path: string
   body: string
-  header?: string
+  header?: string | string[]
 }
 
 async function startRecordingServer(): Promise<HttpFixture & { seen: WireRecord[] }> {
@@ -508,6 +509,62 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     } finally {
       await allowed.close()
       await attacker.close()
+    }
+  })
+
+  it('a Request whose public url disagrees with its intrinsic url in the reverse direction fails closed', async () => {
+    const allowed = await startOkServer()
+    const attacker = await startOkServer()
+    try {
+      await withSeam(allowed.pathUrl('/v1'), async (installed) => {
+        // The instance resolves to the allowed origin intrinsically, while its own url property
+        // publicly claims the attacker origin; neither direction of the divergence may pass.
+        class ShadowedRequest extends Request {}
+        const evil = new ShadowedRequest(allowed.pathUrl('/v1/inside'))
+        Object.defineProperty(evil, 'url', { value: attacker.pathUrl('/v1/stolen') })
+        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual([])
+        expect(attacker.requests).toEqual([])
+      })
+    } finally {
+      await allowed.close()
+      await attacker.close()
+    }
+  })
+
+  it('the transmitted snapshot carries the live caller signal and abort state stays observable', async () => {
+    const server = await startRecordingServer()
+    try {
+      const controller = new AbortController()
+      let captured: Request | undefined
+      globalThis.fetch = new Proxy(globalThis.fetch, {
+        apply(target, thisArg, args) {
+          captured = args[0] as Request
+          return Reflect.apply(target, thisArg, args)
+        },
+      })
+      try {
+        await withSeam(server.pathUrl('/v1'), async (installed) => {
+          const response = await fetch(server.pathUrl('/v1/echo'), {
+            method: 'POST',
+            body: 'signal-body',
+            signal: controller.signal,
+          })
+          expect(response.status).toBe(200)
+          expect(captured).toBeDefined()
+          expect(captured!.signal).toBe(controller.signal)
+          expect(captured!.signal.aborted).toBe(false)
+          controller.abort()
+          expect(captured!.signal.aborted).toBe(true)
+          expect(installed.observation.attempts).toBe(1)
+        })
+        expect(server.seen).toEqual([{ method: 'POST', path: '/v1/echo', body: 'signal-body' }])
+      } finally {
+        globalThis.fetch = PRISTINE_FETCH
+      }
+    } finally {
+      await server.close()
     }
   })
 
@@ -972,75 +1029,143 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
       input.body?.getReader()
       return input
     }
-    const cases: Array<{ name: string; makeInput: () => Request | Promise<Request>; init?: RequestInit; omitInit?: boolean }> = [
+    const undefinedAccessorsInit = (): RequestInit => {
+      const init = {}
+      for (const key of ['method', 'headers', 'body']) {
+        Object.defineProperty(init, key, { enumerable: true, configurable: true, get: () => undefined })
+      }
+      return init as RequestInit
+    }
+    const statefulAccessorInit = (events: string[], inherited: boolean): RequestInit => {
+      const holder: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries({
+        method: 'PUT',
+        body: 'stateful-body',
+        headers: { 'content-type': 'text/plain', 'x-probe': 'stateful-header' },
+      })) {
+        Object.defineProperty(holder, key, {
+          enumerable: true,
+          configurable: true,
+          get() {
+            events.push(`${key}:${this === init ? 'receiver-ok' : 'receiver-bad'}`)
+            return value
+          },
+        })
+      }
+      const init: object = inherited ? Object.create(holder) : holder
+      return init as RequestInit
+    }
+    const proxyInit = (events: string[]): RequestInit =>
+      new Proxy(
+        { method: 'POST', body: 'proxy-body', headers: { 'x-probe': 'proxy-header' } },
+        {
+          get(targetObject, key, receiver) {
+            events.push(`get:${String(key)}`)
+            return Reflect.get(targetObject, key, receiver)
+          },
+          has(targetObject, key) {
+            events.push(`has:${String(key)}`)
+            return Reflect.has(targetObject, key)
+          },
+          getPrototypeOf() {
+            throw new Error('getPrototypeOf trap observed')
+          },
+        },
+      ) as RequestInit
+    const cases: Array<{
+      name: string
+      makeInput: () => Request | Promise<Request>
+      makeInit?: (events: string[]) => RequestInit
+      omitInit?: boolean
+    }> = [
       { name: 'no-init', omitInit: true, makeInput: freshInput },
-      { name: 'empty-init', makeInput: freshInput, init: {} },
-      { name: 'headers-only', makeInput: freshInput, init: { headers: { 'x-override': 'yes' } } },
-      { name: 'redirect-only', makeInput: freshInput, init: { redirect: 'manual' } },
-      { name: 'inherited-headers-only', makeInput: freshInput, init: Object.create({ headers: { 'x-override': 'inherited' } }) },
-      { name: 'undefined-accessors', makeInput: freshInput, init: (() => {
-        const init = {}
-        for (const key of ['method', 'headers', 'body']) {
-          Object.defineProperty(init, key, { enumerable: true, configurable: true, get: () => undefined })
-        }
-        return init as RequestInit
-      })() },
-      { name: 'used-body-only-replacement', makeInput: usedInput, init: { body: 'replacement-used-only' } },
-      { name: 'locked-body-only-replacement', makeInput: lockedInput, init: { body: 'replacement-locked-only' } },
-      { name: 'used-body-replacement', makeInput: usedInput, init: { method: 'PUT', body: 'replacement-used', headers: { 'x-override': 'used' } } },
-      { name: 'locked-body-replacement', makeInput: lockedInput, init: { method: 'PUT', body: 'replacement-locked', headers: { 'x-override': 'locked' } } },
+      { name: 'empty-init', makeInput: freshInput, makeInit: () => ({}) },
+      { name: 'headers-only', makeInput: freshInput, makeInit: () => ({ headers: { 'x-override': 'yes' } }) },
+      { name: 'redirect-only', makeInput: freshInput, makeInit: () => ({ redirect: 'manual' }) },
+      { name: 'inherited-headers-only', makeInput: freshInput, makeInit: () => Object.create({ headers: { 'x-override': 'inherited' } }) as RequestInit },
+      { name: 'undefined-accessors', makeInput: freshInput, makeInit: undefinedAccessorsInit },
+      { name: 'used-body-only-replacement', makeInput: usedInput, makeInit: () => ({ body: 'replacement-used-only' }) },
+      { name: 'locked-body-only-replacement', makeInput: lockedInput, makeInit: () => ({ body: 'replacement-locked-only' }) },
+      { name: 'used-body-replacement', makeInput: usedInput, makeInit: () => ({ method: 'PUT', body: 'replacement-used', headers: { 'x-override': 'used' } }) },
+      { name: 'locked-body-replacement', makeInput: lockedInput, makeInit: () => ({ method: 'PUT', body: 'replacement-locked', headers: { 'x-override': 'locked' } }) },
+      { name: 'stateful-own-accessors', makeInput: freshInput, makeInit: (events) => statefulAccessorInit(events, false) },
+      { name: 'stateful-inherited-accessors', makeInput: freshInput, makeInit: (events) => statefulAccessorInit(events, true) },
+      { name: 'proxy-get-has-traps', makeInput: freshInput, makeInit: proxyInit },
     ]
     const server = await startRecordingServer()
     const url = server.pathUrl('/v1/request-input')
     const stateOf = (request: Request) => ({ bodyUsed: request.bodyUsed, locked: request.body?.locked ?? false })
-    const membersOf = (request: Request) => ({
-      url: request.url,
-      method: request.method,
-      body: request.body === null ? null : 'body-stream',
-      referrer: request.referrer,
-      referrerPolicy: request.referrerPolicy,
-      mode: request.mode,
-      credentials: request.credentials,
-      cache: request.cache,
-      integrity: request.integrity,
-      keepalive: request.keepalive,
-    })
+    // Every getter-backed Request.prototype member the running runtime supports, compared
+    // native against the seam snapshot, plus a full headers dump and proof that no own
+    // redirect property shadows the intrinsic value (the forced redirect lives in the
+    // separate init only).
+    const intrinsicMembers = Object.getOwnPropertyNames(Request.prototype).filter(
+      (member) => typeof Object.getOwnPropertyDescriptor(Request.prototype, member)?.get === 'function',
+    )
+    const memberSurface = (request: Request): Record<string, unknown> => {
+      const surface: Record<string, unknown> = {
+        headersDump: [...request.headers.entries()].sort(),
+        ownRedirectDescriptor: Object.getOwnPropertyDescriptor(request, 'redirect'),
+      }
+      for (const member of intrinsicMembers) {
+        const value = Reflect.get(Request.prototype, member, request)
+        if (member === 'body') {
+          surface.body = value === null ? null : 'body-stream'
+        } else if (member === 'signal') {
+          surface.signalAborted = (value as AbortSignal).aborted
+        } else {
+          surface[member] = value
+        }
+      }
+      return surface
+    }
     try {
       for (const testCase of cases) {
         // Native baseline: the Request constructor alone decides every member and body ownership.
+        const nativeEvents: string[] = []
         const nativeInput = await testCase.makeInput()
-        const nativeSnapshot = testCase.omitInit ? new Request(nativeInput) : new Request(nativeInput, testCase.init)
-        const nativeMembers = membersOf(nativeSnapshot)
-        const nativeBody = nativeSnapshot.body === null ? null : await nativeSnapshot.clone().text()
+        const nativeSnapshot =
+          testCase.omitInit === true ? new Request(nativeInput) : new Request(nativeInput, testCase.makeInit!(nativeEvents))
+        const nativeMembers = memberSurface(nativeSnapshot)
+        const nativeBody = await nativeSnapshot.clone().text()
+        const nativeMethod: string = nativeSnapshot.method
         const nativeOriginal = nativeSnapshot.headers.get('x-original')
         const nativeOverride = nativeSnapshot.headers.get('x-override')
         const nativeState = stateOf(nativeInput)
 
-        // The interceptor is installed before the seam install so originalFetch delegates through
-        // it; `captured` is the exact snapshot the seam hands to the native transport and its
-        // body/headers are read pre-send (the transport consumes the body stream).
-        const previousFetch = globalThis.fetch
+        // The interceptor is a transparent Proxy of the current fetch so the full typeof fetch
+        // surface (preconnect included) is preserved. `captured` is the exact snapshot the seam
+        // hands to the native transport together with the controlled init; its member surface is
+        // read pre-send without consuming the body stream, which stays intact for transmission.
         let captured: Request | undefined
-        globalThis.fetch = async (passed: RequestInfo | URL, passedInit?: RequestInit) => {
-          captured = passed as Request
-          return await previousFetch.call(globalThis, passed, passedInit)
-        }
+        let capturedMembers: Record<string, unknown> | undefined
+        let capturedInit: RequestInit | undefined
+        globalThis.fetch = new Proxy(globalThis.fetch, {
+          apply(target, thisArg, args) {
+            captured = args[0] as Request
+            capturedMembers = memberSurface(captured)
+            capturedInit = args[1] as RequestInit | undefined
+            return Reflect.apply(target, thisArg, args)
+          },
+        })
         try {
+          const seamEvents: string[] = []
           const seamInput = await testCase.makeInput()
           await withSeam(server.pathUrl('/v1'), async (installed) => {
-            const omitInit = testCase.omitInit === true || testCase.init === undefined
-          const response = omitInit ? await fetch(seamInput) : await fetch(seamInput, testCase.init)
+            const response =
+              testCase.omitInit === true ? await fetch(seamInput) : await fetch(seamInput, testCase.makeInit!(seamEvents))
             expect(response.status).toBe(200)
             expect(captured).toBeDefined()
-            expect(membersOf(captured!)).toEqual(nativeMembers)
+            expect(capturedInit).toEqual({ redirect: 'error' })
+            expect(capturedMembers).toEqual(nativeMembers)
             expect(captured!.headers.get('x-original')).toBe(nativeOriginal)
             expect(captured!.headers.get('x-override')).toBe(nativeOverride)
-            expect(captured!.redirect).toBe('error')
+            expect(seamEvents).toEqual(nativeEvents)
             expect(stateOf(seamInput)).toEqual(nativeState)
             expect(installed.observation.attempts).toBe(1)
           })
           const wire = server.seen[server.seen.length - 1]
-          expect(wire.method).toBe(nativeMembers.method)
+          expect(wire.method).toBe(nativeMethod)
           expect(wire.body).toBe(nativeBody)
         } finally {
           globalThis.fetch = PRISTINE_FETCH
@@ -1184,9 +1309,10 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
     const client = bedrockClientWithHandler(requestHandler)
     let originalSendCalls = 0
     const pristineSend = BedrockRuntimeClient.prototype.send
-    BedrockRuntimeClient.prototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]) {
+    const sendSlot = BedrockRuntimeClient.prototype as { send?: unknown }
+    sendSlot.send = function (this: BedrockRuntimeClient, ...args: unknown[]) {
       originalSendCalls += 1
-      return pristineSend.apply(this, args)
+      return (pristineSend as (this: BedrockRuntimeClient, ...sendArgs: unknown[]) => unknown).apply(this, args)
     }
     try {
       // The seam captures this spy as originalSend; a non-zero count means a
@@ -1205,7 +1331,7 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
         }
       })
     } finally {
-      BedrockRuntimeClient.prototype.send = PRISTINE_SEND
+      sendSlot.send = PRISTINE_SEND
       client.destroy()
     }
   })

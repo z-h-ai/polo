@@ -26,16 +26,12 @@ export interface InstalledTransportObservation {
   bedrockConstructor: typeof BedrockRuntimeClient;
 }
 
-const SEAM_ERROR_PREFIX = 'host transport seam:';
-
-const REDIRECT_ERROR_INIT: RequestInit = { redirect: 'error' };
-
 function seamError(reason: string): Error {
-  return new Error(`${SEAM_ERROR_PREFIX} ${reason}`);
+  return new Error(`host transport seam: ${reason}`);
 }
 
 function finiteInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value) ? value : undefined;
+  return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
 
 /** Comparable origin: lowercase protocol, bracket-less lowercase hostname, effective port. */
@@ -59,7 +55,9 @@ function assertAllowedTarget(baseOrigin: string, basePathname: string, target: U
     throw seamError('request path is not the base path or a descendant of it');
   }
   for (const segment of target.pathname.split('/')) {
-    if (segment === '') continue;
+    if (segment === '') {
+      continue;
+    }
     let decoded: string;
     try {
       decoded = decodeURIComponent(segment);
@@ -86,18 +84,16 @@ function installBedrockSendSeam(observation: TransportObservation): void {
     throw seamError('BedrockRuntimeClient.prototype.send is not callable');
   }
   const originalSend = clientPrototype.send as (this: BedrockRuntimeClient, ...args: unknown[]) => unknown;
-  const guardedHandlers = new WeakSet<object>();
-  const failedInstalls = new WeakSet<object>();
-  const HANDLE_NOT_WRITABLE = 'Bedrock request handler handle is not writable';
+  const handlerStates = new WeakMap<object, 'guarded' | 'failed'>();
   clientPrototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]): unknown {
     const requestHandler = (this.config as { requestHandler?: { handle?: (request: unknown, options?: unknown) => Promise<unknown> } } | undefined)?.requestHandler;
     if (!requestHandler || typeof requestHandler.handle !== 'function') {
       throw seamError('resolved Bedrock request handler has no callable handle');
     }
-    if (failedInstalls.has(requestHandler)) {
-      throw seamError(HANDLE_NOT_WRITABLE);
+    if (handlerStates.get(requestHandler) === 'failed') {
+      throw seamError('Bedrock request handler handle is not writable');
     }
-    if (!guardedHandlers.has(requestHandler)) {
+    if (handlerStates.get(requestHandler) !== 'guarded') {
       const originalHandle = requestHandler.handle;
       const wrapped = async (request: unknown, options?: unknown): Promise<unknown> => {
         gateSecondWireAttempt(observation);
@@ -111,16 +107,17 @@ function installBedrockSendSeam(observation: TransportObservation): void {
           throw error;
         }
       };
+      // Atomic install: assign, verify the write landed, then mark; any failure latches fail-closed.
       try {
         requestHandler.handle = wrapped;
         if (requestHandler.handle !== wrapped) {
-          throw seamError(HANDLE_NOT_WRITABLE);
+          throw seamError('Bedrock request handler handle is not writable');
         }
       } catch {
-        failedInstalls.add(requestHandler);
-        throw seamError(HANDLE_NOT_WRITABLE);
+        handlerStates.set(requestHandler, 'failed');
+        throw seamError('Bedrock request handler handle is not writable');
       }
-      guardedHandlers.add(requestHandler);
+      handlerStates.set(requestHandler, 'guarded');
     }
     const pending = originalSend.apply(this, args) as Promise<unknown> | undefined;
     if (typeof pending?.then === 'function') {
@@ -148,11 +145,15 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // One native Request(input, init) snapshot: validated, gated, transmitted; redirect forced.
+    // One native Request(input, init) snapshot: validated, gated, transmitted; redirect forced by init.
     let snapshot: Request;
     if (input instanceof Request) {
+      const intrinsicUrl = Reflect.get(Request.prototype, 'url', input) as string;
+      if (input.url !== intrinsicUrl) {
+        throw seamError('request input url is not internally consistent');
+      }
       snapshot = new Request(input, init);
-      if (Reflect.get(Request.prototype, 'url', input) !== snapshot.url) {
+      if (snapshot.url !== intrinsicUrl) {
         throw seamError('request input url is not internally consistent');
       }
     } else if (typeof input === 'string' || input instanceof URL) {
@@ -162,12 +163,10 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
     } else {
       throw seamError('fetch input must be a string, URL or Request');
     }
-    // redirect:'error' is forced as an own property: every observer sees it regardless of init.
-    Object.defineProperty(snapshot, 'redirect', { value: 'error' });
     assertAllowedTarget(baseOrigin, basePathname, new URL(snapshot.url), 'request url');
     gateSecondWireAttempt(observation);
     try {
-      const response = await originalFetch.call(globalThis, snapshot, REDIRECT_ERROR_INIT);
+      const response = await originalFetch.call(globalThis, snapshot, { redirect: 'error' });
       observation.status = response.status;
       return response;
     } catch (error) {
@@ -181,7 +180,8 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
 }
 
 /** Fixed-priority pure classification (deadline → retry → 401/403 → request → terminal). */
-export function classifyTransportFailure(observation: Readonly<TransportObservation>,
+export function classifyTransportFailure(
+  observation: Readonly<TransportObservation>,
   flags: { deadlineExpired: boolean; providerFailed: boolean },
 ): 'deadline_exceeded' | 'retry_blocked' | 'provider_rejected_credentials'
   | 'provider_request_failed' | 'provider_error_terminal' | undefined {
