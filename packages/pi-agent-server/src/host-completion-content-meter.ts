@@ -1,7 +1,7 @@
 import { types } from 'node:util'
 import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
 import { TEXT_LIMIT } from './host-completion-protocol.ts'
-import { compareJsonData, createComparisonBudget, forEachOwnEnumerableDataProperty, isInertJsonDataArray, isInertJsonDataObject, readArrayElement, readArrayLength, readOwnDescriptor } from './host-completion-json-data.ts'
+import { compareJsonData, createComparisonBudget, forEachOwnEnumerableDataProperty, isInertJsonDataArray, isInertJsonDataObject, readArrayElement, readArrayLength, readOwnDescriptor, readOwnEnumerableDataDescriptor } from './host-completion-json-data.ts'
 // Single responsibility: map Host/Pi message semantics onto an auditable body-metering result
 // (R12 §6.3). Owns typed slot identity, semantic/projection budgets, the 512KiB UTF-8 meter,
 // Unicode pending-surrogate handling, tool raw/tree group bookkeeping with max-or-double
@@ -159,7 +159,7 @@ export function createContentMeter(): ContentMeter {
       return
     }
     if (!charge(budget, 'nodes', NODE_BUDGET)) return
-    const contentDescriptor = readOwnDescriptor(message, 'content')
+    const contentDescriptor = readOwnEnumerableDataDescriptor(message, 'content')
     if (contentDescriptor.kind === 'unsafe') {
       latchSemantic(budget)
       return
@@ -207,7 +207,7 @@ export function createContentMeter(): ContentMeter {
       return
     }
     if (!charge(budget, 'nodes', NODE_BUDGET)) return
-    const typeDescriptor = readOwnDescriptor(block, 'type')
+    const typeDescriptor = readOwnEnumerableDataDescriptor(block, 'type')
     // The block discriminator is only ever a descriptor-safe string; String() on a hostile value
     // is forbidden (R12 §6.4), so anything else fails closed.
     if (typeDescriptor.kind !== 'data' || typeof typeDescriptor.value !== 'string') {
@@ -230,7 +230,7 @@ export function createContentMeter(): ContentMeter {
     }
     for (const [property, slotName] of canonicalFields) {
       if (budget.dead) return
-      const descriptor = readOwnDescriptor(block, property)
+      const descriptor = readOwnEnumerableDataDescriptor(block, property)
       if (descriptor.kind === 'unsafe') {
         latchSemantic(budget)
         return
@@ -316,11 +316,15 @@ export function createContentMeter(): ContentMeter {
   // all further provider reads, and a latched budget skips the snapshot entirely (the caller then
   // sees the conservative empty/null snapshot). Unsafe shapes yield the conservative empty/null
   // variant; stream policy decides the final failure kind.
-  function buildTerminalSnapshot(message: unknown, budget: SemanticBudget): SafeTerminalSnapshot {
+  function buildTerminalSnapshot(message: unknown, budget: SemanticBudget, latchUnsafe: () => void): SafeTerminalSnapshot {
     const snapshot: SafeTerminalSnapshot = { text: '', usage: null, responseModel: '', model: '' }
     if (budget.dead) return snapshot
     if (message === null || typeof message !== 'object' || !isInertJsonDataObject(message)) return snapshot
-    const contentDescriptor = readOwnDescriptor(message, 'content')
+    const contentDescriptor = readOwnEnumerableDataDescriptor(message, 'content')
+    if (contentDescriptor.kind === 'unsafe') {
+      latchUnsafe()
+      return snapshot
+    }
     if (budget.dead) return snapshot
     const content = contentDescriptor.kind === 'data' && isInertJsonDataArray(contentDescriptor.value) ? contentDescriptor.value : null
     if (content !== null) {
@@ -332,23 +336,23 @@ export function createContentMeter(): ContentMeter {
           if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return snapshot
           const element = readArrayElement(content, index)
           if (element.kind !== 'data' || !isInertJsonDataObject(element.value)) continue
-          const typeDescriptor = readOwnDescriptor(element.value, 'type')
+          const typeDescriptor = readOwnEnumerableDataDescriptor(element.value, 'type')
           if (budget.dead) return snapshot
           if (typeDescriptor.kind !== 'data' || typeDescriptor.value !== 'text') continue
-          const textDescriptor = readOwnDescriptor(element.value, 'text')
+          const textDescriptor = readOwnEnumerableDataDescriptor(element.value, 'text')
           if (textDescriptor.kind === 'data' && typeof textDescriptor.value === 'string') parts.push(textDescriptor.value)
         }
       }
       snapshot.text = parts.join('')
     }
-    const usageDescriptor = readOwnDescriptor(message, 'usage')
+    const usageDescriptor = readOwnEnumerableDataDescriptor(message, 'usage')
     if (budget.dead) return snapshot
     if (usageDescriptor.kind === 'data' && isInertJsonDataObject(usageDescriptor.value)) {
       const usageSource = usageDescriptor.value
       const readUsageNumber = (key: string): number | null => {
         if (budget.dead) return null
         if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return null
-        const descriptor = readOwnDescriptor(usageSource, key)
+        const descriptor = readOwnEnumerableDataDescriptor(usageSource, key)
         return descriptor.kind === 'data' && typeof descriptor.value === 'number' ? descriptor.value : null
       }
       const input = readUsageNumber('input')
@@ -359,9 +363,17 @@ export function createContentMeter(): ContentMeter {
       if (input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null) snapshot.usage = { input, output, cacheRead, cacheWrite, totalTokens }
     }
     if (budget.dead) return snapshot
-    const responseModelDescriptor = readOwnDescriptor(message, 'responseModel')
+    const responseModelDescriptor = readOwnEnumerableDataDescriptor(message, 'responseModel')
+    if (responseModelDescriptor.kind === 'unsafe') {
+      latchUnsafe()
+      return snapshot
+    }
     if (responseModelDescriptor.kind === 'data' && typeof responseModelDescriptor.value === 'string') snapshot.responseModel = responseModelDescriptor.value
-    const modelDescriptor = readOwnDescriptor(message, 'model')
+    const modelDescriptor = readOwnEnumerableDataDescriptor(message, 'model')
+    if (modelDescriptor.kind === 'unsafe') {
+      latchUnsafe()
+      return snapshot
+    }
     if (modelDescriptor.kind === 'data' && typeof modelDescriptor.value === 'string') snapshot.model = modelDescriptor.value
     return snapshot
   }
@@ -397,7 +409,9 @@ export function createContentMeter(): ContentMeter {
     meterMessage(message, add, budget)
     // Fail-fast: a latched projection budget skips the snapshot entirely — no further provider
     // field reads after the first violation (R12 §6.3).
-    if (event.type === 'done' && !budget.dead) lastDoneSnapshot = buildTerminalSnapshot(event.message, budget)
+    if (event.type === 'done' && !budget.dead) {
+      lastDoneSnapshot = buildTerminalSnapshot(event.message, budget, () => latchSemantic(budget))
+    }
     if (event.type === 'done' && event.reason === 'toolUse') sawToolContent = true
     for (const [key, candidates] of batch) {
       const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }

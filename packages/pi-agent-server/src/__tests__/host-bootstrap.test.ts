@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeAll, afterAll } from 'bun:test'
 import { spawn } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { acquireHostTestSerialLock, releaseHostTestSerialLock, waitOutEarlySuiteWindow } from './host-test-serial.ts'
 
@@ -105,6 +107,32 @@ describe('host bootstrap module isolation', () => {
     expect(result.model).toBe('invalid')
     expect(result.error).toEqual({ code: 'provider_protocol_error', reason: 'invalid_worker_message', message: 'Host LLM worker protocol failed' })
   }, 120000)
+  it('keeps bootstrap output authority limited to the import: a Host rejection after its own JSONL adds no second line', async () => {
+    // Run the REAL index.ts beside a fake host-completion.ts so the import genuinely resolves;
+    // the fake emits one JSONL line and then rejects. Ownership transfer means the bootstrap
+    // catch never wraps runHostCompletion, so stdout ends with exactly the Host line.
+    const runDir = mkdtempSync(join(tmpdir(), 'host-reject-run-'))
+    const { copyFileSync, writeFileSync } = await import('node:fs')
+    copyFileSync(join(SRC_DIR, 'index.ts'), join(runDir, 'index.ts'))
+    writeFileSync(join(runDir, 'host-completion.ts'), [
+      'export async function runHostCompletion(): Promise<void> {',
+      "  const line = JSON.stringify({ type: 'host_completion_result', version: 1, requestId: 'req-host-line', model: 'm', status: 'failed', error: { code: 'provider_failed', reason: 'provider_error_terminal', message: 'LLM provider request failed' } }) + String.fromCharCode(10)",
+      '  process.stdout.write(line)',
+      "  throw new Error('host rejection after output')",
+      '}',
+    ].join('\n'))
+    const child = Bun.spawn([process.execPath, join(runDir, 'index.ts'), '--host-completion-v1'], {
+      stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+    })
+    const stdout = await new Response(child.stdout as ReadableStream).text()
+    const exitCode = await child.exited
+    const lines = stdout.split('\n').filter((line) => line.trim().length > 0)
+    expect(lines).toHaveLength(1)
+    const parsed = JSON.parse(lines[0]) as { type: string }
+    expect(parsed.type).toBe('host_completion_result')
+    expect(exitCode).not.toBe(0)
+    rmSync(runDir, { recursive: true, force: true })
+  })
 
   it('proves the poison pills fire when the ordinary session path loads them (control)', async () => {
     const outcome = await runSource(['POISON_PRELOAD', ENTRY], null)

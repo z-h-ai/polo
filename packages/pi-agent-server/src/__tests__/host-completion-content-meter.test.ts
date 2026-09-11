@@ -277,6 +277,53 @@ describe('content meter: hostile block kinds and bounded snapshots', () => {
     expect(h.probe()).toMatchObject({ over: true })
   })
 })
+describe('content meter: terminal descriptor fail-fast and JSON-data domain', () => {
+  it('treats non-enumerable canonical fields as absent and never releases their content', () => {
+    const h = meterHarness()
+    const block: Record<string, unknown> = { type: 'text' }
+    Object.defineProperty(block, 'text', { value: 'SECRET', enumerable: false })
+    const message = assistantMessage([block], { usage: GOOD_USAGE, model: 'm' })
+    Object.defineProperty(message, 'model', { value: 'm', enumerable: false })
+    h.meter.onEvent(h.done('stop', message))
+    // The non-enumerable canonical text is domain-external: the meter latches fail-closed, so the
+    // secret content can never be released (no text, no snapshot, result_too_large).
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.meter.snapshotTerminal()).toBeNull()
+    // No body ever exists for the stream to release: the secret content stays unmeasured and dead.
+    expect(h.finish()).toBeNull()
+  })
+  it('latches on the first unsafe terminal descriptor and stops all later descriptor or value reads', () => {
+    let usageAccessorCalls = 0
+    let lateUsageAccessorCalls = 0
+    let modelAccessorCalls = 0
+    const h = meterHarness()
+    // content boundary: the second block's text is an accessor — its descriptor is inspected after
+    // the first block was metered fine, and the accessor must never be invoked.
+    let firstBlockTextRead = false
+    const blocks = [
+      { type: 'text', text: 'hi' },
+      { type: 'text', get text() { firstBlockTextRead = true; return 'late' } },
+    ]
+    const usage: Record<string, unknown> = { input: 5 }
+    Object.defineProperty(usage, 'output', { get() { usageAccessorCalls += 1; return 4 }, enumerable: true })
+    Object.defineProperty(usage, 'cacheRead', { get() { lateUsageAccessorCalls += 1; return 0 }, enumerable: true })
+    const message = assistantMessage(blocks, { model: 'm' })
+    ;(message as { usage: unknown }).usage = usage
+    Object.defineProperty(message, 'responseModel', { get() { modelAccessorCalls += 1; return 'r' }, enumerable: true })
+    Object.defineProperty(message, 'model', { get() { modelAccessorCalls += 1; return 'm' }, enumerable: true })
+    h.meter.onEvent(h.done('stop', message))
+    // content/type/text boundary: the accessor-backed text latched before its value was read, so
+    // the snapshot is skipped entirely and no stream body can exist.
+    expect(firstBlockTextRead).toBe(false)
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+    // usage boundary: input consumed as data, the accessor latched, later usage keys untouched.
+    expect(usageAccessorCalls).toBe(0)
+    expect(lateUsageAccessorCalls).toBe(0)
+    // responseModel/model boundary: neither accessor invoked after the earlier latch.
+    expect(modelAccessorCalls).toBe(0)
+  })
+})
 describe('content meter: exact semantic boundaries and fail-closed reads', () => {
   it('allows exactly 8192 semantic nodes and latches on the 8193rd', () => {
     const atLimit = meterHarness()

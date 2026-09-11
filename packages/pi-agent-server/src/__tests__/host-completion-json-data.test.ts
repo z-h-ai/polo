@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { compareJsonData, createComparisonBudget, forEachOwnEnumerableDataProperty, isInertJsonDataArray, isInertJsonDataObject, readArrayElement, readArrayLength, readOwnDescriptor } from '../host-completion-json-data.ts'
+import { compareJsonData, createComparisonBudget, forEachOwnEnumerableDataProperty, isInertJsonDataArray, isInertJsonDataObject, readArrayElement, readArrayLength, readOwnDescriptor, readOwnEnumerableDataDescriptor } from '../host-completion-json-data.ts'
 
 function countingProxy(target: object, counters: Record<string, number>): object {
   return new Proxy(target, {
@@ -37,6 +37,16 @@ describe('inert JSON-data gates', () => {
     expect(readOwnDescriptor(source, 'accessor')).toEqual({ kind: 'unsafe' })
     const sourceWithProto = Object.create({ inherited: 7 }) as Record<string, unknown>
     expect(readOwnDescriptor(sourceWithProto, 'inherited')).toEqual({ kind: 'missing' })
+  })
+  it('classifies present-but-non-enumerable fixed fields as unsafe, never absent', () => {
+    const source: Record<string, unknown> = {}
+    Object.defineProperty(source, 'hidden', { value: 5, enumerable: false })
+    expect(readOwnEnumerableDataDescriptor(source, 'hidden')).toEqual({ kind: 'unsafe' })
+    Object.defineProperty(source, 'shown', { value: 7, enumerable: true, writable: true, configurable: true })
+    expect(readOwnEnumerableDataDescriptor(source, 'shown')).toEqual({ kind: 'data', value: 7 })
+    expect(readOwnEnumerableDataDescriptor(source, 'absent')).toEqual({ kind: 'missing' })
+    Object.defineProperty(source, 'broken', { get() { return 1 }, enumerable: true })
+    expect(readOwnEnumerableDataDescriptor(source, 'broken')).toEqual({ kind: 'unsafe' })
   })
   it('reads array length and elements through own descriptors and distinguishes holes', () => {
     const array = [1, , 3] as unknown[]

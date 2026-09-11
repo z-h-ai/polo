@@ -37,16 +37,26 @@ async function resolveBedrockEndpointHref(constructor: new (config: any) => Bedr
     client?.destroy()
   }
 }
-// Production-used route/model preparation and Pi registration orchestration (R12 §6.8). Tests
-// import this exact function and inject spy bindings; production wires the sealed pi-ai module
-// functions into the same shape. Fixed order: Bedrock endpoint comparison → exact catalog hit or
-// custom model construction → Copilot/ordinary catalog href comparison → setBedrockProviderModule
-// exactly once → streamSimple exactly once. Every failure before registration leaves
-// registrationCount=0 and streamCount=0.
-export interface HostPiBindings {
+// Production-used route/model preparation, Pi registration and stream orchestration (R14 §3.2):
+// three named phases with injectable bindings/importers. Tests import these exact functions and
+// inject spies; production wires the sealed pi-ai module functions into the same shape.
+export type HostPiImportStage = 'piAi' | 'bedrock' | 'oauth'
+export type HostPiProbeStage =
+  | 'route:after-await'
+  | `import:${HostPiImportStage}:before`
+  | `import:${HostPiImportStage}:after`
+  | 'start:before-model'
+  | 'start:before-register'
+  | 'start:before-stream'
+export interface HostPiModule {
   getModels: (provider: string) => Array<Record<string, any>>
-  getGitHubCopilotBaseUrl: (token: string) => string
+  setBedrockProviderModule: (module: unknown) => void
+  streamSimple: (model: unknown, context: unknown, options: Record<string, unknown>) => AsyncIterable<unknown>
+}
+export interface HostPiBindings {
+  module: HostPiModule
   bedrockProviderModule: unknown
+  getGitHubCopilotBaseUrl: (token: string) => string
   setBedrockProviderModule: (module: unknown) => void
   streamSimple: (model: unknown, context: unknown, options: Record<string, unknown>) => AsyncIterable<unknown>
 }
@@ -56,44 +66,109 @@ export interface HostPiRuntime {
   registrationCount: number
   streamCount: number
 }
-export interface HostPiStreamContext {
+export interface HostPiImporters {
+  importPiAi: () => Promise<HostPiModule>
+  importBedrockProvider: () => Promise<{ bedrockProviderModule: unknown }>
+  importCopilotOAuth: () => Promise<{ getGitHubCopilotBaseUrl: (token: string) => string }>
+}
+export interface HostPiPhaseContext {
   request: ValidatedHostRequest
   credential: HostWorkerCredential
   observation: InstalledTransportObservation
+  shouldStop: (stage: HostPiProbeStage) => boolean
+}
+export interface HostPiStreamInputs {
   systemPrompt: string
   userPrompt: string
   maxOutputTokens: number
   apiKey: string | undefined
   signal: AbortSignal
   timeoutRemainingMs: number
-  // Production wires this to `settled || controller.signal.aborted`. Every await in the seam and
-  // every step before model construction / registration / stream consults it, so a deadline or
-  // abort that wins during an await keeps Pi imports, registration, streaming and transport at 0
-  // (R12 §6.8, Review R4 issue 1).
-  shouldStop: () => boolean
 }
-export type HostPiStreamStart =
-  | { ok: true; stream: AsyncIterable<unknown> }
-  | { ok: false; failure: HostFailureKind; stopped?: true }
-// Fixed order: Bedrock zero-I/O endpoint comparison → Pi bindings load (dynamic imports) → exact
-// catalog hit or custom construction → href comparisons → setBedrockProviderModule once →
-// streamSimple once. The resolver runs BEFORE the provider imports; the stop probe is consulted
-// after every await and before model construction, registration and streaming.
-export async function startHostPiStream(loadRuntime: () => Promise<HostPiRuntime | null>, context: HostPiStreamContext): Promise<HostPiStreamStart> {
+export type HostPiRoutePreparation = { ok: true } | { ok: false; failure: HostFailureKind; stopped?: true }
+export type HostPiRuntimePreparation = { ok: true; runtime: HostPiRuntime } | { ok: false; failure: HostFailureKind; stopped?: true }
+export type HostPiStreamStart = { ok: true; stream: AsyncIterable<unknown>; expectedModel: string } | { ok: false; failure: HostFailureKind; stopped?: true }
+const stoppedResult = (budget: 'deadline_exceeded'): HostPiRoutePreparation => ({ ok: false, failure: budget, stopped: true })
+// Phase 1: Bedrock zero-I/O endpoint resolution and exact anchor comparison. The FIRST semantic
+// operation after the resolver await is the shouldStop probe — endpoint inspection, comparison
+// and classification all obey deadline precedence (R14 §3.2).
+export async function resolveHostPiRoute(context: HostPiPhaseContext): Promise<HostPiRoutePreparation> {
   const { request, credential, observation } = context
   if (request.routeKind === 'catalog' && request.provider === 'amazon-bedrock' && credential.type === 'iam') {
     const resolvedEndpoint = await resolveBedrockEndpointHref(observation.bedrockConstructor as unknown as new (config: any) => BedrockClientLike, credential)
+    if (context.shouldStop('route:after-await')) return stoppedResult('deadline_exceeded')
     if (resolvedEndpoint !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
   }
-  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
-  const runtime = await loadRuntime()
-  if (runtime === null || context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  return { ok: true }
+}
+// Phase 2: provider module loading in the fixed order pi-ai → bedrock-provider → optional Copilot
+// oauth. Every import dispatch is preceded by a stop probe; after settle or after an exception the
+// probe is the first semantic operation again. A deadline that wins inside import N keeps the
+// already-started prefix; import N+1 and everything downstream stay at zero (R14 §3.2).
+export async function loadHostPiRuntime(importers: HostPiImporters, context: HostPiPhaseContext): Promise<HostPiRuntimePreparation> {
+  const { request, credential } = context
+  if (context.shouldStop('import:piAi:before')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  let piAi: HostPiModule
+  try {
+    piAi = await importers.importPiAi()
+  } catch (error) {
+    if (context.shouldStop('import:piAi:after')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+    throw error
+  }
+  if (context.shouldStop('import:piAi:after')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  if (context.shouldStop('import:bedrock:before')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  let bedrockModule: { bedrockProviderModule: unknown }
+  try {
+    bedrockModule = await importers.importBedrockProvider()
+  } catch (error) {
+    if (context.shouldStop('import:bedrock:after')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+    throw error
+  }
+  if (context.shouldStop('import:bedrock:after')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  let copilot: { getGitHubCopilotBaseUrl: (token: string) => string } | null = null
+  if (request.routeKind === 'catalog' && request.provider === 'github-copilot' && credential.type === 'oauth_access') {
+    if (context.shouldStop('import:oauth:before')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+    try {
+      copilot = await importers.importCopilotOAuth()
+    } catch (error) {
+      if (context.shouldStop('import:oauth:after')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+      throw error
+    }
+    if (context.shouldStop('import:oauth:after')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  }
+  const module = piAi
+  const runtime: HostPiRuntime = {
+    bindings: {
+      module,
+      bedrockProviderModule: bedrockModule.bedrockProviderModule,
+      getGitHubCopilotBaseUrl: (token: string): string => {
+        if (copilot === null) throw new Error('host pi binding unavailable')
+        return copilot.getGitHubCopilotBaseUrl(token)
+      },
+      setBedrockProviderModule: (providerModule: unknown): void => {
+        module.setBedrockProviderModule(providerModule)
+      },
+      streamSimple: module.streamSimple,
+    },
+    events: [],
+    registrationCount: 0,
+    streamCount: 0,
+  }
+  return { ok: true, runtime }
+}
+// Phase 3 (synchronous): exact catalog hit or custom construction → Copilot/ordinary href
+// comparison → setBedrockProviderModule exactly once → streamSimple exactly once, with stop
+// probes before model, register and stream (R14 §3.2). Failures before registration leave zero
+// registration and zero stream side effects.
+export function startHostPiStream(runtime: HostPiRuntime, context: HostPiPhaseContext & HostPiStreamInputs): HostPiStreamStart {
+  const { request, credential } = context
+  if (context.shouldStop('start:before-model')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   let model: Record<string, any>
   const bareId = stripPiPrefix(request.model)
   if (request.routeKind === 'custom') {
     model = { ...buildCustomEndpointModelDef(bareId), id: bareId, name: bareId, provider: request.provider, api: request.api, baseUrl: request.transportHref }
   } else {
-    const hit = runtime.bindings.getModels(request.provider).find((entry) => entry.id === bareId)
+    const hit = runtime.bindings.module.getModels(request.provider).find((entry) => entry.id === bareId)
     if (hit === undefined) return { ok: false, failure: 'catalog_model_missing' }
     model = { ...hit }
     if (request.provider === 'github-copilot' && credential.type === 'oauth_access') {
@@ -106,15 +181,13 @@ export async function startHostPiStream(loadRuntime: () => Promise<HostPiRuntime
     }
     if (request.provider === 'minimax-cn') model.id = model.id.replace(/^MiniMax-/, '')
   }
-  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   runtime.events.push('model-constructed')
-  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  if (context.shouldStop('start:before-register')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   runtime.registrationCount += 1
   runtime.events.push('registered')
   runtime.bindings.setBedrockProviderModule(runtime.bindings.bedrockProviderModule)
-  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  if (context.shouldStop('start:before-stream')) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   const composedSystem = request.responseFormat === 'json_object' ? (context.systemPrompt ? `${context.systemPrompt}\n\n${JSON_OBJECT_SYSTEM_CONSTRAINT}` : JSON_OBJECT_SYSTEM_CONSTRAINT) : context.systemPrompt
-  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   runtime.streamCount += 1
   runtime.events.push('stream-started')
   const stream = runtime.bindings.streamSimple(model, {
@@ -124,7 +197,7 @@ export async function startHostPiStream(loadRuntime: () => Promise<HostPiRuntime
     apiKey: context.apiKey, maxTokens: context.maxOutputTokens, maxRetries: 0, signal: context.signal, timeoutMs: context.timeoutRemainingMs,
     ...(request.routeKind === 'catalog' && request.provider === 'openai-codex' ? codexStreamExtras(context.maxOutputTokens) : {}),
   })
-  return { ok: true, stream }
+  return { ok: true, stream, expectedModel: model.id }
 }
 async function readRequestThroughEof(armDeadline: (line: string, firstByteAt: number) => void): Promise<{ ok: true; line: string; firstByteAt: number } | { ok: false; oversize: boolean }> {
   const decoder = new TextDecoder('utf-8', { fatal: true })
@@ -184,42 +257,39 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     const [policy, streamModule] = await Promise.all([import('./host-completion-policy.ts'), import('./host-completion-stream.ts')])
     if (settled) return
     installed = policy.installTransportObservation(new URL(request.transportHref))
-    // The provider modules load only AFTER the Bedrock zero-I/O endpoint comparison passed inside
-    // startHostPiStream, so a deadline that wins during the resolver await keeps imports, Pi
-    // registration, streaming and transport at zero (Review R4 issue 1).
-    const loadRuntime = async (): Promise<HostPiRuntime | null> => {
-      const [piAi, bedrockProviderModule, oauth] = await Promise.all([import('@mariozechner/pi-ai'), import('@mariozechner/pi-ai/bedrock-provider'),
-        request.routeKind === 'catalog' && request.provider === 'github-copilot' ? import('@mariozechner/pi-ai/oauth') : Promise.resolve(null)])
-      if (settled) return null
-      const runtime: HostPiRuntime = {
-      bindings: {
-        getModels: (provider: string): Array<Record<string, any>> => (piAi.getModels as unknown as (provider: string) => Array<Record<string, any>>)(provider),
-        getGitHubCopilotBaseUrl: (token: string): string => {
-          if (oauth === null) throw new Error('host pi binding unavailable')
-          return oauth.getGitHubCopilotBaseUrl(token)
-        },
-        bedrockProviderModule: bedrockProviderModule.bedrockProviderModule,
-        setBedrockProviderModule: (module: unknown): void => {
-          piAi.setBedrockProviderModule(module as Parameters<typeof piAi.setBedrockProviderModule>[0])
-        },
-        streamSimple: piAi.streamSimple as unknown as HostPiBindings['streamSimple'],
-      },
-      events: [],
-      registrationCount: 0,
-      streamCount: 0,
-      }
-      return runtime
+    // Named probe trace (R14 §4): bounded, wire-protocol-external, test-observable.
+    const probeTrace: HostPiProbeStage[] = []
+    const phaseShouldStop = (stage: HostPiProbeStage): boolean => {
+      probeTrace.push(stage)
+      return settled || controller.signal.aborted
     }
+    const phaseContext: HostPiPhaseContext = { request, credential, observation: installed, shouldStop: phaseShouldStop }
+    const route = await resolveHostPiRoute(phaseContext)
+    if (settled) return
+    if (!route.ok) {
+      if (route.stopped === true) return
+      return failWith(route.failure)
+    }
+    const runtimePreparation = await loadHostPiRuntime({
+      importPiAi: async () => await import('@mariozechner/pi-ai') as unknown as HostPiModule,
+      importBedrockProvider: async () => await import('@mariozechner/pi-ai/bedrock-provider'),
+      importCopilotOAuth: async () => await import('@mariozechner/pi-ai/oauth') as unknown as { getGitHubCopilotBaseUrl: (token: string) => string },
+    }, phaseContext)
+    if (settled) return
+    if (!runtimePreparation.ok) {
+      if (runtimePreparation.stopped === true) return
+      return failWith(runtimePreparation.failure)
+    }
+    const runtime = runtimePreparation.runtime
     const apiKey = credential.type === 'api_key' || credential.type === 'oauth_access' ? credential.value : credential.type === 'none' ? 'not-needed' : undefined
     // The tracker's expected response model must equal the SENT clone id the seam constructs:
     // bare id, plus one stripped MiniMax- prefix for the minimax-cn catalog route.
     const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
     const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, claim: (kind) => failWith(kind) })
-    const started = await startHostPiStream(loadRuntime, {
-      request, credential, observation: installed, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
+    const started = startHostPiStream(runtime, {
+      ...phaseContext, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
       maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,
       timeoutRemainingMs: Math.max(1, deadlineAt - Date.now()),
-      shouldStop: () => settled || controller.signal.aborted,
     })
     if (settled) return
     if (!started.ok) {

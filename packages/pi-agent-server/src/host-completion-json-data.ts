@@ -33,9 +33,11 @@ export function isInertJsonDataObject(value: unknown): value is object {
 export function isInertJsonDataArray(value: unknown): value is unknown[] {
   return Array.isArray(value) && !types.isProxy(value)
 }
-// Fixed-field read: own data descriptor only. Missing stays distinguishable; accessor, missing
-// backing or descriptor exceptions are unsafe and never invoke a getter (R12 §6.2 rule 3).
+// Structural read (array `length` and friends): Proxy-first, then own data descriptor only — the
+// non-enumerable array `length` is a sanctioned structural property. Missing → `missing`;
+// accessor, Proxy, exception or illegal descriptor → `unsafe`; getters are never invoked.
 export function readOwnDescriptor(source: object, key: string): OwnDataRead {
+  if (types.isProxy(source)) return { kind: 'unsafe' }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(source, key)
     if (descriptor === undefined) return { kind: 'missing' }
@@ -45,28 +47,46 @@ export function readOwnDescriptor(source: object, key: string): OwnDataRead {
     return { kind: 'unsafe' }
   }
 }
+// Fixed-field read (message/content/block/canonical/usage/model): Proxy-first, then only an
+// ENUMERABLE own data descriptor belongs to the JSON-data domain (R14 §3.1). Truly missing →
+// `missing`; present but non-enumerable, accessor-backed, Proxy, exception or illegal descriptor
+// → `unsafe`, stopping before any value read; getters are never invoked. A non-enumerable field
+// is never disguised as absent.
+export function readOwnEnumerableDataDescriptor(source: object, key: string): OwnDataRead {
+  if (types.isProxy(source)) return { kind: 'unsafe' }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(source, key)
+    if (descriptor === undefined) return { kind: 'missing' }
+    if (descriptor.enumerable !== true || descriptor.get !== undefined || descriptor.set !== undefined) return { kind: 'unsafe' }
+    return { kind: 'data', value: descriptor.value }
+  } catch {
+    return { kind: 'unsafe' }
+  }
+}
 // Array length is read through its own data descriptor — never through the `length` property get,
-// which a Proxy array or accessor would intercept (R12 §6.2 rule 6).
+// which a Proxy array or accessor would intercept (R12 §6.2 rule 6). `length` is intentionally a
+// non-enumerable structural property and stays outside the enumerable content rule above.
 export function readArrayLength(array: unknown[]): number | null {
   const descriptor = readOwnDescriptor(array, 'length')
   if (descriptor.kind !== 'data') return null
   if (typeof descriptor.value !== 'number' || !Number.isInteger(descriptor.value) || descriptor.value < 0) return null
   return descriptor.value
 }
-// Array elements use their own descriptor: holes stay distinguishable from undefined data and
-// accessor indexes are unsafe; prototype values are never read (R12 §6.2 rule 7).
+// Array elements use their own ENUMERABLE data descriptor: holes stay distinguishable from
+// undefined data, accessor and non-enumerable indexes are unsafe; prototype values are never
+// read (R12 §6.2 rule 7).
 export function readArrayElement(array: unknown[], index: number): OwnDataRead {
-  return readOwnDescriptor(array, String(index))
+  return readOwnEnumerableDataDescriptor(array, String(index))
 }
 // Streaming own-enumerable string-key projection: no key-array materialization. chargeKey runs
-// after Object.hasOwn and BEFORE the descriptor is read so budget latches stop pre-read; an unsafe
-// or missing descriptor latches through `latch` without ever invoking a getter. Symbols and
-// non-enumerable fields stay outside the JSON-data domain (R12 §6.2 rules 4/5/10).
+// after Object.hasOwn and BEFORE the descriptor is read so budget latches stop pre-read; an
+// unsafe, missing or non-enumerable descriptor latches through `latch` without ever invoking a
+// getter. Symbols stay outside the JSON-data domain (R12 §6.2 rules 4/5/10).
 export function* forEachOwnEnumerableDataProperty(source: object, chargeKey: () => boolean, latch: () => void): Generator<[string, unknown]> {
   for (const key in source) {
     if (!Object.hasOwn(source, key)) continue
     if (!chargeKey()) return latch()
-    const descriptor = readOwnDescriptor(source, key)
+    const descriptor = readOwnEnumerableDataDescriptor(source, key)
     if (descriptor.kind !== 'data') return latch()
     yield [key, descriptor.value]
   }

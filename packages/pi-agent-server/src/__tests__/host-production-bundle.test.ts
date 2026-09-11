@@ -125,6 +125,7 @@ describe('pi-agent-server production bundle host dispatch', () => {
       expect(nonBuiltin).toEqual([])
 
       const isolated = mkdtempSync(join(tmpdir(), 'host-bundle-run-'))
+      try {
       copyFileSync(bundlePath, join(isolated, 'index.js'))
       writeFileSync(join(isolated, 'package.json'), JSON.stringify({ type: 'module' }))
 
@@ -142,6 +143,7 @@ describe('pi-agent-server production bundle host dispatch', () => {
       collectLines(server.stdout!, (line) => {
         if (line.startsWith('REQUEST:')) serverRequests.push(line.slice('REQUEST:'.length))
       })
+      // The isolated bundle dir is cleaned on every exit path (R5 minor 2).
       try {
         const ready = await new Promise<number>((resolve, reject) => {
           const timer = setTimeout(() => reject(new Error('fixture server did not become ready')), 20000)
@@ -162,22 +164,7 @@ describe('pi-agent-server production bundle host dispatch', () => {
         }) + '\n'
         const hostRun = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
           const child = spawn('/usr/bin/nice', ['-n', '20', HOST_NODE, '--import', join(fixtureDir, 'preload.mjs'), join(isolated, 'index.js'), '--host-completion-v1'], {
-            env: {
-              ...process.env,
-              PATH: process.env.PATH,
-              HOME: process.env.HOME,
-              TMPDIR: process.env.TMPDIR,
-              ELECTRON_RUN_AS_NODE: '1',
-              AWS_MAX_ATTEMPTS: '3',
-              AWS_USE_FIPS_ENDPOINT: 'true',
-              AWS_USE_DUALSTACK_ENDPOINT: 'true',
-              AWS_ACCESS_KEY_ID: 'ambient-key-canary',
-              AWS_SECRET_ACCESS_KEY: 'ambient-aws-secret-canary',
-              AWS_PROFILE: 'ambient-profile',
-              AWS_BEDROCK_SKIP_AUTH: '1',
-              AWS_ENDPOINT_URL_BEDROCK: 'https://ambient-endpoint-canary.invalid',
-              HOST_FIXTURE_PORT: String(ready),
-            },
+            env: { ...process.env, PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, ELECTRON_RUN_AS_NODE: '1', AWS_MAX_ATTEMPTS: '3', AWS_ACCESS_KEY_ID: 'ambient-key-canary', AWS_SECRET_ACCESS_KEY: 'ambient-aws-secret-canary', AWS_PROFILE: 'ambient-profile', AWS_BEDROCK_SKIP_AUTH: '1', AWS_ENDPOINT_URL_BEDROCK: 'https://ambient-endpoint-canary.invalid', HOST_FIXTURE_PORT: String(ready) },
             stdio: ['pipe', 'pipe', 'pipe'],
           })
           let stdout = ''
@@ -222,9 +209,11 @@ describe('pi-agent-server production bundle host dispatch', () => {
         const ordinaryLines = ordinaryRun.stdout.split('\n').filter((line) => line.trim().length > 0).map((line) => JSON.parse(line) as Record<string, unknown>)
         expect(ordinaryLines[0]?.type).toBe('ready')
         expect(ordinaryLines[0]).not.toHaveProperty('callbackPort')
-        rmSync(isolated, { recursive: true, force: true })
       } finally {
         server.kill()
+      }
+      } finally {
+        rmSync(isolated, { recursive: true, force: true })
       }
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true })

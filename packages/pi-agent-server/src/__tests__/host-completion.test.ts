@@ -5,7 +5,7 @@ import http from 'node:http'
 import { checkDescriptor, codexStreamExtras, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS } from '../host-completion.ts'
 import { HOST_PARENT_MARKER, TEXT_LIMIT, validateHostRequest, type ValidatedHostRequest } from '../host-completion-protocol.ts'
 import { createHostStreamTracker, type StreamVerdict } from '../host-completion-stream.ts'
-import { startHostPiStream, type HostPiBindings, type HostPiRuntime, type HostPiStreamContext } from '../host-completion.ts'
+import { loadHostPiRuntime, resolveHostPiRoute, startHostPiStream, type HostPiImportStage, type HostPiImporters, type HostPiPhaseContext, type HostPiRuntime, type HostPiStreamInputs } from '../host-completion.ts'
 import type { InstalledTransportObservation } from '../host-completion-policy.ts'
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime'
 
@@ -567,201 +567,235 @@ describe('host worker single-request JSONL fixtures', () => {
     }
   }, 60000)
 
-  it('runs the production registration seam: every negative route registers and streams zero times', async () => {
+  interface OracleCounters {
+    importStarted: Record<HostPiImportStage, number>
+    importSettled: Record<HostPiImportStage, number>
+    modelConstructionCalls: number
+    registrationCalls: number
+    streamCalls: number
+    transportCalls: number
+    probeTrace: string[]
+    events: string[]
+    capturedModels: Array<Record<string, unknown>>
+  }
+  const oracleHarness = (options: { deadlineAfterProbe?: string; deadlineInsideImport?: HostPiImportStage } = {}) => {
+    const counters: OracleCounters = {
+      importStarted: { piAi: 0, bedrock: 0, oauth: 0 },
+      importSettled: { piAi: 0, bedrock: 0, oauth: 0 },
+      modelConstructionCalls: 0,
+      registrationCalls: 0,
+      streamCalls: 0,
+      transportCalls: 0,
+      probeTrace: [],
+      events: [],
+      capturedModels: [],
+    }
+    const importers: HostPiImporters = {
+      importPiAi: async () => {
+        counters.importStarted.piAi += 1
+        if (options.deadlineInsideImport === 'piAi') deadlineFiredHolder.fired = true
+        counters.importSettled.piAi += 1
+        return moduleStub
+      },
+      importBedrockProvider: async () => {
+        counters.importStarted.bedrock += 1
+        if (options.deadlineInsideImport === 'bedrock') deadlineFiredHolder.fired = true
+        counters.importSettled.bedrock += 1
+        return { bedrockProviderModule: { marker: 'bedrock-module' } }
+      },
+      importCopilotOAuth: async () => {
+        counters.importStarted.oauth += 1
+        if (options.deadlineInsideImport === 'oauth') deadlineFiredHolder.fired = true
+        counters.importSettled.oauth += 1
+        return { getGitHubCopilotBaseUrl: () => 'https://api.example.com/' }
+      },
+    }
+    const moduleStub = {
+      getModels: (provider: string) => {
+        counters.events.push(`getModels:${provider}`)
+        return provider === 'catalog-missing' ? [] : [{ id: 'good-model', baseUrl: 'https://api.example.com/' }]
+      },
+      setBedrockProviderModule: (module: unknown) => {
+        counters.registrationCalls += 1
+        counters.events.push('registered')
+        expect(module).toEqual({ marker: 'bedrock-module' })
+      },
+      streamSimple: (model: unknown) => {
+        counters.streamCalls += 1
+        counters.events.push('stream-started')
+        counters.capturedModels.push(model as Record<string, unknown>)
+        return (async function* generate() { yield 'event' })()
+      },
+    }
+    const deadlineFiredHolder = { fired: false }
+    const deadlineFired = (): boolean => deadlineFiredHolder.fired
+    const phaseShouldStop = (stage: HostPiProbeStage): boolean => {
+      counters.probeTrace.push(stage)
+      // deadlineInsideImport is armed by the importer itself AFTER its own settle — the before
+      // probe must let the dispatch happen so `importStarted` proves the started prefix (R14 §3.2).
+      if (options.deadlineAfterProbe === stage) deadlineFiredHolder.fired = true
+      return deadlineFired()
+    }
     const observation = {
       observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
       bedrockConstructor: BedrockRuntimeClient,
     } as unknown as InstalledTransportObservation
-    const makeRuntime = (catalogFor: (provider: string) => string, copilotBase: string) => {
-      const state = { events: [] as string[], registrationCount: 0, streamCount: 0 }
-      const runtime: HostPiRuntime = {
-        bindings: {
-          getModels: (provider: string) => {
-            state.events.push(`getModels:${provider}`)
-            const baseUrl = catalogFor(provider)
-            return baseUrl === '' ? [] : [{ id: 'good-model', baseUrl }]
-          },
-          getGitHubCopilotBaseUrl: () => {
-            state.events.push('copilot-derived')
-            return copilotBase
-          },
-          bedrockProviderModule: { marker: 'bedrock-module' },
-          setBedrockProviderModule: () => state.events.push('registered'),
-          streamSimple: () => state.events.push('binding-stream-simple'),
-        },
-        events: state.events,
-        registrationCount: state.registrationCount,
-        streamCount: state.streamCount,
-      }
-      return { runtime, state }
-    }
-    const apiKey = { type: 'api_key', value: 'test-key' }
-    const contextFor = (routeWithModel: Record<string, unknown>, credential: Record<string, unknown>): HostPiStreamContext => {
-      const model = typeof routeWithModel.model === 'string' ? routeWithModel.model : undefined
-      const { model: _ignored, ...route } = routeWithModel
-      void _ignored
+    const phaseContext = (requestOverride?: Record<string, unknown>): HostPiPhaseContext => {
+      const builtRequest = mustValidate(request(requestOverride ?? { route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: apiKey }))
       return {
-        request: mustValidate(request({ route, ...(model !== undefined ? { model } : {}), credential })),
-        credential: credential as ValidatedHostRequest['credential'],
+        request: builtRequest,
+        credential: builtRequest.credential,
         observation,
-        systemPrompt: 'sys', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
-        signal: new AbortController().signal, timeoutRemainingMs: 1000,
-      shouldStop: () => false,
+        shouldStop: phaseShouldStop,
       }
     }
-    const missRuntime = makeRuntime((provider) => (provider === 'anthropic' ? 'https://api.example.com/' : ''), '')
-    const missStart = await startHostPiStream(async () => missRuntime.runtime, contextFor({ kind: 'catalog', provider: 'unknown-provider', transportBaseUrl: 'https://api.example.com/' }, apiKey))
-    expect(missStart).toEqual({ ok: false, failure: 'catalog_model_missing' })
-    expect(missRuntime.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
-    // Ordinary catalog href drift: model hit, anchor mismatch, zero registration.
-    const drift = makeRuntime(() => 'https://other.example.com/', '')
-    const driftStart = await startHostPiStream(async () => drift.runtime, contextFor({ kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, apiKey))
+    const streamInputs = (): HostPiStreamInputs & HostPiPhaseContext => ({ ...phaseContext(), systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key', signal: new AbortController().signal, timeoutRemainingMs: 1000 })
+    // modelConstructionCalls derives from the observable model-constructed event (R14 §4).
+    const finalizeCounters = (runtimeEvents?: string[]): void => {
+      counters.modelConstructionCalls = [...counters.events, ...(runtimeEvents ?? [])].filter((event) => event === 'model-constructed').length
+    }
+    return { counters, importers, phaseShouldStop, deadlineFired, phaseContext, streamInputs, finalizeCounters }
+  }
+  const apiKey = { type: 'api_key', value: 'test-key' }
+
+  it('runs the production phases: every negative route keeps registration and stream at zero', async () => {
+    const miss = oracleHarness()
+    const missContext = miss.streamInputs()
+    missContext.request = mustValidate(request({ route: { kind: 'catalog', provider: 'catalog-missing', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: apiKey }))
+    expect(await resolveHostPiRoute(missContext)).toEqual({ ok: true })
+    const runtimeMiss = await loadHostPiRuntime(miss.importers, missContext)
+    expect(runtimeMiss.ok).toBe(true)
+    const startMiss = startHostPiStream((runtimeMiss as { ok: true; runtime: HostPiRuntime }).runtime, missContext)
+    expect(startMiss).toEqual({ ok: false, failure: 'catalog_model_missing' })
+    miss.finalizeCounters()
+    expect(miss.counters).toMatchObject({ modelConstructionCalls: 0, registrationCalls: 0, streamCalls: 0, transportCalls: 0 })
+    expect(miss.counters.importStarted).toEqual({ piAi: 1, bedrock: 1, oauth: 0 })
+    expect(miss.counters.importSettled).toEqual({ piAi: 1, bedrock: 1, oauth: 0 })
+  })
+
+  it('runs the production phases: legal catalog route constructs, registers and streams exactly once', async () => {
+    const legal = oracleHarness()
+    const legalContext = legal.streamInputs()
+    expect(await resolveHostPiRoute(legalContext)).toEqual({ ok: true })
+    const runtimePreparation = await loadHostPiRuntime(legal.importers, legalContext)
+    expect(runtimePreparation.ok).toBe(true)
+    const started = startHostPiStream((runtimePreparation as { ok: true; runtime: HostPiRuntime }).runtime, legalContext)
+    expect(started.ok).toBe(true)
+    if (started.ok) expect(started.expectedModel).toBe('good-model')
+    legal.finalizeCounters((runtimePreparation as { ok: true; runtime: HostPiRuntime }).runtime.events)
+    expect(legal.counters).toMatchObject({
+      importStarted: { piAi: 1, bedrock: 1, oauth: 0 },
+      importSettled: { piAi: 1, bedrock: 1, oauth: 0 },
+      modelConstructionCalls: 1,
+      registrationCalls: 1,
+      streamCalls: 1,
+      transportCalls: 0,
+    })
+    // Non-Bedrock routes have no resolver await, hence no route:after-await probe.
+    expect(legal.counters.probeTrace).toEqual([
+      'import:piAi:before', 'import:piAi:after', 'import:bedrock:before', 'import:bedrock:after',
+      'start:before-model', 'start:before-register', 'start:before-stream',
+    ])
+    // getModels lives in the stub event channel; canonical/runtime events carry the seam sequence.
+    expect((runtimePreparation as { ok: true; runtime: HostPiRuntime }).runtime.events).toEqual(['model-constructed', 'registered', 'stream-started'])
+    expect(legal.counters.events.filter((event) => event === 'getModels:anthropic')).toEqual(['getModels:anthropic'])
+    expect(legal.counters.capturedModels[0]).toMatchObject({ id: 'good-model', baseUrl: 'https://api.example.com/' })
+  })
+
+  it('runs the production phases: drift and copilot mismatch keep registration, stream and transport at zero', async () => {
+    const drift = oracleHarness()
+    const driftContext = drift.streamInputs()
+    driftContext.request = mustValidate(request({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://other.example.com/' }, model: 'pi/good-model', credential: apiKey }))
+    expect(await resolveHostPiRoute(driftContext)).toEqual({ ok: true })
+    const driftRuntime = await loadHostPiRuntime(drift.importers, driftContext)
+    expect(driftRuntime.ok).toBe(true)
+    const driftStart = startHostPiStream((driftRuntime as { ok: true; runtime: HostPiRuntime }).runtime, driftContext)
     expect(driftStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
-    expect(drift.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
-    // Copilot derived href mismatch: zero registration.
-    const copilot = makeRuntime(() => 'https://api.example.com/', 'https://wrong.example.com/')
-    const copilotStart = await startHostPiStream(async () => copilot.runtime, contextFor({ kind: 'catalog', provider: 'github-copilot', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, { type: 'oauth_access', value: 'token' }))
+    expect(drift.counters).toMatchObject({ registrationCalls: 0, streamCalls: 0, transportCalls: 0 })
+    const copilot = oracleHarness()
+    const copilotContext = copilot.streamInputs()
+    copilotContext.request = mustValidate(request({ route: { kind: 'catalog', provider: 'github-copilot', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: { type: 'oauth_access', value: 'token' } }))
+    copilotContext.credential = { type: 'oauth_access', value: 'token' } as ValidatedHostRequest['credential']
+    const copilotRoute = await resolveHostPiRoute(copilotContext)
+    expect(copilotRoute.ok).toBe(true)
+    const copilotRuntime = await loadHostPiRuntime({ ...copilot.importers, importCopilotOAuth: async () => ({ getGitHubCopilotBaseUrl: () => 'https://wrong.example.com/' }) }, copilotContext)
+    expect(copilotRuntime.ok).toBe(true)
+    const copilotStart = startHostPiStream((copilotRuntime as { ok: true; runtime: HostPiRuntime }).runtime, copilotContext)
     expect(copilotStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
-    expect(copilot.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
-    // Bedrock endpoint mismatch (real zero-I/O SDK resolver against the anchor): zero registration.
-    const bedrock = makeRuntime(() => 'https://api.example.com/', '')
-    const bedrockStart = await startHostPiStream(async () => bedrock.runtime, contextFor({ kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-west-2.amazonaws.com/' }, { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' }))
-    expect(bedrockStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
-    expect(bedrock.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
+    expect(copilot.counters).toMatchObject({ registrationCalls: 0, streamCalls: 0, transportCalls: 0 })
   })
 
-  it('stops the production seam with zero imports, registrations and streams when the deadline wins during the Bedrock resolver await', async () => {
-    const observation = {
-      observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
-      bedrockConstructor: BedrockRuntimeClient,
-    } as unknown as InstalledTransportObservation
-    let loadRuntimeCalls = 0
-    let deadlineFired = true
-
-    const loadRuntime = async (): Promise<HostPiRuntime | null> => {
-      loadRuntimeCalls += 1
-      loadRuntimeCalls += 1
-      return deadlineFired ? null : {
-        bindings: {
-          getModels: () => [{ id: 'good-model', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }],
-          getGitHubCopilotBaseUrl: () => 'https://api.example.com/',
-          bedrockProviderModule: { marker: 'bedrock-module' },
-          setBedrockProviderModule: () => { registrationCount += 1; events.push('registered') },
-          streamSimple: () => { streamCount += 1; events.push('stream-started'); return (async function* generate() { yield 'event' })() },
-        },
-        events,
-        registrationCount,
-        streamCount,
-      }
+  it('applies the full deadline oracle matrix across resolver, imports and start probes', async () => {
+    const inResolver = oracleHarness({ deadlineAfterProbe: 'route:after-await' })
+    console.log('DEBUG-trace-before:', JSON.stringify(inResolver.counters.probeTrace))
+    const bedrockContext = inResolver.phaseContext({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })
+    expect(await resolveHostPiRoute(bedrockContext)).toEqual({ ok: false, failure: 'deadline_exceeded', stopped: true })
+    expect(inResolver.counters.probeTrace).toEqual(['route:after-await'])
+    expect(inResolver.counters.importStarted).toEqual({ piAi: 0, bedrock: 0, oauth: 0 })
+    expect(inResolver.counters.modelConstructionCalls).toBe(0)
+    expect(inResolver.counters.registrationCalls).toBe(0)
+    expect(inResolver.counters.streamCalls).toBe(0)
+    expect(inResolver.counters.transportCalls).toBe(0)
+    const inResolverMismatch = oracleHarness({ deadlineAfterProbe: 'route:after-await' })
+    const mismatchContext = inResolverMismatch.phaseContext({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-west-2.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })
+    expect(await resolveHostPiRoute(mismatchContext)).toEqual({ ok: false, failure: 'deadline_exceeded', stopped: true })
+    expect(inResolverMismatch.counters.importStarted).toEqual({ piAi: 0, bedrock: 0, oauth: 0 })
+    const beforeFirst = oracleHarness({ deadlineAfterProbe: 'import:piAi:before' })
+    expect(await resolveHostPiRoute(beforeFirst.phaseContext())).toEqual({ ok: true })
+    expect(await loadHostPiRuntime(beforeFirst.importers, beforeFirst.phaseContext())).toEqual({ ok: false, failure: 'deadline_exceeded', stopped: true })
+    expect(beforeFirst.counters.importStarted).toEqual({ piAi: 0, bedrock: 0, oauth: 0 })
+    expect(beforeFirst.counters.importSettled).toEqual({ piAi: 0, bedrock: 0, oauth: 0 })
+    expect(beforeFirst.counters.modelConstructionCalls).toBe(0)
+    for (const stage of ['piAi', 'bedrock', 'oauth'] as const) {
+      // The oauth import only dispatches for the GitHub Copilot route — use its request shape.
+      const mid = oracleHarness({ deadlineInsideImport: stage })
+      const midContext = mid.phaseContext(stage === 'oauth' ? { route: { kind: 'catalog', provider: 'github-copilot', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: { type: 'oauth_access', value: 'token' } } : undefined)
+      const prepared = await loadHostPiRuntime(mid.importers, midContext)
+      expect(prepared.ok).toBe(false)
+      if (!prepared.ok) expect(prepared.stopped).toBe(true)
+      expect(mid.counters.importStarted[stage]).toBe(1)
+      expect(mid.counters.importSettled[stage]).toBe(1)
+      expect(mid.counters.modelConstructionCalls).toBe(0)
+      expect(mid.counters.registrationCalls).toBe(0)
+      expect(mid.counters.streamCalls).toBe(0)
+      expect(mid.counters.transportCalls).toBe(0)
     }
-    const events: string[] = []
-    let registrationCount = 0
-    let streamCount = 0
-    // Deadline already won when the resolver await settles: everything downstream stays at zero.
-    const context: HostPiStreamContext = {
-      request: mustValidate(request({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })),
-      credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } as ValidatedHostRequest['credential'],
-      observation,
-      systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: undefined,
-      signal: new AbortController().signal, timeoutRemainingMs: 1000,
-      shouldStop: () => deadlineFired,
+    for (const stage of ['start:before-model', 'start:before-register', 'start:before-stream'] as const) {
+      const atStart = oracleHarness({ deadlineAfterProbe: stage })
+      expect(await resolveHostPiRoute(atStart.phaseContext())).toEqual({ ok: true })
+      const runtimePrepared = await loadHostPiRuntime(atStart.importers, atStart.phaseContext())
+      expect(runtimePrepared.ok).toBe(true)
+      const startOutcome = startHostPiStream((runtimePrepared as { ok: true; runtime: HostPiRuntime }).runtime, atStart.streamInputs())
+      expect(startOutcome.ok).toBe(false)
+      if (!startOutcome.ok) expect(startOutcome.stopped).toBe(true)
+      const runtimeEvents = (runtimePrepared as { ok: true; runtime: HostPiRuntime }).runtime.events
+      atStart.finalizeCounters(runtimeEvents)
+      const modelBuilt = runtimeEvents.filter((event) => event === 'model-constructed').length
+      const registered = runtimeEvents.filter((event) => event === 'registered').length
+      if (stage === 'start:before-model') { expect(modelBuilt).toBe(0); expect(registered).toBe(0) }
+      if (stage === 'start:before-register') { expect(modelBuilt).toBe(1); expect(registered).toBe(0) }
+      if (stage === 'start:before-stream') { expect(modelBuilt).toBe(1); expect(registered).toBe(1) }
+      void stage
+      expect(atStart.counters.streamCalls).toBe(0)
+      expect(atStart.counters.transportCalls).toBe(0)
     }
-    const started = await startHostPiStream(loadRuntime, context)
-    expect(started.ok).toBe(false)
-    if (!started.ok) expect(started.stopped).toBe(true)
-    expect(loadRuntimeCalls).toBe(0)
-    expect(registrationCount).toBe(0)
-    expect(streamCount).toBe(0)
-    expect(events).toEqual([])
-    // A deadline that wins only after the resolver still stops the model/registration/stream chain.
-    deadlineFired = false
-    const lateContext: HostPiStreamContext = { ...context, shouldStop: () => deadlineFired || loadRuntimeCalls >= 1 }
-    const lateStarted = await startHostPiStream(loadRuntime, lateContext)
-    expect(lateStarted.ok).toBe(false)
-    if (!lateStarted.ok) expect(lateStarted.stopped).toBe(true)
-    expect(registrationCount).toBe(0)
-    expect(streamCount).toBe(0)
-    expect(events).toEqual([])
   })
 
-  it('runs the production registration seam: legal routes construct the model, register once and stream once', async () => {
-    const observation = {
-      observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
-      bedrockConstructor: BedrockRuntimeClient,
-    } as unknown as InstalledTransportObservation
-    const makeRuntime = () => {
-      const state = { events: [] as string[], registrationCount: 0, streamCount: 0, capturedModels: [] as Array<Record<string, unknown>>, capturedOptions: [] as Array<Record<string, unknown>> }
-      const runtime: HostPiRuntime = {
-        bindings: {
-          getModels: (provider: string) => {
-            state.events.push(`getModels:${provider}`)
-            return [{ id: 'good-model', baseUrl: 'https://api.example.com/' }]
-          },
-          getGitHubCopilotBaseUrl: () => 'https://api.example.com/',
-          bedrockProviderModule: { marker: 'bedrock-module' },
-          setBedrockProviderModule: (module: unknown) => {
-            // The seam owns the events array and the counters; this spy only captures the module.
-            state.registrationCount += 1
-            expect(module).toBe(runtime.bindings.bedrockProviderModule)
-          },
-          streamSimple: (model: unknown, streamContext: unknown, options: Record<string, unknown>) => {
-            state.capturedModels.push(model as Record<string, unknown>)
-            state.capturedOptions.push(options)
-            return (async function* generate() { yield 'event' })()
-          },
-        },
-        events: state.events,
-        registrationCount: state.registrationCount,
-        streamCount: state.streamCount,
-      }
-      return { runtime, state }
-    }
-    const apiKey = { type: 'api_key', value: 'test-key' }
-    // Legal custom route: model-constructed -> registered -> stream-started, each exactly once.
-    const custom = makeRuntime()
-    const customStart = await startHostPiStream(async () => custom.runtime, {
-      request: mustValidate(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' }, model: 'custom-model', credential: apiKey })),
-      credential: apiKey as ValidatedHostRequest['credential'],
-      observation,
-      systemPrompt: 'sys', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
-      signal: new AbortController().signal, timeoutRemainingMs: 1000,
-      shouldStop: () => false,
-    })
-    expect(customStart.ok).toBe(true)
-    expect(custom.state.events).toEqual(['model-constructed', 'registered', 'stream-started'])
-    expect(custom.runtime.registrationCount).toBe(1)
-    expect(custom.runtime.streamCount).toBe(1)
-    expect(custom.state.capturedModels[0]).toMatchObject({ id: 'custom-model', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' })
-    expect(custom.state.capturedOptions[0]).toMatchObject({ apiKey: 'test-key', maxTokens: 64, maxRetries: 0 })
-    // Legal catalog route: same single registration and single stream start.
-    const catalog = makeRuntime()
-    const catalogStart = await startHostPiStream(async () => catalog.runtime, {
-      request: mustValidate(request({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: apiKey })),
-      credential: apiKey as ValidatedHostRequest['credential'],
-      observation,
-      systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
-      signal: new AbortController().signal, timeoutRemainingMs: 1000,
-      shouldStop: () => false,
-    })
-    expect(catalogStart.ok).toBe(true)
-    expect(catalog.state.events).toEqual(['getModels:anthropic', 'model-constructed', 'registered', 'stream-started'])
-    expect(catalog.runtime.registrationCount).toBe(1)
-    expect(catalog.runtime.streamCount).toBe(1)
-    expect(catalog.state.capturedModels[0]).toMatchObject({ id: 'good-model', baseUrl: 'https://api.example.com/' })
-    // Legal Bedrock route: real zero-I/O SDK endpoint resolution matches the anchor, registers once.
-    const bedrock = makeRuntime()
-    const bedrockStart = await startHostPiStream(async () => bedrock.runtime, {
-      request: mustValidate(request({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })),
-      credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } as ValidatedHostRequest['credential'],
-      observation,
-      systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: undefined,
-      signal: new AbortController().signal, timeoutRemainingMs: 1000,
-      shouldStop: () => false,
-    })
-    expect(bedrockStart.ok).toBe(true)
-    expect(bedrock.state.events).toEqual(['getModels:amazon-bedrock', 'model-constructed', 'registered', 'stream-started'])
-    expect(bedrock.runtime.registrationCount).toBe(1)
-    expect(bedrock.runtime.streamCount).toBe(1)
+  it('runs the production phases: legal custom route stays side-effect exact', async () => {
+    const custom = oracleHarness()
+    const customContext = custom.streamInputs()
+    customContext.request = mustValidate(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' }, model: 'custom-model', credential: apiKey }))
+    expect(await resolveHostPiRoute(customContext)).toEqual({ ok: true })
+    const runtimePreparation = await loadHostPiRuntime(custom.importers, customContext)
+    expect(runtimePreparation.ok).toBe(true)
+    const started = startHostPiStream((runtimePreparation as { ok: true; runtime: HostPiRuntime }).runtime, customContext)
+    expect(started.ok).toBe(true)
+    if (started.ok) expect(started.expectedModel).toBe('custom-model')
+    custom.finalizeCounters((runtimePreparation as { ok: true; runtime: HostPiRuntime }).runtime.events)
+    expect(custom.counters.modelConstructionCalls).toBe(1)
+    expect(custom.counters.registrationCalls).toBe(1)
+    expect(custom.counters.streamCalls).toBe(1)
+    expect(custom.counters.capturedModels[0]).toMatchObject({ id: 'custom-model', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' })
   })
 
   it('keeps ambient credential canaries out of stdout, stderr, and the wire authorization', async () => {
