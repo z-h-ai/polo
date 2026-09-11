@@ -480,6 +480,58 @@ describe('host worker stream meter unit fixtures', () => {
     expect(wide.claims).toEqual(['result_too_large'])
   })
 
+  it('flushes a pending high surrogate as a three-byte replacement at absolute and terminal reconciliation', () => {
+    const viaTerminal = trackerHarness()
+    const thinking = 'a'.repeat(524_286) + '\uD83D'
+    viaTerminal.tracker.onEvent(viaTerminal.thinkDelta(0, thinking))
+    viaTerminal.tracker.onEvent(viaTerminal.delta(1, 'ab'))
+    expect(viaTerminal.claims).toEqual([])
+    const joined = assistantMessage([{ type: 'thinking', thinking }, { type: 'text', text: 'ab' }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    viaTerminal.tracker.onEvent(viaTerminal.done('stop', joined))
+    expect(viaTerminal.claims).toEqual(['result_too_large'])
+    expect(viaTerminal.finish()).toMatchObject({ kind: 'failure', failure: 'result_too_large' })
+    const viaAbsolute = trackerHarness()
+    const held = 'x'.repeat(524_287) + '\uD83D'
+    viaAbsolute.tracker.onEvent(viaAbsolute.delta(0, held))
+    expect(viaAbsolute.claims).toEqual([])
+    viaAbsolute.tracker.onEvent(viaAbsolute.done('stop', finalMessage(held)))
+    expect(viaAbsolute.claims).toEqual(['result_too_large'])
+    const orphanFlush = trackerHarness()
+    const orphan = 'y'.repeat(524_286) + '\uD83D'
+    orphanFlush.tracker.onEvent(orphanFlush.thinkDelta(0, orphan))
+    orphanFlush.tracker.onEvent(orphanFlush.delta(1, 'ab'))
+    expect(orphanFlush.claims).toEqual([])
+    expect(orphanFlush.finish()).toMatchObject({ kind: 'failure', failure: 'result_too_large' })
+  })
+
+  it('charges the shared node budget for message roots, content arrays, known blocks, and canonical strings', () => {
+    const known = trackerHarness()
+    const blocks = Array.from({ length: 9000 }, (_, i) => ({ type: 'text', text: `t${i}` }))
+    const message = assistantMessage(blocks, { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    known.tracker.onEvent(known.done('stop', message))
+    expect(known.claims).toEqual(['result_too_large'])
+    const sparse = trackerHarness()
+    const fewBlocks = assistantMessage(Array.from({ length: 100 }, (_, i) => ({ type: 'text', text: `t${i}` })), { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    sparse.tracker.onEvent(sparse.done('stop', fewBlocks))
+    expect(sparse.claims).toEqual([])
+    expect(sparse.finish()).toMatchObject({ kind: 'release', status: 'completed', text: expect.any(String) })
+  })
+
+  it('meters a malformed non-array message.content string and classifies over-limit as result_too_large', () => {
+    const h = trackerHarness()
+    const message = assistantMessage([{ type: 'text', text: 'unused' }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    ;(message as { content: unknown }).content = 'z'.repeat(TEXT_LIMIT + 1)
+    h.tracker.onEvent(h.done('stop', message))
+    expect(h.claims).toEqual(['result_too_large'])
+    expect(h.finish()).toMatchObject({ kind: 'failure', failure: 'result_too_large' })
+    const small = trackerHarness()
+    const smallMessage = assistantMessage([], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    ;(smallMessage as { content: unknown }).content = 'just a string'
+    small.tracker.onEvent(small.done('stop', smallMessage))
+    expect(small.claims).toEqual([])
+    expect(small.finish()).toMatchObject({ kind: 'failure', failure: 'empty_text' })
+  })
+
   it('rejects reportedModel drift against the sent clone id', () => {
     const h = trackerHarness()
     h.tracker.onEvent(h.done('stop', finalMessage('hi', { responseModel: 'other' })))

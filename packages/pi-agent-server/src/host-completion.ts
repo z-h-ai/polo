@@ -80,7 +80,9 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     const [policy, streamModule] = await Promise.all([import('./host-completion-policy.ts'), import('./host-completion-stream.ts')])
     if (settled) return
     installed = policy.installTransportObservation(new URL(request.transportHref))
-    if (isBedrock && credential.type === 'iam' && await resolveBedrockEndpointHref(installed.bedrockConstructor, credential) !== request.transportHref) return failWith('invalid_worker_message')
+    const bedrockEndpoint = isBedrock && credential.type === 'iam' ? await resolveBedrockEndpointHref(installed.bedrockConstructor, credential) : null
+    if (settled) return
+    if (isBedrock && credential.type === 'iam' && bedrockEndpoint !== request.transportHref) return failWith('invalid_worker_message')
     const [piAi, bedrockProviderModule, oauth] = await Promise.all([import('@mariozechner/pi-ai'), import('@mariozechner/pi-ai/bedrock-provider'),
       request.routeKind === 'catalog' && request.provider === 'github-copilot' ? import('@mariozechner/pi-ai/oauth') : Promise.resolve(null)])
     if (settled) return

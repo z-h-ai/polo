@@ -4,9 +4,10 @@ import { TEXT_LIMIT, type HostFailureKind, type HostResultUsage } from './host-c
 export type StreamVerdict = { kind: 'release'; status: 'completed' | 'partial'; text: string; usage: HostResultUsage }
   | { kind: 'failure'; failure: HostFailureKind; usage?: HostResultUsage }
 interface Slot { canonical: string; bytes: number; base: string }
-function countedBytes(value: string): number {
+type MeterBudget = { nodes: number; dead: boolean }
+function countedBytes(value: string, pending: boolean): number {
   const last = value.charCodeAt(value.length - 1)
-  return last >= 0xD800 && last <= 0xDBFF ? Buffer.byteLength(value.slice(0, -1), 'utf8') : Buffer.byteLength(value, 'utf8')
+  return pending && last >= 0xD800 && last <= 0xDBFF ? Buffer.byteLength(value.slice(0, -1), 'utf8') : Buffer.byteLength(value, 'utf8')
 }
 function trieBytes(candidates: string[], cap: number): number {
   const root = new Map<number, unknown>()
@@ -22,12 +23,6 @@ function trieBytes(candidates: string[], cap: number): number {
   return edges
 }
 
-function deepEqual(a: unknown, b: unknown, depth = 0): boolean {
-  if (a === b) return true
-  if (depth > 16 || typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false
-  const keys = Object.keys(a as object); return keys.length === Object.keys(b as object).length && keys.every((key) => key in (b as object) && deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], depth + 1))
-}
-
 export function createHostStreamTracker(opts: {
   expectedModel: string; maxOutputTokens: number; jsonOutput: boolean; bedrock: boolean
   claim: (kind: HostFailureKind) => void
@@ -36,34 +31,42 @@ export function createHostStreamTracker(opts: {
   const lastArgs = new Map<string, unknown>()
   let observed = 0, sawToolContent = false, inconsistent = false
   let terminal: { type: 'done'; reason: string; message: AssistantMessage } | { type: 'error'; aborted: boolean } | null = null
-  const fail = (failure: HostFailureKind, usage?: HostResultUsage): StreamVerdict => ({ kind: 'failure', failure, ...(usage ? { usage } : {}) })
-  const classified = (observation: Readonly<TransportObservation>): HostFailureKind => classifyTransportFailure(observation, { deadlineExpired: false, providerFailed: true }) ?? 'provider_error_terminal'
+  const fail = (failure: HostFailureKind, usage?: HostResultUsage): StreamVerdict => ({ kind: 'failure', failure, ...(usage ? { usage } : {}) }); const classified = (observation: Readonly<TransportObservation>): HostFailureKind => classifyTransportFailure(observation, { deadlineExpired: false, providerFailed: true }) ?? 'provider_error_terminal'
   const CANON: Record<string, Array<[string, string]>> = { text: [['text', 'text'], ['textSignature', 'textsig']], thinking: [['thinking', 'think'], ['thinkingSignature', 'thinksig']], toolCall: [['id', 'toolid'], ['name', 'toolname'], ['thoughtSignature', 'toolsig'], ['arguments', 'toolargs']] }
   const MESSAGE_IDENTITY = new Set(['content', 'usage', 'stopReason', 'timestamp', 'api', 'provider', 'model', 'responseModel', 'responseId', 'role'])
-  function walkAny(value: unknown, key: string, budget: { nodes: number }, add: (key: string, value: string) => void): void {
-    if (++budget.nodes > 8192 || key.split('.').length > 16) { observed = TEXT_LIMIT + 1; return }
+  const bump = (budget: MeterBudget): boolean => { if (budget.dead || ++budget.nodes > 8192) { budget.dead = true; observed = TEXT_LIMIT + 1; return false } return true }
+  function deepEqual(a: unknown, b: unknown, budget: MeterBudget, depth = 0): boolean {
+    if (budget.dead || depth > 16 || !bump(budget)) { budget.dead = true; return false }
+    if (a === b) return true; if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false
+    const keys = Object.keys(a as object); return keys.length === Object.keys(b as object).length && keys.every((key) => key in (b as object) && deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], budget, depth + 1))
+  }
+  function walkAny(value: unknown, key: string, budget: MeterBudget, add: (key: string, value: string) => void): void {
+    if (budget.dead || key.split('.').length > 16 || !bump(budget)) { budget.dead = true; observed = TEXT_LIMIT + 1; return }
     if (value !== null && typeof value === 'object') { for (const [k, item] of Object.entries(value as Record<string, unknown>)) walkAny(item, `${key}.${k}`, budget, add) }
     else if (typeof value === 'string' && value.length > 0) add(key, value)
   }
-  function meterBlock(block: Record<string, any>, index: number, add: (key: string, value: string) => void, toolKeys: string[], budget: { nodes: number }): void {
+  function meterBlock(block: Record<string, any>, index: number, add: (key: string, value: string) => void, toolKeys: string[], budget: MeterBudget): void {
+    if (budget.dead || !bump(budget)) return
     const can = CANON[String(block.type)]
-    for (const [field, slot] of can ?? []) add(`${index}|${slot}`, block[field])
-    for (const [key, value] of Object.entries(block)) if (key !== 'type' && !can?.some(([field]) => field === key)) walkAny(value, can ? `${index}|x:${key}` : `${index}|u:${key}`, budget, add)
+    for (const [field, slot] of can ?? []) { if (!bump(budget)) return; add(`${index}|${slot}`, block[field]) }
+    for (const [key, value] of Object.entries(block)) if (!budget.dead && key !== 'type' && !can?.some(([field]) => field === key)) walkAny(value, can ? `${index}|x:${key}` : `${index}|u:${key}`, budget, add)
     if (can && block.type === 'toolCall') { sawToolContent = true; const key = `${index}|tool`; lastArgs.set(`${key}args`, block.arguments ?? null); toolKeys.push(`${key}raw`); walkAny(block.arguments ?? null, `${key}tree`, budget, add) }
   }
-  function meterMessage(message: AssistantMessage | undefined, add: (key: string, value: string) => void, toolKeys: string[], budget: { nodes: number }): void {
-    const blocks = (message as { content?: unknown } | undefined)?.content
-    if (Array.isArray(blocks)) for (let index = 0; index < blocks.length; index++) meterBlock(blocks[index] as Record<string, any>, index, add, toolKeys, budget)
-    for (const [key, value] of Object.entries(message ?? {})) if (!MESSAGE_IDENTITY.has(key)) walkAny(value, `m:${key}`, budget, add)
+  function meterMessage(message: AssistantMessage | undefined, add: (key: string, value: string) => void, toolKeys: string[], budget: MeterBudget): void {
+    if (budget.dead || !bump(budget)) return
+    const content = (message as { content?: unknown } | undefined)?.content
+    if (Array.isArray(content)) for (let index = 0; index < content.length; index++) meterBlock(content[index] as Record<string, any>, index, add, toolKeys, budget)
+    else walkAny(content, 'm:content', budget, add)
+    for (const [key, value] of Object.entries(message ?? {})) if (!budget.dead && !MESSAGE_IDENTITY.has(key)) walkAny(value, `m:${key}`, budget, add)
   }
   function meterEvent(event: AssistantMessageEvent): void {
-    const batch = new Map<string, string[]>(); const toolKeys: string[] = []; const budget = { nodes: 0 }
+    const batch = new Map<string, string[]>(); const toolKeys: string[] = []; const budget: MeterBudget = { nodes: 0, dead: false }; const appended = new Set<string>()
     const add = (key: string, value: string): void => { if (typeof value === 'string' && value.length > 0) batch.set(key, [...(batch.get(key) ?? []), value]) }
     const append = (key: string, delta: string): void => {
       const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }
       slot.base += delta
       slots.set(key, slot)
-      add(key, slot.base)
+      add(key, slot.base); appended.add(key)
     }
     if (event.type === 'text_delta' || event.type === 'thinking_delta') append(event.type === 'text_delta' ? `${event.contentIndex}|text` : `${event.contentIndex}|think`, event.delta)
     else if (event.type === 'text_end' || event.type === 'thinking_end') add(event.type === 'text_end' ? `${event.contentIndex}|text` : `${event.contentIndex}|think`, event.content)
@@ -77,17 +80,18 @@ export function createHostStreamTracker(opts: {
       const unique = [...new Set([slot.canonical, ...candidates])]
       const longest = unique.reduce((a, b) => (b.length > a.length ? b : a))
       const forked = !unique.every((candidate) => candidate === longest || longest.startsWith(candidate))
-      const next = forked ? trieBytes(unique, TEXT_LIMIT) : countedBytes(longest)
+      const next = forked ? trieBytes(unique, TEXT_LIMIT) : countedBytes(longest, appended.has(key))
       observed += next - slot.bytes
       slots.set(key, { canonical: forked ? slot.canonical : longest, bytes: next, base: slot.base })
       if (forked) inconsistent = true
     }
     for (const key of toolKeys) {
+      if (budget.dead) break
       const rawSlot = slots.get(key)
       if (!rawSlot?.canonical) continue
       let parsed: unknown
       try { parsed = JSON.parse(rawSlot.canonical) } catch { continue }
-      const matched = deepEqual(parsed, lastArgs.get(key.replace('raw', 'args')))
+      const matched = deepEqual(parsed, lastArgs.get(key.replace('raw', 'args')), budget)
       let treeBytes = 0
       for (const [path, slot] of slots) if (path.startsWith(key.replace('raw', 'tree'))) { treeBytes += slot.bytes; if (matched) slot.bytes = 0 }
       if (matched) { const group = Math.max(rawSlot.bytes, treeBytes); observed -= rawSlot.bytes + treeBytes - group; rawSlot.bytes = group } else inconsistent = true
@@ -104,12 +108,14 @@ export function createHostStreamTracker(opts: {
   }
   function finish(observation: Readonly<TransportObservation>, deadlineExpired: boolean): StreamVerdict {
     if (deadlineExpired) return fail('deadline_exceeded')
+    for (const slot of slots.values()) { const full = Buffer.byteLength(slot.canonical, 'utf8'); if (full > slot.bytes) { observed += full - slot.bytes; slot.bytes = full } }
+    if (observed > TEXT_LIMIT) return fail('result_too_large')
     if (!terminal) return fail('unexpected_terminal')
     if (terminal.type === 'error' && terminal.aborted) return fail('provider_aborted')
     if (terminal.type === 'error' || observation.attempts !== 1) return fail(classified(observation))
     if (terminal.reason !== 'stop' && terminal.reason !== 'length') return fail('unexpected_terminal')
     const message = terminal.message
-    const text = (message.content as Array<Record<string, any>>).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('')
+    const text = Array.isArray(message.content) ? (message.content as Array<Record<string, any>>).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('') : ''
     if (!text.trim()) return fail('empty_text')
     const raw = message.usage as unknown as Record<string, unknown> | undefined
     const pick = (value: unknown): number => (typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : -1)
