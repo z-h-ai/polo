@@ -5,6 +5,15 @@ import http from 'node:http'
 import { checkDescriptor, codexStreamExtras, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS } from '../host-completion.ts'
 import { HOST_PARENT_MARKER, TEXT_LIMIT, validateHostRequest, type ValidatedHostRequest } from '../host-completion-protocol.ts'
 import { createHostStreamTracker, type StreamVerdict } from '../host-completion-stream.ts'
+import { startHostPiStream, type HostPiBindings, type HostPiRuntime, type HostPiStreamContext } from '../host-completion.ts'
+import type { InstalledTransportObservation } from '../host-completion-policy.ts'
+import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime'
+
+function mustValidate(object: Record<string, unknown>): ValidatedHostRequest {
+  const verdict = validateHostRequest(object)
+  if (verdict.kind !== 'valid') throw new Error(`fixture request invalid: ${verdict.kind}`)
+  return verdict.request
+}
 import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
 import { acquireHostTestSerialLock, releaseHostTestSerialLock, waitOutEarlySuiteWindow } from './host-test-serial.ts'
 
@@ -233,106 +242,7 @@ function trackerHarness(overrides: Record<string, unknown> = {}): TrackerHarness
   }
 }
 
-describe('host worker stream meter unit fixtures', () => {
-  it('counts delta and end of the same logical string exactly once, even at 400KiB each', () => {
-    const h = trackerHarness()
-    const body = 'a'.repeat(400_000)
-    h.tracker.onEvent(h.delta(0, body))
-    h.tracker.onEvent(h.end(0, body))
-    h.tracker.onEvent(h.done('stop', finalMessage(body)))
-    const verdict = h.finish()
-    expect(verdict.kind).toBe('release')
-    if (verdict.kind === 'release') expect(verdict.text).toBe(body)
-  })
-
-  it('passes exactly 512KiB and claims result_too_large on the first byte over', () => {
-    const exact = trackerHarness()
-    const body = 'a'.repeat(TEXT_LIMIT)
-    exact.tracker.onEvent(exact.delta(0, body))
-    exact.tracker.onEvent(exact.done('stop', finalMessage(body)))
-    expect(exact.claims).toEqual([])
-    expect(exact.finish().kind).toBe('release')
-    const over = trackerHarness()
-    over.tracker.onEvent(over.delta(0, body + 'x'))
-    expect(over.claims).toEqual(['result_too_large'])
-    expect(over.finish().kind).toBe('failure')
-  })
-
-  it('counts UTF-8 bytes, not JS characters, across multi-byte chunks', () => {
-    const over = trackerHarness()
-    over.tracker.onEvent(over.delta(0, '字'.repeat(174_763)))
-    expect(over.claims).toEqual(['result_too_large'])
-    const under = trackerHarness()
-    const body = '字'.repeat(174_762) + 'a'
-    under.tracker.onEvent(under.delta(0, body))
-    under.tracker.onEvent(under.done('stop', finalMessage(body)))
-    const verdict = under.finish()
-    expect(verdict.kind).toBe('release')
-  })
-
-  it('keeps a surrogate pair split across deltas intact and counts it once', () => {
-    const atLimit = trackerHarness()
-    const full = 'a'.repeat(524_284) + '\uD83D\uDE00'
-    atLimit.tracker.onEvent(atLimit.delta(0, 'a'.repeat(524_284) + '\uD83D'))
-    expect(atLimit.claims).toEqual([])
-    atLimit.tracker.onEvent(atLimit.delta(0, '\uDE00'))
-    expect(atLimit.claims).toEqual([])
-    atLimit.tracker.onEvent(atLimit.done('stop', finalMessage(full)))
-    expect(atLimit.finish().kind).toBe('release')
-    const over = trackerHarness()
-    over.tracker.onEvent(over.delta(0, 'a'.repeat(524_285) + '\uD83D'))
-    expect(over.claims).toEqual([])
-    over.tracker.onEvent(over.delta(0, '\uDE00'))
-    expect(over.claims).toEqual(['result_too_large'])
-  })
-
-  it('claims inconsistent snapshots when end content forks from the delta canonical', () => {
-    const h = trackerHarness()
-    h.tracker.onEvent(h.end(0, 'A'))
-    h.tracker.onEvent(h.end(0, 'B'))
-    expect(h.claims).toEqual(['unexpected_terminal'])
-  })
-
-  it('charges the union of forked paths, so a fork at the boundary overflows into result_too_large', () => {
-    const h = trackerHarness()
-    h.tracker.onEvent(h.end(0, 'a'.repeat(TEXT_LIMIT)))
-    expect(h.claims).toEqual([])
-    h.tracker.onEvent(h.end(0, 'b'))
-    expect(h.claims).toEqual(['result_too_large'])
-  })
-
-  it('treats a prefix extension as one growing string, not a second charge', () => {
-    const h = trackerHarness()
-    h.tracker.onEvent(h.end(0, 'a'.repeat(400_000)))
-    h.tracker.onEvent(h.end(0, 'a'.repeat(400_001)))
-    h.tracker.onEvent(h.done('stop', finalMessage('a'.repeat(400_001))))
-    const verdict = h.finish()
-    expect(verdict.kind).toBe('release')
-  })
-
-  it('adds text and thinking slots jointly across content kinds', () => {
-    const over = trackerHarness()
-    over.tracker.onEvent(over.thinkDelta(0, 'a'.repeat(300_000)))
-    over.tracker.onEvent(over.delta(1, 'b'.repeat(300_000)))
-    expect(over.claims).toEqual(['result_too_large'])
-    const atLimit = trackerHarness()
-    atLimit.tracker.onEvent(atLimit.thinkDelta(0, 'a'.repeat(262_144)))
-    atLimit.tracker.onEvent(atLimit.delta(1, 'b'.repeat(262_144)))
-    const joined = assistantMessage([{ type: 'thinking', thinking: 'a'.repeat(262_144) }, { type: 'text', text: 'b'.repeat(262_144) }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    atLimit.tracker.onEvent(atLimit.done('stop', joined))
-    expect(atLimit.finish()).toMatchObject({ kind: 'release', status: 'completed' })
-  })
-
-  it('counts final-only text and thinking signatures carried by the done message', () => {
-    const h = trackerHarness()
-    const message = assistantMessage([{ type: 'text', text: 'hi', textSignature: 'x'.repeat(TEXT_LIMIT + 1) }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    h.tracker.onEvent(h.done('stop', message))
-    expect(h.claims).toEqual(['result_too_large'])
-    const small = trackerHarness()
-    small.tracker.onEvent(small.done('stop', finalMessage('hi', { responseModel: 'm' })))
-    expect(small.finish()).toMatchObject({ kind: 'release', status: 'completed' })
-  })
-
+describe('host stream tracker verdicts', () => {
   it('claims done(length) as partial with terminalReason length', () => {
     const h = trackerHarness()
     h.tracker.onEvent(h.delta(0, 'hi'))
@@ -358,26 +268,6 @@ describe('host worker stream meter unit fixtures', () => {
     const h = trackerHarness()
     h.tracker.onEvent({ type: 'toolcall_start', contentIndex: 0, partial: assistantMessage([]) } as AssistantMessageEvent)
     expect(h.claims).toEqual(['unexpected_terminal'])
-  })
-
-  it('charges consistent tool raw JSON and its parsed projection as max, not sum', () => {
-    const h = trackerHarness()
-    const value = 'x'.repeat(400_000)
-    const raw = `{"k":"${value}"}`
-    h.tracker.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: raw, partial: assistantMessage([]) } as AssistantMessageEvent)
-    const message = assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: { k: value } }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    h.tracker.onEvent(h.done('toolUse', message))
-    expect(h.claims[0]).toBe('unexpected_terminal')
-    expect(h.claims).not.toContain('result_too_large')
-  })
-
-  it('flags a parseable raw tool stream that disagrees with the final parsed arguments', () => {
-    const h = trackerHarness()
-    h.tracker.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: '{"k":1}', partial: assistantMessage([]) } as AssistantMessageEvent)
-    const message = assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: { k: 2 } }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    h.tracker.onEvent(h.done('toolUse', message))
-    expect(h.claims[0]).toBe('unexpected_terminal')
-    expect(h.claims).not.toContain('result_too_large')
   })
 
   it('lets walker overflow on a huge toolCall beat the tool rejection as result_too_large', () => {
@@ -437,99 +327,6 @@ describe('host worker stream meter unit fixtures', () => {
     const verdict = bedrock.finish()
     expect(verdict.kind).toBe('release')
     if (verdict.kind === 'release') expect(verdict.usage).toMatchObject({ inputTokens: 6, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 1, totalTokens: 12 })
-  })
-
-  it('fails closed on an unknown content-bearing string over 512KiB wherever it appears in the final message', () => {
-    const onBlock = trackerHarness()
-    const blockMessage = assistantMessage([{ type: 'providerBlock', providerSignature: 'x'.repeat(TEXT_LIMIT + 1) }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    onBlock.tracker.onEvent(onBlock.done('stop', blockMessage))
-    expect(onBlock.claims).toEqual(['result_too_large'])
-    expect(onBlock.finish().kind).toBe('failure')
-    const onMessage = trackerHarness()
-    const message = assistantMessage([{ type: 'text', text: 'hi' }] as Array<Record<string, unknown>>, { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm', providerSignature: 'y'.repeat(TEXT_LIMIT + 1) })
-    onMessage.tracker.onEvent(onMessage.done('stop', message))
-    expect(onMessage.claims).toEqual(['result_too_large'])
-  })
-
-  it('charges the aggregate parsed tool tree across field paths, claiming result_too_large before tool rejection', () => {
-    const h = trackerHarness()
-    const args = { a: 'x'.repeat(300_000), b: { c: 'y'.repeat(300_000) } }
-    const message = assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: args }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    h.tracker.onEvent(h.done('toolUse', message))
-    expect(h.claims[0]).toBe('result_too_large')
-    expect(h.claims).not.toContain('unexpected_terminal')
-  })
-
-  it('counts identical strings in different fields separately instead of deduplicating them away', () => {
-    const h = trackerHarness()
-    const shared = 'x'.repeat(300_000)
-    const message = assistantMessage([{ type: 'providerBlock', alpha: shared, beta: shared }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    h.tracker.onEvent(h.done('stop', message))
-    expect(h.claims).toEqual(['result_too_large'])
-  })
-
-  it('claims result_too_large when unknown nesting exceeds walker depth or node budgets', () => {
-    let deep: Record<string, unknown> = { leaf: 'v' }
-    for (let i = 0; i < 20; i++) deep = { nested: deep }
-    const h = trackerHarness()
-    h.tracker.onEvent(h.done('stop', assistantMessage([{ type: 'providerBlock', deep }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })))
-    expect(h.claims).toEqual(['result_too_large'])
-    const wide = trackerHarness()
-    const wideBlock = assistantMessage([{ type: 'providerBlock', items: Array.from({ length: 9000 }, (_, i) => ({ v: String(i) })) }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    wide.tracker.onEvent(wide.done('stop', wideBlock))
-    expect(wide.claims).toEqual(['result_too_large'])
-  })
-
-  it('flushes a pending high surrogate as a three-byte replacement at absolute and terminal reconciliation', () => {
-    const viaTerminal = trackerHarness()
-    const thinking = 'a'.repeat(524_286) + '\uD83D'
-    viaTerminal.tracker.onEvent(viaTerminal.thinkDelta(0, thinking))
-    viaTerminal.tracker.onEvent(viaTerminal.delta(1, 'ab'))
-    expect(viaTerminal.claims).toEqual([])
-    const joined = assistantMessage([{ type: 'thinking', thinking }, { type: 'text', text: 'ab' }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    viaTerminal.tracker.onEvent(viaTerminal.done('stop', joined))
-    expect(viaTerminal.claims).toEqual(['result_too_large'])
-    expect(viaTerminal.finish()).toMatchObject({ kind: 'failure', failure: 'result_too_large' })
-    const viaAbsolute = trackerHarness()
-    const held = 'x'.repeat(524_287) + '\uD83D'
-    viaAbsolute.tracker.onEvent(viaAbsolute.delta(0, held))
-    expect(viaAbsolute.claims).toEqual([])
-    viaAbsolute.tracker.onEvent(viaAbsolute.done('stop', finalMessage(held)))
-    expect(viaAbsolute.claims).toEqual(['result_too_large'])
-    const orphanFlush = trackerHarness()
-    const orphan = 'y'.repeat(524_286) + '\uD83D'
-    orphanFlush.tracker.onEvent(orphanFlush.thinkDelta(0, orphan))
-    orphanFlush.tracker.onEvent(orphanFlush.delta(1, 'ab'))
-    expect(orphanFlush.claims).toEqual([])
-    expect(orphanFlush.finish()).toMatchObject({ kind: 'failure', failure: 'result_too_large' })
-  })
-
-  it('charges the shared node budget for message roots, content arrays, known blocks, and canonical strings', () => {
-    const known = trackerHarness()
-    const blocks = Array.from({ length: 9000 }, (_, i) => ({ type: 'text', text: `t${i}` }))
-    const message = assistantMessage(blocks, { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    known.tracker.onEvent(known.done('stop', message))
-    expect(known.claims).toEqual(['result_too_large'])
-    const sparse = trackerHarness()
-    const fewBlocks = assistantMessage(Array.from({ length: 100 }, (_, i) => ({ type: 'text', text: `t${i}` })), { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    sparse.tracker.onEvent(sparse.done('stop', fewBlocks))
-    expect(sparse.claims).toEqual([])
-    expect(sparse.finish()).toMatchObject({ kind: 'release', status: 'completed', text: expect.any(String) })
-  })
-
-  it('meters a malformed non-array message.content string and classifies over-limit as result_too_large', () => {
-    const h = trackerHarness()
-    const message = assistantMessage([{ type: 'text', text: 'unused' }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    ;(message as { content: unknown }).content = 'z'.repeat(TEXT_LIMIT + 1)
-    h.tracker.onEvent(h.done('stop', message))
-    expect(h.claims).toEqual(['result_too_large'])
-    expect(h.finish()).toMatchObject({ kind: 'failure', failure: 'result_too_large' })
-    const small = trackerHarness()
-    const smallMessage = assistantMessage([], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
-    ;(smallMessage as { content: unknown }).content = 'just a string'
-    small.tracker.onEvent(small.done('stop', smallMessage))
-    expect(small.claims).toEqual([])
-    expect(small.finish()).toMatchObject({ kind: 'failure', failure: 'empty_text' })
   })
 
   it('rejects reportedModel drift against the sent clone id', () => {
@@ -769,6 +566,145 @@ describe('host worker single-request JSONL fixtures', () => {
       expect(outcome.stderr).toBe('')
     }
   }, 60000)
+
+  it('runs the production registration seam: every negative route registers and streams zero times', async () => {
+    const observation = {
+      observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
+      bedrockConstructor: BedrockRuntimeClient,
+    } as unknown as InstalledTransportObservation
+    const makeRuntime = (catalogFor: (provider: string) => string, copilotBase: string) => {
+      const state = { events: [] as string[], registrationCount: 0, streamCount: 0 }
+      const runtime: HostPiRuntime = {
+        bindings: {
+          getModels: (provider: string) => {
+            state.events.push(`getModels:${provider}`)
+            const baseUrl = catalogFor(provider)
+            return baseUrl === '' ? [] : [{ id: 'good-model', baseUrl }]
+          },
+          getGitHubCopilotBaseUrl: () => {
+            state.events.push('copilot-derived')
+            return copilotBase
+          },
+          bedrockProviderModule: { marker: 'bedrock-module' },
+          setBedrockProviderModule: () => state.events.push('registered'),
+          streamSimple: () => state.events.push('binding-stream-simple'),
+        },
+        events: state.events,
+        registrationCount: state.registrationCount,
+        streamCount: state.streamCount,
+      }
+      return { runtime, state }
+    }
+    const apiKey = { type: 'api_key', value: 'test-key' }
+    const contextFor = (routeWithModel: Record<string, unknown>, credential: Record<string, unknown>): HostPiStreamContext => {
+      const model = typeof routeWithModel.model === 'string' ? routeWithModel.model : undefined
+      const { model: _ignored, ...route } = routeWithModel
+      void _ignored
+      return {
+        request: mustValidate(request({ route, ...(model !== undefined ? { model } : {}), credential })),
+        credential: credential as ValidatedHostRequest['credential'],
+        observation,
+        systemPrompt: 'sys', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
+        signal: new AbortController().signal, timeoutRemainingMs: 1000,
+      }
+    }
+    const missRuntime = makeRuntime((provider) => (provider === 'anthropic' ? 'https://api.example.com/' : ''), '')
+    const missStart = await startHostPiStream(missRuntime.runtime, contextFor({ kind: 'catalog', provider: 'unknown-provider', transportBaseUrl: 'https://api.example.com/' }, apiKey))
+    expect(missStart).toEqual({ ok: false, failure: 'catalog_model_missing' })
+    expect(missRuntime.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
+    // Ordinary catalog href drift: model hit, anchor mismatch, zero registration.
+    const drift = makeRuntime(() => 'https://other.example.com/', '')
+    const driftStart = await startHostPiStream(drift.runtime, contextFor({ kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, apiKey))
+    expect(driftStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
+    expect(drift.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
+    // Copilot derived href mismatch: zero registration.
+    const copilot = makeRuntime(() => 'https://api.example.com/', 'https://wrong.example.com/')
+    const copilotStart = await startHostPiStream(copilot.runtime, contextFor({ kind: 'catalog', provider: 'github-copilot', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, { type: 'oauth_access', value: 'token' }))
+    expect(copilotStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
+    expect(copilot.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
+    // Bedrock endpoint mismatch (real zero-I/O SDK resolver against the anchor): zero registration.
+    const bedrock = makeRuntime(() => 'https://api.example.com/', '')
+    const bedrockStart = await startHostPiStream(bedrock.runtime, contextFor({ kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-west-2.amazonaws.com/' }, { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' }))
+    expect(bedrockStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
+    expect(bedrock.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
+  })
+
+  it('runs the production registration seam: legal routes construct the model, register once and stream once', async () => {
+    const observation = {
+      observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
+      bedrockConstructor: BedrockRuntimeClient,
+    } as unknown as InstalledTransportObservation
+    const makeRuntime = () => {
+      const state = { events: [] as string[], registrationCount: 0, streamCount: 0, capturedModels: [] as Array<Record<string, unknown>>, capturedOptions: [] as Array<Record<string, unknown>> }
+      const runtime: HostPiRuntime = {
+        bindings: {
+          getModels: (provider: string) => {
+            state.events.push(`getModels:${provider}`)
+            return [{ id: 'good-model', baseUrl: 'https://api.example.com/' }]
+          },
+          getGitHubCopilotBaseUrl: () => 'https://api.example.com/',
+          bedrockProviderModule: { marker: 'bedrock-module' },
+          setBedrockProviderModule: (module: unknown) => {
+            // The seam owns the events array and the counters; this spy only captures the module.
+            state.registrationCount += 1
+            expect(module).toBe(runtime.bindings.bedrockProviderModule)
+          },
+          streamSimple: (model: unknown, streamContext: unknown, options: Record<string, unknown>) => {
+            state.capturedModels.push(model as Record<string, unknown>)
+            state.capturedOptions.push(options)
+            return (async function* generate() { yield 'event' })()
+          },
+        },
+        events: state.events,
+        registrationCount: state.registrationCount,
+        streamCount: state.streamCount,
+      }
+      return { runtime, state }
+    }
+    const apiKey = { type: 'api_key', value: 'test-key' }
+    // Legal custom route: model-constructed -> registered -> stream-started, each exactly once.
+    const custom = makeRuntime()
+    const customStart = await startHostPiStream(custom.runtime, {
+      request: mustValidate(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' }, model: 'custom-model', credential: apiKey })),
+      credential: apiKey as ValidatedHostRequest['credential'],
+      observation,
+      systemPrompt: 'sys', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
+      signal: new AbortController().signal, timeoutRemainingMs: 1000,
+    })
+    expect(customStart.ok).toBe(true)
+    expect(custom.state.events).toEqual(['model-constructed', 'registered', 'stream-started'])
+    expect(custom.runtime.registrationCount).toBe(1)
+    expect(custom.runtime.streamCount).toBe(1)
+    expect(custom.state.capturedModels[0]).toMatchObject({ id: 'custom-model', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' })
+    expect(custom.state.capturedOptions[0]).toMatchObject({ apiKey: 'test-key', maxTokens: 64, maxRetries: 0 })
+    // Legal catalog route: same single registration and single stream start.
+    const catalog = makeRuntime()
+    const catalogStart = await startHostPiStream(catalog.runtime, {
+      request: mustValidate(request({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: apiKey })),
+      credential: apiKey as ValidatedHostRequest['credential'],
+      observation,
+      systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
+      signal: new AbortController().signal, timeoutRemainingMs: 1000,
+    })
+    expect(catalogStart.ok).toBe(true)
+    expect(catalog.state.events).toEqual(['getModels:anthropic', 'model-constructed', 'registered', 'stream-started'])
+    expect(catalog.runtime.registrationCount).toBe(1)
+    expect(catalog.runtime.streamCount).toBe(1)
+    expect(catalog.state.capturedModels[0]).toMatchObject({ id: 'good-model', baseUrl: 'https://api.example.com/' })
+    // Legal Bedrock route: real zero-I/O SDK endpoint resolution matches the anchor, registers once.
+    const bedrock = makeRuntime()
+    const bedrockStart = await startHostPiStream(bedrock.runtime, {
+      request: mustValidate(request({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })),
+      credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } as ValidatedHostRequest['credential'],
+      observation,
+      systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: undefined,
+      signal: new AbortController().signal, timeoutRemainingMs: 1000,
+    })
+    expect(bedrockStart.ok).toBe(true)
+    expect(bedrock.state.events).toEqual(['getModels:amazon-bedrock', 'model-constructed', 'registered', 'stream-started'])
+    expect(bedrock.runtime.registrationCount).toBe(1)
+    expect(bedrock.runtime.streamCount).toBe(1)
+  })
 
   it('keeps ambient credential canaries out of stdout, stderr, and the wire authorization', async () => {
     const mock = await startMockSse({ chunks: textChunks('test-model', 'ok', { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }) })

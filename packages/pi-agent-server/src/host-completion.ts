@@ -1,5 +1,5 @@
 import { stripPiPrefix, buildCustomEndpointModelDef } from './custom-endpoint-models.ts'
-import { failureResult, serializeHostResult, validateHostRequest, writeHostResultLine, type HostCompletionResultV1, type HostFailureKind, type ValidatedHostRequest } from './host-completion-protocol.ts'
+import { canonicalTransportHref, failureResult, serializeHostResult, validateHostRequest, writeHostResultLine, type HostCompletionResultV1, type HostFailureKind, type HostWorkerCredential, type ValidatedHostRequest } from './host-completion-protocol.ts'
 import { classifyTransportFailure, type InstalledTransportObservation } from './host-completion-policy.ts'
 
 const REQUEST_BYTE_LIMIT = 2_097_152
@@ -24,13 +24,89 @@ export function checkDescriptor(request: ValidatedHostRequest): boolean {
   return credential.type === 'none' && loopback
 }
 async function resolveBedrockEndpointHref(constructor: new (config: any) => BedrockClientLike, credential: { accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string }): Promise<string | null> {
-  let client: BedrockClientLike | null = null; try {
+  let client: BedrockClientLike | null = null
+  try {
     const instance = client = new constructor({ region: credential.region, maxAttempts: 1, useFipsEndpoint: false, useDualstackEndpoint: false, credentials: { accessKeyId: credential.accessKeyId, secretAccessKey: credential.secretAccessKey, ...(credential.sessionToken !== undefined ? { sessionToken: credential.sessionToken } : {}) } })
     const endpointProvider = instance.config.endpointProvider as ((params: { Region: string; UseFIPS: boolean; UseDualStack: boolean }) => { url: { href: string } | string } | PromiseLike<{ url: { href: string } | string }>) | undefined
     if (typeof endpointProvider !== 'function') return null
     const resolved = await endpointProvider({ Region: credential.region, UseFIPS: false, UseDualStack: false })
     return canonicalOf(typeof resolved.url === 'string' ? resolved.url : resolved.url.href)
-  } catch { return null } finally { client?.destroy() }
+  } catch {
+    return null
+  } finally {
+    client?.destroy()
+  }
+}
+// Production-used route/model preparation and Pi registration orchestration (R12 §6.8). Tests
+// import this exact function and inject spy bindings; production wires the sealed pi-ai module
+// functions into the same shape. Fixed order: Bedrock endpoint comparison → exact catalog hit or
+// custom model construction → Copilot/ordinary catalog href comparison → setBedrockProviderModule
+// exactly once → streamSimple exactly once. Every failure before registration leaves
+// registrationCount=0 and streamCount=0.
+export interface HostPiBindings {
+  getModels: (provider: string) => Array<Record<string, any>>
+  getGitHubCopilotBaseUrl: (token: string) => string
+  bedrockProviderModule: unknown
+  setBedrockProviderModule: (module: unknown) => void
+  streamSimple: (model: unknown, context: unknown, options: Record<string, unknown>) => AsyncIterable<unknown>
+}
+export interface HostPiRuntime {
+  bindings: HostPiBindings
+  events: string[]
+  registrationCount: number
+  streamCount: number
+}
+export interface HostPiStreamContext {
+  request: ValidatedHostRequest
+  credential: HostWorkerCredential
+  observation: InstalledTransportObservation
+  systemPrompt: string
+  userPrompt: string
+  maxOutputTokens: number
+  apiKey: string | undefined
+  signal: AbortSignal
+  timeoutRemainingMs: number
+}
+export type HostPiStreamStart = { ok: true; stream: AsyncIterable<unknown> } | { ok: false; failure: HostFailureKind }
+export async function startHostPiStream(runtime: HostPiRuntime, context: HostPiStreamContext): Promise<HostPiStreamStart> {
+  const { request, credential, observation } = context
+  if (request.routeKind === 'catalog' && request.provider === 'amazon-bedrock' && credential.type === 'iam') {
+    const resolvedEndpoint = await resolveBedrockEndpointHref(observation.bedrockConstructor as unknown as new (config: any) => BedrockClientLike, credential)
+    if (resolvedEndpoint !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
+  }
+  let model: Record<string, any>
+  const bareId = stripPiPrefix(request.model)
+  if (request.routeKind === 'custom') {
+    model = { ...buildCustomEndpointModelDef(bareId), id: bareId, name: bareId, provider: request.provider, api: request.api, baseUrl: request.transportHref }
+  } else {
+    const hit = runtime.bindings.getModels(request.provider).find((entry) => entry.id === bareId)
+    if (hit === undefined) return { ok: false, failure: 'catalog_model_missing' }
+    model = { ...hit }
+    if (request.provider === 'github-copilot' && credential.type === 'oauth_access') {
+      const derived = canonicalTransportHref(runtime.bindings.getGitHubCopilotBaseUrl(credential.value))
+      if (derived === null || derived !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
+      model.baseUrl = derived
+    } else if (request.provider !== 'amazon-bedrock') {
+      const canonical = canonicalOf(model.baseUrl)
+      if (canonical === null || canonical !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
+    }
+    if (request.provider === 'minimax-cn') model.id = model.id.replace(/^MiniMax-/, '')
+  }
+  runtime.events.push('model-constructed')
+  runtime.registrationCount += 1
+  runtime.events.push('registered')
+  runtime.bindings.setBedrockProviderModule(runtime.bindings.bedrockProviderModule)
+  const composedSystem = request.responseFormat === 'json_object' ? (context.systemPrompt ? `${context.systemPrompt}\n\n${JSON_OBJECT_SYSTEM_CONSTRAINT}` : JSON_OBJECT_SYSTEM_CONSTRAINT) : context.systemPrompt
+  runtime.streamCount += 1
+  runtime.events.push('stream-started')
+  const stream = runtime.bindings.streamSimple(model, {
+    systemPrompt: composedSystem,
+    messages: [{ role: 'user', content: context.userPrompt, timestamp: Date.now() }],
+  }, {
+    apiKey: context.apiKey, maxTokens: context.maxOutputTokens, maxRetries: 0, signal: context.signal, timeoutMs: context.timeoutRemainingMs,
+    ...(request.routeKind === 'catalog' && request.provider === 'openai-codex' ? codexStreamExtras(context.maxOutputTokens) : {}),
+  })
+  return { ok: true, stream }
 }
 async function readRequestThroughEof(armDeadline: (line: string, firstByteAt: number) => void): Promise<{ ok: true; line: string; firstByteAt: number } | { ok: false; oversize: boolean }> {
   const decoder = new TextDecoder('utf-8', { fatal: true })
@@ -53,15 +129,24 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
   let settlePromise = Promise.resolve(true)
   const settle = (result: HostCompletionResultV1): void => {
     if (settled) return
-    settled = true; if (timer) clearTimeout(timer); controller.abort(); process.stdin.destroy()
+    settled = true
+    if (timer) clearTimeout(timer)
+    controller.abort()
+    process.stdin.destroy()
     settlePromise = writeHostResultLine(serializeHostResult(result)).then((flushed) => { process.exitCode = flushed ? 0 : 1; return flushed })
   }
   const failWith = (kind: HostFailureKind): void => settle(failureResult(activeRequestId, activeModel, kind))
   const crash = (): void => failWith('provider_error_terminal'); process.on('uncaughtException', crash); process.on('unhandledRejection', crash)
   const armDeadline = (line: string, firstByteAt: number): void => {
-    try { const timeout = (JSON.parse(line) as { timeoutMs?: unknown }).timeoutMs
-      if (typeof timeout === 'number' && Number.isInteger(timeout) && timeout >= 100 && timeout <= 600_000) { deadlineAt = firstByteAt + timeout; timer = setTimeout(() => failWith('deadline_exceeded'), Math.max(0, deadlineAt - Date.now())) }
-    } catch { /* framing gate owns the post-EOF failure */ }
+    try {
+      const timeout = (JSON.parse(line) as { timeoutMs?: unknown }).timeoutMs
+      if (typeof timeout === 'number' && Number.isInteger(timeout) && timeout >= 100 && timeout <= 600_000) {
+        deadlineAt = firstByteAt + timeout
+        timer = setTimeout(() => failWith('deadline_exceeded'), Math.max(0, deadlineAt - Date.now()))
+      }
+    } catch {
+      // framing gate owns the post-EOF failure
+    }
   }
   if (argvInvalid) return failWith('invalid_worker_message')
   try {
@@ -71,7 +156,8 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     try { parsed = JSON.parse(read.line) } catch { return failWith('invalid_worker_message') }
     const parsedRequest = validateHostRequest(parsed)
     if (parsedRequest.kind !== 'valid') return failWith(parsedRequest.kind === 'oversize' ? 'result_too_large' : 'invalid_worker_message')
-    const request = parsedRequest.request; activeRequestId = request.requestId; activeModel = request.model
+    const request = parsedRequest.request
+    activeRequestId = request.requestId; activeModel = request.model
     if (settled) return
     const credential = request.credential
     const isBedrock = request.routeKind === 'catalog' && request.provider === 'amazon-bedrock'
@@ -80,37 +166,43 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     const [policy, streamModule] = await Promise.all([import('./host-completion-policy.ts'), import('./host-completion-stream.ts')])
     if (settled) return
     installed = policy.installTransportObservation(new URL(request.transportHref))
-    const bedrockEndpoint = isBedrock && credential.type === 'iam' ? await resolveBedrockEndpointHref(installed.bedrockConstructor, credential) : null
-    if (settled) return
-    if (isBedrock && credential.type === 'iam' && bedrockEndpoint !== request.transportHref) return failWith('invalid_worker_message')
     const [piAi, bedrockProviderModule, oauth] = await Promise.all([import('@mariozechner/pi-ai'), import('@mariozechner/pi-ai/bedrock-provider'),
       request.routeKind === 'catalog' && request.provider === 'github-copilot' ? import('@mariozechner/pi-ai/oauth') : Promise.resolve(null)])
     if (settled) return
-    piAi.setBedrockProviderModule(bedrockProviderModule.bedrockProviderModule)
-    let model: Record<string, any>
-    const bareId = stripPiPrefix(request.model)
-    if (request.routeKind === 'custom') {
-      model = { ...buildCustomEndpointModelDef(bareId), id: bareId, name: bareId, provider: request.provider, api: request.api, baseUrl: request.transportHref }
-    } else {
-      const hit = (piAi.getModels as unknown as (provider: string) => Array<Record<string, any>>)(request.provider).find((entry) => entry.id === bareId)
-      if (!hit) return failWith('catalog_model_missing'); model = { ...hit }
-      const copilotBaseUrl = request.provider === 'github-copilot' && credential.type === 'oauth_access' ? oauth!.getGitHubCopilotBaseUrl(credential.value) : null
-      if (copilotBaseUrl !== null) { if (canonicalOf(copilotBaseUrl) !== request.transportHref) return failWith('invalid_worker_message'); model.baseUrl = copilotBaseUrl } else if (!isBedrock) {
-        const canonical = canonicalOf(model.baseUrl)
-        if (!canonical || canonical !== request.transportHref) return failWith('invalid_worker_message')
-      }
-      if (request.provider === 'minimax-cn') model.id = model.id.replace(/^MiniMax-/, '')
+    const runtime: HostPiRuntime = {
+      bindings: {
+        getModels: (provider: string): Array<Record<string, any>> => (piAi.getModels as unknown as (provider: string) => Array<Record<string, any>>)(provider),
+        getGitHubCopilotBaseUrl: (token: string): string => {
+          if (oauth === null) throw new Error('host pi binding unavailable')
+          return oauth.getGitHubCopilotBaseUrl(token)
+        },
+        bedrockProviderModule: bedrockProviderModule.bedrockProviderModule,
+        setBedrockProviderModule: (module: unknown): void => {
+          piAi.setBedrockProviderModule(module as Parameters<typeof piAi.setBedrockProviderModule>[0])
+        },
+        streamSimple: piAi.streamSimple as unknown as HostPiBindings['streamSimple'],
+      },
+      events: [],
+      registrationCount: 0,
+      streamCount: 0,
     }
-    const composedSystem = request.responseFormat === 'json_object' ? (request.systemPrompt ? `${request.systemPrompt}\n\n${JSON_OBJECT_SYSTEM_CONSTRAINT}` : JSON_OBJECT_SYSTEM_CONSTRAINT) : request.systemPrompt
     const apiKey = credential.type === 'api_key' || credential.type === 'oauth_access' ? credential.value : credential.type === 'none' ? 'not-needed' : undefined
-    const tracker = streamModule.createHostStreamTracker({ expectedModel: model.id, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, claim: (kind) => failWith(kind) })
-    const stream = piAi.streamSimple(model as never, { systemPrompt: composedSystem, messages: [{ role: 'user', content: request.prompt, timestamp: Date.now() }] }, {
-      apiKey, maxTokens: request.maxOutputTokens, maxRetries: 0, signal: controller.signal, timeoutMs: Math.max(1, deadlineAt - Date.now()),
-      ...(request.routeKind === 'catalog' && request.provider === 'openai-codex' ? codexStreamExtras(request.maxOutputTokens) : {}),
+    // The tracker's expected response model must equal the SENT clone id the seam constructs:
+    // bare id, plus one stripped MiniMax- prefix for the minimax-cn catalog route.
+    const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
+    const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, claim: (kind) => failWith(kind) })
+    const started = await startHostPiStream(runtime, {
+      request, credential, observation: installed, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
+      maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,
+      timeoutRemainingMs: Math.max(1, deadlineAt - Date.now()),
     })
+    if (settled) return
+    if (!started.ok) return failWith(started.failure)
     try {
-      for await (const event of stream) { tracker.onEvent(event); if (settled) break }
-    } catch { if (!settled) failWith(installed ? (classifyTransportFailure(installed.observation, { deadlineExpired: false, providerFailed: true }) ?? 'provider_error_terminal') : 'provider_error_terminal') }
+      for await (const event of started.stream as AsyncIterable<import('@mariozechner/pi-ai').AssistantMessageEvent>) { tracker.onEvent(event); if (settled) break }
+    } catch {
+      if (!settled) failWith(installed ? (classifyTransportFailure(installed.observation, { deadlineExpired: false, providerFailed: true }) ?? 'provider_error_terminal') : 'provider_error_terminal')
+    }
     if (!settled) {
       const verdict = tracker.finish(installed.observation, Date.now() >= deadlineAt)
       if (verdict.kind === 'release') settle({ type: 'host_completion_result', version: 1, requestId: request.requestId, model: request.model, status: verdict.status, text: verdict.text, usage: verdict.usage })
