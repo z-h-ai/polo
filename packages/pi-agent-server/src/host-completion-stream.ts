@@ -38,30 +38,26 @@ export function createHostStreamTracker(opts: {
   let terminal: { type: 'done'; reason: string; message: AssistantMessage } | { type: 'error'; aborted: boolean } | null = null
   const fail = (failure: HostFailureKind, usage?: HostResultUsage): StreamVerdict => ({ kind: 'failure', failure, ...(usage ? { usage } : {}) })
   const classified = (observation: Readonly<TransportObservation>): HostFailureKind => classifyTransportFailure(observation, { deadlineExpired: false, providerFailed: true }) ?? 'provider_error_terminal'
-  function projectTree(value: unknown, out: string[], depth: number, counter: { nodes: number }): void {
-    if (depth > 16 || ++counter.nodes > 8192) { observed = TEXT_LIMIT + 1; return }
-    if (value !== null && typeof value === 'object') {
-      const isArray = Array.isArray(value)
-      out.push(isArray ? `array:${value.length}` : 'object')
-      for (const [key, item] of Object.entries(value as Record<string, unknown>)) { if (!isArray) out.push(`key:${key}`); projectTree(item, out, depth + 1, counter) }
-    } else out.push(`${typeof value}:${String(value)}`)
+  const CANON: Record<string, Array<[string, string]>> = { text: [['text', 'text'], ['textSignature', 'textsig']], thinking: [['thinking', 'think'], ['thinkingSignature', 'thinksig']], toolCall: [['id', 'toolid'], ['name', 'toolname'], ['thoughtSignature', 'toolsig'], ['arguments', 'toolargs']] }
+  const MESSAGE_IDENTITY = new Set(['content', 'usage', 'stopReason', 'timestamp', 'api', 'provider', 'model', 'responseModel', 'responseId', 'role'])
+  function walkAny(value: unknown, key: string, budget: { nodes: number }, add: (key: string, value: string) => void): void {
+    if (++budget.nodes > 8192 || key.split('.').length > 16) { observed = TEXT_LIMIT + 1; return }
+    if (value !== null && typeof value === 'object') { for (const [k, item] of Object.entries(value as Record<string, unknown>)) walkAny(item, `${key}.${k}`, budget, add) }
+    else if (typeof value === 'string' && value.length > 0) add(key, value)
   }
-  function walkBlocks(blocks: unknown[], add: (key: string, value: string) => void, toolKeys: string[]): void {
-    (blocks as Array<Record<string, any>>).forEach((block, index) => {
-      if (block.type === 'text') { add(`${index}|text`, block.text); add(`${index}|textsig`, block.textSignature) }
-      else if (block.type === 'thinking') { add(`${index}|think`, block.thinking); add(`${index}|thinksig`, block.thinkingSignature) }
-      else if (block.type === 'toolCall') {
-        sawToolContent = true
-        add(`${index}|toolid`, block.id); add(`${index}|toolname`, block.name); add(`${index}|toolsig`, block.thoughtSignature)
-        const key = `${index}|tool`; lastArgs.set(`${key}args`, block.arguments ?? null); toolKeys.push(`${key}raw`)
-        const projection: string[] = []; projectTree(block.arguments ?? null, projection, 0, { nodes: 0 })
-        projection.forEach((item) => add(`${key}tree`, item))
-      }
-    })
+  function meterBlock(block: Record<string, any>, index: number, add: (key: string, value: string) => void, toolKeys: string[], budget: { nodes: number }): void {
+    const can = CANON[String(block.type)]
+    for (const [field, slot] of can ?? []) add(`${index}|${slot}`, block[field])
+    for (const [key, value] of Object.entries(block)) if (key !== 'type' && !can?.some(([field]) => field === key)) walkAny(value, can ? `${index}|x:${key}` : `${index}|u:${key}`, budget, add)
+    if (can && block.type === 'toolCall') { sawToolContent = true; const key = `${index}|tool`; lastArgs.set(`${key}args`, block.arguments ?? null); toolKeys.push(`${key}raw`); walkAny(block.arguments ?? null, `${key}tree`, budget, add) }
+  }
+  function meterMessage(message: AssistantMessage | undefined, add: (key: string, value: string) => void, toolKeys: string[], budget: { nodes: number }): void {
+    const blocks = (message as { content?: unknown } | undefined)?.content
+    if (Array.isArray(blocks)) for (let index = 0; index < blocks.length; index++) meterBlock(blocks[index] as Record<string, any>, index, add, toolKeys, budget)
+    for (const [key, value] of Object.entries(message ?? {})) if (!MESSAGE_IDENTITY.has(key)) walkAny(value, `m:${key}`, budget, add)
   }
   function meterEvent(event: AssistantMessageEvent): void {
-    const batch = new Map<string, string[]>()
-    const toolKeys: string[] = []
+    const batch = new Map<string, string[]>(); const toolKeys: string[] = []; const budget = { nodes: 0 }
     const add = (key: string, value: string): void => { if (typeof value === 'string' && value.length > 0) batch.set(key, [...(batch.get(key) ?? []), value]) }
     const append = (key: string, delta: string): void => {
       const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }
@@ -72,9 +68,9 @@ export function createHostStreamTracker(opts: {
     if (event.type === 'text_delta' || event.type === 'thinking_delta') append(event.type === 'text_delta' ? `${event.contentIndex}|text` : `${event.contentIndex}|think`, event.delta)
     else if (event.type === 'text_end' || event.type === 'thinking_end') add(event.type === 'text_end' ? `${event.contentIndex}|text` : `${event.contentIndex}|think`, event.content)
     else if (event.type === 'toolcall_delta' || event.type === 'toolcall_start') { if (event.type === 'toolcall_delta') append(`${event.contentIndex}|toolraw`, event.delta); sawToolContent = true }
-    else if (event.type === 'toolcall_end') { walkBlocks([event.toolCall], add, toolKeys); sawToolContent = true }
+    else if (event.type === 'toolcall_end') { meterBlock(event.toolCall as Record<string, any>, event.contentIndex, add, toolKeys, budget); sawToolContent = true }
     const message = event.type === 'done' ? event.message : event.type === 'error' ? event.error : (event as { partial?: AssistantMessage }).partial
-    if (message && Array.isArray(message.content)) walkBlocks(message.content, add, toolKeys)
+    meterMessage(message, add, toolKeys, budget)
     if (event.type === 'done' && event.reason === 'toolUse') sawToolContent = true
     for (const [key, candidates] of batch) {
       const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }
@@ -91,12 +87,10 @@ export function createHostStreamTracker(opts: {
       if (!rawSlot?.canonical) continue
       let parsed: unknown
       try { parsed = JSON.parse(rawSlot.canonical) } catch { continue }
-      const treeSlot = slots.get(key.replace('toolraw', 'tooltree')) ?? { canonical: '', bytes: 0, base: '' }
-      if (deepEqual(parsed, lastArgs.get(key.replace('toolraw', 'toolargs')))) {
-        const group = Math.max(rawSlot.bytes, treeSlot.bytes)
-        observed -= rawSlot.bytes + treeSlot.bytes - group
-        rawSlot.bytes = group; treeSlot.bytes = 0
-      } else inconsistent = true
+      const matched = deepEqual(parsed, lastArgs.get(key.replace('raw', 'args')))
+      let treeBytes = 0
+      for (const [path, slot] of slots) if (path.startsWith(key.replace('raw', 'tree'))) { treeBytes += slot.bytes; if (matched) slot.bytes = 0 }
+      if (matched) { const group = Math.max(rawSlot.bytes, treeBytes); observed -= rawSlot.bytes + treeBytes - group; rawSlot.bytes = group } else inconsistent = true
     }
   }
   function onEvent(event: AssistantMessageEvent): void {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   HOST_ERRORS, HOST_PARENT_MARKER, ID_LIMIT, INVALID_RESULT_LINE, RESULT_TOO_LARGE_LINE, TEXT_LIMIT,
-  canonicalTransportHref, failureResult, serializeHostResult, validateHostRequest,
+  canonicalTransportHref, failureResult, serializeHostResult, unsafeSegments, validateHostRequest,
   type HostCompletionResultV1,
 } from '../host-completion-protocol.ts'
 import { isLoopback } from '../host-completion.ts'
@@ -19,8 +19,9 @@ function baseRequest(overrides: Record<string, unknown> = {}, credential: unknow
 
 describe('host completion protocol validation', () => {
   it('accepts a valid catalog request and canonicalizes route data', () => {
-    const request = validateHostRequest(baseRequest())
-    expect(request).not.toBeNull()
+    const verdict = validateHostRequest(baseRequest())
+    expect(verdict.kind).toBe('valid')
+    const request = verdict.kind === 'valid' ? verdict.request : null
     expect(request!.routeKind).toBe('catalog')
     expect(request!.provider).toBe('anthropic')
     expect(request!.model).toBe('pi/claude-3-5-haiku-20241022')
@@ -29,70 +30,87 @@ describe('host completion protocol validation', () => {
     expect(request!.systemPrompt).toBe('')
   })
 
-  it('rejects marker drift, unknown and additional fields, and wrong shapes', () => {
-    expect(validateHostRequest(baseRequest({ parentValidation: 'sessionless-host-llm-executor.v2' }))).toBeNull()
-    expect(validateHostRequest({ ...baseRequest(), extra: 1 })).toBeNull()
-    expect(validateHostRequest({ ...baseRequest(), type: 'prompt' })).toBeNull()
-    expect(validateHostRequest(baseRequest({ route: { kind: 'direct', baseUrl: 'https://x.com/' } }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ credential: { type: 'api_key', value: 'v', extra: 1 } }))).toBeNull()
-    expect(validateHostRequest('not-an-object')).toBeNull()
-    expect(validateHostRequest(null)).toBeNull()
+  it('rejects marker drift, unknown and additional fields, and wrong shapes as invalid', () => {
+    expect(validateHostRequest(baseRequest({ parentValidation: 'sessionless-host-llm-executor.v2' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest({ ...baseRequest(), extra: 1 })).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest({ ...baseRequest(), type: 'prompt' })).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ route: { kind: 'direct', baseUrl: 'https://x.com/' } }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ credential: { type: 'api_key', value: 'v', extra: 1 } }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest('not-an-object')).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(null)).toEqual({ kind: 'invalid' })
   })
 
-  it('enforces integer ranges for maxOutputTokens and timeoutMs', () => {
-    expect(validateHostRequest(baseRequest({ maxOutputTokens: 0 }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_537 }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ maxOutputTokens: 1.5 }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_536 }))).not.toBeNull()
-    expect(validateHostRequest(baseRequest({ timeoutMs: 99 }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ timeoutMs: 600_001 }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ timeoutMs: 100 }))).not.toBeNull()
+  it('enforces integer ranges for maxOutputTokens and timeoutMs as invalid', () => {
+    expect(validateHostRequest(baseRequest({ maxOutputTokens: 0 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_537 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ maxOutputTokens: 1.5 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ maxOutputTokens: 65_536 })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({ timeoutMs: 99 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ timeoutMs: 600_001 }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ timeoutMs: 100 })).kind).toBe('valid')
   })
 
-  it('enforces per-field UTF-8 byte boundaries exactly at the limit', () => {
-    const id = 'r'.repeat(ID_LIMIT)
-    expect(validateHostRequest(baseRequest({ requestId: id }))).not.toBeNull()
-    expect(validateHostRequest(baseRequest({ requestId: id + 'r' }))).toBeNull()
+  it('maps every over-limit field byte boundary to result_too_large, not invalid', () => {
+    expect(validateHostRequest(baseRequest({ requestId: 'r'.repeat(ID_LIMIT + 1) }))).toEqual({ kind: 'oversize' })
+    expect(validateHostRequest(baseRequest({ requestId: 'r'.repeat(ID_LIMIT) })).kind).toBe('valid')
     const multibyte = '字'.repeat(2731)
     expect(Buffer.byteLength(multibyte, 'utf8')).toBe(8193)
-    expect(validateHostRequest(baseRequest({ requestId: multibyte }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ prompt: 'p'.repeat(1_048_576) }))).not.toBeNull()
-    expect(validateHostRequest(baseRequest({ prompt: 'p'.repeat(1_048_577) }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ systemPrompt: 's'.repeat(524_288) }))).not.toBeNull()
-    expect(validateHostRequest(baseRequest({ systemPrompt: 's'.repeat(524_289) }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ requestId: '' }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ model: '' }))).toBeNull()
+    expect(validateHostRequest(baseRequest({ requestId: multibyte }))).toEqual({ kind: 'oversize' })
+    expect(validateHostRequest(baseRequest({ prompt: 'p'.repeat(1_048_577) }))).toEqual({ kind: 'oversize' })
+    expect(validateHostRequest(baseRequest({ prompt: 'p'.repeat(1_048_576) })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({ systemPrompt: 's'.repeat(524_289) }))).toEqual({ kind: 'oversize' })
+    expect(validateHostRequest(baseRequest({ systemPrompt: 's'.repeat(524_288) })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({}, { type: 'api_key', value: 'k'.repeat(65_537) }))).toEqual({ kind: 'oversize' })
+    expect(validateHostRequest(baseRequest({}, { type: 'api_key', value: 'k'.repeat(65_536) })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://a.example/'.slice(0, 13) + 'a'.repeat(8192 - 13 + 1) + '/' } }))).toEqual({ kind: 'oversize' })
   })
 
-  it('rejects empty or oversize credential strings at the 64KiB boundary', () => {
-    expect(validateHostRequest(baseRequest({}, { type: 'api_key', value: '' }))).toBeNull()
-    expect(validateHostRequest(baseRequest({}, { type: 'api_key', value: 'k'.repeat(65_536) }))).not.toBeNull()
-    expect(validateHostRequest(baseRequest({}, { type: 'api_key', value: 'k'.repeat(65_537) }))).toBeNull()
-    expect(validateHostRequest(baseRequest({}, { type: 'iam', accessKeyId: '', secretAccessKey: 's', region: 'r' }))).toBeNull()
-    expect(validateHostRequest(baseRequest({}, { type: 'iam', accessKeyId: 'a', secretAccessKey: 's', region: '' }))).toBeNull()
-    expect(validateHostRequest(baseRequest({}, { type: 'oauth_access', value: 'k'.repeat(65_536) }))).not.toBeNull()
+  it('rejects empty identifiers and credential strings as invalid, not oversize', () => {
+    expect(validateHostRequest(baseRequest({ requestId: '' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ model: '' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({}, { type: 'api_key', value: '' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({}, { type: 'iam', accessKeyId: '', secretAccessKey: 's', region: 'r' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({}, { type: 'iam', accessKeyId: 'a', secretAccessKey: 's', region: '' }))).toEqual({ kind: 'invalid' })
   })
 
   it('requires the catalog transportBaseUrl wire to already be the canonical href', () => {
-    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.anthropic.com' } }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'HTTPS://api.anthropic.com/' } }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.anthropic.com//' } }))).not.toBeNull()
-    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://user:pass@api.anthropic.com/' } }))).toBeNull()
-    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'not a url' } }))).toBeNull()
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.anthropic.com' } }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'HTTPS://api.anthropic.com/' } }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.anthropic.com//' } })).kind).toBe('valid')
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://user:pass@api.anthropic.com/' } }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'not a url' } }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(baseRequest({ route: { kind: 'catalog', provider: '', transportBaseUrl: 'https://api.anthropic.com/' } }))).toEqual({ kind: 'invalid' })
   })
 
-  it('validates custom routes: pairing, scheme, userinfo, hash; normalizes the rest', () => {
+  it('validates custom routes: pairing, scheme, userinfo, hash, and 8KiB bound', () => {
     const custom = (route: Record<string, unknown>): unknown => baseRequest({ route })
-    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'anthropic-messages', baseUrl: 'http://127.0.0.1:1/' }))).toBeNull()
-    expect(validateHostRequest(custom({ kind: 'custom', provider: 'anthropic', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1/' }))).toBeNull()
-    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'ftp://127.0.0.1:1/' }))).toBeNull()
-    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'http://u:p@127.0.0.1:1/' }))).toBeNull()
-    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1/#frag' }))).toBeNull()
-    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'not-a-url' }))).toBeNull()
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'anthropic-messages', baseUrl: 'http://127.0.0.1:1/' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'anthropic', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1/' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: '', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1/' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'ftp://127.0.0.1:1/' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'http://u:p@127.0.0.1:1/' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1/#frag' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'not-a-url' }))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: `http://127.0.0.1:1/${'a'.repeat(8193)}` }))).toEqual({ kind: 'oversize' })
+    expect(validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: `http://127.0.0.1:1/${'a'.repeat(8173)}` })).kind).toBe('valid')
     const normalized = validateHostRequest(custom({ kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'HTTP://[::1]:80' }))
-    expect(normalized).not.toBeNull()
-    expect(normalized!.transportHref).toBe('http://[::1]/')
-    expect(normalized!.api).toBe('openai-completions')
+    expect(normalized.kind).toBe('valid')
+    const normalizedRequest = normalized.kind === 'valid' ? normalized.request : null
+    expect(normalizedRequest!.transportHref).toBe('http://[::1]/')
+    expect(normalizedRequest!.api).toBe('openai-completions')
+  })
+
+  it('rejects encoded traversal and adjacent path segments in the raw custom baseUrl before normalization', () => {
+    const custom = (baseUrl: string): unknown => baseRequest({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl } })
+    expect(validateHostRequest(custom('https://example.com/base/%2e%2e/evil'))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom('https://example.com/%2e/evil'))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom('https://example.com/a%2fb/evil'))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom('https://example.com/a%5Cb/evil'))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom('https://example.com/base/../evil'))).toEqual({ kind: 'invalid' })
+    expect(validateHostRequest(custom('https://example.com/ok/path'))).not.toEqual({ kind: 'invalid' })
+    expect(unsafeSegments('/base/%2e%2e/evil')).toBe(true)
+    expect(unsafeSegments('/base/ok')).toBe(false)
+    expect(unsafeSegments('/%2e%2e/')).toBe(true)
   })
 
   it('maps canonical URL helpers', () => {

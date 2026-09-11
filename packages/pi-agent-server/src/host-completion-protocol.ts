@@ -1,8 +1,7 @@
 import { Type } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
 export const HOST_PARENT_MARKER = 'sessionless-host-llm-executor.v1'
-export const ID_LIMIT = 8192
-export const TEXT_LIMIT = 524_288
+export const ID_LIMIT = 8192, TEXT_LIMIT = 524_288
 const PROMPT_LIMIT = 1_048_576
 const SYSTEM_LIMIT = 524_288
 const CRED_LIMIT = 65_536
@@ -25,25 +24,23 @@ export const HOST_ERRORS: Readonly<Record<HostFailureKind, readonly [string, str
   provider_usage_invalid: ['failed', 'invalid_usage', 'provider_usage_invalid', 'LLM provider returned invalid usage'],
   json_object_required: ['failed', 'invalid_structured_output', 'json_object_required', 'LLM provider returned invalid structured output'],
 }
-export type HostWorkerCredential = { type: 'api_key'; value: string } | { type: 'oauth_access'; value: string }
-  | { type: 'iam'; accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string } | { type: 'none' }
+export type HostWorkerCredential = { type: 'api_key'; value: string } | { type: 'oauth_access'; value: string } | { type: 'iam'; accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string } | { type: 'none' }
 export interface ValidatedHostRequest {
   requestId: string; model: string; prompt: string; systemPrompt: string; responseFormat: 'text' | 'json_object'
   maxOutputTokens: number; timeoutMs: number; routeKind: 'catalog' | 'custom'; provider: string; api: 'openai-completions' | 'anthropic-messages'
   transportHref: string; credential: HostWorkerCredential
 }
+export type HostRequestVerdict = { kind: 'valid'; request: ValidatedHostRequest } | { kind: 'invalid' } | { kind: 'oversize' }
 export interface HostResultUsage {
-  inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number
-  reportedModel: string; terminalReason: 'stop' | 'length'; provenance: 'provider_final'
+  inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; reportedModel: string
+  terminalReason: 'stop' | 'length'; provenance: 'provider_final'
 }
 export interface HostCompletionResultV1 {
-  type: 'host_completion_result'; version: 1; requestId: string; model: string; text?: string; usage?: HostResultUsage
-  status: 'completed' | 'partial' | 'no_output' | 'timed_out' | 'failed'
-  error?: { code: string; reason: string; message: string }
+  type: 'host_completion_result'; version: 1; requestId: string; model: string; status: 'completed' | 'partial' | 'no_output' | 'timed_out' | 'failed'
+  text?: string; usage?: HostResultUsage; error?: { code: string; reason: string; message: string }
 }
 const credentialSchema = Type.Union([
-  Type.Object({ type: Type.Literal('api_key'), value: Type.String() }, { additionalProperties: false }),
-  Type.Object({ type: Type.Literal('oauth_access'), value: Type.String() }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal('api_key'), value: Type.String() }, { additionalProperties: false }), Type.Object({ type: Type.Literal('oauth_access'), value: Type.String() }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal('iam'), accessKeyId: Type.String(), secretAccessKey: Type.String(), sessionToken: Type.Optional(Type.String()), region: Type.String() }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal('none') }, { additionalProperties: false }),
 ])
@@ -61,34 +58,37 @@ function byteOver(value: string, limit: number): boolean { return Buffer.byteLen
 export function canonicalTransportHref(value: string): string | null {
   try { const parsed = new URL(value); return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && parsed.hash === '' && parsed.href === value ? parsed.href : null } catch { return null }
 }
-export function validateHostRequest(raw: unknown): ValidatedHostRequest | null {
-  if (!Value.Check(requestSchema, raw)) return null
+export function validateHostRequest(raw: unknown): HostRequestVerdict {
+  if (!Value.Check(requestSchema, raw)) return { kind: 'invalid' }
   const r = raw as { requestId: string; model: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; route: { kind: 'catalog'; provider: string; transportBaseUrl: string } | { kind: 'custom'; provider: 'openai' | 'anthropic'; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string }; credential: HostWorkerCredential }
-  if (r.requestId.length === 0 || r.model.length === 0 || byteOver(r.requestId, ID_LIMIT) || byteOver(r.model, ID_LIMIT)) return null
-  if (byteOver(r.prompt, PROMPT_LIMIT) || (r.systemPrompt !== undefined && byteOver(r.systemPrompt, SYSTEM_LIMIT))) return null
   const credential = r.credential
   const credStrings = credential.type === 'none' ? [] : credential.type === 'iam' ? [credential.accessKeyId, credential.secretAccessKey, credential.region, ...(credential.sessionToken !== undefined ? [credential.sessionToken] : [])] : [credential.value]
-  if (credStrings.some((s) => s.length === 0 || byteOver(s, CRED_LIMIT))) return null
+  if (byteOver(r.requestId, ID_LIMIT) || byteOver(r.model, ID_LIMIT) || byteOver(r.prompt, PROMPT_LIMIT) || (r.systemPrompt !== undefined && byteOver(r.systemPrompt, SYSTEM_LIMIT)) || credStrings.some((s) => byteOver(s, CRED_LIMIT))) return { kind: 'oversize' }
+  if (r.requestId.length === 0 || r.model.length === 0 || credStrings.some((s) => s.length === 0)) return { kind: 'invalid' }
   const common = { requestId: r.requestId, model: r.model, prompt: r.prompt, systemPrompt: r.systemPrompt ?? '', responseFormat: r.responseFormat ?? 'text' as const, maxOutputTokens: r.maxOutputTokens, timeoutMs: r.timeoutMs, credential }
   if (r.route.kind === 'catalog') {
+    if (byteOver(r.route.provider, ID_LIMIT) || byteOver(r.route.transportBaseUrl, ID_LIMIT)) return { kind: 'oversize' }
     const href = canonicalTransportHref(r.route.transportBaseUrl)
-    if (r.route.provider.length === 0 || byteOver(r.route.provider, ID_LIMIT) || !href) return null
-    return { ...common, routeKind: 'catalog' as const, provider: r.route.provider, api: 'openai-completions' as const, transportHref: href }
+    return href && r.route.provider.length > 0 ? { kind: 'valid', request: { ...common, routeKind: 'catalog' as const, provider: r.route.provider, api: 'openai-completions' as const, transportHref: href } } : { kind: 'invalid' }
   }
-  if ((r.route.provider === 'openai') !== (r.route.api === 'openai-completions')) return null
-  let href: string | null = null
+  if ((r.route.provider === 'openai') !== (r.route.api === 'openai-completions') || r.route.provider.length === 0) return { kind: 'invalid' }
+  if (byteOver(r.route.baseUrl, ID_LIMIT)) return { kind: 'oversize' }
+  let href: string | null
   try {
-    const parsed = new URL(r.route.baseUrl)
-    href = parsed.protocol !== 'https:' && parsed.protocol !== 'http:' || parsed.username !== '' || parsed.password !== '' || parsed.hash !== '' ? null : parsed.href
+    const parsed = unsafeSegments(r.route.baseUrl) ? null : new URL(r.route.baseUrl)
+    href = parsed === null || parsed.protocol !== 'https:' && parsed.protocol !== 'http:' || parsed.username !== '' || parsed.password !== '' || parsed.hash !== '' ? null : parsed.href
   } catch { href = null }
-  return href ? { ...common, routeKind: 'custom' as const, provider: r.route.provider, api: r.route.api, transportHref: href } : null
+  return href ? { kind: 'valid', request: { ...common, routeKind: 'custom' as const, provider: r.route.provider, api: r.route.api, transportHref: href } } : { kind: 'invalid' }
+}
+export function unsafeSegments(url: string): boolean {
+  const path = url.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '').replace(/[?#].*$/, '')
+  return path.split('/').some((segment) => { try { const decoded = decodeURIComponent(segment); return decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\') } catch { return true } })
 }
 export function failureResult(requestId: string, model: string, kind: HostFailureKind, usage?: HostResultUsage): HostCompletionResultV1 {
   const [status, code, reason, message] = HOST_ERRORS[kind]
   return { type: 'host_completion_result', version: 1, requestId, status: status as HostCompletionResultV1['status'], model, ...(usage ? { usage } : {}), error: { code, reason, message } }
 }
-export const RESULT_TOO_LARGE_LINE = JSON.stringify(failureResult('invalid', 'invalid', 'result_too_large')) + '\n'
-export const INVALID_RESULT_LINE = JSON.stringify(failureResult('invalid', 'invalid', 'invalid_worker_message')) + '\n'
+export const RESULT_TOO_LARGE_LINE = JSON.stringify(failureResult('invalid', 'invalid', 'result_too_large')) + '\n'; export const INVALID_RESULT_LINE = JSON.stringify(failureResult('invalid', 'invalid', 'invalid_worker_message')) + '\n'
 export function serializeHostResult(result: HostCompletionResultV1): string {
   if (byteOver(result.requestId, ID_LIMIT) || byteOver(result.model, ID_LIMIT) || byteOver(result.usage?.reportedModel ?? '', ID_LIMIT) || byteOver(result.text ?? '', TEXT_LIMIT) || byteOver(result.error?.reason ?? '', REASON_LIMIT) || byteOver(result.error?.message ?? '', REASON_LIMIT)) return RESULT_TOO_LARGE_LINE
   const line = JSON.stringify(result) + '\n'

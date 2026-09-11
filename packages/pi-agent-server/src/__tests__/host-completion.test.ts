@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'bun:test'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import http from 'node:http'
-import { checkDescriptor, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS } from '../host-completion.ts'
+import { checkDescriptor, codexStreamExtras, isLoopback, JSON_OBJECT_SYSTEM_CONSTRAINT, sanitizeEnvironment, SANITIZED_ENV_KEYS } from '../host-completion.ts'
 import { HOST_PARENT_MARKER, TEXT_LIMIT, validateHostRequest, type ValidatedHostRequest } from '../host-completion-protocol.ts'
 import { createHostStreamTracker, type StreamVerdict } from '../host-completion-stream.ts'
 import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
@@ -25,9 +25,9 @@ function request(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 function descriptor(overrides: Record<string, unknown> = {}, credential: unknown = { type: 'api_key', value: 'k' }): ValidatedHostRequest {
-  const validated = validateHostRequest(request({ ...overrides, credential }))
-  if (!validated) throw new Error('fixture request failed validation')
-  return validated
+  const verdict = validateHostRequest(request({ ...overrides, credential }))
+  if (verdict.kind !== 'valid') throw new Error(`fixture request failed validation: ${verdict.kind}`)
+  return verdict.request
 }
 
 interface MockSse {
@@ -168,6 +168,16 @@ describe('host worker credential descriptor matrix', () => {
 })
 
 describe('host worker environment boundary', () => {
+  it('builds codex stream extras that force SSE and inject only max_output_tokens on a cloned payload', () => {
+    const extras = codexStreamExtras(64)
+    expect(extras.transport).toBe('sse')
+    const payload = { model: 'gpt-5', input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }], stream: true, store: false }
+    const next = extras.onPayload(payload)
+    expect(next).toEqual({ ...payload, max_output_tokens: 64 })
+    expect(payload).not.toHaveProperty('max_output_tokens')
+    expect(Object.keys(next).filter((key) => !(key in payload))).toEqual(['max_output_tokens'])
+  })
+
   it('deletes provider, proxy, and ambient AWS credential/config variables', () => {
     const probe = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'GITHUB_TOKEN', 'HTTPS_PROXY', 'https_proxy', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_BEDROCK_SKIP_AUTH', 'AWS_ENDPOINT_URL', 'AWS_ENDPOINT_URL_BEDROCK', 'AWS_USE_FIPS_ENDPOINT', 'AWS_EC2_METADATA_DISABLED', 'GOOGLE_APPLICATION_CREDENTIALS']
     const saved = probe.map((key) => [key, process.env[key]] as const)
@@ -429,6 +439,47 @@ describe('host worker stream meter unit fixtures', () => {
     if (verdict.kind === 'release') expect(verdict.usage).toMatchObject({ inputTokens: 6, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 1, totalTokens: 12 })
   })
 
+  it('fails closed on an unknown content-bearing string over 512KiB wherever it appears in the final message', () => {
+    const onBlock = trackerHarness()
+    const blockMessage = assistantMessage([{ type: 'providerBlock', providerSignature: 'x'.repeat(TEXT_LIMIT + 1) }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    onBlock.tracker.onEvent(onBlock.done('stop', blockMessage))
+    expect(onBlock.claims).toEqual(['result_too_large'])
+    expect(onBlock.finish().kind).toBe('failure')
+    const onMessage = trackerHarness()
+    const message = assistantMessage([{ type: 'text', text: 'hi' }] as Array<Record<string, unknown>>, { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm', providerSignature: 'y'.repeat(TEXT_LIMIT + 1) })
+    onMessage.tracker.onEvent(onMessage.done('stop', message))
+    expect(onMessage.claims).toEqual(['result_too_large'])
+  })
+
+  it('charges the aggregate parsed tool tree across field paths, claiming result_too_large before tool rejection', () => {
+    const h = trackerHarness()
+    const args = { a: 'x'.repeat(300_000), b: { c: 'y'.repeat(300_000) } }
+    const message = assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: args }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    h.tracker.onEvent(h.done('toolUse', message))
+    expect(h.claims[0]).toBe('result_too_large')
+    expect(h.claims).not.toContain('unexpected_terminal')
+  })
+
+  it('counts identical strings in different fields separately instead of deduplicating them away', () => {
+    const h = trackerHarness()
+    const shared = 'x'.repeat(300_000)
+    const message = assistantMessage([{ type: 'providerBlock', alpha: shared, beta: shared }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    h.tracker.onEvent(h.done('stop', message))
+    expect(h.claims).toEqual(['result_too_large'])
+  })
+
+  it('claims result_too_large when unknown nesting exceeds walker depth or node budgets', () => {
+    let deep: Record<string, unknown> = { leaf: 'v' }
+    for (let i = 0; i < 20; i++) deep = { nested: deep }
+    const h = trackerHarness()
+    h.tracker.onEvent(h.done('stop', assistantMessage([{ type: 'providerBlock', deep }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })))
+    expect(h.claims).toEqual(['result_too_large'])
+    const wide = trackerHarness()
+    const wideBlock = assistantMessage([{ type: 'providerBlock', items: Array.from({ length: 9000 }, (_, i) => ({ v: String(i) })) }], { usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }, model: 'm' })
+    wide.tracker.onEvent(wide.done('stop', wideBlock))
+    expect(wide.claims).toEqual(['result_too_large'])
+  })
+
   it('rejects reportedModel drift against the sent clone id', () => {
     const h = trackerHarness()
     h.tracker.onEvent(h.done('stop', finalMessage('hi', { responseModel: 'other' })))
@@ -635,6 +686,26 @@ describe('host worker single-request JSONL fixtures', () => {
     expect(mismatch.stderr).not.toContain('AKIA-canary')
   }, 120000)
 
+  it('claims the shared deadline from the first stdin byte even while stdin stays open before EOF', async () => {
+    const outcome = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
+      const child = spawn('/usr/bin/nice', ['-n', '20', process.execPath, ENTRY, HOST_FLAG], { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = ''
+      child.stdout.on('data', (data) => { stdout += data })
+      child.stdin.write(JSON.stringify(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'http://127.0.0.1:9/' }, model: 'test-model', credential: { type: 'none' }, timeoutMs: 100 })) + '\n')
+      const check = setTimeout(() => {
+        const lines = stdout.split('\n').filter((line) => line.trim().length > 0)
+        expect(lines).toHaveLength(1)
+        const result = JSON.parse(lines[0]) as { status: string; error: { code: string; reason: string; message: string } }
+        expect(result.status).toBe('timed_out')
+        expect(result.error).toEqual({ code: 'timed_out', reason: 'deadline_exceeded', message: 'Host LLM request timed out' })
+        child.stdin.end()
+      }, 1500)
+      child.on('close', (code) => { clearTimeout(check); resolve({ code, stdout }) })
+    })
+    expect(outcome.code).toBe(0)
+    expect(outcome.stdout.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+  }, 60000)
+
   it('emits at most one fixed invalid_worker_message result for duplicate or unknown --host- flags', async () => {
     for (const extraArgv of [['--host-completion-v1'], ['--host-other'], ['--host-other', '--host-more']]) {
       const outcome = await runWorker(request({}), { raw: '', extraArgv })
@@ -715,12 +786,14 @@ describe('host worker single-request JSONL fixtures', () => {
     expect(parseSingleResult(outcome.stdout).error).toMatchObject({ code: 'provider_failed', reason: 'provider_request_failed' })
   }, 60000)
 
-  it('accepts a request of exactly 2MiB at framing but still enforces per-field bounds, and rejects trailing bytes after the LF', async () => {
+  it('maps over-limit request fields to result_too_large at and below the 2MiB framing bound, and rejects trailing bytes after the LF', async () => {
     const base = JSON.stringify(request({}))
     const pad = 2_097_151 - base.length + 5
     const exact = await runWorker(request({ prompt: 'x'.repeat(pad) }))
     expect(Buffer.byteLength(JSON.stringify(request({ prompt: 'x'.repeat(pad) }))) + 1).toBe(2_097_152)
-    expect(parseSingleResult(exact.stdout).error).toMatchObject({ reason: 'invalid_worker_message' })
+    expect(parseSingleResult(exact.stdout).error).toMatchObject({ code: 'provider_protocol_error', reason: 'result_too_large', message: 'Host LLM worker result exceeds the wire limit' })
+    const fieldBound = await runWorker(request({ prompt: 'x'.repeat(1_048_577) }))
+    expect(parseSingleResult(fieldBound.stdout).error).toMatchObject({ code: 'provider_protocol_error', reason: 'result_too_large' })
     const trailing = await runWorker(request({}), { raw: JSON.stringify(request({})) + '\n' + 'x' })
     expect(parseSingleResult(trailing.stdout).error).toMatchObject({ reason: 'invalid_worker_message' })
   }, 60000)
