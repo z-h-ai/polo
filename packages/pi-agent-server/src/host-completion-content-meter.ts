@@ -24,12 +24,14 @@ export type HostSlotSegment =
 export const encodeSlotKey = (segments: HostSlotSegment[]): string => JSON.stringify(segments)
 export const contentPath = (index: number): HostSlotSegment[] => [{ kind: 'scope', value: 'content' }, { kind: 'content-index', value: index }]
 // Canonical block fields per kind: [property, slot name]. Delta append paths and absolute block
-// canonical paths share the identical segments so both dedupe into one logical slot.
-const CANONICAL_BLOCK_FIELDS: Record<string, Array<[string, string]>> = {
-  text: [['text', 'text'], ['textSignature', 'textSignature']],
-  thinking: [['thinking', 'thinking'], ['thinkingSignature', 'thinkingSignature']],
-  toolCall: [['id', 'id'], ['name', 'name'], ['thoughtSignature', 'thoughtSignature'], ['arguments', 'arguments']],
-}
+// canonical paths share the identical segments so both dedupe into one logical slot. A Map keeps
+// hostile kinds like `__proto__`/`constructor`/`toString` from hitting inherited properties —
+// every unrecognised kind is an ordinary unknown block (R12 §6.4).
+const CANONICAL_BLOCK_FIELDS = new Map<string, Array<[string, string]>>([
+  ['text', [['text', 'text'], ['textSignature', 'textSignature']]],
+  ['thinking', [['thinking', 'thinking'], ['thinkingSignature', 'thinkingSignature']]],
+  ['toolCall', [['id', 'id'], ['name', 'name'], ['thoughtSignature', 'thoughtSignature'], ['arguments', 'arguments']]],
+])
 // Message fields carrying stream identity or accounting — never content bytes.
 const MESSAGE_IDENTITY_FIELDS = new Set(['content', 'usage', 'stopReason', 'timestamp', 'api', 'provider', 'model', 'responseModel', 'responseId', 'role'])
 // Semantic budget invariants (R12 §6.5): nodes count only entered string/array/non-null-object
@@ -215,7 +217,7 @@ export function createContentMeter(): ContentMeter {
     const blockKind = typeDescriptor.value
     const blockPath: HostSlotSegment[] = [...contentPath(index), { kind: 'block-kind', value: blockKind }]
     if (blockKind === 'toolCall') sawToolContent = true
-    const canonicalFields = CANONICAL_BLOCK_FIELDS[blockKind]
+    const canonicalFields = CANONICAL_BLOCK_FIELDS.get(blockKind)
     if (canonicalFields === undefined) {
       for (const [field, value] of forEachOwnEnumerableDataProperty(block, () => charge(budget, 'projectionWork', PROJECTION_WORK_CAP), () => latchSemantic(budget))) {
         if (budget.dead) return
@@ -309,19 +311,29 @@ export function createContentMeter(): ContentMeter {
   // Immutable terminal snapshot: text blocks joined, five raw usage numbers and both model
   // identities copied through descriptor-safe reads. Any unsafe shape yields the conservative
   // empty/null variant; stream policy decides the final failure kind.
-  function buildTerminalSnapshot(message: unknown): SafeTerminalSnapshot {
+  // Immutable terminal snapshot (fail-fast, R12 §6.3): consumes the SAME projection budget as the
+  // semantic walk — every content position and usage key costs projection work, every latch stops
+  // all further provider reads, and a latched budget skips the snapshot entirely (the caller then
+  // sees the conservative empty/null snapshot). Unsafe shapes yield the conservative empty/null
+  // variant; stream policy decides the final failure kind.
+  function buildTerminalSnapshot(message: unknown, budget: SemanticBudget): SafeTerminalSnapshot {
     const snapshot: SafeTerminalSnapshot = { text: '', usage: null, responseModel: '', model: '' }
+    if (budget.dead) return snapshot
     if (message === null || typeof message !== 'object' || !isInertJsonDataObject(message)) return snapshot
     const contentDescriptor = readOwnDescriptor(message, 'content')
+    if (budget.dead) return snapshot
     const content = contentDescriptor.kind === 'data' && isInertJsonDataArray(contentDescriptor.value) ? contentDescriptor.value : null
     if (content !== null) {
       const length = readArrayLength(content)
       const parts: string[] = []
       if (length !== null) {
         for (let index = 0; index < length; index++) {
+          if (budget.dead) return snapshot
+          if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return snapshot
           const element = readArrayElement(content, index)
           if (element.kind !== 'data' || !isInertJsonDataObject(element.value)) continue
           const typeDescriptor = readOwnDescriptor(element.value, 'type')
+          if (budget.dead) return snapshot
           if (typeDescriptor.kind !== 'data' || typeDescriptor.value !== 'text') continue
           const textDescriptor = readOwnDescriptor(element.value, 'text')
           if (textDescriptor.kind === 'data' && typeof textDescriptor.value === 'string') parts.push(textDescriptor.value)
@@ -330,9 +342,12 @@ export function createContentMeter(): ContentMeter {
       snapshot.text = parts.join('')
     }
     const usageDescriptor = readOwnDescriptor(message, 'usage')
+    if (budget.dead) return snapshot
     if (usageDescriptor.kind === 'data' && isInertJsonDataObject(usageDescriptor.value)) {
       const usageSource = usageDescriptor.value
       const readUsageNumber = (key: string): number | null => {
+        if (budget.dead) return null
+        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return null
         const descriptor = readOwnDescriptor(usageSource, key)
         return descriptor.kind === 'data' && typeof descriptor.value === 'number' ? descriptor.value : null
       }
@@ -343,6 +358,7 @@ export function createContentMeter(): ContentMeter {
       const totalTokens = readUsageNumber('totalTokens')
       if (input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null) snapshot.usage = { input, output, cacheRead, cacheWrite, totalTokens }
     }
+    if (budget.dead) return snapshot
     const responseModelDescriptor = readOwnDescriptor(message, 'responseModel')
     if (responseModelDescriptor.kind === 'data' && typeof responseModelDescriptor.value === 'string') snapshot.responseModel = responseModelDescriptor.value
     const modelDescriptor = readOwnDescriptor(message, 'model')
@@ -379,7 +395,9 @@ export function createContentMeter(): ContentMeter {
     }
     const message = event.type === 'done' ? event.message : event.type === 'error' ? event.error : (event as { partial?: AssistantMessage }).partial
     meterMessage(message, add, budget)
-    if (event.type === 'done') lastDoneSnapshot = buildTerminalSnapshot(event.message)
+    // Fail-fast: a latched projection budget skips the snapshot entirely — no further provider
+    // field reads after the first violation (R12 §6.3).
+    if (event.type === 'done' && !budget.dead) lastDoneSnapshot = buildTerminalSnapshot(event.message, budget)
     if (event.type === 'done' && event.reason === 'toolUse') sawToolContent = true
     for (const [key, candidates] of batch) {
       const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }

@@ -169,6 +169,39 @@ describe('bounded structural comparison', () => {
     expect(compareJsonData(nested(17), nested(17), 0, latched)).toBe('depth_exhausted')
     expect(latched.dead).toBe(true)
   })
+  it('gates identical and accessor arrays through unsafe_shape instead of the equality fast path', () => {
+    const counters: Record<string, number> = { get: 0, has: 0, getPrototypeOf: 0, ownKeys: 0, getOwnPropertyDescriptor: 0 }
+    const proxy = countingProxy({ a: 1 }, counters)
+    // The same Proxy object would satisfy `left === right`; the plain-shape gate must still win.
+    expect(compareJsonData(proxy, proxy, 0, createComparisonBudget())).toBe('unsafe_shape')
+    expect(counters.get).toBe(0)
+    expect(counters.has).toBe(0)
+    expect(counters.getPrototypeOf).toBe(0)
+    expect(counters.ownKeys).toBe(0)
+    expect(counters.getOwnPropertyDescriptor).toBe(0)
+    let getterCalls = 0
+    const accessorArray: unknown[] = [1]
+    Object.defineProperty(accessorArray, 0, { get() { getterCalls += 1; return 1 }, enumerable: true })
+    expect(compareJsonData(accessorArray, accessorArray, 0, createComparisonBudget())).toBe('unsafe_shape')
+    expect(getterCalls).toBe(0)
+  })
+  it('pre-charges the 8193rd array pair and depth 17 before reading any boundary value', () => {
+    let getterCalls = 0
+    const left: unknown[] = Array.from({ length: 8192 }, (_, i) => i)
+    const right: unknown[] = Array.from({ length: 8192 }, (_, i) => i)
+    Object.defineProperty(right, 8191, { get() { getterCalls += 1; return 8191 }, enumerable: true })
+    const budget = createComparisonBudget()
+    expect(compareJsonData(left, right, 0, budget)).toBe('pair_budget_exhausted')
+    expect(budget.pairs).toBe(8193)
+    expect(getterCalls).toBe(0)
+    // depth 17 boundary: the child pair pre-charges and latches before the accessor is read.
+    const nestedArrays = (levels: number, leaf: unknown): unknown => (levels === 0 ? leaf : [nestedArrays(levels - 1, leaf)])
+    const accessorLeaf: unknown[] = []
+    Object.defineProperty(accessorLeaf, 0, { get() { getterCalls += 1; return 'x' }, enumerable: true })
+    const depthBudget = createComparisonBudget()
+    expect(compareJsonData(nestedArrays(17, accessorLeaf), nestedArrays(17, accessorLeaf), 0, depthBudget)).toBe('depth_exhausted')
+    expect(getterCalls).toBe(0)
+  })
   it('keeps comparison budgets isolated per reconciliation', () => {
     const first = createComparisonBudget()
     expect(compareJsonData({ a: 1 }, { a: 2 }, 0, first)).toBe('different')

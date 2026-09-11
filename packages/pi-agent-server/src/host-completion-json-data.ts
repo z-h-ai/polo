@@ -98,12 +98,33 @@ function captureKeyRecords(source: object, budget: ComparisonBudget): Map<string
   }
   return records
 }
+// Pre-charges one child pair (pair unit + depth) BEFORE either boundary descriptor/value is read.
+// Returns null when the child visit may proceed, otherwise the latched conservative outcome.
+function preChargeChildPair(depth: number, budget: ComparisonBudget): JsonComparisonOutcome | null {
+  if (budget.dead) return budget.outcome ?? 'unsafe_shape'
+  budget.pairs += 1
+  if (budget.pairs > COMPARISON_PAIR_BUDGET) return latchComparison(budget, 'pair_budget_exhausted')
+  if (depth > COMPARISON_DEPTH_LIMIT) return latchComparison(budget, 'depth_exhausted')
+  return null
+}
 export function compareJsonData(left: unknown, right: unknown, depth: number, budget: ComparisonBudget): JsonComparisonOutcome {
   if (budget.dead) return budget.outcome ?? 'unsafe_shape'
   budget.pairs += 1
   if (budget.pairs > COMPARISON_PAIR_BUDGET) return latchComparison(budget, 'pair_budget_exhausted')
   if (depth > COMPARISON_DEPTH_LIMIT) return latchComparison(budget, 'depth_exhausted')
-  if (left === right) return 'equal'
+  return compareCharged(left, right, depth, budget)
+}
+// Compares an already-charged pair. The equality fast path is reserved for primitives: an object
+// or array identical by reference (the same Proxy, the same accessor array) must still pass the
+// plain-shape gates. Every child pair is pre-charged and depth-checked BEFORE either boundary
+// descriptor/value is read; the 8193rd pair and depth-17 entry latch without touching the value.
+function compareCharged(left: unknown, right: unknown, depth: number, budget: ComparisonBudget): JsonComparisonOutcome {
+  const leftIsPrimitive = left === null || typeof left !== 'object'
+  const rightIsPrimitive = right === null || typeof right !== 'object'
+  if (leftIsPrimitive || rightIsPrimitive) {
+    if (leftIsPrimitive && rightIsPrimitive) return left === right ? 'equal' : 'different'
+    return 'different'
+  }
   if (Array.isArray(left) || Array.isArray(right)) {
     if (!Array.isArray(left) || !Array.isArray(right)) return 'different'
     if (!isInertJsonDataArray(left) || !isInertJsonDataArray(right)) return latchComparison(budget, 'unsafe_shape')
@@ -112,15 +133,16 @@ export function compareJsonData(left: unknown, right: unknown, depth: number, bu
     if (leftLength === null || rightLength === null) return latchComparison(budget, 'unsafe_shape')
     if (leftLength !== rightLength) return 'different'
     for (let index = 0; index < leftLength; index++) {
+      const preCharge = preChargeChildPair(depth + 1, budget)
+      if (preCharge !== null) return preCharge
       const leftElement = readArrayElement(left, index)
       const rightElement = readArrayElement(right, index)
       if (leftElement.kind !== 'data' || rightElement.kind !== 'data') return latchComparison(budget, 'unsafe_shape')
-      const outcome = compareJsonData(leftElement.value, rightElement.value, depth + 1, budget)
+      const outcome = compareCharged(leftElement.value, rightElement.value, depth + 1, budget)
       if (outcome !== 'equal') return outcome
     }
     return 'equal'
   }
-  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return 'different'
   if (!isInertJsonDataObject(left) || !isInertJsonDataObject(right)) return latchComparison(budget, 'unsafe_shape')
   const leftRecords = captureKeyRecords(left, budget)
   if (budget.dead) return budget.outcome ?? 'unsafe_shape'
@@ -129,7 +151,9 @@ export function compareJsonData(left: unknown, right: unknown, depth: number, bu
   if (leftRecords.size !== rightRecords.size) return 'different'
   for (const [key, leftValue] of leftRecords) {
     if (!rightRecords.has(key)) return 'different'
-    const outcome = compareJsonData(leftValue, rightRecords.get(key), depth + 1, budget)
+    const preCharge = preChargeChildPair(depth + 1, budget)
+    if (preCharge !== null) return preCharge
+    const outcome = compareCharged(leftValue, rightRecords.get(key), depth + 1, budget)
     if (outcome !== 'equal') return outcome
   }
   return 'equal'

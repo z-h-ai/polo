@@ -221,6 +221,62 @@ describe('content meter: typed structural identity', () => {
     expect(h.probe()).toMatchObject({ over: true })
   })
 })
+describe('content meter: hostile block kinds and bounded snapshots', () => {
+  it('treats hostile block kinds as ordinary unknown blocks without throwing or coercion', () => {
+    const h = meterHarness()
+    const kinds = ['__proto__', 'constructor', 'toString', 'a|b', '信号', 'hasOwnProperty']
+    const blocks = kinds.map((kind, index) => ({ type: kind, [`v${index}`]: `x${index}` }))
+    h.meter.onEvent(h.done('stop', assistantMessage(blocks, { usage: GOOD_USAGE, model: 'm' })))
+    expect(h.probe()).toMatchObject({ over: false, inconsistent: false })
+    expect(() => h.finish()).not.toThrow()
+    expect(h.finish()?.text).toBe('')
+    // An oversized hostile-kind block still latches the gate through the unknown-block walker.
+    const over = meterHarness()
+    const overBlocks = kinds.map((kind) => ({ type: kind, v: 'x'.repeat(120_000) }))
+    over.meter.onEvent(over.done('stop', assistantMessage(overBlocks, { usage: GOOD_USAGE, model: 'm' })))
+    expect(over.probe()).toMatchObject({ over: true })
+  })
+  it('skips the terminal snapshot once the projection budget is latched by huge sparse content', () => {
+    let accessorCalls = 0
+    const h = meterHarness()
+    const content: unknown[] = new Array(70_000)
+    content[0] = { type: 'text', text: 'x' }
+    Object.defineProperty(content, 66_000, { get() { accessorCalls += 1; return { type: 'text', text: 'late' } }, enumerable: true })
+    const message = assistantMessage([], { usage: GOOD_USAGE, model: 'm' })
+    ;(message as { content: unknown }).content = content
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    // The latched projection budget skips the terminal snapshot entirely: no second traversal and
+    // no read of the late accessor beyond the latch point.
+    expect(h.meter.snapshotTerminal()).toBeNull()
+    expect(accessorCalls).toBe(0)
+  })
+  it('adopts the conservative double representation on pair exhaustion and hits result_too_large first', () => {
+    const equal = meterHarness()
+    const equalArgs = { big: 'x'.repeat(300_000), items: Array.from({ length: 8189 }, (_, i) => i) }
+    equal.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify({ big: 'x'.repeat(300_000), items: Array.from({ length: 8189 }, (_, i) => i) }), partial: assistantMessage([]) } as AssistantMessageEvent)
+    equal.meter.onEvent(equal.done('toolUse', assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: equalArgs }], { usage: GOOD_USAGE, model: 'm' })))
+    expect(equal.probe()).toMatchObject({ over: false, inconsistent: false, tool: true })
+    const exhausted = meterHarness()
+    const exhaustArgs = { big: 'x'.repeat(300_000), items: Array.from({ length: 8190 }, (_, i) => i) }
+    exhausted.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify({ big: 'x'.repeat(300_000), items: Array.from({ length: 8190 }, (_, i) => i) }), partial: assistantMessage([]) } as AssistantMessageEvent)
+    exhausted.meter.onEvent(exhausted.done('toolUse', assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: exhaustArgs }], { usage: GOOD_USAGE, model: 'm' })))
+    expect(exhausted.probe()).toMatchObject({ over: true, inconsistent: true })
+  })
+  it('adopts the conservative double representation on key exhaustion and hits result_too_large first', () => {
+    const h = meterHarness()
+    const args: Record<string, string> = {}
+    for (let i = 0; i < 8193; i++) args[`k${i}`] = `v${'x'.repeat(40)}`
+    const raw = JSON.stringify(args)
+    h.meter.onEvent({ type: 'toolcall_delta', contentIndex: 0, delta: raw, partial: assistantMessage([]) } as AssistantMessageEvent)
+    const message = assistantMessage([{ type: 'toolCall', id: 't1', name: 'f', arguments: args }], { usage: GOOD_USAGE, model: 'm' })
+    h.meter.onEvent(h.done('toolUse', message))
+    // The node/projection budget latches during the tree walk, so result_too_large is the FIRST
+    // outcome — the conservative double representation (raw + partial tree) is what pushes the
+    // observed bytes over the gate; tool rejection can never mask it.
+    expect(h.probe()).toMatchObject({ over: true })
+  })
+})
 describe('content meter: exact semantic boundaries and fail-closed reads', () => {
   it('allows exactly 8192 semantic nodes and latches on the 8193rd', () => {
     const atLimit = meterHarness()

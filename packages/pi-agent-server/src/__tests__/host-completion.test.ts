@@ -606,27 +606,82 @@ describe('host worker single-request JSONL fixtures', () => {
         observation,
         systemPrompt: 'sys', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
         signal: new AbortController().signal, timeoutRemainingMs: 1000,
+      shouldStop: () => false,
       }
     }
     const missRuntime = makeRuntime((provider) => (provider === 'anthropic' ? 'https://api.example.com/' : ''), '')
-    const missStart = await startHostPiStream(missRuntime.runtime, contextFor({ kind: 'catalog', provider: 'unknown-provider', transportBaseUrl: 'https://api.example.com/' }, apiKey))
+    const missStart = await startHostPiStream(async () => missRuntime.runtime, contextFor({ kind: 'catalog', provider: 'unknown-provider', transportBaseUrl: 'https://api.example.com/' }, apiKey))
     expect(missStart).toEqual({ ok: false, failure: 'catalog_model_missing' })
     expect(missRuntime.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
     // Ordinary catalog href drift: model hit, anchor mismatch, zero registration.
     const drift = makeRuntime(() => 'https://other.example.com/', '')
-    const driftStart = await startHostPiStream(drift.runtime, contextFor({ kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, apiKey))
+    const driftStart = await startHostPiStream(async () => drift.runtime, contextFor({ kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, apiKey))
     expect(driftStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
     expect(drift.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
     // Copilot derived href mismatch: zero registration.
     const copilot = makeRuntime(() => 'https://api.example.com/', 'https://wrong.example.com/')
-    const copilotStart = await startHostPiStream(copilot.runtime, contextFor({ kind: 'catalog', provider: 'github-copilot', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, { type: 'oauth_access', value: 'token' }))
+    const copilotStart = await startHostPiStream(async () => copilot.runtime, contextFor({ kind: 'catalog', provider: 'github-copilot', transportBaseUrl: 'https://api.example.com/', model: 'pi/good-model' } as Record<string, unknown>, { type: 'oauth_access', value: 'token' }))
     expect(copilotStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
     expect(copilot.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
     // Bedrock endpoint mismatch (real zero-I/O SDK resolver against the anchor): zero registration.
     const bedrock = makeRuntime(() => 'https://api.example.com/', '')
-    const bedrockStart = await startHostPiStream(bedrock.runtime, contextFor({ kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-west-2.amazonaws.com/' }, { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' }))
+    const bedrockStart = await startHostPiStream(async () => bedrock.runtime, contextFor({ kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-west-2.amazonaws.com/' }, { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' }))
     expect(bedrockStart).toEqual({ ok: false, failure: 'invalid_worker_message' })
     expect(bedrock.runtime).toMatchObject({ registrationCount: 0, streamCount: 0 })
+  })
+
+  it('stops the production seam with zero imports, registrations and streams when the deadline wins during the Bedrock resolver await', async () => {
+    const observation = {
+      observation: { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false },
+      bedrockConstructor: BedrockRuntimeClient,
+    } as unknown as InstalledTransportObservation
+    let loadRuntimeCalls = 0
+    let deadlineFired = true
+
+    const loadRuntime = async (): Promise<HostPiRuntime | null> => {
+      loadRuntimeCalls += 1
+      loadRuntimeCalls += 1
+      return deadlineFired ? null : {
+        bindings: {
+          getModels: () => [{ id: 'good-model', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }],
+          getGitHubCopilotBaseUrl: () => 'https://api.example.com/',
+          bedrockProviderModule: { marker: 'bedrock-module' },
+          setBedrockProviderModule: () => { registrationCount += 1; events.push('registered') },
+          streamSimple: () => { streamCount += 1; events.push('stream-started'); return (async function* generate() { yield 'event' })() },
+        },
+        events,
+        registrationCount,
+        streamCount,
+      }
+    }
+    const events: string[] = []
+    let registrationCount = 0
+    let streamCount = 0
+    // Deadline already won when the resolver await settles: everything downstream stays at zero.
+    const context: HostPiStreamContext = {
+      request: mustValidate(request({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })),
+      credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } as ValidatedHostRequest['credential'],
+      observation,
+      systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: undefined,
+      signal: new AbortController().signal, timeoutRemainingMs: 1000,
+      shouldStop: () => deadlineFired,
+    }
+    const started = await startHostPiStream(loadRuntime, context)
+    expect(started.ok).toBe(false)
+    if (!started.ok) expect(started.stopped).toBe(true)
+    expect(loadRuntimeCalls).toBe(0)
+    expect(registrationCount).toBe(0)
+    expect(streamCount).toBe(0)
+    expect(events).toEqual([])
+    // A deadline that wins only after the resolver still stops the model/registration/stream chain.
+    deadlineFired = false
+    const lateContext: HostPiStreamContext = { ...context, shouldStop: () => deadlineFired || loadRuntimeCalls >= 1 }
+    const lateStarted = await startHostPiStream(loadRuntime, lateContext)
+    expect(lateStarted.ok).toBe(false)
+    if (!lateStarted.ok) expect(lateStarted.stopped).toBe(true)
+    expect(registrationCount).toBe(0)
+    expect(streamCount).toBe(0)
+    expect(events).toEqual([])
   })
 
   it('runs the production registration seam: legal routes construct the model, register once and stream once', async () => {
@@ -664,12 +719,13 @@ describe('host worker single-request JSONL fixtures', () => {
     const apiKey = { type: 'api_key', value: 'test-key' }
     // Legal custom route: model-constructed -> registered -> stream-started, each exactly once.
     const custom = makeRuntime()
-    const customStart = await startHostPiStream(custom.runtime, {
+    const customStart = await startHostPiStream(async () => custom.runtime, {
       request: mustValidate(request({ route: { kind: 'custom', provider: 'openai', api: 'openai-completions', baseUrl: 'https://api.example.com/' }, model: 'custom-model', credential: apiKey })),
       credential: apiKey as ValidatedHostRequest['credential'],
       observation,
       systemPrompt: 'sys', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
       signal: new AbortController().signal, timeoutRemainingMs: 1000,
+      shouldStop: () => false,
     })
     expect(customStart.ok).toBe(true)
     expect(custom.state.events).toEqual(['model-constructed', 'registered', 'stream-started'])
@@ -679,12 +735,13 @@ describe('host worker single-request JSONL fixtures', () => {
     expect(custom.state.capturedOptions[0]).toMatchObject({ apiKey: 'test-key', maxTokens: 64, maxRetries: 0 })
     // Legal catalog route: same single registration and single stream start.
     const catalog = makeRuntime()
-    const catalogStart = await startHostPiStream(catalog.runtime, {
+    const catalogStart = await startHostPiStream(async () => catalog.runtime, {
       request: mustValidate(request({ route: { kind: 'catalog', provider: 'anthropic', transportBaseUrl: 'https://api.example.com/' }, model: 'pi/good-model', credential: apiKey })),
       credential: apiKey as ValidatedHostRequest['credential'],
       observation,
       systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: 'test-key',
       signal: new AbortController().signal, timeoutRemainingMs: 1000,
+      shouldStop: () => false,
     })
     expect(catalogStart.ok).toBe(true)
     expect(catalog.state.events).toEqual(['getModels:anthropic', 'model-constructed', 'registered', 'stream-started'])
@@ -693,12 +750,13 @@ describe('host worker single-request JSONL fixtures', () => {
     expect(catalog.state.capturedModels[0]).toMatchObject({ id: 'good-model', baseUrl: 'https://api.example.com/' })
     // Legal Bedrock route: real zero-I/O SDK endpoint resolution matches the anchor, registers once.
     const bedrock = makeRuntime()
-    const bedrockStart = await startHostPiStream(bedrock.runtime, {
+    const bedrockStart = await startHostPiStream(async () => bedrock.runtime, {
       request: mustValidate(request({ route: { kind: 'catalog', provider: 'amazon-bedrock', transportBaseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/' }, model: 'pi/good-model', credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } })),
       credential: { type: 'iam', accessKeyId: 'AKIA', secretAccessKey: 's', region: 'us-east-1' } as ValidatedHostRequest['credential'],
       observation,
       systemPrompt: '', userPrompt: 'hello', maxOutputTokens: 64, apiKey: undefined,
       signal: new AbortController().signal, timeoutRemainingMs: 1000,
+      shouldStop: () => false,
     })
     expect(bedrockStart.ok).toBe(true)
     expect(bedrock.state.events).toEqual(['getModels:amazon-bedrock', 'model-constructed', 'registered', 'stream-started'])

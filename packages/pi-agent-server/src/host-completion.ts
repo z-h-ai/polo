@@ -66,14 +66,28 @@ export interface HostPiStreamContext {
   apiKey: string | undefined
   signal: AbortSignal
   timeoutRemainingMs: number
+  // Production wires this to `settled || controller.signal.aborted`. Every await in the seam and
+  // every step before model construction / registration / stream consults it, so a deadline or
+  // abort that wins during an await keeps Pi imports, registration, streaming and transport at 0
+  // (R12 §6.8, Review R4 issue 1).
+  shouldStop: () => boolean
 }
-export type HostPiStreamStart = { ok: true; stream: AsyncIterable<unknown> } | { ok: false; failure: HostFailureKind }
-export async function startHostPiStream(runtime: HostPiRuntime, context: HostPiStreamContext): Promise<HostPiStreamStart> {
+export type HostPiStreamStart =
+  | { ok: true; stream: AsyncIterable<unknown> }
+  | { ok: false; failure: HostFailureKind; stopped?: true }
+// Fixed order: Bedrock zero-I/O endpoint comparison → Pi bindings load (dynamic imports) → exact
+// catalog hit or custom construction → href comparisons → setBedrockProviderModule once →
+// streamSimple once. The resolver runs BEFORE the provider imports; the stop probe is consulted
+// after every await and before model construction, registration and streaming.
+export async function startHostPiStream(loadRuntime: () => Promise<HostPiRuntime | null>, context: HostPiStreamContext): Promise<HostPiStreamStart> {
   const { request, credential, observation } = context
   if (request.routeKind === 'catalog' && request.provider === 'amazon-bedrock' && credential.type === 'iam') {
     const resolvedEndpoint = await resolveBedrockEndpointHref(observation.bedrockConstructor as unknown as new (config: any) => BedrockClientLike, credential)
     if (resolvedEndpoint !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
   }
+  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
+  const runtime = await loadRuntime()
+  if (runtime === null || context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   let model: Record<string, any>
   const bareId = stripPiPrefix(request.model)
   if (request.routeKind === 'custom') {
@@ -92,11 +106,15 @@ export async function startHostPiStream(runtime: HostPiRuntime, context: HostPiS
     }
     if (request.provider === 'minimax-cn') model.id = model.id.replace(/^MiniMax-/, '')
   }
+  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   runtime.events.push('model-constructed')
+  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   runtime.registrationCount += 1
   runtime.events.push('registered')
   runtime.bindings.setBedrockProviderModule(runtime.bindings.bedrockProviderModule)
+  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   const composedSystem = request.responseFormat === 'json_object' ? (context.systemPrompt ? `${context.systemPrompt}\n\n${JSON_OBJECT_SYSTEM_CONSTRAINT}` : JSON_OBJECT_SYSTEM_CONSTRAINT) : context.systemPrompt
+  if (context.shouldStop()) return { ok: false, failure: 'deadline_exceeded', stopped: true }
   runtime.streamCount += 1
   runtime.events.push('stream-started')
   const stream = runtime.bindings.streamSimple(model, {
@@ -166,10 +184,14 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     const [policy, streamModule] = await Promise.all([import('./host-completion-policy.ts'), import('./host-completion-stream.ts')])
     if (settled) return
     installed = policy.installTransportObservation(new URL(request.transportHref))
-    const [piAi, bedrockProviderModule, oauth] = await Promise.all([import('@mariozechner/pi-ai'), import('@mariozechner/pi-ai/bedrock-provider'),
-      request.routeKind === 'catalog' && request.provider === 'github-copilot' ? import('@mariozechner/pi-ai/oauth') : Promise.resolve(null)])
-    if (settled) return
-    const runtime: HostPiRuntime = {
+    // The provider modules load only AFTER the Bedrock zero-I/O endpoint comparison passed inside
+    // startHostPiStream, so a deadline that wins during the resolver await keeps imports, Pi
+    // registration, streaming and transport at zero (Review R4 issue 1).
+    const loadRuntime = async (): Promise<HostPiRuntime | null> => {
+      const [piAi, bedrockProviderModule, oauth] = await Promise.all([import('@mariozechner/pi-ai'), import('@mariozechner/pi-ai/bedrock-provider'),
+        request.routeKind === 'catalog' && request.provider === 'github-copilot' ? import('@mariozechner/pi-ai/oauth') : Promise.resolve(null)])
+      if (settled) return null
+      const runtime: HostPiRuntime = {
       bindings: {
         getModels: (provider: string): Array<Record<string, any>> => (piAi.getModels as unknown as (provider: string) => Array<Record<string, any>>)(provider),
         getGitHubCopilotBaseUrl: (token: string): string => {
@@ -185,19 +207,25 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
       events: [],
       registrationCount: 0,
       streamCount: 0,
+      }
+      return runtime
     }
     const apiKey = credential.type === 'api_key' || credential.type === 'oauth_access' ? credential.value : credential.type === 'none' ? 'not-needed' : undefined
     // The tracker's expected response model must equal the SENT clone id the seam constructs:
     // bare id, plus one stripped MiniMax- prefix for the minimax-cn catalog route.
     const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
     const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, claim: (kind) => failWith(kind) })
-    const started = await startHostPiStream(runtime, {
+    const started = await startHostPiStream(loadRuntime, {
       request, credential, observation: installed, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
       maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,
       timeoutRemainingMs: Math.max(1, deadlineAt - Date.now()),
+      shouldStop: () => settled || controller.signal.aborted,
     })
     if (settled) return
-    if (!started.ok) return failWith(started.failure)
+    if (!started.ok) {
+      if (started.stopped === true) return
+      return failWith(started.failure)
+    }
     try {
       for await (const event of started.stream as AsyncIterable<import('@mariozechner/pi-ai').AssistantMessageEvent>) { tracker.onEvent(event); if (settled) break }
     } catch {
