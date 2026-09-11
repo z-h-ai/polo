@@ -533,6 +533,83 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     }
   })
 
+  it('a Proxy-wrapped Request is rejected before any url read, attempt, or wire access', async () => {
+    const allowed = await startOkServer()
+    const attacker = await startOkServer()
+    try {
+      await withSeam(allowed.pathUrl('/v1'), async (installed) => {
+        const underlying = new Request(attacker.pathUrl('/v1/forged'), { signal: AbortSignal.timeout(500) })
+        let input: Request = new Proxy(underlying, {})
+        // Node's undici exposes the request state by symbol. When present, forge an
+        // attacker-underlying state whose public url AND intrinsic url views both present the
+        // allowed origin, so only the pre-read Proxy rejection can stop this input (the exact
+        // R19 forged-intrinsic probe behavior; on runtimes without the symbol the plain
+        // Proxy-wrapped Request must still be rejected before any getter runs).
+        const stateKey = Object.getOwnPropertySymbols(underlying).find((key) => String(key) === 'Symbol(state)')
+        if (stateKey) {
+          const attackerState = Reflect.get(underlying as unknown as object, stateKey) as Record<string, unknown>
+          const presentedUrl = new Proxy(attackerState.url as object, {
+            get: (urlTarget, key, receiver) =>
+              key === 'href' ? allowed.pathUrl('/v1/presented') : Reflect.get(urlTarget, key, receiver),
+          })
+          const presentedState = { ...attackerState, url: presentedUrl, urlList: [presentedUrl] }
+          input = new Proxy(underlying, {
+            get: (requestTarget, key, receiver) => {
+              if (key === stateKey) {
+                return presentedState
+              }
+              if (key === 'url') {
+                return allowed.pathUrl('/v1/presented')
+              }
+              return Reflect.get(requestTarget, key, receiver)
+            },
+          })
+        }
+        await expect(fetch(input)).rejects.toThrow(/host transport seam: request input must not be a Proxy/)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual([])
+        expect(attacker.requests).toEqual([])
+      })
+    } finally {
+      await allowed.close()
+      await attacker.close()
+    }
+  })
+
+  it('the installed fetch keeps the saved original runtime surface, including a callable preconnect', () => {
+    const preconnectCalls: string[] = []
+    const preconnect = (origin: string): void => {
+      preconnectCalls.push(origin)
+    }
+    const savedFetch = async (...args: Parameters<typeof PRISTINE_FETCH>): Promise<Response> =>
+      Reflect.apply(PRISTINE_FETCH, globalThis, args)
+    Object.defineProperty(savedFetch, 'preconnect', {
+      configurable: true,
+      enumerable: true,
+      value: preconnect,
+      writable: false,
+    })
+    try {
+      // The saved fetch here is deliberately a plain callable carrying an own preconnect —
+      // exactly the runtime shape whose surface the seam must preserve (installed via
+      // Reflect.set because it intentionally does not satisfy Node's typed fetch interface).
+      Reflect.set(globalThis, 'fetch', savedFetch)
+      const installed = installTransportObservation(new URL('https://allowed.example/v1'))
+      const installedFetch = globalThis.fetch
+      // The seam callable must expose exactly the saved fetch's own property surface (the
+      // wrapper is a transparent Proxy, not a plain function that drops runtime properties).
+      expect(Reflect.ownKeys(installedFetch).map(String)).toEqual(Reflect.ownKeys(savedFetch).map(String))
+      expect(Object.getOwnPropertyDescriptor(installedFetch, 'preconnect')?.value).toBe(preconnect)
+      const preservedPreconnect = Reflect.get(installedFetch, 'preconnect') as (origin: string) => void
+      preservedPreconnect('https://allowed.example')
+      expect(preconnectCalls).toEqual(['https://allowed.example'])
+      expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+    } finally {
+      globalThis.fetch = PRISTINE_FETCH
+      BedrockRuntimeClient.prototype.send = PRISTINE_SEND
+    }
+  })
+
   it('the transmitted snapshot carries the live caller signal and abort state stays observable', async () => {
     const server = await startRecordingServer()
     try {
@@ -1072,6 +1149,10 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
           },
         },
       ) as RequestInit
+    // Fresh AbortController per matrix side: makeInit() runs once for the native baseline and
+    // once for the seam call, and each invocation records its own controller here so the signal
+    // identity and abort propagation can be asserted per side (reset every iteration).
+    let signalControllers: AbortController[] = []
     const cases: Array<{
       name: string
       makeInput: () => Request | Promise<Request>
@@ -1091,6 +1172,15 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
       { name: 'stateful-own-accessors', makeInput: freshInput, makeInit: (events) => statefulAccessorInit(events, false) },
       { name: 'stateful-inherited-accessors', makeInput: freshInput, makeInit: (events) => statefulAccessorInit(events, true) },
       { name: 'proxy-get-has-traps', makeInput: freshInput, makeInit: proxyInit },
+      {
+        name: 'caller-signal-carrier',
+        makeInput: freshInput,
+        makeInit: () => {
+          const controller = new AbortController()
+          signalControllers.push(controller)
+          return { signal: controller.signal }
+        },
+      },
     ]
     const server = await startRecordingServer()
     const url = server.pathUrl('/v1/request-input')
@@ -1121,6 +1211,7 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     }
     try {
       for (const testCase of cases) {
+        signalControllers = []
         // Native baseline: the Request constructor alone decides every member and body ownership.
         const nativeEvents: string[] = []
         const nativeInput = await testCase.makeInput()
@@ -1163,6 +1254,19 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
             expect(seamEvents).toEqual(nativeEvents)
             expect(stateOf(seamInput)).toEqual(nativeState)
             expect(installed.observation.attempts).toBe(1)
+            if (testCase.name === 'caller-signal-carrier') {
+              const [nativeController, seamController] = signalControllers
+              expect(nativeController).toBeDefined()
+              expect(seamController).toBeDefined()
+              // The transmitted snapshot must carry the exact caller signal objects, not fresh
+              // replacements: identity on both sides, then live abort propagation after capture.
+              expect(nativeSnapshot.signal).toBe(nativeController!.signal)
+              expect(captured!.signal).toBe(seamController!.signal)
+              seamController!.abort()
+              nativeController!.abort()
+              expect(captured!.signal.aborted).toBe(true)
+              expect(nativeSnapshot.signal.aborted).toBe(true)
+            }
           })
           const wire = server.seen[server.seen.length - 1]
           expect(wire.method).toBe(nativeMethod)
@@ -1242,8 +1346,12 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
     const wireCalls = { count: 0 }
     let current = wireStub(wireCalls)
     const requestHandler: { handle: unknown } = { handle: current }
+    let handleGetterReads = 0
     Object.defineProperty(requestHandler, 'handle', {
-      get: () => current,
+      get: () => {
+        handleGetterReads += 1
+        return current
+      },
       set: () => {
         throw new Error('setter exploded')
       },
@@ -1253,6 +1361,9 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
     const client = bedrockClientWithHandler(requestHandler)
     try {
       await withSeam(BASE, async (installed) => {
+        // The SDK may read handle during client construction (before the seam exists); baseline
+        // the counter here so the assertion covers exactly the seam-attributable getter reads.
+        const getterReadsBeforeSends = handleGetterReads
         for (let round = 0; round < 2; round += 1) {
           const error = await sendOnce(client)
           expect((error as Error).message).toMatch(/host transport seam: Bedrock request handler handle is not writable/)
@@ -1260,6 +1371,9 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
           expect(wireCalls.count).toBe(0)
           expect(installed.observation.attempts).toBe(0)
         }
+        // Exactly one pre-latch getter read (the first callable check); the latched second send
+        // must consult the permanent failed state before any further handle property access.
+        expect(handleGetterReads - getterReadsBeforeSends).toBe(1)
       })
     } finally {
       client.destroy()
@@ -1294,8 +1408,12 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
     let current: unknown = wireStub(wireCalls)
     const requestHandler: { handle: unknown } = { handle: current }
     let firstWrite = true
+    let handleGetterReads = 0
     Object.defineProperty(requestHandler, 'handle', {
-      get: () => current,
+      get: () => {
+        handleGetterReads += 1
+        return current
+      },
       set: (value) => {
         current = value
         if (firstWrite) {
@@ -1321,6 +1439,9 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
       // at their initial values across every repeat.
       await withSeam(BASE, async (installed) => {
         const initialObservation = { ...installed.observation }
+        // Baseline after install: the assertion must count only seam-attributable getter reads,
+        // independent of any construction-time SDK access before the seam existed.
+        const getterReadsBeforeSends = handleGetterReads
         for (let round = 0; round < 3; round += 1) {
           const error = await sendOnce(client)
           expect((error as Error).message).toBe('host transport seam: Bedrock request handler handle is not writable')
@@ -1329,6 +1450,10 @@ describe('bedrock send-seam install atomicity fails closed on unusable handles',
           expect(wireCalls.count).toBe(0)
           expect(installed.observation).toEqual(initialObservation)
         }
+        // The stored-then-thrown first send reads handle exactly once (its callable check); both
+        // later sends must hit the permanent failed latch with zero post-latch getter reads, zero
+        // originalSend reach-through, and no wire or observation mutation.
+        expect(handleGetterReads - getterReadsBeforeSends).toBe(1)
       })
     } finally {
       sendSlot.send = PRISTINE_SEND

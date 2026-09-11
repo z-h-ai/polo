@@ -3,14 +3,16 @@
  *
  * A one-shot Host worker installs this BEFORE pi-ai is loaded (POO-68 owns the bootstrap). One
  * request-local `TransportObservation` covers both transports: the saved-original
- * `globalThis.fetch` gets a fail-closed URL policy wrapper (always `redirect: 'error'`), and the
- * shared `BedrockRuntimeClient` send wrapper guards each instance's resolved
- * `config.requestHandler.handle` — the AWS retry middleware's per-wire-attempt entry point. The
- * second wire attempt throws an internal `RetryBlockedError` before the original transport, an
- * unguardable request handler is latched fail-closed, object fetch inputs are bound to their
- * intrinsic transport snapshot, and observations hold only counts/status, never provider content.
+ * `globalThis.fetch` gets a fail-closed URL policy wrapper (always `redirect: 'error'`) as a
+ * transparent `Proxy` preserving the saved callable's runtime surface, and the shared
+ * `BedrockRuntimeClient` send wrapper guards each resolved `config.requestHandler.handle` (the
+ * AWS retry middleware's per-wire-attempt entry point). The second wire attempt throws an
+ * internal `RetryBlockedError` before the original transport, an unguardable handler is latched
+ * fail-closed before later handle reads, Proxy Request inputs are rejected before any URL read,
+ * object fetch inputs are bound to their intrinsic snapshot, observations hold counts/status only.
  */
 
+import { types } from 'node:util';
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 
 export interface TransportObservation {
@@ -34,6 +36,10 @@ function finiteInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
 
+type SeamSend = (this: BedrockRuntimeClient, ...args: unknown[]) => unknown;
+type SeamRequestHandler = { handle?: (request: unknown, options?: unknown) => Promise<unknown> };
+type SeamSdkOutcome = { response?: { statusCode?: unknown }; $metadata?: { httpStatusCode?: unknown } };
+
 /** Comparable origin: lowercase protocol, bracket-less lowercase hostname, effective port. */
 function originKeyOf(url: URL): string {
   const hostname = url.hostname.toLowerCase().replace(/^\[(.+)\]$/, '$1');
@@ -54,10 +60,7 @@ function assertAllowedTarget(baseOrigin: string, basePathname: string, target: U
   if (target.pathname !== basePathname && !target.pathname.startsWith(prefix)) {
     throw seamError('request path is not the base path or a descendant of it');
   }
-  for (const segment of target.pathname.split('/')) {
-    if (segment === '') {
-      continue;
-    }
+  for (const segment of target.pathname.split('/').filter(Boolean)) {
     let decoded: string;
     try {
       decoded = decodeURIComponent(segment);
@@ -78,29 +81,38 @@ function gateSecondWireAttempt(observation: TransportObservation): void {
   }
 }
 
-function installBedrockSendSeam(observation: TransportObservation): void {
+export function installTransportObservation(baseUrl: URL): InstalledTransportObservation {
+  const baseSnapshot = new URL(URL.prototype.toString.call(baseUrl));
+  const baseOrigin = originKeyOf(baseSnapshot);
+  const basePathname = baseSnapshot.pathname;
+  assertAllowedTarget(baseOrigin, basePathname, baseSnapshot, 'base url');
+  const observation: TransportObservation = {
+    attempts: 0,
+    networkFailure: false,
+    retryBlocked: false,
+    sdkException: false,
+  };
   const clientPrototype = BedrockRuntimeClient.prototype as { send?: unknown };
   if (typeof clientPrototype.send !== 'function') {
     throw seamError('BedrockRuntimeClient.prototype.send is not callable');
   }
-  const originalSend = clientPrototype.send as (this: BedrockRuntimeClient, ...args: unknown[]) => unknown;
+  const originalSend = clientPrototype.send as SeamSend;
   const handlerStates = new WeakMap<object, 'guarded' | 'failed'>();
   clientPrototype.send = function (this: BedrockRuntimeClient, ...args: unknown[]): unknown {
-    const requestHandler = (this.config as { requestHandler?: { handle?: (request: unknown, options?: unknown) => Promise<unknown> } } | undefined)?.requestHandler;
-    if (!requestHandler || typeof requestHandler.handle !== 'function') {
-      throw seamError('resolved Bedrock request handler has no callable handle');
-    }
-    if (handlerStates.get(requestHandler) === 'failed') {
+    const requestHandler = (this.config as { requestHandler?: SeamRequestHandler } | undefined)?.requestHandler;
+    if (requestHandler && handlerStates.get(requestHandler) === 'failed') {
       throw seamError('Bedrock request handler handle is not writable');
     }
+    const originalHandle = requestHandler?.handle;
+    if (!requestHandler || typeof originalHandle !== 'function') {
+      throw seamError('resolved Bedrock request handler has no callable handle');
+    }
     if (handlerStates.get(requestHandler) !== 'guarded') {
-      const originalHandle = requestHandler.handle;
       const wrapped = async (request: unknown, options?: unknown): Promise<unknown> => {
         gateSecondWireAttempt(observation);
         try {
           const result = await originalHandle.call(requestHandler, request, options);
-          observation.status ??=
-            finiteInteger((result as { response?: { statusCode?: unknown } } | undefined)?.response?.statusCode);
+          observation.status ??= finiteInteger((result as SeamSdkOutcome | undefined)?.response?.statusCode);
           return result;
         } catch (error) {
           observation.networkFailure = true;
@@ -123,59 +135,47 @@ function installBedrockSendSeam(observation: TransportObservation): void {
     if (typeof pending?.then === 'function') {
       return pending.then(undefined, (error: unknown) => {
         observation.sdkException = true;
-        observation.status ??=
-          finiteInteger((error as { $metadata?: { httpStatusCode?: unknown } } | undefined)?.$metadata?.httpStatusCode);
+        observation.status ??= finiteInteger((error as SeamSdkOutcome | undefined)?.$metadata?.httpStatusCode);
         throw error;
       });
     }
     return pending;
   };
-}
-
-export function installTransportObservation(baseUrl: URL): InstalledTransportObservation {
-  const baseSnapshot = new URL(URL.prototype.toString.call(baseUrl));
-  const baseOrigin = originKeyOf(baseSnapshot);
-  const basePathname = baseSnapshot.pathname;
-  assertAllowedTarget(baseOrigin, basePathname, baseSnapshot, 'base url');
-  const observation: TransportObservation = {
-    attempts: 0,
-    networkFailure: false,
-    retryBlocked: false,
-    sdkException: false,
-  };
-  const originalFetch = globalThis.fetch;
-  const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // One native Request(input, init) snapshot: validated, gated, transmitted; redirect forced by init.
-    let snapshot: Request;
-    if (input instanceof Request) {
-      const intrinsicUrl = Reflect.get(Request.prototype, 'url', input) as string;
-      if (input.url !== intrinsicUrl) {
-        throw seamError('request input url is not internally consistent');
+  globalThis.fetch = new Proxy(globalThis.fetch, {
+    async apply(target, thisArg, [input, init]) {
+      // One native Request(input, init) snapshot: validated, gated, transmitted; redirect forced by init.
+      let snapshot: Request;
+      if (input instanceof Request) {
+        if (types.isProxy(input)) {
+          throw seamError('request input must not be a Proxy');
+        }
+        const intrinsicUrl = Reflect.get(Request.prototype, 'url', input) as string;
+        if (input.url !== intrinsicUrl) {
+          throw seamError('request input url is not internally consistent');
+        }
+        snapshot = new Request(input, init);
+        if (snapshot.url !== intrinsicUrl) {
+          throw seamError('request input url is not internally consistent');
+        }
+      } else if (typeof input === 'string' || input instanceof URL) {
+        const wireTarget = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
+        assertAllowedTarget(baseOrigin, basePathname, wireTarget, 'request url');
+        snapshot = new Request(wireTarget, init);
+      } else {
+        throw seamError('fetch input must be a string, URL or Request');
       }
-      snapshot = new Request(input, init);
-      if (snapshot.url !== intrinsicUrl) {
-        throw seamError('request input url is not internally consistent');
+      assertAllowedTarget(baseOrigin, basePathname, new URL(snapshot.url), 'request url');
+      gateSecondWireAttempt(observation);
+      try {
+        const response = await Reflect.apply(target, thisArg, [snapshot, { redirect: 'error' }]);
+        observation.status = response.status;
+        return response;
+      } catch (error) {
+        observation.networkFailure = true;
+        throw error;
       }
-    } else if (typeof input === 'string' || input instanceof URL) {
-      const target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
-      assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
-      snapshot = new Request(target, init);
-    } else {
-      throw seamError('fetch input must be a string, URL or Request');
-    }
-    assertAllowedTarget(baseOrigin, basePathname, new URL(snapshot.url), 'request url');
-    gateSecondWireAttempt(observation);
-    try {
-      const response = await originalFetch.call(globalThis, snapshot, { redirect: 'error' });
-      observation.status = response.status;
-      return response;
-    } catch (error) {
-      observation.networkFailure = true;
-      throw error;
-    }
-  };
-  installBedrockSendSeam(observation);
-  globalThis.fetch = wrappedFetch as typeof globalThis.fetch;
+    },
+  });
   return { observation, bedrockConstructor: BedrockRuntimeClient };
 }
 
