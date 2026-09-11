@@ -1,15 +1,14 @@
 /**
  * Host single-attempt transport observation seam (POO-69).
  *
- * A one-shot Host worker installs this BEFORE pi-ai is loaded (POO-68 owns the
- * bootstrap). One request-local `TransportObservation` covers both transports:
- * the saved-original `globalThis.fetch` gets a fail-closed URL policy wrapper
- * (always `redirect: 'error'`), and the shared `BedrockRuntimeClient` send
- * wrapper guards each instance's resolved `config.requestHandler.handle` —
- * the AWS retry middleware's per-wire-attempt entry point. The second wire attempt throws an
- * internal `RetryBlockedError` before the original transport, an unguardable request handler
- * is latched fail-closed, object fetch inputs are bound to their intrinsic transport snapshot,
- * and observations hold only counts and numeric status, never provider content.
+ * A one-shot Host worker installs this BEFORE pi-ai is loaded (POO-68 owns the bootstrap). One
+ * request-local `TransportObservation` covers both transports: the saved-original
+ * `globalThis.fetch` gets a fail-closed URL policy wrapper (always `redirect: 'error'`), and the
+ * shared `BedrockRuntimeClient` send wrapper guards each instance's resolved
+ * `config.requestHandler.handle` — the AWS retry middleware's per-wire-attempt entry point. The
+ * second wire attempt throws an internal `RetryBlockedError` before the original transport, an
+ * unguardable request handler is latched fail-closed, object fetch inputs are bound to their
+ * intrinsic transport snapshot, and observations hold only counts/status, never provider content.
  */
 
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -28,6 +27,8 @@ export interface InstalledTransportObservation {
 }
 
 const SEAM_ERROR_PREFIX = 'host transport seam:';
+
+const REDIRECT_ERROR_INIT: RequestInit = { redirect: 'error' };
 
 function seamError(reason: string): Error {
   return new Error(`${SEAM_ERROR_PREFIX} ${reason}`);
@@ -110,7 +111,6 @@ function installBedrockSendSeam(observation: TransportObservation): void {
           throw error;
         }
       };
-      // Atomic install: assign, verify, then mark; a failed install is latched and fails closed.
       try {
         requestHandler.handle = wrapped;
         if (requestHandler.handle !== wrapped) {
@@ -140,33 +140,34 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
   const baseOrigin = originKeyOf(baseSnapshot);
   const basePathname = baseSnapshot.pathname;
   assertAllowedTarget(baseOrigin, basePathname, baseSnapshot, 'base url');
-  const observation: TransportObservation = { attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false };
+  const observation: TransportObservation = {
+    attempts: 0,
+    networkFailure: false,
+    retryBlocked: false,
+    sdkException: false,
+  };
   const originalFetch = globalThis.fetch;
   const wrappedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    // One native Request(input, init) snapshot; validation and transport share this exact input.
-    // A used/locked input body without an init.body replacement fails like native fetch.
-    if (input instanceof Request && (init === undefined || !('body' in init)) && input.body !== null && (input.bodyUsed || input.body.locked)) {
-      throw new TypeError('Request body is unusable');
-    }
+    // One native Request(input, init) snapshot: validated, gated, transmitted; redirect forced.
     let snapshot: Request;
     if (input instanceof Request) {
       snapshot = new Request(input, init);
-    } else if (input instanceof URL) {
-      const target = new URL(URL.prototype.toString.call(input));
-      assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
-      snapshot = new Request(target, init);
-    } else if (typeof input === 'string') {
-      const target = new URL(input);
+      if (Reflect.get(Request.prototype, 'url', input) !== snapshot.url) {
+        throw seamError('request input url is not internally consistent');
+      }
+    } else if (typeof input === 'string' || input instanceof URL) {
+      const target = new URL(typeof input === 'string' ? input : URL.prototype.toString.call(input));
       assertAllowedTarget(baseOrigin, basePathname, target, 'request url');
       snapshot = new Request(target, init);
     } else {
       throw seamError('fetch input must be a string, URL or Request');
     }
-    const guarded = new Request(snapshot, { redirect: 'error' });
-    assertAllowedTarget(baseOrigin, basePathname, new URL(guarded.url), 'request url');
+    // redirect:'error' is forced as an own property: every observer sees it regardless of init.
+    Object.defineProperty(snapshot, 'redirect', { value: 'error' });
+    assertAllowedTarget(baseOrigin, basePathname, new URL(snapshot.url), 'request url');
     gateSecondWireAttempt(observation);
     try {
-      const response = await originalFetch.call(globalThis, guarded);
+      const response = await originalFetch.call(globalThis, snapshot, REDIRECT_ERROR_INIT);
       observation.status = response.status;
       return response;
     } catch (error) {
@@ -180,8 +181,7 @@ export function installTransportObservation(baseUrl: URL): InstalledTransportObs
 }
 
 /** Fixed-priority pure classification (deadline → retry → 401/403 → request → terminal). */
-export function classifyTransportFailure(
-  observation: Readonly<TransportObservation>,
+export function classifyTransportFailure(observation: Readonly<TransportObservation>,
   flags: { deadlineExpired: boolean; providerFailed: boolean },
 ): 'deadline_exceeded' | 'retry_blocked' | 'provider_rejected_credentials'
   | 'provider_request_failed' | 'provider_error_terminal' | undefined {

@@ -491,20 +491,18 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     }
   })
 
-  it('a Request with a shadowed url property binds the wire target to the validated snapshot', async () => {
+  it('a Request whose public url shadows a different intrinsic url fails closed', async () => {
     const allowed = await startOkServer()
     const attacker = await startOkServer()
     try {
       await withSeam(allowed.pathUrl('/v1'), async (installed) => {
         const evil = new Request(attacker.pathUrl('/v1/shadowed'))
         Object.defineProperty(evil, 'url', { value: allowed.pathUrl('/v1/shadowed') })
-        // The snapshot consumes the caller-owned shadow exactly like native bun fetch: the
-        // validated snapshot and the transmitted snapshot are the same object, so the wire target
-        // is always the validated target and the intrinsic (unvalidated) target is never reached.
-        const response = await fetch(evil)
-        expect(response.status).toBe(200)
-        expect(installed.observation).toEqual({ attempts: 1, status: 200, networkFailure: false, retryBlocked: false, sdkException: false })
-        expect(allowed.requests).toEqual(['/v1/shadowed'])
+        // The intrinsic Request URL must agree with the public URL view; any divergence fails
+        // closed before attempts or wire access in both runtimes (zero requests to both origins).
+        await expect(fetch(evil)).rejects.toThrow(/host transport seam:/)
+        expect(installed.observation).toEqual({ attempts: 0, networkFailure: false, retryBlocked: false, sdkException: false })
+        expect(allowed.requests).toEqual([])
         expect(attacker.requests).toEqual([])
       })
     } finally {
@@ -974,8 +972,8 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
       input.body?.getReader()
       return input
     }
-    const cases: Array<{ name: string; makeInput: () => Request | Promise<Request>; init?: RequestInit }> = [
-      { name: 'no-init', makeInput: freshInput },
+    const cases: Array<{ name: string; makeInput: () => Request | Promise<Request>; init?: RequestInit; omitInit?: boolean }> = [
+      { name: 'no-init', omitInit: true, makeInput: freshInput },
       { name: 'empty-init', makeInput: freshInput, init: {} },
       { name: 'headers-only', makeInput: freshInput, init: { headers: { 'x-override': 'yes' } } },
       { name: 'redirect-only', makeInput: freshInput, init: { redirect: 'manual' } },
@@ -994,42 +992,55 @@ describe('fetch policy binds validation to immutable and intrinsic state', () =>
     ]
     const server = await startRecordingServer()
     const url = server.pathUrl('/v1/request-input')
+    const stateOf = (request: Request) => ({ bodyUsed: request.bodyUsed, locked: request.body?.locked ?? false })
+    const membersOf = (request: Request) => ({
+      url: request.url,
+      method: request.method,
+      body: request.body === null ? null : 'body-stream',
+      referrer: request.referrer,
+      referrerPolicy: request.referrerPolicy,
+      mode: request.mode,
+      credentials: request.credentials,
+      cache: request.cache,
+      integrity: request.integrity,
+      keepalive: request.keepalive,
+    })
     try {
       for (const testCase of cases) {
-        // Native baseline: the Request constructor alone decides method/body/headers/ownership.
+        // Native baseline: the Request constructor alone decides every member and body ownership.
         const nativeInput = await testCase.makeInput()
         const nativeSnapshot = testCase.omitInit ? new Request(nativeInput) : new Request(nativeInput, testCase.init)
-        const nativeMethod = nativeSnapshot.method
+        const nativeMembers = membersOf(nativeSnapshot)
         const nativeBody = nativeSnapshot.body === null ? null : await nativeSnapshot.clone().text()
         const nativeOriginal = nativeSnapshot.headers.get('x-original')
         const nativeOverride = nativeSnapshot.headers.get('x-override')
+        const nativeState = stateOf(nativeInput)
 
         // The interceptor is installed before the seam install so originalFetch delegates through
-        // it; `captured` is the exact guarded snapshot the seam hands to the native transport and
-        // `capturedBody`/headers read its state pre-send (the transport consumes the body stream).
+        // it; `captured` is the exact snapshot the seam hands to the native transport and its
+        // body/headers are read pre-send (the transport consumes the body stream).
         const previousFetch = globalThis.fetch
         let captured: Request | undefined
-        let capturedBody: string | null = null
         globalThis.fetch = async (passed: RequestInfo | URL, passedInit?: RequestInit) => {
           captured = passed as Request
-          const request = passed as Request
-          capturedBody = request.body === null ? null : await request.clone().text()
           return await previousFetch.call(globalThis, passed, passedInit)
         }
         try {
           const seamInput = await testCase.makeInput()
           await withSeam(server.pathUrl('/v1'), async (installed) => {
-            const response = testCase.omitInit ? await fetch(seamInput) : await fetch(seamInput, testCase.init)
+            const omitInit = testCase.omitInit === true || testCase.init === undefined
+          const response = omitInit ? await fetch(seamInput) : await fetch(seamInput, testCase.init)
             expect(response.status).toBe(200)
-            expect(captured!.method).toBe(nativeMethod)
-            expect(capturedBody).toBe(nativeBody)
+            expect(captured).toBeDefined()
+            expect(membersOf(captured!)).toEqual(nativeMembers)
             expect(captured!.headers.get('x-original')).toBe(nativeOriginal)
             expect(captured!.headers.get('x-override')).toBe(nativeOverride)
             expect(captured!.redirect).toBe('error')
+            expect(stateOf(seamInput)).toEqual(nativeState)
             expect(installed.observation.attempts).toBe(1)
           })
           const wire = server.seen[server.seen.length - 1]
-          expect(wire.method).toBe(nativeMethod)
+          expect(wire.method).toBe(nativeMembers.method)
           expect(wire.body).toBe(nativeBody)
         } finally {
           globalThis.fetch = PRISTINE_FETCH
