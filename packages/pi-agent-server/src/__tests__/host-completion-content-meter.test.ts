@@ -277,6 +277,89 @@ describe('content meter: hostile block kinds and bounded snapshots', () => {
     expect(h.probe()).toMatchObject({ over: true })
   })
 })
+// R8 issue 1 closure: a message whose insertion order puts a malformed usage value BEFORE later
+// own enumerable data descriptors (responseModel, model) must treat the first usage read as
+// terminal — the complete-event pass latches inside meterMessage and never inspects the later
+// identity fields, so the trusted closure records laterFixedReads=[] for all four shapes.
+describe('content meter: outer usage fail-fast before later message fields (R8 issue 1)', () => {
+  class NotPlain { data = 1 }
+  const usageShapes: Array<[string, unknown]> = [
+    ['primitive', 'malformed-usage'],
+    ['class-instance', new NotPlain()],
+    ['array', [1, 2, 3]],
+    ['proxy', new Proxy({ input: 1 }, {})],
+  ]
+  for (const [shapeName, usageValue] of usageShapes) {
+    it(`latches at the usage field before harmless later data responseModel/model (${shapeName})`, () => {
+      let responseModelGetter = 0
+      let modelGetter = 0
+      const h = meterHarness()
+      const message = assistantMessage([{ type: 'text', text: 'hi' }], {})
+      // Insertion order: content, usage (unsafe shape), then harmless own enumerable data
+      // responseModel/model — the loop must stop at usage, never reach the later descriptors.
+      Object.defineProperty(message, 'usage', { value: usageValue, enumerable: true, writable: true, configurable: true })
+      Object.defineProperty(message, 'responseModel', {
+        get() { responseModelGetter += 1; return 'later-response-model' },
+        enumerable: true, configurable: true,
+      })
+      Object.defineProperty(message, 'model', {
+        get() { modelGetter += 1; return 'later-model' },
+        enumerable: true, configurable: true,
+      })
+      h.meter.onEvent(h.done('stop', message))
+      expect(h.probe()).toMatchObject({ over: true })
+      expect(h.finish()).toBeNull()
+      expect(responseModelGetter).toBe(0)
+      expect(modelGetter).toBe(0)
+    })
+  }
+  it('never meters a non-identity field ordered after a malformed usage value', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'hi' }], {})
+    Object.defineProperty(message, 'usage', { value: 'malformed-usage', enumerable: true, writable: true, configurable: true })
+    Object.defineProperty(message, 'trailerNote', { value: 'z'.repeat(TEXT_LIMIT + 5), enumerable: true, writable: true, configurable: true })
+    h.meter.onEvent(h.done('stop', message))
+    // The latch is attributed to usage itself: the trailer never reaches the semantic walker, so
+    // the only over-limit contribution is the latch constant, and the snapshot stays discarded.
+    expect(h.probe()).toMatchObject({ over: true, inconsistent: false })
+    expect(h.finish()).toBeNull()
+  })
+})
+// R8 issue 2 closure: a present usage key whose data value is not a valid non-negative integer
+// shares the monotonic budget latch — later usage numbers and later model identity fields are
+// never read, and the terminal snapshot is discarded instead of completing with usage:null.
+describe('content meter: malformed usage numeric (R8 issue 2)', () => {
+  it('latches on the first malformed usage number and never completes the snapshot even with valid later data numbers', () => {
+    const h = meterHarness()
+    const usage: Record<string, unknown> = { input: 'malformed-number', output: 4, cacheRead: 4, cacheWrite: 4, totalTokens: 4 }
+    const message = assistantMessage([{ type: 'text', text: 'hi' }], {})
+    ;(message as { usage: unknown }).usage = usage
+    Object.defineProperty(message, 'responseModel', { value: 'later-response-model', enumerable: true, writable: true, configurable: true })
+    Object.defineProperty(message, 'model', { value: 'later-model', enumerable: true, writable: true, configurable: true })
+    h.meter.onEvent(h.done('stop', message))
+    // Under the signed contract the malformed input value latches immediately; the pre-fix
+    // behavior completed a non-null snapshot with usage:null and read responseModel/model.
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('latches on negative and non-integer usage numbers without reading later keys', () => {
+    for (const badValue of [-1, 1.5, Number.NaN]) {
+      let cacheReadGetter = 0
+      let responseModelGetter = 0
+      const h = meterHarness()
+      const usage: Record<string, unknown> = { input: badValue }
+      Object.defineProperty(usage, 'cacheRead', { get() { cacheReadGetter += 1; return 0 }, enumerable: true })
+      const message = assistantMessage([{ type: 'text', text: 'hi' }], {})
+      ;(message as { usage: unknown }).usage = usage
+      Object.defineProperty(message, 'responseModel', { get() { responseModelGetter += 1; return 'r' }, enumerable: true })
+      h.meter.onEvent(h.done('stop', message))
+      expect(h.probe()).toMatchObject({ over: true })
+      expect(h.finish()).toBeNull()
+      expect(cacheReadGetter).toBe(0)
+      expect(responseModelGetter).toBe(0)
+    }
+  })
+})
 describe('content meter: terminal descriptor fail-fast and JSON-data domain', () => {
   it('treats non-enumerable canonical fields as absent and never releases their content', () => {
     const h = meterHarness()

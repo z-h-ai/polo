@@ -193,6 +193,13 @@ export function createContentMeter(): ContentMeter {
     for (const [field, value] of forEachOwnEnumerableDataProperty(message, () => charge(budget, 'projectionWork', PROJECTION_WORK_CAP), latchMessageProjection)) {
       if (budget.dead) return
       if (field === 'content') continue
+      // Outer usage fail-fast (R14 §6.3): a present usage field whose value is not an inert
+      // JSON-data object must latch immediately — no later field (responseModel, model, etc.)
+      // is enumerated or read after this point (R8 Review issue 1).
+      if (field === 'usage' && !isInertJsonDataObject(value)) {
+        latchSemantic(budget)
+        return
+      }
       if (!MESSAGE_IDENTITY_FIELDS.has(field)) walkSemantic(value, [{ kind: 'scope', value: 'message' }, { kind: 'field', value: field }], 1, budget, add)
     }
   }
@@ -378,7 +385,15 @@ export function createContentMeter(): ContentMeter {
           latchUnsafe()
           return null
         }
-        return descriptor.kind === 'data' && typeof descriptor.value === 'number' ? descriptor.value : null
+        if (descriptor.kind !== 'data') return null
+        // Present-but-malformed numeric: a data descriptor whose value is not a non-negative
+        // integer must latch immediately — no later usage key is read (R8 Review issue 2).
+        const value = descriptor.value
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          latchUnsafe()
+          return null
+        }
+        return value
       }
       const input = readUsageNumber('input')
       if (budget.dead) return snapshot
