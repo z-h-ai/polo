@@ -360,6 +360,29 @@ describe('content meter: malformed usage numeric (R8 issue 2)', () => {
     }
   })
 })
+// R9 issue 1 closure (terminal-snapshot-model-value-failclosed): a PRESENT wrong-typed provider
+// identity value fails closed — the shared budget latches, the terminal snapshot is discarded so
+// the stream releases no text and never falls back to the other model field, and no later
+// descriptor is read after the first wrong-typed identity value.
+describe('content meter: wrong-typed identity values fail closed (R9 issue 1)', () => {
+  it('latches when responseModel is a number and never reads the later model descriptor', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], { model: 'expected-model' })
+    ;(message as { responseModel: unknown }).responseModel = 123
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('latches when model is a number even with a valid responseModel', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], {})
+    ;(message as { model: unknown }).model = { fallback: true }
+    Object.defineProperty(message, 'responseModel', { value: 'valid-response-model', enumerable: true, writable: true, configurable: true })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+})
 describe('content meter: terminal descriptor fail-fast and JSON-data domain', () => {
   it('treats non-enumerable canonical fields as absent and never releases their content', () => {
     const h = meterHarness()

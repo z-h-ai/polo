@@ -78,6 +78,11 @@ export interface SafeTerminalSnapshot {
   responseModel: string
   model: string
 }
+// Usage capture taken eagerly at the `usage` yield during message projection (R9 issue 0):
+// 'ok' carries validated numbers so the terminal snapshot never re-reads the provider usage
+// object; 'none' means usage was absent or incomplete without a malformed value; 'latched'
+// means the shared budget is dead.
+type UsageCapture = { status: 'ok'; usage: NonNullable<SafeTerminalSnapshot['usage']> } | { status: 'none' } | { status: 'latched' }
 export interface ContentMeter {
   onEvent(event: AssistantMessageEvent): void
   isBodyOverLimit(): boolean
@@ -152,34 +157,70 @@ export function createContentMeter(): ContentMeter {
       walkSemantic(item, [...segments, { kind: 'object-property', value: key }], depth + 1, budget, add)
     }
   }
-  function meterMessage(message: unknown, add: AddString, budget: SemanticBudget): void {
-    if (budget.dead || message === null || typeof message !== 'object') return
+  // Eager usage validation (R9 issue 0): the five required numbers are read and validated under
+  // the shared monotonic budget at the moment `usage` is projected, so a malformed first value
+  // latches before ANY later message descriptor can be enumerated. A missing key only leaves the
+  // usage unset; a present-but-malformed data value latches immediately (never reinterpreted as
+  // missing or zero). No later usage key is read after the first malformed value.
+  function captureUsageNumbers(usageSource: object, budget: SemanticBudget, latchUnsafe: () => void): UsageCapture {
+    let input: number | null = null
+    let output: number | null = null
+    let cacheRead: number | null = null
+    let cacheWrite: number | null = null
+    let totalTokens: number | null = null
+    for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const) {
+      if (budget.dead) return { status: 'latched' }
+      if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return { status: 'latched' }
+      const descriptor = readOwnEnumerableDataDescriptor(usageSource, key)
+      if (descriptor.kind === 'unsafe') {
+        latchUnsafe()
+        return { status: 'latched' }
+      }
+      if (descriptor.kind !== 'data') continue
+      const value = descriptor.value
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        latchUnsafe()
+        return { status: 'latched' }
+      }
+      if (key === 'input') input = value
+      else if (key === 'output') output = value
+      else if (key === 'cacheRead') cacheRead = value
+      else if (key === 'cacheWrite') cacheWrite = value
+      else totalTokens = value
+    }
+    if (budget.dead) return { status: 'latched' }
+    return input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null
+      ? { status: 'ok', usage: { input, output, cacheRead, cacheWrite, totalTokens } }
+      : { status: 'none' }
+  }
+  function meterMessage(message: unknown, add: AddString, budget: SemanticBudget): UsageCapture {
+    if (budget.dead || message === null || typeof message !== 'object') return { status: 'none' }
     if (!isInertJsonDataObject(message)) {
       latchSemantic(budget)
-      return
+      return { status: 'latched' }
     }
-    if (!charge(budget, 'nodes', NODE_BUDGET)) return
+    if (!charge(budget, 'nodes', NODE_BUDGET)) return { status: 'latched' }
     const contentDescriptor = readOwnEnumerableDataDescriptor(message, 'content')
     if (contentDescriptor.kind === 'unsafe') {
       latchSemantic(budget)
-      return
+      return { status: 'latched' }
     }
     const content = contentDescriptor.kind === 'data' ? contentDescriptor.value : null
     if (content !== null && isInertJsonDataArray(content)) {
-      if (!charge(budget, 'nodes', NODE_BUDGET)) return
+      if (!charge(budget, 'nodes', NODE_BUDGET)) return { status: 'latched' }
       const length = readArrayLength(content)
       if (length === null) {
         latchSemantic(budget)
-        return
+        return { status: 'latched' }
       }
       for (let index = 0; index < length; index++) {
-        if (budget.dead) return
-        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return
+        if (budget.dead) return { status: 'latched' }
+        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return { status: 'latched' }
         const element = readArrayElement(content, index)
         if (element.kind === 'missing') continue
         if (element.kind === 'unsafe') {
           latchSemantic(budget)
-          return
+          return { status: 'latched' }
         }
         meterBlock(element.value, index, add, budget)
       }
@@ -190,18 +231,34 @@ export function createContentMeter(): ContentMeter {
     const latchMessageProjection = (): void => {
       latchSemantic(budget)
     }
+    let usageCapture: UsageCapture = { status: 'none' }
     for (const [field, value] of forEachOwnEnumerableDataProperty(message, () => charge(budget, 'projectionWork', PROJECTION_WORK_CAP), latchMessageProjection)) {
-      if (budget.dead) return
+      if (budget.dead) return { status: 'latched' }
       if (field === 'content') continue
-      // Outer usage fail-fast (R14 §6.3): a present usage field whose value is not an inert
-      // JSON-data object must latch immediately — no later field (responseModel, model, etc.)
-      // is enumerated or read after this point (R8 Review issue 1).
-      if (field === 'usage' && !isInertJsonDataObject(value)) {
+      // Outer usage fail-fast with in-place validation (R14 §6.3, R9 issue 0): the usage value
+      // shape AND its five required numbers are validated at the usage yield itself, so a
+      // primitive, class, array or Proxy usage — or any malformed first number — latches before
+      // the generator can enumerate a later descriptor (responseModel, model, etc.).
+      if (field === 'usage') {
+        if (!isInertJsonDataObject(value)) {
+          latchSemantic(budget)
+          return { status: 'latched' }
+        }
+        usageCapture = captureUsageNumbers(value, budget, latchMessageProjection)
+        if (usageCapture.status === 'latched') return usageCapture
+        continue
+      }
+      // Present-but-wrong-typed provider identity data fails closed at the yield itself (R9
+      // issue 1): the yielded value is the already-materialized descriptor data, so the type
+      // check reads nothing new — and no later descriptor is ever enumerated after it latches.
+      if ((field === 'responseModel' || field === 'model') && typeof value !== 'string') {
         latchSemantic(budget)
-        return
+        return { status: 'latched' }
       }
       if (!MESSAGE_IDENTITY_FIELDS.has(field)) walkSemantic(value, [{ kind: 'scope', value: 'message' }, { kind: 'field', value: field }], 1, budget, add)
     }
+    if (budget.dead) return { status: 'latched' }
+    return usageCapture
   }
   function meterBlock(block: unknown, index: number, add: AddString, budget: SemanticBudget): void {
     if (budget.dead) return
@@ -323,7 +380,7 @@ export function createContentMeter(): ContentMeter {
   // all further provider reads, and a latched budget skips the snapshot entirely (the caller then
   // sees the conservative empty/null snapshot). Unsafe shapes yield the conservative empty/null
   // variant; stream policy decides the final failure kind.
-  function buildTerminalSnapshot(message: unknown, budget: SemanticBudget, latchUnsafe: () => void): SafeTerminalSnapshot {
+  function buildTerminalSnapshot(message: unknown, budget: SemanticBudget, latchUnsafe: () => void, usageCapture: UsageCapture): SafeTerminalSnapshot {
     const snapshot: SafeTerminalSnapshot = { text: '', usage: null, responseModel: '', model: '' }
     if (budget.dead) return snapshot
     if (message === null || typeof message !== 'object' || !isInertJsonDataObject(message)) return snapshot
@@ -361,65 +418,50 @@ export function createContentMeter(): ContentMeter {
       }
       snapshot.text = parts.join('')
     }
-    // Outer usage fail-fast (R14 §6.3): an unsafe/malformed usage descriptor immediately latches
-    // the shared SemanticBudget and returns — no later field (responseModel, model) is read.
-    const usageDescriptor = readOwnEnumerableDataDescriptor(message, 'usage')
-    if (usageDescriptor.kind === 'unsafe') {
-      latchUnsafe()
-      return snapshot
-    }
-    if (budget.dead) return snapshot
-    // Present-but-malformed usage value (not an inert JSON-data object) must latch immediately
-    // (R14 §6.3): responseModel and model are never read after this point.
-    if (usageDescriptor.kind === 'data' && !isInertJsonDataObject(usageDescriptor.value)) {
-      latchUnsafe()
-      return snapshot
-    }
-    if (usageDescriptor.kind === 'data' && isInertJsonDataObject(usageDescriptor.value)) {
-      const usageSource = usageDescriptor.value
-      const readUsageNumber = (key: string): number | null => {
-        if (budget.dead) return null
-        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return null
-        const descriptor = readOwnEnumerableDataDescriptor(usageSource, key)
-        if (descriptor.kind === 'unsafe') {
-          latchUnsafe()
-          return null
-        }
-        if (descriptor.kind !== 'data') return null
-        // Present-but-malformed numeric: a data descriptor whose value is not a non-negative
-        // integer must latch immediately — no later usage key is read (R8 Review issue 2).
-        const value = descriptor.value
-        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-          latchUnsafe()
-          return null
-        }
-        return value
+    // Usage numbers were validated eagerly during message projection (R9 issue 0): the captured
+    // values are reused here and the provider usage object is never re-read. Capture 'none'
+    // (usage absent from the enumerated keys) must still fail closed on a non-enumerable or
+    // accessor usage descriptor — a present unsafe field is never disguised as absent.
+    if (usageCapture.status === 'latched') return snapshot
+    if (usageCapture.status === 'ok') {
+      snapshot.usage = usageCapture.usage
+    } else {
+      const usageDescriptor = readOwnEnumerableDataDescriptor(message, 'usage')
+      if (usageDescriptor.kind === 'unsafe' || usageDescriptor.kind === 'data') {
+        latchUnsafe()
+        return snapshot
       }
-      const input = readUsageNumber('input')
-      if (budget.dead) return snapshot
-      const output = readUsageNumber('output')
-      if (budget.dead) return snapshot
-      const cacheRead = readUsageNumber('cacheRead')
-      if (budget.dead) return snapshot
-      const cacheWrite = readUsageNumber('cacheWrite')
-      if (budget.dead) return snapshot
-      const totalTokens = readUsageNumber('totalTokens')
-      if (budget.dead) return snapshot
-      if (input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null) snapshot.usage = { input, output, cacheRead, cacheWrite, totalTokens }
     }
     if (budget.dead) return snapshot
+    // Present-but-wrong-typed provider identity data fails closed (R9 issue 1): a number, object
+    // or other non-string responseModel/model value never silently disappears and never triggers
+    // the optional fallback — the shared budget latches and no later descriptor is read.
     const responseModelDescriptor = readOwnEnumerableDataDescriptor(message, 'responseModel')
     if (responseModelDescriptor.kind === 'unsafe') {
       latchUnsafe()
       return snapshot
     }
-    if (responseModelDescriptor.kind === 'data' && typeof responseModelDescriptor.value === 'string') snapshot.responseModel = responseModelDescriptor.value
+    if (responseModelDescriptor.kind === 'data') {
+      const responseModelValue = responseModelDescriptor.value
+      if (typeof responseModelValue !== 'string') {
+        latchUnsafe()
+        return snapshot
+      }
+      snapshot.responseModel = responseModelValue
+    }
     const modelDescriptor = readOwnEnumerableDataDescriptor(message, 'model')
     if (modelDescriptor.kind === 'unsafe') {
       latchUnsafe()
       return snapshot
     }
-    if (modelDescriptor.kind === 'data' && typeof modelDescriptor.value === 'string') snapshot.model = modelDescriptor.value
+    if (modelDescriptor.kind === 'data') {
+      const modelValue = modelDescriptor.value
+      if (typeof modelValue !== 'string') {
+        latchUnsafe()
+        return snapshot
+      }
+      snapshot.model = modelValue
+    }
     return snapshot
   }
   function meterEvent(event: AssistantMessageEvent): void {
@@ -451,12 +493,12 @@ export function createContentMeter(): ContentMeter {
       sawToolContent = true
     }
     const message = event.type === 'done' ? event.message : event.type === 'error' ? event.error : (event as { partial?: AssistantMessage }).partial
-    meterMessage(message, add, budget)
+    const usageCapture = meterMessage(message, add, budget)
     // Fail-fast: a latched projection budget skips the snapshot entirely — no further provider
     // field reads after the first violation (R12 §6.3).
     if (event.type === 'done') {
       if (!budget.dead) {
-        lastDoneSnapshot = buildTerminalSnapshot(event.message, budget, () => latchSemantic(budget))
+        lastDoneSnapshot = buildTerminalSnapshot(event.message, budget, () => latchSemantic(budget), usageCapture)
         // A latch during snapshot construction (e.g., malformed usage value) invalidates the
         // terminal snapshot — the stream must not see any body from a latched event.
         if (budget.dead) lastDoneSnapshot = null

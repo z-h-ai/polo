@@ -1,18 +1,21 @@
 import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 // Serial lock protocol for spawn-heavy host fixtures (R14 §5).
 // Dedicated LOCK_ROOT + complete candidate files + atomic hard-link publish +
 // token-specific retained hard-link barriers Q(T) for stale reclaim and release.
 //
-// State-machine contract (R14 §5.2–5.3, Fix R8 issue 2): owner reads are discriminated
-// (valid / absent / malformed / io_error). Only absent and malformed are contract-authorized
-// unknown states that may be waited on; permission, hard-link, stat, read and unexpected unlink
-// errors surface as explicit fail-closed I/O errors while retaining canonical and Q(T) evidence.
-// Cleanup suppression is limited to ENOENT on the caller's own unpublished candidate.
+// State-machine contract (R14 §5.2–5.3, Fix R8 issue 2, Fix R9 issues 2/6): owner reads are
+// discriminated (valid / absent / malformed / io_error). Only absent and malformed are
+// contract-authorized unknown states that may be waited on; permission, hard-link, stat, read and
+// unexpected unlink errors surface as explicit fail-closed I/O errors while retaining canonical
+// and Q(T) evidence. Cleanup suppression is limited to ENOENT on the caller's own unpublished
+// candidate — canonical unlink results after the retained barrier checks are never suppressed.
+// Owner tokens must match the generated canonical-UUID grammar and every derived lock path must
+// remain a direct child of LOCK_ROOT (same-root hard-link contract).
 
 export interface LockOwner { schema: 1; pid: number; token: string }
 export type OwnerRead =
@@ -23,8 +26,20 @@ export type OwnerRead =
 
 const DEFAULT_LOCK_ROOT = join(tmpdir(), 'polo-pi-host-tests.serial.locks')
 let LOCK_ROOT = DEFAULT_LOCK_ROOT
+// Owner tokens are the generated canonical UUIDs; any other value (including path-escaping
+// tokens like `x/../../escaped`) makes the owner record malformed (R9 issue 6).
+const LOCK_TOKEN_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+export function isValidLockToken(token: string): boolean {
+  return LOCK_TOKEN_PATTERN.test(token)
+}
 const currentPath = (): string => join(LOCK_ROOT, 'current')
-const retiredBarrier = (token: string): string => join(LOCK_ROOT, `retired.${token}`)
+const retiredBarrier = (token: string): string => {
+  // Defense in depth: even a grammar-valid token must derive a barrier path that is a direct
+  // child of LOCK_ROOT, so a crafted owner record can never move a hard-link target outside it.
+  const barrier = join(LOCK_ROOT, `retired.${token}`)
+  if (!isValidLockToken(token) || dirname(barrier) !== LOCK_ROOT) throw new Error('host test serial lock token escapes LOCK_ROOT')
+  return barrier
+}
 let ownToken: string | null = null
 
 // ─── Test-only seam (R14 §5.4): default-disabled hooks and injectable ops ────
@@ -32,13 +47,21 @@ let ownToken: string | null = null
 // and the seam listener is a no-op, so the default schedule is the production schedule.
 export type HostTestSerialSeamHook =
   | 'candidate:before-publish'
+  | 'candidate:after-link'
   | 'reclaim:after-dead-read'
   | 'reclaim:after-retired-link'
   | 'release:after-token-check'
   | 'retired:before-link'
+  | 'retired:after-link'
   | 'lock:enter'
   | 'lock:exit'
-export interface HostTestSerialSeamEvent { hook: HostTestSerialSeamHook; token: string | null }
+export interface HostTestSerialSeamEvent {
+  hook: HostTestSerialSeamHook
+  token: string | null
+  // Deterministic post-operation acknowledgement (R9 issue 3): the after-link seams fire AFTER
+  // the hard-link attempt returned, carrying its exact atomic outcome.
+  outcome?: 'linked' | 'eexist'
+}
 export interface HostTestSerialOps {
   read(path: string): string
   stat(path: string): { dev: number; ino: number }
@@ -60,8 +83,8 @@ const defaultOps: HostTestSerialOps = {
 const ops: HostTestSerialOps = { ...defaultOps }
 const counters: HostTestSerialLinkUnlinkCounters = { linkCalls: 0, unlinkCalls: 0 }
 let seamListener: ((event: HostTestSerialSeamEvent) => void) | null = null
-const fireSeam = (hook: HostTestSerialSeamHook, token: string | null): void => {
-  if (seamListener !== null) seamListener({ hook, token })
+const fireSeam = (hook: HostTestSerialSeamHook, token: string | null, outcome?: 'linked' | 'eexist'): void => {
+  if (seamListener !== null) seamListener(outcome === undefined ? { hook, token } : { hook, token, outcome })
 }
 const readOp = (path: string): string => ops.read(path)
 const statOp = (path: string): { dev: number; ino: number } => ops.stat(path)
@@ -100,6 +123,7 @@ export const hostTestSerialTestHooks = {
   },
   readOwnerRecord,
   readOwnerFrom,
+  isValidLockToken,
   prepareCandidateFile,
   publishCandidateFile,
   reclaimStale,
@@ -122,7 +146,7 @@ function readOwnerRecord(path: string): OwnerRead {
     if (
       parsed?.schema === 1 &&
       typeof parsed.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0 &&
-      typeof parsed.token === 'string' && parsed.token.length > 0
+      typeof parsed.token === 'string' && parsed.token.length > 0 && isValidLockToken(parsed.token)
     ) {
       return { kind: 'valid', owner: { schema: 1, pid: parsed.pid, token: parsed.token } }
     }
@@ -177,15 +201,21 @@ function publishCandidate(token: string, candidate: string): boolean {
   fireSeam('candidate:before-publish', token)
   try {
     linkOp(candidate, currentPath())
+    fireSeam('candidate:after-link', token, 'linked')
     return true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      fireSeam('candidate:after-link', token, 'eexist')
+      return false
+    }
     throw error
   }
 }
 // Test preset helper (R14 §5.4): writes a complete candidate under `root` and publishes it with
-// the same atomic hard-link publish used by acquire, then removes the candidate name.
+// the same atomic hard-link publish used by acquire, then removes the candidate name. Preset
+// tokens must satisfy the lock-token grammar so preset paths cannot escape the root either.
 function prepareCandidateFile(root: string, pid: number, token: string): string {
+  if (!isValidLockToken(token)) throw new Error('host test serial lock preset token escapes LOCK_ROOT')
   const candidate = join(root, `candidate.${token}`)
   const fd = openSync(candidate, 'wx')
   try {
@@ -225,9 +255,13 @@ function reclaimStale(owner: LockOwner): void {
   try {
     linkOp(currentPath(), barrier)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return // dual-reclaimer loser: fail closed
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      fireSeam('retired:after-link', owner.token, 'eexist') // deterministic loser acknowledgement
+      return // dual-reclaimer loser: fail closed
+    }
     throw error // permission/cross-filesystem/unsupported hard link: explicit failure, canonical retained
   }
+  fireSeam('retired:after-link', owner.token, 'linked')
   fireSeam('reclaim:after-retired-link', owner.token)
   // Every validation failure below retains canonical and Q(T) as evidence (R14 §5.3.3) and
   // surfaces explicitly instead of being swallowed into a retry.
@@ -242,11 +276,9 @@ function reclaimStale(owner: LockOwner): void {
   if (barrierOwner.kind === 'io_error') throw new Error('host test serial lock reclaim validation I/O failed (fail-closed)', { cause: barrierOwner.cause })
   if (barrierOwner.kind !== 'valid' || barrierOwner.owner.token !== owner.token) throw new Error('host test serial lock reclaim validation failed: barrier token mismatch')
   if (!isDead(barrierOwner.owner.pid)) throw new Error('host test serial lock reclaim validation failed: owner no longer provably dead')
-  try {
-    unlinkOp(currentPath())
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
+  // The Q(T) barrier is published and verified, so the canonical unlink result is never
+  // suppressed (R9 issue 2): ENOENT or any other error surfaces explicitly with Q(T) retained.
+  unlinkOp(currentPath())
 }
 // Release protocol (R14 §5.3.4): verify canonical token, then hard-link canonical into Q(T),
 // verify inode/token, then unlink canonical. A late/foreign release is REFUSED before any link
@@ -263,9 +295,13 @@ function releaseWithToken(token: string | null): void {
   try {
     linkOp(currentPath(), barrier)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return // refuse: successor protected
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      fireSeam('retired:after-link', token, 'eexist') // deterministic refusal acknowledgement
+      return // refuse: successor protected
+    }
     throw error
   }
+  fireSeam('retired:after-link', token, 'linked')
   // Every validation refusal below retains canonical and Q(T) as evidence (R14 §5.3.4).
   let same = false
   try {
