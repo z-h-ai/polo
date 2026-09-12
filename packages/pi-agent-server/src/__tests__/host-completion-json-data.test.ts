@@ -101,6 +101,81 @@ describe('inert JSON-data gates', () => {
     }
   })
 })
+// R10 issue 0 closure (undefined-accessor-descriptor-failclosed): descriptor kinds are classified
+// by the descriptor's OWN slots. An accessor descriptor may carry explicitly undefined get/set
+// values, so slot-value comparison can never decide — only a plain data descriptor with an own
+// `value` slot is data; every other shape fails closed on both readers.
+describe('descriptor-kind classification by own slots', () => {
+  const accessorVariants: Array<[string, PropertyDescriptor]> = [
+    ['getterless/setterless accessor (get and set both explicitly undefined)', { enumerable: true, configurable: true, get: undefined, set: undefined }],
+    ['get-only slot explicitly undefined', { enumerable: true, configurable: true, get: undefined }],
+    ['set-only slot explicitly undefined', { enumerable: true, configurable: true, set: undefined }],
+  ]
+  for (const [name, descriptor] of accessorVariants) {
+    it(`classifies ${name} as unsafe on both readers`, () => {
+      const source: Record<string, unknown> = {}
+      Object.defineProperty(source, 'field', descriptor)
+      expect(readOwnDescriptor(source, 'field')).toEqual({ kind: 'unsafe' })
+      expect(readOwnEnumerableDataDescriptor(source, 'field')).toEqual({ kind: 'unsafe' })
+    })
+  }
+  it('classifies a partial descriptor with neither value nor accessor slots as unsafe', () => {
+    // Real getOwnPropertyDescriptor results are complete, so a partial descriptor can only reach
+    // the readers through a hostile or patched implementation — it must still fail closed.
+    const source: Record<string, unknown> = { field: 1 }
+    const partial = { enumerable: true, configurable: true } as unknown as PropertyDescriptor
+    const original = Object.getOwnPropertyDescriptor
+    ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = (src: object, key: PropertyKey) =>
+      src === source && key === 'field' ? partial : (original as (s: object, k: PropertyKey) => PropertyDescriptor | undefined)(src, key)
+    try {
+      expect(readOwnDescriptor(source, 'field')).toEqual({ kind: 'unsafe' })
+      expect(readOwnEnumerableDataDescriptor(source, 'field')).toEqual({ kind: 'unsafe' })
+    } finally {
+      ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = original
+    }
+  })
+  it('classifies a mixed value+get-slot descriptor as unsafe (constructed without defineProperty)', () => {
+    // defineProperty itself rejects a descriptor with both value and accessor slots, so the mixed
+    // shape is fed straight through a patched getOwnPropertyDescriptor.
+    const source: Record<string, unknown> = { field: 1 }
+    const mixed: Record<string, unknown> = { value: 5, enumerable: true, configurable: true }
+    mixed.get = undefined
+    const original = Object.getOwnPropertyDescriptor
+    ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = (src: object, key: PropertyKey) =>
+      src === source && key === 'field' ? (mixed as PropertyDescriptor) : (original as (s: object, k: PropertyKey) => PropertyDescriptor | undefined)(src, key)
+    try {
+      expect(readOwnDescriptor(source, 'field')).toEqual({ kind: 'unsafe' })
+      expect(readOwnEnumerableDataDescriptor(source, 'field')).toEqual({ kind: 'unsafe' })
+    } finally {
+      ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = original
+    }
+  })
+  it('still classifies genuine data, missing, getter, and non-enumerable shapes exactly as before', () => {
+    const source: Record<string, unknown> = { data: 5 }
+    expect(readOwnDescriptor(source, 'data')).toEqual({ kind: 'data', value: 5 })
+    expect(readOwnEnumerableDataDescriptor(source, 'data')).toEqual({ kind: 'data', value: 5 })
+    expect(readOwnDescriptor(source, 'absent')).toEqual({ kind: 'missing' })
+    expect(readOwnEnumerableDataDescriptor(source, 'absent')).toEqual({ kind: 'missing' })
+    Object.defineProperty(source, 'getter', { get() { return 1 }, enumerable: true })
+    expect(readOwnDescriptor(source, 'getter')).toEqual({ kind: 'unsafe' })
+    expect(readOwnEnumerableDataDescriptor(source, 'getter')).toEqual({ kind: 'unsafe' })
+    Object.defineProperty(source, 'hidden', { value: 1, enumerable: false })
+    expect(readOwnEnumerableDataDescriptor(source, 'hidden')).toEqual({ kind: 'unsafe' })
+    // The sanctioned structural read (array length) stays a plain own data descriptor.
+    expect(readOwnDescriptor([1, 2], 'length')).toEqual({ kind: 'data', value: 2 })
+  })
+  it('the streaming projection latches on a getterless/setterless accessor without invoking anything', () => {
+    const source: Record<string, unknown> = { first: 1 }
+    Object.defineProperty(source, 'undefinedAccessor', { enumerable: true, get: undefined, set: undefined })
+    const seen: Array<[string, unknown]> = []
+    let latched = false
+    for (const [key, value] of forEachOwnEnumerableDataProperty(source, () => true, () => {
+      latched = true
+    })) seen.push([key, value])
+    expect(seen).toEqual([['first', 1]])
+    expect(latched).toBe(true)
+  })
+})
 describe('bounded structural comparison', () => {
   it('returns equal for identical inert shapes regardless of key insertion order', () => {
     const budget = createComparisonBudget()

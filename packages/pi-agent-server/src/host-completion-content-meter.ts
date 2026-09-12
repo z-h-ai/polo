@@ -80,9 +80,11 @@ export interface SafeTerminalSnapshot {
 }
 // Usage capture taken eagerly at the `usage` yield during message projection (R9 issue 0):
 // 'ok' carries validated numbers so the terminal snapshot never re-reads the provider usage
-// object; 'none' means usage was absent or incomplete without a malformed value; 'latched'
-// means the shared budget is dead.
-type UsageCapture = { status: 'ok'; usage: NonNullable<SafeTerminalSnapshot['usage']> } | { status: 'none' } | { status: 'latched' }
+// object; 'incomplete' records a PRESENT but incomplete provider-final usage that was safely
+// read (some required member missing, none malformed) so the stream protocol can classify it
+// as provider_usage_invalid instead of result_too_large (R10 issue 1); 'none' means usage was
+// not among the enumerated own enumerable data keys; 'latched' means the shared budget is dead.
+type UsageCapture = { status: 'ok'; usage: NonNullable<SafeTerminalSnapshot['usage']> } | { status: 'incomplete' } | { status: 'none' } | { status: 'latched' }
 export interface ContentMeter {
   onEvent(event: AssistantMessageEvent): void
   isBodyOverLimit(): boolean
@@ -159,9 +161,11 @@ export function createContentMeter(): ContentMeter {
   }
   // Eager usage validation (R9 issue 0): the five required numbers are read and validated under
   // the shared monotonic budget at the moment `usage` is projected, so a malformed first value
-  // latches before ANY later message descriptor can be enumerated. A missing key only leaves the
-  // usage unset; a present-but-malformed data value latches immediately (never reinterpreted as
-  // missing or zero). No later usage key is read after the first malformed value.
+  // latches before ANY later message descriptor can be enumerated. A present-but-incomplete
+  // usage (a required member safely read as missing, none malformed) keeps the distinct
+  // 'incomplete' state (R10 issue 1); a present-but-malformed data value latches immediately
+  // (never reinterpreted as missing or zero). No later usage key is read after the first
+  // malformed value.
   function captureUsageNumbers(usageSource: object, budget: SemanticBudget, latchUnsafe: () => void): UsageCapture {
     let input: number | null = null
     let output: number | null = null
@@ -189,9 +193,11 @@ export function createContentMeter(): ContentMeter {
       else totalTokens = value
     }
     if (budget.dead) return { status: 'latched' }
+    // captureUsageNumbers only runs for an enumerated (present) usage object, so any non-ok
+    // outcome here is exactly the present-but-incomplete state (R10 issue 1).
     return input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null
       ? { status: 'ok', usage: { input, output, cacheRead, cacheWrite, totalTokens } }
-      : { status: 'none' }
+      : { status: 'incomplete' }
   }
   function meterMessage(message: unknown, add: AddString, budget: SemanticBudget): UsageCapture {
     if (budget.dead || message === null || typeof message !== 'object') return { status: 'none' }
@@ -419,12 +425,17 @@ export function createContentMeter(): ContentMeter {
       snapshot.text = parts.join('')
     }
     // Usage numbers were validated eagerly during message projection (R9 issue 0): the captured
-    // values are reused here and the provider usage object is never re-read. Capture 'none'
-    // (usage absent from the enumerated keys) must still fail closed on a non-enumerable or
-    // accessor usage descriptor — a present unsafe field is never disguised as absent.
+    // values are reused here and the provider usage object is never re-read. An 'incomplete'
+    // capture is a PRESENT provider-final usage that was safely read with required members
+    // missing: usage stays unset so the stream protocol classifies it as provider_usage_invalid
+    // — never result_too_large (R10 issue 1). Capture 'none' (usage absent from the enumerated
+    // keys) must still fail closed on a non-enumerable or accessor usage descriptor — a present
+    // unsafe field is never disguised as absent.
     if (usageCapture.status === 'latched') return snapshot
     if (usageCapture.status === 'ok') {
       snapshot.usage = usageCapture.usage
+    } else if (usageCapture.status === 'incomplete') {
+      snapshot.usage = null
     } else {
       const usageDescriptor = readOwnEnumerableDataDescriptor(message, 'usage')
       if (usageDescriptor.kind === 'unsafe' || usageDescriptor.kind === 'data') {

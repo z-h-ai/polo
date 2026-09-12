@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createContentMeter, encodeSlotKey, type SafeTerminalSnapshot } from '../host-completion-content-meter.ts'
+import { createHostStreamTracker } from '../host-completion-stream.ts'
 import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
 import { TEXT_LIMIT } from '../host-completion-protocol.ts'
 
@@ -378,6 +379,101 @@ describe('content meter: wrong-typed identity values fail closed (R9 issue 1)', 
     const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], {})
     ;(message as { model: unknown }).model = { fallback: true }
     Object.defineProperty(message, 'responseModel', { value: 'valid-response-model', enumerable: true, writable: true, configurable: true })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+})
+// R10 issue 1 closure (incomplete-usage-error-class): a PRESENT but incomplete provider-final
+// usage object is safely read and left unset — no resource latch, a non-null snapshot with text
+// and usage:null — so the stream protocol classifies it as provider_usage_invalid, never
+// result_too_large, and releases zero text. One exact error-class regression per missing member.
+describe('content meter: present-but-incomplete usage keeps its stable error class (R10 issue 1)', () => {
+  const USAGE = { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 9 }
+  function trackerFor(missing: keyof typeof USAGE): { verdict: { kind: string; failure?: string; text?: string }; claimed: string[] } {
+    const usage: Record<string, number> = { ...USAGE }
+    delete usage[missing]
+    const claimed: string[] = []
+    const tracker = createHostStreamTracker({ expectedModel: 'm', maxOutputTokens: 4096, jsonOutput: false, bedrock: false, claim: (kind) => claimed.push(kind) })
+    const message = assistantMessage([{ type: 'text', text: 'hello' }], { usage: usage as typeof USAGE, model: 'm' })
+    tracker.onEvent({ type: 'done', reason: 'stop', message } as AssistantMessageEvent)
+    const verdict = tracker.finish({ attempts: 1 } as never, false)
+    return { verdict: verdict as { kind: string; failure?: string; text?: string }, claimed }
+  }
+  for (const missing of ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const) {
+    it(`classifies usage missing ${missing} as provider_usage_invalid with zero text release`, () => {
+      const { verdict, claimed } = trackerFor(missing)
+      expect(verdict.kind).toBe('failure')
+      expect(verdict.failure).toBe('provider_usage_invalid')
+      expect(verdict.text).toBeUndefined()
+      expect(claimed).toEqual([]) // no result_too_large claim — the resource budget never latched
+    })
+    it(`meter-level: usage missing ${missing} keeps the snapshot readable instead of latching`, () => {
+      const usage: Record<string, number> = { ...USAGE }
+      delete usage[missing]
+      const h = meterHarness()
+      const message = assistantMessage([{ type: 'text', text: 'hello' }], { usage: usage as typeof USAGE, model: 'm' })
+      h.meter.onEvent(h.done('stop', message))
+      expect(h.probe()).toMatchObject({ over: false })
+      const snapshot = h.finish()
+      expect(snapshot).not.toBeNull()
+      expect(snapshot?.text).toBe('hello')
+      expect(snapshot?.usage).toBeNull()
+      expect(snapshot?.model).toBe('m')
+    })
+  }
+  it('an empty present usage object is also incomplete, not resource-exhausted', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'hello' }], { usage: {} as typeof USAGE, model: 'm' })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: false })
+    const snapshot = h.finish()
+    expect(snapshot?.usage).toBeNull()
+    expect(snapshot?.text).toBe('hello')
+  })
+})
+// R10 issue 0 closure (undefined-accessor-descriptor-failclosed) and the full unsafe-descriptor
+// matrix (observations 5b051fa6f2bcb44d5fff7307, 0cc2cc75578f488302698305): a content block whose
+// fixed field is ANY accessor shape — including a getterless/setterless accessor whose get/set
+// slots are both explicitly undefined — must fail closed so earlier metered text is never
+// released.
+describe('content meter: full descriptor-kind matrix fails closed after released text', () => {
+  const hostileTypeVariants: Array<[string, (target: Record<string, unknown>) => void]> = [
+    ['getterless/setterless accessor', (block) => Object.defineProperty(block, 'type', { enumerable: true, get: undefined, set: undefined })],
+    ['get-only slot explicitly undefined', (block) => Object.defineProperty(block, 'type', { enumerable: true, get: undefined })],
+    ['set-only slot explicitly undefined', (block) => Object.defineProperty(block, 'type', { enumerable: true, set: undefined })],
+    ['real getter', (block) => Object.defineProperty(block, 'type', { enumerable: true, get() { return 'text' } })],
+    ['real setter', (block) => Object.defineProperty(block, 'type', { enumerable: true, set() { /* hostile */ } })],
+    ['non-enumerable data', (block) => Object.defineProperty(block, 'type', { value: 'text', enumerable: false })],
+  ]
+  for (const [name, makeHostile] of hostileTypeVariants) {
+    it(`latches when a later block's type is a ${name} after valid text`, () => {
+      const h = meterHarness()
+      const hostileBlock: Record<string, unknown> = { text: 'secondary' }
+      makeHostile(hostileBlock)
+      const message = assistantMessage([{ type: 'text', text: 'must-not-release' }, hostileBlock], { model: 'm' })
+      h.meter.onEvent(h.done('stop', message))
+      expect(h.probe()).toMatchObject({ over: true })
+      expect(h.finish()).toBeNull()
+    })
+    it(`tracker releases zero body text when a later block's type is a ${name}`, () => {
+      const claimed: string[] = []
+      const tracker = createHostStreamTracker({ expectedModel: 'm', maxOutputTokens: 4096, jsonOutput: false, bedrock: false, claim: (kind) => claimed.push(kind) })
+      const hostileBlock: Record<string, unknown> = { text: 'secondary' }
+      makeHostile(hostileBlock)
+      const message = assistantMessage([{ type: 'text', text: 'must-not-release' }, hostileBlock], { model: 'm' })
+      tracker.onEvent({ type: 'done', reason: 'stop', message } as AssistantMessageEvent)
+      const verdict = tracker.finish({ attempts: 1 } as never, false) as { kind: string; text?: string }
+      expect(verdict.kind).not.toBe('release')
+      expect(verdict.text).toBeUndefined()
+      expect(claimed.length).toBeGreaterThan(0)
+    })
+  }
+  it('latches when the text field itself is a getterless/setterless accessor', () => {
+    const h = meterHarness()
+    const block: Record<string, unknown> = { type: 'text' }
+    Object.defineProperty(block, 'text', { enumerable: true, get: undefined, set: undefined })
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }, block], { model: 'm' })
     h.meter.onEvent(h.done('stop', message))
     expect(h.probe()).toMatchObject({ over: true })
     expect(h.finish()).toBeNull()

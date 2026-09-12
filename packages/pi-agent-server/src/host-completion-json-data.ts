@@ -33,32 +33,43 @@ export function isInertJsonDataObject(value: unknown): value is object {
 export function isInertJsonDataArray(value: unknown): value is unknown[] {
   return Array.isArray(value) && !types.isProxy(value)
 }
+// Descriptor-kind classification (R10 issue 0): JavaScript permits an accessor descriptor whose
+// `get` and `set` slots are BOTH explicitly undefined — it has no data value slot. Kinds are
+// therefore classified by the descriptor's OWN slots, never by comparing slot values: a plain
+// data descriptor must own a `value` slot, and any descriptor with own `get`/`set` slots (even
+// undefined) — or with no recognizable data slot at all — is unsafe and fails closed.
+function classifyOwnDescriptor(descriptor: PropertyDescriptor): OwnDataRead {
+  if (Object.hasOwn(descriptor, 'get') || Object.hasOwn(descriptor, 'set')) return { kind: 'unsafe' }
+  if (!Object.hasOwn(descriptor, 'value')) return { kind: 'unsafe' }
+  return { kind: 'data', value: descriptor.value }
+}
 // Structural read (array `length` and friends): Proxy-first, then own data descriptor only — the
 // non-enumerable array `length` is a sanctioned structural property. Missing → `missing`;
-// accessor, Proxy, exception or illegal descriptor → `unsafe`; getters are never invoked.
+// accessor (including getterless/setterless), Proxy, exception or illegal descriptor → `unsafe`;
+// getters are never invoked.
 export function readOwnDescriptor(source: object, key: string): OwnDataRead {
   if (types.isProxy(source)) return { kind: 'unsafe' }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(source, key)
     if (descriptor === undefined) return { kind: 'missing' }
-    if (descriptor.get !== undefined || descriptor.set !== undefined) return { kind: 'unsafe' }
-    return { kind: 'data', value: descriptor.value }
+    return classifyOwnDescriptor(descriptor)
   } catch {
     return { kind: 'unsafe' }
   }
 }
 // Fixed-field read (message/content/block/canonical/usage/model): Proxy-first, then only an
 // ENUMERABLE own data descriptor belongs to the JSON-data domain (R14 §3.1). Truly missing →
-// `missing`; present but non-enumerable, accessor-backed, Proxy, exception or illegal descriptor
-// → `unsafe`, stopping before any value read; getters are never invoked. A non-enumerable field
-// is never disguised as absent.
+// `missing`; present but non-enumerable, accessor-backed (including a getterless/setterless
+// accessor whose get/set slots are both explicitly undefined), Proxy, exception or illegal
+// descriptor → `unsafe`, stopping before any value read; getters are never invoked. A
+// non-enumerable field is never disguised as absent.
 export function readOwnEnumerableDataDescriptor(source: object, key: string): OwnDataRead {
   if (types.isProxy(source)) return { kind: 'unsafe' }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(source, key)
     if (descriptor === undefined) return { kind: 'missing' }
-    if (descriptor.enumerable !== true || descriptor.get !== undefined || descriptor.set !== undefined) return { kind: 'unsafe' }
-    return { kind: 'data', value: descriptor.value }
+    if (descriptor.enumerable !== true) return { kind: 'unsafe' }
+    return classifyOwnDescriptor(descriptor)
   } catch {
     return { kind: 'unsafe' }
   }
