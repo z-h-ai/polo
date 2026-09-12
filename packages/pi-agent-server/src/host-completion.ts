@@ -180,7 +180,7 @@ export function startHostPiStream(runtime: HostPiRuntime, context: HostPiPhaseCo
     if (hit === undefined) return { ok: false, failure: 'catalog_model_missing' }
     model = { ...hit }
     if (request.provider === 'github-copilot' && credential.type === 'oauth_access') {
-      const derived = canonicalTransportHref(runtime.bindings.getGitHubCopilotBaseUrl(credential.value))
+      const derived = canonicalOf(runtime.bindings.getGitHubCopilotBaseUrl(credential.value))
       if (derived === null || derived !== request.transportHref) return { ok: false, failure: 'invalid_worker_message' }
       model.baseUrl = derived
     } else if (request.provider !== 'amazon-bedrock') {

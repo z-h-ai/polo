@@ -112,7 +112,9 @@
     "./protocol": "./src/protocol/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./resources": "./src/resources/index.ts",
-    "./runtime-discovery": "./src/runtime-discovery.ts"
+    "./runtime-discovery": "./src/runtime-discovery.ts",
+    "./agent/host-llm-executor": "./src/agent/host-llm-executor.ts",
+    "./agent/backend/host-executor-factory": "./src/agent/host-llm-executor.ts"
   },
   "dependencies": {
     "@isaacs/ttlcache": "^2.1.4",
