@@ -9,7 +9,6 @@ import { hostTestSerialTestHooks } from './host-test-serial.ts'
 // markers keep parent assertions independent of acquisition order under load.
 
 const SERIAL_HELPER = join(import.meta.dir, 'host-test-serial.ts')
-const DEAD_PID = 999999999
 let workRoot: string
 let lockRoot: string
 let childPath: string
@@ -47,12 +46,7 @@ function childScript(): string {
 }
 function spawnChild(role: string): void {
   const stderrFile = join(workRoot, `stderr-${role}-${children.length}`)
-  const proc = Bun.spawn([process.execPath, childPath, SERIAL_HELPER, lockRoot, role, workRoot], { stdout: 'pipe', stderr: 'pipe' })
-  const reportFailure = async (role: string, code: number, proc: ReturnType<typeof Bun.spawn>): Promise<void> => {
-    const stderr = await new Response(proc.stderr as ReadableStream).text().catch(() => '')
-    if (code !== 0) console.log(`CHILD-FAIL ${role} exit=${code} stderr=${stderr}`)
-  }
-  void proc.exited.then((code) => reportFailure(role, code, proc))
+  const proc = Bun.spawn([process.execPath, childPath, SERIAL_HELPER, lockRoot, role, workRoot], { stdout: 'inherit', stderr: 'inherit' })
   children.push({ exited: proc.exited, stderrFile, role })
 }
 function readdirSafe(directory: string): string[] {
@@ -103,27 +97,27 @@ describe('host test serial lock: hard-link protocol', () => {
   it('serializes two concurrent waiters with maxConcurrent = 1 across retained Q(token) tombstones', async () => {
     // A (hold) enters first; B (reclaim) is spawned while A holds and must stay outside.
     spawnChild('hold-until-signal')
-    const firstEnter = await waitFor(() => firstMatch(workRoot, 'enter-HOLD-'), 40000)
+    const firstEnter = await waitFor(() => firstMatch(workRoot, 'enter-HOLD-'), 30000)
     const tokenA = firstEnter.slice('enter-HOLD-'.length)
     expect(await absentFor(workRoot, 'enter-RECLAIM-', 700)).toBe(true)
     spawnChild('reclaim-once')
     expect(await absentFor(workRoot, 'enter-RECLAIM-', 700)).toBe(true)
     // Release A; B enters only after A's exit.
     writeFileSync(join(workRoot, `go-HOLD-${tokenA}`), '')
-    expect((await waitFor(() => firstMatch(workRoot, 'exit-HOLD-'), 40000))).not.toBeNull()
-    await waitFor(() => firstMatch(workRoot, 'enter-RECLAIM-'), 40000)
+    expect((await waitFor(() => firstMatch(workRoot, 'exit-HOLD-'), 30000))).not.toBeNull()
+    await waitFor(() => firstMatch(workRoot, 'enter-RECLAIM-'), 30000)
     const reclaimedEnter = firstMatch(workRoot, 'enter-RECLAIM-')!
     const reclaimedToken = reclaimedEnter.slice('enter-RECLAIM-'.length)
     writeFileSync(join(workRoot, `go-RECLAIM-${reclaimedToken}`), '')
-    expect((await waitFor(() => firstMatch(workRoot, 'exit-RECLAIM-'), 40000))).not.toBeNull()
+    expect((await waitFor(() => firstMatch(workRoot, 'exit-RECLAIM-'), 30000))).not.toBeNull()
     expect(existsSync(join(lockRoot, `retired.${tokenA}`))).toBe(true)
     expect(existsSync(join(lockRoot, `retired.${reclaimedToken}`))).toBe(true)
-  }, 90000)
+  }, 60000)
   it('lets exactly one of two reclaimers retire a dead owner and never delete a successor', async () => {
     presetDeadOwner('T')
     spawnChild('reclaim-once')
     spawnChild('reclaim-once')
-    const deadline = Date.now() + 55000
+    const deadline = Date.now() + 30000
     while (readdirSafe(workRoot).filter((name) => name.startsWith('exit-RECLAIM-')).length < 2 && Date.now() < deadline) await barrierSleep(10)
     expect(readdirSafe(workRoot).filter((name) => name.startsWith('exit-RECLAIM-')).length).toBe(2)
     // Both children acquired non-T tokens; the dead owner T was retired behind its barrier.

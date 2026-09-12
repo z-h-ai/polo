@@ -347,6 +347,41 @@ describe('content meter: terminal snapshot fail-fast read counts', () => {
     expect(modelGetter).toBe(0)
     expect(h.finish()).toBeNull()
   })
+  it('latches when usage is present but not an inert JSON-data object (malformed value)', () => {
+    let responseModelGetter = 0
+    let modelGetter = 0
+    const h = meterHarness()
+    // usage exists as a data descriptor but its value is a primitive, not an inert object.
+    const message = assistantMessage([{ type: 'text', text: 'hi' }], { model: 'm' })
+    ;(message as { usage: unknown }).usage = 42
+    Object.defineProperty(message, 'responseModel', { get() { responseModelGetter += 1; return 'r' }, enumerable: true })
+    Object.defineProperty(message, 'model', { get() { modelGetter += 1; return 'm' }, enumerable: true })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(responseModelGetter).toBe(0)
+    expect(modelGetter).toBe(0)
+    expect(h.finish()).toBeNull()
+  })
+  it('latches when usage is present as data but its value is not an inert JSON-data object (no accessor)', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'hi' }], { model: 'm' })
+    ;(message as { usage: unknown }).usage = 42
+    h.meter.onEvent(h.done('stop', message))
+    // Present-but-malformed usage value must latch: no accessors, no responseModel/model reads.
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('latches when usage is a non-plain object (class instance)', () => {
+    let responseModelGetter = 0
+    const h = meterHarness()
+    class NotPlain { input = 5 }
+    const message = assistantMessage([{ type: 'text', text: 'hi' }], { model: 'm' })
+    ;(message as { usage: unknown }).usage = new NotPlain()
+    Object.defineProperty(message, 'responseModel', { get() { responseModelGetter += 1; return 'r' }, enumerable: true })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(responseModelGetter).toBe(0)
+  })
   it('stops content block reads after an accessor-backed type descriptor latches', () => {
     let lateTextGetter = 0
     const h = meterHarness()
@@ -464,7 +499,7 @@ describe('content meter: exact semantic boundaries and fail-closed reads', () =>
     ;(accessorMessage as { usage: unknown }).usage = accessorUsage
     const accessorMeter = meterHarness()
     accessorMeter.meter.onEvent(accessorMeter.done('stop', accessorMessage))
-    expect(accessorMeter.finish()?.usage).toBeNull()
+    expect(accessorMeter.finish()).toBeNull()
     expect(getterCalls).toBe(0)
   })
 })

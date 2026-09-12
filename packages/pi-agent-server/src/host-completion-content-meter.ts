@@ -354,8 +354,20 @@ export function createContentMeter(): ContentMeter {
       }
       snapshot.text = parts.join('')
     }
+    // Outer usage fail-fast (R14 §6.3): an unsafe/malformed usage descriptor immediately latches
+    // the shared SemanticBudget and returns — no later field (responseModel, model) is read.
     const usageDescriptor = readOwnEnumerableDataDescriptor(message, 'usage')
+    if (usageDescriptor.kind === 'unsafe') {
+      latchUnsafe()
+      return snapshot
+    }
     if (budget.dead) return snapshot
+    // Present-but-malformed usage value (not an inert JSON-data object) must latch immediately
+    // (R14 §6.3): responseModel and model are never read after this point.
+    if (usageDescriptor.kind === 'data' && !isInertJsonDataObject(usageDescriptor.value)) {
+      latchUnsafe()
+      return snapshot
+    }
     if (usageDescriptor.kind === 'data' && isInertJsonDataObject(usageDescriptor.value)) {
       const usageSource = usageDescriptor.value
       const readUsageNumber = (key: string): number | null => {
@@ -427,8 +439,13 @@ export function createContentMeter(): ContentMeter {
     meterMessage(message, add, budget)
     // Fail-fast: a latched projection budget skips the snapshot entirely — no further provider
     // field reads after the first violation (R12 §6.3).
-    if (event.type === 'done' && !budget.dead) {
-      lastDoneSnapshot = buildTerminalSnapshot(event.message, budget, () => latchSemantic(budget))
+    if (event.type === 'done') {
+      if (!budget.dead) {
+        lastDoneSnapshot = buildTerminalSnapshot(event.message, budget, () => latchSemantic(budget))
+        // A latch during snapshot construction (e.g., malformed usage value) invalidates the
+        // terminal snapshot — the stream must not see any body from a latched event.
+        if (budget.dead) lastDoneSnapshot = null
+      }
     }
     if (event.type === 'done' && event.reason === 'toolUse') sawToolContent = true
     for (const [key, candidates] of batch) {

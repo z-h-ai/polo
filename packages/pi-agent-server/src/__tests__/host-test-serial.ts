@@ -98,12 +98,15 @@ function reclaimStale(owner: LockOwner): void {
   }
   try {
     if (!sameInode(currentPath(), barrier)) return
-    const canonicalOwner = readOwnerFrom(currentPath())
-    if (canonicalOwner === null || canonicalOwner.token !== owner.token) return
-    if (!isDead(canonicalOwner.pid)) return
+    // Verify via the RETAINED Q(T) barrier, not the canonical path (R14 §5.3.2).
+    const barrierOwner = readOwnerFrom(barrier)
+    if (barrierOwner === null || barrierOwner.token !== owner.token) return
+    if (!isDead(barrierOwner.pid)) return
     unlinkSync(currentPath())
-  } catch {
-    // Fail closed: retain canonical and Q(T) evidence; never unlink on uncertain state.
+  } catch (error) {
+    // Expected validation failures return above. Unexpected I/O errors: both paths retained,
+    // explicit propagation (R14 §5.3.3).
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
 }
 export async function acquireHostTestSerialLock(timeoutMs = 300000): Promise<void> {
@@ -163,12 +166,14 @@ function releaseWithToken(token: string | null): void {
   }
   try {
     if (!sameInode(currentPath(), barrier)) return
-    const canonicalOwner = readOwnerFrom(currentPath())
-    if (canonicalOwner === null || canonicalOwner.token !== token) return
-    unlinkSync(currentPath())
-  } catch {
-    // Fail closed: keep canonical and barrier; never unlink a successor.
+    // Verify via the RETAINED Q(T) barrier, not the canonical path (R14 §5.3.4).
+    const barrierOwner = readOwnerFrom(barrier)
+    if (barrierOwner === null || barrierOwner.token !== token) return
+  } catch (error) {
+    // Unexpected I/O error during barrier verification: canonical and barrier both retained.
+    throw error
   }
+  unlinkSync(currentPath())
 }
 function siblingTestWorkerExists(): boolean {
   try {
@@ -196,17 +201,13 @@ export async function waitOutEarlySuiteWindow(graceMs = 75_000): Promise<void> {
 // Test-only surface (R14 §5.4): deterministic hooks injected exclusively through
 // `host-test-serial.test.ts`; the default production scheduling above never imports them.
 export const hostTestSerialTestHooks = {
-  lockRoot(): string {
-    return LOCK_ROOT
-  },
   setLockRoot(root: string): void {
     LOCK_ROOT = root
   },
-  currentPath(): string {
-    return currentPath()
-  },
+  currentPath: (): string => currentPath(),
   retiredBarrier,
   readOwnerFrom,
+  isDead,
   writeOwnerFile(directory: string, pid: number, token: string): void {
     writeFileSync(join(directory, 'owner'), JSON.stringify({ schema: 1 as const, pid, token } satisfies LockOwner))
   },
@@ -230,6 +231,6 @@ export const hostTestSerialTestHooks = {
       throw error
     }
   },
+  reclaimStale,
   releaseWithToken,
-  isDead,
 }
