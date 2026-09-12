@@ -210,10 +210,13 @@ export function createContentMeter(): ContentMeter {
       : { status: 'incomplete' }
   }
   // Single-pass provider projection (R11 issue 0): the ONLY pass that reads or charges the
-  // terminal message. Usage is validated first (before content positions and before any later
-  // identity field), content positions are charged exactly once, and the remaining own
-  // enumerable fields are projected through a manual walk so content/usage descriptors are
-  // never read twice. Everything the terminal snapshot needs is captured here.
+  // terminal message. Fixed fields are read explicitly in the required order — usage, then
+  // responseModel, then model — before content positions and before the remaining-field walk,
+  // so a hostile value in any of them latches before any later provider read (R12 issue 0:
+  // non-enumerable identities are invisible to for...in and must never be skipped). Content
+  // positions are charged exactly once, and the remaining own enumerable fields are projected
+  // through a manual walk so no fixed-field descriptor is ever read twice. Everything the
+  // terminal snapshot needs is captured here.
   function meterMessage(message: unknown, add: AddString, budget: SemanticBudget): TerminalCapture {
     const capture: TerminalCapture = { text: '', usage: { status: 'none' }, responseModel: '', model: '' }
     const textParts: string[] = []
@@ -240,6 +243,30 @@ export function createContentMeter(): ContentMeter {
       }
       capture.usage = captureUsageNumbers(usageDescriptor.value, budget, () => latchSemantic(budget))
       if (capture.usage.status === 'latched') return capture
+    }
+    // Provider identity fields are read EXPLICITLY in the required fixed order (R12 issue 0,
+    // obs c96689d4a6bbce8ff94ef948): for...in cannot see a NON-ENUMERABLE responseModel/model,
+    // so the fixed-field reader is the only way to classify one. Truly missing fields and blank
+    // valid strings stay fallback-eligible exactly as before; a present non-enumerable field,
+    // accessor (incl. getterless/setterless), Proxy/reflective failure, or wrong-typed data
+    // value latches immediately — no later provider read, no body release, no model fallback.
+    // The key charge applies only when the field is present, matching enumerated accounting.
+    for (const identityField of ['responseModel', 'model'] as const) {
+      const identityDescriptor = readOwnEnumerableDataDescriptor(message, identityField)
+      if (identityDescriptor.kind === 'unsafe') {
+        latchSemantic(budget)
+        return capture
+      }
+      if (identityDescriptor.kind === 'data') {
+        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return capture
+        const identityValue = identityDescriptor.value
+        if (typeof identityValue !== 'string') {
+          latchSemantic(budget)
+          return capture
+        }
+        if (identityField === 'responseModel') capture.responseModel = identityValue
+        else capture.model = identityValue
+      }
     }
     // Content: one descriptor read and ONE key charge, then each position charged exactly once.
     const contentDescriptor = readOwnEnumerableDataDescriptor(message, 'content')
@@ -273,11 +300,11 @@ export function createContentMeter(): ContentMeter {
         walkSemantic(content, [{ kind: 'scope', value: 'message' }, { kind: 'field', value: 'content' }], 1, budget, add)
       }
     }
-    // Remaining own enumerable fields, projected exactly once. content and usage were already
-    // read and charged above, so their descriptors are never touched again here.
+    // Remaining own enumerable fields, projected exactly once. usage, responseModel, model and
+    // content were already read and charged above, so their descriptors are never touched again.
     for (const field in message) {
       if (!Object.hasOwn(message, field)) continue
-      if (field === 'content' || field === 'usage') continue
+      if (field === 'content' || field === 'usage' || field === 'responseModel' || field === 'model') continue
       if (budget.dead) return capture
       if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) {
         latchSemantic(budget)
@@ -289,18 +316,6 @@ export function createContentMeter(): ContentMeter {
         return capture
       }
       const value = descriptor.value
-      // Present-but-wrong-typed provider identity data fails closed at the yield itself (R9
-      // issue 1): the descriptor value is already materialized, so the type check reads nothing
-      // new — and no later descriptor is ever enumerated after it latches.
-      if (field === 'responseModel' || field === 'model') {
-        if (typeof value !== 'string') {
-          latchSemantic(budget)
-          return capture
-        }
-        if (field === 'responseModel') capture.responseModel = value
-        else capture.model = value
-        continue
-      }
       if (!MESSAGE_IDENTITY_FIELDS.has(field)) walkSemantic(value, [{ kind: 'scope', value: 'message' }, { kind: 'field', value: field }], 1, budget, add)
     }
     if (budget.dead) return capture

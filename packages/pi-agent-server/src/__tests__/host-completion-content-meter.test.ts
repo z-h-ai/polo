@@ -479,6 +479,88 @@ describe('content meter: full descriptor-kind matrix fails closed after released
     expect(h.finish()).toBeNull()
   })
 })
+// R12 issue 0 closure (terminal-snapshot-nonenumerable-identity-failclosed, obs
+// c96689d4a6bbce8ff94ef948): for...in cannot see a NON-ENUMERABLE responseModel/model, so the
+// single pass reads both identity fields explicitly with readOwnEnumerableDataDescriptor in the
+// fixed order responseModel → model. A present non-enumerable field is classified unsafe exactly
+// like every other present non-enumerable fixed field (R14 §3.1) and latches immediately — zero
+// later provider reads, zero body release, and never a silent fallback to the other identity.
+describe('content meter: non-enumerable identity fields fail closed (R12 issue 0)', () => {
+  it('latches on a non-enumerable wrong-typed responseModel and never falls back to model', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], { model: 'expected-model' })
+    Object.defineProperty(message, 'responseModel', { value: 7, enumerable: false })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('tracker releases zero body text for a non-enumerable wrong-typed responseModel', () => {
+    const claimed: string[] = []
+    const tracker = createHostStreamTracker({ expectedModel: 'expected-model', maxOutputTokens: 4096, jsonOutput: false, bedrock: false, claim: (kind) => claimed.push(kind) })
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], { model: 'expected-model' })
+    Object.defineProperty(message, 'responseModel', { value: 7, enumerable: false })
+    tracker.onEvent({ type: 'done', reason: 'stop', message } as AssistantMessageEvent)
+    const verdict = tracker.finish({ attempts: 1 } as never, false) as { kind: string; text?: string; failure?: string }
+    expect(verdict.kind).not.toBe('release')
+    expect(verdict.text).toBeUndefined()
+    expect(claimed.length).toBeGreaterThan(0)
+  })
+  it('latches on a non-enumerable VALID identity string, consistent with the fixed-field reader classification', () => {
+    // readOwnEnumerableDataDescriptor classifies every present non-enumerable fixed field as
+    // unsafe (R14 §3.1); the explicit identity read inherits exactly that classification, so a
+    // non-enumerable valid string is intentionally treated unsafe rather than captured.
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'ok' }], { model: 'm' })
+    Object.defineProperty(message, 'responseModel', { value: 'valid-but-nonenumerable', enumerable: false })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('latches on a non-enumerable wrong-typed model even with a valid enumerable responseModel', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], {})
+    ;(message as { responseModel: unknown }).responseModel = 'valid-response-model'
+    Object.defineProperty(message, 'model', { value: 9, enumerable: false })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('keeps a missing responseModel and a blank valid string fallback-eligible exactly as before', () => {
+    const missing = meterHarness()
+    const missingMessage = assistantMessage([{ type: 'text', text: 'hello' }], { model: 'expected-model' })
+    missing.meter.onEvent(missing.done('stop', missingMessage))
+    expect(missing.probe()).toMatchObject({ over: false })
+    const missingSnapshot = missing.finish()
+    expect(missingSnapshot?.responseModel).toBe('')
+    expect(missingSnapshot?.model).toBe('expected-model')
+    const blank = meterHarness()
+    const blankMessage = assistantMessage([{ type: 'text', text: 'hello' }], {})
+    ;(blankMessage as { responseModel: unknown }).responseModel = ''
+    blank.meter.onEvent(blank.done('stop', blankMessage))
+    expect(blank.probe()).toMatchObject({ over: false })
+    const blankSnapshot = blank.finish()
+    expect(blankSnapshot?.responseModel).toBe('')
+    expect(blankSnapshot?.model).toBe('')
+  })
+  it('reads identities in the fixed order: a wrong-typed responseModel is terminal before model', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'ok' }], { model: 'expected-model' })
+    ;(message as { responseModel: unknown }).responseModel = 7
+    const descriptorReads: string[] = []
+    const original = Object.getOwnPropertyDescriptor
+    ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = (source: object, key: PropertyKey) => {
+      if (source === message) descriptorReads.push(String(key))
+      return (original as (s: object, k: PropertyKey) => PropertyDescriptor | undefined)(source, key)
+    }
+    try {
+      h.meter.onEvent(h.done('stop', message))
+    } finally {
+      ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = original
+    }
+    expect(descriptorReads).toEqual(['usage', 'responseModel']) // model descriptor never read
+    expect(h.finish()).toBeNull()
+  })
+})
 describe('content meter: terminal descriptor fail-fast and JSON-data domain', () => {
   it('treats non-enumerable canonical fields as absent and never releases their content', () => {
     const h = meterHarness()
