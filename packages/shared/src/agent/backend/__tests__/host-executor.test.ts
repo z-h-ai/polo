@@ -1133,3 +1133,127 @@ describe('edge cases', () => {
     }
   })
 })
+
+// ============================================================
+// UTF-8 chunk boundary integrity (Fix R1)
+// ============================================================
+
+function createChunkedWorker(text: string, textSplitOffsets: number[]): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'polo-chunked-worker-'))
+  const workerPath = join(dir, 'chunked-worker.js')
+  const textJson = JSON.stringify(text)
+  const offsetsJson = JSON.stringify(textSplitOffsets)
+  const script = [
+    'process.stdin.on(\'data\', async (data) => {',
+    '  const line = data.toString().split(\'\\n\')[0];',
+    '  let req; try { req = JSON.parse(line); } catch (e) { process.exit(1); }',
+    '  const result = { type: \'host_completion_result\', version: 1, requestId: req.requestId, model: req.model, status: \'completed\', text: ' + textJson + ', usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 15, reportedModel: req.model, terminalReason: \'stop\', provenance: \'provider_final\' } };',
+    '  const fullLine = Buffer.from(JSON.stringify(result) + \'\\n\', \'utf8\');',
+    '  const textBuf = Buffer.from(' + textJson + ', \'utf8\');',
+    '  const textStart = fullLine.indexOf(textBuf);',
+    '  if (textStart < 0) { process.stdout.write(fullLine); process.exit(0); return; }',
+    '  const offsets = ' + offsetsJson + '.map(function(o) { return textStart + o; });',
+    '  let prev = 0;',
+    '  for (var i = 0; i < offsets.length; i++) { process.stdout.write(fullLine.subarray(prev, offsets[i])); await new Promise(function(r) { setTimeout(r, 25); }); prev = offsets[i]; }',
+    '  process.stdout.write(fullLine.subarray(prev));',
+    '  process.exit(0);',
+    '});',
+    'process.stdin.on(\'end\', function() {});',
+  ].join('\n')
+  writeFileSync(workerPath, script)
+  return { path: workerPath, cleanup: () => { try { rmSync(dir, { recursive: true, force: true }) } catch {} } }
+}
+
+describe('UTF-8 chunk boundary integrity (Fix R1)', () => {
+  it('3-byte char split across two writes (25ms delay) → text matches original', async () => {
+    const text = '\u4e16\u754c\ud83c\udf0d'
+    const textBytes = Buffer.from(text, 'utf8')
+    expect(textBytes.length).toBe(10)
+    const splitAt = 2
+    mockWorker = createChunkedWorker(text, [splitAt])
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 10000 }))
+    expect(r.status).toBe('completed')
+    if (isSuccessResult(r)) {
+      expect(r.text).toBe(text)
+      expect(r.text).not.toContain('\uFFFD')
+    }
+    await executor.dispose()
+  })
+
+  it('3-byte char split at first byte → text matches original', async () => {
+    const text = '\u4e16\u754c\ud83c\udf0d'
+    mockWorker = createChunkedWorker(text, [1])
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 10000 }))
+    expect(r.status).toBe('completed')
+    if (isSuccessResult(r)) {
+      expect(r.text).toBe(text)
+      expect(r.text).not.toContain('\uFFFD')
+    }
+    await executor.dispose()
+  })
+
+  it('multiple split points across 3-byte and 4-byte chars → text matches original', async () => {
+    const text = '\u4e16\u754c\ud83c\udf0d\u4f60\u597d\ud83d\udc4b'
+    const textBytes = Buffer.from(text, 'utf8')
+    mockWorker = createChunkedWorker(text, [1, 4, 7, 10, 13])
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 15000 }))
+    expect(r.status).toBe('completed')
+    if (isSuccessResult(r)) {
+      expect(r.text).toBe(text)
+      expect(r.text).not.toContain('\uFFFD')
+    }
+    await executor.dispose()
+  })
+
+  it('Chinese + emoji mixed, split inside emoji → text matches original', async () => {
+    const text = '\u4f60\u597d\ud83d\udc4b\u4e16\u754c\ud83c\udf0d\ud83d\ude00'
+    const textBytes = Buffer.from(text, 'utf8')
+    expect(textBytes.length).toBe(24)
+    mockWorker = createChunkedWorker(text, [8])
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 10000 }))
+    expect(r.status).toBe('completed')
+    if (isSuccessResult(r)) {
+      expect(r.text).toBe(text)
+      expect(r.text).not.toContain('\uFFFD')
+    }
+    await executor.dispose()
+  })
+
+  it('boundary after complete character (control) → text matches original', async () => {
+    const text = '\u4e16\u754c\ud83c\udf0d'
+    const textBytes = Buffer.from(text, 'utf8')
+    expect(textBytes.length).toBe(10)
+    const splitAt = 3
+    mockWorker = createChunkedWorker(text, [splitAt])
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 10000 }))
+    expect(r.status).toBe('completed')
+    if (isSuccessResult(r)) {
+      expect(r.text).toBe(text)
+    }
+    await executor.dispose()
+  })
+
+  it('long output (200 Chinese chars) across many chunks → text matches original', async () => {
+    const chars = '\u4e00\u4e01\u4e02\u4e03\u4e04\u4e05\u4e06\u4e07\u4e08\u4e09'
+    let text = ''
+    for (let i = 0; i < 20; i++) text += chars
+    const textBytes = Buffer.from(text, 'utf8')
+    expect(textBytes.length).toBe(600)
+    const offsets: number[] = []
+    for (let off = 100; off < 600; off += 100) offsets.push(off)
+    mockWorker = createChunkedWorker(text, offsets)
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 30000 }))
+    expect(r.status).toBe('completed')
+    if (isSuccessResult(r)) {
+      expect(r.text).toBe(text)
+      expect(r.text).not.toContain('\uFFFD')
+    }
+    await executor.dispose()
+  })
+})

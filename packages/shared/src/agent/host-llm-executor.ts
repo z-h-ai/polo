@@ -104,7 +104,7 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
       catch { try { rmSync(descriptor.privateHome, { recursive: true, force: true }) } catch {} return makePublicError('worker_failed', 'spawn_failed', requestId, selectedModel) }
       pendingChild = child
       const result = await new Promise<HostLlmPublicResult>((resolve) => {
-        let settled = false, stdoutBuf = '', stdoutBytes = 0
+        let settled = false, stdoutChunks: Buffer[] = [], stdoutBytes = 0
         const finish = (r: HostLlmPublicResult) => { if (settled) return; settled = true; if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null } if (input.signal && pendingAbortListener) { input.signal.removeEventListener('abort', pendingAbortListener); pendingAbortListener = null } pendingResolve = null; resolve(r) }
         pendingResolve = finish
         pendingTimer = setTimeout(() => finish(makePublicError('timed_out', 'deadline_exceeded', requestId, selectedModel)), input.timeoutMs)
@@ -115,9 +115,10 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
           if (settled) return
           stdoutBytes += chunk.length
           if (stdoutBytes > STDOUT_LIMIT) { finish(makePublicError('provider_protocol_error', 'result_too_large', requestId, selectedModel)); return }
-          stdoutBuf += chunk.toString('utf8')
-          const nl = stdoutBuf.indexOf('\n')
-          if (nl >= 0) { const v = validateWorkerResult(stdoutBuf.slice(0, nl), requestId, selectedModel); finish(v.ok ? toPublicResult(v.result, provider) : makePublicError('provider_protocol_error', 'invalid_worker_message', requestId, selectedModel)) }
+          stdoutChunks.push(chunk)
+          const all = Buffer.concat(stdoutChunks)
+          const nl = all.indexOf(0x0A)
+          if (nl >= 0) { const v = validateWorkerResult(all.subarray(0, nl).toString('utf8'), requestId, selectedModel); finish(v.ok ? toPublicResult(v.result, provider) : makePublicError('provider_protocol_error', 'invalid_worker_message', requestId, selectedModel)) }
         })
         child.on('exit', () => finish(makePublicError('worker_failed', 'worker_exited', requestId, selectedModel)))
         child.on('error', () => finish(makePublicError('worker_failed', 'spawn_failed', requestId, selectedModel)))
