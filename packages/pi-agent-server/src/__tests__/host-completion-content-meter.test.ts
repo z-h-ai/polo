@@ -705,3 +705,91 @@ describe('content meter: exact semantic boundaries and fail-closed reads', () =>
     expect(getterCalls).toBe(0)
   })
 })
+// R11 issue 0 closure (terminal-snapshot-projection-single-pass, obs e467a4af05c7f16af2300f0a):
+// meterMessage is the SOLE provider read and charge pass. The projection allowance must be
+// charged exactly once across the whole terminal path — a message whose content positions
+// consume the exact 65,536 allowance keeps a valid terminal snapshot — and the usage descriptor
+// is read before any later identity field, so a non-enumerable unsafe usage latches before the
+// model descriptor is ever read. The assembled snapshot re-reads nothing: finish() performs zero
+// descriptor reads.
+describe('content meter: single-pass terminal projection (R11 issue 0)', () => {
+  function minimalMessage(content: unknown): AssistantMessage {
+    return { content } as unknown as AssistantMessage
+  }
+  it('keeps the terminal snapshot valid when content positions consume exactly the 65,536 allowance', () => {
+    const h = meterHarness()
+    h.meter.onEvent(h.done('stop', minimalMessage(new Array(65_535))))
+    expect(h.probe()).toMatchObject({ over: false })
+    const snapshot = h.finish()
+    expect(snapshot).not.toBeNull()
+    expect(snapshot?.text).toBe('')
+    expect(snapshot?.usage).toBeNull()
+  })
+  it('still fails closed at allowance 65,537 (boundary + 1)', () => {
+    const h = meterHarness()
+    h.meter.onEvent(h.done('stop', minimalMessage(new Array(65_536))))
+    expect(h.probe()).toMatchObject({ over: true })
+    expect(h.finish()).toBeNull()
+  })
+  it('reads a non-enumerable unsafe usage before the model descriptor and releases no body', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'must-not-release' }], { model: 'expected-model' })
+    Object.defineProperty(message, 'usage', { value: { input: 1 }, enumerable: false })
+    const descriptorReads: string[] = []
+    const original = Object.getOwnPropertyDescriptor
+    ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = (source: object, key: PropertyKey) => {
+      if (source === message) descriptorReads.push(String(key))
+      return (original as (s: object, k: PropertyKey) => PropertyDescriptor | undefined)(source, key)
+    }
+    let readsDuringFinish = 0
+    let snapshot: SafeTerminalSnapshot | null
+    try {
+      h.meter.onEvent(h.done('stop', message))
+      expect(h.probe()).toMatchObject({ over: true })
+      readsDuringFinish = descriptorReads.length
+      snapshot = h.finish()
+      readsDuringFinish = descriptorReads.length - readsDuringFinish
+    } finally {
+      ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = original
+    }
+    expect(descriptorReads).toEqual(['usage']) // first unsafe read is terminal; model never read
+    expect(snapshot).toBeNull()
+    expect(readsDuringFinish).toBe(0) // finish() never re-reads the provider object
+  })
+  it('charges the projection allowance exactly once for a valid terminal message', () => {
+    const h = meterHarness()
+    const usage = { ...GOOD_USAGE }
+    const message = assistantMessage([{ type: 'text', text: 'ok' }], { usage, model: 'm' })
+    h.meter.onEvent(h.done('stop', message))
+    // One content key + one position + five usage members + identity keys stays far below the
+    // cap; the previous second pass would have re-charged the content position set.
+    expect(h.probe()).toMatchObject({ over: false })
+    const snapshot = h.finish()
+    expect(snapshot?.usage).toEqual(GOOD_USAGE)
+  })
+  it('descriptor read order: usage is the first and last message-level read when malformed', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'ok' }], { model: 'm' })
+    ;(message as { usage: unknown }).usage = { input: 'malformed-number', output: 4, cacheRead: 4, cacheWrite: 4, totalTokens: 4 }
+    Object.defineProperty(message, 'responseModel', { value: 'later', enumerable: true, writable: true, configurable: true })
+    const descriptorReads: string[] = []
+    const original = Object.getOwnPropertyDescriptor
+    ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = (source: object, key: PropertyKey) => {
+      if (source === message) descriptorReads.push(String(key))
+      return (original as (s: object, k: PropertyKey) => PropertyDescriptor | undefined)(source, key)
+    }
+    try {
+      h.meter.onEvent(h.done('stop', message))
+    } finally {
+      ;(Object as { getOwnPropertyDescriptor: unknown }).getOwnPropertyDescriptor = original
+    }
+    expect(descriptorReads).toEqual(['usage'])
+    expect(h.finish()).toBeNull()
+  })
+  it('terminal text is captured in content order by the single pass', () => {
+    const h = meterHarness()
+    const message = assistantMessage([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }, { type: 'thinking', thinking: 't' }], { model: 'm' })
+    h.meter.onEvent(h.done('stop', message))
+    expect(h.finish()?.text).toBe('ab')
+  })
+})
