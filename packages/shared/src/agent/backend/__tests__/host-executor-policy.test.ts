@@ -81,7 +81,8 @@ const OAUTH_CATALOG_PROVIDERS = ['anthropic', 'openai-codex', 'github-copilot']
 
 const createdPrivateHomes: string[] = []
 
-function trackDescriptor(desc: ReturnType<typeof createHostDescriptor>): ReturnType<typeof createHostDescriptor> {
+function trackDescriptor(desc: ReturnType<typeof createHostDescriptor>): NonNullable<ReturnType<typeof createHostDescriptor>> {
+  if (!desc) throw new Error('createHostDescriptor returned null in test')
   createdPrivateHomes.push(desc.privateHome)
   return desc
 }
@@ -692,10 +693,11 @@ describe('createHostDescriptor', () => {
     const credential = { type: 'oauth_access' as const, value: token }
     const desc = trackDescriptor(createHostDescriptor(conn, policy.policy, credential))
     const expectedHref = copilotTransportHref(token)
+    expect(expectedHref).not.toBeNull()
     expect(desc.wireRoute).toEqual({
       kind: 'catalog',
       provider: 'github-copilot',
-      transportBaseUrl: expectedHref,
+      transportBaseUrl: expectedHref!,
     })
   })
 

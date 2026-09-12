@@ -111,9 +111,10 @@ export function normalizeCustomTransportHref(raw: string): string | null {
   if (u.protocol === 'http:') { const h = u.hostname.replace(/^\[(.+)\]$/, '$1'); if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return u.href }
   return null
 }
-export function copilotTransportHref(token: string): string {
+export function copilotTransportHref(token: string): string | null {
   const m = token.match(/proxy-ep=([^;]+)/)
-  return new URL(m?.[1] ? `https://${m[1].replace(/^proxy\./, 'api.')}` : 'https://api.individual.githubcopilot.com').href
+  const raw = m?.[1] ? `https://${m[1].replace(/^proxy\./, 'api.')}` : 'https://api.individual.githubcopilot.com'
+  try { return new URL(raw).href } catch { return null }
 }
 export function bedrockTransportHref(region: string): string { return `https://bedrock-runtime.${region}.amazonaws.com/` }
 export function makePublicError(code: HostLlmErrorCode, reason: HostLlmErrorReason, requestId: string, model: string, usage?: HostLlmPublicUsage): HostLlmPublicResult {

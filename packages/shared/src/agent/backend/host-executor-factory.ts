@@ -106,9 +106,9 @@ const BEDROCK_AWS_KEYS: Record<string, string> = {
   AWS_EC2_METADATA_DISABLED: 'true', AWS_MAX_ATTEMPTS: '1', AWS_BEDROCK_FORCE_HTTP1: '1', AWS_USE_FIPS_ENDPOINT: 'false', AWS_USE_DUALSTACK_ENDPOINT: 'false',
 }
 
-export function createHostDescriptor(c: LlmConnection, policy: ExecutablePolicy, credential: WireCredential): HostSpawnDescriptor {
+export function createHostDescriptor(c: LlmConnection, policy: ExecutablePolicy, credential: WireCredential): HostSpawnDescriptor | null {
   let transportHref = policy.staticHref ?? ''
-  if (policy.isCopilot && credential.type === 'oauth_access') transportHref = copilotTransportHref(credential.value)
+  if (policy.isCopilot && credential.type === 'oauth_access') { const derived = copilotTransportHref(credential.value); if (!derived) return null; transportHref = derived }
   else if (policy.isBedrock && credential.type === 'iam') transportHref = bedrockTransportHref(credential.region)
   const privateHome = mkdtempSync(join(tmpdir(), 'polo-host-llm-'))
   const env = createSafeRuntimeEnvironment(process.env, { HOME: privateHome })

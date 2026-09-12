@@ -269,6 +269,18 @@ describe('copilotTransportHref', () => {
       new URL(getGitHubCopilotBaseUrl('token;proxy-ep=proxy.api.example.com;other')).href,
     );
   });
+
+  it('malformed proxy-ep with spaces → null (Fix R2 Issue 1)', () => {
+    expect(copilotTransportHref('token;proxy-ep=exam ple.com;other')).toBeNull();
+  });
+
+  it('malformed proxy-ep with illegal characters → null (Fix R2 Issue 1)', () => {
+    expect(copilotTransportHref('token;proxy-ep=<script>;other')).toBeNull();
+  });
+
+  it('malformed proxy-ep with port out of range → null (Fix R2 Issue 1)', () => {
+    expect(copilotTransportHref('token;proxy-ep=example.com:99999;other')).toBeNull();
+  });
 });
 
 // ============================================================

@@ -829,6 +829,22 @@ describe('dispose', () => {
     }
   })
 
+  it('dispose during in-flight → P11 with selectedModel and requestId (Fix R2 Issue 2)', async () => {
+    mockWorker?.cleanup()
+    mockWorker = createMockWorker({ mode: 'delay', delayMs: 10000 })
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const p = executor.execute(makeValidInput({ timeoutMs: 30000 }))
+    setTimeout(() => executor.dispose(), 100)
+    const r = await p
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(TEST_MODEL)
+    if (isErrorResult(r)) {
+      expect(r.error.code).toBe('executor_closed')
+      expect(r.error.reason).toBe('host_disposed')
+    }
+    expect(r.requestId).toMatch(/^host-/)
+  })
+
   it('execute after dispose → P11 (pre-select, attemptedModel)', async () => {
     const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
     await executor.dispose()
@@ -1253,6 +1269,81 @@ describe('UTF-8 chunk boundary integrity (Fix R1)', () => {
     if (isSuccessResult(r)) {
       expect(r.text).toBe(text)
       expect(r.text).not.toContain('\uFFFD')
+    }
+    await executor.dispose()
+  })
+})
+
+// ============================================================
+// Copilot malformed proxy-ep → fail-closed typed result (Fix R2 Issue 1)
+// ============================================================
+
+describe('copilot malformed proxy-ep → fail-closed typed result (Fix R2 Issue 1)', () => {
+  const COPILOT_SLUG = 'test-copilot'
+  const COPILOT_MODEL = 'gpt-4o'
+
+  function makeCopilotConnection(): LlmConnection {
+    return {
+      slug: COPILOT_SLUG,
+      name: 'Test Copilot',
+      providerType: 'pi',
+      authType: 'oauth',
+      piAuthProvider: 'github-copilot',
+      defaultModel: COPILOT_MODEL,
+      models: [COPILOT_MODEL],
+      createdAt: Date.now(),
+    }
+  }
+
+  function setupCopilot(tokenValue: string): void {
+    setInvocationLlmConnections([makeCopilotConnection()])
+    setInvocationCredential(
+      { type: 'llm_oauth', connectionSlug: COPILOT_SLUG },
+      { value: tokenValue, expiresAt: Date.now() + 600_000 },
+    )
+  }
+
+  it('copilot oauth with spaces in proxy-ep → P5 typed result, zero throw', async () => {
+    teardownConnection()
+    setupCopilot('token;proxy-ep=exam ple.com;other')
+    mockWorker = createMockWorker()
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path, { connectionSlug: COPILOT_SLUG }))
+    const r = await executor.execute(makeValidInput({ model: COPILOT_MODEL }))
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(COPILOT_MODEL)
+    if (isErrorResult(r)) {
+      expect(r.error.code).toBe('invalid_connection')
+      expect(r.error.reason).toBe('unsupported_provider_auth')
+    }
+    await executor.dispose()
+  })
+
+  it('copilot oauth with illegal chars in proxy-ep → P5 typed result, zero throw', async () => {
+    teardownConnection()
+    setupCopilot('token;proxy-ep=<script>;other')
+    mockWorker = createMockWorker()
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path, { connectionSlug: COPILOT_SLUG }))
+    const r = await executor.execute(makeValidInput({ model: COPILOT_MODEL }))
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(COPILOT_MODEL)
+    if (isErrorResult(r)) {
+      expect(r.error.code).toBe('invalid_connection')
+      expect(r.error.reason).toBe('unsupported_provider_auth')
+    }
+    await executor.dispose()
+  })
+
+  it('copilot oauth with port out of range in proxy-ep → P5 typed result, zero throw', async () => {
+    teardownConnection()
+    setupCopilot('token;proxy-ep=example.com:99999;other')
+    mockWorker = createMockWorker()
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path, { connectionSlug: COPILOT_SLUG }))
+    const r = await executor.execute(makeValidInput({ model: COPILOT_MODEL }))
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(COPILOT_MODEL)
+    if (isErrorResult(r)) {
+      expect(r.error.code).toBe('invalid_connection')
+      expect(r.error.reason).toBe('unsupported_provider_auth')
     }
     await executor.dispose()
   })

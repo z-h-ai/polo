@@ -70,6 +70,7 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
   let disposed = false, busy = false
   let disposePromise: Promise<void> | null = null
   let pendingResolve: ((r: HostLlmPublicResult) => void) | null = null
+  let pendingRequestId = '', pendingSelectedModel = ''
   let pendingChild: ChildProcess | null = null
   let pendingTimer: NodeJS.Timeout | null = null
   let pendingAbortListener: (() => void) | null = null
@@ -95,7 +96,9 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
       if (disposed) return makePublicError('executor_closed', 'host_disposed', '', selectedModel)
       if (!serverPath) return makePublicError('worker_failed', 'spawn_failed', '', selectedModel)
       const descriptor = createHostDescriptor(liveConn, policy, credResult.credential)
+      if (!descriptor) return makePublicError('invalid_connection', 'unsupported_provider_auth', '', selectedModel)
       const requestId = `host-${crypto.randomUUID()}`
+      pendingRequestId = requestId; pendingSelectedModel = selectedModel
       const encoded = encodeRequestLine(requestId, selectedModel, input, descriptor.wireRoute, descriptor.wireCredential)
       if (!encoded.ok) { try { rmSync(descriptor.privateHome, { recursive: true, force: true }) } catch {} return makePublicError('invalid_request', 'wire_request_too_large', requestId, selectedModel) }
       const provider = descriptor.provider
@@ -136,7 +139,7 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
     disposed = true
     if (pendingResolve) {
       if (pendingChild && !pendingChild.killed) { try { pendingChild.kill('SIGTERM') } catch {} }
-      pendingResolve(makePublicError('executor_closed', 'host_disposed', '', ''))
+      pendingResolve(makePublicError('executor_closed', 'host_disposed', pendingRequestId, pendingSelectedModel))
     }
     await pendingCleanup
     disposePromise = Promise.resolve()
