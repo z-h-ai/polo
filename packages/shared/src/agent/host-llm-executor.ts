@@ -125,6 +125,7 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
         })
         child.on('exit', () => finish(makePublicError('worker_failed', 'worker_exited', requestId, selectedModel)))
         child.on('error', () => finish(makePublicError('worker_failed', 'spawn_failed', requestId, selectedModel)))
+        child.stdin!.on('error', () => finish(makePublicError('provider_protocol_error', 'invalid_worker_message', requestId, selectedModel)))
         child.stdin!.write(encoded.line + '\n', (err) => { if (err) finish(makePublicError('provider_protocol_error', 'invalid_worker_message', requestId, selectedModel)); else { try { child.stdin!.end() } catch {} } })
       })
       pendingChild = null

@@ -74,7 +74,7 @@ function makeValidInput(overrides: Partial<HostLlmExecuteInput> = {}): HostLlmEx
 }
 
 interface MockWorkerOptions {
-  mode?: 'echo-completed' | 'exit-immediately' | 'delay' | 'invalid-json' | 'stderr-leak' | 'wrong-request-id' | 'wrong-model' | 'extra-fields' | 'no-output' | 'custom'
+  mode?: 'echo-completed' | 'exit-immediately' | 'delay' | 'invalid-json' | 'stderr-leak' | 'wrong-request-id' | 'wrong-model' | 'extra-fields' | 'no-output' | 'custom' | 'exit-no-stdin-read'
   delayMs?: number
   customResult?: string
   captureStderr?: (data: string) => void
@@ -87,7 +87,7 @@ function createMockWorker(opts: MockWorkerOptions = {}): { path: string; cleanup
 
   const script = `
 const CANARY_STDERR = ${mode === 'stderr-leak' ? 'true' : 'false'};
-
+${mode === 'exit-no-stdin-read' ? 'process.exit(0);' : ''}
 process.stdin.on('data', (data) => {
   const line = data.toString().split('\\n')[0];
   let req;
@@ -1275,7 +1275,55 @@ describe('UTF-8 chunk boundary integrity (Fix R1)', () => {
 })
 
 // ============================================================
-// Copilot malformed proxy-ep → fail-closed typed result (Fix R2 Issue 1)
+// stdin EPIPE fail-closed (Fix R3)
+// ============================================================
+
+describe('stdin EPIPE fail-closed (Fix R3)', () => {
+  it('child exits before reading stdin → typed result (no crash, no hang)', async () => {
+    mockWorker?.cleanup()
+    mockWorker = createMockWorker({ mode: 'exit-no-stdin-read' })
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const r = await executor.execute(makeValidInput({ timeoutMs: 10000 }))
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(TEST_MODEL)
+    expect(r.requestId).toMatch(/^host-/)
+    if (isErrorResult(r)) {
+      const validCodes = ['worker_failed', 'provider_protocol_error']
+      expect(validCodes).toContain(r.error.code)
+    }
+    await executor.dispose()
+  })
+
+  it('execute promise resolves (no hang) after stdin EPIPE scenario', async () => {
+    mockWorker?.cleanup()
+    mockWorker = createMockWorker({ mode: 'exit-no-stdin-read' })
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const timeout = new Promise<HostLlmPublicResult>((_, reject) => setTimeout(() => reject(new Error('execute hung')), 15000))
+    const r = await Promise.race([executor.execute(makeValidInput({ timeoutMs: 10000 })), timeout])
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(TEST_MODEL)
+    if (isErrorResult(r)) {
+      const validCodes = ['worker_failed', 'provider_protocol_error']
+      expect(validCodes).toContain(r.error.code)
+    }
+    await executor.dispose()
+  })
+
+  it('large prompt + child exits before stdin read → typed result (no crash)', async () => {
+    mockWorker?.cleanup()
+    mockWorker = createMockWorker({ mode: 'exit-no-stdin-read' })
+    const executor = createSessionlessHostLlmExecutor(makeExecutorOptions(mockWorker!.path))
+    const bigPrompt = 'x'.repeat(512 * 1024)
+    const r = await executor.execute(makeValidInput({ prompt: bigPrompt, timeoutMs: 10000 }))
+    expect(r.status).toBe('failed')
+    expect(r.model).toBe(TEST_MODEL)
+    if (isErrorResult(r)) {
+      const validCodes = ['worker_failed', 'provider_protocol_error']
+      expect(validCodes).toContain(r.error.code)
+    }
+    await executor.dispose()
+  })
+})
 // ============================================================
 
 describe('copilot malformed proxy-ep → fail-closed typed result (Fix R2 Issue 1)', () => {
