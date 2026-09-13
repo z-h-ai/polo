@@ -191,19 +191,25 @@ function hostUsage(
 
 /**
  * Immutable terminal outcome of ONE generation teardown, shared with every
- * concurrent waiter of the same teardown guard. `stopFailure` carries the
- * recorded (never thrown) generation-bound process-stop failure; every
- * boundary that joins the guard reads the SAME outcome, so a frozen handler
- * fails closed on it without racing a per-execution take against a
- * consumer-less drainer.
+ * concurrent waiter of the same teardown guard. The `ok` discriminant is the
+ * ONLY failure signal: `ok: false` carries the recorded (never thrown)
+ * generation-bound process-stop failure — even when that failure is itself
+ * `undefined` (`Promise.reject(undefined)`), so a rejected stop can never be
+ * misclassified as success by value-inspecting the error. Every boundary
+ * that joins the guard reads the SAME outcome, so a frozen handler fails
+ * closed on it without racing a per-execution take against a consumer-less
+ * drainer.
  */
-export interface TeardownOutcome {
-  readonly executionId: string
-  readonly stopFailure: unknown
-}
+export type TeardownOutcome =
+  | { readonly ok: true; readonly executionId: string }
+  | {
+    readonly ok: false
+    readonly executionId: string
+    readonly stopFailure: unknown
+  }
 
 function settledTeardownOutcome(runtime: { executionId: string }): TeardownOutcome {
-  return Object.freeze({ executionId: runtime.executionId, stopFailure: undefined })
+  return Object.freeze({ ok: true as const, executionId: runtime.executionId })
 }
 
 /**
@@ -614,12 +620,16 @@ export class LocalAppRuntimeCoordinator {
     // Best-effort: every subsequent cleanup step runs even when the
     // generation-bound process stop fails. The failure is RECORDED (never
     // thrown): the single START-boundary aggregation exit surfaces it via
-    // the STOP_FAILED contract after cleanup completes.
+    // the STOP_FAILED contract after cleanup completes. Failure is tracked
+    // by an INDEPENDENT boolean tag — a `Promise.reject(undefined)` reason
+    // must still classify the stop as failed (never an undefined sentinel).
     let stopFailure: unknown
+    let stopFailed = false
     if (stopProcess) {
       try {
         await stopProcess()
       } catch (error) {
+        stopFailed = true
         stopFailure = error
       }
     }
@@ -634,12 +644,18 @@ export class LocalAppRuntimeCoordinator {
     }
     // ONE immutable outcome per teardown: it is recorded for the
     // observability/consumption seams and returned to every waiter of the
-    // guard — never re-derived from racy per-execution state.
-    const outcome: TeardownOutcome = Object.freeze({
-      executionId: runtime.executionId,
-      stopFailure,
-    })
-    if (stopFailure !== undefined) {
+    // guard — never re-derived from racy per-execution state. The `ok`
+    // discriminant — never the error value — decides failure.
+    const outcome: TeardownOutcome = Object.freeze(
+      stopFailed
+        ? {
+          ok: false as const,
+          executionId: runtime.executionId,
+          stopFailure,
+        }
+        : { ok: true as const, executionId: runtime.executionId },
+    )
+    if (stopFailed) {
       this.rollbackStopFailures.set(runtime.executionId, outcome)
     } else {
       this.rollbackStopFailures.delete(runtime.executionId)
@@ -647,22 +663,30 @@ export class LocalAppRuntimeCoordinator {
     return outcome
   }
 
-  /** Recorded rollback stop failure for one execution, if any. */
+  /**
+   * Recorded rollback stop failure for one execution, if any. Tag-driven
+   * mapping: only an `ok: false` outcome maps to its recorded failure.
+   * Test/observability seam — production fail-closed consumers must use the
+   * tagged consumeTeardownOutcome boundary instead.
+   */
   getRollbackStopFailure(executionId: string): unknown {
-    return this.rollbackStopFailures.get(executionId)?.stopFailure
+    const record = this.rollbackStopFailures.get(executionId)
+    return record && !record.ok ? record.stopFailure : undefined
   }
 
   /**
    * Atomic take-and-delete of one recorded rollback stop failure: a
    * consumption primitive for boundaries that surface the failure by
-   * executionId alone (legacy seam). Frozen handlers must prefer
-   * consumeTeardownOutcome — the shared outcome cannot race a concurrent
-   * drainer.
+   * executionId alone (legacy seam). The value is mapped by the outcome's
+   * `ok` discriminant — a record exists (and is taken) for every FAILED
+   * teardown, even when the failure value itself is `undefined`. Frozen
+   * handlers must prefer consumeTeardownOutcome — the shared outcome cannot
+   * race a concurrent drainer.
    */
   takeRollbackStopFailure(executionId: string): unknown {
     const outcome = this.rollbackStopFailures.get(executionId)
     if (outcome !== undefined) this.rollbackStopFailures.delete(executionId)
-    return outcome?.stopFailure
+    return outcome && !outcome.ok ? outcome.stopFailure : undefined
   }
 
   /**
@@ -672,14 +696,15 @@ export class LocalAppRuntimeCoordinator {
    * diagnostic record when it belongs to THIS exact teardown: the map can
    * never accumulate consumed entries, and a concurrent consumer-less
    * drainer that already retired the record cannot resurrect or duplicate
-   * the failure. Returns the outcome's stop failure for fail-closed
-   * propagation.
+   * the failure. Returns the SAME tagged outcome — the caller MUST fail
+   * closed on `!consumed.ok` (never on the failure value being defined),
+   * so a `Promise.reject(undefined)` stop still propagates.
    */
-  consumeTeardownOutcome(outcome: TeardownOutcome): unknown {
+  consumeTeardownOutcome(outcome: TeardownOutcome): TeardownOutcome {
     if (this.rollbackStopFailures.get(outcome.executionId) === outcome) {
       this.rollbackStopFailures.delete(outcome.executionId)
     }
-    return outcome.stopFailure
+    return outcome
   }
 
   /** Test/observability seam: count of currently retained stop failures. */
@@ -706,7 +731,7 @@ export class LocalAppRuntimeCoordinator {
    * caller error attribution; fail-closed behavior never depends on it.
    */
   private drainUnsurfacedStopFailure(outcome: TeardownOutcome): void {
-    if (outcome.stopFailure === undefined) return
+    if (outcome.ok) return
     if (this.rollbackStopFailures.get(outcome.executionId) !== outcome) return
     this.rollbackStopFailures.delete(outcome.executionId)
     this.unsurfacedTeardownStopFailures.push({
@@ -913,11 +938,11 @@ export class LocalAppRuntimeCoordinator {
       // Aggregate ONLY the runtimes this shutdown tore down: historical
       // records from already-consumed or consumer-less teardowns must never
       // reject (or pollute) a shutdown with no matching active runtime.
+      // Failure is judged by the outcome's `ok` discriminant, so a
+      // `Promise.reject(undefined)` stop still rejects this shutdown.
       const failures = settled.flatMap(result => {
         if (result.status === 'rejected') return [result.reason]
-        return result.value.stopFailure !== undefined
-          ? [result.value.stopFailure]
-          : []
+        return !result.value.ok ? [result.value.stopFailure] : []
       })
       // Terminal hygiene: nothing survives shutdown for this instance.
       this.rollbackStopFailures.clear()

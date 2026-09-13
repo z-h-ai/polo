@@ -1981,9 +1981,9 @@ describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
   function createFrozenHandlerBoundary(
     coordinator: Fixture['coordinator'],
     runtime: ActiveRuntime,
-  ): { joined: Promise<unknown>; joinerStopCallbackRan: () => boolean } {
+  ): { joined: Promise<{ ok: boolean; stopFailure?: unknown }>; joinerStopCallbackRan: () => boolean } {
     let joinerStopCallbackRan = false
-    const joined = (async (): Promise<unknown> => {
+    const joined = (async (): Promise<{ ok: boolean; stopFailure?: unknown }> => {
       // Frozen-handler contract (replacement / explicit STOP / RESTART):
       // join the guard, then fail closed on the SHARED outcome — never on a
       // per-execution take that a concurrent drainer can win first.
@@ -2006,9 +2006,12 @@ describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
     releaseStop()
     await Promise.all([expiry, replacement.joined])
     // Fail closed: the frozen replacement observed the stop failure on the
-    // shared outcome — a successor spawn would be gated on `undefined` and
-    // must never happen while the old process may still be alive.
-    expect(await replacement.joined).toMatchObject({ message: 'process survived' })
+    // shared outcome — the `ok` discriminant (never the error value) gates
+    // the successor, which must never spawn while the old process may still
+    // be alive.
+    const consumedReplacement = await replacement.joined
+    expect(consumedReplacement.ok).toBe(false)
+    expect(consumedReplacement.stopFailure).toMatchObject({ message: 'process survived' })
     expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
     // The exact stop ran EXACTLY once (joiners never re-stop).
     expect(fixture.stopRuntimeCalls).toEqual([1])
@@ -2021,7 +2024,7 @@ describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
       .toHaveLength(1)
     // The generation is terminal: a stale replay cannot re-stop it.
     const replay = await fixture.coordinator.teardownRuntime(runtime, 'cancelled')
-    expect(replay.stopFailure).toBeUndefined()
+    expect(replay.ok).toBe(true)
     expect(fixture.stopRuntimeCalls).toEqual([1])
     await fixture.coordinator.shutdown()
   })
@@ -2033,7 +2036,10 @@ describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
     const stop = createFrozenHandlerBoundary(fixture.coordinator, runtime)
     releaseStop()
     await Promise.all([expiry, stop.joined])
-    expect(await stop.joined).toMatchObject({ message: 'process survived' })
+    expect((await stop.joined).ok).toBe(false)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+      .filter(entry => entry.executionId === 'exec-1'))
+      .toHaveLength(1)
     // Cleanup completed despite the failed stop: active set drained, the
     // generation is terminal, the capability is forgotten.
     expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
@@ -2053,7 +2059,7 @@ describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
     const stop = createFrozenHandlerBoundary(fixture.coordinator, runtime)
     releaseStop()
     await Promise.all([scopeSweep, stop.joined])
-    expect(await stop.joined).toMatchObject({ message: 'process survived' })
+    expect((await stop.joined).ok).toBe(false)
     await scopeSweep
     expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
     expect(fixture.stopRuntimeCalls).toEqual([1])
@@ -2088,5 +2094,200 @@ describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
     expect(ring.filter(entry => entry.executionId === 'exec-1')).toHaveLength(1)
     // A retry shutdown converges: the teardown work is terminal.
     await expect(fixture.coordinator.shutdown()).resolves.toBeUndefined()
+  })
+})
+
+/**
+ * R13 fail-closed regressions: `Promise.reject(undefined)` is a LEGAL
+ * rejection reason, so no teardown boundary may use the error VALUE as a
+ * no-failure sentinel. Every outcome carries an `ok` discriminant and every
+ * consumer (frozen handlers, the consumer-less drainer, shutdown
+ * aggregation, the legacy seams) judges failure by that tag alone.
+ */
+describe('POO-54 R13 undefined-rejection fail-closed (tag-discriminated teardown outcomes)', () => {
+  it('a Promise.reject(undefined) stop is RECORDED as ok:false: cleanup completes and the explicit-STOP boundary fails closed', async () => {
+    const fixture = createFixture({ skipBootstrapRuntime: true })
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-undef-stop',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    const outcome = await fixture.coordinator.teardownRuntime(
+      runtime,
+      'cancelled',
+      () => Promise.reject(undefined),
+    )
+    // Cleanup completed despite the rejected stop: the active set drained
+    // and the generation is terminal.
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    expect(fixture.coordinator.terminalRuntimeGenerationHighWater(runtime.identityKey)).toBe(1)
+    // The outcome is FAILED by TAG even though the rejection reason is
+    // undefined — the old undefined sentinel encoded it as success.
+    expect(outcome.ok).toBe(false)
+    // Frozen-handler consumption fails closed on the tag, never the value.
+    const consumed = fixture.coordinator.consumeTeardownOutcome(outcome)
+    expect(consumed.ok).toBe(false)
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('the legacy seams map by tag: an undefined-failure record exists, is observable and is taken exactly once', async () => {
+    const fixture = createFixture({ skipBootstrapRuntime: true })
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-undef-seam',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    const outcome = await fixture.coordinator.teardownRuntime(
+      runtime,
+      'cancelled',
+      () => Promise.reject(undefined),
+    )
+    expect(outcome.ok).toBe(false)
+    // The record EXISTS (tag-driven) even though its failure VALUE is
+    // undefined — the value never decides retention.
+    expect(fixture.coordinator.getRollbackStopFailure('exec-undef-seam')).toBeUndefined()
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(1)
+    // take-and-delete retires the record exactly once.
+    expect(fixture.coordinator.takeRollbackStopFailure('exec-undef-seam')).toBeUndefined()
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    expect(fixture.coordinator.takeRollbackStopFailure('exec-undef-seam')).toBeUndefined()
+    await fixture.coordinator.shutdown()
+  })
+
+  it('consumer-less expiry and scope teardowns with Promise.reject(undefined) drain exactly one ring entry each', async () => {
+    const fixture = createFixture({
+      skipBootstrapRuntime: true,
+      stopRuntime: async () => {
+        throw undefined
+      },
+    })
+    await fixture.coordinator.ensureGateway()
+    // Expiry path: the drained failure lands in the bounded ring.
+    const signing = fixture.coordinator.signCapability({
+      identity: IDENTITY,
+      workspaceId: 'ws-a',
+      executionId: 'exec-undef-expiry',
+      runtimeKind: 'python',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-undef-expiry',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing.capabilityGeneration,
+    })
+    await fixture.coordinator.handleCapabilityExpiry(signing.capabilityGeneration)
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()).toHaveLength(1)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()[0])
+      .toMatchObject({ executionId: 'exec-undef-expiry' })
+    // Scope sweep path: same tag-driven drain at the call boundary.
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, artifactInstanceId: 'artifact-undef-scope' },
+      executionId: 'exec-undef-scope',
+      runtimeGeneration: 2,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+    await fixture.coordinator.teardownRuntimesFor(() => true, 'cancelled')
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()).toHaveLength(2)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures().at(-1))
+      .toMatchObject({ executionId: 'exec-undef-scope' })
+    await fixture.coordinator.shutdown()
+  })
+
+  it('shutdown rejects and aggregates undefined-rejection stops: both generations are counted and a retry converges', async () => {
+    const fixture = createFixture({
+      skipBootstrapRuntime: true,
+      stopRuntime: async () => {
+        throw undefined
+      },
+    })
+    await fixture.coordinator.ensureGateway()
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-undef-sd-1',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, artifactInstanceId: 'artifact-undef-sd' },
+      executionId: 'exec-undef-sd-2',
+      runtimeGeneration: 2,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+    await expect(fixture.coordinator.shutdown()).rejects.toThrow(
+      /coordinator shutdown: 2 runtime generation\(s\) failed to stop/,
+    )
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    // A retry shutdown converges: the terminal teardown work is complete.
+    await expect(fixture.coordinator.shutdown()).resolves.toBeUndefined()
+  })
+
+  it('concurrent expiry↔replacement share the guard: an undefined rejection drains the ring exactly once and fails the replacement closed', async () => {
+    let releaseStop!: () => void
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve
+    })
+    let entered = 0
+    const fixture = createFixture({
+      stopRuntime: async () => {
+        entered += 1
+        await stopGate
+        throw undefined
+      },
+    })
+    await fixture.ready
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    // Boundary A: expiry enters the guard and parks inside the stop.
+    const expiry = fixture.coordinator.handleCapabilityExpiry(runtime.capabilityGeneration!)
+    for (let i = 0; i < 500 && entered === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(entered).toBe(1)
+    // Boundary B: the replacement joins the SAME in-flight guard before the
+    // stop is allowed to reject with undefined.
+    const replacement = (async () => {
+      const outcome = await fixture.coordinator.teardownRuntime(
+        runtime,
+        'cancelled',
+        async () => {},
+      )
+      return fixture.coordinator.consumeTeardownOutcome(outcome)
+    })()
+    releaseStop()
+    const consumed = await replacement
+    await expiry
+    expect(consumed.ok).toBe(false)
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    // The exact stop ran EXACTLY once (joiners never re-stop).
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    // Terminal hygiene holds and the ring holds the undefined-reason
+    // failure EXACTLY once (per-outcome idempotent enqueue).
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+      .filter(entry => entry.executionId === 'exec-1'))
+      .toHaveLength(1)
+    await fixture.coordinator.shutdown()
   })
 })

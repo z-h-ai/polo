@@ -2364,3 +2364,54 @@ describe('POO-54 R12 shutdown orchestration (coordinator failure never skips for
     })).resolves.toBeUndefined()
   })
 })
+
+describe('POO-54 R13 shutdown orchestration (undefined rejections fail closed by settled status)', () => {
+  it('a coordinator Promise.reject(undefined) still rejects the orchestration and never skips the manager', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    let coordinatorShutdownCalls = 0
+    let managerShutdownCalls = 0
+    const outcome = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          coordinatorShutdownCalls += 1
+          throw undefined
+        },
+      },
+      manager: {
+        shutdown: async () => {
+          managerShutdownCalls += 1
+        },
+      },
+    }).then(
+      () => ({ settled: 'resolved' as const }),
+      (error: unknown) => ({ settled: 'rejected' as const, error }),
+    )
+    // The manager ALWAYS ran after the coordinator failure.
+    expect(coordinatorShutdownCalls).toBe(1)
+    expect(managerShutdownCalls).toBe(1)
+    // The single failure is rethrown raw — here the failure VALUE is
+    // undefined, so the settled STATUS must decide: the orchestration
+    // rejects (never a false resolve).
+    expect(outcome).toMatchObject({ settled: 'rejected' })
+    expect((outcome as { error: unknown }).error).toBeUndefined()
+  })
+
+  it('coordinator AND manager both rejecting undefined aggregate into an AggregateError keeping both reports', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const failure = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          throw undefined
+        },
+      },
+      manager: {
+        shutdown: async () => {
+          throw undefined
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    // Both undefined reports travel: never a false "single raw failure".
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toHaveLength(2)
+  })
+})

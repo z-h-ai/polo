@@ -19,19 +19,28 @@ export interface LocalAppRuntimeShutdownOwners {
 export async function shutdownLocalAppRuntimeOwners(
   owners: LocalAppRuntimeShutdownOwners,
 ): Promise<void> {
-  // Capture (never propagate) the coordinator failure: its exact-stop
-  // rejections must not become the element that skips the manager/registry
-  // forced cleanup below.
-  const coordinatorFailure = await owners.coordinator?.shutdown().then(
-    () => undefined,
-    (error: unknown) => error,
-  )
+  // Capture (never propagate) the coordinator failure by SETTLED STATUS:
+  // its exact-stop rejections must not become the element that skips the
+  // manager/registry forced cleanup below, and a rejection reason of
+  // `undefined` (Promise.reject(undefined)) must still classify as a
+  // failure — never by value-inspecting the captured error.
+  let coordinatorFailure: unknown
+  let coordinatorFailed = false
+  if (owners.coordinator) {
+    const [settledCoordinator] = await Promise.allSettled([
+      owners.coordinator.shutdown(),
+    ])
+    if (settledCoordinator?.status === 'rejected') {
+      coordinatorFailed = true
+      coordinatorFailure = settledCoordinator.reason
+    }
+  }
   const results = await Promise.allSettled([
     owners.manager?.shutdown(),
     owners.scopedRegistry?.shutdown(),
   ])
   const failures: unknown[] = [
-    ...(coordinatorFailure !== undefined ? [coordinatorFailure] : []),
+    ...(coordinatorFailed ? [coordinatorFailure] : []),
     ...results.flatMap(result =>
       result.status === 'rejected' ? [result.reason] : []),
   ]

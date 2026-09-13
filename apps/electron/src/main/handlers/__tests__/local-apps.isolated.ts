@@ -335,17 +335,27 @@ const runtimeCoordinator = {
     activeRuntimesByExecution.delete(runtime.executionId)
     // REAL-coordinator semantics: a failing stopProcess is RECORDED (never
     // thrown) and the teardown resolves with the SAME immutable shared
-    // outcome carrying the failure — the frozen handler boundary consumes
-    // the OUTCOME (never a racy per-execution take).
+    // outcome carrying the failure — failure is tracked by an INDEPENDENT
+    // `ok` tag (a Promise.reject(undefined) reason still fails closed), and
+    // the frozen handler boundary consumes the OUTCOME (never a racy
+    // per-execution take).
     const stopProcess = args[2] as (() => Promise<void>) | undefined
     let stopFailure: unknown
+    let stopFailed = false
     try {
       await stopProcess?.()
     } catch (error) {
+      stopFailed = true
       stopFailure = error
     }
-    const outcome = Object.freeze({ executionId: runtime.executionId, stopFailure })
-    if (stopFailure !== undefined) {
+    const outcome = stopFailed
+      ? Object.freeze({
+        ok: false as const,
+        executionId: runtime.executionId,
+        stopFailure,
+      })
+      : Object.freeze({ ok: true as const, executionId: runtime.executionId })
+    if (stopFailed) {
       recordedRollbackStopFailures.set(runtime.executionId, outcome)
     } else {
       recordedRollbackStopFailures.delete(runtime.executionId)
@@ -354,24 +364,26 @@ const runtimeCoordinator = {
   }),
   handleUnexpectedExit: mock(async () => {}),
   consumeTeardownOutcome: mock(
-    (outcome: { executionId: string; stopFailure: unknown }): unknown => {
+    (
+      outcome: { executionId: string; ok: boolean; stopFailure?: unknown },
+    ): { executionId: string; ok: boolean; stopFailure?: unknown } => {
       // REAL-coordinator semantics: the failure travels ON the shared
       // outcome; consumption only retires the retained record when it
-      // belongs to THIS exact teardown.
+      // belongs to THIS exact teardown, and returns the SAME tagged outcome.
       if (recordedRollbackStopFailures.get(outcome.executionId) === outcome) {
         recordedRollbackStopFailures.delete(outcome.executionId)
       }
-      return outcome.stopFailure
+      return outcome
     },
   ),
   takeRollbackStopFailure: mock((executionId: unknown): unknown => {
     const outcome = recordedRollbackStopFailures.get(executionId as string) as
-      | { stopFailure?: unknown }
+      | { ok: boolean; stopFailure?: unknown }
       | undefined
     if (outcome !== undefined) {
       recordedRollbackStopFailures.delete(executionId as string)
     }
-    return outcome?.stopFailure
+    return outcome && !outcome.ok ? outcome.stopFailure : undefined
   }),
 }
 const recordedRollbackStopFailures = new Map<string, unknown>()
@@ -4315,5 +4327,91 @@ describe('local app production status projection (R34-3)', () => {
     } finally {
       scopedRegistryOverride = null
     }
+  })
+
+  // ── POO-54 R13: an undefined rejection reason (Promise.reject(undefined))
+  // must still classify the recorded stop failure as FAILED — the frozen
+  // handler boundaries judge the tagged TeardownOutcome, never the value.
+  it('POO-54 R13: a replacement whose recorded stop failure is undefined fails closed — STOP_FAILED and zero successor spawn', async () => {
+    const existing = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-old-undef',
+      runtimeGeneration: 41,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 3,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
+    // The real coordinator RECORDED a stop whose rejection reason was
+    // `undefined`: the shared outcome is ok:false with an undefined
+    // stopFailure value.
+    runtimeCoordinator.teardownRuntime.mockImplementationOnce(async () =>
+      Object.freeze({
+        ok: false as const,
+        executionId: 'exec-old-undef',
+        stopFailure: undefined,
+      }))
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // The successor never spawned and the gateway never reopened: the
+    // undefined failure still gates the replacement closed.
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    expect(scopedStopExact).not.toHaveBeenCalled()
+  })
+
+  it('POO-54 R13: an explicit STOP whose recorded stop failure is undefined rejects STOP_FAILED while cleanup completes', async () => {
+    const runtime = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-stop-undef',
+      runtimeGeneration: 7,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'static' as const,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(runtime.identity), runtime)
+    activeRuntimesByExecution.set('exec-stop-undef', runtime)
+    // The teardown RECORDED an undefined-rejection stop failure; cleanup
+    // (active-set retirement) still completed before the frozen handler
+    // consumed the tagged outcome.
+    runtimeCoordinator.teardownRuntime.mockImplementationOnce(async (...args: unknown[]) => {
+      const tornDown = args[0] as { identity: typeof runtime.identity; executionId: string }
+      activeRuntimesByKey.delete(runtimeIdentityKey(tornDown.identity))
+      activeRuntimesByExecution.delete(tornDown.executionId)
+      return Object.freeze({
+        ok: false as const,
+        executionId: tornDown.executionId,
+        stopFailure: undefined,
+      })
+    })
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'exec-stop-undef',
+      expectedRuntimeGeneration: 7,
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // Cleanup completed: no runtime record survives the failed stop.
+    expect(activeRuntimesByKey.size).toBe(0)
+    expect(activeRuntimesByExecution.size).toBe(0)
   })
 })

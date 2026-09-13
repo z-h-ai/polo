@@ -1867,9 +1867,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           const outcome = await coordinator.teardownRuntime(active, 'cancelled', async () => {
             await registry.stopExact(scope, active.runtimeGeneration)
           })
-          const recorded = coordinator.consumeTeardownOutcome(outcome)
-          if (recorded !== undefined) {
-            throw normalizeStopFailure(recorded)
+          const consumed = coordinator.consumeTeardownOutcome(outcome)
+          if (!consumed.ok) {
+            throw normalizeStopFailure(consumed.stopFailure)
           }
           return
         }
@@ -1920,15 +1920,17 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           })
           // The teardown RECORDS (never throws) the stop failure and the
           // guard resolves THIS boundary with the SAME immutable outcome:
-          // consume it race-free — a failed old-generation stop must fail
-          // the replacement closed with STOP_FAILED BEFORE any gateway
-          // reopen or successor spawn, even when a concurrent consumer-less
-          // teardown (expiry/scope/account) drained the retained record
-          // first. The registry-side old-generation ownership stays intact
-          // as the retry/diagnostic fallback.
-          const recorded = coordinator.consumeTeardownOutcome(outcome)
-          if (recorded !== undefined) {
-            throw normalizeStopFailure(recorded)
+          // consume it race-free and judge failure by the outcome's `ok`
+          // discriminant (never by the error value) — a failed old-generation
+          // stop must fail the replacement closed with STOP_FAILED BEFORE any
+          // gateway reopen or successor spawn, even when the failure value is
+          // `undefined` (Promise.reject(undefined)) or a concurrent
+          // consumer-less teardown (expiry/scope/account) drained the
+          // retained record first. The registry-side old-generation ownership
+          // stays intact as the retry/diagnostic fallback.
+          const consumed = coordinator.consumeTeardownOutcome(outcome)
+          if (!consumed.ok) {
+            throw normalizeStopFailure(consumed.stopFailure)
           }
         }
         // Gateway-first: a listen failure fails closed before any spawn.
@@ -2128,12 +2130,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     })
     // The recorded (never thrown) rollback stop failure travels on the
     // SHARED teardown outcome: this explicit STOP/RESTART boundary owns the
-    // consumption race-free — even when a concurrent consumer-less teardown
-    // (expiry/scope/account/shutdown) drained the retained record first, the
-    // stop failure still fails this operation closed.
-    const recorded = coordinator.consumeTeardownOutcome(outcome)
-    if (recorded !== undefined) {
-      throw normalizeStopFailure(recorded)
+    // consumption race-free and judges failure by the outcome's `ok`
+    // discriminant (never by the error value) — even when a concurrent
+    // consumer-less teardown (expiry/scope/account/shutdown) drained the
+    // retained record first, or the failure value itself is `undefined`
+    // (Promise.reject(undefined)), the stop still fails this operation
+    // closed.
+    const consumed = coordinator.consumeTeardownOutcome(outcome)
+    if (!consumed.ok) {
+      throw normalizeStopFailure(consumed.stopFailure)
     }
     return { identity, scope }
   }
