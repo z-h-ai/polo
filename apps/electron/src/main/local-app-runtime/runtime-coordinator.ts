@@ -183,8 +183,13 @@ export class LocalAppRuntimeCoordinator {
   private readonly inFlight = new Map<string, InFlightQuery>()
   private readonly inFlightStarts = new Map<string, InFlightStart>()
   private readonly expiryTimers = new Map<number, () => void>()
-  /** Unique in-progress teardown per runtime generation. */
-  private readonly teardownGuarantees = new Map<number, Promise<void>>()
+  /**
+   * Unique in-progress teardown per identityKey+runtimeGeneration. The
+   * composite key is load-bearing: manager-local runtime generations collide
+   * across identities, so a generation-only key would let identity B reuse
+   * identity A's in-flight guard and skip its own teardown entirely.
+   */
+  private readonly teardownGuarantees = new Map<string, Promise<void>>()
   /**
    * Bounded terminal lifecycle marker: per runtime identity, the highest
    * manager-local runtime generation whose teardown has settled — a stale
@@ -451,7 +456,8 @@ export class LocalAppRuntimeCoordinator {
     // Bounded terminal marker: any generation at or below the high water is
     // already terminal — a stale late callback is a fail-closed no-op.
     if (this.isGenerationTornDown(runtime)) return
-    const inProgress = this.teardownGuarantees.get(runtime.runtimeGeneration)
+    const guardKey = `${runtime.identityKey}:${runtime.runtimeGeneration}`
+    const inProgress = this.teardownGuarantees.get(guardKey)
     if (inProgress) return inProgress
     // Publish the guard promise BEFORE any revoke/abort side effect runs:
     // performTeardown synchronously aborts the runtime controller and its
@@ -466,7 +472,7 @@ export class LocalAppRuntimeCoordinator {
       guardResolve = resolve
       guardReject = reject
     })
-    this.teardownGuarantees.set(runtime.runtimeGeneration, guardPromise)
+    this.teardownGuarantees.set(guardKey, guardPromise)
     // The guard mirrors the teardown rejection to concurrent callers; mark
     // it handled so bun/node never reports a spurious unhandled rejection
     // when no concurrent caller is awaiting it.
@@ -477,8 +483,8 @@ export class LocalAppRuntimeCoordinator {
         // Persist the terminal marker BEFORE clearing the guard.
         this.markGenerationTornDown(runtime)
         guardResolve()
-        if (this.teardownGuarantees.get(runtime.runtimeGeneration) === guardPromise) {
-          this.teardownGuarantees.delete(runtime.runtimeGeneration)
+        if (this.teardownGuarantees.get(guardKey) === guardPromise) {
+          this.teardownGuarantees.delete(guardKey)
         }
       },
       error => {
@@ -486,8 +492,8 @@ export class LocalAppRuntimeCoordinator {
         // generation stays terminal; the guard mirrors the rejection.
         this.markGenerationTornDown(runtime)
         guardReject(error)
-        if (this.teardownGuarantees.get(runtime.runtimeGeneration) === guardPromise) {
-          this.teardownGuarantees.delete(runtime.runtimeGeneration)
+        if (this.teardownGuarantees.get(guardKey) === guardPromise) {
+          this.teardownGuarantees.delete(guardKey)
         }
       },
     )

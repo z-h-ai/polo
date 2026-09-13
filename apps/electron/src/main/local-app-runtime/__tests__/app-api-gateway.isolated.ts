@@ -1684,3 +1684,64 @@ describe('POO-54 R6 fix regressions (gateway/coordinator)', () => {
     expect(fixture.coordinator.getActiveRuntimeByExecution('exec-static')).toBeUndefined()
   })
 })
+
+it('POO-54 R7: two different identities with the SAME manager-local generation tear down independently — B never reuses A in-flight guard', async () => {
+  const fixture = createFixture({ skipBootstrapRuntime: true })
+  await fixture.coordinator.ensureGateway()
+  // Identity A and B each report manager-local generation 1.
+  const identityA = IDENTITY
+  const identityB = { ...IDENTITY, productSpaceId: 'space-b' }
+  const keyA = createProductSpaceAppRuntimeIdentityKey(identityA)
+  const keyB = createProductSpaceAppRuntimeIdentityKey(identityB)
+  const signingA = fixture.coordinator.signCapability({
+    identity: identityA, workspaceId: 'ws-a', executionId: 'exec-a',
+    runtimeKind: 'python', runtimeGeneration: 1, scopeGeneration: 1,
+  })
+  fixture.coordinator.registerActiveRuntime({
+    identity: identityA, executionId: 'exec-a', runtimeGeneration: 1,
+    scopeGeneration: 1, workspaceId: 'ws-a', runtimeKind: 'python',
+    capabilityGeneration: signingA.capabilityGeneration,
+  })
+  const signingB = fixture.coordinator.signCapability({
+    identity: identityB, workspaceId: 'ws-a', executionId: 'exec-b',
+    runtimeKind: 'python', runtimeGeneration: 1, scopeGeneration: 2,
+  })
+  fixture.coordinator.registerActiveRuntime({
+    identity: identityB, executionId: 'exec-b', runtimeGeneration: 1,
+    scopeGeneration: 2, workspaceId: 'ws-a', runtimeKind: 'python',
+    capabilityGeneration: signingB.capabilityGeneration,
+  })
+  // A's teardown hangs inside its stop callback.
+  let releaseStopA: (() => void) | undefined
+  let aStopCount = 0
+  let bStopCount = 0
+  const runtimeA = fixture.coordinator.getActiveRuntime(identityA)!
+  const first = fixture.coordinator.teardownRuntime(runtimeA, 'cancelled', () =>
+    new Promise<void>(resolve => {
+      aStopCount += 1
+      releaseStopA = resolve
+    }))
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(releaseStopA).toBeDefined()
+  // B's teardown (same generation, different identity) starts while A hangs.
+  let releaseStopB: (() => void) | undefined
+  const runtimeB = fixture.coordinator.getActiveRuntime(identityB)!
+  const second = fixture.coordinator.teardownRuntime(runtimeB, 'cancelled', () =>
+    new Promise<void>(resolve => {
+      bStopCount += 1
+      releaseStopB = resolve
+    }))
+  await new Promise(resolve => setTimeout(resolve, 50))
+  // B executed ITS OWN stop — it did not reuse A's in-flight guard.
+  expect(bStopCount).toBe(1)
+  // Release A: both settle independently.
+  releaseStopA?.()
+  await first
+  expect(aStopCount).toBe(1)
+  releaseStopB?.()
+  await second
+  expect(bStopCount).toBe(1)
+  // Both identities are fully torn down (active cleared independently).
+  expect(fixture.coordinator.getActiveRuntime(identityA)).toBeUndefined()
+  expect(fixture.coordinator.getActiveRuntime(identityB)).toBeUndefined()
+})
