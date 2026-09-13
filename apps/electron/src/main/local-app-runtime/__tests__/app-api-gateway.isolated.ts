@@ -44,6 +44,7 @@ interface FixtureOptions {
     identity: typeof IDENTITY
     runtimeGeneration: number
   }) => Promise<void>
+  runIdTombstoneHighWater?: number
 }
 
 function uuid(): string {
@@ -82,6 +83,9 @@ function createFixture(options: FixtureOptions = {}) {
   let holdExecutions = false
 
   const coordinator = new LocalAppRuntimeCoordinator({
+    ...(options.runIdTombstoneHighWater !== undefined
+      ? { runIdTombstoneHighWater: options.runIdTombstoneHighWater }
+      : {}),
     admin: {
       startAppRun: async (input, signalOptions) => {
         adminCalls.push({ method: 'start', body: input })
@@ -1304,10 +1308,11 @@ describe('POO-54 R4 fix regressions (gateway/coordinator)', () => {
     setTimeout(() => releaseStart?.(), 300)
     const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
     await fixture.coordinator.teardownRuntime(runtime, 'cancelled')
-    // The App request resolves with the explicit shutting_down boundary.
+    // The App request waits for the frozen start's reconciliation and is
+    // answered truthfully: the Admin start succeeded.
     const response = await pending
-    expect(response.status).toBe(503)
-    expect(response.json.error.code).toBe('shutting_down')
+    expect(response.status).toBe(200)
+    expect(response.json.data).toMatchObject({ runId, status: 'running' })
     // The late remote success was reconciled: start reconfirmed, then a
     // qualified terminal finish (cancelled) was submitted — no orphan run.
     const startCalls = fixture.adminCalls.filter(call => call.method === 'start')
@@ -1363,5 +1368,193 @@ describe('POO-54 R4 fix regressions (gateway/coordinator)', () => {
       ...IDENTITY,
       versionId: 'version-b',
     })).toBeUndefined()
+  })
+})
+
+describe('POO-54 R5 fix regressions (gateway/coordinator)', () => {
+  it('a concurrent second teardown waits for and mirrors the first guard settlement', async () => {
+    const fixture = createFixture({
+      executorResults: [() => completed('x', 1, 1)],
+      usageHangsUntilAbort: true,
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = await startRun(fixture)
+    const pendingQuery = fixture.post('/ai/query', { ...queryBody(), runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    let releaseStop: (() => void) | undefined
+    // First teardown hangs INSIDE the process stop until released.
+    const first = fixture.coordinator.teardownRuntime(runtime, 'cancelled', () =>
+      new Promise<void>(resolve => {
+        releaseStop = resolve
+      }))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // The cleanup lane's hung receipt occupies the budget before the stop
+    // callback runs: wait (bounded) for the stop to be reached.
+    for (let attempt = 0; attempt < 90 && releaseStop === undefined; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    expect(releaseStop).toBeDefined()
+    // Concurrent second teardown must share the guard, not resolve early.
+    let secondSettled = false
+    let secondError: unknown
+    const second = fixture.coordinator
+      .teardownRuntime(runtime, 'cancelled')
+      .then(() => {
+        secondSettled = true
+      }, error => {
+        secondSettled = true
+        secondError = error
+      })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(secondSettled).toBe(false)
+    // Release the first teardown's stop: both settle together.
+    releaseStop?.()
+    await first
+    await second
+    expect(secondSettled).toBe(true)
+    expect(secondError).toBeUndefined()
+    await pendingQuery.catch(() => null)
+    await fixture.coordinator.shutdown()
+  }, 20_000)
+
+  it('a concurrent second teardown mirrors the first teardown rejection', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    await startRun(fixture)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    const first = fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+      throw new Error('stop exploded')
+    })
+    const second = fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    second.catch(() => {})
+    await expect(first).rejects.toThrow(/stop exploded/)
+    // The shared guard mirrors the rejection to the concurrent caller.
+    await expect(second).rejects.toThrow(/stop exploded/)
+  })
+
+  it('a 2.5s late Admin start success is frozen, reconfirmed, terminal-finished and answered 200', async () => {
+    let releaseStart: (() => void) | undefined
+    let startHung = false
+    const fixture = createFixture({
+      onStart: () => {
+        if (startHung) return
+        startHung = true
+        return new Promise<void>(resolve => {
+          releaseStart = resolve
+        })
+      },
+    })
+    const runId = uuid()
+    // The App's run/start is admitted and the Admin start hangs.
+    const pending = fixture.post('/run/start', { runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // Teardown freezes the start; the Admin succeeds at 2.5s — AFTER the
+    // 2s drain grace. The frozen start is still reconciled.
+    setTimeout(() => releaseStart?.(), 2_500)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    const teardownPromise = fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    // The original App request is answered 200 once the start is confirmed.
+    const response = await pending
+    expect(response.status).toBe(200)
+    expect(response.json.data).toMatchObject({ runId, status: 'running' })
+    await teardownPromise
+    // The frozen start was reconfirmed and a terminal finish submitted.
+    const startCalls = fixture.adminCalls.filter(call => call.method === 'start')
+    expect(startCalls.length).toBeGreaterThanOrEqual(2)
+    const finishCall = fixture.adminCalls.filter(call => call.method === 'finish').at(-1)
+    expect(finishCall).toMatchObject({ runId })
+    await fixture.coordinator.shutdown()
+  }, 20_000)
+
+  it('a never-settling Admin start does not leak in-flight start allocations', async () => {
+    const fixture = createFixture({
+      onStart: () => new Promise<void>(() => {}),
+    })
+    const runId = uuid()
+    const pending = fixture.post('/run/start', { runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(fixture.coordinator.pendingInFlightStartCount()).toBe(1)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    await fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    // Deterministic retirement: the never-settling adapter no longer holds
+    // the in-flight allocation.
+    expect(fixture.coordinator.pendingInFlightStartCount()).toBe(0)
+    void pending.catch(() => null)
+    await fixture.coordinator.shutdown()
+  }, 20_000)
+})
+
+describe('POO-54 R5 tombstone high-water and credit replay', () => {
+  it('reaching the tombstone high-water fails closed BEFORE the Admin start; recorded runIds stay rejected', async () => {
+    const fixture = createFixture({ runIdTombstoneHighWater: 2 })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    // Two runs fill the tombstone registry (each terminal-finished).
+    const runId1 = uuid()
+    expect((await fixture.post('/run/start', { runId: runId1 })).status).toBe(200)
+    expect((await fixture.post('/run/finish', { runId: runId1, status: 'completed' })).status).toBe(200)
+    const runId2 = uuid()
+    expect((await fixture.post('/run/start', { runId: runId2 })).status).toBe(200)
+    expect((await fixture.post('/run/finish', { runId: runId2, status: 'completed' })).status).toBe(200)
+    const startsBefore = fixture.adminCalls.filter(c => c.method === 'start').length
+    // Registry full: a NEW runId fails closed with a stable error and zero
+    // Admin calls.
+    const full = await fixture.post('/run/start', { runId: uuid() })
+    expect(full.status).toBe(503)
+    expect(full.json.error.code).toBe('run_registry_full')
+    expect(fixture.adminCalls.filter(c => c.method === 'start').length).toBe(startsBefore)
+    // A RECORDED runId (tombstoned, record already released) is still
+    // rejected — never re-opened — on the same generation.
+    const recorded = await fixture.post('/run/start', { runId: runId1 })
+    expect(recorded.status).toBe(409)
+    expect(recorded.json.error.code).toBe('run_state_conflict')
+    expect(fixture.adminCalls.filter(c => c.method === 'start').length).toBe(startsBefore)
+  })
+
+  it('insufficient_credit disposes the run record but keeps ownership: exact retry re-enters Admin, cross-generation reuse stays 409', async () => {
+    let startCalls = 0
+    let creditBlocked = true
+    const fixture = createFixture({
+      onStart: async () => {
+        startCalls += 1
+        if (creditBlocked) {
+          throw new AdminError('no credit', 'insufficient_credit')
+        }
+      },
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = uuid()
+    const first = await fixture.post('/run/start', { runId })
+    expect(first.status).toBe(409)
+    expect(first.json.error.code).toBe('insufficient_credit')
+    expect(startCalls).toBe(1)
+    // An exact retry re-enters Admin (the run record was disposed, the
+    // ownership tombstone retained).
+    creditBlocked = false
+    const retry = await fixture.post('/run/start', { runId })
+    expect(retry.status).toBe(200)
+    expect(startCalls).toBe(2)
+    // Another generation reusing the same runId is still refused.
+    const signing2 = fixture.coordinator.signCapability({
+      identity: { ...IDENTITY, versionId: 'version-b' },
+      workspaceId: 'ws-a',
+      executionId: 'exec-b',
+      runtimeKind: 'python',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, versionId: 'version-b' },
+      executionId: 'exec-b',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing2.capabilityGeneration,
+    })
+    const cross = await fixture.post('/run/start', { runId }, { token: signing2.token })
+    expect(cross.status).toBe(409)
+    expect(cross.json.error.code).toBe('run_state_conflict')
+    await fixture.coordinator.shutdown()
   })
 })

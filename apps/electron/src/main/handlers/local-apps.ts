@@ -1828,7 +1828,19 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         const existing = coordinator.getActiveRuntime(runtimeIdentity)
         if (existing) {
           await coordinator.teardownRuntime(existing, 'cancelled', async () => {
-            await registry.stopExact(scope, existing.runtimeGeneration).catch(() => {})
+            try {
+              await registry.stopExact(scope, existing.runtimeGeneration)
+            } catch (error) {
+              // Propagate: the successor must never spawn while the previous
+              // generation's process may still be alive.
+              throw error instanceof LocalAppRuntimeError
+                ? error
+                : new LocalAppRuntimeError(
+                    'STOP_FAILED',
+                    'Failed to stop the previous runtime generation',
+                    { cause: error instanceof Error ? error.message : String(error) },
+                  )
+            }
           })
         }
         // Gateway-first: a listen failure fails closed before any spawn.
@@ -1863,6 +1875,25 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
           },
         })
+        if (result.runtimeKind === 'static') {
+          // The manager deliberately never calls processEnvironment for
+          // static runtimes: register WITHOUT a capability so STOP/RESTART/
+          // shutdown can still resolve this identity. Registration/publication
+          // failure rolls the registration back revoke-first.
+          try {
+            coordinator.registerActiveRuntime({
+              identity: runtimeIdentity,
+              executionId,
+              runtimeGeneration: result.runtimeGeneration,
+              scopeGeneration: result.scopeGeneration,
+              workspaceId,
+              runtimeKind: 'static',
+            })
+          } catch (error) {
+            await rollbackRuntime().catch(() => {})
+            throw error
+          }
+        }
         getAppRuntimeCenter().publish({
           identityKey,
           identity: runtimeIdentity,
@@ -1999,10 +2030,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const { identity } = await teardownProductSpaceRuntimeHandle(rawHandle)
     return startProductSpaceRuntime(ctx, {
       ...identity,
+      // Placeholder validation-only fields: with trustDerivedIdentityOnly the
+      // authoritative identity is re-derived from a fresh Catalog anyway.
+      catalogEntryId: 'revalidated-against-fresh-catalog',
       catalogRevision: 'revalidated-against-fresh-catalog',
       sources: [{ kind: 'restart', name: null, circleId: null }],
       availability: 'available',
-    }, { trustDerivedIdentityOnly: true })
+    } satisfies ProductSpaceAppIdentity, { trustDerivedIdentityOnly: true })
   }
 
   server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) => {

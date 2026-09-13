@@ -3202,6 +3202,20 @@ describe('local app production status projection (R34-3)', () => {
     scopedStartExact.mockClear()
     scopedStartExact.mockImplementation(defaultStartExact)
     scopedStopExact.mockClear()
+    scopedStopExact.mockImplementation(async (
+      scope: CatalogLocalAppScope,
+      expectedRuntimeGeneration: number,
+    ): Promise<LocalAppRuntimeStatus> => {
+      if (expectedRuntimeGeneration !== 41) {
+        throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+      }
+      return {
+        appId: scope.catalogAppId,
+        scope,
+        status: 'stopped' as const,
+        currentVersion: '2.3.4',
+      }
+    })
     runtimeCoordinator.ensureGateway.mockClear()
     runtimeCoordinator.signCapability.mockClear()
     runtimeCoordinator.registerActiveRuntime.mockClear()
@@ -3443,7 +3457,7 @@ describe('local app production status projection (R34-3)', () => {
         version: '2.3.4',
       },
       executionId: 'exec-old',
-      runtimeGeneration: 13,
+      runtimeGeneration: 41,
       scopeGeneration: 2,
       workspaceId: 'ws-window-a',
       runtimeKind: 'python' as const,
@@ -3464,7 +3478,7 @@ describe('local app production status projection (R34-3)', () => {
     )
     expect(scopedStopExact).toHaveBeenCalledWith(
       expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
-      13,
+      41,
     )
   })
 
@@ -3726,5 +3740,98 @@ describe('local app production status projection (R34-3)', () => {
     await expect(start(context, { kind: 'legacy_scope', scope: scope() }))
       .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     expect(scopedStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('POO-54 R5: static runtimes register without a capability and STOP/RESTART resolve them', async () => {
+    // A static exact start: startExact reports runtimeKind 'static' and the
+    // manager never calls the capability hook.
+    scopedStartExact.mockImplementation((async (
+      _scope: CatalogLocalAppScope,
+      version: string,
+    ) => ({
+      appId: 'artifact-instance-a',
+      version,
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      runtimeKind: 'static' as const,
+      runtimeGeneration: 41,
+      scopeGeneration: 9,
+    })) as unknown as typeof defaultStartExact)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const result = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    expect(result).toMatchObject({
+      runtimeKind: 'static',
+      runtimeGeneration: 41,
+      platformApi: { status: 'unavailable', reason: 'static_runtime_unsupported' },
+    })
+    // The coordinator has an active runtime for the static identity (without
+    // any capability) — the execution handle resolves through STOP.
+    expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeKind: 'static',
+        runtimeGeneration: 41,
+      }),
+    )
+    expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    // RESTART resolves the live static handle and re-registers a fresh
+    // static generation (provisional + restarted registration calls).
+    const restart = handlers.get(RPC_CHANNELS.localApps.RESTART)!
+    const restarted = await restart(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: (result as { executionId: string }).executionId,
+      expectedRuntimeGeneration: 41,
+    })
+    expect(restarted).toMatchObject({
+      runtimeKind: 'static',
+      runtimeGeneration: 41,
+    })
+    expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledTimes(2)
+    // STOP resolves the restarted generation.
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    const status = await stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: (restarted as { executionId: string }).executionId,
+      expectedRuntimeGeneration: 41,
+    })
+    expect(status).toMatchObject({ status: 'stopped' })
+    scopedStartExact.mockImplementation(defaultStartExact)
+  })
+
+  it('POO-54 R5: a failed replacement stop rejects the replacement START with STOP_FAILED', async () => {
+    const existing = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-old',
+      runtimeGeneration: 41,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 3,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
+    // The exact-generation stop of the OLD generation fails.
+    scopedStopExact.mockImplementation(async () => {
+      throw Object.assign(new Error('process survived'), { code: 'STOP_FAILED' })
+    })
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // The successor never spawned: zero exact-version starts.
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    // (Generation ownership retention for retry/diagnostics lives in the
+    // registry process-id map and the runId tombstones — covered by their
+    // own suites; the coordinator active entry is best-effort cleaned.)
   })
 })

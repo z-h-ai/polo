@@ -54,6 +54,7 @@ export type AppApiStableErrorCode =
   | 'sink_unavailable'
   | 'shutting_down'
   | 'response_cache_full'
+  | 'run_registry_full'
   | 'host_timed_out'
   | 'no_output'
 

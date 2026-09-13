@@ -3,6 +3,7 @@ import type { AppApiStableErrorCode } from '@polo-ai/shared/product-spaces'
 export type AppRunStatus =
   | 'starting_admin'
   | 'start_unconfirmed'
+  | 'start_rejected'
   | 'running'
   | 'finishing'
   | 'finish_unconfirmed'
@@ -48,6 +49,18 @@ export const GLOBAL_QUERY_SLOTS = 256
 export const GLOBAL_TEXT_BUDGET_BYTES = 128 * 1024 * 1024
 export const QUERY_TEXT_RESERVATION_BYTES = 512 * 1024
 
+/**
+ * Deterministic coordinator-wide cap on retained runId ownership
+ * tombstones (analogous to the query cache limits). At the high water mark
+ * NEW runIds fail closed BEFORE any Admin call; recorded tombstones are
+ * NEVER evicted (a recorded runId can never be re-opened).
+ */
+export const RUN_ID_TOMBSTONE_HIGH_WATER = 50_000
+
+export interface AppApiRunStateOptions {
+  runIdTombstoneHighWater?: number
+}
+
 export type AdmitQueryResult =
   | { kind: 'admitted' }
   | { kind: 'replay'; record: QueryRecord }
@@ -70,32 +83,71 @@ const queryKey = (
  * re-run past a bounded cache. Only whole-run and whole-capability release
  * lanes exist: a terminal Run clears exactly its own slots/bytes.
  */
+export type CreateRunResult =
+  | { status: 'created'; record: RunRecord }
+  | { status: 'cross_generation' }
+  | { status: 'registry_full' }
+
 export class AppApiRunState {
   private readonly runs = new Map<string, RunRecord>()
   private readonly queries = new Map<string, QueryRecord>()
   /** Global runId → owning capabilityGeneration: a runId can never be reused
    * by another generation — such requests fail closed as run_state_conflict. */
   private readonly runIdOwners = new Map<string, number>()
+  private readonly runIdTombstoneHighWater: number
+
+  constructor(options: AppApiRunStateOptions = {}) {
+    this.runIdTombstoneHighWater = options.runIdTombstoneHighWater
+      ?? RUN_ID_TOMBSTONE_HIGH_WATER
+  }
 
   private runKey(capabilityGeneration: number, runId: string): string {
     return `${capabilityGeneration}:${runId}`
   }
 
   /**
-   * Creates a run owned by this capability generation. Returns undefined
-   * when the runId is already owned by ANOTHER generation (Plan: the request
-   * must fail closed as run_state_conflict).
+   * Creates a run owned by this capability generation. `cross_generation`:
+   * the runId tombstone belongs to ANOTHER generation (fail closed as
+   * run_state_conflict). `registry_full`: the coordinator-wide tombstone
+   * high water mark is reached — fail closed BEFORE any Admin call;
+   * recorded tombstones are never evicted to re-open a runId.
    */
-  createRun(capabilityGeneration: number, runId: string, startFingerprint: string): RunRecord | undefined {
+  createRun(
+    capabilityGeneration: number,
+    runId: string,
+    startFingerprint: string,
+  ): CreateRunResult {
     const owner = this.runIdOwners.get(runId)
-    if (owner !== undefined && owner !== capabilityGeneration) return undefined
+    if (owner !== undefined && owner !== capabilityGeneration) {
+      return { status: 'cross_generation' }
+    }
     const key = this.runKey(capabilityGeneration, runId)
     const existing = this.runs.get(key)
-    if (existing) return existing
+    if (existing) return { status: 'created', record: existing }
+    if (
+      this.runIdOwners.size >= this.runIdTombstoneHighWater
+      && owner === undefined
+    ) {
+      return { status: 'registry_full' }
+    }
     this.runIdOwners.set(runId, capabilityGeneration)
     const record: RunRecord = { status: 'starting_admin', startFingerprint }
     this.runs.set(key, record)
-    return record
+    return { status: 'created', record }
+  }
+
+  /**
+   * Discards an UNSTARTED run record (per-generation disposal) while keeping
+   * the runId ownership tombstone: an exact same-generation retry may
+   * re-enter Admin, another generation still fails as run_state_conflict.
+   */
+  discardRun(capabilityGeneration: number, runId: string): void {
+    const key = this.runKey(capabilityGeneration, runId)
+    this.runs.delete(key)
+    const prefix = queryKey(capabilityGeneration, runId, '')
+    for (const queryKeyToDelete of this.queries.keys()) {
+      if (queryKeyToDelete.startsWith(prefix)) this.queries.delete(queryKeyToDelete)
+    }
   }
 
   getRun(capabilityGeneration: number, runId: string): RunRecord | undefined {

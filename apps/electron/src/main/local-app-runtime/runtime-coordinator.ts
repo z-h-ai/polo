@@ -82,6 +82,8 @@ export interface RuntimeCoordinatorAdapters {
     runtimeGeneration: number
   }): Promise<void>
   now?: () => number
+  /** Coordinator-wide cap on retained runId ownership tombstones. */
+  runIdTombstoneHighWater?: number
   /**
    * Schedules the generation-bound capability expiry task. Defaults to
    * setTimeout/clearTimeout; tests inject a deterministic scheduler.
@@ -175,7 +177,7 @@ function hostUsage(
  */
 export class LocalAppRuntimeCoordinator {
   readonly capabilities = new AppApiCapabilityRegistry()
-  readonly runState = new AppApiRunState()
+  readonly runState: AppApiRunState
   private gateway?: AppApiGateway
   private readonly active = new Map<string, ActiveRuntime>()
   private readonly inFlight = new Map<string, InFlightQuery>()
@@ -193,7 +195,13 @@ export class LocalAppRuntimeCoordinator {
   private shutdownPromise?: Promise<void>
   private shuttingDown = false
 
-  constructor(private readonly adapters: RuntimeCoordinatorAdapters) {}
+  constructor(private readonly adapters: RuntimeCoordinatorAdapters) {
+    this.runState = new AppApiRunState(
+      adapters.runIdTombstoneHighWater !== undefined
+        ? { runIdTombstoneHighWater: adapters.runIdTombstoneHighWater }
+        : undefined,
+    )
+  }
 
   private now(): number {
     return this.adapters.now ? this.adapters.now() : Date.now()
@@ -422,27 +430,42 @@ export class LocalAppRuntimeCoordinator {
     // Publish the guard promise BEFORE any revoke/abort side effect runs:
     // performTeardown synchronously aborts the runtime controller and its
     // abort listeners can synchronously re-enter this method — at that
-    // moment the guard must already be observable.
-    let settleGuard!: () => void
-    const guardPromise = new Promise<void>(resolve => {
-      settleGuard = resolve
+    // moment the guard must already be observable. The guard settles ONLY
+    // when performTeardown itself fulfills or rejects, so a concurrent
+    // second teardown shares the exact first settlement (never an early
+    // success) and observes its rejection.
+    let guardResolve!: () => void
+    let guardReject!: (error: unknown) => void
+    const guardPromise = new Promise<void>((resolve, reject) => {
+      guardResolve = resolve
+      guardReject = reject
     })
     this.teardownGuarantees.set(guardKey, guardPromise)
-    try {
-      const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
-      void teardown
-        .catch(() => {})
-        .finally(() => {
-          // Persist the terminal marker BEFORE clearing the guard.
-          this.tornDownGenerations.add(guardKey)
-          if (this.teardownGuarantees.get(guardKey) === guardPromise) {
-            this.teardownGuarantees.delete(guardKey)
-          }
-        })
-      return teardown
-    } finally {
-      settleGuard()
-    }
+    // The guard mirrors the teardown rejection to concurrent callers; mark
+    // it handled so bun/node never reports a spurious unhandled rejection
+    // when no concurrent caller is awaiting it.
+    guardPromise.catch(() => {})
+    const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
+    void teardown.then(
+      () => {
+        // Persist the terminal marker BEFORE clearing the guard.
+        this.tornDownGenerations.add(guardKey)
+        guardResolve()
+        if (this.teardownGuarantees.get(guardKey) === guardPromise) {
+          this.teardownGuarantees.delete(guardKey)
+        }
+      },
+      error => {
+        // Cleanup completed but the aggregated stop failure rejected: the
+        // generation stays terminal; the guard mirrors the rejection.
+        this.tornDownGenerations.add(guardKey)
+        guardReject(error)
+        if (this.teardownGuarantees.get(guardKey) === guardPromise) {
+          this.teardownGuarantees.delete(guardKey)
+        }
+      },
+    )
+    return teardown
   }
 
   private async performTeardown(
@@ -455,6 +478,24 @@ export class LocalAppRuntimeCoordinator {
       this.capabilities.revoke(runtime.capabilityGeneration)
     }
     runtime.controller.abort()
+    // Freeze every admitted generation-owned start SYNCHRONOUSLY: a late
+    // Admin success beyond the drain grace still lands on a replayable
+    // start that the detached cleanup lane re-confirms and finishes.
+    const startPrefix = `${runtime.identityKey}:`
+    for (const [key, start] of this.inFlightStarts) {
+      if (
+        start.runtimeGeneration !== runtime.runtimeGeneration
+        || !key.startsWith(startPrefix)
+      ) continue
+      const record = this.runState.getRun(start.capabilityGeneration, start.runId)
+      if (record && record.status === 'starting_admin') {
+        this.runState.setRunStatus(
+          start.capabilityGeneration,
+          start.runId,
+          'start_unconfirmed',
+        )
+      }
+    }
     // Drain ONLY this generation's in-flight queries and starts — never a
     // replacement's.
     await this.drainInFlight(runtime.identityKey, runtime.runtimeGeneration)
@@ -509,6 +550,18 @@ export class LocalAppRuntimeCoordinator {
       Promise.allSettled(pending.map(([, start]) => start.promise)),
       new Promise((resolve) => setTimeout(resolve, CLEANUP_ABORT_GRACE_MS)),
     ])
+    // Deterministic retirement: a never-settling adapter can no longer hold
+    // the generation's in-flight allocation after teardown.
+    for (const [key, start] of pending) {
+      if (this.inFlightStarts.get(key) === start) {
+        this.inFlightStarts.delete(key)
+      }
+    }
+  }
+
+  /** Test/observability seam: count of retained in-flight Admin starts. */
+  pendingInFlightStartCount(): number {
+    return this.inFlightStarts.size
   }
 
   /**
@@ -740,11 +793,21 @@ export class LocalAppRuntimeCoordinator {
     let record = existing
     if (!record) {
       const created = this.runState.createRun(capGen, runId, fingerprint(body))
-      if (!created) {
+      if (created.status === 'cross_generation') {
         // The runId is owned by another capability generation.
         return { errorCode: 'run_state_conflict' }
       }
-      record = created
+      if (created.status === 'registry_full') {
+        // Coordinator-wide tombstone high water reached: fail closed
+        // BEFORE any Admin call; recorded runIds are never re-opened.
+        return { errorCode: 'run_registry_full' }
+      }
+      record = created.record
+    }
+    if (record.status === 'start_rejected') {
+      // The previous Admin start was schema-validated rejected: replays
+      // answer the same stable error without re-entering Admin.
+      return { errorCode: 'idempotency_conflict' }
     }
     record.status = existing?.status === 'start_unconfirmed'
       ? 'start_unconfirmed'
@@ -772,10 +835,14 @@ export class LocalAppRuntimeCoordinator {
         }
       } catch (error) {
         if (error instanceof AdminError && error.errorCode === 'insufficient_credit') {
-          this.runState.releaseRun(capGen, runId)
+          // Completed rejection: dispose the per-generation run record (the
+          // owner tombstone is retained) so an exact retry re-enters Admin.
+          this.runState.discardRun(capGen, runId)
           return { errorCode: 'insufficient_credit' }
         }
         if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') {
+          // Explicit stable rejected state — never left in starting_admin.
+          this.runState.setRunStatus(capGen, runId, 'start_rejected')
           return { errorCode: 'idempotency_conflict' }
         }
         if (error instanceof AdminError && error.errorCode === 'run_finalized') {
@@ -787,12 +854,38 @@ export class LocalAppRuntimeCoordinator {
         this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
         return { errorCode: 'metering_unconfirmed' }
       }
-      if (runtime.controller.signal.aborted) {
-        // The idempotent Admin start may still have succeeded remotely: keep
-        // the run replayable so the bounded cleanup lane can reconcile and
-        // finish it instead of orphaning the remote run.
+      if (
+        runtime.controller.signal.aborted
+        || this.tornDownGenerations.has(`${runtime.identityKey}:${runtime.runtimeGeneration}`)
+      ) {
+        // Teardown is in progress but the idempotent Admin start SUCCEEDED:
+        // freeze the run replayable for the detached cleanup lane, wait
+        // (bounded) for it to reconcile (re-confirm + terminal finish), and
+        // answer the App truthfully with the confirmed start.
         this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
-        return { errorCode: 'shutting_down' }
+        const deadline = this.now() + CLEANUP_TOTAL_BUDGET_MS
+        while (true) {
+          const reconciled = this.runState.getRun(capGen, runId)
+          // The Admin start succeeded: once the frozen start is confirmed
+          // (running/terminal, or released after its terminal finish by the
+          // cleanup lane) the truthful answer is 200 running.
+          if (
+            reconciled === undefined
+            || reconciled.status === 'running'
+            || reconciled.status === 'terminal'
+          ) {
+            // Released after its terminal finish (or already running): the
+            // frozen start was reconciled by the cleanup lane.
+            return { data: { runId, status: 'running' } }
+          }
+          if (
+            reconciled?.status === 'start_rejected'
+            || this.now() >= deadline
+          ) {
+            return { errorCode: 'shutting_down' }
+          }
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
       }
       this.runState.setRunStatus(capGen, runId, 'running')
       return { data: { runId, status: 'running' } }

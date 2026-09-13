@@ -40,6 +40,7 @@ export const APP_API_ERROR_STATUS: Record<AppApiStableErrorCode, number> = {
   sink_unavailable: 503,
   shutting_down: 503,
   response_cache_full: 503,
+  run_registry_full: 503,
   host_timed_out: 504,
   no_output: 200,
 }
