@@ -1190,7 +1190,6 @@ export class LocalAppRuntimeCoordinator {
     requestId: string,
     record: { state: string; outcome?: QueryOutcome; requiredReceipt: boolean },
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode }> {
-    const capGen = capabilityGenerationOf(runtime)
     if (record.state === 'executing') return { errorCode: 'request_in_progress' }
     if (record.state === 'receipt_rejected') return { errorCode: 'idempotency_conflict' }
     if (record.state === 'receipt_unconfirmed' && record.outcome) {
@@ -1204,7 +1203,6 @@ export class LocalAppRuntimeCoordinator {
       }
       if (record.outcome) return this.outcomeResponse(requestId, record.outcome)
     }
-    void capGen
     return { errorCode: 'run_state_conflict' }
   }
 

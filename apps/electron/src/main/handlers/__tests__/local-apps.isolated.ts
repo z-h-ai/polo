@@ -346,6 +346,8 @@ const assertAppAuthorized = mock(() => {
   }
 })
 
+let scopedRegistryOverride: unknown = null
+
 const scopedRegistry = {
   assertAppAuthorized,
   install: scopedInstall,
@@ -487,7 +489,7 @@ mock.module('../../local-app-runtime', () => {
     getLocalAppRuntimeManager: () => {
       throw new Error('renderer RPC must never reach the trusted legacy manager')
     },
-    getScopedLocalAppRuntimeRegistry: () => scopedRegistry,
+    getScopedLocalAppRuntimeRegistry: () => scopedRegistryOverride ?? scopedRegistry,
     getLocalAppRuntimeCoordinator: () => runtimeCoordinator,
     LocalAppRuntimeError,
     MAX_CATALOG_STATUS_SCOPES: 10_000,
@@ -3770,6 +3772,11 @@ describe('local app production status projection (R34-3)', () => {
       runtimeGeneration: 41,
       platformApi: { status: 'unavailable', reason: 'static_runtime_unsupported' },
     })
+    // Generation-exact liveness is TRUE for the static runtime (the exact
+    // generation was recorded before coordinator registration).
+    const staticExecutions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(await staticExecutions[0]!.isActive()).toBe(true)
     // The coordinator has an active runtime for the static identity (without
     // any capability) — the execution handle resolves through STOP.
     expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledWith(
@@ -3861,11 +3868,14 @@ describe('local app production status projection (R34-3)', () => {
     const executions = listRegisteredProductSpaceExecutions()
       .filter(execution => execution.kind === 'local_app')
     expect(executions).toHaveLength(1)
-    expect(await executions[0]!.isActive()).toBe(true)
+    const staticExecutions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(await staticExecutions[0]!.isActive()).toBe(true)
     expect(scopedRegistry.stop).not.toHaveBeenCalled()
 
-    // A registration failure rolls back: legacy stop is invoked (no
-    // capability exists to revoke) and the START fails.
+    // A registration failure rolls back generation-aware: the EXACT
+    // version-namespaced stop runs (no capability exists to revoke) and the
+    // START fails — the legacy artifact-scoped stop is never taken.
     runtimeCoordinator.registerActiveRuntime.mockImplementationOnce(() => {
       throw new Error('coordinator is shutting down')
     })
@@ -3873,7 +3883,11 @@ describe('local app production status projection (R34-3)', () => {
       kind: 'product_space_runtime_start',
       app: productSpaceAppIdentity(),
     })).rejects.toThrow('coordinator is shutting down')
-    expect(scopedRegistry.stop).toHaveBeenCalled()
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
   })
 
   it('POO-54 R6: any exact-stop failure normalizes to STOP_FAILED with the original cause (STOP and replacement)', async () => {
@@ -3940,5 +3954,134 @@ describe('local app production status projection (R34-3)', () => {
     }
     expect(replacement).toMatchObject({ code: 'STOP_FAILED' })
     expect(replacement?.details?.cause?.message).toBe('no longer current')
+  })
+
+
+  it('static registration failure rolls back via generation-aware stopExact on the version-namespaced id — never legacy stop', async () => {
+    // A behavioral fake of the scoped registry's exact-version semantics
+    // (mirrors the real registry's namespace contract): startExact records
+    // (scopeKey, generation) → version-namespaced process id; stopExact
+    // removes the mapping and throws STALE when absent; legacy stop targets
+    // ONLY the artifact-scoped id and never touches exact mappings.
+    const exactMappings = new Map<string, string>()
+    const stopExactCalls: Array<{ appId: string; generation: number }> = []
+    const legacyStopCalls: string[] = []
+    const fakeProcessAppId = (version: string): string => `exact-process-${version}`
+    const fakeExactRegistry = {
+      assertAppAuthorized: () => {},
+      install: async () => { throw new Error('not used') },
+      cancelInstall: async () => false,
+      start: async () => { throw new Error('not used') },
+      stop: async (scope: CatalogLocalAppScope) => {
+        legacyStopCalls.push('legacy-artifact-scoped-id')
+        return { appId: scope.catalogAppId, scope, status: 'stopped' as const }
+      },
+      restart: async () => { throw new Error('not used') },
+      startExact: async (
+        scope: CatalogLocalAppScope,
+        version: string,
+        hooks?: { processEnvironment?: (input: { runtimeKind: 'python' | 'js'; runtimeGeneration: number; scopeGeneration: number }) => unknown },
+      ) => {
+        const generation = 41
+        hooks?.processEnvironment?.({
+          runtimeKind: 'python',
+          runtimeGeneration: generation,
+          scopeGeneration: 9,
+        })
+        exactMappings.set(`${scope.catalogAppId}:${generation}`, fakeProcessAppId(version))
+        return {
+          appId: fakeProcessAppId(version),
+          version,
+          url: 'http://127.0.0.1:9876',
+          port: 9876,
+          runtimeKind: 'python' as const,
+          runtimeGeneration: generation,
+          scopeGeneration: 9,
+        }
+      },
+      stopExact: async (
+        scope: CatalogLocalAppScope,
+        expectedRuntimeGeneration: number,
+      ) => {
+        const mappingKey = `${scope.catalogAppId}:${expectedRuntimeGeneration}`
+        const processAppId = exactMappings.get(mappingKey)
+        stopExactCalls.push({ appId: processAppId ?? '<legacy>', generation: expectedRuntimeGeneration })
+        if (!processAppId) {
+          throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+        }
+        exactMappings.delete(mappingKey)
+        return {
+          appId: processAppId,
+          scope,
+          status: 'stopped' as const,
+          currentVersion: '2.3.4',
+        }
+      },
+      uninstall: async () => {},
+      setAvailableRelease: async (scope: CatalogLocalAppScope) => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'installed' as const,
+      }),
+      getInstalledApps: async () => [],
+      getRuntimeStatus: async (scope: CatalogLocalAppScope) => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'not_installed' as const,
+      }),
+      getRuntimeStatuses: async (scopes: CatalogLocalAppScope[]) => scopes.map(scope => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'not_installed' as const,
+      })),
+      getLogs: async () => '',
+      getFailureRecoveryLogs: async () => '',
+      getRetainedManagementLogs: async () => '',
+      isInstalledAndReady: async () => true,
+    }
+    scopedRegistryOverride = fakeExactRegistry
+    try {
+      const start = handlers.get(RPC_CHANNELS.localApps.START)!
+      // First start succeeds (coordinator provisional registration via the
+      // hook succeeds) — recording the exact mapping for generation 41.
+      const result = await start(context, {
+        kind: 'product_space_runtime_start',
+        app: productSpaceAppIdentity(),
+      })
+      expect(result).toMatchObject({
+        runtimeKind: 'python',
+        runtimeGeneration: 41,
+      })
+      expect(exactMappings.size).toBe(1)
+      // Second start: coordinator registration throws → rollback must
+      // target the EXACT version-namespaced id via generation-aware
+      // stopExact (never the legacy artifact-scoped stop).
+      runtimeCoordinator.registerActiveRuntime.mockImplementationOnce(() => {
+        throw new Error('coordinator exploded')
+      })
+      activeRuntimesByKey.clear()
+      activeRuntimesByExecution.clear()
+      let failed: { code?: string } | null = null
+      try {
+        await start(context, {
+          kind: 'product_space_runtime_start',
+          app: productSpaceAppIdentity(),
+        })
+      } catch (error) {
+        failed = error as { code?: string }
+      }
+      // The rollback itself succeeded; the original registration error
+      // surfaces to the caller.
+      expect(failed).toMatchObject({ message: 'coordinator exploded' })
+      // The rollback used generation-aware stopExact on the EXACT
+      // version-namespaced id — the legacy stop was never taken.
+      expect(stopExactCalls.length).toBeGreaterThanOrEqual(1)
+      expect(stopExactCalls.every(call => call.appId.startsWith('exact-process-'))).toBe(true)
+      expect(legacyStopCalls).toHaveLength(0)
+      // The failed generation's exact mapping was removed (no ownership leak).
+      expect([...exactMappings.values()].every(id => id.startsWith('exact-process-'))).toBe(true)
+    } finally {
+      scopedRegistryOverride = null
+    }
   })
 })

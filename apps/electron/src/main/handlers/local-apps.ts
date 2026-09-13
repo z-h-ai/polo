@@ -1824,6 +1824,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         if (signedCapability !== undefined) {
           coordinator.revokeSignedCapability(signedCapability)
         }
+        if (startedRuntimeGeneration !== undefined) {
+          // Generation-aware fallback: the exact version process lives in a
+          // version-namespaced id — a legacy artifact-scoped stop would miss
+          // it and leak the running process.
+          await registry
+            .stopExact(scope, startedRuntimeGeneration)
+            .catch(() => {})
+          return
+        }
         await registry.stop(scope).catch(() => {})
       })()
       return rollbackStarted
