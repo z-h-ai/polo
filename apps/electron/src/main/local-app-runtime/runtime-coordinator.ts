@@ -99,7 +99,7 @@ export interface CapabilitySigning {
   sensitiveValues: string[]
 }
 
-interface ActiveRuntime {
+export interface ActiveRuntime {
   identityKey: string
   identity: ProductSpaceAppRuntimeIdentity
   executionId: string
@@ -182,16 +182,39 @@ export class LocalAppRuntimeCoordinator {
   private readonly active = new Map<string, ActiveRuntime>()
   private readonly inFlight = new Map<string, InFlightQuery>()
   private readonly inFlightStarts = new Map<string, InFlightStart>()
-  private readonly expiryHandled = new Set<number>()
   private readonly expiryTimers = new Map<number, () => void>()
-  /** Unique in-progress teardown per identityKey+runtimeGeneration. */
-  private readonly teardownGuarantees = new Map<string, Promise<void>>()
+  /** Unique in-progress teardown per runtime generation. */
+  private readonly teardownGuarantees = new Map<number, Promise<void>>()
   /**
-   * PERSISTENT terminal markers for completed runtime generations: a stale
-   * late callback can never re-teardown (re-stop/re-abort) a generation —
-   * including after a replacement took over the identity key.
+   * Bounded terminal lifecycle marker: per runtime identity, the highest
+   * manager-local runtime generation whose teardown has settled — a stale
+   * late callback for `generation <= highWater(identity)` is provably
+   * terminal and fails closed. Storage is bounded by the number of DISTINCT
+   * App identities on this device (never by generation churn).
    */
-  private readonly tornDownGenerations = new Set<string>()
+  private readonly tornDownThroughGeneration = new Map<string, number>()
+
+  private isGenerationTornDown(runtime: {
+    identityKey: string
+    runtimeGeneration: number
+  }): boolean {
+    return runtime.runtimeGeneration <= (this.tornDownThroughGeneration.get(runtime.identityKey) ?? 0)
+  }
+
+  private markGenerationTornDown(runtime: {
+    identityKey: string
+    runtimeGeneration: number
+  }): void {
+    this.tornDownThroughGeneration.set(
+      runtime.identityKey,
+      Math.max(
+        this.tornDownThroughGeneration.get(runtime.identityKey) ?? 0,
+        runtime.runtimeGeneration,
+      ),
+    )
+  }
+  /** Explicit reconciliation outcomes for runs frozen during teardown. */
+  private readonly reconciledStarts = new Map<string, 'confirmed_and_finished'>()
   private shutdownPromise?: Promise<void>
   private shuttingDown = false
 
@@ -377,11 +400,13 @@ export class LocalAppRuntimeCoordinator {
    * revoke→abort→cleanup→stop→CAS-clear order ('unknown' terminal status).
    */
   async handleCapabilityExpiry(capabilityGeneration: number): Promise<void> {
-    if (this.expiryHandled.has(capabilityGeneration)) return
-    this.expiryHandled.add(capabilityGeneration)
     const runtime = [...this.active.values()]
       .find(candidate => candidate.capabilityGeneration === capabilityGeneration)
-    if (!runtime) return
+    // The teardown guard/high-water makes repeated triggers no-ops.
+    if (
+      !runtime
+      || this.isGenerationTornDown(runtime)
+    ) return
     await this.teardownRuntime(runtime, 'unknown', () =>
       this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
   }
@@ -423,9 +448,10 @@ export class LocalAppRuntimeCoordinator {
     finalStatus: 'cancelled' | 'failed' | 'unknown',
     stopProcess?: () => Promise<void>,
   ): Promise<void> {
-    const guardKey = `${runtime.identityKey}:${runtime.runtimeGeneration}`
-    if (this.tornDownGenerations.has(guardKey)) return
-    const inProgress = this.teardownGuarantees.get(guardKey)
+    // Bounded terminal marker: any generation at or below the high water is
+    // already terminal — a stale late callback is a fail-closed no-op.
+    if (this.isGenerationTornDown(runtime)) return
+    const inProgress = this.teardownGuarantees.get(runtime.runtimeGeneration)
     if (inProgress) return inProgress
     // Publish the guard promise BEFORE any revoke/abort side effect runs:
     // performTeardown synchronously aborts the runtime controller and its
@@ -440,7 +466,7 @@ export class LocalAppRuntimeCoordinator {
       guardResolve = resolve
       guardReject = reject
     })
-    this.teardownGuarantees.set(guardKey, guardPromise)
+    this.teardownGuarantees.set(runtime.runtimeGeneration, guardPromise)
     // The guard mirrors the teardown rejection to concurrent callers; mark
     // it handled so bun/node never reports a spurious unhandled rejection
     // when no concurrent caller is awaiting it.
@@ -449,23 +475,28 @@ export class LocalAppRuntimeCoordinator {
     void teardown.then(
       () => {
         // Persist the terminal marker BEFORE clearing the guard.
-        this.tornDownGenerations.add(guardKey)
+        this.markGenerationTornDown(runtime)
         guardResolve()
-        if (this.teardownGuarantees.get(guardKey) === guardPromise) {
-          this.teardownGuarantees.delete(guardKey)
+        if (this.teardownGuarantees.get(runtime.runtimeGeneration) === guardPromise) {
+          this.teardownGuarantees.delete(runtime.runtimeGeneration)
         }
       },
       error => {
         // Cleanup completed but the aggregated stop failure rejected: the
         // generation stays terminal; the guard mirrors the rejection.
-        this.tornDownGenerations.add(guardKey)
+        this.markGenerationTornDown(runtime)
         guardReject(error)
-        if (this.teardownGuarantees.get(guardKey) === guardPromise) {
-          this.teardownGuarantees.delete(guardKey)
+        if (this.teardownGuarantees.get(runtime.runtimeGeneration) === guardPromise) {
+          this.teardownGuarantees.delete(runtime.runtimeGeneration)
         }
       },
     )
     return teardown
+  }
+
+  /** Test/observability seam: bounded per-identity terminal high water. */
+  terminalRuntimeGenerationHighWater(identityKey: string): number {
+    return this.tornDownThroughGeneration.get(identityKey) ?? 0
   }
 
   private async performTeardown(
@@ -637,8 +668,14 @@ export class LocalAppRuntimeCoordinator {
           // server timeout instead of fabricating a terminal state.
           continue
         }
+        // Explicit reconciliation outcome: the start was confirmed (running)
+        // and the terminal finish succeeded.
+        const startWasConfirmed = record.status === 'running'
         this.runState.markTerminal(capabilityGeneration, runId, 'cleanup')
         this.runState.releaseRun(capabilityGeneration, runId)
+        if (startWasConfirmed) {
+          this.reconciledStarts.set(`${capabilityGeneration}:${runId}`, 'confirmed_and_finished')
+        }
       } catch {
         // Budget/boundary failures stop this run's local reconciliation.
       }
@@ -856,35 +893,41 @@ export class LocalAppRuntimeCoordinator {
       }
       if (
         runtime.controller.signal.aborted
-        || this.tornDownGenerations.has(`${runtime.identityKey}:${runtime.runtimeGeneration}`)
+        || this.isGenerationTornDown(runtime)
       ) {
         // Teardown is in progress but the idempotent Admin start SUCCEEDED:
-        // freeze the run replayable for the detached cleanup lane, wait
-        // (bounded) for it to reconcile (re-confirm + terminal finish), and
-        // answer the App truthfully with the confirmed start.
-        this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
-        const deadline = this.now() + CLEANUP_TOTAL_BUDGET_MS
-        while (true) {
-          const reconciled = this.runState.getRun(capGen, runId)
-          // The Admin start succeeded: once the frozen start is confirmed
-          // (running/terminal, or released after its terminal finish by the
-          // cleanup lane) the truthful answer is 200 running.
-          if (
-            reconciled === undefined
-            || reconciled.status === 'running'
-            || reconciled.status === 'terminal'
-          ) {
-            // Released after its terminal finish (or already running): the
-            // frozen start was reconciled by the cleanup lane.
-            return { data: { runId, status: 'running' } }
+        // freeze the run replayable for the detached cleanup lane, then wait
+        // for the EXPLICIT reconciliation outcome. 200 running is returned
+        // only when the start was re-confirmed AND the terminal finish
+        // succeeded; anything else answers a stable error.
+        // Freeze ONLY a still-admitting record: never downgrade a run the
+        // cleanup lane has already confirmed (running/terminal).
+        const frozen = this.runState.getRun(capGen, runId)
+        if (frozen && frozen.status === 'starting_admin') {
+          this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
+        }
+        const reconcileKey = `${capGen}:${runId}`
+        // REAL-TIME budget: a monotonic timer enforces the total cleanup
+        // budget even when the injectable clock is frozen or rolled back.
+        let timedOut = false
+        const budgetTimer = setTimeout(() => {
+          timedOut = true
+        }, CLEANUP_TOTAL_BUDGET_MS)
+        try {
+          while (!timedOut) {
+            if (this.reconciledStarts.get(reconcileKey) === 'confirmed_and_finished') {
+              return { data: { runId, status: 'running' } }
+            }
+            if (this.isGenerationTornDown(runtime)) {
+              // The teardown settled without a confirmed reconciliation:
+              // never fabricate a success.
+              return { errorCode: 'shutting_down' }
+            }
+            await new Promise(resolve => setTimeout(resolve, 50))
           }
-          if (
-            reconciled?.status === 'start_rejected'
-            || this.now() >= deadline
-          ) {
-            return { errorCode: 'shutting_down' }
-          }
-          await new Promise(resolve => setTimeout(resolve, 50))
+          return { errorCode: 'shutting_down' }
+        } finally {
+          clearTimeout(budgetTimer)
         }
       }
       this.runState.setRunStatus(capGen, runId, 'running')

@@ -6,6 +6,7 @@ import type { HostLlmPublicResult } from '@polo-ai/shared/agent/host-llm-executo
 import { LocalAppRuntimeCoordinator } from '../runtime-coordinator'
 import { PER_CAPABILITY_QUERY_SLOTS } from '../app-api-run-state'
 import { createProductSpaceAppRuntimeIdentityKey } from '@polo-ai/shared/product-spaces'
+import type { ActiveRuntime } from '../runtime-coordinator'
 
 const IDENTITY = {
   accountId: 'account-a',
@@ -1556,5 +1557,130 @@ describe('POO-54 R5 tombstone high-water and credit replay', () => {
     expect(cross.status).toBe(409)
     expect(cross.json.error.code).toBe('run_state_conflict')
     await fixture.coordinator.shutdown()
+  })
+})
+
+describe('POO-54 R6 fix regressions (gateway/coordinator)', () => {
+  it('a hung start RECONFIRM beyond the budget never yields a fabricated 200 and submits no finish', async () => {
+    let releaseOriginal: (() => void) | undefined
+    let startCalls = 0
+    const fixture = createFixture({
+      onStart: () => {
+        startCalls += 1
+        if (startCalls === 1) {
+          // The ORIGINAL Admin start succeeds late (beyond the drain grace).
+          return new Promise<void>(resolve => {
+            releaseOriginal = resolve
+          })
+        }
+        // The cleanup lane's exact RECONFIRM hangs forever (budget aborts it).
+        return new Promise<void>(() => {})
+      },
+    })
+    const runId = uuid()
+    const pending = fixture.post('/run/start', { runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    setTimeout(() => releaseOriginal?.(), 2_500)
+    await fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    // The reconfirm timed out: the App must NOT receive a fabricated 200.
+    const response = await pending
+    expect(response.status).toBe(503)
+    expect(response.json.error.code).toBe('shutting_down')
+    // Zero terminal finishes: the late start was never confirmed+finished.
+    expect(fixture.adminCalls.filter(call => call.method === 'finish')).toHaveLength(0)
+    expect(startCalls).toBe(2)
+    await fixture.coordinator.shutdown()
+  }, 20_000)
+
+  it('the reconciliation budget is enforced by a real timer even when the injectable clock freezes or rolls back', async () => {
+    let releaseOriginal: (() => void) | undefined
+    let startCalls = 0
+    const fixture = createFixture({
+      onStart: () => {
+        startCalls += 1
+        if (startCalls === 1) {
+          return new Promise<void>(resolve => {
+            releaseOriginal = resolve
+          })
+        }
+        return new Promise<void>(() => {})
+      },
+    })
+    const runId = uuid()
+    const pending = fixture.post('/run/start', { runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    setTimeout(() => releaseOriginal?.(), 2_500)
+    const teardownPromise = fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    // Freeze AND roll back the injectable clock mid-wait: the REAL-TIMER
+    // budget must still terminate the wait.
+    fixture.setNow(500_000)
+    const startedAt = Date.now()
+    const response = await pending
+    const elapsed = Date.now() - startedAt
+    expect(response.status).toBe(503)
+    expect(response.json.error.code).toBe('shutting_down')
+    // Bounded: the wait ended via the real-timer budget, not the frozen clock.
+    expect(elapsed).toBeLessThan(15_000)
+    void teardownPromise
+    expect(fixture.adminCalls.filter(call => call.method === 'finish')).toHaveLength(0)
+    await fixture.coordinator.shutdown()
+  }, 30_000)
+
+  it('terminal lifecycle markers stay bounded across generation churn', async () => {
+    const fixture = createFixture({ skipBootstrapRuntime: true })
+    await fixture.coordinator.ensureGateway()
+    const identityKey = createProductSpaceAppRuntimeIdentityKey(IDENTITY)
+    const fakeRuntime = (runtimeGeneration: number) => ({
+      identityKey,
+      identity: IDENTITY,
+      executionId: `exec-${runtimeGeneration}`,
+      runtimeGeneration,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: undefined,
+      controller: new AbortController(),
+    })
+    // Heavy generation churn: register + teardown 500 generations.
+    for (let gen = 1; gen <= 500; gen += 1) {
+      fixture.coordinator.registerActiveRuntime(fakeRuntime(gen))
+      await fixture.coordinator.teardownRuntime(
+        fixture.coordinator.getActiveRuntime(IDENTITY)!,
+        'cancelled',
+      )
+    }
+    // BOUNDED storage: one scalar high-water == 500; no per-generation set.
+    expect(fixture.coordinator.terminalRuntimeGenerationHighWater(createProductSpaceAppRuntimeIdentityKey(IDENTITY))).toBe(500)
+    // Fail-closed: stale callbacks for ANY earlier generation are no-ops —
+    // including one "covered" by a much higher generation.
+    const stale = fakeRuntime(250)
+    await fixture.coordinator.teardownRuntime(stale as never, 'cancelled')
+    expect(fixture.coordinator.terminalRuntimeGenerationHighWater(createProductSpaceAppRuntimeIdentityKey(IDENTITY))).toBe(500)
+    // A future generation still tears down normally.
+    fixture.coordinator.registerActiveRuntime(fakeRuntime(501))
+    await fixture.coordinator.teardownRuntime(
+      fixture.coordinator.getActiveRuntime(IDENTITY)!,
+      'cancelled',
+    )
+    expect(fixture.coordinator.terminalRuntimeGenerationHighWater(createProductSpaceAppRuntimeIdentityKey(IDENTITY))).toBe(501)
+  })
+
+  it('a static runtime (no capability) is tracked and cleared by the real coordinator shutdown', async () => {
+    const fixture = createFixture({ skipBootstrapRuntime: true })
+    await fixture.coordinator.ensureGateway()
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-static',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+    // Generation-exact liveness for the static runtime.
+    expect(fixture.coordinator.getActiveRuntimeByExecution('exec-static')).toBeDefined()
+    await fixture.coordinator.shutdown()
+    expect(fixture.coordinator.getActiveRuntimeByExecution('exec-static')).toBeUndefined()
   })
 })

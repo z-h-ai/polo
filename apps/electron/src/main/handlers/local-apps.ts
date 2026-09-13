@@ -132,6 +132,25 @@ async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promis
 }
 
 /**
+ * Normalizes ANY exact-generation stop failure into the stable STOP_FAILED
+ * transport error. An already-STOP_FAILED LocalAppRuntimeError is preserved
+ * as-is; the original code/message travel in details.cause for diagnostics.
+ */
+function normalizeStopFailure(error: unknown): LocalAppRuntimeError {
+  if (error instanceof LocalAppRuntimeError && error.code === 'STOP_FAILED') {
+    return error
+  }
+  const cause = error instanceof LocalAppRuntimeError
+    ? { code: error.code, message: error.message }
+    : { message: error instanceof Error ? error.message : String(error) }
+  return new LocalAppRuntimeError(
+    'STOP_FAILED',
+    'Failed to stop the exact runtime generation',
+    { cause },
+  )
+}
+
+/**
  * Shared hooks wiring one exact ProductSpace runtime into the execution
  * registry: generation/version-exact liveness, unified fail-closed rollback
  * (coordinator-first teardown) and the execution-scoped stop.
@@ -1828,18 +1847,12 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         const existing = coordinator.getActiveRuntime(runtimeIdentity)
         if (existing) {
           await coordinator.teardownRuntime(existing, 'cancelled', async () => {
+            // Propagate (normalized): the successor must never spawn while
+            // the previous generation's process may still be alive.
             try {
               await registry.stopExact(scope, existing.runtimeGeneration)
             } catch (error) {
-              // Propagate: the successor must never spawn while the previous
-              // generation's process may still be alive.
-              throw error instanceof LocalAppRuntimeError
-                ? error
-                : new LocalAppRuntimeError(
-                    'STOP_FAILED',
-                    'Failed to stop the previous runtime generation',
-                    { cause: error instanceof Error ? error.message : String(error) },
-                  )
+              throw normalizeStopFailure(error)
             }
           })
         }
@@ -1878,8 +1891,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         if (result.runtimeKind === 'static') {
           // The manager deliberately never calls processEnvironment for
           // static runtimes: register WITHOUT a capability so STOP/RESTART/
-          // shutdown can still resolve this identity. Registration/publication
-          // failure rolls the registration back revoke-first.
+          // shutdown can still resolve this identity. The exact generation is
+          // recorded BEFORE registration so liveness and any rollback can
+          // locate the coordinator runtime by execution/generation.
+          startedRuntimeGeneration = result.runtimeGeneration
           try {
             coordinator.registerActiveRuntime({
               identity: runtimeIdentity,
@@ -1996,14 +2011,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         await getScopedLocalAppRuntimeRegistry()
           .stopExact(scope, handle.expectedRuntimeGeneration as number)
       } catch (error) {
-        // Aggregate: surface a failed generation-bound stop as STOP_FAILED.
-        throw error instanceof LocalAppRuntimeError
-          ? error
-          : new LocalAppRuntimeError(
-              'STOP_FAILED',
-              'Failed to stop the exact runtime generation',
-              { cause: error instanceof Error ? error.message : String(error) },
-            )
+        // Aggregate: surface ANY failed generation-bound stop as the stable
+        // STOP_FAILED (original code/message preserved in details.cause).
+        throw normalizeStopFailure(error)
       }
     })
     return { identity, scope }

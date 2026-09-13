@@ -472,11 +472,14 @@ mock.module('@polo-ai/shared/credentials', () => ({
 
 mock.module('../../local-app-runtime', () => {
   class LocalAppRuntimeError extends Error {
+    readonly details?: Record<string, unknown>
     constructor(
       public readonly code: string,
       message: string,
+      details?: Record<string, unknown>,
     ) {
       super(message)
+      if (details) this.details = details
     }
   }
 
@@ -3833,5 +3836,109 @@ describe('local app production status projection (R34-3)', () => {
     // (Generation ownership retention for retry/diagnostics lives in the
     // registry process-id map and the runId tombstones — covered by their
     // own suites; the coordinator active entry is best-effort cleaned.)
+  })
+
+  it('static START records the exact generation: liveness is true and a registration failure rolls back through the legacy stop', async () => {
+    scopedStartExact.mockImplementation((async (
+      _scope: CatalogLocalAppScope,
+      version: string,
+    ) => ({
+      appId: 'artifact-instance-a',
+      version,
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      runtimeKind: 'static' as const,
+      runtimeGeneration: 41,
+      scopeGeneration: 9,
+    })) as unknown as typeof defaultStartExact)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const result = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    expect(result).toMatchObject({ runtimeKind: 'static', runtimeGeneration: 41 })
+    // Generation-exact liveness is TRUE for the static runtime (R5 bug).
+    const executions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(executions).toHaveLength(1)
+    expect(await executions[0]!.isActive()).toBe(true)
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+
+    // A registration failure rolls back: legacy stop is invoked (no
+    // capability exists to revoke) and the START fails.
+    runtimeCoordinator.registerActiveRuntime.mockImplementationOnce(() => {
+      throw new Error('coordinator is shutting down')
+    })
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toThrow('coordinator is shutting down')
+    expect(scopedRegistry.stop).toHaveBeenCalled()
+  })
+
+  it('POO-54 R6: any exact-stop failure normalizes to STOP_FAILED with the original cause (STOP and replacement)', async () => {
+    // Seed a live runtime.
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    const executionId = [...activeRuntimesByExecution.keys()][0]!
+    // stopExact throws a STALE_RUNTIME_GENERATION LocalAppRuntimeError —
+    // NOT a STOP_FAILED. Both STOP and replacement must normalize it.
+    scopedStopExact.mockImplementation(async () => {
+      // A STALE_RUNTIME_GENERATION-shaped failure (as the registry throws).
+      throw Object.assign(new Error('no longer current'), {
+        code: 'STALE_RUNTIME_GENERATION',
+      })
+    })
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    let stopFailure: { code?: string; details?: { cause?: { message?: string } } } | null = null
+    try {
+      await stop(context, {
+        kind: 'product_space_runtime_handle',
+        executionId,
+        expectedRuntimeGeneration: 41,
+      })
+    } catch (error) {
+      stopFailure = error as { code: string; details?: { cause?: { message: string } } }
+    }
+    expect(stopFailure).toMatchObject({ code: 'STOP_FAILED' })
+    expect(stopFailure?.details?.cause?.message).toBe('no longer current')
+
+    // Replacement: the successor never spawns and the normalized
+    // STOP_FAILED (with cause) is what the caller sees. Re-seed the live
+    // runtime (the STOP above removed it from the coordinator maps).
+    const replacementRuntime = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId,
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 11,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(replacementRuntime.identity), replacementRuntime)
+    activeRuntimesByExecution.set(executionId, replacementRuntime)
+    scopedStartExact.mockClear()
+    let replacement: { code?: string; details?: { cause?: { message?: string } } } | null = null
+    try {
+      await start(context, {
+        kind: 'product_space_runtime_start',
+        app: productSpaceAppIdentity(),
+      })
+    } catch (error) {
+      replacement = error as { code: string; details?: { cause?: { message: string } } }
+    }
+    expect(replacement).toMatchObject({ code: 'STOP_FAILED' })
+    expect(replacement?.details?.cause?.message).toBe('no longer current')
   })
 })
