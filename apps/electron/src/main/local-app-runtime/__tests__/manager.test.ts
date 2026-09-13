@@ -2250,3 +2250,117 @@ describe('POO-54 R2 per-version process namespaces', () => {
     await runtime.stopExact(`${app}.v2`, v2.runtimeGeneration)
   }, 60_000)
 })
+
+describe('POO-54 R12 shutdown orchestration (coordinator failure never skips forced cleanup)', () => {
+  it('aggregates a coordinator exact-stop failure WITH the manager failure, force-reaps the real subprocess, and lets a quit retry converge', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const { LocalAppRuntimeCoordinator } = await import('../runtime-coordinator')
+
+    // A REAL js runtime subprocess whose graceful stop is injected to fail:
+    // only the manager's forced cleanup path (forceStopRuntime/SIGKILL) can
+    // reap it.
+    const bundleDir = await writeBundle(
+      'demo.r12-shutdown',
+      '1.0.0',
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': ownedNodeServerSource() },
+    )
+    const archive = await archiveBundle(bundleDir, 'r12-shutdown')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.r12-shutdown', '1.0.0', url, archive))
+    await runtime.start('demo.r12-shutdown')
+    const status = await runtime.getRuntimeStatus('demo.r12-shutdown')
+    expect(status.pid).toBeGreaterThan(0)
+
+    // A REAL coordinator with one active runtime whose exact stop FAILS.
+    const coordinator = new LocalAppRuntimeCoordinator({
+      admin: {
+        startAppRun: async () => ({}),
+        recordAppUsage: async () => ({}),
+        finishAppRun: async () => ({}),
+      },
+      createExecutor: () => {
+        throw new Error('no executor in this test')
+      },
+      resolveWorkspaceRoot: () => null,
+      loadWorkspaceConfig: () => undefined,
+      getDefaultLlmConnection: () => null,
+      stopRuntime: async () => {
+        throw new Error('coordinator exact stop exploded')
+      },
+    })
+    coordinator.registerActiveRuntime({
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        artifactInstanceId: 'artifact-r12',
+        versionId: 'version-a',
+        version: '1.0.0',
+      },
+      executionId: 'exec-r12',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+      runtimes: Map<string, unknown>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    internals.killProcessTree = async () => {
+      throw new Error('injected graceful stop failure')
+    }
+
+    // (a) The coordinator rejection must NOT skip the manager: forced
+    // cleanup runs and reaps the real subprocess.
+    const firstFailure = await shutdownLocalAppRuntimeOwners({
+      coordinator,
+      manager: runtime,
+    }).then(() => null, (error: unknown) => error)
+    // (d) BOTH failures travel — none is lost to the other.
+    expect(firstFailure).toBeInstanceOf(AggregateError)
+    const reasons = (firstFailure as AggregateError).errors as unknown[]
+    expect(reasons).toHaveLength(2)
+    expect(reasons.some(error =>
+      String((error as Error).message).includes(
+        'coordinator shutdown: 1 runtime generation(s) failed to stop',
+      ))).toBe(true)
+    expect(reasons.some(error =>
+      String((error as Error).message).includes(
+        'Failed to confirm every managed local app process exited',
+      ))).toBe(true)
+    // (b) No real subprocess survives the forced cleanup.
+    expect(isProcessAlive(status.pid!)).toBe(false)
+    expect(internals.runtimes.has('demo.r12-shutdown')).toBe(false)
+
+    // (c) The before-quit retry CONVERGES: neither the coordinator's cached
+    // rejection nor the manager blocks the second attempt.
+    internals.killProcessTree = originalKill
+    await expect(shutdownLocalAppRuntimeOwners({
+      coordinator,
+      manager: runtime,
+    })).resolves.toBeUndefined()
+  }, 60_000)
+
+  it('propagates a single owner failure raw (no aggregation wrapper for one report)', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const failure = await shutdownLocalAppRuntimeOwners({
+      manager: {
+        shutdown: async () => {
+          throw Object.assign(new Error('registry sweep exploded'), { code: 'STOP_FAILED' })
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    expect(failure).toMatchObject({ code: 'STOP_FAILED' })
+    expect((failure as Error).message).toBe('registry sweep exploded')
+    // All owners succeed: the orchestration resolves.
+    await expect(shutdownLocalAppRuntimeOwners({
+      coordinator: { shutdown: async () => {} },
+      manager: { shutdown: async () => {} },
+      scopedRegistry: { shutdown: async () => {} },
+    })).resolves.toBeUndefined()
+  })
+})

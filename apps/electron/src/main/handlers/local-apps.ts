@@ -1843,7 +1843,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
      * The ONLY post-spawn rollback entry (idempotent): coordinator teardown
      * (revoke → abort → bounded cleanup → exact-generation stop → CAS clear)
      * when the runtime registered; otherwise revoke the just-signed
-     * capability before any legacy stop — never stop-before-revoke.
+     * capability before any exact stop — never stop-before-revoke. A
+     * pre-spawn rollback (no capability issued, no runtime generation
+     * started) is a side-effect-free completion: a ProductSpace START must
+     * never touch the legacy artifact-scoped namespace, and with no exact
+     * generation there is nothing to stop.
      */
     let rollbackStarted: Promise<void> | undefined
     const rollbackRuntime = (): Promise<void> => {
@@ -1855,15 +1859,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         if (active) {
           // The aggregated process-stop failure must surface: never swallow
           // stopExact here. The teardown RECORDS (never throws) the stop
-          // failure, so it is consumed atomically below and rejected through
-          // rollbackRuntime itself — the START-boundary exits (the
-          // registration/fence helper and the single catch) then surface the
-          // stable STOP_FAILED carrying BOTH the original failure and the
-          // rollback stop failure.
-          await coordinator.teardownRuntime(active, 'cancelled', async () => {
+          // failure and the guard resolves THIS boundary with the SAME
+          // immutable outcome, so consumption is race-free — the START
+          // boundary exits (the registration/fence helper and the single
+          // catch) then surface the stable STOP_FAILED carrying BOTH the
+          // original failure and the rollback stop failure.
+          const outcome = await coordinator.teardownRuntime(active, 'cancelled', async () => {
             await registry.stopExact(scope, active.runtimeGeneration)
           })
-          const recorded = coordinator.takeRollbackStopFailure(executionId)
+          const recorded = coordinator.consumeTeardownOutcome(outcome)
           if (recorded !== undefined) {
             throw normalizeStopFailure(recorded)
           }
@@ -1882,7 +1886,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           await registry.stopExact(scope, startedRuntimeGeneration)
           return
         }
-        await registry.stop(scope).catch(() => {})
+        // Pre-spawn failure: nothing was signed, nothing spawned, nothing to
+        // stop — the rollback completes without any registry namespace call.
       })()
       return rollbackStarted
     }
@@ -1904,7 +1909,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         // the loser can never bypass the winner's cleanup via the manager.
         const existing = coordinator.getActiveRuntime(runtimeIdentity)
         if (existing) {
-          await coordinator.teardownRuntime(existing, 'cancelled', async () => {
+          const outcome = await coordinator.teardownRuntime(existing, 'cancelled', async () => {
             // Propagate (normalized): the successor must never spawn while
             // the previous generation's process may still be alive.
             try {
@@ -1913,12 +1918,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
               throw normalizeStopFailure(error)
             }
           })
-          // The teardown RECORDS (never throws) the stop failure: consume it
-          // atomically here — a failed old-generation stop must fail the
-          // replacement closed with STOP_FAILED BEFORE any gateway reopen or
-          // successor spawn. The registry-side old-generation ownership stays
-          // intact as the retry/diagnostic fallback.
-          const recorded = coordinator.takeRollbackStopFailure(existing.executionId)
+          // The teardown RECORDS (never throws) the stop failure and the
+          // guard resolves THIS boundary with the SAME immutable outcome:
+          // consume it race-free — a failed old-generation stop must fail
+          // the replacement closed with STOP_FAILED BEFORE any gateway
+          // reopen or successor spawn, even when a concurrent consumer-less
+          // teardown (expiry/scope/account) drained the retained record
+          // first. The registry-side old-generation ownership stays intact
+          // as the retry/diagnostic fallback.
+          const recorded = coordinator.consumeTeardownOutcome(outcome)
           if (recorded !== undefined) {
             throw normalizeStopFailure(recorded)
           }
@@ -2108,7 +2116,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       catalogAppId: identity.artifactInstanceId,
     }
     assertScopeInsideActiveProductSpace(scope)
-    await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+    const outcome = await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
       try {
         await getScopedLocalAppRuntimeRegistry()
           .stopExact(scope, handle.expectedRuntimeGeneration as number)
@@ -2118,10 +2126,12 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         throw normalizeStopFailure(error)
       }
     })
-    // The recorded (never thrown) rollback stop failure is surfaced here and
-    // consumed atomically: an explicit STOP/RESTART owns this boundary, so
-    // the record cannot outlive the operation it belongs to.
-    const recorded = coordinator.takeRollbackStopFailure(handle.executionId as string)
+    // The recorded (never thrown) rollback stop failure travels on the
+    // SHARED teardown outcome: this explicit STOP/RESTART boundary owns the
+    // consumption race-free — even when a concurrent consumer-less teardown
+    // (expiry/scope/account/shutdown) drained the retained record first, the
+    // stop failure still fails this operation closed.
+    const recorded = coordinator.consumeTeardownOutcome(outcome)
     if (recorded !== undefined) {
       throw normalizeStopFailure(recorded)
     }

@@ -190,6 +190,23 @@ function hostUsage(
 }
 
 /**
+ * Immutable terminal outcome of ONE generation teardown, shared with every
+ * concurrent waiter of the same teardown guard. `stopFailure` carries the
+ * recorded (never thrown) generation-bound process-stop failure; every
+ * boundary that joins the guard reads the SAME outcome, so a frozen handler
+ * fails closed on it without racing a per-execution take against a
+ * consumer-less drainer.
+ */
+export interface TeardownOutcome {
+  readonly executionId: string
+  readonly stopFailure: unknown
+}
+
+function settledTeardownOutcome(runtime: { executionId: string }): TeardownOutcome {
+  return Object.freeze({ executionId: runtime.executionId, stopFailure: undefined })
+}
+
+/**
  * Single owner of the ProductSpace App platform boundary: loopback gateway,
  * per-launch capabilities, capability-local Run/request state, POL-102
  * metering sequencing, the sessionless Host executor lifecycle, sink
@@ -207,9 +224,12 @@ export class LocalAppRuntimeCoordinator {
    * Unique in-progress teardown per identityKey+runtimeGeneration. The
    * composite key is load-bearing: manager-local runtime generations collide
    * across identities, so a generation-only key would let identity B reuse
-   * identity A's in-flight guard and skip its own teardown entirely.
+   * identity A's in-flight guard and skip its own teardown entirely. The
+   * shared promise resolves with the FIRST teardown's immutable outcome so
+   * every waiter (frozen handler or consumer-less drainer) observes the
+   * same terminal stop failure.
    */
-  private readonly teardownGuarantees = new Map<string, Promise<void>>()
+  private readonly teardownGuarantees = new Map<string, Promise<TeardownOutcome>>()
   /**
    * Bounded terminal lifecycle marker: per runtime identity, the highest
    * manager-local runtime generation whose teardown has settled — a stale
@@ -242,13 +262,17 @@ export class LocalAppRuntimeCoordinator {
   private readonly reconciledStarts = new Map<string, 'confirmed_and_finished'>()
   /**
    * Recorded (never thrown) rollback stop failures, keyed by executionId.
-   * Every record has exactly ONE consumption boundary: the START exit /
-   * replacement teardown / explicit STOP that owns the frozen stop callback
-   * consumes it via takeRollbackStopFailure; teardown paths without such a
-   * consumer (expiry, unexpected exit, scope/account teardown) drain it into
-   * the bounded unsurfaced report below at their own call boundary.
+   * The value is the teardown's SHARED TeardownOutcome, so consumption can
+   * retire a record only when it belongs to the exact teardown being
+   * consumed. Every record has exactly ONE consumption boundary: the START
+   * exit / replacement teardown / explicit STOP that owns the frozen stop
+   * callback consumes it via consumeTeardownOutcome (the failure itself
+   * already traveled on the shared outcome — the take is hygiene only);
+   * teardown paths without such a consumer (expiry, unexpected exit,
+   * scope/account teardown) drain it into the bounded unsurfaced report
+   * below at their own call boundary.
    */
-  private readonly rollbackStopFailures = new Map<string, unknown>()
+  private readonly rollbackStopFailures = new Map<string, TeardownOutcome>()
   /**
    * Bounded diagnostics for teardown stop failures surfaced by no frozen
    * handler: capped ring so generation churn can never grow it unboundedly.
@@ -434,10 +458,10 @@ export class LocalAppRuntimeCoordinator {
       .find(candidate => candidate.identityKey === event.runtimeKey
         && candidate.runtimeGeneration === event.runtimeGeneration)
     if (!runtime) return
-    await this.teardownRuntime(runtime, 'failed')
+    const outcome = await this.teardownRuntime(runtime, 'failed')
     // No frozen handler consumes this path: the recorded stop failure is
     // drained into the bounded report here (the call boundary owns it).
-    this.drainUnsurfacedStopFailure(runtime.executionId)
+    this.drainUnsurfacedStopFailure(outcome)
   }
 
   /**
@@ -453,10 +477,10 @@ export class LocalAppRuntimeCoordinator {
       !runtime
       || this.isGenerationTornDown(runtime)
     ) return
-    await this.teardownRuntime(runtime, 'unknown', () =>
+    const outcome = await this.teardownRuntime(runtime, 'unknown', () =>
       this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
     // No frozen handler consumes this path: drain at the call boundary.
-    this.drainUnsurfacedStopFailure(runtime.executionId)
+    this.drainUnsurfacedStopFailure(outcome)
   }
 
   /** Read-only view of active runtimes for unified stop entry points. */
@@ -474,10 +498,10 @@ export class LocalAppRuntimeCoordinator {
   ): Promise<void> {
     for (const runtime of [...this.active.values()]) {
       if (!matches(runtime)) continue
-      await this.teardownRuntime(runtime, finalStatus, () =>
+      const outcome = await this.teardownRuntime(runtime, finalStatus, () =>
         this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
       // No frozen handler consumes this path: drain at the call boundary.
-      this.drainUnsurfacedStopFailure(runtime.executionId)
+      this.drainUnsurfacedStopFailure(outcome)
     }
   }
 
@@ -487,20 +511,24 @@ export class LocalAppRuntimeCoordinator {
    * clear → release capability resources. Best-effort at every step.
    *
    * The teardown is a UNIQUE TERMINAL operation per identityKey+generation:
-   * concurrent triggers share one in-flight promise, and a COMPLETED
-   * generation keeps a persistent terminal marker — a stale late callback
-   * (old token replay, delayed exit event, replacement-era teardown) is a
-   * no-op that can neither re-stop the generation nor abort a replacement's
-   * in-flight queries.
+   * concurrent triggers share one in-flight promise AND ONE immutable
+   * TeardownOutcome — the guard resolves every waiter with the same frozen
+   * outcome (including the recorded stop failure), so a frozen handler
+   * (replacement / explicit STOP / RESTART) fails closed on it without
+   * racing a per-execution take against a consumer-less drainer. A
+   * COMPLETED generation keeps a persistent terminal marker — a stale late
+   * callback (old token replay, delayed exit event, replacement-era
+   * teardown) is a no-op that can neither re-stop the generation nor abort
+   * a replacement's in-flight queries.
    */
   async teardownRuntime(
     runtime: ActiveRuntime,
     finalStatus: 'cancelled' | 'failed' | 'unknown',
     stopProcess?: () => Promise<void>,
-  ): Promise<void> {
+  ): Promise<TeardownOutcome> {
     // Bounded terminal marker: any generation at or below the high water is
     // already terminal — a stale late callback is a fail-closed no-op.
-    if (this.isGenerationTornDown(runtime)) return
+    if (this.isGenerationTornDown(runtime)) return settledTeardownOutcome(runtime)
     const guardKey = `${runtime.identityKey}:${runtime.runtimeGeneration}`
     const inProgress = this.teardownGuarantees.get(guardKey)
     if (inProgress) return inProgress
@@ -510,10 +538,10 @@ export class LocalAppRuntimeCoordinator {
     // moment the guard must already be observable. The guard settles ONLY
     // when performTeardown itself fulfills or rejects, so a concurrent
     // second teardown shares the exact first settlement (never an early
-    // success) and observes its rejection.
-    let guardResolve!: () => void
+    // success) and the SAME immutable outcome.
+    let guardResolve!: (outcome: TeardownOutcome) => void
     let guardReject!: (error: unknown) => void
-    const guardPromise = new Promise<void>((resolve, reject) => {
+    const guardPromise = new Promise<TeardownOutcome>((resolve, reject) => {
       guardResolve = resolve
       guardReject = reject
     })
@@ -524,10 +552,10 @@ export class LocalAppRuntimeCoordinator {
     guardPromise.catch(() => {})
     const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
     void teardown.then(
-      () => {
+      outcome => {
         // Persist the terminal marker BEFORE clearing the guard.
         this.markGenerationTornDown(runtime)
-        guardResolve()
+        guardResolve(outcome)
         if (this.teardownGuarantees.get(guardKey) === guardPromise) {
           this.teardownGuarantees.delete(guardKey)
         }
@@ -554,7 +582,7 @@ export class LocalAppRuntimeCoordinator {
     runtime: ActiveRuntime,
     finalStatus: 'cancelled' | 'failed' | 'unknown',
     stopProcess?: () => Promise<void>,
-  ): Promise<void> {
+  ): Promise<TeardownOutcome> {
     if (runtime.capabilityGeneration !== undefined) {
       this.cancelCapabilityExpiry(runtime.capabilityGeneration)
       this.capabilities.revoke(runtime.capabilityGeneration)
@@ -604,28 +632,54 @@ export class LocalAppRuntimeCoordinator {
     if (this.active.get(runtime.identityKey) === runtime) {
       this.active.delete(runtime.identityKey)
     }
+    // ONE immutable outcome per teardown: it is recorded for the
+    // observability/consumption seams and returned to every waiter of the
+    // guard — never re-derived from racy per-execution state.
+    const outcome: TeardownOutcome = Object.freeze({
+      executionId: runtime.executionId,
+      stopFailure,
+    })
     if (stopFailure !== undefined) {
-      this.rollbackStopFailures.set(runtime.executionId, stopFailure)
+      this.rollbackStopFailures.set(runtime.executionId, outcome)
     } else {
       this.rollbackStopFailures.delete(runtime.executionId)
     }
+    return outcome
   }
 
   /** Recorded rollback stop failure for one execution, if any. */
   getRollbackStopFailure(executionId: string): unknown {
-    return this.rollbackStopFailures.get(executionId)
+    return this.rollbackStopFailures.get(executionId)?.stopFailure
   }
 
   /**
-   * Atomic take-and-delete of one recorded rollback stop failure: the single
-   * consumption primitive for boundaries that surface the failure (START
-   * exit, replacement teardown, explicit STOP). Taking removes the record,
-   * so the map can never accumulate consumed entries.
+   * Atomic take-and-delete of one recorded rollback stop failure: a
+   * consumption primitive for boundaries that surface the failure by
+   * executionId alone (legacy seam). Frozen handlers must prefer
+   * consumeTeardownOutcome — the shared outcome cannot race a concurrent
+   * drainer.
    */
   takeRollbackStopFailure(executionId: string): unknown {
-    const failure = this.rollbackStopFailures.get(executionId)
-    if (failure !== undefined) this.rollbackStopFailures.delete(executionId)
-    return failure
+    const outcome = this.rollbackStopFailures.get(executionId)
+    if (outcome !== undefined) this.rollbackStopFailures.delete(executionId)
+    return outcome?.stopFailure
+  }
+
+  /**
+   * Frozen-handler consumption of a shared teardown outcome. The failure
+   * itself travels ON the immutable outcome (race-free — the guard gave the
+   * same object to every waiter), so this only retires the retained
+   * diagnostic record when it belongs to THIS exact teardown: the map can
+   * never accumulate consumed entries, and a concurrent consumer-less
+   * drainer that already retired the record cannot resurrect or duplicate
+   * the failure. Returns the outcome's stop failure for fail-closed
+   * propagation.
+   */
+  consumeTeardownOutcome(outcome: TeardownOutcome): unknown {
+    if (this.rollbackStopFailures.get(outcome.executionId) === outcome) {
+      this.rollbackStopFailures.delete(outcome.executionId)
+    }
+    return outcome.stopFailure
   }
 
   /** Test/observability seam: count of currently retained stop failures. */
@@ -644,12 +698,21 @@ export class LocalAppRuntimeCoordinator {
   /**
    * Consumption boundary for teardown paths with no frozen-handler consumer
    * (capability expiry, unexpected exit, scope/account teardown): drains the
-   * recorded failure into the bounded report so the map cannot retain it.
+   * outcome's failure into the bounded report so the map cannot retain it.
+   * Enqueue is IDEMPOTENT PER OUTCOME — only the boundary that retires the
+   * retained record for THIS exact teardown reports it, so concurrent
+   * boundaries sharing one guard can never double-report the same failure.
+   * Whether the failure lands here or in a frozen handler's caller is pure
+   * caller error attribution; fail-closed behavior never depends on it.
    */
-  private drainUnsurfacedStopFailure(executionId: string): void {
-    const error = this.takeRollbackStopFailure(executionId)
-    if (error === undefined) return
-    this.unsurfacedTeardownStopFailures.push({ executionId, error })
+  private drainUnsurfacedStopFailure(outcome: TeardownOutcome): void {
+    if (outcome.stopFailure === undefined) return
+    if (this.rollbackStopFailures.get(outcome.executionId) !== outcome) return
+    this.rollbackStopFailures.delete(outcome.executionId)
+    this.unsurfacedTeardownStopFailures.push({
+      executionId: outcome.executionId,
+      error: outcome.stopFailure,
+    })
     if (
       this.unsurfacedTeardownStopFailures.length
       > LocalAppRuntimeCoordinator.MAX_UNSURFACED_TEARDOWN_STOP_FAILURES
@@ -837,8 +900,11 @@ export class LocalAppRuntimeCoordinator {
         }
         runtime.controller.abort()
       }
-      // performTeardown records (never throws) rollback stop failures.
-      await Promise.allSettled(
+      // performTeardown records (never throws) rollback stop failures and
+      // resolves with the SHARED outcome: aggregation reads the outcome, so
+      // a concurrent drainer retiring the record first can never turn this
+      // shutdown into a false pass.
+      const settled = await Promise.allSettled(
         runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
           this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())),
       )
@@ -847,9 +913,12 @@ export class LocalAppRuntimeCoordinator {
       // Aggregate ONLY the runtimes this shutdown tore down: historical
       // records from already-consumed or consumer-less teardowns must never
       // reject (or pollute) a shutdown with no matching active runtime.
-      const failures = runtimes
-        .map(runtime => this.takeRollbackStopFailure(runtime.executionId))
-        .filter(failure => failure !== undefined)
+      const failures = settled.flatMap(result => {
+        if (result.status === 'rejected') return [result.reason]
+        return result.value.stopFailure !== undefined
+          ? [result.value.stopFailure]
+          : []
+      })
       // Terminal hygiene: nothing survives shutdown for this instance.
       this.rollbackStopFailures.clear()
       if (failures.length > 0) {
@@ -860,6 +929,18 @@ export class LocalAppRuntimeCoordinator {
       }
     })()
     this.shutdownPromise = shutdownPromise
+    // A rejected shutdown must not poison quit retries forever: the
+    // teardown work itself is terminal and complete, so a retry re-runs the
+    // (now empty) shutdown body instead of replaying the same failure and
+    // never reaching downstream forced cleanup.
+    void shutdownPromise.then(
+      () => {
+        if (this.shutdownPromise === shutdownPromise) this.shutdownPromise = undefined
+      },
+      () => {
+        if (this.shutdownPromise === shutdownPromise) this.shutdownPromise = undefined
+      },
+    )
     return shutdownPromise
   }
 

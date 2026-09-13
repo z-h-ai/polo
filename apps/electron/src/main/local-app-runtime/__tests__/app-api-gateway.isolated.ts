@@ -269,6 +269,7 @@ function createFixture(options: FixtureOptions = {}) {
     coordinator,
     adminCalls,
     stopRuntimeCalls,
+    ready,
     executorCount: () => executorCounter,
     post,
     rawRequest,
@@ -1906,5 +1907,186 @@ describe('POO-54 R11 rollback-stop-failure consumption boundaries', () => {
     expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(3)
     await expect(fixture.coordinator.shutdown()).resolves.toBeUndefined()
     expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+  })
+
+  it('a rejected shutdown does not poison a quit retry: the second shutdown re-aggregates and converges', async () => {
+    const fixture = createFixture({
+      stopRuntime: async () => {
+        throw new Error('process stop exploded')
+      },
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    await startRun(fixture)
+    await expect(fixture.coordinator.shutdown()).rejects.toThrow(/failed to stop/)
+    // The retry is not the cached rejection: the terminal teardown work is
+    // complete, so the second shutdown re-runs the (now empty) body and
+    // converges instead of replaying the same failure forever.
+    await expect(fixture.coordinator.shutdown()).resolves.toBeUndefined()
+  })
+})
+
+/**
+ * R12 deterministic barrier concurrency regressions: TWO teardown
+ * boundaries reach the SAME generation-bound guard before the (failing)
+ * stopRuntime is allowed to settle. The barrier makes the interleaving
+ * exact: boundary A enters the guard and parks inside stopRuntime; only
+ * after boundary B has joined the in-flight guard does the stop fail. Both
+ * boundaries must then observe the SAME immutable TeardownOutcome — the
+ * frozen handler fails closed on it (never a racy per-execution take) and
+ * the consumer-less drainer reports it into the bounded ring at most once.
+ */
+describe('POO-54 R12 shared teardown-outcome concurrency barriers', () => {
+  interface BarrierFixture {
+    fixture: Fixture
+    runtime: ActiveRuntime
+    releaseStop: () => void
+    waitUntilStopEntered: () => Promise<void>
+    stopEnteredCount: () => number
+  }
+
+  async function createBarrierFixture(): Promise<BarrierFixture> {
+    let releaseStop!: () => void
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve
+    })
+    let entered = 0
+    let notifyEntered!: () => void
+    const enteredPromise = new Promise<void>(resolve => {
+      notifyEntered = resolve
+    })
+    const fixture = createFixture({
+      stopRuntime: async () => {
+        entered += 1
+        notifyEntered()
+        await stopGate
+        throw Object.assign(new Error('process survived'), { code: 'STOP_FAILED' })
+      },
+    })
+    await fixture.ready
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    return {
+      fixture,
+      runtime,
+      releaseStop,
+      waitUntilStopEntered: async () => {
+        for (let i = 0; i < 500 && entered === 0; i += 1) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        if (entered === 0) throw new Error('barrier broken: stopRuntime never entered')
+      },
+      stopEnteredCount: () => entered,
+    }
+  }
+
+  function createFrozenHandlerBoundary(
+    coordinator: Fixture['coordinator'],
+    runtime: ActiveRuntime,
+  ): { joined: Promise<unknown>; joinerStopCallbackRan: () => boolean } {
+    let joinerStopCallbackRan = false
+    const joined = (async (): Promise<unknown> => {
+      // Frozen-handler contract (replacement / explicit STOP / RESTART):
+      // join the guard, then fail closed on the SHARED outcome — never on a
+      // per-execution take that a concurrent drainer can win first.
+      const outcome = await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+        joinerStopCallbackRan = true
+      })
+      return coordinator.consumeTeardownOutcome(outcome)
+    })()
+    return { joined, joinerStopCallbackRan: () => joinerStopCallbackRan }
+  }
+
+  it('expiry↔replacement: the replacement fails closed on the shared outcome and never spawns a successor', async () => {
+    const { fixture, runtime, releaseStop, waitUntilStopEntered } = await createBarrierFixture()
+    const expiry = fixture.coordinator.handleCapabilityExpiry(runtime.capabilityGeneration!)
+    // Barrier step 1: expiry entered the guard and parked inside the stop.
+    await waitUntilStopEntered()
+    // Barrier step 2: the replacement joins the SAME in-flight guard (the
+    // join is synchronous) BEFORE the stop is allowed to fail.
+    const replacement = createFrozenHandlerBoundary(fixture.coordinator, runtime)
+    releaseStop()
+    await Promise.all([expiry, replacement.joined])
+    // Fail closed: the frozen replacement observed the stop failure on the
+    // shared outcome — a successor spawn would be gated on `undefined` and
+    // must never happen while the old process may still be alive.
+    expect(await replacement.joined).toMatchObject({ message: 'process survived' })
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    // The exact stop ran EXACTLY once (joiners never re-stop).
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    expect(replacement.joinerStopCallbackRan()).toBe(false)
+    // No retained record survives, and the ring holds the failure AT MOST
+    // once (per-outcome idempotent enqueue).
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+      .filter(entry => entry.executionId === 'exec-1'))
+      .toHaveLength(1)
+    // The generation is terminal: a stale replay cannot re-stop it.
+    const replay = await fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    expect(replay.stopFailure).toBeUndefined()
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    await fixture.coordinator.shutdown()
+  })
+
+  it('expiry↔STOP: the explicit STOP still surfaces STOP_FAILED while cleanup completes', async () => {
+    const { fixture, runtime, releaseStop, waitUntilStopEntered } = await createBarrierFixture()
+    const expiry = fixture.coordinator.handleCapabilityExpiry(runtime.capabilityGeneration!)
+    await waitUntilStopEntered()
+    const stop = createFrozenHandlerBoundary(fixture.coordinator, runtime)
+    releaseStop()
+    await Promise.all([expiry, stop.joined])
+    expect(await stop.joined).toMatchObject({ message: 'process survived' })
+    // Cleanup completed despite the failed stop: active set drained, the
+    // generation is terminal, the capability is forgotten.
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+    expect(fixture.coordinator.terminalRuntimeGenerationHighWater(runtime.identityKey)).toBe(1)
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+      .filter(entry => entry.executionId === 'exec-1'))
+      .toHaveLength(1)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('scope/account teardown↔STOP: the STOP fails closed while the scope sweep completes', async () => {
+    const { fixture, runtime, releaseStop, waitUntilStopEntered } = await createBarrierFixture()
+    const scopeSweep = fixture.coordinator.teardownRuntimesFor(() => true, 'cancelled')
+    await waitUntilStopEntered()
+    const stop = createFrozenHandlerBoundary(fixture.coordinator, runtime)
+    releaseStop()
+    await Promise.all([scopeSweep, stop.joined])
+    expect(await stop.joined).toMatchObject({ message: 'process survived' })
+    await scopeSweep
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    expect(fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+      .filter(entry => entry.executionId === 'exec-1'))
+      .toHaveLength(1)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('shutdown↔expiry: shutdown still aggregates the failure even when the concurrent drain retired the record first', async () => {
+    const { fixture, runtime, releaseStop, waitUntilStopEntered } = await createBarrierFixture()
+    // Boundary A: shutdown enters the guard and parks inside the stop.
+    const shutdown = fixture.coordinator.shutdown()
+    await waitUntilStopEntered()
+    // Barrier step 2: the consumer-less expiry joins the SAME guard.
+    const expiry = fixture.coordinator.handleCapabilityExpiry(runtime.capabilityGeneration!)
+    releaseStop()
+    // The guard resolves the expiry first (registration order): its drain
+    // retires the retained record — the OLD take-based shutdown would have
+    // found an empty map and false-passed. The shared-outcome aggregation
+    // must still reject.
+    await expect(shutdown).rejects.toThrow(
+      /coordinator shutdown: 1 runtime generation\(s\) failed to stop/,
+    )
+    await expiry
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    // Terminal hygiene holds and the ring holds the failure exactly once.
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    const ring = fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+    expect(ring.filter(entry => entry.executionId === 'exec-1')).toHaveLength(1)
+    // A retry shutdown converges: the teardown work is terminal.
+    await expect(fixture.coordinator.shutdown()).resolves.toBeUndefined()
   })
 })

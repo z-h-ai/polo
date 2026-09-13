@@ -334,22 +334,44 @@ const runtimeCoordinator = {
     activeRuntimesByKey.delete(runtimeIdentityKey(runtime.identity))
     activeRuntimesByExecution.delete(runtime.executionId)
     // REAL-coordinator semantics: a failing stopProcess is RECORDED (never
-    // thrown) — the teardown resolves after cleanup and the frozen handler
-    // boundary must consume the record itself.
+    // thrown) and the teardown resolves with the SAME immutable shared
+    // outcome carrying the failure — the frozen handler boundary consumes
+    // the OUTCOME (never a racy per-execution take).
     const stopProcess = args[2] as (() => Promise<void>) | undefined
+    let stopFailure: unknown
     try {
       await stopProcess?.()
     } catch (error) {
-      recordedRollbackStopFailures.set(runtime.executionId, error)
+      stopFailure = error
     }
+    const outcome = Object.freeze({ executionId: runtime.executionId, stopFailure })
+    if (stopFailure !== undefined) {
+      recordedRollbackStopFailures.set(runtime.executionId, outcome)
+    } else {
+      recordedRollbackStopFailures.delete(runtime.executionId)
+    }
+    return outcome
   }),
   handleUnexpectedExit: mock(async () => {}),
+  consumeTeardownOutcome: mock(
+    (outcome: { executionId: string; stopFailure: unknown }): unknown => {
+      // REAL-coordinator semantics: the failure travels ON the shared
+      // outcome; consumption only retires the retained record when it
+      // belongs to THIS exact teardown.
+      if (recordedRollbackStopFailures.get(outcome.executionId) === outcome) {
+        recordedRollbackStopFailures.delete(outcome.executionId)
+      }
+      return outcome.stopFailure
+    },
+  ),
   takeRollbackStopFailure: mock((executionId: unknown): unknown => {
-    const failure = recordedRollbackStopFailures.get(executionId as string)
-    if (failure !== undefined) {
+    const outcome = recordedRollbackStopFailures.get(executionId as string) as
+      | { stopFailure?: unknown }
+      | undefined
+    if (outcome !== undefined) {
       recordedRollbackStopFailures.delete(executionId as string)
     }
-    return failure ?? undefined
+    return outcome?.stopFailure
   }),
 }
 const recordedRollbackStopFailures = new Map<string, unknown>()
@@ -678,6 +700,7 @@ describe('local app main-process authorization boundary', () => {
     recordedRollbackStopFailures.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
+    runtimeCoordinator.consumeTeardownOutcome.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
       '@polo-ai/server-core/runtime'
     )
@@ -3245,6 +3268,7 @@ describe('local app production status projection (R34-3)', () => {
     recordedRollbackStopFailures.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
+    runtimeCoordinator.consumeTeardownOutcome.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
       '@polo-ai/server-core/runtime'
     )
@@ -3954,6 +3978,51 @@ describe('local app production status projection (R34-3)', () => {
     // replacement: it remains the fallback for the surviving process.
     expect(registryProcessOwnership.get(41)).toBe('exact-process-old')
     expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+    // R12: the outer START catch re-ran the (idempotent) rollback AFTER the
+    // replacement boundary already failed — with no capability issued and no
+    // successor generation started, that rollback must be a side-effect-free
+    // completion: the legacy artifact-scoped namespace is never touched
+    // (generation-exact isolation) and no second exact stop runs either.
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(scopedStopExact).toHaveBeenCalledTimes(1)
+  })
+
+  it('POO-54 R12: a pre-spawn START failure rolls back with zero registry calls — no legacy namespace touch, no exact stop', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Failure mode 1: the exact-version spawn fails BEFORE processEnvironment
+    // runs — no capability was signed and no runtime generation started, so
+    // the rollback is a side-effect-free completion.
+    scopedStartExact.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('bundle spawn exploded'), { code: 'RUNTIME_UNAVAILABLE' })
+    })
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    // Zero stop calls of ANY namespace: nothing was spawned, nothing to stop.
+    expect(scopedStopExact).not.toHaveBeenCalled()
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.teardownRuntime).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.revokeSignedCapability).not.toHaveBeenCalled()
+    // No retryable/diagnostic state leaks from the failed START.
+    expect(recordedRollbackStopFailures.size).toBe(0)
+    expect([...activeRuntimesByExecution.keys()]).toHaveLength(0)
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
+
+    // Failure mode 2: the gateway cannot open (pre-spawn, pre-signing) —
+    // same side-effect-free rollback contract.
+    runtimeCoordinator.ensureGateway.mockImplementationOnce(async () => {
+      throw new Error('gateway listen exploded')
+    })
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toThrow('gateway listen exploded')
+    expect(scopedStopExact).not.toHaveBeenCalled()
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(recordedRollbackStopFailures.size).toBe(0)
   })
 
   it('static START records the exact generation: liveness is true and a registration failure rolls back through the legacy stop', async () => {

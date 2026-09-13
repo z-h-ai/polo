@@ -12,6 +12,7 @@ import { createSessionlessHostLlmExecutor } from '@polo-ai/shared/agent/host-llm
 import { mainLog } from '../logger'
 import { LocalAppRuntimeManager } from './manager'
 import { ScopedLocalAppRuntimeRegistry } from './scoped-registry'
+import { shutdownLocalAppRuntimeOwners } from './shutdown-orchestration'
 import {
   catalogRuntimeScopeTupleKey,
   LocalAppRuntimeCoordinator,
@@ -187,17 +188,15 @@ export function hasLocalAppRuntimeManager(): boolean {
 export async function shutdownLocalAppRuntime(): Promise<void> {
   // Strict order: the coordinator first revokes every capability, aborts
   // App-owned work, runs the bounded cleanup lane and stops the exact
-  // process generations; only then do the manager/registry shut down their
-  // remaining lifecycle state.
-  await coordinator?.shutdown()
-  const results = await Promise.allSettled([
-    manager?.shutdown(),
-    scopedRegistry?.shutdown(),
-  ])
-  const failure = results.find(
-    (result): result is PromiseRejectedResult => result.status === 'rejected',
-  )
-  if (failure) throw failure.reason
+  // process generations; the manager/registry forced cleanup then ALWAYS
+  // runs — a coordinator exact-stop failure is captured and aggregated, it
+  // must never skip the SIGKILL/managed-process retry paths or poison a
+  // before-quit retry (see shutdownLocalAppRuntimeOwners).
+  await shutdownLocalAppRuntimeOwners({
+    ...(coordinator ? { coordinator } : {}),
+    ...(manager ? { manager } : {}),
+    ...(scopedRegistry ? { scopedRegistry } : {}),
+  })
 }
 
 export { LocalAppRuntimeManager } from './manager'
