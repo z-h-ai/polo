@@ -947,10 +947,16 @@ export class LocalAppRuntimeCoordinator {
       // Terminal hygiene: nothing survives shutdown for this instance.
       this.rollbackStopFailures.clear()
       if (failures.length > 0) {
-        throw new Error(
-          `coordinator shutdown: ${failures.length} runtime generation(s) failed to stop`,
-          { cause: failures[0] },
-        )
+        const message = `coordinator shutdown: ${failures.length} runtime generation(s) failed to stop`
+        // A single failure keeps the plain-Error shape (cause = the reason)
+        // that quit-guard callers already handle; multiple failures must
+        // preserve EVERY reason — an AggregateError keeps stop-a AND stop-b
+        // independently observable in `errors`, so no evidence is lost to a
+        // cause-only wrapper.
+        if (failures.length === 1) {
+          throw new Error(message, { cause: failures[0] })
+        }
+        throw new AggregateError(failures, message)
       }
     })()
     this.shutdownPromise = shutdownPromise

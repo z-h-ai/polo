@@ -2235,9 +2235,17 @@ describe('POO-54 R13 undefined-rejection fail-closed (tag-discriminated teardown
       workspaceId: 'ws-a',
       runtimeKind: 'static',
     })
-    await expect(fixture.coordinator.shutdown()).rejects.toThrow(
-      /coordinator shutdown: 2 runtime generation\(s\) failed to stop/,
-    )
+    const rejection = await fixture.coordinator.shutdown()
+      .then(() => null, (error: unknown) => error)
+    // Multi-failure aggregate: the count stays in the message and BOTH
+    // undefined reasons are preserved as elements of `errors` (tag-driven,
+    // so even value-less rejections travel as evidence).
+    expect(rejection).toBeInstanceOf(AggregateError)
+    expect((rejection as AggregateError).message)
+      .toMatch(/coordinator shutdown: 2 runtime generation\(s\) failed to stop/)
+    expect((rejection as AggregateError).errors).toHaveLength(2)
+    expect((rejection as AggregateError).errors[0]).toBeUndefined()
+    expect((rejection as AggregateError).errors[1]).toBeUndefined()
     expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
     expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
     // A retry shutdown converges: the terminal teardown work is complete.
@@ -2289,5 +2297,79 @@ describe('POO-54 R13 undefined-rejection fail-closed (tag-discriminated teardown
       .filter(entry => entry.executionId === 'exec-1'))
       .toHaveLength(1)
     await fixture.coordinator.shutdown()
+  })
+})
+
+/**
+ * R14 evidence-preservation regressions: a shutdown that fails MORE than
+ * one runtime generation must keep EVERY stop reason observable. The old
+ * plain-Error wrapper kept only `cause = failures[0]`, so stop-b vanished
+ * from the rejection. Multi-failure now throws AggregateError (same count
+ * message, all reasons in `errors`); the SINGLE-failure shape stays a plain
+ * Error with `cause` for existing quit-guard callers.
+ */
+describe('POO-54 R14 shutdown multi-failure evidence preservation', () => {
+  async function registerGeneration(
+    fixture: ReturnType<typeof createFixture>,
+    executionId: string,
+    runtimeGeneration: number,
+  ): Promise<void> {
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, artifactInstanceId: `artifact-${executionId}` },
+      executionId,
+      runtimeGeneration,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+  }
+
+  it('two distinct stop failures reject with AggregateError: stop-a and stop-b are EACH independently observable in errors', async () => {
+    const fixture = createFixture({
+      skipBootstrapRuntime: true,
+      stopRuntime: async runtime => {
+        throw new Error(
+          runtime.runtimeGeneration === 1 ? 'stop-a' : 'stop-b',
+        )
+      },
+    })
+    await fixture.coordinator.ensureGateway()
+    await registerGeneration(fixture, 'exec-multi-sd-1', 1)
+    await registerGeneration(fixture, 'exec-multi-sd-2', 2)
+    const rejection = await fixture.coordinator.shutdown()
+      .then(() => null, (error: unknown) => error)
+    // The count is still in the message, but the cause-only wrapper is GONE:
+    // every original reason survives in `errors` (deterministic active-map
+    // order: generation 1 → stop-a, generation 2 → stop-b).
+    expect(rejection).toBeInstanceOf(AggregateError)
+    expect((rejection as AggregateError).message)
+      .toMatch(/coordinator shutdown: 2 runtime generation\(s\) failed to stop/)
+    const errors = (rejection as AggregateError).errors
+    expect(errors).toHaveLength(2)
+    expect((errors[0] as Error).message).toBe('stop-a')
+    expect((errors[1] as Error).message).toBe('stop-b')
+    // Cleanup still completed despite both failed stops.
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+  })
+
+  it('a SINGLE stop failure keeps the plain-Error shape: not an AggregateError, cause carries the reason', async () => {
+    const fixture = createFixture({
+      skipBootstrapRuntime: true,
+      stopRuntime: async () => {
+        throw new Error('only-stop')
+      },
+    })
+    await fixture.coordinator.ensureGateway()
+    await registerGeneration(fixture, 'exec-single-sd', 1)
+    const rejection = await fixture.coordinator.shutdown()
+      .then(() => null, (error: unknown) => error)
+    expect(rejection).toBeInstanceOf(Error)
+    expect(rejection).not.toBeInstanceOf(AggregateError)
+    expect((rejection as Error).message)
+      .toBe('coordinator shutdown: 1 runtime generation(s) failed to stop')
+    expect((rejection as { cause?: unknown }).cause)
+      .toBeInstanceOf(Error)
+    expect(((rejection as { cause?: Error }).cause)?.message).toBe('only-stop')
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
   })
 })

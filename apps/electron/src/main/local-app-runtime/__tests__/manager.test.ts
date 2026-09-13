@@ -2415,3 +2415,51 @@ describe('POO-54 R13 shutdown orchestration (undefined rejections fail closed by
     expect((failure as AggregateError).errors).toHaveLength(2)
   })
 })
+
+describe('POO-54 R14 shutdown orchestration (coordinator AggregateError stays a WHOLE failure: nested, inner errors never lost)', () => {
+  it('a coordinator multi-generation AggregateError nests intact in the orchestration aggregate and rethrows RAW when it is the only failure', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const inner = new AggregateError(
+      [new Error('stop-a'), new Error('stop-b')],
+      'coordinator shutdown: 2 runtime generation(s) failed to stop',
+    )
+    let managerShutdownCalls = 0
+    // Layer 1: the coordinator AggregateError is the ONLY failure — the
+    // single-failure path must rethrow it RAW (no re-wrap that could imply
+    // extraction), so both inner reasons stay reachable via `errors`.
+    const onlyFailure = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          throw inner
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    expect(onlyFailure).toBe(inner)
+    expect((onlyFailure as AggregateError).errors.map(error => (error as Error).message))
+      .toEqual(['stop-a', 'stop-b'])
+    // Layer 2: with a manager failure too, the coordinator AggregateError
+    // is nested AS ONE ELEMENT — never flattened away, never reduced to a
+    // `failures[0]`-style single reason.
+    const bothFailure = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          throw inner
+        },
+      },
+      manager: {
+        shutdown: async () => {
+          managerShutdownCalls += 1
+          throw new Error('manager force-stop exploded')
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    expect(bothFailure).toBeInstanceOf(AggregateError)
+    const reasons = (bothFailure as AggregateError).errors
+    expect(reasons).toHaveLength(2)
+    expect(reasons[0]).toBe(inner)
+    expect((reasons[0] as AggregateError).errors.map(error => (error as Error).message))
+      .toEqual(['stop-a', 'stop-b'])
+    expect((reasons[1] as Error).message).toBe('manager force-stop exploded')
+    expect(managerShutdownCalls).toBe(1)
+  })
+})
