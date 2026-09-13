@@ -136,6 +136,12 @@ export interface ExactVersionStartHooks {
    * runtime generation before tearing anything down.
    */
   runtimeKey?: string
+  /**
+   * Process/lifecycle/log namespace for the exact-version runtime. Defaults
+   * to the install appId; the scoped registry passes the full runtime
+   * identity namespace so different versions never collide.
+   */
+  processAppId?: string
 }
 
 export interface ExactVersionStartResult extends LocalAppStartResult {
@@ -618,25 +624,31 @@ export class LocalAppRuntimeManager {
   ): Promise<ExactVersionStartResult> {
     const safeAppId = validateRequestIdentifier(appId, 'appId')
     const safeVersion = validateRequestIdentifier(version, 'version')
+    // The install stays in the artifact-scoped storage namespace, but the
+    // process, lifecycle queue and logs live under the FULL runtime identity
+    // (including versionId via `processAppId`): different versions of one
+    // artifact are different runtimes and must never share — or stop — each
+    // other's process namespace.
+    const processAppId = hooks.processAppId ?? safeAppId
     if (this.shuttingDown) {
       return Promise.reject(new LocalAppRuntimeError('START_FAILED', 'Polo is shutting down'))
     }
-    const existing = this.startPromises.get(safeAppId)
+    const existing = this.startPromises.get(processAppId)
     if (existing) {
       return Promise.reject(new LocalAppRuntimeError(
         'INVALID_REQUEST',
-        `${safeAppId} already has a start operation in progress`,
+        `${processAppId} already has a start operation in progress`,
       ))
     }
-    return this.trackStartOperation(safeAppId, async (signal) => {
-      // A previous runtime generation never survives an exact start: stop it
-      // first so the new generation is the single instance.
-      const running = this.runtimes.get(safeAppId)
+    return this.trackStartOperation(processAppId, async (signal) => {
+      // A previous runtime generation of the SAME runtime identity never
+      // survives an exact start; a DIFFERENT version's namespace is untouched.
+      const running = this.runtimes.get(processAppId)
       if (running) {
         await this.stopRuntime(running)
-        if (this.runtimes.get(safeAppId) === running) this.runtimes.delete(safeAppId)
+        if (this.runtimes.get(processAppId) === running) this.runtimes.delete(processAppId)
       }
-      this.throwIfStartCancelled(signal, safeAppId)
+      this.throwIfStartCancelled(signal, processAppId)
       const metadata = await this.readMetadata(safeAppId)
       const record = metadata?.versions[safeVersion]
       if (!metadata || !record) {
@@ -648,11 +660,12 @@ export class LocalAppRuntimeManager {
       const runtimeGeneration = ++this.runtimeGenerationCounter
       const handle = await this.startVersion(metadata, safeVersion, signal, {
         runtimeGeneration,
+        runtimeAppId: processAppId,
         hooks,
         ...(hooks.runtimeKey ? { runtimeKey: hooks.runtimeKey } : {}),
       })
       return {
-        appId: safeAppId,
+        appId: processAppId,
         version: safeVersion,
         url: handle.url,
         port: handle.port,
@@ -1939,21 +1952,26 @@ export class LocalAppRuntimeManager {
     options: {
       runtimeGeneration?: number
       runtimeKey?: string
+      runtimeAppId?: string
       hooks?: ExactVersionStartHooks
     } = {},
   ): Promise<LocalAppStartResult> {
+    // Install storage stays under the install appId; the RUNNING runtime
+    // namespace (statuses/runtimes/logs/process env) is the full runtime
+    // identity namespace.
+    const runtimeAppId = options.runtimeAppId ?? metadata.appId
     if (this.shuttingDown) {
-      throw new LocalAppRuntimeError('START_FAILED', `Start of ${metadata.appId} was cancelled during shutdown`)
+      throw new LocalAppRuntimeError('START_FAILED', `Start of ${runtimeAppId} was cancelled during shutdown`)
     }
-    this.throwIfStartCancelled(signal, metadata.appId)
+    this.throwIfStartCancelled(signal, runtimeAppId)
     const record = metadata.versions[version]
     if (!record) throw new LocalAppRuntimeError('NOT_INSTALLED', `Version ${version} is not installed`)
     const { manifest } = record
     const versionDir = this.getVersionDir(metadata.appId, version)
     await this.validateRequiredFiles(versionDir, manifest)
     await mkdir(this.getDataDir(metadata.appId), { recursive: true })
-    this.statuses.set(metadata.appId, {
-      appId: metadata.appId,
+    this.statuses.set(runtimeAppId, {
+      appId: runtimeAppId,
       status: 'starting',
       currentVersion: metadata.currentVersion,
       runningVersion: version,
@@ -1962,7 +1980,7 @@ export class LocalAppRuntimeManager {
     let handle: ManagedRuntime
     if (manifest.runtime === 'static') {
       // Static runtimes never receive a capability or platform environment.
-      handle = await this.startStaticRuntime(metadata.appId, version, versionDir, manifest)
+      handle = await this.startStaticRuntime(runtimeAppId, version, versionDir, manifest)
     } else {
       const runtimeGeneration = options.runtimeGeneration
       let hookEnvironment: { env: NodeJS.ProcessEnv; sensitiveValues: string[] } | undefined
@@ -1973,7 +1991,7 @@ export class LocalAppRuntimeManager {
         })
       }
       handle = await this.startProcessRuntime(
-        metadata.appId,
+        runtimeAppId,
         version,
         versionDir,
         manifest,
@@ -1984,7 +2002,7 @@ export class LocalAppRuntimeManager {
     }
     handle.runtimeGeneration = options.runtimeGeneration
     handle.runtimeKey = options.runtimeKey
-    this.runtimes.set(metadata.appId, handle)
+    this.runtimes.set(runtimeAppId, handle)
     try {
       await this.waitForHealthcheck(
         handle,
@@ -2013,8 +2031,8 @@ export class LocalAppRuntimeManager {
       throw error
     }
     this.assertRuntimeHandleCurrentAndLive(handle)
-    this.statuses.set(metadata.appId, {
-      appId: metadata.appId,
+    this.statuses.set(runtimeAppId, {
+      appId: runtimeAppId,
       status: 'running',
       currentVersion: metadata.currentVersion,
       runningVersion: version,
@@ -2022,9 +2040,9 @@ export class LocalAppRuntimeManager {
       port: handle.port,
       ...(handle.child?.pid ? { pid: handle.child.pid } : {}),
     })
-    this.appendLog(metadata.appId, 'system', `Healthy at ${handle.url}`)
+    this.appendLog(runtimeAppId, 'system', `Healthy at ${handle.url}`)
     return {
-      appId: metadata.appId,
+      appId: runtimeAppId,
       version,
       url: handle.url,
       port: handle.port,

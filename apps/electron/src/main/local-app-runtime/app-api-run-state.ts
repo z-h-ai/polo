@@ -69,15 +69,26 @@ const queryKey = (c: number, r: string, q: string) => `${c}:${r}:${q}`
 export class AppApiRunState {
   private readonly runs = new Map<string, RunRecord>()
   private readonly queries = new Map<string, QueryRecord>()
+  /** Global runId → owning capabilityGeneration: a runId can never be reused
+   * by another generation — such requests fail closed as run_state_conflict. */
+  private readonly runIdOwners = new Map<string, number>()
 
   private runKey(c: number, r: string): string {
     return `${c}:${r}`
   }
 
-  createRun(capabilityGeneration: number, runId: string, startFingerprint: string): RunRecord {
+  /**
+   * Creates a run owned by this capability generation. Returns undefined
+   * when the runId is already owned by ANOTHER generation (Plan: the request
+   * must fail closed as run_state_conflict).
+   */
+  createRun(capabilityGeneration: number, runId: string, startFingerprint: string): RunRecord | undefined {
+    const owner = this.runIdOwners.get(runId)
+    if (owner !== undefined && owner !== capabilityGeneration) return undefined
     const key = this.runKey(capabilityGeneration, runId)
     const existing = this.runs.get(key)
     if (existing) return existing
+    this.runIdOwners.set(runId, capabilityGeneration)
     const record: RunRecord = { status: 'starting_admin', startFingerprint }
     this.runs.set(key, record)
     return record
@@ -237,6 +248,9 @@ export class AppApiRunState {
     for (const key of this.queries.keys()) {
       if (key.startsWith(prefix)) this.queries.delete(key)
     }
+    if (this.runIdOwners.get(runId) === capabilityGeneration) {
+      this.runIdOwners.delete(runId)
+    }
   }
 
   /** Releases one executing reservation (e.g. pre-executor failure). */
@@ -269,6 +283,9 @@ export class AppApiRunState {
     }
     for (const key of this.runs.keys()) {
       if (key.startsWith(prefix)) this.runs.delete(key)
+    }
+    for (const [runId, owner] of this.runIdOwners) {
+      if (owner === capabilityGeneration) this.runIdOwners.delete(runId)
     }
   }
 

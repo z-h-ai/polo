@@ -68,13 +68,32 @@ export interface AppApiErrorBody {
   error: { code: AppApiStableErrorCode }
 }
 
-const appApiUuid = z.string().uuid()
+const APP_API_UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/** Content-free identifiers are strict UUID v4 — v1/v5/nil are rejected. */
+const appApiUuid = z
+  .string()
+  .regex(APP_API_UUID_V4_PATTERN, 'must be a UUID v4')
+
+/** Plan wire limits are UTF-8 BYTE bounds, not JS character counts. */
+const byteBoundedString = (maxBytes: number, minBytes = 1) =>
+  z
+    .string()
+    .refine(
+      value => {
+        const bytes = Buffer.byteLength(value, 'utf8')
+        return bytes >= minBytes && bytes <= maxBytes
+      },
+      { message: `must be between ${minBytes} and ${maxBytes} UTF-8 bytes` },
+    )
+
 export const AppApiRunStartSchema = z.object({ runId: appApiUuid }).strict()
 export const AppAiQuerySchema = z.object({
   runId: appApiUuid,
   requestId: appApiUuid,
-  prompt: z.string().min(1).max(1_048_576),
-  systemPrompt: z.string().max(524_288).optional(),
+  prompt: byteBoundedString(1_048_576),
+  systemPrompt: byteBoundedString(524_288, 0).optional(),
   responseFormat: z.enum(['text', 'json_object']).optional(),
   maxOutputTokens: z.number().int().min(1).max(8192),
   timeoutMs: z.number().int().min(1000).max(120_000),

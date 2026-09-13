@@ -10,6 +10,11 @@ import {
   type ProductSpaceAppRuntimeIdentity,
 } from '@polo-ai/shared/product-spaces'
 import { AdminError } from '@polo-ai/shared/admin'
+import type {
+  AdminFinishAppRunInput,
+  AdminRecordAppUsageInput,
+  AdminStartAppRunInput,
+} from '@polo-ai/shared/admin'
 import type { HostLlmPublicResult } from '@polo-ai/shared/agent/host-llm-executor'
 import { getAppRuntimeCenter } from '@polo-ai/server-core/runtime'
 import { unregisterProductSpaceExecution } from '@polo-ai/server-core/runtime/product-space-executions'
@@ -26,16 +31,16 @@ import {
 
 export interface CoordinatorAdminAdapter {
   startAppRun(
-    input: Record<string, unknown>,
+    input: AdminStartAppRunInput,
     options?: { signal?: AbortSignal },
   ): Promise<unknown>
   recordAppUsage(
-    input: Record<string, unknown>,
+    input: AdminRecordAppUsageInput,
     options?: { signal?: AbortSignal },
   ): Promise<unknown>
   finishAppRun(
     runId: string,
-    input: Record<string, unknown>,
+    input: AdminFinishAppRunInput,
     options?: { signal?: AbortSignal },
   ): Promise<unknown>
 }
@@ -77,6 +82,11 @@ export interface RuntimeCoordinatorAdapters {
     runtimeGeneration: number
   }): Promise<void>
   now?: () => number
+  /**
+   * Schedules the generation-bound capability expiry task. Defaults to
+   * setTimeout/clearTimeout; tests inject a deterministic scheduler.
+   */
+  scheduleExpiry?(delayMs: number, callback: () => void): () => void
 }
 
 export interface CapabilitySigning {
@@ -161,6 +171,9 @@ export class LocalAppRuntimeCoordinator {
   private readonly active = new Map<string, ActiveRuntime>()
   private readonly inFlight = new Map<string, InFlightQuery>()
   private readonly expiryHandled = new Set<number>()
+  private readonly expiryTimers = new Map<number, () => void>()
+  /** Unique in-progress/done teardown per identityKey+runtimeGeneration. */
+  private readonly teardownGuarantees = new Map<string, Promise<void>>()
   private shuttingDown = false
 
   constructor(private readonly adapters: RuntimeCoordinatorAdapters) {}
@@ -221,6 +234,7 @@ export class LocalAppRuntimeCoordinator {
       runtimeGeneration: input.runtimeGeneration,
       scopeGeneration: input.scopeGeneration,
     }, this.now())
+    this.armCapabilityExpiry(issued)
     const existing = this.active.get(identityKey)
     if (existing && existing.capabilityGeneration === undefined) {
       existing.capabilityGeneration = issued.capabilityGeneration
@@ -233,6 +247,32 @@ export class LocalAppRuntimeCoordinator {
         POLO_APP_API_TOKEN: issued.token,
       },
       sensitiveValues: [issued.token],
+    }
+  }
+
+  /**
+   * Arms the generation-bound TTL task at issue time: an idle runtime is
+   * torn down when its capability expires even without any further request
+   * (the gateway's expired-token detection remains as a backstop).
+   */
+  private armCapabilityExpiry(issued: {
+    capabilityGeneration: number
+    expiresAt: number
+  }): void {
+    const cancel = (this.adapters.scheduleExpiry ?? ((delayMs, callback) => {
+      const timer = setTimeout(callback, delayMs)
+      return () => clearTimeout(timer)
+    }))(Math.max(0, issued.expiresAt - this.now()), () => {
+      void this.handleCapabilityExpiry(issued.capabilityGeneration).catch(() => {})
+    })
+    this.expiryTimers.set(issued.capabilityGeneration, cancel)
+  }
+
+  private cancelCapabilityExpiry(capabilityGeneration: number): void {
+    const cancel = this.expiryTimers.get(capabilityGeneration)
+    if (cancel) {
+      this.expiryTimers.delete(capabilityGeneration)
+      cancel()
     }
   }
 
@@ -274,6 +314,7 @@ export class LocalAppRuntimeCoordinator {
 
   /** Revokes a capability whose post-hook start failed. */
   revokeSignedCapability(capabilityGeneration: number): void {
+    this.cancelCapabilityExpiry(capabilityGeneration)
     this.capabilities.revoke(capabilityGeneration)
     this.runState.releaseCapability(capabilityGeneration)
     this.capabilities.forget(capabilityGeneration)
@@ -334,13 +375,40 @@ export class LocalAppRuntimeCoordinator {
    * Fail-closed teardown of one runtime generation: revoke → abort → bounded
    * reconfirm lane → (caller stops the process) → generation-CAS projection
    * clear → release capability resources. Best-effort at every step.
+   *
+   * The teardown is a UNIQUE terminal operation per identityKey+generation:
+   * concurrent or repeated triggers (expiry, stop, replacement, shutdown,
+   * revoked-token replay) share the same in-flight/done promise, so the
+   * exact-generation stop can never run twice. The guard is released with a
+   * generation-CAS once the teardown settles.
    */
   async teardownRuntime(
     runtime: ActiveRuntime,
     finalStatus: 'cancelled' | 'failed' | 'unknown',
     stopProcess?: () => Promise<void>,
   ): Promise<void> {
+    const guardKey = `${runtime.identityKey}:${runtime.runtimeGeneration}`
+    const inProgress = this.teardownGuarantees.get(guardKey)
+    if (inProgress) return inProgress
+    const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
+    this.teardownGuarantees.set(guardKey, teardown)
+    void teardown
+      .catch(() => {})
+      .finally(() => {
+        if (this.teardownGuarantees.get(guardKey) === teardown) {
+          this.teardownGuarantees.delete(guardKey)
+        }
+      })
+    return teardown
+  }
+
+  private async performTeardown(
+    runtime: ActiveRuntime,
+    finalStatus: 'cancelled' | 'failed' | 'unknown',
+    stopProcess?: () => Promise<void>,
+  ): Promise<void> {
     if (runtime.capabilityGeneration !== undefined) {
+      this.cancelCapabilityExpiry(runtime.capabilityGeneration)
       this.capabilities.revoke(runtime.capabilityGeneration)
     }
     runtime.controller.abort()
@@ -435,7 +503,7 @@ export class LocalAppRuntimeCoordinator {
           if (!finishOk) return
         } else if (this.runState.canFinishRun(capabilityGeneration, runId)) {
           const finishOk = await runBounded(signal =>
-            admin.finishAppRun(runId, { status: finalStatus }, { signal }))
+            admin.finishAppRun(runId, { status: finalStatus } satisfies AdminFinishAppRunInput, { signal }))
           if (!finishOk) return
         } else {
           // Not cleanly finishable: leave reconciliation to the POL-102
@@ -454,7 +522,7 @@ export class LocalAppRuntimeCoordinator {
   private adminStartBody(
     runtime: ActiveRuntime,
     runId: string,
-  ): Record<string, unknown> {
+  ): AdminStartAppRunInput {
     return {
       runId,
       workspaceId: runtime.workspaceId,
@@ -471,7 +539,7 @@ export class LocalAppRuntimeCoordinator {
     runId: string,
     requestId: string,
     outcome: QueryOutcome,
-  ): Record<string, unknown> {
+  ): AdminRecordAppUsageInput {
     const inputTokens = outcome.kind === 'success'
       ? outcome.usage.inputTokens
       : outcome.kind === 'no_output'
@@ -488,6 +556,8 @@ export class LocalAppRuntimeCoordinator {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true
+    for (const cancel of this.expiryTimers.values()) cancel()
+    this.expiryTimers.clear()
     const runtimes = [...this.active.values()]
     for (const runtime of runtimes) {
       if (runtime.capabilityGeneration !== undefined) {
@@ -573,14 +643,27 @@ export class LocalAppRuntimeCoordinator {
       || existing.status === 'finishing' || existing.status === 'finish_unconfirmed')) {
       return { errorCode: 'run_state_conflict' }
     }
-    const record = existing ?? this.runState.createRun(capGen, runId, fingerprint(body))
+    let record = existing
+    if (!record) {
+      const created = this.runState.createRun(capGen, runId, fingerprint(body))
+      if (!created) {
+        // The runId is owned by another capability generation.
+        return { errorCode: 'run_state_conflict' }
+      }
+      record = created
+    }
     record.status = existing?.status === 'start_unconfirmed'
       ? 'start_unconfirmed'
       : 'starting_admin'
     try {
-      await this.adapters.admin.startAppRun(this.adminStartBody(runtime, runId), {
-        signal: anySignal([signal, runtime.controller.signal]),
-      })
+      const composed = anySignal([signal, runtime.controller.signal])
+      try {
+        await this.adapters.admin.startAppRun(this.adminStartBody(runtime, runId), {
+          signal: composed.signal,
+        })
+      } finally {
+        composed.dispose()
+      }
     } catch (error) {
       if (error instanceof AdminError && error.errorCode === 'insufficient_credit') {
         this.runState.releaseRun(capGen, runId)
@@ -641,9 +724,14 @@ export class LocalAppRuntimeCoordinator {
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode }> {
     const capGen = capabilityGenerationOf(runtime)
     try {
-      await this.adapters.admin.finishAppRun(runId, { status }, {
-        signal: anySignal([signal, runtime.controller.signal]),
-      })
+      const composed = anySignal([signal, runtime.controller.signal])
+      try {
+        await this.adapters.admin.finishAppRun(runId, { status }, {
+          signal: composed.signal,
+        })
+      } finally {
+        composed.dispose()
+      }
     } catch (error) {
       if (error instanceof AdminError && error.errorCode === 'run_finalized') {
         this.runState.markTerminal(capGen, runId, 'server')
@@ -684,20 +772,25 @@ export class LocalAppRuntimeCoordinator {
       return this.replayQuery(runtime, runId, requestId, admission.record)
     }
     // Admitted: resolve the trusted connection/model, then run one dedicated
-    // executor under its own abort controller.
-    const rootPath = await this.adapters.resolveWorkspaceRoot(runtime.workspaceId)
-    if (!rootPath) {
-      this.releaseReservation(capGen, runId, requestId)
-      return { errorCode: 'host_configuration_unavailable' }
+    // executor under its own abort controller. Everything between admission
+    // and provider start shares ONE failure boundary: any exception releases
+    // the full reservation so a retry can be admitted cleanly.
+    let rootPath: string | null
+    let connectionSlug: string | null | undefined
+    let model: string | undefined
+    try {
+      rootPath = await this.adapters.resolveWorkspaceRoot(runtime.workspaceId)
+      if (!rootPath) return this.failAdmittedQuery(capGen, runId, requestId, 'host_configuration_unavailable')
+      const workspaceConfig = this.adapters.loadWorkspaceConfig(rootPath)
+      connectionSlug = workspaceConfig?.defaults?.defaultLlmConnection
+        ?? this.adapters.getDefaultLlmConnection()
+      if (!connectionSlug) {
+        return this.failAdmittedQuery(capGen, runId, requestId, 'host_configuration_unavailable')
+      }
+      model = workspaceConfig?.defaults?.model
+    } catch {
+      return this.failAdmittedQuery(capGen, runId, requestId, 'host_failed')
     }
-    const workspaceConfig = this.adapters.loadWorkspaceConfig(rootPath)
-    const connectionSlug = workspaceConfig?.defaults?.defaultLlmConnection
-      ?? this.adapters.getDefaultLlmConnection()
-    if (!connectionSlug) {
-      this.releaseReservation(capGen, runId, requestId)
-      return { errorCode: 'host_configuration_unavailable' }
-    }
-    const model = workspaceConfig?.defaults?.model
     const controller = new AbortController()
     const abortForward = () => controller.abort()
     if (signal.aborted) abortForward()
@@ -784,6 +877,17 @@ export class LocalAppRuntimeCoordinator {
     this.runState.releaseQuery(capGen, runId, requestId)
   }
 
+  /** Failure boundary for an admitted query before the provider started. */
+  private failAdmittedQuery(
+    capGen: number,
+    runId: string,
+    requestId: string,
+    code: AppApiStableErrorCode,
+  ): { data?: unknown; errorCode?: AppApiStableErrorCode } {
+    this.releaseReservation(capGen, runId, requestId)
+    return { errorCode: code }
+  }
+
   private async sendReceipt(
     runtime: ActiveRuntime,
     runId: string,
@@ -792,10 +896,15 @@ export class LocalAppRuntimeCoordinator {
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode } | null> {
     const capGen = capabilityGenerationOf(runtime)
     try {
-      await this.adapters.admin.recordAppUsage(
-        this.receiptBody(runtime, runId, requestId, outcome),
-        { signal: anySignal([runtime.controller.signal]) },
-      )
+      const composed = anySignal([runtime.controller.signal])
+      try {
+        await this.adapters.admin.recordAppUsage(
+          this.receiptBody(runtime, runId, requestId, outcome),
+          { signal: composed.signal },
+        )
+      } finally {
+        composed.dispose()
+      }
     } catch (error) {
       if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') {
         this.runState.noteReceiptRejected(capGen, runId, requestId)
@@ -877,11 +986,25 @@ function fingerprint(body: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex')
 }
 
-function anySignal(signals: Array<AbortSignal>): AbortSignal | undefined {
+function anySignal(signals: Array<AbortSignal>): {
+  signal: AbortSignal | undefined
+  dispose: () => void
+} {
   const controller = new AbortController()
-  for (const signal of signals) {
-    if (signal.aborted) controller.abort()
-    else signal.addEventListener('abort', () => controller.abort(), { once: true })
+  const disposers: Array<() => void> = []
+  for (const source of signals) {
+    if (source.aborted) {
+      controller.abort()
+      continue
+    }
+    const listener = () => controller.abort()
+    source.addEventListener('abort', listener, { once: true })
+    disposers.push(() => source.removeEventListener('abort', listener))
   }
-  return signals.length > 0 ? controller.signal : undefined
+  return {
+    signal: signals.length > 0 ? controller.signal : undefined,
+    dispose: () => {
+      for (const dispose of disposers.splice(0)) dispose()
+    },
+  }
 }

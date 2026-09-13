@@ -24,6 +24,12 @@ interface FixtureOptions {
   executorFactoryThrows?: boolean
   /** The usage POST hangs until its AbortSignal fires, then rejects. */
   usageHangsUntilAbort?: boolean
+  /** resolveWorkspaceRoot throws synchronously/asynchronously. */
+  resolveWorkspaceRootThrows?: boolean
+  /** loadWorkspaceConfig throws. */
+  loadWorkspaceConfigThrows?: boolean
+  /** Captures the armed capability-expiry callbacks for deterministic tests. */
+  onExpiryArmed?: (fire: () => void) => void
   /** executor.execute rejects instead of returning a Host terminal. */
   executeRejection?: boolean
   /** execute hangs until its abort signal fires, then rejects. */
@@ -123,9 +129,20 @@ function createFixture(options: FixtureOptions = {}) {
         dispose: async () => {},
       }
     },
-    resolveWorkspaceRoot: workspaceId => (workspaceId === 'ws-a' ? '/root-a' : null),
-    loadWorkspaceConfig: () => ({ defaults: { defaultLlmConnection: 'conn-1', model: 'model-x' } }),
+    resolveWorkspaceRoot: workspaceId => {
+      if (options.resolveWorkspaceRootThrows) throw new Error('workspace probe exploded')
+      return workspaceId === 'ws-a' ? '/root-a' : null
+    },
+    loadWorkspaceConfig: () => {
+      if (options.loadWorkspaceConfigThrows) throw new Error('workspace config exploded')
+      return { defaults: { defaultLlmConnection: 'conn-1', model: 'model-x' } }
+    },
     getDefaultLlmConnection: () => null,
+    scheduleExpiry: (delayMs, callback) => {
+      void delayMs
+      options.onExpiryArmed?.(callback)
+      return () => {}
+    },
     stopRuntime: async runtime => {
       stopRuntimeCalls.push(runtime.runtimeGeneration)
       await options.stopRuntime?.(runtime)
@@ -870,5 +887,163 @@ describe('POO-54 round-1 fix regressions (gateway/coordinator)', () => {
     expect(replay.status).toBe(502)
     expect(rejectingExecute.executorCount()).toBe(1)
     await rejectingExecute.coordinator.shutdown()
+  })
+})
+
+describe('POO-54 R2 fix regressions (gateway/coordinator)', () => {
+  it('capability expiry tears down an IDLE runtime via the generation-bound task with no further requests', async () => {
+    const expiryCallbacks: Array<() => void> = []
+    const fixture = createFixture({
+      executorResults: [() => completed('x', 1, 1)],
+      onExpiryArmed: fire => expiryCallbacks.push(fire),
+    })
+    const { getAppRuntimeCenter, resetAppRuntimeCenterForTests } =
+      await import('@polo-ai/server-core/runtime')
+    resetAppRuntimeCenterForTests()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = await startRun(fixture)
+    const query = { runId, requestId: uuid(), prompt: 'p', maxOutputTokens: 8, timeoutMs: 5_000 }
+    expect((await fixture.post('/ai/query', query)).status).toBe(200)
+    // The capability was armed exactly once at issue time.
+    expect(expiryCallbacks).toHaveLength(1)
+    // Idle past the TTL with NO further request: the armed task fires.
+    fixture.setNow(1_000_000 + 24 * 60 * 60 * 1000 + 1)
+    expiryCallbacks[0]!()
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (!fixture.coordinator.getActiveRuntime(IDENTITY)) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    // The projection is cleared and the settled run is reconciled as unknown.
+    expect(getAppRuntimeCenter().findByIdentity(IDENTITY)).toBeUndefined()
+    expect(fixture.adminCalls.at(-1)).toMatchObject({ method: 'finish', runId })
+    const finishedCall = fixture.adminCalls.filter(c => c.method === 'finish').at(-1)
+    expect((finishedCall!.body as { status: string }).status).toBe('unknown')
+    // A later request with the expired token is still refused.
+    const refused = await fixture.post('/run/start', startBody())
+    expect(refused.status).toBe(401)
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    await fixture.coordinator.shutdown()
+    resetAppRuntimeCenterForTests()
+  })
+
+  it('a revoked-token replay during a hung teardown does NOT trigger a second teardown/stop', async () => {
+    const fixture = createFixture({
+      executorResults: [() => completed('t', 1, 1)],
+      usageHangsUntilAbort: true,
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = await startRun(fixture)
+    const pendingQuery = fixture.post('/ai/query', { ...queryBody(), runId })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)
+    // Explicit teardown starts and HANGS inside the cleanup lane (hung usage
+    // reconfirmation up to the 5s request budget). The capability is already
+    // revoked at this point. The exact-generation stop is counted directly.
+    let stopCount = 0
+    const teardownPromise = fixture.coordinator.teardownRuntime(runtime!, 'cancelled', async () => {
+      stopCount += 1
+    })
+    await new Promise(resolve => setTimeout(resolve, 250))
+    // Old-token replay mid-teardown: 401, and the expiry path must reuse the
+    // in-flight teardown instead of starting a second one.
+    const replay = await fixture.post('/run/start', startBody())
+    expect(replay.status).toBe(401)
+    await teardownPromise
+    // Exactly ONE exact-generation stop for the whole generation — a second
+    // teardown via the revoked-token replay must never re-stop it.
+    expect(stopCount).toBe(1)
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    await pendingQuery.catch(() => null)
+    await fixture.coordinator.shutdown()
+  }, 20_000)
+
+  it('pre-executor resolution failures release the reservation: retries re-admit instead of request_in_progress', async () => {
+    for (const throws of ['resolve', 'config'] as const) {
+      const fixture = createFixture({
+        resolveWorkspaceRootThrows: throws === 'resolve',
+        loadWorkspaceConfigThrows: throws === 'config',
+      })
+      await fixture.post('/run/start', undefined).catch(() => null)
+      const runId = await startRun(fixture)
+      const query = { runId, requestId: uuid(), prompt: 'p', maxOutputTokens: 8, timeoutMs: 5_000 }
+      const first = await fixture.post('/ai/query', query)
+      expect(first.status).toBe(502)
+      expect(first.json.error.code).toBe('host_failed')
+      expect(fixture.executorCount()).toBe(0)
+      // The full reservation was released: the retry is re-admitted.
+      const retry = await fixture.post('/ai/query', query)
+      expect(retry.status).toBe(502)
+      expect(retry.json.error.code).toBe('host_failed')
+      await fixture.coordinator.shutdown()
+    }
+  })
+
+  it('the same runId owned by generation 1 is refused for generation 2', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = uuid()
+    const first = await fixture.post('/run/start', { runId })
+    expect(first.status).toBe(200)
+    // A second capability generation (different runtime identity).
+    const identityB = { ...IDENTITY, versionId: 'version-b' }
+    const signingB = fixture.coordinator.signCapability({
+      identity: identityB,
+      workspaceId: 'ws-a',
+      executionId: 'exec-b',
+      runtimeKind: 'python',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: identityB,
+      executionId: 'exec-b',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signingB.capabilityGeneration,
+    })
+    const second = await fixture.post('/run/start', { runId }, { token: signingB.token })
+    expect(second.status).toBe(409)
+    expect(second.json.error.code).toBe('run_state_conflict')
+    // The owner generation is unaffected and can still use its run.
+    const finish = await fixture.post('/run/finish', { runId, status: 'completed' })
+    expect(finish.status).toBe(200)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('abort-source listeners do not accumulate across successful Admin requests', async () => {
+    const fixture = createFixture({
+      executorResults: [],
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    let added = 0
+    let removed = 0
+    const controllerSignal = runtime.controller.signal as unknown as {
+      addEventListener: (type: string, listener: unknown, options?: unknown) => void
+      removeEventListener: (type: string, listener: unknown, options?: unknown) => void
+    }
+    const originalAdd = controllerSignal.addEventListener.bind(controllerSignal)
+    const originalRemove = controllerSignal.removeEventListener.bind(controllerSignal)
+    controllerSignal.addEventListener = (...args: Parameters<typeof originalAdd>) => {
+      added += 1
+      return originalAdd(...args)
+    }
+    controllerSignal.removeEventListener = (...args: Parameters<typeof originalRemove>) => {
+      removed += 1
+      return originalRemove(...args)
+    }
+    const baselineAdd = added
+    const baselineRemove = removed
+    for (let index = 0; index < 5; index += 1) {
+      const response = await fixture.post('/run/start', startBody())
+      expect(response.status).toBe(200)
+    }
+    // Every composed signal disposed its source-signal listeners.
+    expect(added - baselineAdd).toBe(removed - baselineRemove)
+    await fixture.coordinator.shutdown()
   })
 })

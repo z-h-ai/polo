@@ -203,6 +203,9 @@ mock.module('@polo-ai/shared/config', () => ({
   updateLlmConnection: () => true,
   deleteLlmConnection: () => true,
   setDefaultLlmConnection: () => true,
+  // Trusted caller-Workspace existence check (POO-54 START path); session
+  // ending tests never start a ProductSpace runtime.
+  getWorkspaceByNameOrId: () => null,
 }))
 
 mock.module('@polo-ai/shared/admin', () => ({

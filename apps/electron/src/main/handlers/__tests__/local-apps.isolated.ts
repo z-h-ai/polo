@@ -23,6 +23,7 @@ function createDeferred<T>() {
 }
 
 let signedInAccountId: string | null = 'account-a'
+let workspaceExists = true
 let accessMode: 'online' | 'offline' | 'denied' = 'online'
 let accountAccessDenied = false
 let appAccessDenied = false
@@ -218,6 +219,7 @@ const scopedRetainedManagementLogs = mock(async (
 })
 const isInstalledAndReady = mock(async () => true)
 const activeRuntimesByKey = new Map<string, Record<string, unknown>>()
+const activeRuntimesByExecution = new Map<string, Record<string, unknown>>()
 
 function runtimeIdentityKey(identity: {
   accountId: string
@@ -302,6 +304,10 @@ const runtimeCoordinator = {
       controller: new AbortController(),
     }
     activeRuntimesByKey.set(runtimeIdentityKey(identity), runtime)
+    activeRuntimesByExecution.set(
+      (input as { executionId: string }).executionId,
+      runtime,
+    )
     return runtime
   }),
   getActiveRuntime: mock((identity: {
@@ -311,17 +317,22 @@ const runtimeCoordinator = {
     versionId: string
     version: string
   }): unknown => activeRuntimesByKey.get(runtimeIdentityKey(identity)) ?? null),
-  getActiveRuntimeByExecution: mock((_executionId: unknown): unknown => null),
+  getActiveRuntimeByExecution: mock((executionId: unknown): unknown =>
+    activeRuntimesByExecution.get(executionId as string) ?? null),
   revokeSignedCapability: mock(() => {}),
   teardownRuntime: mock(async (...args: unknown[]) => {
-    const runtime = args[0] as { identity: {
-      accountId: string
-      productSpaceId: string
-      artifactInstanceId: string
-      versionId: string
-      version: string
-    } }
+    const runtime = args[0] as {
+      identity: {
+        accountId: string
+        productSpaceId: string
+        artifactInstanceId: string
+        versionId: string
+        version: string
+      }
+      executionId: string
+    }
     activeRuntimesByKey.delete(runtimeIdentityKey(runtime.identity))
+    activeRuntimesByExecution.delete(runtime.executionId)
     const stopProcess = args[2] as (() => Promise<void>) | undefined
     await stopProcess?.()
   }),
@@ -386,6 +397,9 @@ mock.module('@polo-ai/shared/admin', () => ({
 
 mock.module('@polo-ai/shared/config', () => ({
   getAdminUrl: () => 'https://admin.example.com',
+  // The trusted caller-Workspace existence check for ProductSpace starts.
+  getWorkspaceByNameOrId: (id: string) =>
+    workspaceExists ? { id, rootPath: `/root-${id}` } : null,
 }))
 
 const withdrawnTombstonesByScope = new Map<string, Set<string>>()
@@ -602,6 +616,7 @@ describe('local app main-process authorization boundary', () => {
     trustedRecordByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
+    workspaceExists = true
     context.webContentsId = 1
     getAppReleaseDownload.mockClear()
     listProductSpaces.mockClear()
@@ -639,6 +654,7 @@ describe('local app main-process authorization boundary', () => {
     runtimeCoordinator.signCapability.mockClear()
     runtimeCoordinator.registerActiveRuntime.mockClear()
     activeRuntimesByKey.clear()
+    activeRuntimesByExecution.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
@@ -2157,6 +2173,7 @@ describe('local app main-process authorization boundary', () => {
     // documented residual — so ws-b's liveness probe reads the shared
     // runtime, but its registration and lifecycle ownership are isolated.)
     windowWorkspaceId = 'ws-window-a'
+    workspaceExists = true
     context.webContentsId = 1
     await stop(context, scope())
     let registered = byWorkspace()
@@ -3174,12 +3191,14 @@ describe('local app production status projection (R34-3)', () => {
     authorityTuplesByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
+    workspaceExists = true
     context.webContentsId = 1
     handlers.clear()
     withdrawnTombstonesByScope.clear()
     trustedRecordByScope.clear()
     getProductSpaceCatalog.mockClear()
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listProductSpaces.mockClear()
     scopedStartExact.mockClear()
     scopedStartExact.mockImplementation(defaultStartExact)
     scopedStopExact.mockClear()
@@ -3187,6 +3206,7 @@ describe('local app production status projection (R34-3)', () => {
     runtimeCoordinator.signCapability.mockClear()
     runtimeCoordinator.registerActiveRuntime.mockClear()
     activeRuntimesByKey.clear()
+    activeRuntimesByExecution.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
@@ -3518,9 +3538,7 @@ describe('local app production status projection (R34-3)', () => {
       capabilityGeneration: 11,
       controller: new AbortController(),
     }
-    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(
-      (executionId: unknown) => (executionId === 'exec-41' ? runtime : null),
-    )
+    activeRuntimesByExecution.set('exec-41', runtime)
     // A stale generation is refused BEFORE touching the registry.
     await expect(stop(context, {
       kind: 'product_space_runtime_handle',
@@ -3528,6 +3546,7 @@ describe('local app production status projection (R34-3)', () => {
       expectedRuntimeGeneration: 40,
     })).rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
     expect(scopedStopExact).not.toHaveBeenCalled()
+    activeRuntimesByExecution.set('exec-41', runtime)
     // The current generation tears the runtime down with the exact stop.
     const status = await stop(context, {
       kind: 'product_space_runtime_handle',
@@ -3544,6 +3563,71 @@ describe('local app production status projection (R34-3)', () => {
       expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
       41,
     )
-    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(() => null)
+  })
+
+  it('POO-54 R2: registration/fence failure rolls back revoke-first via the coordinator, never stop-before-revoke', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Park INSIDE the switch-mutex critical section (registry.startExact):
+    // flip the committed ProductSpace while the runtime is starting, then
+    // release — the post-start fence must roll back through the coordinator
+    // (revoke → … → exact stop), never a bare process stop.
+    let releaseParkedStart!: () => void
+    const parkedStart = new Promise<void>(resolve => {
+      releaseParkedStart = resolve
+    })
+    scopedStartExact.mockImplementationOnce(async (
+      ...args: Parameters<typeof defaultStartExact>
+    ) => {
+      await parkedStart
+      return defaultStartExact(...args)
+    })
+    const pending = start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    for (let i = 0; i < 100 && scopedStartExact.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    setRuntimeActiveProductSpace('organization-b')
+    releaseParkedStart()
+    await expect(pending).rejects.toMatchObject({ code: 'SWITCH_IN_PROGRESS' })
+    // Revoke-first ordering: the coordinator teardown happened BEFORE the
+    // exact stop, and the direct legacy stop path was never taken.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledTimes(1)
+    const teardownOrder = runtimeCoordinator.teardownRuntime.mock.invocationCallOrder.at(-1)!
+    expect(teardownOrder).toBeLessThan(
+      scopedStopExact.mock.invocationCallOrder.at(-1)!,
+    )
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    setRuntimeActiveProductSpace('organization-a')
+  })
+
+  it('POO-54 R2: START without a trusted caller Workspace fails closed with zero side effects', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // No window → no workspaceId.
+    windowWorkspaceId = null
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    // Window exists but the Workspace record does not.
+    windowWorkspaceId = 'ws-window-a'
+    workspaceExists = false
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    // Zero gateway, zero capability, zero process, zero Admin calls.
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.registerActiveRuntime).not.toHaveBeenCalled()
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(listProductSpaces).not.toHaveBeenCalled()
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
   })
 })

@@ -824,3 +824,72 @@ describe('product-space app runtime contract (POO-54)', () => {
     expect(projection).not.toHaveProperty('capability')
   })
 })
+
+describe('POO-54 R2 content-free identifier and byte-bound contracts', () => {
+  const validQuery = () => ({
+    runId: crypto.randomUUID(),
+    requestId: crypto.randomUUID(),
+    prompt: 'hello',
+    maxOutputTokens: 64,
+    timeoutMs: 5_000,
+  })
+
+  test('identifiers are strict UUID v4 — v1, v5 and nil are rejected', () => {
+    expect(AppAiQuerySchema.safeParse(validQuery()).success).toBe(true)
+    // Uppercase canonical v4 still parses.
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      runId: crypto.randomUUID().toUpperCase(),
+    }).success).toBe(true)
+    for (const [field, value] of [
+      ['runId', '6ba7b810-9dad-11d1-80b4-00c04fd430c8'], // UUID v1
+      ['runId', '74738ff5-5367-5958-9aee-98fffdcd1876'], // UUID v5
+      ['runId', '00000000-0000-0000-0000-000000000000'], // nil UUID
+    ] as const) {
+      expect(AppAiQuerySchema.safeParse({ ...validQuery(), [field]: value }).success)
+        .toBe(false)
+    }
+    expect(AppApiRunStartSchema.safeParse({
+      runId: '00000000-0000-0000-0000-000000000000',
+    }).success).toBe(false)
+  })
+
+  test('prompt/systemPrompt bounds are UTF-8 BYTE bounds, not character counts', () => {
+    // 400000 汉字 = 1,200,000 bytes > 1 MiB: rejected despite 400000 chars.
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      prompt: '汉'.repeat(400_000),
+    }).success).toBe(false)
+    // Multi-byte boundary: exactly 1 MiB of 4-byte emoji is accepted.
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      prompt: '😀'.repeat(262_144),
+    }).success).toBe(true)
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      prompt: '😀'.repeat(262_145),
+    }).success).toBe(false)
+    // 3-byte boundary just below/above the limit.
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      prompt: '汉'.repeat(349_525),
+    }).success).toBe(true)
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      prompt: '汉'.repeat(349_526),
+    }).success).toBe(false)
+    // systemPrompt: 512 KiB byte bound.
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      systemPrompt: 'a'.repeat(524_288),
+    }).success).toBe(true)
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      systemPrompt: 'a'.repeat(524_289),
+    }).success).toBe(false)
+    expect(AppAiQuerySchema.safeParse({
+      ...validQuery(),
+      systemPrompt: '汉'.repeat(200_000),
+    }).success).toBe(false)
+  })
+})

@@ -73,20 +73,15 @@ export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
       admin: {
         startAppRun: async (input, options) => {
           const client = await createTrustedAdminClient()
-          return client.startAppRun(await trustedAccessToken(), input as never, options)
+          return client.startAppRun(await trustedAccessToken(), input, options)
         },
         recordAppUsage: async (input, options) => {
           const client = await createTrustedAdminClient()
-          return client.recordAppUsage(await trustedAccessToken(), input as never, options)
+          return client.recordAppUsage(await trustedAccessToken(), input, options)
         },
         finishAppRun: async (runId, input, options) => {
           const client = await createTrustedAdminClient()
-          return client.finishAppRun(
-            await trustedAccessToken(),
-            runId,
-            input as never,
-            options,
-          )
+          return client.finishAppRun(await trustedAccessToken(), runId, input, options)
         },
       },
       createExecutor: ({ connectionSlug, model }) => createSessionlessHostLlmExecutor({

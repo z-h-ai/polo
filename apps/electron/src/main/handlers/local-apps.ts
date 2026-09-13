@@ -7,7 +7,7 @@ import {
   type AppReleaseSummary,
   type CatalogApp,
 } from '@polo-ai/shared/admin'
-import { getAdminUrl } from '@polo-ai/shared/config'
+import { getAdminUrl, getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import {
   compareCatalogSemVer,
   normalizeCatalogSemVer,
@@ -1437,6 +1437,12 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         version: string
       }
       stop: () => Promise<'stopped' | 'failed'>
+      /**
+       * Post-spawn rollback: coordinator-first teardown (revoke → abort →
+       * cleanup → exact-generation stop → CAS clear) — NEVER a direct
+       * process stop that would leave a live token behind.
+       */
+      rollback: () => Promise<void>
     },
   ): Promise<string> => {
     const accountId = trustedAccountId
@@ -1518,8 +1524,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     try {
       registerProductSpaceExecution(execution)
     } catch (error) {
-      // Registration failure must not leave an unregistered running runtime.
-      await registry.stop(scope).catch(() => {})
+      // Registration failure must not leave an unregistered running runtime:
+      // revoke first via the coordinator, then stop the exact generation.
+      if (runtime) await runtime.rollback().catch(() => {})
+      else await registry.stop(scope).catch(() => {})
       throw error
     }
     return executionId
@@ -1547,6 +1555,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         version: string
       }
       stop: () => Promise<'stopped' | 'failed'>
+      /** Post-spawn rollback: coordinator-first teardown, never stop→revoke. */
+      rollback: () => Promise<void>
     },
   ) => {
     // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
@@ -1608,7 +1618,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         || getRuntimeActiveProductSpace() !== scope.organizationId
         || !isTrustedStartGateCurrent(gate)
       ) {
-        await registryStopQuietly(scope)
+        // Revoke before stop: the coordinator tears the just-started runtime
+        // down (capability/Run/execution/projection) with the exact stop.
+        if (runtime) await runtime.rollback().catch(() => {})
+        else await registryStopQuietly(scope)
         throw new LocalAppRuntimeError(
           'SWITCH_IN_PROGRESS',
           'A ProductSpace switch superseded this start',
@@ -1724,6 +1737,22 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     options: { trustDerivedIdentityOnly?: boolean } = {},
   ): Promise<ProductSpaceAppRuntimeStartResult> => {
     const requested = validateProductSpaceAppIdentity(rawApp)
+    // The trusted caller Workspace is resolved and verified BEFORE anything
+    // else: no gateway, capability, process or Admin call may exist without
+    // a non-empty, existing Workspace ownership.
+    const workspaceId = callerWorkspaceId(ctx)
+    if (!workspaceId) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'The calling window has no Workspace context for this app start',
+      )
+    }
+    if (!getWorkspaceByNameOrId(workspaceId)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'The calling window Workspace does not exist',
+      )
+    }
     const runtimeIdentity: ProductSpaceAppRuntimeIdentity = {
       accountId: requested.accountId,
       productSpaceId: requested.productSpaceId,
@@ -1752,10 +1781,35 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const registry = getScopedLocalAppRuntimeRegistry()
     const coordinator = getLocalAppRuntimeCoordinator()
     const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
-    const workspaceId = callerWorkspaceId(ctx)
     const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
     let signedCapability: number | undefined
     let startedRuntimeGeneration: number | undefined
+    /**
+     * The ONLY post-spawn rollback entry (idempotent): coordinator teardown
+     * (revoke → abort → bounded cleanup → exact-generation stop → CAS clear)
+     * when the runtime registered; otherwise revoke the just-signed
+     * capability before any legacy stop — never stop-before-revoke.
+     */
+    let rollbackStarted: Promise<void> | undefined
+    const rollbackRuntime = (): Promise<void> => {
+      if (rollbackStarted) return rollbackStarted
+      rollbackStarted = (async (): Promise<void> => {
+        const active = startedRuntimeGeneration !== undefined
+          ? coordinator.getActiveRuntimeByExecution(executionId)
+          : undefined
+        if (active) {
+          await coordinator.teardownRuntime(active, 'cancelled', async () => {
+            await registry.stopExact(scope, active.runtimeGeneration).catch(() => {})
+          })
+          return
+        }
+        if (signedCapability !== undefined) {
+          coordinator.revokeSignedCapability(signedCapability)
+        }
+        await registry.stop(scope).catch(() => {})
+      })()
+      return rollbackStarted
+    }
     let start: {
       version: string
       appId?: string
@@ -1783,10 +1837,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         try {
           const result = await registry.startExact(scope, app.version, {
             runtimeKey: identityKey,
+            versionId: app.versionId,
             processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
               const signing = coordinator.signCapability({
                 identity: runtimeIdentity,
-                workspaceId: workspaceId ?? '',
+                workspaceId,
                 executionId,
                 runtimeKind,
                 runtimeGeneration,
@@ -1802,14 +1857,14 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             executionId,
             runtimeGeneration: result.runtimeGeneration,
             scopeGeneration: result.scopeGeneration,
-            workspaceId: workspaceId ?? '',
+            workspaceId,
             runtimeKind: result.runtimeKind,
             capabilityGeneration: signedCapability,
           })
           getAppRuntimeCenter().publish({
             identityKey,
             identity: runtimeIdentity,
-            workspaceId: workspaceId ?? '',
+            workspaceId,
             executionId,
             runtimeGeneration: result.runtimeGeneration,
             scopeGeneration: result.scopeGeneration,
@@ -1836,33 +1891,16 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           version: app.version,
         },
         stop: async () => {
-          const active = startedRuntimeGeneration !== undefined
-            ? coordinator.getActiveRuntimeByExecution(executionId)
-            : undefined
-          if (active) {
-            await coordinator.teardownRuntime(active, 'cancelled', async () => {
-              await registry.stopExact(scope, active.runtimeGeneration).catch(() => {})
-            })
-            return 'stopped'
-          }
-          await registry.stop(scope)
+          await rollbackRuntime()
           return 'stopped'
         },
+        rollback: rollbackRuntime,
       },
     )
     } catch (error) {
       // A superseded or failed registration must not leave coordinator
       // runtime/capability/projection state behind.
-      const active = startedRuntimeGeneration !== undefined
-        ? coordinator.getActiveRuntimeByExecution(executionId)
-        : undefined
-      if (active) {
-        await coordinator.teardownRuntime(active, 'cancelled', async () => {
-          await registry.stopExact(scope, active.runtimeGeneration).catch(() => {})
-        })
-      } else if (signedCapability !== undefined) {
-        coordinator.revokeSignedCapability(signedCapability)
-      }
+      await rollbackRuntime().catch(() => {})
       throw error
     }
     return {

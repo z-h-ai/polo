@@ -14,11 +14,12 @@ import type {
   LocalAppRuntimeStatus,
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
-import { LocalAppRuntimeManager } from '../manager'
+import { LocalAppRuntimeManager, type ExactVersionStartHooks } from '../manager'
 import { LocalAppRuntimeError } from '../runtime-error'
 import {
   createCatalogLocalAppScopeKey,
   createCatalogRuntimeAppId,
+  createCatalogRuntimeProcessAppId,
   PERSISTED_SCOPE_READ_CONCURRENCY,
   ScopedLocalAppRuntimeRegistry,
   STOP_CLEANUP_CONCURRENCY,
@@ -982,10 +983,13 @@ describe('scoped exact-version runtime (POO-54)', () => {
     expect(hookCalls).toHaveLength(0)
 
     // Generation-CAS stop: an unknown generation is rejected by the manager
-    // CAS before any runtime mutation, and the call flows through verbatim.
+    // CAS before any runtime mutation, and the call flows through the
+    // version-namespaced process id (no versionId given → version-derived).
     await expect(registry.stopExact(catalogScope, 99))
       .rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
     expect(stopCalls).toEqual([{
+      // The failed start never registered a process id, so the stop falls
+      // back to the artifact-scoped namespace before failing on the CAS.
       appId: createCatalogRuntimeAppId(catalogScope),
       runtimeGeneration: 99,
     }])
@@ -1026,5 +1030,136 @@ describe('scoped exact-version runtime (POO-54)', () => {
     })
     expect(otherScope.scopeGeneration).toBe(1)
     expect(registry.getScopeGeneration(catalogScope)).toBe(2)
+  })
+})
+
+describe('POO-54 R2 scoped exact-version namespaces and fences', () => {
+  it('namespaces process ids by versionId: two versions never share process, logs or teardown', async () => {
+    const started: Array<{ install: string; process: string; version: string }> = []
+    const stopped: string[] = []
+    class NamespacedManager extends LocalAppRuntimeManager {
+      override async startExactVersion(
+        appId: string,
+        version: string,
+        hooks: ExactVersionStartHooks = {},
+      ) {
+        started.push({
+          install: appId,
+          process: hooks.processAppId ?? appId,
+          version,
+        })
+        return {
+          appId: hooks.processAppId ?? appId,
+          version,
+          url: 'http://127.0.0.1:9',
+          port: 9,
+          runtimeKind: 'python' as const,
+          runtimeGeneration: started.length,
+        }
+      }
+
+      override async stopExact(appId: string, expectedRuntimeGeneration: number) {
+        stopped.push(appId)
+        return {
+          appId,
+          status: 'stopped',
+          currentVersion: '1.0.0',
+        } as LocalAppRuntimeStatus
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new NamespacedManager(options),
+    })
+    const catalogScope = scope('account-a')
+    const v1 = await registry.startExact(catalogScope, '1.0.0', {
+      versionId: 'version-a',
+      runtimeKey: 'key-a',
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    const v2 = await registry.startExact(catalogScope, '2.0.0', {
+      versionId: 'version-b',
+      runtimeKey: 'key-b',
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    // Both versions run under the SAME artifact install namespace but in
+    // DISJOINT process namespaces derived from their versionIds.
+    expect(v1.runtimeGeneration).not.toBe(v2.runtimeGeneration)
+    expect(started).toHaveLength(2)
+    expect(started[0]).toMatchObject({
+      install: createCatalogRuntimeAppId(catalogScope),
+      process: createCatalogRuntimeProcessAppId(catalogScope, 'version-a'),
+    })
+    expect(started[1]).toMatchObject({
+      install: createCatalogRuntimeAppId(catalogScope),
+      process: createCatalogRuntimeProcessAppId(catalogScope, 'version-b'),
+    })
+    expect(started[0]!.process).not.toBe(started[1]!.process)
+    // A generation-CAS stop of v1 resolves v1's process id exactly.
+    await registry.stopExact(catalogScope, v1.runtimeGeneration)
+    expect(stopped).toEqual([createCatalogRuntimeProcessAppId(catalogScope, 'version-a')])
+  })
+
+  it('fences block new starts synchronously before any slow cleanup', async () => {
+    class IdleManager extends LocalAppRuntimeManager {
+      override async startExactVersion(appId: string, version: string) {
+        return {
+          appId,
+          version,
+          url: 'http://127.0.0.1:9',
+          port: 9,
+          runtimeKind: 'python' as const,
+          runtimeGeneration: 1,
+        }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new IdleManager(options),
+    })
+    const hooks = {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+      versionId: 'version-a',
+    }
+    // Baseline: a start succeeds, then the app fence blocks everything.
+    await registry.startExact(scope('account-a'), '1.0.0', hooks)
+    registry.fenceApps([scope('account-a')])
+    await expect(registry.startExact(scope('account-a'), '1.0.0', hooks))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(registry.install({
+      scope: scope('account-a'),
+      version: '1.0.0',
+      downloadUrl: 'https://example.com/app.zip',
+      checksum: 'a'.repeat(64),
+      sizeBytes: 1,
+      platform: 'darwin',
+      arch: 'arm64',
+    })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // The organization fence blocks a different scope's starts too.
+    const orgRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new IdleManager(options),
+    })
+    await orgRegistry.startExact(scope('account-a'), '1.0.0', hooks)
+    orgRegistry.fenceOrganization('account-a', 'organization-1')
+    await expect(orgRegistry.startExact(scope('account-a'), '1.0.0', hooks))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    // The account fence blocks everything for the account.
+    const accountRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new IdleManager(options),
+    })
+    accountRegistry.fenceAccount('account-a')
+    await expect(accountRegistry.startExact(scope('account-a'), '1.0.0', hooks))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(accountRegistry.install({
+      scope: scope('account-a'),
+      version: '1.0.0',
+      downloadUrl: 'https://example.com/app.zip',
+      checksum: 'a'.repeat(64),
+      sizeBytes: 1,
+      platform: 'darwin',
+      arch: 'arm64',
+    })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
   })
 })

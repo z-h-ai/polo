@@ -2181,3 +2181,72 @@ describe('POO-54 exact-version runtime foundation', () => {
     await staticRuntime.shutdown()
   }, 60_000)
 })
+
+describe('POO-54 R2 per-version process namespaces', () => {
+  const bunPath = process.execPath
+
+  function makeHealthServer(): string {
+    return `
+      Bun.serve({
+        hostname: '127.0.0.1',
+        port: Number(process.env.PORT),
+        fetch() {
+          return new Response('ok', {
+            headers: { 'x-polo-app-health-token': process.env.POLO_APP_HEALTH_TOKEN },
+          })
+        },
+      })
+    `
+  }
+
+  it('v1 and v2 of one artifact run simultaneously in disjoint namespaces without mutual teardown', async () => {
+    const runtime = makeManager({ bunPath })
+    const app = 'poo54.versions'
+    for (const [version, marker] of [['1.0.0', 'V1'], ['2.0.0', 'V2']] as const) {
+      const bundle = await writeBundle(
+        app,
+        version,
+        { runtime: 'js', entry: ['server.js'] },
+        { 'server.js': `${makeHealthServer()}\nconsole.log('${marker} boot')` },
+      )
+      const archive = await archiveBundle(bundle, `${app}-${version}`)
+      const url = await serveArchive(archive)
+      await runtime.install(requestFor(app, version, url, archive))
+      await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+      downloadServer = null
+    }
+    const startExact = (version: string, processAppId: string) =>
+      runtime.startExactVersion(app, version, {
+        processAppId,
+        processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+      })
+    // Both versions start and stay live TOGETHER — v2's exact start must
+    // never stop v1 (they are different runtime identities).
+    const v1 = await startExact('1.0.0', `${app}.v1`)
+    const v2 = await startExact('2.0.0', `${app}.v2`)
+    expect(v1.runtimeGeneration).not.toBe(v2.runtimeGeneration)
+    const statusV1 = await runtime.getRuntimeStatus(`${app}.v1`)
+    const statusV2 = await runtime.getRuntimeStatus(`${app}.v2`)
+    expect(statusV1.status).toBe('running')
+    expect(statusV2.status).toBe('running')
+    expect(statusV1.runningVersion).toBe('1.0.0')
+    expect(statusV2.runningVersion).toBe('2.0.0')
+    // Logs are namespace-isolated per version.
+    const logsV1 = await runtime.getLogs(`${app}.v1`)
+    const logsV2 = await runtime.getLogs(`${app}.v2`)
+    expect(logsV1).toContain('V1 boot')
+    expect(logsV1).not.toContain('V2 boot')
+    expect(logsV2).toContain('V2 boot')
+    expect(logsV2).not.toContain('V1 boot')
+    // Stopping v1's namespace leaves v2 fully live.
+    await runtime.stopExact(`${app}.v1`, v1.runtimeGeneration)
+    const afterStopV1 = await runtime.getRuntimeStatus(`${app}.v1`)
+    const afterStopV2 = await runtime.getRuntimeStatus(`${app}.v2`)
+    // A process-only namespace has no install metadata: not_installed IS the
+    // stopped projection; the exact-stop result above already said 'stopped'.
+    expect(['stopped', 'not_installed']).toContain(afterStopV1.status)
+    expect(afterStopV2.status).toBe('running')
+    expect(afterStopV2.runningVersion).toBe('2.0.0')
+    await runtime.stopExact(`${app}.v2`, v2.runtimeGeneration)
+  }, 60_000)
+})

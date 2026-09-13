@@ -959,41 +959,46 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
-            onAdminSessionEnding: (accountId: string) =>
-              teardownCoordinatorRuntimesForAccount(accountId).then(() =>
+            onAdminSessionEnding: (accountId: string) => {
+              // Fence FIRST (synchronously blocks new starts via the deny
+              // gate + lifecycle generation), then coordinator revoke/abort/
+              // bounded cleanup, then the slow exact-generation stops.
+              getScopedLocalAppRuntimeRegistry().fenceAccount(accountId)
+              return teardownCoordinatorRuntimesForAccount(accountId).then(() =>
                 endAccountProductSpaceRuntimes(
                   accountId,
                   getScopedLocalAppRuntimeRegistry(),
-                )),
+                ))
+            },
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
             onAdminCatalogScopeDenied: (
               accountId: string,
               organizationId: string,
-            ) => teardownCoordinatorRuntimesForOrganization(accountId, organizationId)
-              .then(() => getScopedLocalAppRuntimeRegistry().stopOrganization(
-                accountId,
-                organizationId,
-              )),
+            ) => {
+              getScopedLocalAppRuntimeRegistry().fenceOrganization(accountId, organizationId)
+              return teardownCoordinatorRuntimesForOrganization(accountId, organizationId)
+                .then(() => getScopedLocalAppRuntimeRegistry().stopOrganization(
+                  accountId,
+                  organizationId,
+                ))
+            },
             onAdminCatalogAppsWithdrawn: (
               accountId: string,
               organizationId: string,
               catalogAppIds: readonly string[],
-            ) => teardownCoordinatorRuntimesForCatalogScopes(
-              catalogAppIds.map(catalogAppId => ({
-                accountId,
-                organizationId,
-                catalogAppId,
-              })),
-            ).then(() => getScopedLocalAppRuntimeRegistry().stopApps(
-              catalogAppIds.map(catalogAppId => ({
+            ) => {
+              const scopes = catalogAppIds.map(catalogAppId => ({
                 kind: 'catalog' as const,
                 accountId,
                 organizationId,
                 catalogAppId,
-              })),
-            )),
+              }))
+              getScopedLocalAppRuntimeRegistry().fenceApps(scopes)
+              return teardownCoordinatorRuntimesForCatalogScopes(scopes)
+                .then(() => getScopedLocalAppRuntimeRegistry().stopApps(scopes))
+            },
             onAdminCatalogAppsAuthorized: (
               accountId: string,
               organizationId: string,
