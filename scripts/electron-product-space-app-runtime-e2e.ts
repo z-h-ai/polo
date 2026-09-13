@@ -39,7 +39,7 @@ async function main(): Promise<void> {
       entryPoints: ['apps/electron/e2e/product-space-app-runtime/fixture-app.ts'],
       format: 'esm',
       outfile: fixtureOutput,
-      platform: 'bun',
+      platform: 'node',
     }),
   ])
 

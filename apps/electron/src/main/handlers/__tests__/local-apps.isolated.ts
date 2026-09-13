@@ -217,7 +217,25 @@ const scopedRetainedManagementLogs = mock(async (
   return ''
 })
 const isInstalledAndReady = mock(async () => true)
-const scopedStartExact = mock(async (
+const activeRuntimesByKey = new Map<string, Record<string, unknown>>()
+
+function runtimeIdentityKey(identity: {
+  accountId: string
+  productSpaceId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+}): string {
+  return JSON.stringify([
+    identity.accountId,
+    identity.productSpaceId,
+    identity.artifactInstanceId,
+    identity.versionId,
+    identity.version,
+  ])
+}
+
+const defaultStartExact = async (
   _scope: CatalogLocalAppScope,
   version: string,
   hooks?: { processEnvironment?: (input: { runtimeKind: 'python' | 'js'; runtimeGeneration: number; scopeGeneration: number }) => unknown },
@@ -238,7 +256,9 @@ const scopedStartExact = mock(async (
     runtimeGeneration: 41,
     scopeGeneration: 7,
   }
-})
+}
+
+const scopedStartExact = mock(defaultStartExact)
 const scopedStopExact = mock(async (
   scope: CatalogLocalAppScope,
   expectedRuntimeGeneration: number,
@@ -268,21 +288,43 @@ const runtimeCoordinator = {
       sensitiveValues: ['capability-token'],
     }
   }),
-  registerActiveRuntime: mock((input: Record<string, unknown>) => ({
-    identityKey: 'k',
-    identity: (input as { identity: unknown }).identity,
-    executionId: (input as { executionId: string }).executionId,
-    runtimeGeneration: (input as { runtimeGeneration: number }).runtimeGeneration,
-    scopeGeneration: (input as { scopeGeneration: number }).scopeGeneration,
-    workspaceId: (input as { workspaceId: string }).workspaceId,
-    runtimeKind: (input as { runtimeKind: string }).runtimeKind,
-    capabilityGeneration: 11,
-    controller: new AbortController(),
-  })),
-  getActiveRuntime: mock((_identity: unknown): unknown => null),
+  registerActiveRuntime: mock((input: Record<string, unknown>) => {
+    const identity = (input as { identity: {
+      accountId: string
+      productSpaceId: string
+      artifactInstanceId: string
+      versionId: string
+      version: string
+    } }).identity
+    const runtime = {
+      ...input,
+      identity,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(identity), runtime)
+    return runtime
+  }),
+  getActiveRuntime: mock((identity: {
+    accountId: string
+    productSpaceId: string
+    artifactInstanceId: string
+    versionId: string
+    version: string
+  }): unknown => activeRuntimesByKey.get(runtimeIdentityKey(identity)) ?? null),
   getActiveRuntimeByExecution: mock((_executionId: unknown): unknown => null),
   revokeSignedCapability: mock(() => {}),
-  teardownRuntime: mock(async () => {}),
+  teardownRuntime: mock(async (...args: unknown[]) => {
+    const runtime = args[0] as { identity: {
+      accountId: string
+      productSpaceId: string
+      artifactInstanceId: string
+      versionId: string
+      version: string
+    } }
+    activeRuntimesByKey.delete(runtimeIdentityKey(runtime.identity))
+    const stopProcess = args[2] as (() => Promise<void>) | undefined
+    await stopProcess?.()
+  }),
   handleUnexpectedExit: mock(async () => {}),
 }
 const assertAppAuthorized = mock(() => {
@@ -596,8 +638,7 @@ describe('local app main-process authorization boundary', () => {
     runtimeCoordinator.ensureGateway.mockClear()
     runtimeCoordinator.signCapability.mockClear()
     runtimeCoordinator.registerActiveRuntime.mockClear()
-    runtimeCoordinator.getActiveRuntime.mockImplementation(() => null)
-    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(() => null)
+    activeRuntimesByKey.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
@@ -3140,20 +3181,14 @@ describe('local app production status projection (R34-3)', () => {
     getProductSpaceCatalog.mockClear()
     getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
     scopedStartExact.mockClear()
+    scopedStartExact.mockImplementation(defaultStartExact)
     scopedStopExact.mockClear()
     runtimeCoordinator.ensureGateway.mockClear()
     runtimeCoordinator.signCapability.mockClear()
     runtimeCoordinator.registerActiveRuntime.mockClear()
-    runtimeCoordinator.getActiveRuntime.mockImplementation(() => null)
-    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(() => null)
+    activeRuntimesByKey.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
-    runtimeCoordinator.teardownRuntime.mockImplementation(
-      async (...args: unknown[]) => {
-        const stopProcess = args[2] as (() => Promise<void>) | undefined
-        await stopProcess?.()
-      },
-    )
     const { resetAppRuntimeCenterForTests } = await import(
       '@polo-ai/server-core/runtime'
     )
@@ -3395,7 +3430,7 @@ describe('local app production status projection (R34-3)', () => {
       capabilityGeneration: 3,
       controller: new AbortController(),
     }
-    runtimeCoordinator.getActiveRuntime.mockImplementation(() => existing)
+    activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
     const start = handlers.get(RPC_CHANNELS.localApps.START)!
     await start(context, {
       kind: 'product_space_runtime_start',
@@ -3407,7 +3442,55 @@ describe('local app production status projection (R34-3)', () => {
       'cancelled',
       expect.any(Function),
     )
-    runtimeCoordinator.getActiveRuntime.mockImplementation(() => null)
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      13,
+    )
+  })
+
+  it('POO-54: two concurrent STARTs of one runtime identity serialize inside the switch mutex and the loser tears the winner down', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Park the FIRST startExact call: START-A holds the switch mutex inside
+    // its critical section while START-B queues behind it.
+    let releaseFirst!: () => void
+    const firstParked = new Promise<void>(resolve => {
+      releaseFirst = resolve
+    })
+    scopedStartExact.mockImplementationOnce(async (...args: Parameters<typeof defaultStartExact>) => {
+      await firstParked
+      return defaultStartExact(...args)
+    })
+    const request = {
+      kind: 'product_space_runtime_start' as const,
+      app: productSpaceAppIdentity(),
+    }
+    const first = start(context, request)
+    for (let i = 0; i < 100 && scopedStartExact.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    const second = start(context, request)
+    // START-B must still be waiting on the switch mutex, not bypassing the
+    // winner's cleanup via a direct manager stop.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    releaseFirst()
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toMatchObject({ version: '2.3.4' })
+    expect(secondResult).toMatchObject({ version: '2.3.4' })
+    // The replacement teardown ran exactly once, INSIDE the mutex, between
+    // the two exact-version starts — capability/Run/execution/projection
+    // cleanup of generation A can never be skipped.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledTimes(1)
+    const startCalls = scopedStartExact.mock.calls.length
+    expect(startCalls).toBe(2)
+    const teardownOrder = runtimeCoordinator.teardownRuntime.mock.invocationCallOrder.at(-1)!
+    expect(teardownOrder).toBeGreaterThan(
+      scopedStartExact.mock.invocationCallOrder[0]!,
+    )
+    expect(teardownOrder).toBeLessThan(
+      scopedStartExact.mock.invocationCallOrder[1]!,
+    )
   })
 
   it('POO-54: STOP is generation-CAS gated and tears the exact runtime down', async () => {

@@ -2051,17 +2051,21 @@ describe('POO-54 exact-version runtime foundation', () => {
   it('pins the exact version, binds the capability hook to one runtime generation, and redacts secrets across chunk boundaries', async () => {
     const runtime = makeManager({ bunPath })
     const app = 'poo54.exact'
-    // v1.0.0 prints the injected capability token in TWO stdout writes so the
-    // raw secret spans a chunk boundary in the bounded log.
+    // v1.0.0 prints the injected capability token in TWO writes per stream,
+    // INTERLEAVED across stdout and stderr so each stream withholds a tail
+    // while the other keeps emitting (a shared redactor would leak here).
     await installJsVersion(runtime, app, '1.0.0', `
       const token = process.env.POLO_APP_API_TOKEN ?? ''
       if (token) {
         process.stdout.write(token.slice(0, 10))
+        process.stderr.write(token.slice(0, 12))
         setTimeout(() => {
+          process.stderr.write(token.slice(12) + '\\n')
           process.stdout.write(token.slice(10) + '\\n')
-          // A pad line longer than the withhold window releases the
-          // newline-terminated redacted line while the process still runs.
-          setTimeout(() => process.stdout.write('x'.repeat(64) + '\\n'), 80)
+          setTimeout(() => {
+            process.stdout.write('x'.repeat(64) + '\\n')
+            process.stderr.write('y'.repeat(64) + '\\n')
+          }, 80)
         }, 80)
       }
     `)
@@ -2099,6 +2103,9 @@ describe('POO-54 exact-version runtime foundation', () => {
       await Bun.sleep(100)
     }
     expect(logs).toContain('[REDACTED_RUNTIME_SECRET]')
+    // Both interleaved streams are covered: stdout and stderr must each have
+    // been redacted (at least two redaction markers across the log).
+    expect(logs.split('[REDACTED_RUNTIME_SECRET]').length - 1).toBeGreaterThanOrEqual(2)
     expect(logs).not.toContain('secret-canary-token')
 
     // Generation-CAS stop: a stale generation can never stop the current one.

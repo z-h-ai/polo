@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import { request as httpRequest } from 'node:http'
+import net from 'node:net'
 import { AdminError } from '@polo-ai/shared/admin'
 import type { HostLlmPublicResult } from '@polo-ai/shared/agent/host-llm-executor'
 import { LocalAppRuntimeCoordinator } from '../runtime-coordinator'
 import { PER_CAPABILITY_QUERY_SLOTS } from '../app-api-run-state'
+import { createProductSpaceAppRuntimeIdentityKey } from '@polo-ai/shared/product-spaces'
 
 const IDENTITY = {
   accountId: 'account-a',
@@ -18,10 +20,22 @@ interface FixtureOptions {
   onUsage?: () => void | Promise<void>
   onFinish?: () => void | Promise<void>
   executorResults?: Array<() => HostLlmPublicResult>
+  /** The executor factory itself throws synchronously. */
+  executorFactoryThrows?: boolean
+  /** The usage POST hangs until its AbortSignal fires, then rejects. */
+  usageHangsUntilAbort?: boolean
+  /** executor.execute rejects instead of returning a Host terminal. */
+  executeRejection?: boolean
+  /** execute hangs until its abort signal fires, then rejects. */
+  executeHangsUntilAbort?: boolean
   sinks?: {
     reportResult?: (input: Record<string, unknown>) => Promise<{ revision: number }>
     reportFile?: (input: Record<string, unknown>) => Promise<{ revision: number }>
   }
+  stopRuntime?: (runtime: {
+    identity: typeof IDENTITY
+    runtimeGeneration: number
+  }) => Promise<void>
 }
 
 function uuid(): string {
@@ -52,6 +66,7 @@ function completed(text: string, inputTokens = 12, outputTokens = 34): HostLlmPu
 
 function createFixture(options: FixtureOptions = {}) {
   const adminCalls: Array<{ method: 'start' | 'usage' | 'finish'; body: unknown; runId?: string }> = []
+  const stopRuntimeCalls: number[] = []
   let executorCounter = 0
   const scripted = [...(options.executorResults ?? [])]
   let now = 1_000_000
@@ -68,6 +83,15 @@ function createFixture(options: FixtureOptions = {}) {
       recordAppUsage: async (input, signalOptions) => {
         adminCalls.push({ method: 'usage', body: input })
         if (signalOptions?.signal?.aborted) throw new AdminError('aborted', 'NETWORK_ERROR')
+        if (options.usageHangsUntilAbort) {
+          await new Promise<void>((_resolve, reject) => {
+            signalOptions?.signal?.addEventListener(
+              'abort',
+              () => reject(new AdminError('aborted', 'NETWORK_ERROR')),
+              { once: true },
+            )
+          })
+        }
         await options.onUsage?.()
       },
       finishAppRun: async (runId, input, signalOptions) => {
@@ -78,11 +102,20 @@ function createFixture(options: FixtureOptions = {}) {
     },
     createExecutor: () => {
       executorCounter += 1
+      if (options.executorFactoryThrows) {
+        throw new Error('executor factory exploded')
+      }
       return {
-        execute: async () => {
+        execute: async (input?: { signal?: AbortSignal }) => {
+          if (options.executeHangsUntilAbort) {
+            await new Promise<void>((_resolve, reject) => {
+              input?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+            })
+          }
           if (holdExecutions) {
             await new Promise<void>(resolve => gates.push(resolve))
           }
+          if (options.executeRejection) throw new Error('executor.execute exploded')
           const next = scripted.shift()
           if (!next) throw new Error('no scripted executor result')
           return next()
@@ -93,6 +126,10 @@ function createFixture(options: FixtureOptions = {}) {
     resolveWorkspaceRoot: workspaceId => (workspaceId === 'ws-a' ? '/root-a' : null),
     loadWorkspaceConfig: () => ({ defaults: { defaultLlmConnection: 'conn-1', model: 'model-x' } }),
     getDefaultLlmConnection: () => null,
+    stopRuntime: async runtime => {
+      stopRuntimeCalls.push(runtime.runtimeGeneration)
+      await options.stopRuntime?.(runtime)
+    },
     ...(options.sinks ? { sinks: options.sinks } : {}),
     now: () => now,
   })
@@ -165,12 +202,53 @@ function createFixture(options: FixtureOptions = {}) {
       }, reject)
     })
 
+  /**
+   * Writes a fully raw HTTP/1.1 request over a TCP socket, permitting
+   * duplicate header names exactly as an attacker would send them.
+   */
+  const rawSocketRequest = (
+    path: string,
+    headerLines: string[],
+    body: Record<string, unknown>,
+  ) =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      void ready.then(() => {
+        const port = new URL(baseURL).port
+        const payloadBody = JSON.stringify(body)
+        const payload = [
+          `POST /local-app-api/v1${path} HTTP/1.1`,
+          `Host: 127.0.0.1:${port}`,
+          ...headerLines,
+          'Content-Type: application/json',
+          `Content-Length: ${Buffer.byteLength(payloadBody)}`,
+          'Connection: close',
+          '',
+          payloadBody,
+        ].join('\r\n')
+        const socket = net.connect(Number(port), '127.0.0.1', () => {
+          socket.write(payload)
+        })
+        let raw = ''
+        socket.on('data', chunk => {
+          raw += String(chunk)
+        })
+        socket.on('close', () => {
+          const status = Number(/^HTTP\/1\.1 (\d+)/.exec(raw)?.[1] ?? 0)
+          resolve({ status, body: raw })
+        })
+        socket.once('error', reject)
+      }, reject)
+    })
+
   return {
     coordinator,
     adminCalls,
+    stopRuntimeCalls,
     executorCount: () => executorCounter,
     post,
     rawRequest,
+    rawSocketRequest,
+    getSignedToken: () => token,
     setNow: (value: number) => {
       now = value
     },
@@ -596,5 +674,201 @@ describe('local-app-api.v1 loopback gateway and coordinator (POO-54)', () => {
     expect(response.status).toBe(503)
     expect(response.json.error.code).toBe('host_configuration_unavailable')
     expect(fixture.executorCount()).toBe(0)
+  })
+})
+
+describe('POO-54 round-1 fix regressions (gateway/coordinator)', () => {
+  it('unexpected exit matches identityKey AND runtimeGeneration across scoped managers', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    // Two scoped managers both report generation 1 for different identities.
+    const identityB = { ...IDENTITY, productSpaceId: 'space-b', versionId: 'version-b' }
+    const keyB = createProductSpaceAppRuntimeIdentityKey(identityB)
+    const signingB = fixture.coordinator.signCapability({
+      identity: identityB,
+      workspaceId: 'ws-a',
+      executionId: 'exec-b',
+      runtimeKind: 'python',
+      runtimeGeneration: 1,
+      scopeGeneration: 2,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, productSpaceId: 'space-b', versionId: 'version-b' },
+      executionId: 'exec-b',
+      runtimeGeneration: 1,
+      scopeGeneration: 2,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signingB.capabilityGeneration,
+    })
+    // Identity A is generation 1 as well (different scoped manager).
+    const runtimeA = fixture.coordinator.getActiveRuntime(IDENTITY)
+    expect(runtimeA?.runtimeGeneration).toBe(1)
+    // B's process exits: only B's identity/generation pair may tear down.
+    await fixture.coordinator.handleUnexpectedExit({
+      runtimeKey: keyB,
+      runtimeGeneration: 1,
+    })
+    expect(fixture.coordinator.getActiveRuntime(identityB)).toBeUndefined()
+    // A is untouched — a generation-only match would have removed it.
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeDefined()
+    // A's capability still authenticates.
+    const stillAuthorized = await fixture.post('/run/start', startBody())
+    expect(stillAuthorized.status).toBe(200)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('unexpected exit without a runtimeKey is ignored (fail closed)', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    await fixture.coordinator.handleUnexpectedExit({ runtimeGeneration: 1 })
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeDefined()
+    await fixture.coordinator.shutdown()
+  })
+
+  it('duplicate Authorization headers are rejected in BOTH header orders', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const validToken = fixture.getSignedToken()
+    // Forged FIRST, valid LAST: Node folds these into one comma-joined
+    // headers value, so only a rawHeaders count catches the duplicate.
+    const forgedFirst = await fixture.rawSocketRequest('/run/start', [
+      'Authorization: Bearer forged-token',
+      `Authorization: Bearer ${validToken}`,
+    ], startBody())
+    expect(forgedFirst.status).toBe(400)
+    expect(forgedFirst.body).toContain('invalid_request')
+    // Valid FIRST, forged LAST: also rejected — order must not matter.
+    const validFirst = await fixture.rawSocketRequest('/run/start', [
+      `Authorization: Bearer ${validToken}`,
+      'Authorization: Bearer forged-token',
+    ], startBody())
+    expect(validFirst.status).toBe(400)
+    expect(validFirst.body).toContain('invalid_request')
+    // A single valid header keeps working.
+    const single = await fixture.post('/run/start', startBody())
+    expect(single.status).toBe(200)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('expired capability triggers the unified idempotent teardown with in-flight query', async () => {
+    const fixture = createFixture({
+      executorResults: [() => completed('x', 1, 1)],
+      executeHangsUntilAbort: true,
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = await startRun(fixture)
+    const inFlightQuery = fixture.post('/ai/query', { ...queryBody(), runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // The virtual clock jumps past the fixed 24h TTL; the next App request
+    // with the old token is refused AND tears the generation down.
+    fixture.setNow(1_000_000 + 24 * 60 * 60 * 1000 + 1)
+    const refused = await fixture.post('/run/start', startBody())
+    expect(refused.status).toBe(401)
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (!fixture.coordinator.getActiveRuntime(IDENTITY)) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    // A repeated expired request stays 401 and never re-triggers teardown.
+    const again = await fixture.post('/run/start', startBody())
+    expect(again.status).toBe(401)
+    expect(fixture.stopRuntimeCalls).toEqual([1])
+    await inFlightQuery.catch(() => null)
+    await fixture.coordinator.shutdown()
+  })
+
+  it('cleanup budgets bound a hung Admin adapter: teardown returns within the request+total budget', async () => {
+    const fixture = createFixture({
+      executorResults: [() => completed('t', 1, 1)],
+      usageHangsUntilAbort: true,
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = await startRun(fixture)
+    // The receipt POST hangs on the fake Admin; the App response resolves
+    // only once the runtime controller aborts during teardown.
+    const pendingQuery = fixture.post('/ai/query', { ...queryBody(), runId })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)
+    const startedAt = Date.now()
+    await fixture.coordinator.teardownRuntime(runtime!, 'cancelled')
+    const elapsed = Date.now() - startedAt
+    // The hung receipt reconfirmation is cut at the 5s request budget (the
+    // lane then stops on its aborted shared controller) — far below the old
+    // unbounded behaviour.
+    expect(elapsed).toBeLessThan(9_500)
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    const pendingResponse = await pendingQuery
+    expect(pendingResponse.status).toBe(503)
+    expect(pendingResponse.json.error.code).toBe('metering_unconfirmed')
+  }, 20_000)
+
+  it('Host failed result WITH trusted usage records the POL-102 receipt before the 502', async () => {
+    const fixture = createFixture({
+      executorResults: [
+        () => ({
+          status: 'failed' as const,
+          error: {
+            code: 'auth_failed' as const,
+            reason: 'provider_rejected_credentials' as const,
+            message: 'LLM provider rejected the connection credential',
+          },
+          requestId: 'h',
+          model: 'model-x',
+          usage: usage(21, 5),
+        }),
+      ],
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId = await startRun(fixture)
+    const query = { runId, requestId: uuid(), prompt: 'p', maxOutputTokens: 8, timeoutMs: 5_000 }
+    const response = await fixture.post('/ai/query', query)
+    expect(response.status).toBe(502)
+    expect(response.json.error.code).toBe('host_auth_failed')
+    // The provider-final usage of the failed call is metered, not dropped.
+    const usageCall = fixture.adminCalls.find(call => call.method === 'usage')
+    expect(usageCall!.body).toMatchObject({
+      runId,
+      requestId: query.requestId,
+      inputTokens: 21,
+      outputTokens: 5,
+    })
+    // The receipt is confirmed, so the run can finish cleanly.
+    const finish = await fixture.post('/run/finish', { runId, status: 'completed' })
+    expect(finish.status).toBe(200)
+    // Terminal replay returns the cached stable error.
+    const replay = await fixture.post('/ai/query', query)
+    expect(replay.status).toBe(409)
+    expect(replay.json.error.code).toBe('run_finalized')
+  })
+
+  it('executor factory failure releases the reservation; execute rejection yields a stable replayable outcome', async () => {
+    const failingFactory = createFixture({ executorFactoryThrows: true })
+    await failingFactory.post('/run/start', undefined).catch(() => null)
+    const runIdA = await startRun(failingFactory)
+    const queryA = { runId: runIdA, requestId: uuid(), prompt: 'p', maxOutputTokens: 8, timeoutMs: 5_000 }
+    const first = await failingFactory.post('/ai/query', queryA)
+    expect(first.status).toBe(502)
+    expect(first.json.error.code).toBe('host_failed')
+    // The reservation was released: the same fingerprint is re-admitted
+    // instead of being stuck in request_in_progress forever.
+    const retry = await failingFactory.post('/ai/query', queryA)
+    expect(retry.status).toBe(502)
+    expect(retry.json.error.code).toBe('host_failed')
+    await failingFactory.coordinator.shutdown()
+
+    const rejectingExecute = createFixture({ executeRejection: true })
+    await rejectingExecute.post('/run/start', undefined).catch(() => null)
+    const runIdB = await startRun(rejectingExecute)
+    const queryB = { runId: runIdB, requestId: uuid(), prompt: 'p', maxOutputTokens: 8, timeoutMs: 5_000 }
+    const failed = await rejectingExecute.post('/ai/query', queryB)
+    expect(failed.status).toBe(502)
+    expect(rejectingExecute.executorCount()).toBe(1)
+    // The cached terminal outcome replays without another provider attempt.
+    const replay = await rejectingExecute.post('/ai/query', queryB)
+    expect(replay.status).toBe(502)
+    expect(rejectingExecute.executorCount()).toBe(1)
+    await rejectingExecute.coordinator.shutdown()
   })
 })

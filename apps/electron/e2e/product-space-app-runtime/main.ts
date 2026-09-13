@@ -13,8 +13,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'os'
 import { join } from 'path'
 import * as tar from 'tar'
-import { LocalAppRuntimeManager } from '../../main/local-app-runtime/manager'
-import { LocalAppRuntimeCoordinator } from '../../main/local-app-runtime/runtime-coordinator'
+import { LocalAppRuntimeManager } from '../../src/main/local-app-runtime/manager'
+import { LocalAppRuntimeCoordinator } from '../../src/main/local-app-runtime/runtime-coordinator'
 
 const FAILURES: string[] = []
 
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
 
   // --- Fixture bundle: a real js local-app carrying the fixture server. ---
   const bundleDir = join(tempRoot, 'bundle-src')
-  const serverJs = await Bun.file(join(__dirname, 'fixture-server.js')).text()
+  const serverJs = readFileSync(join(__dirname, 'fixture-server.js'), 'utf8')
   mkdirSync(bundleDir, { recursive: true })
   writeFileSync(join(bundleDir, 'server.js'), serverJs)
   writeFileSync(join(bundleDir, 'polo-app.json'), JSON.stringify({
@@ -73,6 +73,7 @@ async function main(): Promise<void> {
   await new Promise<void>(resolve => downloadServer.listen(0, '127.0.0.1', resolve))
   const address = downloadServer.address()
   if (!address || typeof address === 'string') throw new Error('no download port')
+  const downloadUrl = `http://127.0.0.1:${address.port}/bundle`
 
   // --- Real manager + real coordinator; Admin/Host seams are fakes. ---
   const manager = new LocalAppRuntimeManager({
@@ -123,6 +124,21 @@ async function main(): Promise<void> {
   const gatewayUrl = await coordinator.ensureGateway()
   assert(gatewayUrl.startsWith('http://127.0.0.1:'), 'gateway binds IPv4 loopback only')
 
+  // Install the fixture bundle through the REAL manager install path.
+  const hostPlatform = process.platform === 'win32'
+    ? 'win32'
+    : process.platform === 'darwin' ? 'darwin' : 'linux'
+  await manager.install({
+    appId: 'e2e.fixture',
+    version: '1.0.0',
+    downloadUrl,
+    checksum,
+    sizeBytes: archive.length,
+    platform: hostPlatform,
+    arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+  })
+  downloadServer.close()
+
   const startForIdentity = async (
     productSpaceId: string,
     scopeGeneration: number,
@@ -137,7 +153,9 @@ async function main(): Promise<void> {
     }
     const executionId = `local-app:${productSpaceId}:artifact-e2e:e2e`
     let token = ''
+    let capabilityGeneration: number | undefined
     const result = await manager.startExactVersion('e2e.fixture', '1.0.0', {
+      runtimeKey: `product-space-app-runtime:1:account-e2e:${productSpaceId}:artifact-e2e:version-e2e`,
       processEnvironment: ({ runtimeKind, runtimeGeneration }) => {
         const signing = coordinator.signCapability({
           identity,
@@ -148,6 +166,7 @@ async function main(): Promise<void> {
           scopeGeneration,
         })
         token = signing.token
+        capabilityGeneration = signing.capabilityGeneration
         return {
           env: {
             ...signing.environment,
@@ -164,7 +183,7 @@ async function main(): Promise<void> {
       scopeGeneration,
       workspaceId: 'ws-e2e',
       runtimeKind: result.runtimeKind,
-      capabilityGeneration: undefined,
+      capabilityGeneration,
     })
     return { token, runtimeGeneration: result.runtimeGeneration, executionId }
   }

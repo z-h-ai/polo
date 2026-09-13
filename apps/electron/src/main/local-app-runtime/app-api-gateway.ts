@@ -151,13 +151,27 @@ export class AppApiGateway {
     const route = pathname.slice(contractPrefix.length).replace(/\/+$/, '') as AppApiRoute
     const limit = ROUTE_BODY_LIMITS[route]
     if (limit === undefined) return fail('route_not_found')
-    const authorization = request.headers.authorization
-    if (Array.isArray(authorization)) return fail('invalid_request')
-    if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
+    // Node folds repeated headers into one comma-joined string in
+    // `request.headers`, so duplicates are counted from rawHeaders instead:
+    // exactly one Authorization header is acceptable, never two.
+    let authorizationValue: string | undefined
+    let authorizationCount = 0
+    for (let index = 0; index < request.rawHeaders.length; index += 2) {
+      if (request.rawHeaders[index]!.toLowerCase() === 'authorization') {
+        authorizationCount += 1
+        authorizationValue = request.rawHeaders[index + 1]
+      }
+    }
+    if (authorizationCount > 1) return fail('invalid_request')
+    if (
+      authorizationCount === 0
+      || typeof authorizationValue !== 'string'
+      || !authorizationValue.startsWith('Bearer ')
+    ) {
       return fail('capability_invalid')
     }
     const capability = this.options.verifyToken(
-      authorization.slice('Bearer '.length),
+      authorizationValue.slice('Bearer '.length),
       (this.options.now ?? Date.now)(),
     )
     if (!capability) return fail('capability_invalid')

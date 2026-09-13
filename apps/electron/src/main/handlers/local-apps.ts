@@ -1751,14 +1751,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const scope = productSpaceBundleScope(app)
     const registry = getScopedLocalAppRuntimeRegistry()
     const coordinator = getLocalAppRuntimeCoordinator()
-    // Cross-Workspace single-instance replacement: the prior generation of
-    // the same runtime identity is revoked and stopped before B starts.
-    const existing = coordinator.getActiveRuntime(runtimeIdentity)
-    if (existing) {
-      await coordinator.teardownRuntime(existing, 'cancelled', async () => {
-        await registry.stopExact(scope, existing.runtimeGeneration).catch(() => {})
-      })
-    }
+    const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
     const workspaceId = callerWorkspaceId(ctx)
     const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
     let signedCapability: number | undefined
@@ -1774,10 +1767,22 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       start = await startAndRegisterLocalApp(
       scope,
       async () => {
+        // INSIDE the switch mutex — cross-Workspace single-instance
+        // replacement CAS: the prior generation of the same runtime identity
+        // is looked up, fully torn down (capability/Run/execution/projection)
+        // and stopped before B starts. Concurrent STARTs serialize here, so
+        // the loser can never bypass the winner's cleanup via the manager.
+        const existing = coordinator.getActiveRuntime(runtimeIdentity)
+        if (existing) {
+          await coordinator.teardownRuntime(existing, 'cancelled', async () => {
+            await registry.stopExact(scope, existing.runtimeGeneration).catch(() => {})
+          })
+        }
         // Gateway-first: a listen failure fails closed before any spawn.
         await coordinator.ensureGateway()
         try {
           const result = await registry.startExact(scope, app.version, {
+            runtimeKey: identityKey,
             processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
               const signing = coordinator.signCapability({
                 identity: runtimeIdentity,
@@ -1801,7 +1806,6 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             runtimeKind: result.runtimeKind,
             capabilityGeneration: signedCapability,
           })
-          const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
           getAppRuntimeCenter().publish({
             identityKey,
             identity: runtimeIdentity,

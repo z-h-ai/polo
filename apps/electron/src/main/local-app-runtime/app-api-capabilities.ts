@@ -63,6 +63,24 @@ export class AppApiCapabilityRegistry {
     return null
   }
 
+  /**
+   * Returns the record matching the token when it is expired or revoked but
+   * still retained — the trigger for the coordinator's unified expiry
+   * teardown. Records already forgotten (torn down) never match.
+   */
+  findExpiredOrRevoked(token: unknown, now: number): CapabilityRecord | null {
+    if (typeof token !== 'string' || token.length === 0 || token.length > 512) return null
+    const candidate = createHash('sha256').update(token).digest()
+    for (const record of this.records.values()) {
+      if (!timingSafeEqual(Buffer.from(record.digest, 'hex'), candidate)) continue
+      if (record.expiresAt <= now || this.revoked.has(record.capabilityGeneration)) {
+        return record
+      }
+      return null
+    }
+    return null
+  }
+
   get(capabilityGeneration: number): CapabilityRecord | undefined {
     return this.records.get(capabilityGeneration)
   }

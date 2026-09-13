@@ -67,6 +67,15 @@ export interface RuntimeCoordinatorAdapters {
     reportResult?(input: Record<string, unknown>): Promise<{ revision: number }>
     reportFile?(input: Record<string, unknown>): Promise<{ revision: number }>
   }
+  /**
+   * Trusted process stop for one active runtime (exact-version generation
+   * CAS). Used by expiry/shutdown teardowns so every stop entry follows the
+   * unified revoke→abort→cleanup→stop→CAS-clear order.
+   */
+  stopRuntime?(runtime: {
+    identity: ProductSpaceAppRuntimeIdentity
+    runtimeGeneration: number
+  }): Promise<void>
   now?: () => number
 }
 
@@ -128,6 +137,17 @@ function hostErrorCode(result: HostLlmPublicResult): AppApiStableErrorCode | nul
   }
 }
 
+/** Trusted provider-final usage of a terminal Host result, if present. */
+function hostUsage(
+  result: HostLlmPublicResult,
+): { inputTokens: number; outputTokens: number } | undefined {
+  if (!('usage' in result) || !result.usage) return undefined
+  const { inputTokens, outputTokens } = result.usage
+  if (!Number.isSafeInteger(inputTokens) || inputTokens < 0) return undefined
+  if (!Number.isSafeInteger(outputTokens) || outputTokens < 0) return undefined
+  return { inputTokens, outputTokens }
+}
+
 /**
  * Single owner of the ProductSpace App platform boundary: loopback gateway,
  * per-launch capabilities, capability-local Run/request state, POL-102
@@ -140,6 +160,7 @@ export class LocalAppRuntimeCoordinator {
   private gateway?: AppApiGateway
   private readonly active = new Map<string, ActiveRuntime>()
   private readonly inFlight = new Map<string, InFlightQuery>()
+  private readonly expiryHandled = new Set<number>()
   private shuttingDown = false
 
   constructor(private readonly adapters: RuntimeCoordinatorAdapters) {}
@@ -156,7 +177,18 @@ export class LocalAppRuntimeCoordinator {
       }
       const gateway = new AppApiGateway({
         delegate,
-        verifyToken: (token, now) => this.capabilities.verify(token, now),
+        verifyToken: (token, now) => {
+          const record = this.capabilities.verify(token, now)
+          if (record) return record
+          // A matching-but-expired/revoked token triggers the unified
+          // expiry teardown exactly once (idempotent, best-effort).
+          const expired = this.capabilities.findExpiredOrRevoked(token, now)
+          if (expired) {
+            void this.handleCapabilityExpiry(expired.capabilityGeneration)
+              .catch(() => {})
+          }
+          return null
+        },
         now: () => this.now(),
       })
       await gateway.start()
@@ -249,12 +281,53 @@ export class LocalAppRuntimeCoordinator {
 
   /** Manager observer for an unexpected process exit of an exact runtime. */
   async handleUnexpectedExit(event: {
+    runtimeKey?: string
     runtimeGeneration: number
   }): Promise<void> {
+    // Fail closed: both the immutable identity key AND the manager-local
+    // runtime generation must match — two scoped managers allocate
+    // generations independently, so a generation alone is ambiguous.
+    if (!event.runtimeKey) return
     const runtime = [...this.active.values()]
-      .find(candidate => candidate.runtimeGeneration === event.runtimeGeneration)
+      .find(candidate => candidate.identityKey === event.runtimeKey
+        && candidate.runtimeGeneration === event.runtimeGeneration)
     if (!runtime) return
     await this.teardownRuntime(runtime, 'failed')
+  }
+
+  /**
+   * Capability TTL expiry: the expired token is refused at the gateway and
+   * the whole runtime generation is torn down exactly once with the unified
+   * revoke→abort→cleanup→stop→CAS-clear order ('unknown' terminal status).
+   */
+  async handleCapabilityExpiry(capabilityGeneration: number): Promise<void> {
+    if (this.expiryHandled.has(capabilityGeneration)) return
+    this.expiryHandled.add(capabilityGeneration)
+    const runtime = [...this.active.values()]
+      .find(candidate => candidate.capabilityGeneration === capabilityGeneration)
+    if (!runtime) return
+    await this.teardownRuntime(runtime, 'unknown', () =>
+      this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
+  }
+
+  /** Read-only view of active runtimes for unified stop entry points. */
+  listActiveRuntimes(): ReadonlyArray<ActiveRuntime> {
+    return [...this.active.values()]
+  }
+
+  /**
+   * Unified fail-closed teardown for every active runtime matching a filter
+   * (scope withdrawal / organization denial / account session ending).
+   */
+  async teardownRuntimesFor(
+    matches: (runtime: ActiveRuntime) => boolean,
+    finalStatus: 'cancelled' | 'failed' | 'unknown',
+  ): Promise<void> {
+    for (const runtime of [...this.active.values()]) {
+      if (!matches(runtime)) continue
+      await this.teardownRuntime(runtime, finalStatus, () =>
+        this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
+    }
   }
 
   /**
@@ -300,7 +373,9 @@ export class LocalAppRuntimeCoordinator {
    * Bounded generation-bound cleanup lane: at most one reconfirmation per
    * already-formed fact (start/receipt/finish), never a provider re-run and
    * never a new App payload. Falls back to the owner-specified terminal
-   * status only when the run is cleanly finishable.
+   * status only when the run is cleanly finishable. Every Admin call is
+   * bounded by min(5s, remaining total budget) with a Promise.race fallback,
+   * so a hung adapter can never extend the teardown beyond its budgets.
    */
   private async runCleanupLane(
     runtime: ActiveRuntime,
@@ -310,41 +385,58 @@ export class LocalAppRuntimeCoordinator {
     if (capabilityGeneration === undefined || !this.gateway) return
     const deadline = this.now() + CLEANUP_TOTAL_BUDGET_MS
     const controller = new AbortController()
-    const budgetCheck = (): AbortSignal | undefined => {
-      if (this.now() >= deadline || controller.signal.aborted) {
-        controller.abort()
-        return undefined
+    const runBounded = async (
+      operation: (signal: AbortSignal) => Promise<unknown>,
+    ): Promise<boolean> => {
+      if (this.now() >= deadline || controller.signal.aborted) return false
+      const remaining = deadline - this.now()
+      const budget = Math.max(0, Math.min(CLEANUP_REQUEST_BUDGET_MS, remaining))
+      const timer = setTimeout(() => controller.abort(), budget)
+      try {
+        await Promise.race([
+          operation(controller.signal),
+          new Promise<void>(resolve => {
+            controller.signal.addEventListener('abort', () => resolve(), { once: true })
+          }),
+        ])
+        return !controller.signal.aborted
+      } catch {
+        return false
+      } finally {
+        clearTimeout(timer)
       }
-      return controller.signal
     }
     const admin = this.adapters.admin
     const runs = this.runState.runsForCapability(capabilityGeneration)
     for (const { runId, record } of runs) {
-      if (!budgetCheck()) return
       try {
         if (record.status === 'start_unconfirmed') {
-          await admin.startAppRun(this.adminStartBody(runtime, runId), {
-            signal: budgetCheck(),
-          })
+          const confirmed = await runBounded(signal =>
+            admin.startAppRun(this.adminStartBody(runtime, runId), { signal }))
+          if (!confirmed) return
           this.runState.setRunStatus(capabilityGeneration, runId, 'running')
           record.status = 'running'
         }
         for (const { requestId, record: query } of this.runState.queriesForRun(capabilityGeneration, runId)) {
           if (query.state !== 'receipt_unconfirmed' || !query.outcome) continue
-          await admin.recordAppUsage(
-            this.receiptBody(runtime, runId, requestId, query.outcome),
-            { signal: budgetCheck() },
-          )
+          const receiptOk = await runBounded(signal =>
+            admin.recordAppUsage(
+              this.receiptBody(runtime, runId, requestId, query.outcome!),
+              { signal },
+            ))
+          if (!receiptOk) return
           this.runState.noteReceiptConfirmed(capabilityGeneration, runId, requestId)
         }
         if (record.status === 'finishing' || record.status === 'finish_unconfirmed') {
-          await admin.finishAppRun(runId, {
-            status: record.requestedFinishStatus ?? finalStatus,
-          }, { signal: budgetCheck() })
+          const finishOk = await runBounded(signal =>
+            admin.finishAppRun(runId, {
+              status: record.requestedFinishStatus ?? finalStatus,
+            }, { signal }))
+          if (!finishOk) return
         } else if (this.runState.canFinishRun(capabilityGeneration, runId)) {
-          await admin.finishAppRun(runId, { status: finalStatus }, {
-            signal: budgetCheck(),
-          })
+          const finishOk = await runBounded(signal =>
+            admin.finishAppRun(runId, { status: finalStatus }, { signal }))
+          if (!finishOk) return
         } else {
           // Not cleanly finishable: leave reconciliation to the POL-102
           // server timeout instead of fabricating a terminal state.
@@ -384,8 +476,12 @@ export class LocalAppRuntimeCoordinator {
       ? outcome.usage.inputTokens
       : outcome.kind === 'no_output'
         ? outcome.inputTokens ?? 0
-        : 0
-    const outputTokens = outcome.kind === 'success' ? outcome.usage.outputTokens : 0
+        : outcome.usage?.inputTokens ?? 0
+    const outputTokens = outcome.kind === 'success'
+      ? outcome.usage.outputTokens
+      : outcome.kind === 'no_output'
+        ? 0
+        : outcome.usage?.outputTokens ?? 0
     void runtime
     return { runId, requestId, inputTokens, outputTokens }
   }
@@ -399,7 +495,8 @@ export class LocalAppRuntimeCoordinator {
       }
       runtime.controller.abort()
     }
-    await Promise.allSettled(runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown')))
+    await Promise.allSettled(runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
+      this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())))
     await this.gateway?.close()
     this.gateway = undefined
     this.shuttingDown = false
@@ -607,7 +704,17 @@ export class LocalAppRuntimeCoordinator {
     else signal.addEventListener('abort', abortForward, { once: true })
     runtime.controller.signal.addEventListener('abort', abortForward, { once: true })
     const queryKey = `${runtime.identityKey}:${runId}:${requestId}`
-    const executor = this.adapters.createExecutor({ connectionSlug, model })
+    let executor: CoordinatorExecutor
+    try {
+      executor = this.adapters.createExecutor({ connectionSlug, model })
+    } catch {
+      // Construction failed before the provider ran: release the reservation
+      // and answer with a stable error so a retry can be admitted cleanly.
+      this.releaseReservation(capGen, runId, requestId)
+      signal.removeEventListener('abort', abortForward)
+      runtime.controller.signal.removeEventListener('abort', abortForward)
+      return { errorCode: 'host_failed' }
+    }
     const completion = (async (): Promise<QueryOutcome> => {
       try {
         const result = await executor.execute({
@@ -632,7 +739,11 @@ export class LocalAppRuntimeCoordinator {
         if (result.status === 'no_output') {
           return { kind: 'no_output', inputTokens: result.usage?.inputTokens }
         }
-        return { kind: 'error', code: hostErrorCode(result) ?? 'host_failed' }
+        return {
+          kind: 'error',
+          code: hostErrorCode(result) ?? 'host_failed',
+          ...(hostUsage(result) ? { usage: hostUsage(result) } : {}),
+        }
       } finally {
         await executor.dispose().catch(() => {})
       }
@@ -641,15 +752,24 @@ export class LocalAppRuntimeCoordinator {
       runId,
       requestId,
       controller,
-      promise: completion.then(() => {}),
+      promise: completion.then(() => {}, () => {}),
     }
     this.inFlight.set(queryKey, inFlight)
-    const outcome = await completion
-    this.inFlight.delete(queryKey)
-    runtime.controller.signal.removeEventListener('abort', abortForward)
-    if (outcome.kind === 'error' && !this.runState.getQuery(capGen, runId, requestId)) {
+    let outcome: QueryOutcome
+    try {
+      outcome = await completion
+    } catch {
+      // Executor failure without a Host terminal: record a stable replayable
+      // outcome instead of leaving the reservation stuck in flight.
+      outcome = { kind: 'error', code: 'host_failed' }
+    } finally {
+      this.inFlight.delete(queryKey)
+      runtime.controller.signal.removeEventListener('abort', abortForward)
+      signal.removeEventListener('abort', abortForward)
+    }
+    if (!this.runState.getQuery(capGen, runId, requestId)) {
       // Admission was released (e.g. replaced/shutdown mid-flight).
-      return { errorCode: outcome.code }
+      return { errorCode: outcome.kind === 'error' ? outcome.code : 'run_state_conflict' }
     }
     const record = this.runState.noteHostTerminal(capGen, runId, requestId, outcome)
     if (!record) return { errorCode: 'run_state_conflict' }

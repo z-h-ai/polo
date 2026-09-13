@@ -117,6 +117,7 @@ interface ManagedRuntime {
   healthToken: string
   runtimeGeneration?: number
   sensitiveValues?: string[]
+  runtimeKey?: string
 }
 
 export interface ExactVersionStartHooks {
@@ -129,6 +130,12 @@ export interface ExactVersionStartHooks {
     runtimeKind: 'python' | 'js'
     runtimeGeneration: number
   }): { env: NodeJS.ProcessEnv; sensitiveValues: string[] }
+  /**
+   * Immutable coordinator identity key echoed on the unexpected-exit event,
+   * so the coordinator matches BOTH the key and the (manager-local)
+   * runtime generation before tearing anything down.
+   */
+  runtimeKey?: string
 }
 
 export interface ExactVersionStartResult extends LocalAppStartResult {
@@ -141,6 +148,7 @@ export interface UnexpectedExitEvent {
   version: string
   runtimeKind: LocalAppRuntimeKind
   runtimeGeneration: number
+  runtimeKey?: string
 }
 
 export const RUNTIME_SECRET_REDACTED = '[REDACTED_RUNTIME_SECRET]'
@@ -641,6 +649,7 @@ export class LocalAppRuntimeManager {
       const handle = await this.startVersion(metadata, safeVersion, signal, {
         runtimeGeneration,
         hooks,
+        ...(hooks.runtimeKey ? { runtimeKey: hooks.runtimeKey } : {}),
       })
       return {
         appId: safeAppId,
@@ -1929,6 +1938,7 @@ export class LocalAppRuntimeManager {
     signal: AbortSignal,
     options: {
       runtimeGeneration?: number
+      runtimeKey?: string
       hooks?: ExactVersionStartHooks
     } = {},
   ): Promise<LocalAppStartResult> {
@@ -1969,9 +1979,11 @@ export class LocalAppRuntimeManager {
         manifest,
         hookEnvironment,
         runtimeGeneration,
+        options.runtimeKey,
       )
     }
     handle.runtimeGeneration = options.runtimeGeneration
+    handle.runtimeKey = options.runtimeKey
     this.runtimes.set(metadata.appId, handle)
     try {
       await this.waitForHealthcheck(
@@ -2050,6 +2062,7 @@ export class LocalAppRuntimeManager {
     manifest: PoloAppManifest,
     hookEnvironment?: { env: NodeJS.ProcessEnv; sensitiveValues: string[] },
     runtimeGeneration?: number,
+    runtimeKey?: string,
   ): Promise<ManagedRuntime> {
     const port = await this.allocatePort()
     await this.assertPortAvailable(port)
@@ -2103,6 +2116,7 @@ export class LocalAppRuntimeManager {
       exitPromise,
       healthToken,
       ...(runtimeGeneration !== undefined ? { runtimeGeneration } : {}),
+      ...(runtimeKey ? { runtimeKey } : {}),
       ...(hookEnvironment?.sensitiveValues?.length
         ? { sensitiveValues: hookEnvironment.sensitiveValues }
         : {}),
@@ -2119,6 +2133,7 @@ export class LocalAppRuntimeManager {
           version,
           runtimeKind: manifest.runtime,
           runtimeGeneration,
+          ...(runtimeKey ? { runtimeKey } : {}),
         })
       }
       handle.cleanupPromise = this.cleanupManagedProcess(managedProcess)
@@ -3002,9 +3017,12 @@ export class LocalAppRuntimeManager {
   }
 
   private captureChildOutput(appId: string, child: ChildProcess, sensitiveValues: string[] = []): void {
-    const redactor = new StreamingSecretRedactor(sensitiveValues)
     const attach = (source: 'stdout' | 'stderr', stream: ChildProcess['stdout']) => {
       if (!stream) return
+      // Each stream owns its own redactor and carry state: a shared instance
+      // would let one stream consume or flush the other's withheld tail and
+      // leak a secret prefix on interleaved output.
+      const redactor = new StreamingSecretRedactor(sensitiveValues)
       let lineCarry = ''
       let flushed = false
       const emit = (text: string) => {

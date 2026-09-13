@@ -295,6 +295,8 @@ export class ScopedLocalAppRuntimeRegistry {
         runtimeGeneration: number
         scopeGeneration: number
       }): { env: NodeJS.ProcessEnv; sensitiveValues: string[] }
+      /** Echoed on unexpected-exit events for coordinator identity matching. */
+      runtimeKey?: string
     } = {},
   ): Promise<ExactVersionStartResult & { scopeGeneration: number }> {
     const safeScope = validateCatalogLocalAppScope(scope)
@@ -306,6 +308,7 @@ export class ScopedLocalAppRuntimeRegistry {
         this.assertAccountSessionActive(safe.accountId)
         const scopeGeneration = this.nextScopeGeneration(safe)
         const wrapped: ExactVersionStartHooks = {
+          ...(hooks.runtimeKey ? { runtimeKey: hooks.runtimeKey } : {}),
           processEnvironment: input => hooks.processEnvironment?.({
             ...input,
             scopeGeneration,

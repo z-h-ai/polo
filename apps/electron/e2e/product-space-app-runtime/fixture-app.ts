@@ -35,6 +35,43 @@ async function call(label: string, path: string, body: Record<string, unknown>):
   calls[label] = { path, status: response.status, body: json }
 }
 
+/**
+ * The capability is delivered through the process environment, but the
+ * platform side registers the runtime right after the health gate — this
+ * fixture may boot first. The FIRST call therefore retries while the
+ * gateway answers 401 (bounded); once any request passes auth the session
+ * is live and later calls never retry.
+ */
+async function callFirstWithAuthRetry(
+  label: string,
+  path: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const response = await fetch(`${apiUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    let json: Record<string, unknown> = {}
+    try {
+      json = await response.json() as Record<string, unknown>
+    } catch {
+      json = {}
+    }
+    if (response.status === 401) {
+      await new Promise(resolve => setTimeout(resolve, 150))
+      continue
+    }
+    calls[label] = { path, status: response.status, body: json }
+    return
+  }
+  calls[label] = { path, status: 401, body: { error: { code: 'capability_invalid' } } }
+}
+
 function uuid(): string {
   return crypto.randomUUID()
 }
@@ -42,7 +79,7 @@ function uuid(): string {
 async function runSequence(): Promise<void> {
   const runId = uuid()
   try {
-    await call('runStart', '/run/start', { runId })
+    await callFirstWithAuthRetry('runStart', '/run/start', { runId })
     await call('resultReportWhileRunning', '/result/report', {
       runId,
       requestId: uuid(),
@@ -57,7 +94,8 @@ async function runSequence(): Promise<void> {
       timeoutMs: 10_000,
     })
     await call('finish', '/run/finish', { runId, status: 'completed' })
-    await call('startAfterFinish', '/run/start', { runId: uuid() })
+    // Re-starting the SAME terminal runId conflicts; report stays finalized.
+    await call('startAfterFinish', '/run/start', { runId })
     await call('reportAfterFinish', '/result/report', {
       runId,
       requestId: uuid(),

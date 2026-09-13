@@ -18,7 +18,12 @@ export type QueryOutcome =
       usage: { inputTokens: number; outputTokens: number }
     }
   | { kind: 'no_output'; inputTokens?: number }
-  | { kind: 'error'; code: AppApiStableErrorCode }
+  | {
+      kind: 'error'
+      code: AppApiStableErrorCode
+      /** Trusted provider-final usage attached to a terminal Host failure. */
+      usage?: { inputTokens: number; outputTokens: number }
+    }
 
 export interface RunRecord {
   status: AppRunStatus
@@ -127,10 +132,11 @@ export class AppApiRunState {
   }
 
   /**
-   * Stores the unique Host terminal outcome. Trusted provider-final usage (or
-   * the owner-accepted no_output sentinel) always requires a confirmed
-   * POL-102 receipt before the response may be released; the 512 KiB
-   * reservation shrinks to the retained bytes (0 for error/no_output).
+   * Stores the unique Host terminal outcome. Trusted provider-final usage
+   * (on success, no_output, or a terminal failure), or the owner-accepted
+   * no_output sentinel, always requires a confirmed POL-102 receipt before
+   * the response may be released; the 512 KiB reservation shrinks to the
+   * retained bytes (0 for error/no_output).
    */
   noteHostTerminal(
     capabilityGeneration: number,
@@ -142,6 +148,7 @@ export class AppApiRunState {
     if (!record || record.state !== 'executing') return record
     const requiresReceipt = outcome.kind === 'success'
       || outcome.kind === 'no_output'
+      || (outcome.kind === 'error' && outcome.usage !== undefined)
     record.outcome = outcome
     record.requiredReceipt = requiresReceipt
     record.state = requiresReceipt ? 'receipt_unconfirmed' : 'settled'

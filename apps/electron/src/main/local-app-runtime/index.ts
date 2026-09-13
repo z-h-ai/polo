@@ -62,7 +62,10 @@ export function getScopedLocalAppRuntimeRegistry(): ScopedLocalAppRuntimeRegistr
 /**
  * Production runtime coordinator: wires the trusted POL-102 AdminClient
  * boundary, the sessionless Host LLM executor factory and the workspace
- * root/connection resolution into the shared coordinator.
+ * root/connection resolution into the shared coordinator. The stopRuntime
+ * adapter routes teardown process stops through the scoped registry's
+ * exact-generation CAS so every stop entry keeps the unified
+ * revoke→abort→cleanup→stop→CAS-clear order.
  */
 export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
   if (!coordinator) {
@@ -94,6 +97,17 @@ export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
         getWorkspaceByNameOrId(workspaceId)?.rootPath ?? null,
       loadWorkspaceConfig: rootPath => loadWorkspaceConfig(rootPath),
       getDefaultLlmConnection: () => getDefaultLlmConnection(),
+      stopRuntime: async runtime => {
+        await getScopedLocalAppRuntimeRegistry().stopExact(
+          {
+            kind: 'catalog',
+            accountId: runtime.identity.accountId,
+            organizationId: runtime.identity.productSpaceId,
+            catalogAppId: runtime.identity.artifactInstanceId,
+          },
+          runtime.runtimeGeneration,
+        )
+      },
     }
     coordinator = new LocalAppRuntimeCoordinator(adapters)
   }
@@ -102,6 +116,60 @@ export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
 
 export function hasLocalAppRuntimeCoordinator(): boolean {
   return coordinator !== null
+}
+
+const runtimeScopeKey = (accountId: string, productSpaceId: string, artifactInstanceId: string): string =>
+  `${accountId}|${productSpaceId}|${artifactInstanceId}`
+
+/**
+ * Unified coordinator-aware teardown for scope withdrawals: revokes the
+ * capability, aborts in-flight work, runs the bounded cleanup lane, stops
+ * the exact process generation, clears the projection and releases state —
+ * before any registry-level stop runs.
+ */
+export function teardownCoordinatorRuntimesForCatalogScopes(
+  scopes: ReadonlyArray<{
+    accountId: string
+    organizationId: string
+    catalogAppId: string
+  }>,
+  finalStatus: 'cancelled' | 'failed' | 'unknown' = 'cancelled',
+): Promise<void> {
+  if (!hasLocalAppRuntimeCoordinator()) return Promise.resolve()
+  const keys = new Set(scopes.map(scope =>
+    runtimeScopeKey(scope.accountId, scope.organizationId, scope.catalogAppId)))
+  return getLocalAppRuntimeCoordinator().teardownRuntimesFor(
+    runtime => keys.has(runtimeScopeKey(
+      runtime.identity.accountId,
+      runtime.identity.productSpaceId,
+      runtime.identity.artifactInstanceId,
+    )),
+    finalStatus,
+  )
+}
+
+export function teardownCoordinatorRuntimesForOrganization(
+  accountId: string,
+  organizationId: string,
+  finalStatus: 'cancelled' | 'failed' | 'unknown' = 'cancelled',
+): Promise<void> {
+  if (!hasLocalAppRuntimeCoordinator()) return Promise.resolve()
+  return getLocalAppRuntimeCoordinator().teardownRuntimesFor(
+    runtime => runtime.identity.accountId === accountId
+      && runtime.identity.productSpaceId === organizationId,
+    finalStatus,
+  )
+}
+
+export function teardownCoordinatorRuntimesForAccount(
+  accountId: string,
+  finalStatus: 'cancelled' | 'failed' | 'unknown' = 'cancelled',
+): Promise<void> {
+  if (!hasLocalAppRuntimeCoordinator()) return Promise.resolve()
+  return getLocalAppRuntimeCoordinator().teardownRuntimesFor(
+    runtime => runtime.identity.accountId === accountId,
+    finalStatus,
+  )
 }
 
 async function trustedAccessToken(): Promise<string> {
@@ -121,8 +189,12 @@ export function hasLocalAppRuntimeManager(): boolean {
 }
 
 export async function shutdownLocalAppRuntime(): Promise<void> {
+  // Strict order: the coordinator first revokes every capability, aborts
+  // App-owned work, runs the bounded cleanup lane and stops the exact
+  // process generations; only then do the manager/registry shut down their
+  // remaining lifecycle state.
+  await coordinator?.shutdown()
   const results = await Promise.allSettled([
-    coordinator?.shutdown(),
     manager?.shutdown(),
     scopedRegistry?.shutdown(),
   ])

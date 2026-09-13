@@ -129,6 +129,9 @@ import {
   getScopedLocalAppRuntimeRegistry,
   hasLocalAppRuntimeManager,
   shutdownLocalAppRuntime,
+  teardownCoordinatorRuntimesForAccount,
+  teardownCoordinatorRuntimesForCatalogScopes,
+  teardownCoordinatorRuntimesForOrganization,
 } from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
@@ -957,32 +960,40 @@ app.whenReady().then(async () => {
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
             onAdminSessionEnding: (accountId: string) =>
-              endAccountProductSpaceRuntimes(
-                accountId,
-                getScopedLocalAppRuntimeRegistry(),
-              ),
+              teardownCoordinatorRuntimesForAccount(accountId).then(() =>
+                endAccountProductSpaceRuntimes(
+                  accountId,
+                  getScopedLocalAppRuntimeRegistry(),
+                )),
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
             onAdminCatalogScopeDenied: (
               accountId: string,
               organizationId: string,
-            ) => getScopedLocalAppRuntimeRegistry().stopOrganization(
-              accountId,
-              organizationId,
-            ),
+            ) => teardownCoordinatorRuntimesForOrganization(accountId, organizationId)
+              .then(() => getScopedLocalAppRuntimeRegistry().stopOrganization(
+                accountId,
+                organizationId,
+              )),
             onAdminCatalogAppsWithdrawn: (
               accountId: string,
               organizationId: string,
               catalogAppIds: readonly string[],
-            ) => getScopedLocalAppRuntimeRegistry().stopApps(
+            ) => teardownCoordinatorRuntimesForCatalogScopes(
+              catalogAppIds.map(catalogAppId => ({
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ).then(() => getScopedLocalAppRuntimeRegistry().stopApps(
               catalogAppIds.map(catalogAppId => ({
                 kind: 'catalog' as const,
                 accountId,
                 organizationId,
                 catalogAppId,
               })),
-            ),
+            )),
             onAdminCatalogAppsAuthorized: (
               accountId: string,
               organizationId: string,
