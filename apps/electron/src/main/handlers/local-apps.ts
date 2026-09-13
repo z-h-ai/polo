@@ -1849,16 +1849,24 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const rollbackRuntime = (): Promise<void> => {
       if (rollbackStarted) return rollbackStarted
       rollbackStarted = (async (): Promise<void> => {
-        console.log('[dbg] rollback gen:', startedRuntimeGeneration, 'exec:', executionId)
         const active = startedRuntimeGeneration !== undefined
           ? coordinator.getActiveRuntimeByExecution(executionId)
           : undefined
         if (active) {
           // The aggregated process-stop failure must surface: never swallow
-          // stopExact here.
+          // stopExact here. The teardown RECORDS (never throws) the stop
+          // failure, so it is consumed atomically below and rejected through
+          // rollbackRuntime itself — the START-boundary exits (the
+          // registration/fence helper and the single catch) then surface the
+          // stable STOP_FAILED carrying BOTH the original failure and the
+          // rollback stop failure.
           await coordinator.teardownRuntime(active, 'cancelled', async () => {
             await registry.stopExact(scope, active.runtimeGeneration)
           })
+          const recorded = coordinator.takeRollbackStopFailure(executionId)
+          if (recorded !== undefined) {
+            throw normalizeStopFailure(recorded)
+          }
           return
         }
         if (signedCapability !== undefined) {
@@ -1905,6 +1913,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
               throw normalizeStopFailure(error)
             }
           })
+          // The teardown RECORDS (never throws) the stop failure: consume it
+          // atomically here — a failed old-generation stop must fail the
+          // replacement closed with STOP_FAILED BEFORE any gateway reopen or
+          // successor spawn. The registry-side old-generation ownership stays
+          // intact as the retry/diagnostic fallback.
+          const recorded = coordinator.takeRollbackStopFailure(existing.executionId)
+          if (recorded !== undefined) {
+            throw normalizeStopFailure(recorded)
+          }
         }
         // Gateway-first: a listen failure fails closed before any spawn.
         await coordinator.ensureGateway()
@@ -2003,7 +2020,19 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // runtime/capability/projection state behind. The SINGLE aggregation
       // exit: the rollback primitives already ran (idempotent guard); if the
       // generation-aware stop failed, surface the stable STOP_FAILED with
-      // BOTH the original failure and the rollback stop failure.
+      // BOTH the original failure and the rollback stop failure. When the
+      // registration/fence exits already composed that STOP_FAILED (it
+      // carries details.cause.original), rethrow it unchanged — the
+      // idempotent rollback re-rejects with the same settled failure and
+      // must never be double-wrapped.
+      if (
+        error instanceof LocalAppRuntimeError
+        && error.code === 'STOP_FAILED'
+        && (error.details?.cause as { original?: unknown } | undefined)?.original
+          !== undefined
+      ) {
+        throw error
+      }
       let rollbackStopFailure: { message?: string } | undefined
       try {
         await rollbackRuntime()
@@ -2089,8 +2118,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         throw normalizeStopFailure(error)
       }
     })
-    // The recorded (never thrown) rollback stop failure is surfaced here.
-    const recorded = coordinator.getRollbackStopFailure(handle.executionId as string)
+    // The recorded (never thrown) rollback stop failure is surfaced here and
+    // consumed atomically: an explicit STOP/RESTART owns this boundary, so
+    // the record cannot outlive the operation it belongs to.
+    const recorded = coordinator.takeRollbackStopFailure(handle.executionId as string)
     if (recorded !== undefined) {
       throw normalizeStopFailure(recorded)
     }

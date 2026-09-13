@@ -333,12 +333,26 @@ const runtimeCoordinator = {
     }
     activeRuntimesByKey.delete(runtimeIdentityKey(runtime.identity))
     activeRuntimesByExecution.delete(runtime.executionId)
+    // REAL-coordinator semantics: a failing stopProcess is RECORDED (never
+    // thrown) — the teardown resolves after cleanup and the frozen handler
+    // boundary must consume the record itself.
     const stopProcess = args[2] as (() => Promise<void>) | undefined
-    await stopProcess?.()
+    try {
+      await stopProcess?.()
+    } catch (error) {
+      recordedRollbackStopFailures.set(runtime.executionId, error)
+    }
   }),
   handleUnexpectedExit: mock(async () => {}),
-  getRollbackStopFailure: mock((_executionId: unknown): unknown => undefined),
+  takeRollbackStopFailure: mock((executionId: unknown): unknown => {
+    const failure = recordedRollbackStopFailures.get(executionId as string)
+    if (failure !== undefined) {
+      recordedRollbackStopFailures.delete(executionId as string)
+    }
+    return failure ?? undefined
+  }),
 }
+const recordedRollbackStopFailures = new Map<string, unknown>()
 const assertAppAuthorized = mock(() => {
   if (appAccessDenied) {
     throw Object.assign(new Error('Catalog app authorization is ending'), {
@@ -661,6 +675,7 @@ describe('local app main-process authorization boundary', () => {
     runtimeCoordinator.registerActiveRuntime.mockClear()
     activeRuntimesByKey.clear()
     activeRuntimesByExecution.clear()
+    recordedRollbackStopFailures.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
@@ -3227,6 +3242,7 @@ describe('local app production status projection (R34-3)', () => {
     runtimeCoordinator.registerActiveRuntime.mockClear()
     activeRuntimesByKey.clear()
     activeRuntimesByExecution.clear()
+    recordedRollbackStopFailures.clear()
     runtimeCoordinator.revokeSignedCapability.mockClear()
     runtimeCoordinator.teardownRuntime.mockClear()
     const { resetAppRuntimeCenterForTests } = await import(
@@ -3627,6 +3643,76 @@ describe('local app production status projection (R34-3)', () => {
     setRuntimeActiveProductSpace('organization-a')
   })
 
+  it('POO-54 R11: a stop failure recorded by the already-active START rollback surfaces as STOP_FAILED with BOTH original and rollback cause', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Park INSIDE startExact: the runtime registers ACTIVE (generation 41 via
+    // processEnvironment) before the fence re-check runs. Flip the committed
+    // ProductSpace while parked — after release, the post-registration fence
+    // fails and the rollback targets the now-ACTIVE runtime. The rollback's
+    // exact stop FAILS; the real coordinator records it (never throws), so
+    // the START boundary itself must consume the recorded failure.
+    let releaseParkedStart!: () => void
+    const parkedStart = new Promise<void>(resolve => {
+      releaseParkedStart = resolve
+    })
+    scopedStartExact.mockImplementationOnce(async (
+      ...args: Parameters<typeof defaultStartExact>
+    ) => {
+      await parkedStart
+      return defaultStartExact(...args)
+    })
+    scopedStopExact.mockImplementation(async () => {
+      throw Object.assign(new Error('injected rollback stop failure'), {
+        code: 'STOP_FAILED',
+      })
+    })
+    const pending = start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    for (let i = 0; i < 100 && scopedStartExact.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    setRuntimeActiveProductSpace('organization-b')
+    releaseParkedStart()
+    type SurfacedStartFailure = {
+      code?: string
+      details?: { cause?: { original?: { code?: string }; rollback?: { message?: string } } }
+    }
+    let failure: SurfacedStartFailure | null = null
+    try {
+      await pending
+    } catch (error) {
+      failure = error as SurfacedStartFailure
+    }
+    // Exactly ONE surfaced STOP_FAILED — the composed one from the START
+    // boundary, never a double wrap.
+    expect(failure).toMatchObject({ code: 'STOP_FAILED' })
+    // The ORIGINAL fence failure is preserved as cause.original…
+    expect(failure?.details?.cause?.original?.code).toBe('SWITCH_IN_PROGRESS')
+    // …and the recorded rollback stop failure travels as cause.rollback.
+    expect(failure?.details?.cause?.rollback?.message).toBe('injected rollback stop failure')
+    // The rollback ran exactly once through the ACTIVE teardown path (the
+    // runtime was already registered) and consumed the recorded failure.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledTimes(1)
+    expect(recordedRollbackStopFailures.size).toBe(0)
+    expect(scopedStopExact).toHaveBeenCalledTimes(1)
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    // The legacy artifact-scoped stop was never taken.
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    // No runtime survives the failed START: the coordinator entry was torn
+    // down and the execution was never registered (fence failure).
+    expect([...activeRuntimesByExecution.keys()]).toHaveLength(0)
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
+    setRuntimeActiveProductSpace('organization-a')
+  })
+
   it('POO-54 R2: START without a trusted caller Workspace fails closed with zero side effects', async () => {
     const start = handlers.get(RPC_CHANNELS.localApps.START)!
     // No window → no workspaceId.
@@ -3830,8 +3916,20 @@ describe('local app production status projection (R34-3)', () => {
       controller: new AbortController(),
     }
     activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
-    // The exact-generation stop of the OLD generation fails.
-    scopedStopExact.mockImplementation(async () => {
+    // Registry-side old-generation ownership (the retry/diagnostic fallback):
+    // a SUCCESSFUL stopExact removes it — a failing one throws BEFORE any
+    // removal, mirroring the real scoped registry's process-id map.
+    const registryProcessOwnership = new Map<number, string>([[41, 'exact-process-old']])
+    // The exact-generation stop of the OLD generation fails. The mock
+    // teardownRuntime mirrors the real coordinator's record-not-throw
+    // semantics: the failure is RECORDED and the teardown RESOLVES.
+    scopedStopExact.mockImplementation(async (
+      _scope: CatalogLocalAppScope,
+      expectedRuntimeGeneration: number,
+    ) => {
+      if (!registryProcessOwnership.has(expectedRuntimeGeneration)) {
+        throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+      }
       throw Object.assign(new Error('process survived'), { code: 'STOP_FAILED' })
     })
     const start = handlers.get(RPC_CHANNELS.localApps.START)!
@@ -3839,11 +3937,23 @@ describe('local app production status projection (R34-3)', () => {
       kind: 'product_space_runtime_start',
       app: productSpaceAppIdentity(),
     })).rejects.toMatchObject({ code: 'STOP_FAILED' })
-    // The successor never spawned: zero exact-version starts.
+    // The recorded failure was consumed exactly at the replacement boundary.
+    expect(recordedRollbackStopFailures.size).toBe(0)
+    // stopExact ran exactly once for the old generation.
+    expect(scopedStopExact).toHaveBeenCalledTimes(1)
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    // The successor never spawned: zero exact-version starts AND no gateway
+    // reopen between the failed teardown and the STOP_FAILED boundary.
     expect(scopedStartExact).not.toHaveBeenCalled()
-    // (Generation ownership retention for retry/diagnostics lives in the
-    // registry process-id map and the runId tombstones — covered by their
-    // own suites; the coordinator active entry is best-effort cleaned.)
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    // The old generation's registry ownership was NOT prematurely cleared —
+    // no retry stop, no uninstall, no ownership wipe around the failed
+    // replacement: it remains the fallback for the surviving process.
+    expect(registryProcessOwnership.get(41)).toBe('exact-process-old')
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
   })
 
   it('static START records the exact generation: liveness is true and a registration failure rolls back through the legacy stop', async () => {
@@ -4005,7 +4115,6 @@ describe('local app production status projection (R34-3)', () => {
           appId: appId ?? '<unknown>',
           generation: expectedRuntimeGeneration,
         })
-        console.log('[dbg] stopExact', expectedRuntimeGeneration, new Error('trace').stack?.split('\n').slice(2, 5).join(' | '))
         if (injectedStopFailure) throw injectedStopFailure
         if (appId === undefined) {
           throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
@@ -4116,8 +4225,6 @@ describe('local app production status projection (R34-3)', () => {
       })
       // The failed generation's exact key was removed; the previously
       // successful generation 1 mapping is unaffected.
-      console.log('[dbg] mappings:', JSON.stringify([...exactMappings]))
-      console.log('[dbg] stopExactCalls:', JSON.stringify(stopExactCalls))
       expect(exactMappings.has(2)).toBe(false)
       expect(exactMappings.get(1)).toBe('exact-process-1')
       expect(legacyStopCalls).toHaveLength(0)

@@ -1817,3 +1817,94 @@ it('POO-54 R9: teardown scope matching uses unambiguous tuple keys — delimiter
   expect(fixture.coordinator.getActiveRuntime(identityOther)).toBeDefined()
   await fixture.coordinator.shutdown()
 })
+
+describe('POO-54 R11 rollback-stop-failure consumption boundaries', () => {
+  it('takeRollbackStopFailure consumes atomically: repeated failed-stop teardowns leave zero retained records', async () => {
+    const fixture = createFixture({ skipBootstrapRuntime: true })
+    for (let i = 1; i <= 20; i += 1) {
+      const executionId = `exec-r11-take-${i}`
+      const identity = { ...IDENTITY, artifactInstanceId: `artifact-r11-take-${i}` }
+      fixture.coordinator.registerActiveRuntime({
+        identity,
+        executionId,
+        runtimeGeneration: i,
+        scopeGeneration: 1,
+        workspaceId: 'ws-a',
+        runtimeKind: 'static',
+      })
+      const runtime = fixture.coordinator.getActiveRuntime(identity)!
+      await fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+        throw new Error(`stop-${i}-failed`)
+      })
+      // One take removes the record: consumption is atomic and idempotent.
+      expect(fixture.coordinator.takeRollbackStopFailure(executionId))
+        .toMatchObject({ message: `stop-${i}-failed` })
+      expect(fixture.coordinator.takeRollbackStopFailure(executionId)).toBeUndefined()
+      expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    }
+    await fixture.coordinator.shutdown()
+  })
+
+  it('consumer-less teardown paths drain into the bounded report: expiry churn cannot grow records unboundedly', async () => {
+    const fixture = createFixture({
+      skipBootstrapRuntime: true,
+      stopRuntime: async () => {
+        throw new Error('adapter stop exploded')
+      },
+    })
+    await fixture.coordinator.ensureGateway()
+    for (let i = 1; i <= 24; i += 1) {
+      const identity = { ...IDENTITY, artifactInstanceId: `artifact-r11-drain-${i}` }
+      const signing = fixture.coordinator.signCapability({
+        identity,
+        workspaceId: 'ws-a',
+        executionId: `exec-r11-drain-${i}`,
+        runtimeKind: 'python',
+        runtimeGeneration: i,
+        scopeGeneration: 1,
+      })
+      fixture.coordinator.registerActiveRuntime({
+        identity,
+        executionId: `exec-r11-drain-${i}`,
+        runtimeGeneration: i,
+        scopeGeneration: 1,
+        workspaceId: 'ws-a',
+        runtimeKind: 'python',
+        capabilityGeneration: signing.capabilityGeneration,
+      })
+      // No frozen handler consumes the expiry path: the record must be
+      // drained at the boundary, never retained per-execution.
+      await fixture.coordinator.handleCapabilityExpiry(signing.capabilityGeneration)
+      expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+    }
+    const report = fixture.coordinator.recentUnsurfacedTeardownStopFailures()
+    expect(report.length).toBe(16)
+    expect(report.at(-1)?.executionId).toBe('exec-r11-drain-24')
+    await fixture.coordinator.shutdown()
+  })
+
+  it('shutdown aggregates only its own active runtimes: historical failures never reject a later shutdown', async () => {
+    const fixture = createFixture({ skipBootstrapRuntime: true })
+    for (let i = 1; i <= 3; i += 1) {
+      const identity = { ...IDENTITY, artifactInstanceId: `artifact-r11-hist-${i}` }
+      fixture.coordinator.registerActiveRuntime({
+        identity,
+        executionId: `exec-r11-hist-${i}`,
+        runtimeGeneration: i,
+        scopeGeneration: 1,
+        workspaceId: 'ws-a',
+        runtimeKind: 'static',
+      })
+      const runtime = fixture.coordinator.getActiveRuntime(identity)!
+      await fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+        throw new Error(`hist-stop-${i}-failed`)
+      })
+    }
+    expect(fixture.coordinator.listActiveRuntimes()).toHaveLength(0)
+    // The R11 reviewer repro: retained records with NO active runtime must
+    // not reject a shutdown — and nothing survives it.
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(3)
+    await expect(fixture.coordinator.shutdown()).resolves.toBeUndefined()
+    expect(fixture.coordinator.retainedRollbackStopFailureCount()).toBe(0)
+  })
+})

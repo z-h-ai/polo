@@ -240,8 +240,24 @@ export class LocalAppRuntimeCoordinator {
   }
   /** Explicit reconciliation outcomes for runs frozen during teardown. */
   private readonly reconciledStarts = new Map<string, 'confirmed_and_finished'>()
-  /** Recorded (never thrown) rollback stop failures, keyed by executionId. */
+  /**
+   * Recorded (never thrown) rollback stop failures, keyed by executionId.
+   * Every record has exactly ONE consumption boundary: the START exit /
+   * replacement teardown / explicit STOP that owns the frozen stop callback
+   * consumes it via takeRollbackStopFailure; teardown paths without such a
+   * consumer (expiry, unexpected exit, scope/account teardown) drain it into
+   * the bounded unsurfaced report below at their own call boundary.
+   */
   private readonly rollbackStopFailures = new Map<string, unknown>()
+  /**
+   * Bounded diagnostics for teardown stop failures surfaced by no frozen
+   * handler: capped ring so generation churn can never grow it unboundedly.
+   */
+  private readonly unsurfacedTeardownStopFailures: Array<{
+    executionId: string
+    error: unknown
+  }> = []
+  private static readonly MAX_UNSURFACED_TEARDOWN_STOP_FAILURES = 16
   private shutdownPromise?: Promise<void>
   private shuttingDown = false
 
@@ -419,6 +435,9 @@ export class LocalAppRuntimeCoordinator {
         && candidate.runtimeGeneration === event.runtimeGeneration)
     if (!runtime) return
     await this.teardownRuntime(runtime, 'failed')
+    // No frozen handler consumes this path: the recorded stop failure is
+    // drained into the bounded report here (the call boundary owns it).
+    this.drainUnsurfacedStopFailure(runtime.executionId)
   }
 
   /**
@@ -436,6 +455,8 @@ export class LocalAppRuntimeCoordinator {
     ) return
     await this.teardownRuntime(runtime, 'unknown', () =>
       this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
+    // No frozen handler consumes this path: drain at the call boundary.
+    this.drainUnsurfacedStopFailure(runtime.executionId)
   }
 
   /** Read-only view of active runtimes for unified stop entry points. */
@@ -455,6 +476,8 @@ export class LocalAppRuntimeCoordinator {
       if (!matches(runtime)) continue
       await this.teardownRuntime(runtime, finalStatus, () =>
         this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())
+      // No frozen handler consumes this path: drain at the call boundary.
+      this.drainUnsurfacedStopFailure(runtime.executionId)
     }
   }
 
@@ -591,6 +614,48 @@ export class LocalAppRuntimeCoordinator {
   /** Recorded rollback stop failure for one execution, if any. */
   getRollbackStopFailure(executionId: string): unknown {
     return this.rollbackStopFailures.get(executionId)
+  }
+
+  /**
+   * Atomic take-and-delete of one recorded rollback stop failure: the single
+   * consumption primitive for boundaries that surface the failure (START
+   * exit, replacement teardown, explicit STOP). Taking removes the record,
+   * so the map can never accumulate consumed entries.
+   */
+  takeRollbackStopFailure(executionId: string): unknown {
+    const failure = this.rollbackStopFailures.get(executionId)
+    if (failure !== undefined) this.rollbackStopFailures.delete(executionId)
+    return failure
+  }
+
+  /** Test/observability seam: count of currently retained stop failures. */
+  retainedRollbackStopFailureCount(): number {
+    return this.rollbackStopFailures.size
+  }
+
+  /** Test/observability seam: bounded recent unsurfaced stop failures. */
+  recentUnsurfacedTeardownStopFailures(): ReadonlyArray<{
+    executionId: string
+    error: unknown
+  }> {
+    return [...this.unsurfacedTeardownStopFailures]
+  }
+
+  /**
+   * Consumption boundary for teardown paths with no frozen-handler consumer
+   * (capability expiry, unexpected exit, scope/account teardown): drains the
+   * recorded failure into the bounded report so the map cannot retain it.
+   */
+  private drainUnsurfacedStopFailure(executionId: string): void {
+    const error = this.takeRollbackStopFailure(executionId)
+    if (error === undefined) return
+    this.unsurfacedTeardownStopFailures.push({ executionId, error })
+    if (
+      this.unsurfacedTeardownStopFailures.length
+      > LocalAppRuntimeCoordinator.MAX_UNSURFACED_TEARDOWN_STOP_FAILURES
+    ) {
+      this.unsurfacedTeardownStopFailures.shift()
+    }
   }
 
   private async drainInFlight(identityKey: string, runtimeGeneration: number): Promise<void> {
@@ -779,9 +844,14 @@ export class LocalAppRuntimeCoordinator {
       )
       await this.gateway?.close()
       this.gateway = undefined
-      // Aggregate: a failed generation-bound process stop must not pass
-      // silently even though every other cleanup step completed.
-      const failures = [...this.rollbackStopFailures.values()]
+      // Aggregate ONLY the runtimes this shutdown tore down: historical
+      // records from already-consumed or consumer-less teardowns must never
+      // reject (or pollute) a shutdown with no matching active runtime.
+      const failures = runtimes
+        .map(runtime => this.takeRollbackStopFailure(runtime.executionId))
+        .filter(failure => failure !== undefined)
+      // Terminal hygiene: nothing survives shutdown for this instance.
+      this.rollbackStopFailures.clear()
       if (failures.length > 0) {
         throw new Error(
           `coordinator shutdown: ${failures.length} runtime generation(s) failed to stop`,
