@@ -35,6 +35,7 @@ import type {
   LocalAppLifecycleStatus,
   LocalAppLogsOptions,
   LocalAppPlatform,
+  LocalAppRuntimeKind,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
   LocalAppUninstallOptions,
@@ -114,6 +115,69 @@ interface ManagedRuntime {
   exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
   spawnError?: Error
   healthToken: string
+  runtimeGeneration?: number
+  sensitiveValues?: string[]
+}
+
+export interface ExactVersionStartHooks {
+  /**
+   * Called ONLY for trusted python/js runtimes, right before spawn. The
+   * returned environment additions (per-launch capability) and sensitive
+   * values (secret redaction) bind one process generation to one token.
+   */
+  processEnvironment?(input: {
+    runtimeKind: 'python' | 'js'
+    runtimeGeneration: number
+  }): { env: NodeJS.ProcessEnv; sensitiveValues: string[] }
+}
+
+export interface ExactVersionStartResult extends LocalAppStartResult {
+  runtimeKind: LocalAppRuntimeKind
+  runtimeGeneration: number
+}
+
+export interface UnexpectedExitEvent {
+  appId: string
+  version: string
+  runtimeKind: LocalAppRuntimeKind
+  runtimeGeneration: number
+}
+
+export const RUNTIME_SECRET_REDACTED = '[REDACTED_RUNTIME_SECRET]'
+
+/**
+ * Token-aware streaming redactor. Withholds a `maxSensitiveLength - 1`
+ * character overlap across chunks so a secret split at any chunk boundary is
+ * still redacted exactly once, never partially written to disk.
+ */
+export class StreamingSecretRedactor {
+  private carry = ''
+
+  constructor(private readonly secrets: string[]) {}
+
+  push(chunk: string): string {
+    this.carry += chunk
+    const maxSecretLength = this.secrets.reduce((max, s) => Math.max(max, s.length), 0)
+    const safeLength = Math.max(0, this.carry.length - Math.max(0, maxSecretLength - 1))
+    const safe = this.carry.slice(0, safeLength)
+    this.carry = this.carry.slice(safeLength)
+    return this.redact(safe)
+  }
+
+  flush(): string {
+    const rest = this.redact(this.carry)
+    this.carry = ''
+    return rest
+  }
+
+  private redact(text: string): string {
+    let output = text
+    for (const secret of this.secrets) {
+      if (secret.length === 0) continue
+      output = output.split(secret).join(RUNTIME_SECRET_REDACTED)
+    }
+    return output
+  }
 }
 
 type ActiveReleaseIdentity = Pick<
@@ -223,6 +287,8 @@ export interface LocalAppRuntimeManagerOptions {
     kind: 'dependency-preparation' | 'runtime',
     pid: number | undefined,
   ) => void
+  /** Per-start observer fired when a runtime process exits unexpectedly. */
+  onUnexpectedExit?: (event: UnexpectedExitEvent) => void
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -331,6 +397,8 @@ export class LocalAppRuntimeManager {
   private readonly onInstallProgress?: LocalAppRuntimeManagerOptions['onInstallProgress']
   private readonly onManagedProcessStarted?:
     LocalAppRuntimeManagerOptions['onManagedProcessStarted']
+  private readonly onUnexpectedExit?: LocalAppRuntimeManagerOptions['onUnexpectedExit']
+  private runtimeGenerationCounter = 0
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
@@ -374,6 +442,7 @@ export class LocalAppRuntimeManager {
       ?? createWindowsProcessTreeOwner
     this.onInstallProgress = options.onInstallProgress
     this.onManagedProcessStarted = options.onManagedProcessStarted
+    this.onUnexpectedExit = options.onUnexpectedExit
   }
 
   initialize(): Promise<void> {
@@ -484,6 +553,90 @@ export class LocalAppRuntimeManager {
       safeAppId,
       signal => this.performStart(safeAppId, signal),
     )
+  }
+
+  /**
+   * Exact-version ProductSpace start. The requested version MUST be installed
+   * and valid — currentVersion fallback and rollback are forbidden on this
+   * path, so a launched runtime can never silently become another version.
+   */
+  startExactVersion(
+    appId: string,
+    version: string,
+    hooks: ExactVersionStartHooks = {},
+  ): Promise<ExactVersionStartResult> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const safeVersion = validateRequestIdentifier(version, 'version')
+    if (this.shuttingDown) {
+      return Promise.reject(new LocalAppRuntimeError('START_FAILED', 'Polo is shutting down'))
+    }
+    const existing = this.startPromises.get(safeAppId)
+    if (existing) {
+      return Promise.reject(new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        `${safeAppId} already has a start operation in progress`,
+      ))
+    }
+    return this.trackStartOperation(safeAppId, async (signal) => {
+      // A previous runtime generation never survives an exact start: stop it
+      // first so the new generation is the single instance.
+      const running = this.runtimes.get(safeAppId)
+      if (running) {
+        await this.stopRuntime(running)
+        if (this.runtimes.get(safeAppId) === running) this.runtimes.delete(safeAppId)
+      }
+      this.throwIfStartCancelled(signal, safeAppId)
+      const metadata = await this.readMetadata(safeAppId)
+      const record = metadata?.versions[safeVersion]
+      if (!metadata || !record) {
+        throw new LocalAppRuntimeError(
+          'NOT_INSTALLED',
+          `Exact version ${safeVersion} of ${safeAppId} is not installed`,
+        )
+      }
+      const runtimeGeneration = ++this.runtimeGenerationCounter
+      const handle = await this.startVersion(metadata, safeVersion, signal, {
+        runtimeGeneration,
+        hooks,
+      })
+      return {
+        appId: safeAppId,
+        version: safeVersion,
+        url: handle.url,
+        port: handle.port,
+        runtimeKind: record.manifest.runtime,
+        runtimeGeneration,
+      }
+    })
+  }
+
+  /**
+   * Generation-CAS stop: a stop for a stale runtime generation is rejected
+   * before touching the registry, so a late A-side stop can never kill the
+   * replacement B runtime.
+   */
+  async stopExact(appId: string, expectedRuntimeGeneration: number): Promise<LocalAppRuntimeStatus> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by stopExact`)
+    return this.enqueueLifecycle(safeAppId, async () => {
+      const handle = this.runtimes.get(safeAppId)
+      if (
+        !handle
+        || handle.runtimeGeneration === undefined
+        || handle.runtimeGeneration !== expectedRuntimeGeneration
+      ) {
+        throw new LocalAppRuntimeError(
+          'STALE_RUNTIME_GENERATION',
+          `Runtime generation ${expectedRuntimeGeneration} of ${safeAppId} is no longer current`,
+        )
+      }
+      await this.stopRuntime(handle)
+      return {
+        appId: safeAppId,
+        status: 'stopped',
+        currentVersion: handle.version,
+      }
+    })
   }
 
   stop(appId: string): Promise<LocalAppRuntimeStatus> {
@@ -960,10 +1113,10 @@ export class LocalAppRuntimeManager {
     }
   }
 
-  private trackStartOperation(
+  private trackStartOperation<T extends LocalAppStartResult>(
     appId: string,
-    operation: (signal: AbortSignal) => Promise<LocalAppStartResult>,
-  ): Promise<LocalAppStartResult> {
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
     const controller = new AbortController()
     const promise = this.enqueueLifecycle(appId, () => operation(controller.signal))
       .finally(() => {
@@ -1731,6 +1884,10 @@ export class LocalAppRuntimeManager {
     metadata: AppMetadata,
     version: string,
     signal: AbortSignal,
+    options: {
+      runtimeGeneration?: number
+      hooks?: ExactVersionStartHooks
+    } = {},
   ): Promise<LocalAppStartResult> {
     if (this.shuttingDown) {
       throw new LocalAppRuntimeError('START_FAILED', `Start of ${metadata.appId} was cancelled during shutdown`)
@@ -1751,10 +1908,27 @@ export class LocalAppRuntimeManager {
 
     let handle: ManagedRuntime
     if (manifest.runtime === 'static') {
+      // Static runtimes never receive a capability or platform environment.
       handle = await this.startStaticRuntime(metadata.appId, version, versionDir, manifest)
     } else {
-      handle = await this.startProcessRuntime(metadata.appId, version, versionDir, manifest)
+      const runtimeGeneration = options.runtimeGeneration
+      let hookEnvironment: { env: NodeJS.ProcessEnv; sensitiveValues: string[] } | undefined
+      if (options.hooks?.processEnvironment && runtimeGeneration !== undefined) {
+        hookEnvironment = options.hooks.processEnvironment({
+          runtimeKind: manifest.runtime,
+          runtimeGeneration,
+        })
+      }
+      handle = await this.startProcessRuntime(
+        metadata.appId,
+        version,
+        versionDir,
+        manifest,
+        hookEnvironment,
+        runtimeGeneration,
+      )
     }
+    handle.runtimeGeneration = options.runtimeGeneration
     this.runtimes.set(metadata.appId, handle)
     try {
       await this.waitForHealthcheck(
@@ -1831,6 +2005,8 @@ export class LocalAppRuntimeManager {
     version: string,
     versionDir: string,
     manifest: PoloAppManifest,
+    hookEnvironment?: { env: NodeJS.ProcessEnv; sensitiveValues: string[] },
+    runtimeGeneration?: number,
   ): Promise<ManagedRuntime> {
     const port = await this.allocatePort()
     await this.assertPortAvailable(port)
@@ -1858,10 +2034,13 @@ export class LocalAppRuntimeManager {
       executable,
       args,
       versionDir,
-      this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
+      {
+        ...this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
+        ...(hookEnvironment?.env ?? {}),
+      },
     )
     const { child, processTreeOwner } = managedProcess
-    this.captureChildOutput(appId, child)
+    this.captureChildOutput(appId, child, hookEnvironment?.sensitiveValues ?? [])
 
     let resolveExit!: (outcome: { code: number | null; signal: NodeJS.Signals | null }) => void
     const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
@@ -1880,6 +2059,10 @@ export class LocalAppRuntimeManager {
       stopRequested: false,
       exitPromise,
       healthToken,
+      ...(runtimeGeneration !== undefined ? { runtimeGeneration } : {}),
+      ...(hookEnvironment?.sensitiveValues?.length
+        ? { sensitiveValues: hookEnvironment.sensitiveValues }
+        : {}),
     }
     child.once('error', (error) => {
       handle.spawnError = error
@@ -1887,6 +2070,14 @@ export class LocalAppRuntimeManager {
     child.once('exit', (code, signal) => {
       resolveExit({ code, signal })
       if (handle.stopRequested) return
+      if (runtimeGeneration !== undefined) {
+        this.onUnexpectedExit?.({
+          appId,
+          version,
+          runtimeKind: manifest.runtime,
+          runtimeGeneration,
+        })
+      }
       handle.cleanupPromise = this.cleanupManagedProcess(managedProcess)
         .then(() => {
           if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
@@ -2767,14 +2958,34 @@ export class LocalAppRuntimeManager {
     })
   }
 
-  private captureChildOutput(appId: string, child: ChildProcess): void {
-    const capture = (source: 'stdout' | 'stderr', chunk: Buffer | string) => {
-      for (const line of String(chunk).split(/\r?\n/)) {
-        if (line) this.appendLog(appId, source, line)
+  private captureChildOutput(appId: string, child: ChildProcess, sensitiveValues: string[] = []): void {
+    const redactor = new StreamingSecretRedactor(sensitiveValues)
+    const attach = (source: 'stdout' | 'stderr', stream: ChildProcess['stdout']) => {
+      if (!stream) return
+      let lineCarry = ''
+      let flushed = false
+      const emit = (text: string) => {
+        for (const line of text.split(/\r?\n/)) {
+          if (line) this.appendLog(appId, source, line)
+        }
       }
+      stream.on('data', (chunk: Buffer | string) => {
+        lineCarry += redactor.push(String(chunk))
+        const lines = lineCarry.split(/\r?\n/)
+        lineCarry = lines.pop() ?? ''
+        for (const line of lines) if (line) this.appendLog(appId, source, line)
+      })
+      const flush = () => {
+        if (flushed) return
+        flushed = true
+        emit(redactor.flush() + lineCarry)
+        lineCarry = ''
+      }
+      stream.once('end', flush)
+      stream.once('close', flush)
     }
-    child.stdout?.on('data', chunk => capture('stdout', chunk))
-    child.stderr?.on('data', chunk => capture('stderr', chunk))
+    attach('stdout', child.stdout)
+    attach('stderr', child.stderr)
   }
 
   private appendLog(

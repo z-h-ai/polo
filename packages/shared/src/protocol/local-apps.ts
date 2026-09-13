@@ -385,6 +385,8 @@ export type LocalAppErrorCode =
   | 'RELEASE_CHANGED'
   | 'CATALOG_ENTRY_MISSING'
   | 'CATALOG_IDENTITY_DRIFT'
+  | 'APP_UNAVAILABLE'
+  | 'STALE_RUNTIME_GENERATION'
   | 'NOT_AUTHORIZED'
   | 'NOT_INSTALLED'
   | 'SWITCH_IN_PROGRESS'
@@ -400,4 +402,44 @@ export interface LocalAppErrorPayload {
   code: LocalAppErrorCode
   message: string
   details?: Record<string, unknown>
+}
+
+/**
+ * Strict discriminator union for the localApps lifecycle RPC. The legacy
+ * scope-only branch stays isolated and can never address a ProductSpace
+ * runtime execution handle; ProductSpace branches carry the full immutable
+ * identity (START) or the execution handle with its expected runtime
+ * generation (STOP/RESTART).
+ */
+export type LocalAppLifecycleRequest =
+  | { kind: 'legacy_scope'; scope: CatalogLocalAppScope }
+  | { kind: 'product_space_runtime_start'; app: ProductSpaceAppIdentity }
+  | {
+      kind: 'product_space_runtime_handle'
+      executionId: string
+      expectedRuntimeGeneration: number
+    }
+
+export function isProductSpaceRuntimeRequest(
+  value: unknown,
+): value is Exclude<LocalAppLifecycleRequest, { kind: 'legacy_scope' }> {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && ((value as { kind?: unknown }).kind === 'product_space_runtime_start'
+      || (value as { kind?: unknown }).kind === 'product_space_runtime_handle'),
+  )
+}
+
+/** Non-secret ProductSpace start result: never exposes capability or gateway URL. */
+export interface ProductSpaceAppRuntimeStartResult {
+  appId: string
+  version: string
+  executionId: string
+  runtimeGeneration: number
+  scopeGeneration: number
+  runtimeKind: LocalAppRuntimeKind
+  platformApi:
+    | { status: 'available' }
+    | { status: 'unavailable'; reason: 'static_runtime_unsupported' }
 }

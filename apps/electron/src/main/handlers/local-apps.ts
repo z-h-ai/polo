@@ -15,6 +15,7 @@ import {
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import {
   normalizeLocalAppPermissions,
+  isProductSpaceRuntimeRequest,
   projectLocalAppStatusForCatalogAccess,
   RPC_CHANNELS,
 } from '@polo-ai/shared/protocol'
@@ -23,16 +24,20 @@ import type {
   LocalAppAvailableRelease,
   LocalAppBatchStatusRequest,
   LocalAppCatalogInstallRequest,
+  LocalAppLifecycleRequest,
   LocalAppLogsOptions,
   LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
   ProductSpaceAppIdentity,
   ProductSpaceAppInstallState,
   ProductSpaceBundleInstallRequest,
+  ProductSpaceAppRuntimeStartResult,
 } from '@polo-ai/shared/protocol'
+import type { ProductSpaceAppRuntimeIdentity } from '@polo-ai/shared/product-spaces'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
   getScopedLocalAppRuntimeRegistry,
+  getLocalAppRuntimeCoordinator,
   LocalAppRuntimeError,
   MAX_CATALOG_STATUS_SCOPES,
   validateCatalogLocalAppScope,
@@ -57,8 +62,10 @@ import {
   CatalogEntryIdSchema,
   ProductSpaceIdSchema,
   ProductSpaceExecutionScopeSchema,
+  createProductSpaceAppRuntimeIdentityKey,
   type TrustedProductSpaceCatalogEntry,
 } from '@polo-ai/shared/product-spaces'
+import { getAppRuntimeCenter } from '@polo-ai/server-core/runtime'
 import {
   getProductSpaceCatalogAuthorityRecord,
   loadProductSpaceCatalogAuthorityTupleSet,
@@ -1420,6 +1427,17 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     name: string,
     workspaceId: string | null,
     trustedAccountId: string,
+    runtime?: {
+      executionId: string
+      subject: {
+        kind: 'artifact_instance'
+        artifactType: 'app'
+        artifactInstanceId: string
+        versionId: string
+        version: string
+      }
+      stop: () => Promise<'stopped' | 'failed'>
+    },
   ): Promise<string> => {
     const accountId = trustedAccountId
     if (!accountId) {
@@ -1439,7 +1457,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     const registry = getScopedLocalAppRuntimeRegistry()
     // Every start is a distinct execution with its own immutable scope.
-    const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
+    const executionId = runtime?.executionId
+      ?? `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
     // R33-3/R34-3: real owner-scoped status projection. The runtime status
     // is probed asynchronously (isActive), so the last observed lifecycle is
     // cached for the synchronous getStatus provider; a dispatched stop
@@ -1456,7 +1475,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       accountId,
       productSpaceId: scope.organizationId,
       workspaceId,
-      subject: {
+      subject: runtime?.subject ?? {
         kind: 'artifact_instance',
         artifactType: 'app',
         artifactInstanceId: scope.catalogAppId,
@@ -1486,7 +1505,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         }
       },
       getStatus: () => (stopDispatched ? 'stopping' : lastObservedStatus),
-      stop: async () => {
+      stop: runtime?.stop ?? (async () => {
         stopDispatched = true
         try {
           await registry.stop(scope)
@@ -1494,7 +1513,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         } catch {
           return 'failed'
         }
-      },
+      }),
     }
     try {
       registerProductSpaceExecution(execution)
@@ -1510,8 +1529,25 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   // start-and-register path.
   const startAndRegisterLocalApp = async (
     scope: CatalogLocalAppScope,
-    startRuntime: () => Promise<{ version: string }>,
+    startRuntime: () => Promise<{
+      version: string
+      appId?: string
+      runtimeKind?: 'python' | 'js' | 'static'
+      runtimeGeneration?: number
+      scopeGeneration?: number
+    }>,
     workspaceId: string | null,
+    runtime?: {
+      executionId: string
+      subject: {
+        kind: 'artifact_instance'
+        artifactType: 'app'
+        artifactInstanceId: string
+        versionId: string
+        version: string
+      }
+      stop: () => Promise<'stopped' | 'failed'>
+    },
   ) => {
     // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
     // trusted Admin account) BEFORE the switch lock — the Admin session
@@ -1578,7 +1614,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'A ProductSpace switch superseded this start',
         )
       }
-      await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId)
+      await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId, runtime)
       return result
     })
   }
@@ -1597,14 +1633,374 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     })()
   }
 
-  server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) =>
-    withCatalogScope(
+  /**
+   * Derives the authoritative App identity from a FRESH Catalog read.
+   * Main never trusts renderer identity: the entry is located by the
+   * runtime tuple, its raw availability must be 'available', and the
+   * derived identity carries the fresh revision/sources.
+   */
+  const fetchAuthoritativeProductSpaceApp = async (
+    identity: ProductSpaceAppRuntimeIdentity,
+  ): Promise<ProductSpaceAppIdentity> => {
+    assertProductSpaceAppOperationCurrent({
+      ...identity,
+      catalogEntryId: '' as ProductSpaceAppIdentity['catalogEntryId'],
+      catalogRevision: '',
+      sources: [],
+      availability: 'available',
+    })
+    const tokens = await getCredentialManager().getAdminTokens()
+    if (!tokens || tokens.userId !== identity.accountId) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'ProductSpace App runtime belongs to another or signed-out account',
+      )
+    }
+    const adminUrl = getAdminUrl()
+    if (!adminUrl) {
+      throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Polo Admin is not configured')
+    }
+    const client = new AdminClient(adminUrl)
+    const list = await client.listProductSpaces(tokens.accessToken)
+    const context = list.productSpaces.find(space => space.id === identity.productSpaceId)
+    if (!context || context.accessMode !== 'active') {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'The requested ProductSpace is not active',
+      )
+    }
+    const catalog = await client.getProductSpaceCatalog(tokens.accessToken, context)
+    if ('notModified' in catalog) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'A fresh ProductSpace Catalog is required to start an App runtime',
+      )
+    }
+    const entry = catalog.entries.find(candidate =>
+      candidate.kind === 'app'
+      && candidate.artifactInstanceId === identity.artifactInstanceId
+      && candidate.version.versionId === identity.versionId
+      && candidate.version.version === identity.version) as
+      | (Extract<TrustedProductSpaceCatalogEntry, { kind: 'app' }> & {
+        sources: ProductSpaceAppIdentity['sources']
+        availability: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
+      })
+      | undefined
+    if (!entry) {
+      throw new LocalAppRuntimeError(
+        'CATALOG_ENTRY_MISSING',
+        'The ProductSpace Catalog no longer lists this App version',
+      )
+    }
+    if (entry.availability !== 'available') {
+      throw new LocalAppRuntimeError(
+        'APP_UNAVAILABLE',
+        'This ProductSpace App is not available to launch',
+      )
+    }
+    return {
+      accountId: identity.accountId,
+      productSpaceId: identity.productSpaceId,
+      catalogEntryId: entry.catalogEntryId,
+      artifactInstanceId: identity.artifactInstanceId,
+      versionId: identity.versionId,
+      version: identity.version,
+      catalogRevision: catalog.catalogRevision,
+      sources: entry.sources,
+      availability: entry.availability,
+    }
+  }
+
+  /**
+   * Trusted ProductSpace runtime START: fresh-Catalog identity derivation
+   * (fail-closed on missing/drift/unavailable), single-instance replacement
+   * of any prior generation of the same runtime identity, gateway-first
+   * capability signing inside the exact-version start, generation-safe
+   * execution registration and active projection publish.
+   */
+  const startProductSpaceRuntime = async (
+    ctx: { webContentsId?: number | null },
+    rawApp: unknown,
+    options: { trustDerivedIdentityOnly?: boolean } = {},
+  ): Promise<ProductSpaceAppRuntimeStartResult> => {
+    const requested = validateProductSpaceAppIdentity(rawApp)
+    const runtimeIdentity: ProductSpaceAppRuntimeIdentity = {
+      accountId: requested.accountId,
+      productSpaceId: requested.productSpaceId,
+      artifactInstanceId: requested.artifactInstanceId,
+      versionId: requested.versionId,
+      version: requested.version,
+    }
+    // Fresh-Catalog re-verification BEFORE the switch mutex (network I/O
+    // never runs under the lock); the mutex fence re-checks afterwards.
+    const app = await fetchAuthoritativeProductSpaceApp(runtimeIdentity)
+    if (
+      !options.trustDerivedIdentityOnly
+      && (
+        requested.catalogEntryId !== app.catalogEntryId
+        || requested.catalogRevision !== app.catalogRevision
+        || requested.availability !== app.availability
+        || canonicalIdentitySources(requested.sources) !== canonicalIdentitySources(app.sources)
+      )
+    ) {
+      throw new LocalAppRuntimeError(
+        'CATALOG_IDENTITY_DRIFT',
+        'The start request identity drifted from the authoritative Catalog',
+      )
+    }
+    const scope = productSpaceBundleScope(app)
+    const registry = getScopedLocalAppRuntimeRegistry()
+    const coordinator = getLocalAppRuntimeCoordinator()
+    // Cross-Workspace single-instance replacement: the prior generation of
+    // the same runtime identity is revoked and stopped before B starts.
+    const existing = coordinator.getActiveRuntime(runtimeIdentity)
+    if (existing) {
+      await coordinator.teardownRuntime(existing, 'cancelled', async () => {
+        await registry.stopExact(scope, existing.runtimeGeneration).catch(() => {})
+      })
+    }
+    const workspaceId = callerWorkspaceId(ctx)
+    const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
+    let signedCapability: number | undefined
+    let startedRuntimeGeneration: number | undefined
+    let start: {
+      version: string
+      appId?: string
+      runtimeKind?: 'python' | 'js' | 'static'
+      runtimeGeneration?: number
+      scopeGeneration?: number
+    }
+    try {
+      start = await startAndRegisterLocalApp(
+      scope,
+      async () => {
+        // Gateway-first: a listen failure fails closed before any spawn.
+        await coordinator.ensureGateway()
+        try {
+          const result = await registry.startExact(scope, app.version, {
+            processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
+              const signing = coordinator.signCapability({
+                identity: runtimeIdentity,
+                workspaceId: workspaceId ?? '',
+                executionId,
+                runtimeKind,
+                runtimeGeneration,
+                scopeGeneration,
+              })
+              signedCapability = signing.capabilityGeneration
+              return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
+            },
+          })
+          startedRuntimeGeneration = result.runtimeGeneration
+          coordinator.registerActiveRuntime({
+            identity: runtimeIdentity,
+            executionId,
+            runtimeGeneration: result.runtimeGeneration,
+            scopeGeneration: result.scopeGeneration,
+            workspaceId: workspaceId ?? '',
+            runtimeKind: result.runtimeKind,
+            capabilityGeneration: signedCapability,
+          })
+          const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
+          getAppRuntimeCenter().publish({
+            identityKey,
+            identity: runtimeIdentity,
+            workspaceId: workspaceId ?? '',
+            executionId,
+            runtimeGeneration: result.runtimeGeneration,
+            scopeGeneration: result.scopeGeneration,
+            runtimeKind: result.runtimeKind,
+            status: 'running',
+          }, result.runtimeGeneration)
+          return result
+        } catch (error) {
+          // Any post-hook start failure revokes the just-signed token.
+          if (signedCapability !== undefined) {
+            coordinator.revokeSignedCapability(signedCapability)
+          }
+          throw error
+        }
+      },
+      workspaceId,
+      {
+        executionId,
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: app.artifactInstanceId,
+          versionId: app.versionId,
+          version: app.version,
+        },
+        stop: async () => {
+          const active = startedRuntimeGeneration !== undefined
+            ? coordinator.getActiveRuntimeByExecution(executionId)
+            : undefined
+          if (active) {
+            await coordinator.teardownRuntime(active, 'cancelled', async () => {
+              await registry.stopExact(scope, active.runtimeGeneration).catch(() => {})
+            })
+            return 'stopped'
+          }
+          await registry.stop(scope)
+          return 'stopped'
+        },
+      },
+    )
+    } catch (error) {
+      // A superseded or failed registration must not leave coordinator
+      // runtime/capability/projection state behind.
+      const active = startedRuntimeGeneration !== undefined
+        ? coordinator.getActiveRuntimeByExecution(executionId)
+        : undefined
+      if (active) {
+        await coordinator.teardownRuntime(active, 'cancelled', async () => {
+          await registry.stopExact(scope, active.runtimeGeneration).catch(() => {})
+        })
+      } else if (signedCapability !== undefined) {
+        coordinator.revokeSignedCapability(signedCapability)
+      }
+      throw error
+    }
+    return {
+      appId: start.appId ?? scope.catalogAppId,
+      version: start.version,
+      executionId,
+      runtimeGeneration: start.runtimeGeneration ?? 0,
+      scopeGeneration: start.scopeGeneration ?? 0,
+      runtimeKind: start.runtimeKind ?? 'static',
+      platformApi: start.runtimeKind && start.runtimeKind !== 'static'
+        ? { status: 'available' as const }
+        : { status: 'unavailable' as const, reason: 'static_runtime_unsupported' as const },
+    }
+  }
+
+  /** Generation-CAS stop for a ProductSpace runtime execution handle. */
+  const stopProductSpaceRuntime = async (
+    rawHandle: unknown,
+  ): Promise<LocalAppRuntimeStatus> => {
+    const handle = rawHandle as {
+      executionId?: unknown
+      expectedRuntimeGeneration?: unknown
+    }
+    if (
+      typeof handle?.executionId !== 'string'
+      || !Number.isSafeInteger(handle.expectedRuntimeGeneration)
+    ) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'A ProductSpace runtime handle requires executionId and expectedRuntimeGeneration',
+      )
+    }
+    const coordinator = getLocalAppRuntimeCoordinator()
+    const runtime = coordinator.getActiveRuntimeByExecution(handle.executionId)
+    if (!runtime || runtime.runtimeGeneration !== handle.expectedRuntimeGeneration) {
+      throw new LocalAppRuntimeError(
+        'STALE_RUNTIME_GENERATION',
+        'This runtime generation is no longer current',
+      )
+    }
+    const identity = runtime.identity
+    const scope: CatalogLocalAppScope = {
+      kind: 'catalog',
+      accountId: identity.accountId,
+      organizationId: identity.productSpaceId,
+      catalogAppId: identity.artifactInstanceId,
+    }
+    assertScopeInsideActiveProductSpace(scope)
+    await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+      await getScopedLocalAppRuntimeRegistry()
+        .stopExact(scope, handle.expectedRuntimeGeneration as number)
+        .catch(() => {})
+    })
+    return {
+      appId: scope.catalogAppId,
+      scope,
+      status: 'stopped',
+      currentVersion: identity.version,
+    }
+  }
+
+  /** Restart: stop the exact generation, then re-run the authoritative START. */
+  const restartProductSpaceRuntime = async (
+    ctx: { webContentsId?: number | null },
+    rawHandle: unknown,
+  ): Promise<ProductSpaceAppRuntimeStartResult> => {
+    const handle = rawHandle as { executionId?: unknown; expectedRuntimeGeneration?: unknown }
+    if (
+      typeof handle?.executionId !== 'string'
+      || !Number.isSafeInteger(handle.expectedRuntimeGeneration)
+    ) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'A ProductSpace runtime handle requires executionId and expectedRuntimeGeneration',
+      )
+    }
+    const coordinator = getLocalAppRuntimeCoordinator()
+    const runtime = coordinator.getActiveRuntimeByExecution(handle.executionId)
+    if (!runtime || runtime.runtimeGeneration !== handle.expectedRuntimeGeneration) {
+      throw new LocalAppRuntimeError(
+        'STALE_RUNTIME_GENERATION',
+        'This runtime generation is no longer current',
+      )
+    }
+    const identity = runtime.identity
+    const scope: CatalogLocalAppScope = {
+      kind: 'catalog',
+      accountId: identity.accountId,
+      organizationId: identity.productSpaceId,
+      catalogAppId: identity.artifactInstanceId,
+    }
+    assertScopeInsideActiveProductSpace(scope)
+    await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+      await getScopedLocalAppRuntimeRegistry()
+        .stopExact(scope, handle.expectedRuntimeGeneration as number)
+        .catch(() => {})
+    })
+    return startProductSpaceRuntime(ctx, {
+      ...identity,
+      catalogRevision: 'revalidated-against-fresh-catalog',
+      sources: [{ kind: 'restart', name: null, circleId: null }],
+      availability: 'available',
+    }, { trustDerivedIdentityOnly: true })
+  }
+
+  server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) => {
+    // Strict discriminator union: legacy scope-only requests stay isolated
+    // from ProductSpace runtime requests, which carry the full identity.
+    if (isProductSpaceRuntimeRequest(reference)) {
+      const request = reference as Extract<
+        LocalAppLifecycleRequest,
+        { kind: 'product_space_runtime_start' }
+      >
+      if (request.kind !== 'product_space_runtime_start') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'START requires a ProductSpace runtime identity request',
+        )
+      }
+      return startProductSpaceRuntime(ctx, request.app)
+    }
+    return withCatalogScope(
       reference,
       scope => startCatalogApp(ctx, scope),
-    ))
+    )
+  })
 
-  server.handle(RPC_CHANNELS.localApps.STOP, (ctx, reference: unknown) =>
-    withCatalogManagementScope(
+  server.handle(RPC_CHANNELS.localApps.STOP, (ctx, reference: unknown) => {
+    if (isProductSpaceRuntimeRequest(reference)) {
+      const request = reference as Extract<
+        LocalAppLifecycleRequest,
+        { kind: 'product_space_runtime_handle' }
+      >
+      if (request.kind !== 'product_space_runtime_handle') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'STOP requires a ProductSpace runtime handle request',
+        )
+      }
+      return stopProductSpaceRuntime(request)
+    }
+    return withCatalogManagementScope(
       reference,
       async (scope, catalogReference) => {
         const status = await getScopedLocalAppRuntimeRegistry().stop(scope)
@@ -1616,10 +2012,24 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             && canAccessCatalogDeliveryMetadata(scope),
         )
       },
-    ))
+    )
+  })
 
-  server.handle(RPC_CHANNELS.localApps.RESTART, (ctx, reference: unknown) =>
-    withCatalogScope(
+  server.handle(RPC_CHANNELS.localApps.RESTART, (ctx, reference: unknown) => {
+    if (isProductSpaceRuntimeRequest(reference)) {
+      const request = reference as Extract<
+        LocalAppLifecycleRequest,
+        { kind: 'product_space_runtime_handle' }
+      >
+      if (request.kind !== 'product_space_runtime_handle') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'RESTART requires a ProductSpace runtime handle request',
+        )
+      }
+      return restartProductSpaceRuntime(ctx, request)
+    }
+    return withCatalogScope(
       reference,
       async scope => {
         const { accessMode } = await requireAuthorizedCatalogApp(scope)
@@ -1633,7 +2043,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         unregisterLocalAppExecutions(scope, { workspaceId: callerWorkspaceId(ctx) })
         return startAndRegisterLocalApp(scope, () => registry.restart(scope), callerWorkspaceId(ctx))
       },
-    ))
+    )
+  })
 
   server.handle(
     RPC_CHANNELS.localApps.UNINSTALL,

@@ -1,11 +1,25 @@
 import { app } from 'electron'
 import { join } from 'path'
+import { AdminClient } from '@polo-ai/shared/admin'
+import {
+  getDefaultLlmConnection,
+  getAdminUrl,
+  getWorkspaceByNameOrId,
+} from '@polo-ai/shared/config'
+import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
+import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { createSessionlessHostLlmExecutor } from '@polo-ai/shared/agent/host-llm-executor'
 import { mainLog } from '../logger'
 import { LocalAppRuntimeManager } from './manager'
 import { ScopedLocalAppRuntimeRegistry } from './scoped-registry'
+import {
+  LocalAppRuntimeCoordinator,
+  type RuntimeCoordinatorAdapters,
+} from './runtime-coordinator'
 
 let manager: LocalAppRuntimeManager | null = null
 let scopedRegistry: ScopedLocalAppRuntimeRegistry | null = null
+let coordinator: LocalAppRuntimeCoordinator | null = null
 
 const runtimeLogger = {
   info: (message: string, details?: unknown) => mainLog.info(message, details),
@@ -36,9 +50,70 @@ export function getScopedLocalAppRuntimeRegistry(): ScopedLocalAppRuntimeRegistr
       uvPath: process.env.POLO_AI_UV,
       bunPath: process.env.POLO_AI_BUN,
       logger: runtimeLogger,
+      onUnexpectedExit: event => {
+        void getLocalAppRuntimeCoordinator().handleUnexpectedExit(event)
+          .catch(error => mainLog.error('[local-apps] unexpected exit teardown failed', error))
+      },
     })
   }
   return scopedRegistry
+}
+
+/**
+ * Production runtime coordinator: wires the trusted POL-102 AdminClient
+ * boundary, the sessionless Host LLM executor factory and the workspace
+ * root/connection resolution into the shared coordinator.
+ */
+export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
+  if (!coordinator) {
+    const adapters: RuntimeCoordinatorAdapters = {
+      admin: {
+        startAppRun: async (input, options) => {
+          const client = await createTrustedAdminClient()
+          return client.startAppRun(await trustedAccessToken(), input as never, options)
+        },
+        recordAppUsage: async (input, options) => {
+          const client = await createTrustedAdminClient()
+          return client.recordAppUsage(await trustedAccessToken(), input as never, options)
+        },
+        finishAppRun: async (runId, input, options) => {
+          const client = await createTrustedAdminClient()
+          return client.finishAppRun(
+            await trustedAccessToken(),
+            runId,
+            input as never,
+            options,
+          )
+        },
+      },
+      createExecutor: ({ connectionSlug, model }) => createSessionlessHostLlmExecutor({
+        connectionSlug,
+        ...(model ? { model } : {}),
+      }),
+      resolveWorkspaceRoot: workspaceId =>
+        getWorkspaceByNameOrId(workspaceId)?.rootPath ?? null,
+      loadWorkspaceConfig: rootPath => loadWorkspaceConfig(rootPath),
+      getDefaultLlmConnection: () => getDefaultLlmConnection(),
+    }
+    coordinator = new LocalAppRuntimeCoordinator(adapters)
+  }
+  return coordinator
+}
+
+export function hasLocalAppRuntimeCoordinator(): boolean {
+  return coordinator !== null
+}
+
+async function trustedAccessToken(): Promise<string> {
+  const tokens = await getCredentialManager().getAdminTokens()
+  if (!tokens) throw new Error('No trusted Admin session for App runtime billing')
+  return tokens.accessToken
+}
+
+async function createTrustedAdminClient(): Promise<AdminClient> {
+  const adminUrl = getAdminUrl()
+  if (!adminUrl) throw new Error('Polo Admin is not configured')
+  return new AdminClient(adminUrl)
 }
 
 export function hasLocalAppRuntimeManager(): boolean {
@@ -47,6 +122,7 @@ export function hasLocalAppRuntimeManager(): boolean {
 
 export async function shutdownLocalAppRuntime(): Promise<void> {
   const results = await Promise.allSettled([
+    coordinator?.shutdown(),
     manager?.shutdown(),
     scopedRegistry?.shutdown(),
   ])
@@ -67,3 +143,8 @@ export {
   ScopedLocalAppRuntimeRegistry,
   validateCatalogLocalAppScope,
 } from './scoped-registry'
+export { LocalAppRuntimeCoordinator } from './runtime-coordinator'
+export type { RuntimeCoordinatorAdapters } from './runtime-coordinator'
+export { AppApiCapabilityRegistry } from './app-api-capabilities'
+export { AppApiRunState } from './app-api-run-state'
+export { AppApiGateway } from './app-api-gateway'
