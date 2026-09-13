@@ -30,6 +30,8 @@ interface FixtureOptions {
   loadWorkspaceConfigThrows?: boolean
   /** Captures the armed capability-expiry callbacks for deterministic tests. */
   onExpiryArmed?: (fire: () => void) => void
+  /** Boots only the gateway (no capability/runtime registration). */
+  skipBootstrapRuntime?: boolean
   /** executor.execute rejects instead of returning a Host terminal. */
   executeRejection?: boolean
   /** execute hangs until its abort signal fires, then rejects. */
@@ -156,6 +158,7 @@ function createFixture(options: FixtureOptions = {}) {
   const ready = (async () => {
     const gatewayUrl = await coordinator.ensureGateway()
     baseURL = gatewayUrl.replace(/\/local-app-api\/v1$/, '')
+    if (options.skipBootstrapRuntime) return
     const signing = coordinator.signCapability({
       identity: IDENTITY,
       workspaceId: 'ws-a',
@@ -1144,5 +1147,221 @@ describe('POO-54 R3 fix regressions (gateway/coordinator)', () => {
     const result = await fixture.post('/run/start', startBody())
       .then(() => 'reachable', () => 'unreachable')
     expect(result).toBe('unreachable')
+  })
+})
+
+describe('POO-54 R4 fix regressions (gateway/coordinator)', () => {
+  it('a capability signed at spawn time is served in the boot window, with no projection until health', async () => {
+    const { getAppRuntimeCenter, resetAppRuntimeCenterForTests } =
+      await import('@polo-ai/server-core/runtime')
+    resetAppRuntimeCenterForTests()
+    const fixture = createFixture({
+      executorResults: [() => completed('boot', 1, 1)],
+      skipBootstrapRuntime: true,
+    })
+    await fixture.coordinator.ensureGateway()
+    // Provisional registration exactly as the production hook does it:
+    // signed + registered BEFORE the process can call; no projection yet.
+    const signing = fixture.coordinator.signCapability({
+      identity: IDENTITY,
+      workspaceId: 'ws-a',
+      executionId: 'exec-boot',
+      runtimeKind: 'python',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-boot',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing.capabilityGeneration,
+    })
+    // The FIRST legitimate request in the boot window succeeds — no retry.
+    const bootRun = { runId: uuid() }
+    const started = await fixture.post('/run/start', bootRun, { token: signing.token })
+    expect(started.status).toBe(200)
+    expect(started.json.data).toMatchObject({ runId: bootRun.runId, status: 'running' })
+    // The running projection is still withheld until the health gate passes.
+    expect(getAppRuntimeCenter().findByIdentity(IDENTITY)).toBeUndefined()
+    // Queries work in the boot window too.
+    const query = { runId: bootRun.runId, requestId: uuid(), prompt: 'p', maxOutputTokens: 8, timeoutMs: 5_000 }
+    const queryResponse = await fixture.post('/ai/query', query, { token: signing.token })
+    expect(queryResponse.status).toBe(200)
+    expect(queryResponse.json.data.text).toBe('boot')
+    await fixture.coordinator.shutdown()
+    resetAppRuntimeCenterForTests()
+  })
+
+  it('a synchronous abort-listener re-entry during teardown cannot double-stop', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    await startRun(fixture)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    let stopCount = 0
+    // A listener that SYNCHRONOUSLY re-enters teardown during the abort
+    // side effect of the first teardown.
+    runtime.controller.signal.addEventListener('abort', () => {
+      void fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+        stopCount += 10
+      })
+    })
+    await fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+      stopCount += 1
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(stopCount).toBe(1)
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+  })
+
+  it('runId ownership is a coordinator-lifetime tombstone across terminal and capability release', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    // Generation 1 owns runId R and takes it to terminal.
+    const ownedRunId = uuid()
+    const first = await fixture.post('/run/start', { runId: ownedRunId })
+    expect(first.status).toBe(200)
+    const finished = await fixture.post('/run/finish', { runId: ownedRunId, status: 'completed' })
+    expect(finished.status).toBe(200)
+    // Generation 2 (new capability, same/different identity) reusing the
+    // tombstoned runId is still refused.
+    const signing2 = fixture.coordinator.signCapability({
+      identity: { ...IDENTITY, versionId: 'version-b' },
+      workspaceId: 'ws-a',
+      executionId: 'exec-b',
+      runtimeKind: 'python',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, versionId: 'version-b' },
+      executionId: 'exec-b',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing2.capabilityGeneration,
+    })
+    const terminalReuse = await fixture.post('/run/start', { runId: ownedRunId }, {
+      token: signing2.token,
+    })
+    expect(terminalReuse.status).toBe(409)
+    expect(terminalReuse.json.error.code).toBe('run_state_conflict')
+    // Capability release (full teardown) keeps the tombstone too: a THIRD
+    // generation with a fresh valid capability is still refused.
+    const runtime2 = fixture.coordinator.getActiveRuntime({
+      ...IDENTITY,
+      versionId: 'version-b',
+    })!
+    await fixture.coordinator.teardownRuntime(runtime2, 'cancelled')
+    const signing3 = fixture.coordinator.signCapability({
+      identity: { ...IDENTITY, versionId: 'version-c' },
+      workspaceId: 'ws-a',
+      executionId: 'exec-c',
+      runtimeKind: 'python',
+      runtimeGeneration: 3,
+      scopeGeneration: 3,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, versionId: 'version-c' },
+      executionId: 'exec-c',
+      runtimeGeneration: 3,
+      scopeGeneration: 3,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing3.capabilityGeneration,
+    })
+    const afterRelease = await fixture.post('/run/start', { runId: ownedRunId }, {
+      token: signing3.token,
+    })
+    expect(afterRelease.status).toBe(409)
+    expect(afterRelease.json.error.code).toBe('run_state_conflict')
+    await fixture.coordinator.shutdown()
+  })
+
+  it('an in-flight Admin start that succeeds during teardown is reconciled and finished', async () => {
+    let releaseStart: (() => void) | undefined
+    let startHung = false
+    const fixture = createFixture({
+      // Only the FIRST Admin start hangs (and ignores its abort signal);
+      // the cleanup lane's idempotent reconfirmation resolves immediately.
+      onStart: () => {
+        if (startHung) return
+        startHung = true
+        return new Promise<void>(resolve => {
+          releaseStart = resolve
+        })
+      },
+    })
+    const runId = uuid()
+    const pending = fixture.post('/run/start', { runId })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(releaseStart).toBeDefined()
+    // Teardown begins while the Admin start is still hung; release it DURING
+    // the drain grace so the late success is observed.
+    setTimeout(() => releaseStart?.(), 300)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    await fixture.coordinator.teardownRuntime(runtime, 'cancelled')
+    // The App request resolves with the explicit shutting_down boundary.
+    const response = await pending
+    expect(response.status).toBe(503)
+    expect(response.json.error.code).toBe('shutting_down')
+    // The late remote success was reconciled: start reconfirmed, then a
+    // qualified terminal finish (cancelled) was submitted — no orphan run.
+    const startCalls = fixture.adminCalls.filter(call => call.method === 'start')
+    expect(startCalls.length).toBeGreaterThanOrEqual(2)
+    expect(startCalls[0]!.body).toMatchObject({ runId })
+    const finishCall = fixture.adminCalls.filter(call => call.method === 'finish').at(-1)
+    expect(finishCall).toMatchObject({ runId })
+    expect((finishCall!.body as { status: string }).status).toBe('cancelled')
+  }, 20_000)
+
+  it('a failing generation-bound stop is aggregated: teardown rejects after full cleanup; shutdown rejects too', async () => {
+    const fixture = createFixture({
+      stopRuntime: async () => {
+        throw new Error('process stop exploded')
+      },
+    })
+    await fixture.post('/run/start', undefined).catch(() => null)
+    await startRun(fixture)
+    const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    // Explicit teardown: the stop failure is aggregated AFTER every other
+    // cleanup step completed.
+    await expect(fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+      throw new Error('process stop exploded')
+    })).rejects.toThrow(/process stop exploded/)
+    expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
+    // The projection was still cleared despite the failed stop.
+    const { getAppRuntimeCenter } = await import('@polo-ai/server-core/runtime')
+    expect(getAppRuntimeCenter().findByIdentity(IDENTITY)).toBeUndefined()
+
+    // Shutdown with a failing adapter stop also rejects (aggregated), while
+    // the generation cleanup itself still completed.
+    const signing = fixture.coordinator.signCapability({
+      identity: { ...IDENTITY, versionId: 'version-b' },
+      workspaceId: 'ws-a',
+      executionId: 'exec-b',
+      runtimeKind: 'python',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: { ...IDENTITY, versionId: 'version-b' },
+      executionId: 'exec-b',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing.capabilityGeneration,
+    })
+    const runId = uuid()
+    await fixture.post('/run/start', { runId }, { token: signing.token })
+    await expect(fixture.coordinator.shutdown()).rejects.toThrow(/failed to stop/)
+    expect(fixture.coordinator.getActiveRuntime({
+      ...IDENTITY,
+      versionId: 'version-b',
+    })).toBeUndefined()
   })
 })

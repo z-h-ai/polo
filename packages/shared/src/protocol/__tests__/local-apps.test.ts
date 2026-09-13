@@ -3,6 +3,7 @@ import {
   isProductSpaceRuntimeRequest,
   projectLocalAppStatusForCatalogAccess,
   type LocalAppInstalledApp,
+  type LocalAppLifecycleRequest,
   type LocalAppRuntimeStatus,
   type ProductSpaceAppRuntimeStartResult,
 } from '../local-apps'
@@ -170,5 +171,38 @@ describe('localApps ProductSpace runtime request union (POO-54)', () => {
       status: 'unavailable',
       reason: 'static_runtime_unsupported',
     })
+  })
+})
+
+describe('POO-54 R4 legacy union member', () => {
+  it('models the legacy member as a BARE CatalogLocalAppScope', () => {
+    const bareScope = {
+      kind: 'catalog' as const,
+      accountId: 'account-1',
+      organizationId: 'space-1',
+      catalogAppId: 'artifact-1',
+    }
+    // The bare scope is a valid union member and is NOT a ProductSpace
+    // runtime request.
+    const bare: LocalAppLifecycleRequest = bareScope
+    expect(isProductSpaceRuntimeRequest(bare)).toBe(false)
+    // The legacy_scope WRAPPER shape is not part of the union at all.
+    const wrapper = { kind: 'legacy_scope', scope: bareScope }
+    expect(isProductSpaceRuntimeRequest(wrapper)).toBe(false)
+    // The two discriminated ProductSpace branches remain.
+    expect(isProductSpaceRuntimeRequest({
+      kind: 'product_space_runtime_start',
+      app: {
+        accountId: 'account-1',
+        productSpaceId: 'space-1',
+        catalogEntryId: 'entry-1',
+        artifactInstanceId: 'artifact-1',
+        versionId: 'version-1',
+        version: '1.0.0',
+        catalogRevision: 'rev-1',
+        sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+        availability: 'available',
+      },
+    })).toBe(true)
   })
 })

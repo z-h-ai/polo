@@ -167,6 +167,17 @@ async function main(): Promise<void> {
         })
         token = signing.token
         capabilityGeneration = signing.capabilityGeneration
+        // Provisional registration at spawn time: the injected token is
+        // valid the moment the process boots.
+        coordinator.registerActiveRuntime({
+          identity,
+          executionId,
+          runtimeGeneration,
+          scopeGeneration,
+          workspaceId: 'ws-e2e',
+          runtimeKind,
+          capabilityGeneration,
+        })
         return {
           env: {
             ...signing.environment,
@@ -175,15 +186,6 @@ async function main(): Promise<void> {
           sensitiveValues: signing.sensitiveValues,
         }
       },
-    })
-    coordinator.registerActiveRuntime({
-      identity,
-      executionId,
-      runtimeGeneration: result.runtimeGeneration,
-      scopeGeneration,
-      workspaceId: 'ws-e2e',
-      runtimeKind: result.runtimeKind,
-      capabilityGeneration,
     })
     return { token, runtimeGeneration: result.runtimeGeneration, executionId }
   }

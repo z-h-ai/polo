@@ -246,14 +246,16 @@ export class AppApiRunState {
     }
   }
 
-  /** Terminal Run: clears exactly its own slots/bytes, never other runs'. */
+  /**
+   * Terminal Run: clears exactly its own slots/bytes, never other runs'.
+   * The runId ownership TOMBSTONE is deliberately retained for the
+   * coordinator lifetime — another capability generation reusing the runId
+   * must keep failing with run_state_conflict.
+   */
   releaseRun(capabilityGeneration: number, runId: string): void {
     const prefix = queryKey(capabilityGeneration, runId, '')
     for (const key of this.queries.keys()) {
       if (key.startsWith(prefix)) this.queries.delete(key)
-    }
-    if (this.runIdOwners.get(runId) === capabilityGeneration) {
-      this.runIdOwners.delete(runId)
     }
   }
 
@@ -279,7 +281,10 @@ export class AppApiRunState {
       .map(([key, record]) => ({ requestId: key.slice(prefix.length), record }))
   }
 
-  /** Capability revoke/expiry: clears the whole generation after cleanup. */
+  /**
+   * Capability revoke/expiry: clears the whole generation after cleanup.
+   * runId ownership tombstones intentionally survive (coordinator lifetime).
+   */
   releaseCapability(capabilityGeneration: number): void {
     const prefix = `${capabilityGeneration}:`
     for (const key of this.queries.keys()) {
@@ -287,9 +292,6 @@ export class AppApiRunState {
     }
     for (const key of this.runs.keys()) {
       if (key.startsWith(prefix)) this.runs.delete(key)
-    }
-    for (const [runId, owner] of this.runIdOwners) {
-      if (owner === capabilityGeneration) this.runIdOwners.delete(runId)
     }
   }
 

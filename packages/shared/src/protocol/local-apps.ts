@@ -405,14 +405,14 @@ export interface LocalAppErrorPayload {
 }
 
 /**
- * Strict discriminator union for the localApps lifecycle RPC. The legacy
- * scope-only branch stays isolated and can never address a ProductSpace
- * runtime execution handle; ProductSpace branches carry the full immutable
- * identity (START) or the execution handle with its expected runtime
- * generation (STOP/RESTART).
+ * Strict request shape for the localApps lifecycle RPC: a bare
+ * CatalogLocalAppScope (legacy, renderer-reachable) or one of the two
+ * discriminated ProductSpace runtime branches. There is deliberately NO
+ * `legacy_scope` wrapper branch — the legacy member travels as the bare
+ * scope itself, exactly as the handler/renderer always accepted.
  */
 export type LocalAppLifecycleRequest =
-  | { kind: 'legacy_scope'; scope: CatalogLocalAppScope }
+  | CatalogLocalAppScope
   | { kind: 'product_space_runtime_start'; app: ProductSpaceAppIdentity }
   | {
       kind: 'product_space_runtime_handle'
@@ -422,7 +422,7 @@ export type LocalAppLifecycleRequest =
 
 export function isProductSpaceRuntimeRequest(
   value: unknown,
-): value is Exclude<LocalAppLifecycleRequest, { kind: 'legacy_scope' }> {
+): value is Exclude<LocalAppLifecycleRequest, CatalogLocalAppScope> {
   return Boolean(
     value
     && typeof value === 'object'

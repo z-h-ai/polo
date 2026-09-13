@@ -117,6 +117,14 @@ interface InFlightQuery {
   promise: Promise<void>
 }
 
+/** An admitted (in-flight) run/start Admin fact, owned by one generation. */
+interface InFlightStart {
+  runtimeGeneration: number
+  capabilityGeneration: number
+  runId: string
+  promise: Promise<void>
+}
+
 const CLEANUP_ABORT_GRACE_MS = 2_000
 const CLEANUP_REQUEST_BUDGET_MS = 5_000
 const CLEANUP_TOTAL_BUDGET_MS = 10_000
@@ -171,6 +179,7 @@ export class LocalAppRuntimeCoordinator {
   private gateway?: AppApiGateway
   private readonly active = new Map<string, ActiveRuntime>()
   private readonly inFlight = new Map<string, InFlightQuery>()
+  private readonly inFlightStarts = new Map<string, InFlightStart>()
   private readonly expiryHandled = new Set<number>()
   private readonly expiryTimers = new Map<number, () => void>()
   /** Unique in-progress teardown per identityKey+runtimeGeneration. */
@@ -410,18 +419,30 @@ export class LocalAppRuntimeCoordinator {
     if (this.tornDownGenerations.has(guardKey)) return
     const inProgress = this.teardownGuarantees.get(guardKey)
     if (inProgress) return inProgress
-    const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
-    this.teardownGuarantees.set(guardKey, teardown)
-    void teardown
-      .catch(() => {})
-      .finally(() => {
-        // Persist the terminal marker BEFORE clearing the concurrency guard.
-        this.tornDownGenerations.add(guardKey)
-        if (this.teardownGuarantees.get(guardKey) === teardown) {
-          this.teardownGuarantees.delete(guardKey)
-        }
-      })
-    return teardown
+    // Publish the guard promise BEFORE any revoke/abort side effect runs:
+    // performTeardown synchronously aborts the runtime controller and its
+    // abort listeners can synchronously re-enter this method — at that
+    // moment the guard must already be observable.
+    let settleGuard!: () => void
+    const guardPromise = new Promise<void>(resolve => {
+      settleGuard = resolve
+    })
+    this.teardownGuarantees.set(guardKey, guardPromise)
+    try {
+      const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
+      void teardown
+        .catch(() => {})
+        .finally(() => {
+          // Persist the terminal marker BEFORE clearing the guard.
+          this.tornDownGenerations.add(guardKey)
+          if (this.teardownGuarantees.get(guardKey) === guardPromise) {
+            this.teardownGuarantees.delete(guardKey)
+          }
+        })
+      return teardown
+    } finally {
+      settleGuard()
+    }
   }
 
   private async performTeardown(
@@ -434,10 +455,22 @@ export class LocalAppRuntimeCoordinator {
       this.capabilities.revoke(runtime.capabilityGeneration)
     }
     runtime.controller.abort()
-    // Drain ONLY this generation's in-flight queries — never a replacement's.
+    // Drain ONLY this generation's in-flight queries and starts — never a
+    // replacement's.
     await this.drainInFlight(runtime.identityKey, runtime.runtimeGeneration)
+    await this.drainInFlightStarts(runtime.identityKey, runtime.runtimeGeneration)
     await this.runCleanupLane(runtime, finalStatus)
-    if (stopProcess) await stopProcess().catch(() => {})
+    // Best-effort: every subsequent cleanup step runs even when the
+    // generation-bound process stop fails; the failure is aggregated and
+    // rejected AFTER cleanup completes.
+    let stopFailure: unknown
+    if (stopProcess) {
+      try {
+        await stopProcess()
+      } catch (error) {
+        stopFailure = error
+      }
+    }
     getAppRuntimeCenter().clear(runtime.identityKey, runtime.runtimeGeneration)
     unregisterProductSpaceExecution(runtime.executionId)
     if (runtime.capabilityGeneration !== undefined) {
@@ -447,6 +480,7 @@ export class LocalAppRuntimeCoordinator {
     if (this.active.get(runtime.identityKey) === runtime) {
       this.active.delete(runtime.identityKey)
     }
+    if (stopFailure !== undefined) throw stopFailure
   }
 
   private async drainInFlight(identityKey: string, runtimeGeneration: number): Promise<void> {
@@ -457,6 +491,22 @@ export class LocalAppRuntimeCoordinator {
     if (pending.length === 0) return
     await Promise.race([
       Promise.allSettled(pending.map(([, query]) => query.promise)),
+      new Promise((resolve) => setTimeout(resolve, CLEANUP_ABORT_GRACE_MS)),
+    ])
+  }
+
+  /**
+   * Waits (bounded) for the unique outcome of this generation's admitted
+   * Admin starts: a late success is converted to a replayable start so the
+   * cleanup lane can reconcile and finish the remote run.
+   */
+  private async drainInFlightStarts(identityKey: string, runtimeGeneration: number): Promise<void> {
+    const pending = [...this.inFlightStarts.entries()]
+      .filter(([key, start]) => start.runtimeGeneration === runtimeGeneration
+        && key.startsWith(`${identityKey}:`))
+    if (pending.length === 0) return
+    await Promise.race([
+      Promise.allSettled(pending.map(([, start]) => start.promise)),
       new Promise((resolve) => setTimeout(resolve, CLEANUP_ABORT_GRACE_MS)),
     ])
   }
@@ -513,7 +563,7 @@ export class LocalAppRuntimeCoordinator {
           if (query.state !== 'receipt_unconfirmed' || !query.outcome) continue
           const receiptOk = await runBounded(signal =>
             admin.recordAppUsage(
-              this.receiptBody(runtime, runId, requestId, query.outcome!),
+              this.receiptBody(runId, requestId, query.outcome!),
               { signal },
             ))
           if (!receiptOk) return
@@ -559,7 +609,6 @@ export class LocalAppRuntimeCoordinator {
   }
 
   private receiptBody(
-    runtime: ActiveRuntime,
     runId: string,
     requestId: string,
     outcome: QueryOutcome,
@@ -574,7 +623,6 @@ export class LocalAppRuntimeCoordinator {
       : outcome.kind === 'no_output'
         ? 0
         : outcome.usage?.outputTokens ?? 0
-    void runtime
     return { runId, requestId, inputTokens, outputTokens }
   }
 
@@ -596,10 +644,23 @@ export class LocalAppRuntimeCoordinator {
         }
         runtime.controller.abort()
       }
-      await Promise.allSettled(runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
-        this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())))
+      const teardownResults = await Promise.allSettled(
+        runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
+          this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())),
+      )
       await this.gateway?.close()
       this.gateway = undefined
+      // Aggregate: a failed generation-bound process stop must not pass
+      // silently even though every other cleanup step completed.
+      const failures = teardownResults
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map(result => result.reason)
+      if (failures.length > 0) {
+        throw new Error(
+          `coordinator shutdown: ${failures.length} runtime generation(s) failed to stop`,
+          { cause: failures[0] },
+        )
+      }
     })()
     this.shutdownPromise = shutdownPromise
     return shutdownPromise
@@ -688,35 +749,60 @@ export class LocalAppRuntimeCoordinator {
     record.status = existing?.status === 'start_unconfirmed'
       ? 'start_unconfirmed'
       : 'starting_admin'
-    try {
-      const composed = anySignal([signal, runtime.controller.signal])
-      try {
-        await this.adapters.admin.startAppRun(this.adminStartBody(runtime, runId), {
-          signal: composed.signal,
-        })
-      } finally {
-        composed.dispose()
-      }
-    } catch (error) {
-      if (error instanceof AdminError && error.errorCode === 'insufficient_credit') {
-        this.runState.releaseRun(capGen, runId)
-        return { errorCode: 'insufficient_credit' }
-      }
-      if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') {
-        return { errorCode: 'idempotency_conflict' }
-      }
-      if (error instanceof AdminError && error.errorCode === 'run_finalized') {
-        this.runState.markTerminal(capGen, runId, 'server')
-        this.runState.releaseRun(capGen, runId)
-        return { errorCode: 'run_finalized' }
-      }
-      // Unknown network outcome: keep the idempotent start replayable.
-      this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
-      return { errorCode: 'metering_unconfirmed' }
+    const startKey = `${runtime.identityKey}:${runId}`
+    let settleStartOutcome!: () => void
+    const inFlightStart: InFlightStart = {
+      runtimeGeneration: runtime.runtimeGeneration,
+      capabilityGeneration: capGen,
+      runId,
+      promise: new Promise<void>(resolve => {
+        settleStartOutcome = resolve
+      }),
     }
-    if (runtime.controller.signal.aborted) return { errorCode: 'shutting_down' }
-    this.runState.setRunStatus(capGen, runId, 'running')
-    return { data: { runId, status: 'running' } }
+    this.inFlightStarts.set(startKey, inFlightStart)
+    try {
+      try {
+        const composed = anySignal([signal, runtime.controller.signal])
+        try {
+          await this.adapters.admin.startAppRun(this.adminStartBody(runtime, runId), {
+            signal: composed.signal,
+          })
+        } finally {
+          composed.dispose()
+        }
+      } catch (error) {
+        if (error instanceof AdminError && error.errorCode === 'insufficient_credit') {
+          this.runState.releaseRun(capGen, runId)
+          return { errorCode: 'insufficient_credit' }
+        }
+        if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') {
+          return { errorCode: 'idempotency_conflict' }
+        }
+        if (error instanceof AdminError && error.errorCode === 'run_finalized') {
+          this.runState.markTerminal(capGen, runId, 'server')
+          this.runState.releaseRun(capGen, runId)
+          return { errorCode: 'run_finalized' }
+        }
+        // Unknown network outcome: keep the idempotent start replayable.
+        this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
+        return { errorCode: 'metering_unconfirmed' }
+      }
+      if (runtime.controller.signal.aborted) {
+        // The idempotent Admin start may still have succeeded remotely: keep
+        // the run replayable so the bounded cleanup lane can reconcile and
+        // finish it instead of orphaning the remote run.
+        this.runState.setRunStatus(capGen, runId, 'start_unconfirmed')
+        return { errorCode: 'shutting_down' }
+      }
+      this.runState.setRunStatus(capGen, runId, 'running')
+      return { data: { runId, status: 'running' } }
+    } finally {
+      // The unique start outcome is now known: release the drain.
+      settleStartOutcome()
+      if (this.inFlightStarts.get(startKey) === inFlightStart) {
+        this.inFlightStarts.delete(startKey)
+      }
+    }
   }
 
   private async handleRunFinish(
@@ -933,7 +1019,7 @@ export class LocalAppRuntimeCoordinator {
       const composed = anySignal([runtime.controller.signal])
       try {
         await this.adapters.admin.recordAppUsage(
-          this.receiptBody(runtime, runId, requestId, outcome),
+          this.receiptBody(runId, requestId, outcome),
           { signal: composed.signal },
         )
       } finally {

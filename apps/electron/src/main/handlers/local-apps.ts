@@ -131,6 +131,27 @@ async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promis
   }
 }
 
+/**
+ * Shared hooks wiring one exact ProductSpace runtime into the execution
+ * registry: generation/version-exact liveness, unified fail-closed rollback
+ * (coordinator-first teardown) and the execution-scoped stop.
+ */
+interface RuntimeRegistrationHooks {
+  executionId: string
+  subject: {
+    kind: 'artifact_instance'
+    artifactType: 'app'
+    artifactInstanceId: string
+    versionId: string
+    version: string
+  }
+  stop: () => Promise<'stopped' | 'failed'>
+  /** Post-spawn rollback: coordinator-first teardown, never stop→revoke. */
+  rollback: () => Promise<void>
+  /** Generation/version-exact liveness for the execution projection. */
+  isActiveExact: () => boolean
+}
+
 interface CatalogAppReference {
   app: CatalogApp
   appConfigVersion: string
@@ -1427,28 +1448,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     name: string,
     workspaceId: string | null,
     trustedAccountId: string,
-    runtime?: {
-      executionId: string
-      subject: {
-        kind: 'artifact_instance'
-        artifactType: 'app'
-        artifactInstanceId: string
-        versionId: string
-        version: string
-      }
-      stop: () => Promise<'stopped' | 'failed'>
-      /**
-       * Post-spawn rollback: coordinator-first teardown (revoke → abort →
-       * cleanup → exact-generation stop → CAS clear) — NEVER a direct
-       * process stop that would leave a live token behind.
-       */
-      rollback: () => Promise<void>
-      /**
-       * Generation/version-exact liveness: true only while THIS runtime
-       * generation is still the coordinator's active runtime.
-       */
-      isActiveExact: () => boolean
-    },
+    runtime?: RuntimeRegistrationHooks,
   ): Promise<string> => {
     const accountId = trustedAccountId
     if (!accountId) {
@@ -1554,21 +1554,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       scopeGeneration?: number
     }>,
     workspaceId: string | null,
-    runtime?: {
-      executionId: string
-      subject: {
-        kind: 'artifact_instance'
-        artifactType: 'app'
-        artifactInstanceId: string
-        versionId: string
-        version: string
-      }
-      stop: () => Promise<'stopped' | 'failed'>
-      /** Post-spawn rollback: coordinator-first teardown, never stop→revoke. */
-      rollback: () => Promise<void>
-      /** Generation/version-exact liveness for the execution projection. */
-      isActiveExact: () => boolean
-    },
+    runtime?: RuntimeRegistrationHooks,
   ) => {
     // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
     // trusted Admin account) BEFORE the switch lock — the Admin session
@@ -1809,8 +1795,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           ? coordinator.getActiveRuntimeByExecution(executionId)
           : undefined
         if (active) {
+          // The aggregated process-stop failure must surface: never swallow
+          // stopExact here.
           await coordinator.teardownRuntime(active, 'cancelled', async () => {
-            await registry.stopExact(scope, active.runtimeGeneration).catch(() => {})
+            await registry.stopExact(scope, active.runtimeGeneration)
           })
           return
         }
@@ -1845,51 +1833,47 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         }
         // Gateway-first: a listen failure fails closed before any spawn.
         await coordinator.ensureGateway()
-        try {
-          const result = await registry.startExact(scope, app.version, {
-            runtimeKey: identityKey,
-            versionId: app.versionId,
-            processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
-              const signing = coordinator.signCapability({
-                identity: runtimeIdentity,
-                workspaceId,
-                executionId,
-                runtimeKind,
-                runtimeGeneration,
-                scopeGeneration,
-              })
-              signedCapability = signing.capabilityGeneration
-              return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
-            },
-          })
-          startedRuntimeGeneration = result.runtimeGeneration
-          coordinator.registerActiveRuntime({
-            identity: runtimeIdentity,
-            executionId,
-            runtimeGeneration: result.runtimeGeneration,
-            scopeGeneration: result.scopeGeneration,
-            workspaceId,
-            runtimeKind: result.runtimeKind,
-            capabilityGeneration: signedCapability,
-          })
-          getAppRuntimeCenter().publish({
-            identityKey,
-            identity: runtimeIdentity,
-            workspaceId,
-            executionId,
-            runtimeGeneration: result.runtimeGeneration,
-            scopeGeneration: result.scopeGeneration,
-            runtimeKind: result.runtimeKind,
-            status: 'running',
-          }, result.runtimeGeneration)
-          return result
-        } catch (error) {
-          // Any post-hook start failure revokes the just-signed token.
-          if (signedCapability !== undefined) {
-            coordinator.revokeSignedCapability(signedCapability)
-          }
-          throw error
-        }
+        const result = await registry.startExact(scope, app.version, {
+          runtimeKey: identityKey,
+          versionId: app.versionId,
+          processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
+            const signing = coordinator.signCapability({
+              identity: runtimeIdentity,
+              workspaceId,
+              executionId,
+              runtimeKind,
+              runtimeGeneration,
+              scopeGeneration,
+            })
+            signedCapability = signing.capabilityGeneration
+            // PROVISIONAL registration (spawn-time): the just-signed token is
+            // valid the moment the process reads its environment, so the
+            // runtime must be registered BEFORE the process can call — the
+            // running projection is only published after the health gate.
+            startedRuntimeGeneration = runtimeGeneration
+            coordinator.registerActiveRuntime({
+              identity: runtimeIdentity,
+              executionId,
+              runtimeGeneration,
+              scopeGeneration,
+              workspaceId,
+              runtimeKind,
+              capabilityGeneration: signedCapability,
+            })
+            return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
+          },
+        })
+        getAppRuntimeCenter().publish({
+          identityKey,
+          identity: runtimeIdentity,
+          workspaceId,
+          executionId,
+          runtimeGeneration: result.runtimeGeneration,
+          scopeGeneration: result.scopeGeneration,
+          runtimeKind: result.runtimeKind,
+          status: 'running',
+        }, result.runtimeGeneration)
+        return result
       },
       workspaceId,
       {
@@ -1946,7 +1930,6 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   ): Promise<{
     identity: ProductSpaceAppRuntimeIdentity
     scope: CatalogLocalAppScope
-    expectedRuntimeGeneration: number
   }> => {
     const handle = rawHandle as {
       executionId?: unknown
@@ -1978,11 +1961,21 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     assertScopeInsideActiveProductSpace(scope)
     await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
-      await getScopedLocalAppRuntimeRegistry()
-        .stopExact(scope, handle.expectedRuntimeGeneration as number)
-        .catch(() => {})
+      try {
+        await getScopedLocalAppRuntimeRegistry()
+          .stopExact(scope, handle.expectedRuntimeGeneration as number)
+      } catch (error) {
+        // Aggregate: surface a failed generation-bound stop as STOP_FAILED.
+        throw error instanceof LocalAppRuntimeError
+          ? error
+          : new LocalAppRuntimeError(
+              'STOP_FAILED',
+              'Failed to stop the exact runtime generation',
+              { cause: error instanceof Error ? error.message : String(error) },
+            )
+      }
     })
-    return { identity, scope, expectedRuntimeGeneration: handle.expectedRuntimeGeneration as number }
+    return { identity, scope }
   }
 
   /** Generation-CAS stop for a ProductSpace runtime execution handle. */

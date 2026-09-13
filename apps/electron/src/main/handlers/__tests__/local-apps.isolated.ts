@@ -3694,4 +3694,37 @@ describe('local app production status projection (R34-3)', () => {
     await runtimeCoordinator.teardownRuntime(runtimeV1!, 'failed')
     expect(await execV2!.isActive()).toBe(true)
   })
+
+  it('POO-54 R4: STOP aggregates a failed generation-bound stop as STOP_FAILED while cleanup completes', async () => {
+    // Seed a live runtime (started through the normal START path).
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    // The exact-generation stop FAILS.
+    scopedStopExact.mockImplementation(async () => {
+      throw Object.assign(new Error('process survived'), { code: 'STOP_FAILED' })
+    })
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: [...activeRuntimesByExecution.keys()][0]!,
+      expectedRuntimeGeneration: 41,
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // (Projection/execution cleanup on a failed stop is asserted against the
+    // REAL coordinator in the gateway isolated suite.)
+  })
+
+  it('POO-54 R4: the legacy lifecycle member travels as a bare scope — wrapper shapes are rejected', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // A bare CatalogLocalAppScope remains the legacy member and works.
+    await start(context, scope())
+    expect(scopedStart).toHaveBeenCalledTimes(1)
+    // A legacy_scope WRAPPER is not part of the union: it reaches the
+    // legacy branch as an invalid scope and fails closed.
+    await expect(start(context, { kind: 'legacy_scope', scope: scope() }))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(scopedStart).toHaveBeenCalledTimes(1)
+  })
 })
