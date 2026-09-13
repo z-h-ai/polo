@@ -1849,6 +1849,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     const rollbackRuntime = (): Promise<void> => {
       if (rollbackStarted) return rollbackStarted
       rollbackStarted = (async (): Promise<void> => {
+        console.log('[dbg] rollback gen:', startedRuntimeGeneration, 'exec:', executionId)
         const active = startedRuntimeGeneration !== undefined
           ? coordinator.getActiveRuntimeByExecution(executionId)
           : undefined
@@ -1954,7 +1955,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
               runtimeKind: 'static',
             })
           } catch (error) {
-            await throwOriginalAfterRollback(error, rollbackRuntime())
+            // Rollback PRIMITIVES only (never a second aggregation): the
+            // single START-boundary exit below surfaces both the original
+            // registration failure and any rollback stop failure.
+            await rollbackRuntime().catch(() => {})
+            throw error
           }
         }
         getAppRuntimeCenter().publish({
@@ -1995,9 +2000,29 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     )
     } catch (error) {
       // A superseded or failed registration must not leave coordinator
-      // runtime/capability/projection state behind; a failed rollback stop
-      // is aggregated into the surfaced error.
-      return await throwOriginalAfterRollback(error, rollbackRuntime())
+      // runtime/capability/projection state behind. The SINGLE aggregation
+      // exit: the rollback primitives already ran (idempotent guard); if the
+      // generation-aware stop failed, surface the stable STOP_FAILED with
+      // BOTH the original failure and the rollback stop failure.
+      let rollbackStopFailure: { message?: string } | undefined
+      try {
+        await rollbackRuntime()
+      } catch (rollbackError) {
+        rollbackStopFailure = {
+          message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        }
+      }
+      if (rollbackStopFailure !== undefined) {
+        const originalInfo = error instanceof LocalAppRuntimeError
+          ? { code: error.code, message: error.message }
+          : { message: error instanceof Error ? error.message : String(error) }
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          'Failed to stop the exact runtime generation',
+          { cause: { original: originalInfo, rollback: rollbackStopFailure } },
+        )
+      }
+      throw error
     }
     return {
       appId: start.appId ?? scope.catalogAppId,
@@ -2059,11 +2084,16 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         await getScopedLocalAppRuntimeRegistry()
           .stopExact(scope, handle.expectedRuntimeGeneration as number)
       } catch (error) {
-        // Aggregate: surface ANY failed generation-bound stop as the stable
+        // Surface ANY failed generation-bound stop as the stable
         // STOP_FAILED (original code/message preserved in details.cause).
         throw normalizeStopFailure(error)
       }
     })
+    // The recorded (never thrown) rollback stop failure is surfaced here.
+    const recorded = coordinator.getRollbackStopFailure(handle.executionId as string)
+    if (recorded !== undefined) {
+      throw normalizeStopFailure(recorded)
+    }
     return { identity, scope }
   }
 

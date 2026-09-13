@@ -1324,7 +1324,7 @@ describe('POO-54 R4 fix regressions (gateway/coordinator)', () => {
     expect((finishCall!.body as { status: string }).status).toBe('cancelled')
   }, 20_000)
 
-  it('a failing generation-bound stop is aggregated: teardown rejects after full cleanup; shutdown rejects too', async () => {
+  it('a failing generation-bound stop is RECORDED: teardown resolves after full cleanup and shutdown aggregates', async () => {
     const fixture = createFixture({
       stopRuntime: async () => {
         throw new Error('process stop exploded')
@@ -1333,18 +1333,22 @@ describe('POO-54 R4 fix regressions (gateway/coordinator)', () => {
     await fixture.post('/run/start', undefined).catch(() => null)
     await startRun(fixture)
     const runtime = fixture.coordinator.getActiveRuntime(IDENTITY)!
-    // Explicit teardown: the stop failure is aggregated AFTER every other
-    // cleanup step completed.
-    await expect(fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+    // Explicit teardown: the stop failure is RECORDED (never thrown) and
+    // every other cleanup step still completes.
+    await fixture.coordinator.teardownRuntime(runtime, 'cancelled', async () => {
       throw new Error('process stop exploded')
-    })).rejects.toThrow(/process stop exploded/)
+    })
     expect(fixture.coordinator.getActiveRuntime(IDENTITY)).toBeUndefined()
     // The projection was still cleared despite the failed stop.
     const { getAppRuntimeCenter } = await import('@polo-ai/server-core/runtime')
     expect(getAppRuntimeCenter().findByIdentity(IDENTITY)).toBeUndefined()
+    // The recorded failure is observable at the coordinator boundary.
+    expect(fixture.coordinator.getRollbackStopFailure('exec-1')).toMatchObject({
+      message: 'process stop exploded',
+    })
 
-    // Shutdown with a failing adapter stop also rejects (aggregated), while
-    // the generation cleanup itself still completed.
+    // Shutdown with a failing adapter stop aggregates the recorded failures
+    // into a rejection, while the generation cleanup itself still completed.
     const signing = fixture.coordinator.signCapability({
       identity: { ...IDENTITY, versionId: 'version-b' },
       workspaceId: 'ws-a',
@@ -1419,7 +1423,7 @@ describe('POO-54 R5 fix regressions (gateway/coordinator)', () => {
     await fixture.coordinator.shutdown()
   }, 20_000)
 
-  it('a concurrent second teardown mirrors the first teardown rejection', async () => {
+  it('a concurrent second teardown shares the first settlement; stop failures are recorded exactly once', async () => {
     const fixture = createFixture()
     await fixture.post('/run/start', undefined).catch(() => null)
     await startRun(fixture)
@@ -1429,9 +1433,10 @@ describe('POO-54 R5 fix regressions (gateway/coordinator)', () => {
     })
     const second = fixture.coordinator.teardownRuntime(runtime, 'cancelled')
     second.catch(() => {})
-    await expect(first).rejects.toThrow(/stop exploded/)
-    // The shared guard mirrors the rejection to the concurrent caller.
-    await expect(second).rejects.toThrow(/stop exploded/)
+    // The shared guard settles together with the first teardown (stop
+    // failures are RECORDED by performTeardown, never thrown).
+    await first
+    await second
   })
 
   it('a 2.5s late Admin start success is frozen, reconfirmed, terminal-finished and answered 200', async () => {

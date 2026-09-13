@@ -540,7 +540,7 @@ export interface AdminStartAppRunInput {
 }
 
 export interface AdminStartAppRunResponse {
-  run: { runId: string; status: 'running' }
+  run: { runId: string; status: 'running' };
 }
 
 export interface AdminRecordAppUsageInput {

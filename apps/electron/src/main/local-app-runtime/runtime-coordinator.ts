@@ -240,6 +240,8 @@ export class LocalAppRuntimeCoordinator {
   }
   /** Explicit reconciliation outcomes for runs frozen during teardown. */
   private readonly reconciledStarts = new Map<string, 'confirmed_and_finished'>()
+  /** Recorded (never thrown) rollback stop failures, keyed by executionId. */
+  private readonly rollbackStopFailures = new Map<string, unknown>()
   private shutdownPromise?: Promise<void>
   private shuttingDown = false
 
@@ -559,8 +561,9 @@ export class LocalAppRuntimeCoordinator {
     await this.drainInFlightStarts(runtime.identityKey, runtime.runtimeGeneration)
     await this.runCleanupLane(runtime, finalStatus)
     // Best-effort: every subsequent cleanup step runs even when the
-    // generation-bound process stop fails; the failure is aggregated and
-    // rejected AFTER cleanup completes.
+    // generation-bound process stop fails. The failure is RECORDED (never
+    // thrown): the single START-boundary aggregation exit surfaces it via
+    // the STOP_FAILED contract after cleanup completes.
     let stopFailure: unknown
     if (stopProcess) {
       try {
@@ -578,7 +581,16 @@ export class LocalAppRuntimeCoordinator {
     if (this.active.get(runtime.identityKey) === runtime) {
       this.active.delete(runtime.identityKey)
     }
-    if (stopFailure !== undefined) throw stopFailure
+    if (stopFailure !== undefined) {
+      this.rollbackStopFailures.set(runtime.executionId, stopFailure)
+    } else {
+      this.rollbackStopFailures.delete(runtime.executionId)
+    }
+  }
+
+  /** Recorded rollback stop failure for one execution, if any. */
+  getRollbackStopFailure(executionId: string): unknown {
+    return this.rollbackStopFailures.get(executionId)
   }
 
   private async drainInFlight(identityKey: string, runtimeGeneration: number): Promise<void> {
@@ -760,7 +772,8 @@ export class LocalAppRuntimeCoordinator {
         }
         runtime.controller.abort()
       }
-      const teardownResults = await Promise.allSettled(
+      // performTeardown records (never throws) rollback stop failures.
+      await Promise.allSettled(
         runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
           this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())),
       )
@@ -768,9 +781,7 @@ export class LocalAppRuntimeCoordinator {
       this.gateway = undefined
       // Aggregate: a failed generation-bound process stop must not pass
       // silently even though every other cleanup step completed.
-      const failures = teardownResults
-        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-        .map(result => result.reason)
+      const failures = [...this.rollbackStopFailures.values()]
       if (failures.length > 0) {
         throw new Error(
           `coordinator shutdown: ${failures.length} runtime generation(s) failed to stop`,
