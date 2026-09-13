@@ -151,6 +151,42 @@ function normalizeStopFailure(error: unknown): LocalAppRuntimeError {
 }
 
 /**
+ * Awaits the post-start rollback and rethrows the ORIGINAL error once the
+ * rollback completed. When the rollback's generation-aware stop itself
+ * failed, the START boundary must observe that too: the surfaced error
+ * becomes the stable STOP_FAILED carrying BOTH the original failure and the
+ * rollback stop failure in details.cause — a caller can tell a fully
+ * rolled-back registration failure from one whose version-namespaced
+ * process still lives.
+ */
+async function throwOriginalAfterRollback(
+  originalError: unknown,
+  rollbackPromise: Promise<void>,
+): Promise<never> {
+  let rollbackFailure: unknown
+  try {
+    await rollbackPromise
+  } catch (rollbackError) {
+    rollbackFailure = rollbackError
+  }
+  if (rollbackFailure === undefined) throw originalError
+  const normalized = normalizeStopFailure(rollbackFailure)
+  const originalInfo = originalError instanceof LocalAppRuntimeError
+    ? { code: originalError.code, message: originalError.message }
+    : { message: originalError instanceof Error ? originalError.message : String(originalError) }
+  throw new LocalAppRuntimeError(
+    normalized.code,
+    normalized.message,
+    {
+      cause: {
+        original: originalInfo,
+        rollback: normalized.details?.cause ?? { message: normalized.message },
+      },
+    },
+  )
+}
+
+/**
  * Shared hooks wiring one exact ProductSpace runtime into the execution
  * registry: generation/version-exact liveness, unified fail-closed rollback
  * (coordinator-first teardown) and the execution-scoped stop.
@@ -1554,7 +1590,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     } catch (error) {
       // Registration failure must not leave an unregistered running runtime:
       // revoke first via the coordinator, then stop the exact generation.
-      if (runtime) await runtime.rollback().catch(() => {})
+      if (runtime) await throwOriginalAfterRollback(error, runtime.rollback())
       else await registry.stop(scope).catch(() => {})
       throw error
     }
@@ -1636,12 +1672,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       ) {
         // Revoke before stop: the coordinator tears the just-started runtime
         // down (capability/Run/execution/projection) with the exact stop.
-        if (runtime) await runtime.rollback().catch(() => {})
-        else await registryStopQuietly(scope)
-        throw new LocalAppRuntimeError(
+        const fenceError = new LocalAppRuntimeError(
           'SWITCH_IN_PROGRESS',
           'A ProductSpace switch superseded this start',
         )
+        if (runtime) {
+          await throwOriginalAfterRollback(fenceError, runtime.rollback())
+        }
+        await registryStopQuietly(scope)
+        throw fenceError
       }
       await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId, runtime)
       return result
@@ -1827,10 +1866,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         if (startedRuntimeGeneration !== undefined) {
           // Generation-aware fallback: the exact version process lives in a
           // version-namespaced id — a legacy artifact-scoped stop would miss
-          // it and leak the running process.
-          await registry
-            .stopExact(scope, startedRuntimeGeneration)
-            .catch(() => {})
+          // it and leak the running process. The rejection is NEVER
+          // swallowed: the START boundary aggregates it with the original
+          // failure so callers can tell a fully rolled-back registration
+          // failure from one whose version-namespaced process still lives.
+          await registry.stopExact(scope, startedRuntimeGeneration)
           return
         }
         await registry.stop(scope).catch(() => {})
@@ -1914,8 +1954,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
               runtimeKind: 'static',
             })
           } catch (error) {
-            await rollbackRuntime().catch(() => {})
-            throw error
+            await throwOriginalAfterRollback(error, rollbackRuntime())
           }
         }
         getAppRuntimeCenter().publish({
@@ -1956,9 +1995,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     )
     } catch (error) {
       // A superseded or failed registration must not leave coordinator
-      // runtime/capability/projection state behind.
-      await rollbackRuntime().catch(() => {})
-      throw error
+      // runtime/capability/projection state behind; a failed rollback stop
+      // is aggregated into the surfaced error.
+      return await throwOriginalAfterRollback(error, rollbackRuntime())
     }
     return {
       appId: start.appId ?? scope.catalogAppId,

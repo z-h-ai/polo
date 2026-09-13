@@ -13,6 +13,7 @@ import { mainLog } from '../logger'
 import { LocalAppRuntimeManager } from './manager'
 import { ScopedLocalAppRuntimeRegistry } from './scoped-registry'
 import {
+  catalogRuntimeScopeTupleKey,
   LocalAppRuntimeCoordinator,
   type RuntimeCoordinatorAdapters,
 } from './runtime-coordinator'
@@ -114,7 +115,7 @@ export function hasLocalAppRuntimeCoordinator(): boolean {
 }
 
 const runtimeScopeKey = (accountId: string, productSpaceId: string, artifactInstanceId: string): string =>
-  `${accountId}|${productSpaceId}|${artifactInstanceId}`
+  catalogRuntimeScopeTupleKey({ accountId, productSpaceId, artifactInstanceId })
 
 /**
  * Unified coordinator-aware teardown for scope withdrawals: revokes the
@@ -210,6 +211,7 @@ export {
   ScopedLocalAppRuntimeRegistry,
   validateCatalogLocalAppScope,
 } from './scoped-registry'
+export { catalogRuntimeScopeTupleKey } from './runtime-coordinator'
 export { LocalAppRuntimeCoordinator } from './runtime-coordinator'
 export type { RuntimeCoordinatorAdapters } from './runtime-coordinator'
 export { AppApiCapabilityRegistry } from './app-api-capabilities'

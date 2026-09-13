@@ -1745,3 +1745,70 @@ it('POO-54 R7: two different identities with the SAME manager-local generation t
   expect(fixture.coordinator.getActiveRuntime(identityA)).toBeUndefined()
   expect(fixture.coordinator.getActiveRuntime(identityB)).toBeUndefined()
 })
+
+it('POO-54 R9: teardown scope matching uses unambiguous tuple keys — delimiter collisions cannot cross identities', async () => {
+  const fixture = createFixture({ skipBootstrapRuntime: true })
+  await fixture.coordinator.ensureGateway()
+  // Two DISTINCT tuples that collide under naive '|' concatenation:
+  // ('a|b', 'c', 'd') vs ('a', 'b|c', 'd').
+  const identityColliding = {
+    accountId: 'a|b',
+    productSpaceId: 'c',
+    artifactInstanceId: 'd',
+    versionId: 'version-x',
+    version: '1.0.0',
+  }
+  const identityOther = {
+    accountId: 'a',
+    productSpaceId: 'b|c',
+    artifactInstanceId: 'd',
+    versionId: 'version-x',
+    version: '1.0.0',
+  }
+  const keyColliding = createProductSpaceAppRuntimeIdentityKey(identityColliding)
+  const keyOther = createProductSpaceAppRuntimeIdentityKey(identityOther)
+  expect(keyColliding).not.toBe(keyOther)
+  fixture.coordinator.registerActiveRuntime({
+    identity: identityColliding,
+    executionId: 'exec-colliding',
+    runtimeGeneration: 1,
+    scopeGeneration: 1,
+    workspaceId: 'ws',
+    runtimeKind: 'python',
+  })
+  fixture.coordinator.registerActiveRuntime({
+    identity: identityOther,
+    executionId: 'exec-other',
+    runtimeGeneration: 2,
+    scopeGeneration: 1,
+    workspaceId: 'ws',
+    runtimeKind: 'python',
+  })
+  const { catalogRuntimeScopeTupleKey } = await import('../runtime-coordinator')
+  // The production matching helper derives DISTINCT scope keys for the two
+  // tuples — a withdrawal of one cannot select the other's runtime.
+  const scopeKeyOf = (identity: { accountId: string; productSpaceId: string; artifactInstanceId: string }): string =>
+    catalogRuntimeScopeTupleKey({
+      accountId: identity.accountId,
+      productSpaceId: identity.productSpaceId,
+      artifactInstanceId: identity.artifactInstanceId,
+    })
+  expect(scopeKeyOf(identityColliding)).not.toBe(scopeKeyOf(identityOther))
+  // Teardown of the colliding-key tuple leaves the other tuple untouched.
+  const withdrawnScope = { accountId: 'a|b', organizationId: 'c', catalogAppId: 'd' }
+  await fixture.coordinator.teardownRuntimesFor(runtime => {
+    const scopeKey = catalogRuntimeScopeTupleKey({
+      accountId: runtime.identity.accountId,
+      productSpaceId: runtime.identity.productSpaceId,
+      artifactInstanceId: runtime.identity.artifactInstanceId,
+    })
+    return scopeKey === catalogRuntimeScopeTupleKey({
+      accountId: withdrawnScope.accountId,
+      productSpaceId: withdrawnScope.organizationId,
+      artifactInstanceId: withdrawnScope.catalogAppId,
+    })
+  }, 'cancelled')
+  expect(fixture.coordinator.getActiveRuntime(identityColliding)).toBeUndefined()
+  expect(fixture.coordinator.getActiveRuntime(identityOther)).toBeDefined()
+  await fixture.coordinator.shutdown()
+})

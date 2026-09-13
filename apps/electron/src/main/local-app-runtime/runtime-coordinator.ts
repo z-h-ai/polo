@@ -91,6 +91,26 @@ export interface RuntimeCoordinatorAdapters {
   scheduleExpiry?(delayMs: number, callback: () => void): () => void
 }
 
+/**
+ * Unambiguous tuple encoding for (account, ProductSpace, artifact instance)
+ * scope matching. Delimiter concatenation is unsafe: AdminEntityIdSchema
+ * accepts '|', so `a|b`+`c` and `a`+`b|c` would collide. JSON tuple encoding
+ * keeps every distinct tuple distinct.
+ */
+export function catalogRuntimeScopeTupleKey(fields: {
+  accountId: string
+  productSpaceId: string
+  artifactInstanceId: string
+}): string {
+  return JSON.stringify([
+    'product-space-app-runtime-scope',
+    1,
+    fields.accountId,
+    fields.productSpaceId,
+    fields.artifactInstanceId,
+  ])
+}
+
 export interface CapabilitySigning {
   capabilityGeneration: number
   /** Raw capability token: only for process-env injection, never persisted. */

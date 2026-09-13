@@ -530,13 +530,13 @@ export class AdminError extends Error {
 
 /** POL-102 minimal App billing contract. Payer/price are server-derived and never appear here. */
 export interface AdminStartAppRunInput {
-  runId: string
-  workspaceId: string
-  accountId: string
-  productSpaceId: string
-  artifactInstanceId: string
-  versionId: string
-  version: string
+  runId: string;
+  workspaceId: string;
+  accountId: string;
+  productSpaceId: string;
+  artifactInstanceId: string;
+  versionId: string;
+  version: string;
 }
 
 export interface AdminStartAppRunResponse {
@@ -544,23 +544,23 @@ export interface AdminStartAppRunResponse {
 }
 
 export interface AdminRecordAppUsageInput {
-  runId: string
-  requestId: string
-  inputTokens: number
-  outputTokens: number
+  runId: string;
+  requestId: string;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface AdminRecordAppUsageResponse {
-  runId: string
-  requestId: string
-  recorded: true
+  runId: string;
+  requestId: string;
+  recorded: true;
 }
 
 export interface AdminFinishAppRunInput {
-  status: 'completed' | 'failed' | 'cancelled' | 'unknown'
+  status: 'completed' | 'failed' | 'cancelled' | 'unknown';
 }
 
 export interface AdminFinishAppRunResponse {
-  runId: string
-  status: AdminFinishAppRunInput['status']
+  runId: string;
+  status: AdminFinishAppRunInput['status'];
 }
