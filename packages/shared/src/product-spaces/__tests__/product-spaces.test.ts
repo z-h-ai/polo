@@ -23,6 +23,14 @@ import {
   parseResolveLaunchResponseForProductSpace,
   parseStopAllExecutionsResultForProductSpace,
   parseUpdateSkillEnablementResponseForProductSpace,
+  createProductSpaceAppRuntimeIdentityKey,
+  AppApiRunStartSchema,
+  AppAiQuerySchema,
+  AppApiRunFinishSchema,
+  AppApiResultReportSchema,
+  AppApiFileReportSchema,
+  RUNTIME_PROJECTION_CONTRACT_VERSION,
+  type AppRuntimeProjection,
   type EnterpriseId,
   type ProductSpaceId,
   type TrustedProductSpaceSummary,
@@ -716,4 +724,103 @@ test('contract IDs are parsed before boundary use', () => {
   expect(ArtifactInstanceIdSchema.safeParse('  ').success).toBe(false)
   expect(CatalogEntryIdSchema.safeParse('').success).toBe(false)
   expect(WorkspaceIdSchema.safeParse('workspace').success).toBe(true)
+})
+
+describe('product-space app runtime contract (POO-54)', () => {
+  const identity = {
+    accountId: 'account-a',
+    productSpaceId: 'space-a',
+    artifactInstanceId: 'artifact-a',
+    versionId: 'version-a',
+    version: '1.0.0',
+  }
+
+  test('runtime identity key is a versioned JSON tuple without workspace or catalog entry', () => {
+    expect(createProductSpaceAppRuntimeIdentityKey(identity)).toBe(JSON.stringify([
+      'product-space-app-runtime', 1, 'account-a', 'space-a', 'artifact-a', 'version-a',
+    ]))
+    // Same artifact different version NEVER shares a runtime key.
+    expect(createProductSpaceAppRuntimeIdentityKey({ ...identity, versionId: 'version-b' }))
+      .not.toBe(createProductSpaceAppRuntimeIdentityKey(identity))
+    // personal-A vs enterprise-B same-named App never collide.
+    expect(createProductSpaceAppRuntimeIdentityKey({ ...identity, productSpaceId: 'space-b' }))
+      .not.toBe(createProductSpaceAppRuntimeIdentityKey(identity))
+    expect(createProductSpaceAppRuntimeIdentityKey({ ...identity, accountId: 'account-b' }))
+      .not.toBe(createProductSpaceAppRuntimeIdentityKey(identity))
+  })
+
+  test('strict local-app-api schemas reject unknown ownership and secret fields', () => {
+    expect(AppApiRunStartSchema.safeParse({ runId: crypto.randomUUID() }).success).toBe(true)
+    // A malicious App self-reporting account/ProductSpace/payer is rejected.
+    expect(AppApiRunStartSchema.safeParse({
+      runId: crypto.randomUUID(),
+      accountId: 'account-b',
+    }).success).toBe(false)
+    const query = {
+      runId: crypto.randomUUID(),
+      requestId: crypto.randomUUID(),
+      prompt: 'hello',
+      maxOutputTokens: 128,
+      timeoutMs: 5_000,
+    }
+    expect(AppAiQuerySchema.safeParse(query).success).toBe(true)
+    expect(AppAiQuerySchema.safeParse({ ...query, workspaceId: 'ws' }).success).toBe(false)
+    expect(AppAiQuerySchema.safeParse({ ...query, payer: 'enterprise' }).success).toBe(false)
+    expect(AppAiQuerySchema.safeParse({ ...query, price: 1 }).success).toBe(false)
+    expect(AppAiQuerySchema.safeParse({ ...query, maxOutputTokens: 8193 }).success).toBe(false)
+    expect(AppAiQuerySchema.safeParse({ ...query, timeoutMs: 999 }).success).toBe(false)
+    expect(AppApiRunFinishSchema.safeParse({ runId: query.runId, status: 'completed' }).success).toBe(true)
+    expect(AppApiRunFinishSchema.safeParse({ runId: query.runId, status: 'running' }).success).toBe(false)
+    expect(AppApiResultReportSchema.safeParse({
+      runId: query.runId,
+      requestId: query.requestId,
+      resultId: crypto.randomUUID(),
+      title: 't',
+    }).success).toBe(true)
+    expect(AppApiResultReportSchema.safeParse({
+      runId: query.runId,
+      requestId: query.requestId,
+      resultId: crypto.randomUUID(),
+      title: 't',
+      associatedFileIds: Array.from({ length: 33 }, () => crypto.randomUUID()),
+    }).success).toBe(false)
+    expect(AppApiFileReportSchema.safeParse({
+      runId: query.runId,
+      requestId: query.requestId,
+      fileId: crypto.randomUUID(),
+      source: 'app_export',
+      displayName: 'f',
+      candidatePath: '/tmp/f',
+    }).success).toBe(true)
+    expect(AppApiFileReportSchema.safeParse({
+      runId: query.runId,
+      requestId: query.requestId,
+      fileId: crypto.randomUUID(),
+      source: 'other',
+      displayName: 'f',
+      candidatePath: '/tmp/f',
+    }).success).toBe(false)
+  })
+
+  test('projection DTO keeps workspace independent from the runtime identity', () => {
+    const projection: AppRuntimeProjection = {
+      contractVersion: RUNTIME_PROJECTION_CONTRACT_VERSION,
+      identityKey: createProductSpaceAppRuntimeIdentityKey(identity),
+      identity,
+      workspaceId: 'ws-a',
+      executionId: 'local-app:space-a:artifact-a:1',
+      runtimeGeneration: 7,
+      scopeGeneration: 2,
+      runtimeKind: 'python',
+      status: 'running',
+      revision: 1,
+    }
+    // The same runtime identity under another workspace is a distinct
+    // execution/projection row, never a different runtime key.
+    const otherWorkspace = { ...projection, workspaceId: 'ws-b', executionId: 'e2', revision: 2 }
+    expect(otherWorkspace.identityKey).toBe(projection.identityKey)
+    expect(otherWorkspace.workspaceId).not.toBe(projection.workspaceId)
+    expect(projection).not.toHaveProperty('prompt')
+    expect(projection).not.toHaveProperty('capability')
+  })
 })

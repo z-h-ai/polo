@@ -72,6 +72,8 @@ export interface RuntimeCoordinatorAdapters {
 
 export interface CapabilitySigning {
   capabilityGeneration: number
+  /** Raw capability token: only for process-env injection, never persisted. */
+  token: string
   environment: { POLO_APP_API_URL: string; POLO_APP_API_TOKEN: string }
   sensitiveValues: string[]
 }
@@ -193,6 +195,7 @@ export class LocalAppRuntimeCoordinator {
     }
     return {
       capabilityGeneration: issued.capabilityGeneration,
+      token: issued.token,
       environment: {
         POLO_APP_API_URL: gatewayUrl,
         POLO_APP_API_TOKEN: issued.token,

@@ -146,28 +146,71 @@ export interface UnexpectedExitEvent {
 export const RUNTIME_SECRET_REDACTED = '[REDACTED_RUNTIME_SECRET]'
 
 /**
- * Token-aware streaming redactor. Withholds a `maxSensitiveLength - 1`
- * character overlap across chunks so a secret split at any chunk boundary is
- * still redacted exactly once, never partially written to disk.
+ * Token-aware streaming redactor. Raw text is withheld until every secret
+ * occurrence that could straddle the emit cut is fully contained: the cut is
+ * pushed back to the earliest straddling occurrence start, so a partial
+ * secret can never be emitted (across any chunk boundary), and flush always
+ * passes through this same path.
  */
 export class StreamingSecretRedactor {
-  private carry = ''
+  private pending = ''
+  private readonly maxSecretLength: number
 
-  constructor(private readonly secrets: string[]) {}
+  constructor(private readonly secrets: string[]) {
+    this.maxSecretLength = secrets.reduce((max, secret) => Math.max(max, secret.length), 0)
+  }
 
   push(chunk: string): string {
-    this.carry += chunk
-    const maxSecretLength = this.secrets.reduce((max, s) => Math.max(max, s.length), 0)
-    const safeLength = Math.max(0, this.carry.length - Math.max(0, maxSecretLength - 1))
-    const safe = this.carry.slice(0, safeLength)
-    this.carry = this.carry.slice(safeLength)
-    return this.redact(safe)
+    if (this.maxSecretLength === 0) {
+      const text = this.pending + chunk
+      this.pending = ''
+      return this.redact(text)
+    }
+    this.pending += chunk
+    return this.drain()
   }
 
   flush(): string {
-    const rest = this.redact(this.carry)
-    this.carry = ''
-    return rest
+    return this.take(this.pending.length)
+  }
+
+  /**
+   * Emits everything up to a safe cut: the base withhold keeps a possible
+   * tail partial secret buffered, complete occurrences straddling the cut
+   * are emitted whole (redacted), and an incomplete tail occurrence pushes
+   * the cut back before its start.
+   */
+  private drain(): string {
+    const pending = this.pending
+    let cut = pending.length - (this.maxSecretLength - 1)
+    if (cut <= 0) return ''
+    const intervals: Array<[number, number]> = []
+    for (const secret of this.secrets) {
+      let index = pending.indexOf(secret)
+      while (index !== -1 && index < cut) {
+        intervals.push([index, index + secret.length])
+        index = pending.indexOf(secret, index + 1)
+      }
+    }
+    intervals.sort((left, right) => left[0] - right[0])
+    for (const [start, end] of intervals) {
+      if (end <= cut) continue
+      if (start >= cut) break
+      if (end <= pending.length) {
+        cut = end
+      } else {
+        cut = start
+        break
+      }
+    }
+    return this.take(cut)
+  }
+
+  private take(emitCut: number): string {
+    if (emitCut <= 0) return ''
+    const emitted = this.redact(this.pending.slice(0, emitCut))
+    this.pending = this.pending.slice(emitCut)
+    return emitted
   }
 
   private redact(text: string): string {
@@ -2978,7 +3021,7 @@ export class LocalAppRuntimeManager {
       const flush = () => {
         if (flushed) return
         flushed = true
-        emit(redactor.flush() + lineCarry)
+        emit(lineCarry + redactor.flush())
         lineCarry = ''
       }
       stream.once('end', flush)

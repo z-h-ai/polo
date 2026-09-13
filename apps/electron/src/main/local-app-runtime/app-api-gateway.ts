@@ -140,7 +140,15 @@ export class AppApiGateway {
     if (request.headers.host !== `127.0.0.1:${this.port}`) return fail('invalid_request')
     const rawUrl = request.url ?? '/'
     if (rawUrl.includes('?') || rawUrl.includes('#')) return fail('invalid_request')
-    const route = rawUrl.replace(/\/+$/, '') as AppApiRoute
+    const contractPrefix = '/local-app-api/v1'
+    let pathname: string
+    try {
+      pathname = new URL(rawUrl, 'http://127.0.0.1').pathname
+    } catch {
+      return fail('invalid_request')
+    }
+    if (!pathname.startsWith(contractPrefix)) return fail('route_not_found')
+    const route = pathname.slice(contractPrefix.length).replace(/\/+$/, '') as AppApiRoute
     const limit = ROUTE_BODY_LIMITS[route]
     if (limit === undefined) return fail('route_not_found')
     const authorization = request.headers.authorization

@@ -217,6 +217,74 @@ const scopedRetainedManagementLogs = mock(async (
   return ''
 })
 const isInstalledAndReady = mock(async () => true)
+const scopedStartExact = mock(async (
+  _scope: CatalogLocalAppScope,
+  version: string,
+  hooks?: { processEnvironment?: (input: { runtimeKind: 'python' | 'js'; runtimeGeneration: number; scopeGeneration: number }) => unknown },
+) => {
+  const signing = hooks?.processEnvironment?.({
+    runtimeKind: 'python',
+    runtimeGeneration: 41,
+    scopeGeneration: 7,
+  }) as { env: Record<string, string>; sensitiveValues: string[] } | undefined
+  void signing
+  return {
+    appId: 'artifact-instance-a',
+    scope: { kind: 'catalog', accountId: 'account-a', organizationId: 'organization-a', catalogAppId: 'artifact-instance-a' },
+    version,
+    url: 'http://127.0.0.1:9876',
+    port: 9876,
+    runtimeKind: 'python' as const,
+    runtimeGeneration: 41,
+    scopeGeneration: 7,
+  }
+})
+const scopedStopExact = mock(async (
+  scope: CatalogLocalAppScope,
+  expectedRuntimeGeneration: number,
+): Promise<LocalAppRuntimeStatus> => {
+  if (expectedRuntimeGeneration !== 41) {
+    throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+  }
+  return {
+    appId: scope.catalogAppId,
+    scope,
+    status: 'stopped' as const,
+    currentVersion: '2.3.4',
+  }
+})
+
+const runtimeCoordinator = {
+  ensureGateway: mock(async () => 'http://127.0.0.1:9/local-app-api/v1'),
+  signCapability: mock((input: Record<string, unknown>) => {
+    void input
+    return {
+      capabilityGeneration: 11,
+      token: 'capability-token',
+      environment: {
+        POLO_APP_API_URL: 'http://127.0.0.1:9/local-app-api/v1',
+        POLO_APP_API_TOKEN: 'capability-token',
+      },
+      sensitiveValues: ['capability-token'],
+    }
+  }),
+  registerActiveRuntime: mock((input: Record<string, unknown>) => ({
+    identityKey: 'k',
+    identity: (input as { identity: unknown }).identity,
+    executionId: (input as { executionId: string }).executionId,
+    runtimeGeneration: (input as { runtimeGeneration: number }).runtimeGeneration,
+    scopeGeneration: (input as { scopeGeneration: number }).scopeGeneration,
+    workspaceId: (input as { workspaceId: string }).workspaceId,
+    runtimeKind: (input as { runtimeKind: string }).runtimeKind,
+    capabilityGeneration: 11,
+    controller: new AbortController(),
+  })),
+  getActiveRuntime: mock((_identity: unknown): unknown => null),
+  getActiveRuntimeByExecution: mock((_executionId: unknown): unknown => null),
+  revokeSignedCapability: mock(() => {}),
+  teardownRuntime: mock(async () => {}),
+  handleUnexpectedExit: mock(async () => {}),
+}
 const assertAppAuthorized = mock(() => {
   if (appAccessDenied) {
     throw Object.assign(new Error('Catalog app authorization is ending'), {
@@ -236,6 +304,8 @@ const scopedRegistry = {
     status: 'stopped' as const,
   })),
   restart: scopedStart,
+  startExact: scopedStartExact,
+  stopExact: scopedStopExact,
   uninstall: mock(async () => {}),
   setAvailableRelease: mock(async (scope: CatalogLocalAppScope) => ({
     appId: scope.catalogAppId,
@@ -359,6 +429,7 @@ mock.module('../../local-app-runtime', () => {
       throw new Error('renderer RPC must never reach the trusted legacy manager')
     },
     getScopedLocalAppRuntimeRegistry: () => scopedRegistry,
+    getLocalAppRuntimeCoordinator: () => runtimeCoordinator,
     LocalAppRuntimeError,
     MAX_CATALOG_STATUS_SCOPES: 10_000,
     validateCatalogLocalAppScope(value: unknown): CatalogLocalAppScope {
@@ -478,7 +549,7 @@ describe('local app main-process authorization boundary', () => {
   }
   let windowWorkspaceId: string | null = 'ws-window-a'
 
-  beforeEach(() => {
+  beforeEach(async () => {
     signedInAccountId = 'account-a'
     accessMode = 'online'
     accountAccessDenied = false
@@ -520,6 +591,19 @@ describe('local app main-process authorization boundary', () => {
       scope,
       status: 'not_installed',
     })))
+    scopedStartExact.mockClear()
+    scopedStopExact.mockClear()
+    runtimeCoordinator.ensureGateway.mockClear()
+    runtimeCoordinator.signCapability.mockClear()
+    runtimeCoordinator.registerActiveRuntime.mockClear()
+    runtimeCoordinator.getActiveRuntime.mockImplementation(() => null)
+    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(() => null)
+    runtimeCoordinator.revokeSignedCapability.mockClear()
+    runtimeCoordinator.teardownRuntime.mockClear()
+    const { resetAppRuntimeCenterForTests } = await import(
+      '@polo-ai/server-core/runtime'
+    )
+    resetAppRuntimeCenterForTests()
     scopedRuntimeStatus.mockImplementation(async item => ({
       appId: item.catalogAppId,
       scope: item,
@@ -3041,7 +3125,7 @@ describe('local app production status projection (R34-3)', () => {
   }
   let windowWorkspaceId: string | null = 'ws-window-a'
 
-  beforeEach(() => {
+  beforeEach(async () => {
     signedInAccountId = 'account-a'
     accessMode = 'online'
     appAccessDenied = false
@@ -3051,6 +3135,29 @@ describe('local app production status projection (R34-3)', () => {
     windowWorkspaceId = 'ws-window-a'
     context.webContentsId = 1
     handlers.clear()
+    withdrawnTombstonesByScope.clear()
+    trustedRecordByScope.clear()
+    getProductSpaceCatalog.mockClear()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    scopedStartExact.mockClear()
+    scopedStopExact.mockClear()
+    runtimeCoordinator.ensureGateway.mockClear()
+    runtimeCoordinator.signCapability.mockClear()
+    runtimeCoordinator.registerActiveRuntime.mockClear()
+    runtimeCoordinator.getActiveRuntime.mockImplementation(() => null)
+    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(() => null)
+    runtimeCoordinator.revokeSignedCapability.mockClear()
+    runtimeCoordinator.teardownRuntime.mockClear()
+    runtimeCoordinator.teardownRuntime.mockImplementation(
+      async (...args: unknown[]) => {
+        const stopProcess = args[2] as (() => Promise<void>) | undefined
+        await stopProcess?.()
+      },
+    )
+    const { resetAppRuntimeCenterForTests } = await import(
+      '@polo-ai/server-core/runtime'
+    )
+    resetAppRuntimeCenterForTests()
     for (const handlerMock of [
       getCachedAppCatalog,
       getAppCatalogAccessMode,
@@ -3161,5 +3268,199 @@ describe('local app production status projection (R34-3)', () => {
     }))
     expect(await stopPromise).toBe('stopped')
     expect(await execution.isActive()).toBe(false)
+  })
+
+  it('POO-54: starts a ProductSpace runtime through exact-version generation with capability binding and projection', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const result = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    expect(result).toMatchObject({
+      appId: 'artifact-instance-a',
+      version: '2.3.4',
+      runtimeKind: 'python',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      platformApi: { status: 'available' },
+    })
+    expect(typeof (result as { executionId: string }).executionId).toBe('string')
+    // Fresh-Catalog re-verification ran before any runtime call.
+    expect(getProductSpaceCatalog).toHaveBeenCalledTimes(1)
+    // The exact-version start used the full runtime scope and version.
+    expect(scopedStartExact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'artifact-instance-a',
+      }),
+      '2.3.4',
+      expect.objectContaining({ processEnvironment: expect.any(Function) }),
+    )
+    // The capability signed with the trusted caller workspace and the real
+    // ProductSpace identity — never renderer-owned billing fields.
+    expect(runtimeCoordinator.signCapability).toHaveBeenCalledWith(expect.objectContaining({
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+    }))
+    expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledTimes(1)
+    // The result never exposes the capability token or the gateway URL.
+    expect(JSON.stringify(result)).not.toContain('capability-token')
+    expect(JSON.stringify(result)).not.toContain('127.0.0.1')
+    // The active projection is published through the single center.
+    const { getAppRuntimeCenter } = await import('@polo-ai/server-core/runtime')
+    const projection = getAppRuntimeCenter().findByIdentity({
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+    })
+    expect(projection).toMatchObject({
+      workspaceId: 'ws-window-a',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      runtimeKind: 'python',
+      status: 'running',
+    })
+    // The execution registry holds the FULL identity subject.
+    const registered = listRegisteredProductSpaceExecutions().find(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered?.scope.subject).toMatchObject({
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+    })
+  })
+
+  it('POO-54: fails START closed on missing entry, drift, and unavailable availability', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Missing entry: an unknown artifact instance never resolves.
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: { ...productSpaceAppIdentity(), artifactInstanceId: 'unknown-instance' },
+    })).rejects.toMatchObject({ code: 'CATALOG_ENTRY_MISSING' })
+    // Revision drift: the fresh Catalog moved on.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      ...(await defaultProductSpaceCatalog()),
+      catalogRevision: 'revision-next',
+    }))
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    // Unavailable: the raw availability is not launchable.
+    const blockedCatalog = await defaultProductSpaceCatalog()
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      ...blockedCatalog,
+      entries: [{
+        ...blockedCatalog.entries[0]!,
+        availability: 'blocked',
+      }],
+    }))
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'APP_UNAVAILABLE' })
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('POO-54: a second start of the same runtime identity replaces the first generation', async () => {
+    const existing = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-old',
+      runtimeGeneration: 13,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 3,
+      controller: new AbortController(),
+    }
+    runtimeCoordinator.getActiveRuntime.mockImplementation(() => existing)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    // Workspace-A's old generation is revoked/stopped before B starts.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledWith(
+      existing,
+      'cancelled',
+      expect.any(Function),
+    )
+    runtimeCoordinator.getActiveRuntime.mockImplementation(() => null)
+  })
+
+  it('POO-54: STOP is generation-CAS gated and tears the exact runtime down', async () => {
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    // Unknown execution → stale generation, no registry touch.
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'unknown',
+      expectedRuntimeGeneration: 41,
+    })).rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    const runtime = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-41',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 11,
+      controller: new AbortController(),
+    }
+    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(
+      (executionId: unknown) => (executionId === 'exec-41' ? runtime : null),
+    )
+    // A stale generation is refused BEFORE touching the registry.
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'exec-41',
+      expectedRuntimeGeneration: 40,
+    })).rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    expect(scopedStopExact).not.toHaveBeenCalled()
+    // The current generation tears the runtime down with the exact stop.
+    const status = await stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'exec-41',
+      expectedRuntimeGeneration: 41,
+    })
+    expect(status).toMatchObject({ appId: 'artifact-instance-a', status: 'stopped' })
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledWith(
+      runtime,
+      'cancelled',
+      expect.any(Function),
+    )
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    runtimeCoordinator.getActiveRuntimeByExecution.mockImplementation(() => null)
   })
 })

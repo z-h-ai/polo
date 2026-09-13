@@ -2008,3 +2008,169 @@ package = false
     ).rejects.toMatchObject({ code: 'UNSAFE_ARCHIVE' })
   })
 })
+
+describe('POO-54 exact-version runtime foundation', () => {
+  const bunPath = process.execPath
+
+  function makeJsServer(extraBody: string): string {
+    return `
+      const server = Bun.serve({
+        hostname: '127.0.0.1',
+        port: Number(process.env.PORT),
+        fetch() {
+          return new Response('ok', {
+            headers: { 'x-polo-app-health-token': process.env.POLO_APP_HEALTH_TOKEN },
+          })
+        },
+      })
+      ${extraBody}
+    `
+  }
+
+  async function installJsVersion(
+    runtime: LocalAppRuntimeManager,
+    appId: string,
+    version: string,
+    serverBody: string,
+  ): Promise<void> {
+    // No package.json: the dependency-preparation pass is skipped and the
+    // runtime starts as a plain Bun entry.
+    const bundle = await writeBundle(
+      appId,
+      version,
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': makeJsServer(serverBody) },
+    )
+    const archive = await archiveBundle(bundle, `${appId}-${version}`)
+    const url = await serveArchive(archive)
+    await runtime.install(requestFor(appId, version, url, archive))
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+  }
+
+  it('pins the exact version, binds the capability hook to one runtime generation, and redacts secrets across chunk boundaries', async () => {
+    const runtime = makeManager({ bunPath })
+    const app = 'poo54.exact'
+    // v1.0.0 prints the injected capability token in TWO stdout writes so the
+    // raw secret spans a chunk boundary in the bounded log.
+    await installJsVersion(runtime, app, '1.0.0', `
+      const token = process.env.POLO_APP_API_TOKEN ?? ''
+      if (token) {
+        process.stdout.write(token.slice(0, 10))
+        setTimeout(() => {
+          process.stdout.write(token.slice(10) + '\\n')
+          // A pad line longer than the withhold window releases the
+          // newline-terminated redacted line while the process still runs.
+          setTimeout(() => process.stdout.write('x'.repeat(64) + '\\n'), 80)
+        }, 80)
+      }
+    `)
+    // v2.0.0 becomes currentVersion (simulating a Catalog update).
+    await installJsVersion(runtime, app, '2.0.0', '')
+
+    const hookCalls: Array<{ runtimeKind: string; runtimeGeneration: number }> = []
+    const startedV1 = await runtime.startExactVersion(app, '1.0.0', {
+      processEnvironment: input => {
+        hookCalls.push({ runtimeKind: input.runtimeKind, runtimeGeneration: input.runtimeGeneration })
+        return {
+          env: {
+            POLO_APP_API_URL: 'http://127.0.0.1:9/local-app-api/v1',
+            POLO_APP_API_TOKEN: 'secret-canary-token-0123456789',
+          },
+          sensitiveValues: ['secret-canary-token-0123456789'],
+        }
+      },
+    })
+    // The EXACT requested version runs even though currentVersion is 2.0.0.
+    expect(startedV1.version).toBe('1.0.0')
+    expect(startedV1.runtimeKind).toBe('js')
+    expect(startedV1.runtimeGeneration).toBeGreaterThan(0)
+    expect(hookCalls).toEqual([{
+      runtimeKind: 'js',
+      runtimeGeneration: startedV1.runtimeGeneration,
+    }])
+
+    // The capability token must never reach the bounded log in raw form,
+    // not even when its stdout writes span chunk boundaries.
+    let logs = ''
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      logs = await runtime.getLogs(app)
+      if (logs.includes('[REDACTED_RUNTIME_SECRET]')) break
+      await Bun.sleep(100)
+    }
+    expect(logs).toContain('[REDACTED_RUNTIME_SECRET]')
+    expect(logs).not.toContain('secret-canary-token')
+
+    // Generation-CAS stop: a stale generation can never stop the current one.
+    await expect(runtime.stopExact(app, startedV1.runtimeGeneration + 1000))
+      .rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    const stopped = await runtime.stopExact(app, startedV1.runtimeGeneration)
+    expect(stopped.status).toBe('stopped')
+
+    // A second exact start allocates a NEW runtime generation.
+    const startedV2 = await runtime.startExactVersion(app, '2.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    expect(startedV2.version).toBe('2.0.0')
+    expect(startedV2.runtimeGeneration).toBeGreaterThan(startedV1.runtimeGeneration)
+    await runtime.stopExact(app, startedV2.runtimeGeneration)
+  }, 60_000)
+
+  it('never calls the capability hook for static runtimes and never rolls back a broken exact version', async () => {
+    const staticRuntime = makeManager({ bunPath })
+    const staticApp = 'poo54.static.app'
+    const staticBundle = await writeBundle(
+      staticApp,
+      '1.0.0',
+      { runtime: 'static', entry: ['dist'] },
+      { 'dist/index.html': '<html></html>' },
+    )
+    const staticArchive = await archiveBundle(staticBundle, 'static')
+    const staticUrl = await serveArchive(staticArchive)
+    await staticRuntime.install(requestFor(staticApp, '1.0.0', staticUrl, staticArchive))
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+
+    const hookCalls: unknown[] = []
+    const started = await staticRuntime.startExactVersion(staticApp, '1.0.0', {
+      processEnvironment: input => {
+        hookCalls.push(input)
+        return { env: { POLO_APP_API_TOKEN: 'must-not-be-injected' }, sensitiveValues: [] }
+      },
+    })
+    expect(started.runtimeKind).toBe('static')
+    expect(hookCalls).toHaveLength(0)
+    await staticRuntime.stopExact(staticApp, started.runtimeGeneration)
+
+    // A crashing exact version fails closed WITHOUT rolling back to another
+    // installed version, and the per-start unexpected-exit observer fires.
+    const unexpectedExits: Array<{ version: string; runtimeGeneration: number }> = []
+    const crashingManager = new LocalAppRuntimeManager({
+      rootDir: join(testRoot, 'runtime'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+      bunPath,
+      onUnexpectedExit: event => unexpectedExits.push({
+        version: event.version,
+        runtimeGeneration: event.runtimeGeneration,
+      }),
+    })
+    const crashApp = 'poo54.crash.app'
+    await installJsVersion(crashingManager, crashApp, '1.0.0', '')
+    await installJsVersion(crashingManager, crashApp, '3.0.0', `
+      setTimeout(() => process.exit(3), 0)
+    `)
+    await expect(crashingManager.startExactVersion(crashApp, '3.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })).rejects.toMatchObject({ code: 'PROCESS_CRASHED' })
+    expect(unexpectedExits.length).toBeGreaterThan(0)
+    expect(unexpectedExits.at(-1)).toMatchObject({ version: '3.0.0' })
+    const status = await crashingManager.getRuntimeStatus(crashApp)
+    // currentVersion stays 3.0.0 — no silent rollback to 1.0.0.
+    expect(status.currentVersion).toBe('3.0.0')
+    expect(status.runningVersion).toBeUndefined()
+    await crashingManager.shutdown()
+    await staticRuntime.shutdown()
+  }, 60_000)
+})

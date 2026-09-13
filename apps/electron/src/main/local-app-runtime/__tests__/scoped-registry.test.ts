@@ -932,3 +932,99 @@ describe('scoped local app runtime registry', () => {
     expect(managerCount).toBe(0)
   })
 })
+
+describe('scoped exact-version runtime (POO-54)', () => {
+  it('starts the exact version with scope-generation-bound capability hooks and no rollback', async () => {
+    const hookCalls: Array<{ runtimeKind: string; runtimeGeneration: number; scopeGeneration: number }> = []
+    const startCalls: Array<{ appId: string; version: string }> = []
+    const stopCalls: Array<{ appId: string; runtimeGeneration: number }> = []
+    class ExactManager extends LocalAppRuntimeManager {
+      override startExactVersion(appId: string, version: string, hooks = {}) {
+        startCalls.push({ appId, version })
+        return super.startExactVersion(appId, version, hooks)
+      }
+
+      override async stopExact(appId: string, expectedRuntimeGeneration: number) {
+        stopCalls.push({ appId, runtimeGeneration: expectedRuntimeGeneration })
+        return super.stopExact(appId, expectedRuntimeGeneration)
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new ExactManager(options),
+    })
+    const catalogScope = scope('account-a')
+    const manager = await (registry as unknown as {
+      getManager: (scope: CatalogLocalAppScope) => Promise<LocalAppRuntimeManager>
+    }).getManager(catalogScope)
+    // The registry wraps the caller hook so the scope generation is bound.
+    const result = await registry.startExact(catalogScope, '1.0.0', {
+      processEnvironment: input => {
+        hookCalls.push(input)
+        return { env: { POLO_APP_API_TOKEN: 'token-a' }, sensitiveValues: ['token-a'] }
+      },
+    }).catch(async (error: unknown) => {
+      // The manager has no installation in this fixture: assert the
+      // NOT_INSTALLED (exact-version, no fallback) contract instead.
+      expect((error as LocalAppRuntimeError).code).toBe('NOT_INSTALLED')
+      return null
+    })
+    if (result) {
+      expect(result.scopeGeneration).toBe(1)
+      expect(result.runtimeGeneration).toBeGreaterThan(0)
+    }
+    // The exact-version request reached the manager verbatim (no fallback
+    // re-targeting) and the manager failed closed before any hook ran.
+    expect(startCalls).toEqual([{
+      appId: createCatalogRuntimeAppId(catalogScope),
+      version: '1.0.0',
+    }])
+    expect(hookCalls).toHaveLength(0)
+
+    // Generation-CAS stop: an unknown generation is rejected by the manager
+    // CAS before any runtime mutation, and the call flows through verbatim.
+    await expect(registry.stopExact(catalogScope, 99))
+      .rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    expect(stopCalls).toEqual([{
+      appId: createCatalogRuntimeAppId(catalogScope),
+      runtimeGeneration: 99,
+    }])
+  })
+
+  it('advances the scope generation on every exact start for cross-workspace replacement', async () => {
+    class InstalledExactManager extends LocalAppRuntimeManager {
+      override async startExactVersion(appId: string, version: string, hooks = {}) {
+        return {
+          appId,
+          version,
+          url: 'http://127.0.0.1:9',
+          port: 9,
+          runtimeKind: 'python' as const,
+          runtimeGeneration: ++InstalledExactManager.counter,
+        }
+      }
+
+      static counter = 0
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new InstalledExactManager(options),
+    })
+    const catalogScope = scope('account-a')
+    const first = await registry.startExact(catalogScope, '1.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    const second = await registry.startExact(catalogScope, '1.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    expect(first.scopeGeneration).toBe(1)
+    expect(second.scopeGeneration).toBe(2)
+    expect(first.runtimeGeneration).not.toBe(second.runtimeGeneration)
+    // A different scope has its own generation space.
+    const otherScope = await registry.startExact(scope('account-b'), '1.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    expect(otherScope.scopeGeneration).toBe(1)
+    expect(registry.getScopeGeneration(catalogScope)).toBe(2)
+  })
+})

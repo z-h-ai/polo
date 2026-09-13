@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  isProductSpaceRuntimeRequest,
   projectLocalAppStatusForCatalogAccess,
   type LocalAppInstalledApp,
   type LocalAppRuntimeStatus,
+  type ProductSpaceAppRuntimeStartResult,
 } from '../local-apps'
 
 describe('projectLocalAppStatusForCatalogAccess', () => {
@@ -109,5 +111,64 @@ describe('projectLocalAppStatusForCatalogAccess', () => {
     }
 
     expect(projectLocalAppStatusForCatalogAccess(status, true)).toBe(status)
+  })
+})
+
+describe('localApps ProductSpace runtime request union (POO-54)', () => {
+  const identity = {
+    accountId: 'account-1',
+    productSpaceId: 'space-1',
+    catalogEntryId: 'entry-1',
+    artifactInstanceId: 'artifact-1',
+    versionId: 'version-1',
+    version: '1.0.0',
+    catalogRevision: 'rev-1',
+    sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+    availability: 'available' as const,
+  }
+
+  it('discriminates ProductSpace runtime requests from legacy scopes', () => {
+    expect(isProductSpaceRuntimeRequest({
+      kind: 'product_space_runtime_start',
+      app: identity,
+    })).toBe(true)
+    expect(isProductSpaceRuntimeRequest({
+      kind: 'product_space_runtime_handle',
+      executionId: 'local-app:space-1:artifact-1:1',
+      expectedRuntimeGeneration: 3,
+    })).toBe(true)
+    // The legacy scope-only branch can never be mistaken for a ProductSpace
+    // runtime request.
+    expect(isProductSpaceRuntimeRequest({
+      kind: 'catalog',
+      accountId: 'account-1',
+      organizationId: 'space-1',
+      catalogAppId: 'artifact-1',
+    })).toBe(false)
+    expect(isProductSpaceRuntimeRequest(null)).toBe(false)
+    expect(isProductSpaceRuntimeRequest({ kind: 'legacy' })).toBe(false)
+  })
+
+  it('keeps the runtime start result free of capability and gateway URL secrets', () => {
+    const result: ProductSpaceAppRuntimeStartResult = {
+      appId: 'artifact-1',
+      version: '1.0.0',
+      executionId: 'local-app:space-1:artifact-1:1',
+      runtimeGeneration: 4,
+      scopeGeneration: 2,
+      runtimeKind: 'python',
+      platformApi: { status: 'available' },
+    }
+    expect(JSON.stringify(result)).not.toContain('POLO_APP_API_TOKEN')
+    expect(JSON.stringify(result)).not.toContain('127.0.0.1')
+    const staticResult: ProductSpaceAppRuntimeStartResult = {
+      ...result,
+      runtimeKind: 'static',
+      platformApi: { status: 'unavailable', reason: 'static_runtime_unsupported' },
+    }
+    expect(staticResult.platformApi).toEqual({
+      status: 'unavailable',
+      reason: 'static_runtime_unsupported',
+    })
   })
 })
