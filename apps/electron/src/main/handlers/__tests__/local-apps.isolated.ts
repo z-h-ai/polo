@@ -3630,4 +3630,68 @@ describe('local app production status projection (R34-3)', () => {
     expect(listProductSpaces).not.toHaveBeenCalled()
     expect(getProductSpaceCatalog).not.toHaveBeenCalled()
   })
+
+  it('POO-54 R3: ProductSpace execution liveness is generation/version-exact while versions coexist', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // The fresh Catalog lists TWO versions of the same artifact instance.
+    const baseCatalog = await defaultProductSpaceCatalog()
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      ...baseCatalog,
+      entries: [
+        ...baseCatalog.entries,
+        {
+          kind: 'app',
+          catalogEntryId: 'catalog-entry-b',
+          artifactInstanceId: 'artifact-instance-a',
+          version: { versionId: 'version-b', version: '9.9.9', checksum: 'c'.repeat(64) },
+          name: 'ProductSpace App v9',
+          description: '',
+          availability: 'available',
+          sources: [{ kind: 'enterprise_import' }],
+          permissions: [],
+        },
+      ],
+    }))
+    const identityV2 = {
+      ...productSpaceAppIdentity(),
+      catalogEntryId: 'catalog-entry-b',
+      versionId: 'version-b',
+      version: '9.9.9',
+    }
+    const resultV1 = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    const resultV2 = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: identityV2,
+    })
+    const executions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(executions).toHaveLength(2)
+    const subjectVersionId = (execution: { scope: { subject: unknown } }): string =>
+      ((execution.scope.subject as { versionId?: string }).versionId ?? '')
+    const execV1 = executions.find(
+      execution => subjectVersionId(execution) === 'version-a',
+    )
+    const execV2 = executions.find(
+      execution => subjectVersionId(execution) === 'version-b',
+    )
+    expect(execV1).toBeDefined()
+    expect(execV2).toBeDefined()
+    // While both coordinator runtimes are active, BOTH executions are live.
+    expect(await execV1!.isActive()).toBe(true)
+    expect(await execV2!.isActive()).toBe(true)
+    // v1's process dies: only v1's execution reports not-live; the artifact-
+    // scoped probe would have reported BOTH as not running.
+    const runtimeV1 = activeRuntimesByExecution.get(
+      (resultV1 as { executionId: string }).executionId,
+    )
+    await runtimeCoordinator.teardownRuntime(runtimeV1!, 'failed')
+    expect(await execV1!.isActive()).toBe(false)
+    expect(await execV2!.isActive()).toBe(true)
+    // Liveness is generation-exact: a stale generation replay is a no-op.
+    await runtimeCoordinator.teardownRuntime(runtimeV1!, 'failed')
+    expect(await execV2!.isActive()).toBe(true)
+  })
 })

@@ -1443,6 +1443,11 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
        * process stop that would leave a live token behind.
        */
       rollback: () => Promise<void>
+      /**
+       * Generation/version-exact liveness: true only while THIS runtime
+       * generation is still the coordinator's active runtime.
+       */
+      isActiveExact: () => boolean
     },
   ): Promise<string> => {
     const accountId = trustedAccountId
@@ -1496,6 +1501,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       ref: executionId,
       generation: 0,
       isActive: async () => {
+        // ProductSpace exact runtimes report GENERATION-EXACT liveness from
+        // the coordinator's active runtime; the artifact-scoped status probe
+        // cannot see per-version process namespaces.
+        if (runtime?.isActiveExact) return runtime.isActiveExact()
         try {
           const status = await registry.getRuntimeStatus(scope)
           // R34-3: 'starting' is a genuine non-terminal startup state — a
@@ -1557,6 +1566,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       stop: () => Promise<'stopped' | 'failed'>
       /** Post-spawn rollback: coordinator-first teardown, never stop→revoke. */
       rollback: () => Promise<void>
+      /** Generation/version-exact liveness for the execution projection. */
+      isActiveExact: () => boolean
     },
   ) => {
     // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
@@ -1895,6 +1906,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           return 'stopped'
         },
         rollback: rollbackRuntime,
+        isActiveExact: () => {
+          if (startedRuntimeGeneration === undefined) return false
+          const active = coordinator.getActiveRuntimeByExecution(executionId)
+          return Boolean(
+            active && active.runtimeGeneration === startedRuntimeGeneration,
+          )
+        },
       },
     )
     } catch (error) {
@@ -1916,10 +1934,20 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
   }
 
-  /** Generation-CAS stop for a ProductSpace runtime execution handle. */
-  const stopProductSpaceRuntime = async (
+  /**
+   * Validates and resolves one ProductSpace runtime handle (strict
+   * executionId + expectedRuntimeGeneration), generation-CAS checks against
+   * the coordinator's active runtime, projects the owning scope and runs the
+   * unified fail-closed teardown. STOP returns the projected status; RESTART
+   * re-runs the authoritative exact-version START afterwards.
+   */
+  const teardownProductSpaceRuntimeHandle = async (
     rawHandle: unknown,
-  ): Promise<LocalAppRuntimeStatus> => {
+  ): Promise<{
+    identity: ProductSpaceAppRuntimeIdentity
+    scope: CatalogLocalAppScope
+    expectedRuntimeGeneration: number
+  }> => {
     const handle = rawHandle as {
       executionId?: unknown
       expectedRuntimeGeneration?: unknown
@@ -1954,6 +1982,14 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         .stopExact(scope, handle.expectedRuntimeGeneration as number)
         .catch(() => {})
     })
+    return { identity, scope, expectedRuntimeGeneration: handle.expectedRuntimeGeneration as number }
+  }
+
+  /** Generation-CAS stop for a ProductSpace runtime execution handle. */
+  const stopProductSpaceRuntime = async (
+    rawHandle: unknown,
+  ): Promise<LocalAppRuntimeStatus> => {
+    const { identity, scope } = await teardownProductSpaceRuntimeHandle(rawHandle)
     return {
       appId: scope.catalogAppId,
       scope,
@@ -1967,37 +2003,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     ctx: { webContentsId?: number | null },
     rawHandle: unknown,
   ): Promise<ProductSpaceAppRuntimeStartResult> => {
-    const handle = rawHandle as { executionId?: unknown; expectedRuntimeGeneration?: unknown }
-    if (
-      typeof handle?.executionId !== 'string'
-      || !Number.isSafeInteger(handle.expectedRuntimeGeneration)
-    ) {
-      throw new LocalAppRuntimeError(
-        'INVALID_REQUEST',
-        'A ProductSpace runtime handle requires executionId and expectedRuntimeGeneration',
-      )
-    }
-    const coordinator = getLocalAppRuntimeCoordinator()
-    const runtime = coordinator.getActiveRuntimeByExecution(handle.executionId)
-    if (!runtime || runtime.runtimeGeneration !== handle.expectedRuntimeGeneration) {
-      throw new LocalAppRuntimeError(
-        'STALE_RUNTIME_GENERATION',
-        'This runtime generation is no longer current',
-      )
-    }
-    const identity = runtime.identity
-    const scope: CatalogLocalAppScope = {
-      kind: 'catalog',
-      accountId: identity.accountId,
-      organizationId: identity.productSpaceId,
-      catalogAppId: identity.artifactInstanceId,
-    }
-    assertScopeInsideActiveProductSpace(scope)
-    await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
-      await getScopedLocalAppRuntimeRegistry()
-        .stopExact(scope, handle.expectedRuntimeGeneration as number)
-        .catch(() => {})
-    })
+    const { identity } = await teardownProductSpaceRuntimeHandle(rawHandle)
     return startProductSpaceRuntime(ctx, {
       ...identity,
       catalogRevision: 'revalidated-against-fresh-catalog',

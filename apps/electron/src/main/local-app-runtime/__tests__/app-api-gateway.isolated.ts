@@ -1047,3 +1047,102 @@ describe('POO-54 R2 fix regressions (gateway/coordinator)', () => {
     await fixture.coordinator.shutdown()
   })
 })
+
+describe('POO-54 R3 fix regressions (gateway/coordinator)', () => {
+  it('a completed generation is terminal: stale teardown neither re-stops nor aborts a replacement query', async () => {
+    const fixture = createFixture({
+      executorResults: [() => completed('g1', 1, 1), () => completed('g2', 2, 2)],
+    })
+    fixture.holdExecutions(true)
+    await fixture.post('/run/start', undefined).catch(() => null)
+    const runId1 = await startRun(fixture)
+    const held1 = fixture.post('/ai/query', { ...queryBody(), runId: runId1 })
+      .catch(() => null)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const runtime1 = fixture.coordinator.getActiveRuntime(IDENTITY)!
+    let stopCount = 0
+    await fixture.coordinator.teardownRuntime(runtime1, 'cancelled', async () => {
+      stopCount += 1
+    })
+    expect(stopCount).toBe(1)
+    // A replacement generation takes over the SAME identity key.
+    const signing2 = fixture.coordinator.signCapability({
+      identity: IDENTITY,
+      workspaceId: 'ws-a',
+      executionId: 'exec-2',
+      runtimeKind: 'python',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+    })
+    fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-2',
+      runtimeGeneration: 2,
+      scopeGeneration: 2,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: signing2.capabilityGeneration,
+    })
+    // gen2 starts its own run with its own (still valid) capability.
+    const runId2 = uuid()
+    const start2 = await fixture.post('/run/start', { runId: runId2 }, {
+      token: signing2.token,
+    })
+    expect(start2.status).toBe(200)
+    // gen2 admits and holds its own query.
+    const held2 = fixture.post('/ai/query', { ...queryBody(), runId: runId2 }, {
+      token: signing2.token,
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // STALE teardown of the COMPLETED generation: a terminal no-op — the
+    // replacement is neither stopped nor drained.
+    await fixture.coordinator.teardownRuntime(runtime1, 'cancelled', async () => {
+      stopCount += 100
+    })
+    expect(stopCount).toBe(1)
+    // gen2's in-flight query was NOT aborted: it completes normally.
+    fixture.releaseOne()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    fixture.releaseOne()
+    const gen2Response = await held2
+    expect(gen2Response.status).toBe(200)
+    expect(gen2Response.json.data.text).toBe('g2')
+    await held1
+    fixture.holdExecutions(false)
+  }, 20_000)
+
+  it('coordinator shutdown is terminal: no gateway, capability or runtime can be created afterwards', async () => {
+    const fixture = createFixture()
+    await fixture.post('/run/start', undefined).catch(() => null)
+    await startRun(fixture)
+    await fixture.coordinator.shutdown()
+    // Second shutdown resolves idempotently.
+    await fixture.coordinator.shutdown()
+    // No gateway reopen.
+    await expect(fixture.coordinator.ensureGateway())
+      .rejects.toThrow(/shutting down/)
+    // No capability re-signing.
+    expect(() => fixture.coordinator.signCapability({
+      identity: IDENTITY,
+      workspaceId: 'ws-a',
+      executionId: 'exec-late',
+      runtimeKind: 'python',
+      runtimeGeneration: 9,
+      scopeGeneration: 9,
+    })).toThrow(/shutting down/)
+    // No runtime registration.
+    expect(() => fixture.coordinator.registerActiveRuntime({
+      identity: IDENTITY,
+      executionId: 'exec-late',
+      runtimeGeneration: 9,
+      scopeGeneration: 9,
+      workspaceId: 'ws-a',
+      runtimeKind: 'python',
+      capabilityGeneration: 99,
+    })).toThrow(/shutting down/)
+    // The loopback boundary is closed: requests cannot connect at all.
+    const result = await fixture.post('/run/start', startBody())
+      .then(() => 'reachable', () => 'unreachable')
+    expect(result).toBe('unreachable')
+  })
+})

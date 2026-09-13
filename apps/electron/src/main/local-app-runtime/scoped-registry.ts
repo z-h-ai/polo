@@ -442,6 +442,24 @@ export class ScopedLocalAppRuntimeRegistry {
     }
   }
 
+  /**
+   * Shared scope-level runtime cleanup: cancels installs, stops every
+   * per-version exact process namespace and the legacy artifact-scoped
+   * namespace. Both cleanup workers reuse this to keep failure aggregation
+   * semantics in their callers.
+   */
+  private async stopScopeRuntimeNamespaces(
+    scope: CatalogLocalAppScope,
+    manager: LocalAppRuntimeManager,
+  ): Promise<void> {
+    manager.cancelInstall(createCatalogRuntimeAppId(scope))
+    // Per-version exact runtimes live in their own process namespaces.
+    for (const processAppId of this.trackedProcessAppIds(scope)) {
+      await manager.stop(processAppId).catch(() => {})
+    }
+    await manager.stop(createCatalogRuntimeAppId(scope))
+  }
+
   /** Process ids of tracked exact-version runtimes for one scope. */
   private trackedProcessAppIds(scope: CatalogLocalAppScope): string[] {
     const prefix = `${createCatalogLocalAppScopeKey(scope)}:`
@@ -1002,12 +1020,7 @@ export class ScopedLocalAppRuntimeRegistry {
         const manager = await this.getExistingManager(scope)
           ?? this.managers.get(createCatalogLocalAppScopeKey(scope))
         if (!manager) return
-        manager.cancelInstall(createCatalogRuntimeAppId(scope))
-        // Per-version exact runtimes live in their own process namespaces.
-        for (const processAppId of this.trackedProcessAppIds(scope)) {
-          await manager.stop(processAppId).catch(() => {})
-        }
-        await manager.stop(createCatalogRuntimeAppId(scope))
+        await this.stopScopeRuntimeNamespaces(scope, manager)
       },
       failures,
     )
@@ -1140,12 +1153,7 @@ export class ScopedLocalAppRuntimeRegistry {
         const manager = await this.getExistingManager(scope)
           ?? this.managers.get(appKey)
         if (!manager) return
-        manager.cancelInstall(createCatalogRuntimeAppId(scope))
-        // Per-version exact runtimes live in their own process namespaces.
-        for (const processAppId of this.trackedProcessAppIds(scope)) {
-          await manager.stop(processAppId).catch(() => {})
-        }
-        await manager.stop(createCatalogRuntimeAppId(scope))
+        await this.stopScopeRuntimeNamespaces(scope, manager)
       },
       (scope, error) => addFailure(createCatalogLocalAppScopeKey(scope), error),
     )

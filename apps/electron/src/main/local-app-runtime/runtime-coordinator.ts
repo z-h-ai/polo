@@ -110,6 +110,7 @@ interface ActiveRuntime {
 }
 
 interface InFlightQuery {
+  runtimeGeneration: number
   runId: string
   requestId: string
   controller: AbortController
@@ -172,8 +173,15 @@ export class LocalAppRuntimeCoordinator {
   private readonly inFlight = new Map<string, InFlightQuery>()
   private readonly expiryHandled = new Set<number>()
   private readonly expiryTimers = new Map<number, () => void>()
-  /** Unique in-progress/done teardown per identityKey+runtimeGeneration. */
+  /** Unique in-progress teardown per identityKey+runtimeGeneration. */
   private readonly teardownGuarantees = new Map<string, Promise<void>>()
+  /**
+   * PERSISTENT terminal markers for completed runtime generations: a stale
+   * late callback can never re-teardown (re-stop/re-abort) a generation —
+   * including after a replacement took over the identity key.
+   */
+  private readonly tornDownGenerations = new Set<string>()
+  private shutdownPromise?: Promise<void>
   private shuttingDown = false
 
   constructor(private readonly adapters: RuntimeCoordinatorAdapters) {}
@@ -184,6 +192,11 @@ export class LocalAppRuntimeCoordinator {
 
   /** Gateway-first: the loopback boundary must exist before any App spawn. */
   async ensureGateway(): Promise<string> {
+    if (this.shuttingDown) {
+      // Shutdown is TERMINAL for this coordinator instance: the loopback
+      // platform boundary can never be reopened ("stop accepting starts").
+      throw new Error('coordinator is shutting down')
+    }
     if (!this.gateway) {
       const delegate: AppApiGatewayDelegate = {
         handle: (route, body, capability, signal) => this.handle(route, body, capability, signal),
@@ -285,6 +298,11 @@ export class LocalAppRuntimeCoordinator {
     runtimeKind: 'python' | 'js' | 'static'
     capabilityGeneration?: number
   }): ActiveRuntime {
+    if (this.shuttingDown) {
+      // A runtime registered after shutdown began can never be torn down in
+      // order — refuse it; the start path revokes any just-signed token.
+      throw new Error('coordinator is shutting down')
+    }
     const identityKey = createProductSpaceAppRuntimeIdentityKey(input.identity)
     const runtime: ActiveRuntime = {
       identityKey,
@@ -376,11 +394,12 @@ export class LocalAppRuntimeCoordinator {
    * reconfirm lane → (caller stops the process) → generation-CAS projection
    * clear → release capability resources. Best-effort at every step.
    *
-   * The teardown is a UNIQUE terminal operation per identityKey+generation:
-   * concurrent or repeated triggers (expiry, stop, replacement, shutdown,
-   * revoked-token replay) share the same in-flight/done promise, so the
-   * exact-generation stop can never run twice. The guard is released with a
-   * generation-CAS once the teardown settles.
+   * The teardown is a UNIQUE TERMINAL operation per identityKey+generation:
+   * concurrent triggers share one in-flight promise, and a COMPLETED
+   * generation keeps a persistent terminal marker — a stale late callback
+   * (old token replay, delayed exit event, replacement-era teardown) is a
+   * no-op that can neither re-stop the generation nor abort a replacement's
+   * in-flight queries.
    */
   async teardownRuntime(
     runtime: ActiveRuntime,
@@ -388,6 +407,7 @@ export class LocalAppRuntimeCoordinator {
     stopProcess?: () => Promise<void>,
   ): Promise<void> {
     const guardKey = `${runtime.identityKey}:${runtime.runtimeGeneration}`
+    if (this.tornDownGenerations.has(guardKey)) return
     const inProgress = this.teardownGuarantees.get(guardKey)
     if (inProgress) return inProgress
     const teardown = this.performTeardown(runtime, finalStatus, stopProcess)
@@ -395,6 +415,8 @@ export class LocalAppRuntimeCoordinator {
     void teardown
       .catch(() => {})
       .finally(() => {
+        // Persist the terminal marker BEFORE clearing the concurrency guard.
+        this.tornDownGenerations.add(guardKey)
         if (this.teardownGuarantees.get(guardKey) === teardown) {
           this.teardownGuarantees.delete(guardKey)
         }
@@ -412,7 +434,8 @@ export class LocalAppRuntimeCoordinator {
       this.capabilities.revoke(runtime.capabilityGeneration)
     }
     runtime.controller.abort()
-    await this.drainInFlight(runtime.identityKey)
+    // Drain ONLY this generation's in-flight queries — never a replacement's.
+    await this.drainInFlight(runtime.identityKey, runtime.runtimeGeneration)
     await this.runCleanupLane(runtime, finalStatus)
     if (stopProcess) await stopProcess().catch(() => {})
     getAppRuntimeCenter().clear(runtime.identityKey, runtime.runtimeGeneration)
@@ -426,9 +449,10 @@ export class LocalAppRuntimeCoordinator {
     }
   }
 
-  private async drainInFlight(identityKey: string): Promise<void> {
+  private async drainInFlight(identityKey: string, runtimeGeneration: number): Promise<void> {
     const pending = [...this.inFlight.entries()]
-      .filter(([key]) => key.startsWith(`${identityKey}:`))
+      .filter(([key, query]) => query.runtimeGeneration === runtimeGeneration
+        && key.startsWith(`${identityKey}:`))
     for (const [, query] of pending) query.controller.abort()
     if (pending.length === 0) return
     await Promise.race([
@@ -554,22 +578,31 @@ export class LocalAppRuntimeCoordinator {
     return { runId, requestId, inputTokens, outputTokens }
   }
 
-  async shutdown(): Promise<void> {
+  /**
+   * TERMINAL for this coordinator instance: after the returned promise
+   * resolves, no gateway can be reopened, no capability re-signed and no
+   * runtime re-registered ("stop accepting starts" never lifts).
+   */
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise
     this.shuttingDown = true
-    for (const cancel of this.expiryTimers.values()) cancel()
-    this.expiryTimers.clear()
-    const runtimes = [...this.active.values()]
-    for (const runtime of runtimes) {
-      if (runtime.capabilityGeneration !== undefined) {
-        this.capabilities.revoke(runtime.capabilityGeneration)
+    const shutdownPromise = (async (): Promise<void> => {
+      for (const cancel of this.expiryTimers.values()) cancel()
+      this.expiryTimers.clear()
+      const runtimes = [...this.active.values()]
+      for (const runtime of runtimes) {
+        if (runtime.capabilityGeneration !== undefined) {
+          this.capabilities.revoke(runtime.capabilityGeneration)
+        }
+        runtime.controller.abort()
       }
-      runtime.controller.abort()
-    }
-    await Promise.allSettled(runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
-      this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())))
-    await this.gateway?.close()
-    this.gateway = undefined
-    this.shuttingDown = false
+      await Promise.allSettled(runtimes.map(runtime => this.teardownRuntime(runtime, 'unknown', () =>
+        this.adapters.stopRuntime?.(runtime) ?? Promise.resolve())))
+      await this.gateway?.close()
+      this.gateway = undefined
+    })()
+    this.shutdownPromise = shutdownPromise
+    return shutdownPromise
   }
 
   /** Handles one authenticated gateway request end-to-end. */
@@ -842,6 +875,7 @@ export class LocalAppRuntimeCoordinator {
       }
     })()
     const inFlight: InFlightQuery = {
+      runtimeGeneration: runtime.runtimeGeneration,
       runId,
       requestId,
       controller,

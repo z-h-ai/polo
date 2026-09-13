@@ -56,7 +56,11 @@ export type AdmitQueryResult =
   | { kind: 'response_cache_full' }
   | { kind: 'run_not_ready'; runStatus: AppRunStatus | 'absent' }
 
-const queryKey = (c: number, r: string, q: string) => `${c}:${r}:${q}`
+const queryKey = (
+  capabilityGeneration: number,
+  runId: string,
+  requestId: string,
+) => `${capabilityGeneration}:${runId}:${requestId}`
 
 /**
  * Capability-local Run/request state machine with an atomic admission budget.
@@ -73,8 +77,8 @@ export class AppApiRunState {
    * by another generation — such requests fail closed as run_state_conflict. */
   private readonly runIdOwners = new Map<string, number>()
 
-  private runKey(c: number, r: string): string {
-    return `${c}:${r}`
+  private runKey(capabilityGeneration: number, runId: string): string {
+    return `${capabilityGeneration}:${runId}`
   }
 
   /**
