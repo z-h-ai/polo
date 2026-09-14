@@ -226,6 +226,8 @@ import type {
   ProductSpaceAppIdentity,
   ProductSpaceAppInstallState,
   ProductSpaceBundleInstallRequest,
+  LocalAppLifecycleRequest,
+  ProductSpaceAppRuntimeStartResult,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -620,9 +622,12 @@ export interface ElectronAPI {
       options?: LocalAppUninstallOptions,
     ): Promise<void>
     cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
-    start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
     stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    stop(request: LocalAppLifecycleRequest): Promise<LocalAppRuntimeStatus>
     restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
     uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
       app: CatalogLocalAppScope,

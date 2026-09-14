@@ -501,6 +501,8 @@ export type AdminErrorCode =
   | 'upload_expired'
   | 'checksum_mismatch'
   | 'content_digest_mismatch'
+  | 'insufficient_credit'
+  | 'run_finalized'
   | 'account_transition_pending'
   | PhoneAuthErrorCode;
 
@@ -524,4 +526,41 @@ export class AdminError extends Error {
     this.status = options?.status;
     this.details = options?.details;
   }
+}
+
+/** POL-102 minimal App billing contract. Payer/price are server-derived and never appear here. */
+export interface AdminStartAppRunInput {
+  runId: string;
+  workspaceId: string;
+  accountId: string;
+  productSpaceId: string;
+  artifactInstanceId: string;
+  versionId: string;
+  version: string;
+}
+
+export interface AdminStartAppRunResponse {
+  run: { runId: string; status: 'running' };
+}
+
+export interface AdminRecordAppUsageInput {
+  runId: string;
+  requestId: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface AdminRecordAppUsageResponse {
+  runId: string;
+  requestId: string;
+  recorded: true;
+}
+
+export interface AdminFinishAppRunInput {
+  status: 'completed' | 'failed' | 'cancelled' | 'unknown';
+}
+
+export interface AdminFinishAppRunResponse {
+  runId: string;
+  status: AdminFinishAppRunInput['status'];
 }

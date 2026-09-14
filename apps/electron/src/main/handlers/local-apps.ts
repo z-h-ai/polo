@@ -7,7 +7,7 @@ import {
   type AppReleaseSummary,
   type CatalogApp,
 } from '@polo-ai/shared/admin'
-import { getAdminUrl } from '@polo-ai/shared/config'
+import { getAdminUrl, getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import {
   compareCatalogSemVer,
   normalizeCatalogSemVer,
@@ -15,6 +15,7 @@ import {
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import {
   normalizeLocalAppPermissions,
+  isProductSpaceRuntimeRequest,
   projectLocalAppStatusForCatalogAccess,
   RPC_CHANNELS,
 } from '@polo-ai/shared/protocol'
@@ -23,16 +24,20 @@ import type {
   LocalAppAvailableRelease,
   LocalAppBatchStatusRequest,
   LocalAppCatalogInstallRequest,
+  LocalAppLifecycleRequest,
   LocalAppLogsOptions,
   LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
   ProductSpaceAppIdentity,
   ProductSpaceAppInstallState,
   ProductSpaceBundleInstallRequest,
+  ProductSpaceAppRuntimeStartResult,
 } from '@polo-ai/shared/protocol'
+import type { ProductSpaceAppRuntimeIdentity } from '@polo-ai/shared/product-spaces'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
   getScopedLocalAppRuntimeRegistry,
+  getLocalAppRuntimeCoordinator,
   LocalAppRuntimeError,
   MAX_CATALOG_STATUS_SCOPES,
   validateCatalogLocalAppScope,
@@ -57,8 +62,10 @@ import {
   CatalogEntryIdSchema,
   ProductSpaceIdSchema,
   ProductSpaceExecutionScopeSchema,
+  createProductSpaceAppRuntimeIdentityKey,
   type TrustedProductSpaceCatalogEntry,
 } from '@polo-ai/shared/product-spaces'
+import { getAppRuntimeCenter } from '@polo-ai/server-core/runtime'
 import {
   getProductSpaceCatalogAuthorityRecord,
   loadProductSpaceCatalogAuthorityTupleSet,
@@ -122,6 +129,82 @@ async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promis
       'The local app belongs to a different or signed-out account',
     )
   }
+}
+
+/**
+ * Normalizes ANY exact-generation stop failure into the stable STOP_FAILED
+ * transport error. An already-STOP_FAILED LocalAppRuntimeError is preserved
+ * as-is; the original code/message travel in details.cause for diagnostics.
+ */
+function normalizeStopFailure(error: unknown): LocalAppRuntimeError {
+  if (error instanceof LocalAppRuntimeError && error.code === 'STOP_FAILED') {
+    return error
+  }
+  const cause = error instanceof LocalAppRuntimeError
+    ? { code: error.code, message: error.message }
+    : { message: error instanceof Error ? error.message : String(error) }
+  return new LocalAppRuntimeError(
+    'STOP_FAILED',
+    'Failed to stop the exact runtime generation',
+    { cause },
+  )
+}
+
+/**
+ * Awaits the post-start rollback and rethrows the ORIGINAL error once the
+ * rollback completed. When the rollback's generation-aware stop itself
+ * failed, the START boundary must observe that too: the surfaced error
+ * becomes the stable STOP_FAILED carrying BOTH the original failure and the
+ * rollback stop failure in details.cause — a caller can tell a fully
+ * rolled-back registration failure from one whose version-namespaced
+ * process still lives.
+ */
+async function throwOriginalAfterRollback(
+  originalError: unknown,
+  rollbackPromise: Promise<void>,
+): Promise<never> {
+  let rollbackFailure: unknown
+  try {
+    await rollbackPromise
+  } catch (rollbackError) {
+    rollbackFailure = rollbackError
+  }
+  if (rollbackFailure === undefined) throw originalError
+  const normalized = normalizeStopFailure(rollbackFailure)
+  const originalInfo = originalError instanceof LocalAppRuntimeError
+    ? { code: originalError.code, message: originalError.message }
+    : { message: originalError instanceof Error ? originalError.message : String(originalError) }
+  throw new LocalAppRuntimeError(
+    normalized.code,
+    normalized.message,
+    {
+      cause: {
+        original: originalInfo,
+        rollback: normalized.details?.cause ?? { message: normalized.message },
+      },
+    },
+  )
+}
+
+/**
+ * Shared hooks wiring one exact ProductSpace runtime into the execution
+ * registry: generation/version-exact liveness, unified fail-closed rollback
+ * (coordinator-first teardown) and the execution-scoped stop.
+ */
+interface RuntimeRegistrationHooks {
+  executionId: string
+  subject: {
+    kind: 'artifact_instance'
+    artifactType: 'app'
+    artifactInstanceId: string
+    versionId: string
+    version: string
+  }
+  stop: () => Promise<'stopped' | 'failed'>
+  /** Post-spawn rollback: coordinator-first teardown, never stop→revoke. */
+  rollback: () => Promise<void>
+  /** Generation/version-exact liveness for the execution projection. */
+  isActiveExact: () => boolean
 }
 
 interface CatalogAppReference {
@@ -1420,6 +1503,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     name: string,
     workspaceId: string | null,
     trustedAccountId: string,
+    runtime?: RuntimeRegistrationHooks,
   ): Promise<string> => {
     const accountId = trustedAccountId
     if (!accountId) {
@@ -1439,7 +1523,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
     const registry = getScopedLocalAppRuntimeRegistry()
     // Every start is a distinct execution with its own immutable scope.
-    const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
+    const executionId = runtime?.executionId
+      ?? `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
     // R33-3/R34-3: real owner-scoped status projection. The runtime status
     // is probed asynchronously (isActive), so the last observed lifecycle is
     // cached for the synchronous getStatus provider; a dispatched stop
@@ -1456,7 +1541,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       accountId,
       productSpaceId: scope.organizationId,
       workspaceId,
-      subject: {
+      subject: runtime?.subject ?? {
         kind: 'artifact_instance',
         artifactType: 'app',
         artifactInstanceId: scope.catalogAppId,
@@ -1471,6 +1556,10 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       ref: executionId,
       generation: 0,
       isActive: async () => {
+        // ProductSpace exact runtimes report GENERATION-EXACT liveness from
+        // the coordinator's active runtime; the artifact-scoped status probe
+        // cannot see per-version process namespaces.
+        if (runtime?.isActiveExact) return runtime.isActiveExact()
         try {
           const status = await registry.getRuntimeStatus(scope)
           // R34-3: 'starting' is a genuine non-terminal startup state — a
@@ -1486,7 +1575,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         }
       },
       getStatus: () => (stopDispatched ? 'stopping' : lastObservedStatus),
-      stop: async () => {
+      stop: runtime?.stop ?? (async () => {
         stopDispatched = true
         try {
           await registry.stop(scope)
@@ -1494,13 +1583,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         } catch {
           return 'failed'
         }
-      },
+      }),
     }
     try {
       registerProductSpaceExecution(execution)
     } catch (error) {
-      // Registration failure must not leave an unregistered running runtime.
-      await registry.stop(scope).catch(() => {})
+      // Registration failure must not leave an unregistered running runtime:
+      // revoke first via the coordinator, then stop the exact generation.
+      if (runtime) await throwOriginalAfterRollback(error, runtime.rollback())
+      else await registry.stop(scope).catch(() => {})
       throw error
     }
     return executionId
@@ -1510,8 +1601,15 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   // start-and-register path.
   const startAndRegisterLocalApp = async (
     scope: CatalogLocalAppScope,
-    startRuntime: () => Promise<{ version: string }>,
+    startRuntime: () => Promise<{
+      version: string
+      appId?: string
+      runtimeKind?: 'python' | 'js' | 'static'
+      runtimeGeneration?: number
+      scopeGeneration?: number
+    }>,
     workspaceId: string | null,
+    runtime?: RuntimeRegistrationHooks,
   ) => {
     // GLOBAL LOCK ORDER: capture the trusted-start gate (resolves the
     // trusted Admin account) BEFORE the switch lock — the Admin session
@@ -1572,13 +1670,19 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         || getRuntimeActiveProductSpace() !== scope.organizationId
         || !isTrustedStartGateCurrent(gate)
       ) {
-        await registryStopQuietly(scope)
-        throw new LocalAppRuntimeError(
+        // Revoke before stop: the coordinator tears the just-started runtime
+        // down (capability/Run/execution/projection) with the exact stop.
+        const fenceError = new LocalAppRuntimeError(
           'SWITCH_IN_PROGRESS',
           'A ProductSpace switch superseded this start',
         )
+        if (runtime) {
+          await throwOriginalAfterRollback(fenceError, runtime.rollback())
+        }
+        await registryStopQuietly(scope)
+        throw fenceError
       }
-      await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId)
+      await registerLocalAppExecution(scope, result.version, workspaceId, gate.accountId, runtime)
       return result
     })
   }
@@ -1597,14 +1701,515 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     })()
   }
 
-  server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) =>
-    withCatalogScope(
+  /**
+   * Derives the authoritative App identity from a FRESH Catalog read.
+   * Main never trusts renderer identity: the entry is located by the
+   * runtime tuple, its raw availability must be 'available', and the
+   * derived identity carries the fresh revision/sources.
+   */
+  const fetchAuthoritativeProductSpaceApp = async (
+    identity: ProductSpaceAppRuntimeIdentity,
+  ): Promise<ProductSpaceAppIdentity> => {
+    assertProductSpaceAppOperationCurrent({
+      ...identity,
+      catalogEntryId: '' as ProductSpaceAppIdentity['catalogEntryId'],
+      catalogRevision: '',
+      sources: [],
+      availability: 'available',
+    })
+    const tokens = await getCredentialManager().getAdminTokens()
+    if (!tokens || tokens.userId !== identity.accountId) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'ProductSpace App runtime belongs to another or signed-out account',
+      )
+    }
+    const adminUrl = getAdminUrl()
+    if (!adminUrl) {
+      throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Polo Admin is not configured')
+    }
+    const client = new AdminClient(adminUrl)
+    const list = await client.listProductSpaces(tokens.accessToken)
+    const context = list.productSpaces.find(space => space.id === identity.productSpaceId)
+    if (!context || context.accessMode !== 'active') {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'The requested ProductSpace is not active',
+      )
+    }
+    const catalog = await client.getProductSpaceCatalog(tokens.accessToken, context)
+    if ('notModified' in catalog) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'A fresh ProductSpace Catalog is required to start an App runtime',
+      )
+    }
+    const entry = catalog.entries.find(candidate =>
+      candidate.kind === 'app'
+      && candidate.artifactInstanceId === identity.artifactInstanceId
+      && candidate.version.versionId === identity.versionId
+      && candidate.version.version === identity.version) as
+      | (Extract<TrustedProductSpaceCatalogEntry, { kind: 'app' }> & {
+        sources: ProductSpaceAppIdentity['sources']
+        availability: 'available' | 'unavailable' | 'blocked' | 'withdrawn'
+      })
+      | undefined
+    if (!entry) {
+      throw new LocalAppRuntimeError(
+        'CATALOG_ENTRY_MISSING',
+        'The ProductSpace Catalog no longer lists this App version',
+      )
+    }
+    if (entry.availability !== 'available') {
+      throw new LocalAppRuntimeError(
+        'APP_UNAVAILABLE',
+        'This ProductSpace App is not available to launch',
+      )
+    }
+    return {
+      accountId: identity.accountId,
+      productSpaceId: identity.productSpaceId,
+      catalogEntryId: entry.catalogEntryId,
+      artifactInstanceId: identity.artifactInstanceId,
+      versionId: identity.versionId,
+      version: identity.version,
+      catalogRevision: catalog.catalogRevision,
+      sources: entry.sources,
+      availability: entry.availability,
+    }
+  }
+
+  /**
+   * Trusted ProductSpace runtime START: fresh-Catalog identity derivation
+   * (fail-closed on missing/drift/unavailable), single-instance replacement
+   * of any prior generation of the same runtime identity, gateway-first
+   * capability signing inside the exact-version start, generation-safe
+   * execution registration and active projection publish.
+   */
+  const startProductSpaceRuntime = async (
+    ctx: { webContentsId?: number | null },
+    rawApp: unknown,
+    options: { trustDerivedIdentityOnly?: boolean } = {},
+  ): Promise<ProductSpaceAppRuntimeStartResult> => {
+    const requested = validateProductSpaceAppIdentity(rawApp)
+    // The trusted caller Workspace is resolved and verified BEFORE anything
+    // else: no gateway, capability, process or Admin call may exist without
+    // a non-empty, existing Workspace ownership.
+    const workspaceId = callerWorkspaceId(ctx)
+    if (!workspaceId) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'The calling window has no Workspace context for this app start',
+      )
+    }
+    if (!getWorkspaceByNameOrId(workspaceId)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'The calling window Workspace does not exist',
+      )
+    }
+    const runtimeIdentity: ProductSpaceAppRuntimeIdentity = {
+      accountId: requested.accountId,
+      productSpaceId: requested.productSpaceId,
+      artifactInstanceId: requested.artifactInstanceId,
+      versionId: requested.versionId,
+      version: requested.version,
+    }
+    // Fresh-Catalog re-verification BEFORE the switch mutex (network I/O
+    // never runs under the lock); the mutex fence re-checks afterwards.
+    const app = await fetchAuthoritativeProductSpaceApp(runtimeIdentity)
+    if (
+      !options.trustDerivedIdentityOnly
+      && (
+        requested.catalogEntryId !== app.catalogEntryId
+        || requested.catalogRevision !== app.catalogRevision
+        || requested.availability !== app.availability
+        || canonicalIdentitySources(requested.sources) !== canonicalIdentitySources(app.sources)
+      )
+    ) {
+      throw new LocalAppRuntimeError(
+        'CATALOG_IDENTITY_DRIFT',
+        'The start request identity drifted from the authoritative Catalog',
+      )
+    }
+    const scope = productSpaceBundleScope(app)
+    const registry = getScopedLocalAppRuntimeRegistry()
+    const coordinator = getLocalAppRuntimeCoordinator()
+    const identityKey = createProductSpaceAppRuntimeIdentityKey(runtimeIdentity)
+    const executionId = `local-app:${scope.organizationId}:${scope.catalogAppId}:${Date.now()}-${++localAppStartSequence}`
+    let signedCapability: number | undefined
+    let startedRuntimeGeneration: number | undefined
+    /**
+     * The ONLY post-spawn rollback entry (idempotent): coordinator teardown
+     * (revoke → abort → bounded cleanup → exact-generation stop → CAS clear)
+     * when the runtime registered; otherwise revoke the just-signed
+     * capability before any exact stop — never stop-before-revoke. A
+     * pre-spawn rollback (no capability issued, no runtime generation
+     * started) is a side-effect-free completion: a ProductSpace START must
+     * never touch the legacy artifact-scoped namespace, and with no exact
+     * generation there is nothing to stop.
+     */
+    let rollbackStarted: Promise<void> | undefined
+    const rollbackRuntime = (): Promise<void> => {
+      if (rollbackStarted) return rollbackStarted
+      rollbackStarted = (async (): Promise<void> => {
+        const active = startedRuntimeGeneration !== undefined
+          ? coordinator.getActiveRuntimeByExecution(executionId)
+          : undefined
+        if (active) {
+          // The aggregated process-stop failure must surface: never swallow
+          // stopExact here. The teardown RECORDS (never throws) the stop
+          // failure and the guard resolves THIS boundary with the SAME
+          // immutable outcome, so consumption is race-free — the START
+          // boundary exits (the registration/fence helper and the single
+          // catch) then surface the stable STOP_FAILED carrying BOTH the
+          // original failure and the rollback stop failure.
+          const outcome = await coordinator.teardownRuntime(active, 'cancelled', async () => {
+            await registry.stopExact(scope, active.runtimeGeneration)
+          })
+          const consumed = coordinator.consumeTeardownOutcome(outcome)
+          if (!consumed.ok) {
+            throw normalizeStopFailure(consumed.stopFailure)
+          }
+          return
+        }
+        if (signedCapability !== undefined) {
+          coordinator.revokeSignedCapability(signedCapability)
+        }
+        if (startedRuntimeGeneration !== undefined) {
+          // Generation-aware fallback: the exact version process lives in a
+          // version-namespaced id — a legacy artifact-scoped stop would miss
+          // it and leak the running process. The rejection is NEVER
+          // swallowed: the START boundary aggregates it with the original
+          // failure so callers can tell a fully rolled-back registration
+          // failure from one whose version-namespaced process still lives.
+          await registry.stopExact(scope, startedRuntimeGeneration)
+          return
+        }
+        // Pre-spawn failure: nothing was signed, nothing spawned, nothing to
+        // stop — the rollback completes without any registry namespace call.
+      })()
+      return rollbackStarted
+    }
+    let start: {
+      version: string
+      appId?: string
+      runtimeKind?: 'python' | 'js' | 'static'
+      runtimeGeneration?: number
+      scopeGeneration?: number
+    }
+    try {
+      start = await startAndRegisterLocalApp(
+      scope,
+      async () => {
+        // INSIDE the switch mutex — cross-Workspace single-instance
+        // replacement CAS: the prior generation of the same runtime identity
+        // is looked up, fully torn down (capability/Run/execution/projection)
+        // and stopped before B starts. Concurrent STARTs serialize here, so
+        // the loser can never bypass the winner's cleanup via the manager.
+        const existing = coordinator.getActiveRuntime(runtimeIdentity)
+        if (existing) {
+          const outcome = await coordinator.teardownRuntime(existing, 'cancelled', async () => {
+            // Propagate (normalized): the successor must never spawn while
+            // the previous generation's process may still be alive.
+            try {
+              await registry.stopExact(scope, existing.runtimeGeneration)
+            } catch (error) {
+              throw normalizeStopFailure(error)
+            }
+          })
+          // The teardown RECORDS (never throws) the stop failure and the
+          // guard resolves THIS boundary with the SAME immutable outcome:
+          // consume it race-free and judge failure by the outcome's `ok`
+          // discriminant (never by the error value) — a failed old-generation
+          // stop must fail the replacement closed with STOP_FAILED BEFORE any
+          // gateway reopen or successor spawn, even when the failure value is
+          // `undefined` (Promise.reject(undefined)) or a concurrent
+          // consumer-less teardown (expiry/scope/account) drained the
+          // retained record first. The registry-side old-generation ownership
+          // stays intact as the retry/diagnostic fallback.
+          const consumed = coordinator.consumeTeardownOutcome(outcome)
+          if (!consumed.ok) {
+            throw normalizeStopFailure(consumed.stopFailure)
+          }
+        }
+        // Gateway-first: a listen failure fails closed before any spawn.
+        await coordinator.ensureGateway()
+        const result = await registry.startExact(scope, app.version, {
+          runtimeKey: identityKey,
+          versionId: app.versionId,
+          processEnvironment: ({ runtimeKind, runtimeGeneration, scopeGeneration }) => {
+            const signing = coordinator.signCapability({
+              identity: runtimeIdentity,
+              workspaceId,
+              executionId,
+              runtimeKind,
+              runtimeGeneration,
+              scopeGeneration,
+            })
+            signedCapability = signing.capabilityGeneration
+            // PROVISIONAL registration (spawn-time): the just-signed token is
+            // valid the moment the process reads its environment, so the
+            // runtime must be registered BEFORE the process can call — the
+            // running projection is only published after the health gate.
+            startedRuntimeGeneration = runtimeGeneration
+            coordinator.registerActiveRuntime({
+              identity: runtimeIdentity,
+              executionId,
+              runtimeGeneration,
+              scopeGeneration,
+              workspaceId,
+              runtimeKind,
+              capabilityGeneration: signedCapability,
+            })
+            return { env: signing.environment, sensitiveValues: signing.sensitiveValues }
+          },
+        })
+        if (result.runtimeKind === 'static') {
+          // The manager deliberately never calls processEnvironment for
+          // static runtimes: register WITHOUT a capability so STOP/RESTART/
+          // shutdown can still resolve this identity. The exact generation is
+          // recorded BEFORE registration so liveness and any rollback can
+          // locate the coordinator runtime by execution/generation.
+          startedRuntimeGeneration = result.runtimeGeneration
+          try {
+            coordinator.registerActiveRuntime({
+              identity: runtimeIdentity,
+              executionId,
+              runtimeGeneration: result.runtimeGeneration,
+              scopeGeneration: result.scopeGeneration,
+              workspaceId,
+              runtimeKind: 'static',
+            })
+          } catch (error) {
+            // Rollback PRIMITIVES only (never a second aggregation): the
+            // single START-boundary exit below surfaces both the original
+            // registration failure and any rollback stop failure.
+            await rollbackRuntime().catch(() => {})
+            throw error
+          }
+        }
+        getAppRuntimeCenter().publish({
+          identityKey,
+          identity: runtimeIdentity,
+          workspaceId,
+          executionId,
+          runtimeGeneration: result.runtimeGeneration,
+          scopeGeneration: result.scopeGeneration,
+          runtimeKind: result.runtimeKind,
+          status: 'running',
+        }, result.runtimeGeneration)
+        return result
+      },
+      workspaceId,
+      {
+        executionId,
+        subject: {
+          kind: 'artifact_instance' as const,
+          artifactType: 'app' as const,
+          artifactInstanceId: app.artifactInstanceId,
+          versionId: app.versionId,
+          version: app.version,
+        },
+        stop: async () => {
+          await rollbackRuntime()
+          return 'stopped'
+        },
+        rollback: rollbackRuntime,
+        isActiveExact: () => {
+          if (startedRuntimeGeneration === undefined) return false
+          const active = coordinator.getActiveRuntimeByExecution(executionId)
+          return Boolean(
+            active && active.runtimeGeneration === startedRuntimeGeneration,
+          )
+        },
+      },
+    )
+    } catch (error) {
+      // A superseded or failed registration must not leave coordinator
+      // runtime/capability/projection state behind. The SINGLE aggregation
+      // exit: the rollback primitives already ran (idempotent guard); if the
+      // generation-aware stop failed, surface the stable STOP_FAILED with
+      // BOTH the original failure and the rollback stop failure. When the
+      // registration/fence exits already composed that STOP_FAILED (it
+      // carries details.cause.original), rethrow it unchanged — the
+      // idempotent rollback re-rejects with the same settled failure and
+      // must never be double-wrapped.
+      if (
+        error instanceof LocalAppRuntimeError
+        && error.code === 'STOP_FAILED'
+        && (error.details?.cause as { original?: unknown } | undefined)?.original
+          !== undefined
+      ) {
+        throw error
+      }
+      let rollbackStopFailure: { message?: string } | undefined
+      try {
+        await rollbackRuntime()
+      } catch (rollbackError) {
+        rollbackStopFailure = {
+          message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        }
+      }
+      if (rollbackStopFailure !== undefined) {
+        const originalInfo = error instanceof LocalAppRuntimeError
+          ? { code: error.code, message: error.message }
+          : { message: error instanceof Error ? error.message : String(error) }
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          'Failed to stop the exact runtime generation',
+          { cause: { original: originalInfo, rollback: rollbackStopFailure } },
+        )
+      }
+      throw error
+    }
+    return {
+      appId: start.appId ?? scope.catalogAppId,
+      version: start.version,
+      executionId,
+      runtimeGeneration: start.runtimeGeneration ?? 0,
+      scopeGeneration: start.scopeGeneration ?? 0,
+      runtimeKind: start.runtimeKind ?? 'static',
+      platformApi: start.runtimeKind && start.runtimeKind !== 'static'
+        ? { status: 'available' as const }
+        : { status: 'unavailable' as const, reason: 'static_runtime_unsupported' as const },
+    }
+  }
+
+  /**
+   * Validates and resolves one ProductSpace runtime handle (strict
+   * executionId + expectedRuntimeGeneration), generation-CAS checks against
+   * the coordinator's active runtime, projects the owning scope and runs the
+   * unified fail-closed teardown. STOP returns the projected status; RESTART
+   * re-runs the authoritative exact-version START afterwards.
+   */
+  const teardownProductSpaceRuntimeHandle = async (
+    rawHandle: unknown,
+  ): Promise<{
+    identity: ProductSpaceAppRuntimeIdentity
+    scope: CatalogLocalAppScope
+  }> => {
+    const handle = rawHandle as {
+      executionId?: unknown
+      expectedRuntimeGeneration?: unknown
+    }
+    if (
+      typeof handle?.executionId !== 'string'
+      || !Number.isSafeInteger(handle.expectedRuntimeGeneration)
+    ) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'A ProductSpace runtime handle requires executionId and expectedRuntimeGeneration',
+      )
+    }
+    const coordinator = getLocalAppRuntimeCoordinator()
+    const runtime = coordinator.getActiveRuntimeByExecution(handle.executionId)
+    if (!runtime || runtime.runtimeGeneration !== handle.expectedRuntimeGeneration) {
+      throw new LocalAppRuntimeError(
+        'STALE_RUNTIME_GENERATION',
+        'This runtime generation is no longer current',
+      )
+    }
+    const identity = runtime.identity
+    const scope: CatalogLocalAppScope = {
+      kind: 'catalog',
+      accountId: identity.accountId,
+      organizationId: identity.productSpaceId,
+      catalogAppId: identity.artifactInstanceId,
+    }
+    assertScopeInsideActiveProductSpace(scope)
+    const outcome = await coordinator.teardownRuntime(runtime, 'cancelled', async () => {
+      try {
+        await getScopedLocalAppRuntimeRegistry()
+          .stopExact(scope, handle.expectedRuntimeGeneration as number)
+      } catch (error) {
+        // Surface ANY failed generation-bound stop as the stable
+        // STOP_FAILED (original code/message preserved in details.cause).
+        throw normalizeStopFailure(error)
+      }
+    })
+    // The recorded (never thrown) rollback stop failure travels on the
+    // SHARED teardown outcome: this explicit STOP/RESTART boundary owns the
+    // consumption race-free and judges failure by the outcome's `ok`
+    // discriminant (never by the error value) — even when a concurrent
+    // consumer-less teardown (expiry/scope/account/shutdown) drained the
+    // retained record first, or the failure value itself is `undefined`
+    // (Promise.reject(undefined)), the stop still fails this operation
+    // closed.
+    const consumed = coordinator.consumeTeardownOutcome(outcome)
+    if (!consumed.ok) {
+      throw normalizeStopFailure(consumed.stopFailure)
+    }
+    return { identity, scope }
+  }
+
+  /** Generation-CAS stop for a ProductSpace runtime execution handle. */
+  const stopProductSpaceRuntime = async (
+    rawHandle: unknown,
+  ): Promise<LocalAppRuntimeStatus> => {
+    const { identity, scope } = await teardownProductSpaceRuntimeHandle(rawHandle)
+    return {
+      appId: scope.catalogAppId,
+      scope,
+      status: 'stopped',
+      currentVersion: identity.version,
+    }
+  }
+
+  /** Restart: stop the exact generation, then re-run the authoritative START. */
+  const restartProductSpaceRuntime = async (
+    ctx: { webContentsId?: number | null },
+    rawHandle: unknown,
+  ): Promise<ProductSpaceAppRuntimeStartResult> => {
+    const { identity } = await teardownProductSpaceRuntimeHandle(rawHandle)
+    return startProductSpaceRuntime(ctx, {
+      ...identity,
+      // Placeholder validation-only fields: with trustDerivedIdentityOnly the
+      // authoritative identity is re-derived from a fresh Catalog anyway.
+      catalogEntryId: 'revalidated-against-fresh-catalog',
+      catalogRevision: 'revalidated-against-fresh-catalog',
+      sources: [{ kind: 'restart', name: null, circleId: null }],
+      availability: 'available',
+    } satisfies ProductSpaceAppIdentity, { trustDerivedIdentityOnly: true })
+  }
+
+  server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) => {
+    // Strict discriminator union: legacy scope-only requests stay isolated
+    // from ProductSpace runtime requests, which carry the full identity.
+    if (isProductSpaceRuntimeRequest(reference)) {
+      const request = reference as Extract<
+        LocalAppLifecycleRequest,
+        { kind: 'product_space_runtime_start' }
+      >
+      if (request.kind !== 'product_space_runtime_start') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'START requires a ProductSpace runtime identity request',
+        )
+      }
+      return startProductSpaceRuntime(ctx, request.app)
+    }
+    return withCatalogScope(
       reference,
       scope => startCatalogApp(ctx, scope),
-    ))
+    )
+  })
 
-  server.handle(RPC_CHANNELS.localApps.STOP, (ctx, reference: unknown) =>
-    withCatalogManagementScope(
+  server.handle(RPC_CHANNELS.localApps.STOP, (ctx, reference: unknown) => {
+    if (isProductSpaceRuntimeRequest(reference)) {
+      const request = reference as Extract<
+        LocalAppLifecycleRequest,
+        { kind: 'product_space_runtime_handle' }
+      >
+      if (request.kind !== 'product_space_runtime_handle') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'STOP requires a ProductSpace runtime handle request',
+        )
+      }
+      return stopProductSpaceRuntime(request)
+    }
+    return withCatalogManagementScope(
       reference,
       async (scope, catalogReference) => {
         const status = await getScopedLocalAppRuntimeRegistry().stop(scope)
@@ -1616,10 +2221,24 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             && canAccessCatalogDeliveryMetadata(scope),
         )
       },
-    ))
+    )
+  })
 
-  server.handle(RPC_CHANNELS.localApps.RESTART, (ctx, reference: unknown) =>
-    withCatalogScope(
+  server.handle(RPC_CHANNELS.localApps.RESTART, (ctx, reference: unknown) => {
+    if (isProductSpaceRuntimeRequest(reference)) {
+      const request = reference as Extract<
+        LocalAppLifecycleRequest,
+        { kind: 'product_space_runtime_handle' }
+      >
+      if (request.kind !== 'product_space_runtime_handle') {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'RESTART requires a ProductSpace runtime handle request',
+        )
+      }
+      return restartProductSpaceRuntime(ctx, request)
+    }
+    return withCatalogScope(
       reference,
       async scope => {
         const { accessMode } = await requireAuthorizedCatalogApp(scope)
@@ -1633,7 +2252,8 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         unregisterLocalAppExecutions(scope, { workspaceId: callerWorkspaceId(ctx) })
         return startAndRegisterLocalApp(scope, () => registry.restart(scope), callerWorkspaceId(ctx))
       },
-    ))
+    )
+  })
 
   server.handle(
     RPC_CHANNELS.localApps.UNINSTALL,

@@ -23,6 +23,7 @@ function createDeferred<T>() {
 }
 
 let signedInAccountId: string | null = 'account-a'
+let workspaceExists = true
 let accessMode: 'online' | 'offline' | 'denied' = 'online'
 let accountAccessDenied = false
 let appAccessDenied = false
@@ -217,6 +218,175 @@ const scopedRetainedManagementLogs = mock(async (
   return ''
 })
 const isInstalledAndReady = mock(async () => true)
+const activeRuntimesByKey = new Map<string, Record<string, unknown>>()
+const activeRuntimesByExecution = new Map<string, Record<string, unknown>>()
+
+function runtimeIdentityKey(identity: {
+  accountId: string
+  productSpaceId: string
+  artifactInstanceId: string
+  versionId: string
+  version: string
+}): string {
+  return JSON.stringify([
+    identity.accountId,
+    identity.productSpaceId,
+    identity.artifactInstanceId,
+    identity.versionId,
+    identity.version,
+  ])
+}
+
+const defaultStartExact = async (
+  _scope: CatalogLocalAppScope,
+  version: string,
+  hooks?: { processEnvironment?: (input: { runtimeKind: 'python' | 'js'; runtimeGeneration: number; scopeGeneration: number }) => unknown },
+) => {
+  const signing = hooks?.processEnvironment?.({
+    runtimeKind: 'python',
+    runtimeGeneration: 41,
+    scopeGeneration: 7,
+  }) as { env: Record<string, string>; sensitiveValues: string[] } | undefined
+  void signing
+  return {
+    appId: 'artifact-instance-a',
+    scope: { kind: 'catalog', accountId: 'account-a', organizationId: 'organization-a', catalogAppId: 'artifact-instance-a' },
+    version,
+    url: 'http://127.0.0.1:9876',
+    port: 9876,
+    runtimeKind: 'python' as const,
+    runtimeGeneration: 41,
+    scopeGeneration: 7,
+  }
+}
+
+const scopedStartExact = mock(defaultStartExact)
+const scopedStopExact = mock(async (
+  scope: CatalogLocalAppScope,
+  expectedRuntimeGeneration: number,
+): Promise<LocalAppRuntimeStatus> => {
+  if (expectedRuntimeGeneration !== 41) {
+    throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+  }
+  return {
+    appId: scope.catalogAppId,
+    scope,
+    status: 'stopped' as const,
+    currentVersion: '2.3.4',
+  }
+})
+
+const runtimeCoordinator = {
+  ensureGateway: mock(async () => 'http://127.0.0.1:9/local-app-api/v1'),
+  signCapability: mock((input: Record<string, unknown>) => {
+    void input
+    return {
+      capabilityGeneration: 11,
+      token: 'capability-token',
+      environment: {
+        POLO_APP_API_URL: 'http://127.0.0.1:9/local-app-api/v1',
+        POLO_APP_API_TOKEN: 'capability-token',
+      },
+      sensitiveValues: ['capability-token'],
+    }
+  }),
+  registerActiveRuntime: mock((input: Record<string, unknown>) => {
+    const identity = (input as { identity: {
+      accountId: string
+      productSpaceId: string
+      artifactInstanceId: string
+      versionId: string
+      version: string
+    } }).identity
+    const runtime = {
+      ...input,
+      identity,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(identity), runtime)
+    activeRuntimesByExecution.set(
+      (input as { executionId: string }).executionId,
+      runtime,
+    )
+    return runtime
+  }),
+  getActiveRuntime: mock((identity: {
+    accountId: string
+    productSpaceId: string
+    artifactInstanceId: string
+    versionId: string
+    version: string
+  }): unknown => activeRuntimesByKey.get(runtimeIdentityKey(identity)) ?? null),
+  getActiveRuntimeByExecution: mock((executionId: unknown): unknown =>
+    activeRuntimesByExecution.get(executionId as string) ?? null),
+  revokeSignedCapability: mock(() => {}),
+  teardownRuntime: mock(async (...args: unknown[]) => {
+    const runtime = args[0] as {
+      identity: {
+        accountId: string
+        productSpaceId: string
+        artifactInstanceId: string
+        versionId: string
+        version: string
+      }
+      executionId: string
+    }
+    activeRuntimesByKey.delete(runtimeIdentityKey(runtime.identity))
+    activeRuntimesByExecution.delete(runtime.executionId)
+    // REAL-coordinator semantics: a failing stopProcess is RECORDED (never
+    // thrown) and the teardown resolves with the SAME immutable shared
+    // outcome carrying the failure — failure is tracked by an INDEPENDENT
+    // `ok` tag (a Promise.reject(undefined) reason still fails closed), and
+    // the frozen handler boundary consumes the OUTCOME (never a racy
+    // per-execution take).
+    const stopProcess = args[2] as (() => Promise<void>) | undefined
+    let stopFailure: unknown
+    let stopFailed = false
+    try {
+      await stopProcess?.()
+    } catch (error) {
+      stopFailed = true
+      stopFailure = error
+    }
+    const outcome = stopFailed
+      ? Object.freeze({
+        ok: false as const,
+        executionId: runtime.executionId,
+        stopFailure,
+      })
+      : Object.freeze({ ok: true as const, executionId: runtime.executionId })
+    if (stopFailed) {
+      recordedRollbackStopFailures.set(runtime.executionId, outcome)
+    } else {
+      recordedRollbackStopFailures.delete(runtime.executionId)
+    }
+    return outcome
+  }),
+  handleUnexpectedExit: mock(async () => {}),
+  consumeTeardownOutcome: mock(
+    (
+      outcome: { executionId: string; ok: boolean; stopFailure?: unknown },
+    ): { executionId: string; ok: boolean; stopFailure?: unknown } => {
+      // REAL-coordinator semantics: the failure travels ON the shared
+      // outcome; consumption only retires the retained record when it
+      // belongs to THIS exact teardown, and returns the SAME tagged outcome.
+      if (recordedRollbackStopFailures.get(outcome.executionId) === outcome) {
+        recordedRollbackStopFailures.delete(outcome.executionId)
+      }
+      return outcome
+    },
+  ),
+  takeRollbackStopFailure: mock((executionId: unknown): unknown => {
+    const outcome = recordedRollbackStopFailures.get(executionId as string) as
+      | { ok: boolean; stopFailure?: unknown }
+      | undefined
+    if (outcome !== undefined) {
+      recordedRollbackStopFailures.delete(executionId as string)
+    }
+    return outcome && !outcome.ok ? outcome.stopFailure : undefined
+  }),
+}
+const recordedRollbackStopFailures = new Map<string, unknown>()
 const assertAppAuthorized = mock(() => {
   if (appAccessDenied) {
     throw Object.assign(new Error('Catalog app authorization is ending'), {
@@ -224,6 +394,8 @@ const assertAppAuthorized = mock(() => {
     })
   }
 })
+
+let scopedRegistryOverride: unknown = null
 
 const scopedRegistry = {
   assertAppAuthorized,
@@ -236,6 +408,8 @@ const scopedRegistry = {
     status: 'stopped' as const,
   })),
   restart: scopedStart,
+  startExact: scopedStartExact,
+  stopExact: scopedStopExact,
   uninstall: mock(async () => {}),
   setAvailableRelease: mock(async (scope: CatalogLocalAppScope) => ({
     appId: scope.catalogAppId,
@@ -274,6 +448,9 @@ mock.module('@polo-ai/shared/admin', () => ({
 
 mock.module('@polo-ai/shared/config', () => ({
   getAdminUrl: () => 'https://admin.example.com',
+  // The trusted caller-Workspace existence check for ProductSpace starts.
+  getWorkspaceByNameOrId: (id: string) =>
+    workspaceExists ? { id, rootPath: `/root-${id}` } : null,
 }))
 
 const withdrawnTombstonesByScope = new Map<string, Set<string>>()
@@ -346,11 +523,14 @@ mock.module('@polo-ai/shared/credentials', () => ({
 
 mock.module('../../local-app-runtime', () => {
   class LocalAppRuntimeError extends Error {
+    readonly details?: Record<string, unknown>
     constructor(
       public readonly code: string,
       message: string,
+      details?: Record<string, unknown>,
     ) {
       super(message)
+      if (details) this.details = details
     }
   }
 
@@ -358,7 +538,8 @@ mock.module('../../local-app-runtime', () => {
     getLocalAppRuntimeManager: () => {
       throw new Error('renderer RPC must never reach the trusted legacy manager')
     },
-    getScopedLocalAppRuntimeRegistry: () => scopedRegistry,
+    getScopedLocalAppRuntimeRegistry: () => scopedRegistryOverride ?? scopedRegistry,
+    getLocalAppRuntimeCoordinator: () => runtimeCoordinator,
     LocalAppRuntimeError,
     MAX_CATALOG_STATUS_SCOPES: 10_000,
     validateCatalogLocalAppScope(value: unknown): CatalogLocalAppScope {
@@ -478,7 +659,7 @@ describe('local app main-process authorization boundary', () => {
   }
   let windowWorkspaceId: string | null = 'ws-window-a'
 
-  beforeEach(() => {
+  beforeEach(async () => {
     signedInAccountId = 'account-a'
     accessMode = 'online'
     accountAccessDenied = false
@@ -489,6 +670,7 @@ describe('local app main-process authorization boundary', () => {
     trustedRecordByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
+    workspaceExists = true
     context.webContentsId = 1
     getAppReleaseDownload.mockClear()
     listProductSpaces.mockClear()
@@ -520,6 +702,21 @@ describe('local app main-process authorization boundary', () => {
       scope,
       status: 'not_installed',
     })))
+    scopedStartExact.mockClear()
+    scopedStopExact.mockClear()
+    runtimeCoordinator.ensureGateway.mockClear()
+    runtimeCoordinator.signCapability.mockClear()
+    runtimeCoordinator.registerActiveRuntime.mockClear()
+    activeRuntimesByKey.clear()
+    activeRuntimesByExecution.clear()
+    recordedRollbackStopFailures.clear()
+    runtimeCoordinator.revokeSignedCapability.mockClear()
+    runtimeCoordinator.teardownRuntime.mockClear()
+    runtimeCoordinator.consumeTeardownOutcome.mockClear()
+    const { resetAppRuntimeCenterForTests } = await import(
+      '@polo-ai/server-core/runtime'
+    )
+    resetAppRuntimeCenterForTests()
     scopedRuntimeStatus.mockImplementation(async item => ({
       appId: item.catalogAppId,
       scope: item,
@@ -2032,6 +2229,7 @@ describe('local app main-process authorization boundary', () => {
     // documented residual — so ws-b's liveness probe reads the shared
     // runtime, but its registration and lifecycle ownership are isolated.)
     windowWorkspaceId = 'ws-window-a'
+    workspaceExists = true
     context.webContentsId = 1
     await stop(context, scope())
     let registered = byWorkspace()
@@ -3041,7 +3239,7 @@ describe('local app production status projection (R34-3)', () => {
   }
   let windowWorkspaceId: string | null = 'ws-window-a'
 
-  beforeEach(() => {
+  beforeEach(async () => {
     signedInAccountId = 'account-a'
     accessMode = 'online'
     appAccessDenied = false
@@ -3049,8 +3247,44 @@ describe('local app production status projection (R34-3)', () => {
     authorityTuplesByScope.clear()
     seedAuthorityBinding()
     windowWorkspaceId = 'ws-window-a'
+    workspaceExists = true
     context.webContentsId = 1
     handlers.clear()
+    withdrawnTombstonesByScope.clear()
+    trustedRecordByScope.clear()
+    getProductSpaceCatalog.mockClear()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+    listProductSpaces.mockClear()
+    scopedStartExact.mockClear()
+    scopedStartExact.mockImplementation(defaultStartExact)
+    scopedStopExact.mockClear()
+    scopedStopExact.mockImplementation(async (
+      scope: CatalogLocalAppScope,
+      expectedRuntimeGeneration: number,
+    ): Promise<LocalAppRuntimeStatus> => {
+      if (expectedRuntimeGeneration !== 41) {
+        throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+      }
+      return {
+        appId: scope.catalogAppId,
+        scope,
+        status: 'stopped' as const,
+        currentVersion: '2.3.4',
+      }
+    })
+    runtimeCoordinator.ensureGateway.mockClear()
+    runtimeCoordinator.signCapability.mockClear()
+    runtimeCoordinator.registerActiveRuntime.mockClear()
+    activeRuntimesByKey.clear()
+    activeRuntimesByExecution.clear()
+    recordedRollbackStopFailures.clear()
+    runtimeCoordinator.revokeSignedCapability.mockClear()
+    runtimeCoordinator.teardownRuntime.mockClear()
+    runtimeCoordinator.consumeTeardownOutcome.mockClear()
+    const { resetAppRuntimeCenterForTests } = await import(
+      '@polo-ai/server-core/runtime'
+    )
+    resetAppRuntimeCenterForTests()
     for (const handlerMock of [
       getCachedAppCatalog,
       getAppCatalogAccessMode,
@@ -3161,5 +3395,1023 @@ describe('local app production status projection (R34-3)', () => {
     }))
     expect(await stopPromise).toBe('stopped')
     expect(await execution.isActive()).toBe(false)
+  })
+
+  it('POO-54: starts a ProductSpace runtime through exact-version generation with capability binding and projection', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const result = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    expect(result).toMatchObject({
+      appId: 'artifact-instance-a',
+      version: '2.3.4',
+      runtimeKind: 'python',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      platformApi: { status: 'available' },
+    })
+    expect(typeof (result as { executionId: string }).executionId).toBe('string')
+    // Fresh-Catalog re-verification ran before any runtime call.
+    expect(getProductSpaceCatalog).toHaveBeenCalledTimes(1)
+    // The exact-version start used the full runtime scope and version.
+    expect(scopedStartExact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'artifact-instance-a',
+      }),
+      '2.3.4',
+      expect.objectContaining({ processEnvironment: expect.any(Function) }),
+    )
+    // The capability signed with the trusted caller workspace and the real
+    // ProductSpace identity — never renderer-owned billing fields.
+    expect(runtimeCoordinator.signCapability).toHaveBeenCalledWith(expect.objectContaining({
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+    }))
+    expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledTimes(1)
+    // The result never exposes the capability token or the gateway URL.
+    expect(JSON.stringify(result)).not.toContain('capability-token')
+    expect(JSON.stringify(result)).not.toContain('127.0.0.1')
+    // The active projection is published through the single center.
+    const { getAppRuntimeCenter } = await import('@polo-ai/server-core/runtime')
+    const projection = getAppRuntimeCenter().findByIdentity({
+      accountId: 'account-a',
+      productSpaceId: 'organization-a',
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+    })
+    expect(projection).toMatchObject({
+      workspaceId: 'ws-window-a',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      runtimeKind: 'python',
+      status: 'running',
+    })
+    // The execution registry holds the FULL identity subject.
+    const registered = listRegisteredProductSpaceExecutions().find(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered?.scope.subject).toMatchObject({
+      artifactInstanceId: 'artifact-instance-a',
+      versionId: 'version-a',
+      version: '2.3.4',
+    })
+  })
+
+  it('POO-54: fails START closed on missing entry, drift, and unavailable availability', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Missing entry: an unknown artifact instance never resolves.
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: { ...productSpaceAppIdentity(), artifactInstanceId: 'unknown-instance' },
+    })).rejects.toMatchObject({ code: 'CATALOG_ENTRY_MISSING' })
+    // Revision drift: the fresh Catalog moved on.
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      ...(await defaultProductSpaceCatalog()),
+      catalogRevision: 'revision-next',
+    }))
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'CATALOG_IDENTITY_DRIFT' })
+    // Unavailable: the raw availability is not launchable.
+    const blockedCatalog = await defaultProductSpaceCatalog()
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      ...blockedCatalog,
+      entries: [{
+        ...blockedCatalog.entries[0]!,
+        availability: 'blocked',
+      }],
+    }))
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'APP_UNAVAILABLE' })
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    getProductSpaceCatalog.mockImplementation(defaultProductSpaceCatalog)
+  })
+
+  it('POO-54: a second start of the same runtime identity replaces the first generation', async () => {
+    const existing = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-old',
+      runtimeGeneration: 41,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 3,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    // Workspace-A's old generation is revoked/stopped before B starts.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledWith(
+      existing,
+      'cancelled',
+      expect.any(Function),
+    )
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+  })
+
+  it('POO-54: two concurrent STARTs of one runtime identity serialize inside the switch mutex and the loser tears the winner down', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Park the FIRST startExact call: START-A holds the switch mutex inside
+    // its critical section while START-B queues behind it.
+    let releaseFirst!: () => void
+    const firstParked = new Promise<void>(resolve => {
+      releaseFirst = resolve
+    })
+    scopedStartExact.mockImplementationOnce(async (...args: Parameters<typeof defaultStartExact>) => {
+      await firstParked
+      return defaultStartExact(...args)
+    })
+    const request = {
+      kind: 'product_space_runtime_start' as const,
+      app: productSpaceAppIdentity(),
+    }
+    const first = start(context, request)
+    for (let i = 0; i < 100 && scopedStartExact.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    const second = start(context, request)
+    // START-B must still be waiting on the switch mutex, not bypassing the
+    // winner's cleanup via a direct manager stop.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    releaseFirst()
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toMatchObject({ version: '2.3.4' })
+    expect(secondResult).toMatchObject({ version: '2.3.4' })
+    // The replacement teardown ran exactly once, INSIDE the mutex, between
+    // the two exact-version starts — capability/Run/execution/projection
+    // cleanup of generation A can never be skipped.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledTimes(1)
+    const startCalls = scopedStartExact.mock.calls.length
+    expect(startCalls).toBe(2)
+    const teardownOrder = runtimeCoordinator.teardownRuntime.mock.invocationCallOrder.at(-1)!
+    expect(teardownOrder).toBeGreaterThan(
+      scopedStartExact.mock.invocationCallOrder[0]!,
+    )
+    expect(teardownOrder).toBeLessThan(
+      scopedStartExact.mock.invocationCallOrder[1]!,
+    )
+  })
+
+  it('POO-54: STOP is generation-CAS gated and tears the exact runtime down', async () => {
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    // Unknown execution → stale generation, no registry touch.
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'unknown',
+      expectedRuntimeGeneration: 41,
+    })).rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    const runtime = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-41',
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 11,
+      controller: new AbortController(),
+    }
+    activeRuntimesByExecution.set('exec-41', runtime)
+    // A stale generation is refused BEFORE touching the registry.
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'exec-41',
+      expectedRuntimeGeneration: 40,
+    })).rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    expect(scopedStopExact).not.toHaveBeenCalled()
+    activeRuntimesByExecution.set('exec-41', runtime)
+    // The current generation tears the runtime down with the exact stop.
+    const status = await stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'exec-41',
+      expectedRuntimeGeneration: 41,
+    })
+    expect(status).toMatchObject({ appId: 'artifact-instance-a', status: 'stopped' })
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledWith(
+      runtime,
+      'cancelled',
+      expect.any(Function),
+    )
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+  })
+
+  it('POO-54 R2: registration/fence failure rolls back revoke-first via the coordinator, never stop-before-revoke', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Park INSIDE the switch-mutex critical section (registry.startExact):
+    // flip the committed ProductSpace while the runtime is starting, then
+    // release — the post-start fence must roll back through the coordinator
+    // (revoke → … → exact stop), never a bare process stop.
+    let releaseParkedStart!: () => void
+    const parkedStart = new Promise<void>(resolve => {
+      releaseParkedStart = resolve
+    })
+    scopedStartExact.mockImplementationOnce(async (
+      ...args: Parameters<typeof defaultStartExact>
+    ) => {
+      await parkedStart
+      return defaultStartExact(...args)
+    })
+    const pending = start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    for (let i = 0; i < 100 && scopedStartExact.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    setRuntimeActiveProductSpace('organization-b')
+    releaseParkedStart()
+    await expect(pending).rejects.toMatchObject({ code: 'SWITCH_IN_PROGRESS' })
+    // Revoke-first ordering: the coordinator teardown happened BEFORE the
+    // exact stop, and the direct legacy stop path was never taken.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledTimes(1)
+    const teardownOrder = runtimeCoordinator.teardownRuntime.mock.invocationCallOrder.at(-1)!
+    expect(teardownOrder).toBeLessThan(
+      scopedStopExact.mock.invocationCallOrder.at(-1)!,
+    )
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    setRuntimeActiveProductSpace('organization-a')
+  })
+
+  it('POO-54 R11: a stop failure recorded by the already-active START rollback surfaces as STOP_FAILED with BOTH original and rollback cause', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Park INSIDE startExact: the runtime registers ACTIVE (generation 41 via
+    // processEnvironment) before the fence re-check runs. Flip the committed
+    // ProductSpace while parked — after release, the post-registration fence
+    // fails and the rollback targets the now-ACTIVE runtime. The rollback's
+    // exact stop FAILS; the real coordinator records it (never throws), so
+    // the START boundary itself must consume the recorded failure.
+    let releaseParkedStart!: () => void
+    const parkedStart = new Promise<void>(resolve => {
+      releaseParkedStart = resolve
+    })
+    scopedStartExact.mockImplementationOnce(async (
+      ...args: Parameters<typeof defaultStartExact>
+    ) => {
+      await parkedStart
+      return defaultStartExact(...args)
+    })
+    scopedStopExact.mockImplementation(async () => {
+      throw Object.assign(new Error('injected rollback stop failure'), {
+        code: 'STOP_FAILED',
+      })
+    })
+    const pending = start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    for (let i = 0; i < 100 && scopedStartExact.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(scopedStartExact.mock.calls.length).toBe(1)
+    setRuntimeActiveProductSpace('organization-b')
+    releaseParkedStart()
+    type SurfacedStartFailure = {
+      code?: string
+      details?: { cause?: { original?: { code?: string }; rollback?: { message?: string } } }
+    }
+    let failure: SurfacedStartFailure | null = null
+    try {
+      await pending
+    } catch (error) {
+      failure = error as SurfacedStartFailure
+    }
+    // Exactly ONE surfaced STOP_FAILED — the composed one from the START
+    // boundary, never a double wrap.
+    expect(failure).toMatchObject({ code: 'STOP_FAILED' })
+    // The ORIGINAL fence failure is preserved as cause.original…
+    expect(failure?.details?.cause?.original?.code).toBe('SWITCH_IN_PROGRESS')
+    // …and the recorded rollback stop failure travels as cause.rollback.
+    expect(failure?.details?.cause?.rollback?.message).toBe('injected rollback stop failure')
+    // The rollback ran exactly once through the ACTIVE teardown path (the
+    // runtime was already registered) and consumed the recorded failure.
+    expect(runtimeCoordinator.teardownRuntime).toHaveBeenCalledTimes(1)
+    expect(recordedRollbackStopFailures.size).toBe(0)
+    expect(scopedStopExact).toHaveBeenCalledTimes(1)
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    // The legacy artifact-scoped stop was never taken.
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    // No runtime survives the failed START: the coordinator entry was torn
+    // down and the execution was never registered (fence failure).
+    expect([...activeRuntimesByExecution.keys()]).toHaveLength(0)
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
+    setRuntimeActiveProductSpace('organization-a')
+  })
+
+  it('POO-54 R2: START without a trusted caller Workspace fails closed with zero side effects', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // No window → no workspaceId.
+    windowWorkspaceId = null
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    // Window exists but the Workspace record does not.
+    windowWorkspaceId = 'ws-window-a'
+    workspaceExists = false
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    // Zero gateway, zero capability, zero process, zero Admin calls.
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.registerActiveRuntime).not.toHaveBeenCalled()
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(listProductSpaces).not.toHaveBeenCalled()
+    expect(getProductSpaceCatalog).not.toHaveBeenCalled()
+  })
+
+  it('POO-54 R3: ProductSpace execution liveness is generation/version-exact while versions coexist', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // The fresh Catalog lists TWO versions of the same artifact instance.
+    const baseCatalog = await defaultProductSpaceCatalog()
+    getProductSpaceCatalog.mockImplementation(async (): Promise<any> => ({
+      ...baseCatalog,
+      entries: [
+        ...baseCatalog.entries,
+        {
+          kind: 'app',
+          catalogEntryId: 'catalog-entry-b',
+          artifactInstanceId: 'artifact-instance-a',
+          version: { versionId: 'version-b', version: '9.9.9', checksum: 'c'.repeat(64) },
+          name: 'ProductSpace App v9',
+          description: '',
+          availability: 'available',
+          sources: [{ kind: 'enterprise_import' }],
+          permissions: [],
+        },
+      ],
+    }))
+    const identityV2 = {
+      ...productSpaceAppIdentity(),
+      catalogEntryId: 'catalog-entry-b',
+      versionId: 'version-b',
+      version: '9.9.9',
+    }
+    const resultV1 = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    const resultV2 = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: identityV2,
+    })
+    const executions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(executions).toHaveLength(2)
+    const subjectVersionId = (execution: { scope: { subject: unknown } }): string =>
+      ((execution.scope.subject as { versionId?: string }).versionId ?? '')
+    const execV1 = executions.find(
+      execution => subjectVersionId(execution) === 'version-a',
+    )
+    const execV2 = executions.find(
+      execution => subjectVersionId(execution) === 'version-b',
+    )
+    expect(execV1).toBeDefined()
+    expect(execV2).toBeDefined()
+    // While both coordinator runtimes are active, BOTH executions are live.
+    expect(await execV1!.isActive()).toBe(true)
+    expect(await execV2!.isActive()).toBe(true)
+    // v1's process dies: only v1's execution reports not-live; the artifact-
+    // scoped probe would have reported BOTH as not running.
+    const runtimeV1 = activeRuntimesByExecution.get(
+      (resultV1 as { executionId: string }).executionId,
+    )
+    await runtimeCoordinator.teardownRuntime(runtimeV1!, 'failed')
+    expect(await execV1!.isActive()).toBe(false)
+    expect(await execV2!.isActive()).toBe(true)
+    // Liveness is generation-exact: a stale generation replay is a no-op.
+    await runtimeCoordinator.teardownRuntime(runtimeV1!, 'failed')
+    expect(await execV2!.isActive()).toBe(true)
+  })
+
+  it('POO-54 R4: STOP aggregates a failed generation-bound stop as STOP_FAILED while cleanup completes', async () => {
+    // Seed a live runtime (started through the normal START path).
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    // The exact-generation stop FAILS.
+    scopedStopExact.mockImplementation(async () => {
+      throw Object.assign(new Error('process survived'), { code: 'STOP_FAILED' })
+    })
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: [...activeRuntimesByExecution.keys()][0]!,
+      expectedRuntimeGeneration: 41,
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // (Projection/execution cleanup on a failed stop is asserted against the
+    // REAL coordinator in the gateway isolated suite.)
+  })
+
+  it('POO-54 R4: the legacy lifecycle member travels as a bare scope — wrapper shapes are rejected', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // A bare CatalogLocalAppScope remains the legacy member and works.
+    await start(context, scope())
+    expect(scopedStart).toHaveBeenCalledTimes(1)
+    // A legacy_scope WRAPPER is not part of the union: it reaches the
+    // legacy branch as an invalid scope and fails closed.
+    await expect(start(context, { kind: 'legacy_scope', scope: scope() }))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(scopedStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('POO-54 R5: static runtimes register without a capability and STOP/RESTART resolve them', async () => {
+    // A static exact start: startExact reports runtimeKind 'static' and the
+    // manager never calls the capability hook.
+    scopedStartExact.mockImplementation((async (
+      _scope: CatalogLocalAppScope,
+      version: string,
+    ) => ({
+      appId: 'artifact-instance-a',
+      version,
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      runtimeKind: 'static' as const,
+      runtimeGeneration: 41,
+      scopeGeneration: 9,
+    })) as unknown as typeof defaultStartExact)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const result = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    expect(result).toMatchObject({
+      runtimeKind: 'static',
+      runtimeGeneration: 41,
+      platformApi: { status: 'unavailable', reason: 'static_runtime_unsupported' },
+    })
+    // Generation-exact liveness is TRUE for the static runtime (the exact
+    // generation was recorded before coordinator registration).
+    const staticExecutions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(await staticExecutions[0]!.isActive()).toBe(true)
+    // The coordinator has an active runtime for the static identity (without
+    // any capability) — the execution handle resolves through STOP.
+    expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeKind: 'static',
+        runtimeGeneration: 41,
+      }),
+    )
+    expect(runtimeCoordinator.signCapability).not.toHaveBeenCalled()
+    // RESTART resolves the live static handle and re-registers a fresh
+    // static generation (provisional + restarted registration calls).
+    const restart = handlers.get(RPC_CHANNELS.localApps.RESTART)!
+    const restarted = await restart(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: (result as { executionId: string }).executionId,
+      expectedRuntimeGeneration: 41,
+    })
+    expect(restarted).toMatchObject({
+      runtimeKind: 'static',
+      runtimeGeneration: 41,
+    })
+    expect(runtimeCoordinator.registerActiveRuntime).toHaveBeenCalledTimes(2)
+    // STOP resolves the restarted generation.
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    const status = await stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: (restarted as { executionId: string }).executionId,
+      expectedRuntimeGeneration: 41,
+    })
+    expect(status).toMatchObject({ status: 'stopped' })
+    scopedStartExact.mockImplementation(defaultStartExact)
+  })
+
+  it('POO-54 R5: a failed replacement stop rejects the replacement START with STOP_FAILED', async () => {
+    const existing = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-old',
+      runtimeGeneration: 41,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 3,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
+    // Registry-side old-generation ownership (the retry/diagnostic fallback):
+    // a SUCCESSFUL stopExact removes it — a failing one throws BEFORE any
+    // removal, mirroring the real scoped registry's process-id map.
+    const registryProcessOwnership = new Map<number, string>([[41, 'exact-process-old']])
+    // The exact-generation stop of the OLD generation fails. The mock
+    // teardownRuntime mirrors the real coordinator's record-not-throw
+    // semantics: the failure is RECORDED and the teardown RESOLVES.
+    scopedStopExact.mockImplementation(async (
+      _scope: CatalogLocalAppScope,
+      expectedRuntimeGeneration: number,
+    ) => {
+      if (!registryProcessOwnership.has(expectedRuntimeGeneration)) {
+        throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+      }
+      throw Object.assign(new Error('process survived'), { code: 'STOP_FAILED' })
+    })
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // The recorded failure was consumed exactly at the replacement boundary.
+    expect(recordedRollbackStopFailures.size).toBe(0)
+    // stopExact ran exactly once for the old generation.
+    expect(scopedStopExact).toHaveBeenCalledTimes(1)
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    // The successor never spawned: zero exact-version starts AND no gateway
+    // reopen between the failed teardown and the STOP_FAILED boundary.
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    // The old generation's registry ownership was NOT prematurely cleared —
+    // no retry stop, no uninstall, no ownership wipe around the failed
+    // replacement: it remains the fallback for the surviving process.
+    expect(registryProcessOwnership.get(41)).toBe('exact-process-old')
+    expect(scopedRegistry.uninstall).not.toHaveBeenCalled()
+    // R12: the outer START catch re-ran the (idempotent) rollback AFTER the
+    // replacement boundary already failed — with no capability issued and no
+    // successor generation started, that rollback must be a side-effect-free
+    // completion: the legacy artifact-scoped namespace is never touched
+    // (generation-exact isolation) and no second exact stop runs either.
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(scopedStopExact).toHaveBeenCalledTimes(1)
+  })
+
+  it('POO-54 R12: a pre-spawn START failure rolls back with zero registry calls — no legacy namespace touch, no exact stop', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Failure mode 1: the exact-version spawn fails BEFORE processEnvironment
+    // runs — no capability was signed and no runtime generation started, so
+    // the rollback is a side-effect-free completion.
+    scopedStartExact.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('bundle spawn exploded'), { code: 'RUNTIME_UNAVAILABLE' })
+    })
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    // Zero stop calls of ANY namespace: nothing was spawned, nothing to stop.
+    expect(scopedStopExact).not.toHaveBeenCalled()
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.teardownRuntime).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.revokeSignedCapability).not.toHaveBeenCalled()
+    // No retryable/diagnostic state leaks from the failed START.
+    expect(recordedRollbackStopFailures.size).toBe(0)
+    expect([...activeRuntimesByExecution.keys()]).toHaveLength(0)
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
+
+    // Failure mode 2: the gateway cannot open (pre-spawn, pre-signing) —
+    // same side-effect-free rollback contract.
+    runtimeCoordinator.ensureGateway.mockImplementationOnce(async () => {
+      throw new Error('gateway listen exploded')
+    })
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toThrow('gateway listen exploded')
+    expect(scopedStopExact).not.toHaveBeenCalled()
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+    expect(recordedRollbackStopFailures.size).toBe(0)
+  })
+
+  it('static START records the exact generation: liveness is true and a registration failure rolls back through the legacy stop', async () => {
+    scopedStartExact.mockImplementation((async (
+      _scope: CatalogLocalAppScope,
+      version: string,
+    ) => ({
+      appId: 'artifact-instance-a',
+      version,
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      runtimeKind: 'static' as const,
+      runtimeGeneration: 41,
+      scopeGeneration: 9,
+    })) as unknown as typeof defaultStartExact)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const result = await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    expect(result).toMatchObject({ runtimeKind: 'static', runtimeGeneration: 41 })
+    // Generation-exact liveness is TRUE for the static runtime (R5 bug).
+    const executions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(executions).toHaveLength(1)
+    const staticExecutions = listRegisteredProductSpaceExecutions()
+      .filter(execution => execution.kind === 'local_app')
+    expect(await staticExecutions[0]!.isActive()).toBe(true)
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+
+    // A registration failure rolls back generation-aware: the EXACT
+    // version-namespaced stop runs (no capability exists to revoke) and the
+    // START fails — the legacy artifact-scoped stop is never taken.
+    runtimeCoordinator.registerActiveRuntime.mockImplementationOnce(() => {
+      throw new Error('coordinator is shutting down')
+    })
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toThrow('coordinator is shutting down')
+    expect(scopedStopExact).toHaveBeenCalledWith(
+      expect.objectContaining({ catalogAppId: 'artifact-instance-a' }),
+      41,
+    )
+    expect(scopedRegistry.stop).not.toHaveBeenCalled()
+  })
+
+  it('POO-54 R6: any exact-stop failure normalizes to STOP_FAILED with the original cause (STOP and replacement)', async () => {
+    // Seed a live runtime.
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })
+    const executionId = [...activeRuntimesByExecution.keys()][0]!
+    // stopExact throws a STALE_RUNTIME_GENERATION LocalAppRuntimeError —
+    // NOT a STOP_FAILED. Both STOP and replacement must normalize it.
+    scopedStopExact.mockImplementation(async () => {
+      // A STALE_RUNTIME_GENERATION-shaped failure (as the registry throws).
+      throw Object.assign(new Error('no longer current'), {
+        code: 'STALE_RUNTIME_GENERATION',
+      })
+    })
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    let stopFailure: { code?: string; details?: { cause?: { message?: string } } } | null = null
+    try {
+      await stop(context, {
+        kind: 'product_space_runtime_handle',
+        executionId,
+        expectedRuntimeGeneration: 41,
+      })
+    } catch (error) {
+      stopFailure = error as { code: string; details?: { cause?: { message: string } } }
+    }
+    expect(stopFailure).toMatchObject({ code: 'STOP_FAILED' })
+    expect(stopFailure?.details?.cause?.message).toBe('no longer current')
+
+    // Replacement: the successor never spawns and the normalized
+    // STOP_FAILED (with cause) is what the caller sees. Re-seed the live
+    // runtime (the STOP above removed it from the coordinator maps).
+    const replacementRuntime = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId,
+      runtimeGeneration: 41,
+      scopeGeneration: 7,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 11,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(replacementRuntime.identity), replacementRuntime)
+    activeRuntimesByExecution.set(executionId, replacementRuntime)
+    scopedStartExact.mockClear()
+    let replacement: { code?: string; details?: { cause?: { message?: string } } } | null = null
+    try {
+      await start(context, {
+        kind: 'product_space_runtime_start',
+        app: productSpaceAppIdentity(),
+      })
+    } catch (error) {
+      replacement = error as { code: string; details?: { cause?: { message: string } } }
+    }
+    expect(replacement).toMatchObject({ code: 'STOP_FAILED' })
+    expect(replacement?.details?.cause?.message).toBe('no longer current')
+  })
+
+
+  it('static registration failure rolls back via generation-aware stopExact on the version-namespaced id — never legacy stop; stopExact rejection propagates through the aggregator', async () => {
+    // FAITHFUL static model: the manager deliberately never calls
+    // processEnvironment for static runtimes. Each startExact call records
+    // a DISTINCT generation → version-namespaced mapping (41, 42, …).
+    let generationCounter = 0
+    const exactMappings = new Map<number, string>()
+    const stopExactCalls: Array<{ appId: string; generation: number }> = []
+    const legacyStopCalls: string[] = []
+    let injectedStopFailure: Error | null = null
+    const fakeExactRegistry = {
+      assertAppAuthorized: () => {},
+      install: async () => { throw new Error('not used') },
+      cancelInstall: async () => false,
+      start: async () => { throw new Error('not used') },
+      stop: async (scope: CatalogLocalAppScope) => {
+        legacyStopCalls.push('legacy-artifact-scoped-id')
+        return { appId: scope.catalogAppId, scope, status: 'stopped' as const }
+      },
+      restart: async () => { throw new Error('not used') },
+      startExact: async (
+        scope: CatalogLocalAppScope,
+        version: string,
+      ) => {
+        // STATIC contract: no processEnvironment call. Each call records a
+        // distinct generation → version-namespaced mapping.
+        generationCounter += 1
+        const generation = generationCounter
+        exactMappings.set(generation, `exact-process-${generation}`)
+        return {
+          appId: `exact-process-${generation}`,
+          version,
+          url: 'http://127.0.0.1:9876',
+          port: 9876,
+          runtimeKind: 'static' as const,
+          runtimeGeneration: generation,
+          scopeGeneration: 9,
+        }
+      },
+      stopExact: async (
+        scope: CatalogLocalAppScope,
+        expectedRuntimeGeneration: number,
+      ) => {
+        const appId = exactMappings.get(expectedRuntimeGeneration)
+        stopExactCalls.push({
+          appId: appId ?? '<unknown>',
+          generation: expectedRuntimeGeneration,
+        })
+        if (injectedStopFailure) throw injectedStopFailure
+        if (appId === undefined) {
+          throw Object.assign(new Error('stale'), { code: 'STALE_RUNTIME_GENERATION' })
+        }
+        exactMappings.delete(expectedRuntimeGeneration)
+        return {
+          appId,
+          scope,
+          status: 'stopped' as const,
+          currentVersion: '2.3.4',
+        }
+      },
+      uninstall: async () => {},
+      setAvailableRelease: async (scope: CatalogLocalAppScope) => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'installed' as const,
+      }),
+      getInstalledApps: async () => [],
+      getRuntimeStatus: async (scope: CatalogLocalAppScope) => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'not_installed' as const,
+      }),
+      getRuntimeStatuses: async (scopes: CatalogLocalAppScope[]) => scopes.map(scope => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'not_installed' as const,
+      })),
+      getLogs: async () => '',
+      getFailureRecoveryLogs: async () => '',
+      getRetainedManagementLogs: async () => '',
+      isInstalledAndReady: async () => true,
+    }
+    scopedRegistryOverride = fakeExactRegistry
+    try {
+      const start = handlers.get(RPC_CHANNELS.localApps.START)!
+
+      // ── Phase 1: successful static start of identity A.
+      const baseCatalog = await defaultProductSpaceCatalog()
+      const twoVersionCatalog = {
+        ...baseCatalog,
+        entries: [
+          ...baseCatalog.entries,
+          {
+            kind: 'app',
+            catalogEntryId: 'catalog-entry-b',
+            artifactInstanceId: 'artifact-instance-b',
+            version: { versionId: 'version-b', version: '3.0.0', checksum: 'c'.repeat(64) },
+            name: 'Static App B',
+            description: '',
+            availability: 'available',
+            sources: [{ kind: 'enterprise_import' }],
+            permissions: [],
+          },
+        ],
+      }
+      getProductSpaceCatalog.mockImplementation(async (): Promise<any> => twoVersionCatalog)
+      const identityA = {
+        ...productSpaceAppIdentity(),
+        catalogEntryId: 'catalog-entry-a',
+      }
+      const resultA = await start(context, {
+        kind: 'product_space_runtime_start',
+        app: identityA,
+      })
+      expect(resultA).toMatchObject({
+        runtimeKind: 'static',
+        runtimeGeneration: 1,
+      })
+      // Generation 1's mapping was recorded as a distinct entry.
+      expect(exactMappings.get(1)).toBe('exact-process-1')
+
+      // ── Phase 2: a DIFFERENT identity's static start; its post-start
+      // registerActiveRuntime throws → rollback must target generation 2's
+      // version-namespaced id.
+      const identityB = {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        catalogEntryId: 'catalog-entry-b',
+        artifactInstanceId: 'artifact-instance-b',
+        versionId: 'version-b',
+        version: '3.0.0',
+        catalogRevision: 'revision-a',
+        sources: [{ kind: 'enterprise_import', name: null, circleId: null }],
+        availability: 'available' as const,
+      }
+      runtimeCoordinator.registerActiveRuntime.mockImplementationOnce(() => {
+        throw new Error('coordinator exploded')
+      })
+      let failed: { code?: string; message?: string; details?: { cause?: { message?: string } } } | null = null
+      try {
+        await start(context, {
+          kind: 'product_space_runtime_start',
+          app: identityB,
+        })
+      } catch (error) {
+        failed = error as { code?: string; message?: string; details?: { cause?: { message?: string } } }
+      }
+      // The registration failure surfaces to the START boundary.
+      expect(failed).toMatchObject({ message: 'coordinator exploded' })
+      // The rollback used generation-aware stopExact for generation 2 with
+      // its exact id — never the legacy artifact-scoped stop.
+      const rollbackCall = stopExactCalls.at(-1)!
+      expect(rollbackCall).toEqual({
+        appId: 'exact-process-2',
+        generation: 2,
+      })
+      // The failed generation's exact key was removed; the previously
+      // successful generation 1 mapping is unaffected.
+      expect(exactMappings.has(2)).toBe(false)
+      expect(exactMappings.get(1)).toBe('exact-process-1')
+      expect(legacyStopCalls).toHaveLength(0)
+      // ── Phase 3: injected stopExact rejection propagates through the
+      // aggregator to the STOP boundary (STOP_FAILED + original cause).
+      injectedStopFailure = new Error('injected stop failure')
+      let stopFailure: { code?: string; details?: { cause?: { message?: string } } } | null = null
+      try {
+        await handlers.get(RPC_CHANNELS.localApps.STOP)!(context, {
+          kind: 'product_space_runtime_handle',
+          executionId: (resultA as { executionId: string }).executionId,
+          expectedRuntimeGeneration: 1,
+        })
+      } catch (error) {
+        stopFailure = error as { code?: string; details?: { cause?: { message?: string } } }
+      }
+      expect(stopFailure).toMatchObject({ code: 'STOP_FAILED' })
+      expect(stopFailure?.details?.cause?.message).toBe('injected stop failure')
+    } finally {
+      scopedRegistryOverride = null
+    }
+  })
+
+  // ── POO-54 R13: an undefined rejection reason (Promise.reject(undefined))
+  // must still classify the recorded stop failure as FAILED — the frozen
+  // handler boundaries judge the tagged TeardownOutcome, never the value.
+  it('POO-54 R13: a replacement whose recorded stop failure is undefined fails closed — STOP_FAILED and zero successor spawn', async () => {
+    const existing = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-old-undef',
+      runtimeGeneration: 41,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'python' as const,
+      capabilityGeneration: 3,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(existing.identity), existing)
+    // The real coordinator RECORDED a stop whose rejection reason was
+    // `undefined`: the shared outcome is ok:false with an undefined
+    // stopFailure value.
+    runtimeCoordinator.teardownRuntime.mockImplementationOnce(async () =>
+      Object.freeze({
+        ok: false as const,
+        executionId: 'exec-old-undef',
+        stopFailure: undefined,
+      }))
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await expect(start(context, {
+      kind: 'product_space_runtime_start',
+      app: productSpaceAppIdentity(),
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // The successor never spawned and the gateway never reopened: the
+    // undefined failure still gates the replacement closed.
+    expect(scopedStartExact).not.toHaveBeenCalled()
+    expect(runtimeCoordinator.ensureGateway).not.toHaveBeenCalled()
+    expect(scopedStopExact).not.toHaveBeenCalled()
+  })
+
+  it('POO-54 R13: an explicit STOP whose recorded stop failure is undefined rejects STOP_FAILED while cleanup completes', async () => {
+    const runtime = {
+      identityKey: 'k',
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'organization-a',
+        artifactInstanceId: 'artifact-instance-a',
+        versionId: 'version-a',
+        version: '2.3.4',
+      },
+      executionId: 'exec-stop-undef',
+      runtimeGeneration: 7,
+      scopeGeneration: 2,
+      workspaceId: 'ws-window-a',
+      runtimeKind: 'static' as const,
+      controller: new AbortController(),
+    }
+    activeRuntimesByKey.set(runtimeIdentityKey(runtime.identity), runtime)
+    activeRuntimesByExecution.set('exec-stop-undef', runtime)
+    // The teardown RECORDED an undefined-rejection stop failure; cleanup
+    // (active-set retirement) still completed before the frozen handler
+    // consumed the tagged outcome.
+    runtimeCoordinator.teardownRuntime.mockImplementationOnce(async (...args: unknown[]) => {
+      const tornDown = args[0] as { identity: typeof runtime.identity; executionId: string }
+      activeRuntimesByKey.delete(runtimeIdentityKey(tornDown.identity))
+      activeRuntimesByExecution.delete(tornDown.executionId)
+      return Object.freeze({
+        ok: false as const,
+        executionId: tornDown.executionId,
+        stopFailure: undefined,
+      })
+    })
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    await expect(stop(context, {
+      kind: 'product_space_runtime_handle',
+      executionId: 'exec-stop-undef',
+      expectedRuntimeGeneration: 7,
+    })).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    // Cleanup completed: no runtime record survives the failed stop.
+    expect(activeRuntimesByKey.size).toBe(0)
+    expect(activeRuntimesByExecution.size).toBe(0)
   })
 })

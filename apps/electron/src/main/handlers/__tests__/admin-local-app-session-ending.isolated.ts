@@ -203,6 +203,9 @@ mock.module('@polo-ai/shared/config', () => ({
   updateLlmConnection: () => true,
   deleteLlmConnection: () => true,
   setDefaultLlmConnection: () => true,
+  // Trusted caller-Workspace existence check (POO-54 START path); session
+  // ending tests never start a ProductSpace runtime.
+  getWorkspaceByNameOrId: () => null,
 }))
 
 mock.module('@polo-ai/shared/admin', () => ({
@@ -319,6 +322,13 @@ mock.module('../../local-app-runtime', () => ({
     if (!runtimeRegistry) throw new Error('Scoped runtime registry is not ready')
     return runtimeRegistry
   },
+  // The trusted runtime coordinator is a local-app-runtime production
+  // dependency of the handler module; session-ending tests never start a
+  // ProductSpace runtime, so a minimal fail-closed stub is sufficient.
+  getLocalAppRuntimeCoordinator: () => {
+    throw new Error('ProductSpace runtime coordinator is not available in this test')
+  },
+  hasLocalAppRuntimeCoordinator: () => false,
   LocalAppRuntimeError,
   MAX_CATALOG_STATUS_SCOPES,
   validateCatalogLocalAppScope,
