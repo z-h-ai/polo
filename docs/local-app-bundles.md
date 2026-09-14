@@ -94,9 +94,12 @@ loopback API variables, injected fresh at each process start:
 
 - `POLO_APP_API_URL` — the local loopback URL of the app API gateway
   (`/local-app-api/v1`).
-- `POLO_APP_API_TOKEN` — a single-use, generation-bound bearer token for that
-  gateway. It is signed exactly once per process start and is not an App or
-  user credential.
+- `POLO_APP_API_TOKEN` — a generation-bound bearer token for that gateway.
+  It is signed exactly once per process generation and is used by the trusted
+  dynamic runtime for repeated authentication of every API request (run/start,
+  ai/query, run/finish, result/report, file/report) until the token is revoked
+  or reaches its fixed 24-hour expiry. It is a temporary App runtime credential,
+  but not a user, account, or Polo service credential.
 
 The API token is secret and ephemeral:
 
