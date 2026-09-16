@@ -1,0 +1,38 @@
+{
+  "name": "@polo-ai/server",
+  "version": "0.16.3",
+  "description": "Standalone headless Polo AI server (Bun runtime)",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "polo-ai-server": "src/index.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "author": {
+    "name": "Polo AI",
+    "email": "support@polo.ai"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://app.polo.z-h-ai.com",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "generate-token": "bun run src/index.ts --generate-token",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@polo-ai/core": "workspace:*",
+    "@polo-ai/messaging-gateway": "workspace:*",
+    "@polo-ai/server-core": "workspace:*",
+    "@polo-ai/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "@types/node": "^22.0.0",
+    "ws": "^8.16.0"
+  }
+}

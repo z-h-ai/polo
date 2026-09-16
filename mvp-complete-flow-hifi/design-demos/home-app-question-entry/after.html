@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-Hans" data-prototype-role="after">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polo 首页 App · After</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --background: oklch(0.98 0.003 265);
+      --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+      --foreground: oklch(0.185 0.01 270);
+      --foreground-rgb: 38, 36, 42;
+      --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+      --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+      --foreground-8: color-mix(in srgb, var(--foreground) 8%, var(--background));
+      --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+      --foreground-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+      --foreground-45: color-mix(in srgb, var(--foreground) 45%, var(--background));
+      --foreground-55: color-mix(in srgb, var(--foreground) 55%, var(--background));
+      --foreground-65: color-mix(in srgb, var(--foreground) 65%, var(--background));
+      --foreground-75: color-mix(in srgb, var(--foreground) 75%, var(--background));
+      --foreground-85: color-mix(in srgb, var(--foreground) 85%, var(--background));
+      --accent: oklch(0.62 0.13 293);
+      --accent-rgb: 104, 78, 133;
+      --shadow-blur-opacity: 0.06;
+      --shadow-minimal:
+        rgba(0,0,0,0) 0 0 0 0,
+        rgba(0,0,0,0) 0 0 0 0,
+        rgba(var(--foreground-rgb),0.06) 0 0 0 1px,
+        rgba(0,0,0,var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+        rgba(0,0,0,var(--shadow-blur-opacity)) 0 3px 3px -1.5px;
+      --shadow-middle:
+        rgba(var(--foreground-rgb),0.08) 0 0 0 1px,
+        rgba(0,0,0,var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+        rgba(0,0,0,var(--shadow-blur-opacity)) 0 6px 6px -3px;
+      --tabbar-height: 36px;
+      background: var(--background);
+    }
+    :root.dark {
+      color-scheme: dark;
+      --background: oklch(0.145 0.015 270);
+      --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+      --foreground: oklch(0.95 0.01 270);
+      --foreground-rgb: 237, 236, 240;
+      --accent: oklch(0.65 0.22 293);
+      --accent-rgb: 130, 75, 185;
+      --shadow-blur-opacity: 0.18;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: var(--background); color: var(--foreground); -webkit-font-smoothing: antialiased; }
+    button, input { color: inherit; font: inherit; }
+    button { border: 0; }
+    .shell { height: 100%; min-height: 0; background: var(--background); }
+    .tabbar {
+      position: fixed; z-index: 20; inset: 0 0 auto 0; height: var(--tabbar-height);
+      display: flex; align-items: center; gap: 4px; padding: 0 8px 0 86px;
+      border-bottom: 1px solid var(--foreground-10); background: color-mix(in srgb,var(--background) 95%,transparent);
+    }
+    .home-button, .tab-close, .icon-button {
+      display: inline-flex; align-items: center; justify-content: center; flex: none;
+      cursor: pointer; background: transparent;
+    }
+    .home-button { width: 28px; height: 28px; border-radius: 6px; background: var(--foreground-8); }
+    .icon { width: 16px; height: 16px; display: block; }
+    .tab-icon { width: 14px; height: 14px; display: block; opacity: .65; }
+    .tabs { display: flex; align-items: flex-end; gap: 4px; min-width: 0; flex: 1; height: 100%; overflow: hidden; }
+    .tab {
+      height: 32px; min-width: 120px; max-width: 220px; flex: 1;
+      display: flex; align-items: center; gap: 6px; padding: 0 8px;
+      border: 1px solid transparent; border-radius: 6px 6px 0 0;
+      color: var(--foreground-65); background: transparent; font-size: 12px; cursor: pointer;
+    }
+    .tab-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+    .tab-close { width: 20px; height: 20px; border-radius: 4px; color: var(--foreground-45); }
+    .main {
+      height: 100%; min-height: 0; overflow-y: auto; padding: calc(var(--tabbar-height) + 32px) 32px 40px;
+      background: var(--background);
+    }
+    .content { width: 100%; min-width: 0; max-width: 1120px; margin: 0 auto; display: grid; gap: 40px; }
+    .content > section { min-width: 0; }
+    .prompt-section { padding-bottom: 2px; }
+    .prompt-kicker {
+      margin: 0 0 10px; display: flex; align-items: center; gap: 7px;
+      color: var(--foreground-65); font-size: 13px; font-weight: 600;
+    }
+    .prompt-kicker .app-glyph { width: 18px; height: 18px; }
+    .prompt-form {
+      min-height: 76px; padding: 14px 14px 12px 16px; display: flex; align-items: flex-end; gap: 12px;
+      border-radius: 12px; background: var(--background); box-shadow: var(--shadow-minimal); transition: box-shadow .2s ease;
+    }
+    .prompt-form:focus-within { box-shadow: var(--shadow-middle); }
+    .prompt-input {
+      min-width: 0; min-height: 46px; flex: 1; border: 0; outline: 0; background: transparent;
+      color: var(--foreground); font-size: 16px; line-height: 24px;
+    }
+    .prompt-input::placeholder { color: var(--foreground-45); }
+    .prompt-submit {
+      width: 32px; height: 32px; flex: none; display: flex; align-items: center; justify-content: center;
+      border-radius: 50%; color: var(--background); background: var(--foreground); cursor: pointer;
+    }
+    .prompt-submit:disabled { color: var(--foreground-45); background: var(--foreground-10); cursor: default; }
+    .prompt-hint { margin: 8px 2px 0; color: var(--foreground-45); font-size: 11px; text-align: right; }
+    .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .section-title { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 650; letter-spacing: -.01em; }
+    .section-title.primary { font-size: 18px; }
+    .section-copy { margin: 4px 0 0; color: var(--foreground-55); font-size: 12px; line-height: 1.45; }
+    .icon-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 20px 16px; }
+    .app-icon {
+      min-width: 0; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+      border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer;
+    }
+    .app-icon:hover { transform: translateY(-2px); border-color: var(--foreground-10); background: var(--foreground-3); box-shadow: var(--shadow-minimal); }
+    .app-art {
+      width: 76px; height: 76px; display: flex; align-items: center; justify-content: center;
+      overflow: hidden; border: 1px solid var(--foreground-10); border-radius: 8px;
+      background: var(--background-elevated); box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    }
+    .app-art.brand { color: var(--foreground-75); }
+    .app-art.kanban { color: white; background: linear-gradient(145deg,#0ea5e9,#4f46e5); border: 0; }
+    .app-art.airdrop { color: white; background: linear-gradient(145deg,#22c55e,#0f766e); border: 0; }
+    .app-art.notion { color: white; background: #171717; border: 0; }
+    .app-art.figma { color: white; background: linear-gradient(145deg,#f24e1e,#a259ff 48%,#1abcfe); border: 0; }
+    .app-art.add { border-style: dashed; border-color: var(--foreground-20); color: var(--foreground-55); background: var(--foreground-3); }
+    .app-glyph { width: 36px; height: 36px; }
+    .letter { font-size: 24px; line-height: 1; font-weight: 650; }
+    .app-name { min-height: 36px; max-width: 108px; color: var(--foreground-85); font-size: 14px; line-height: 18px; font-weight: 550; text-align: center; }
+    .org-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
+    .org-card {
+      min-width: 0;
+      min-height: 176px; padding: 16px; display: flex; flex-direction: column;
+      border: 1px solid var(--foreground-10); border-radius: 12px;
+      background: var(--background-elevated); box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .org-top { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+    .org-art {
+      width: 48px; height: 48px; flex: none; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--foreground-10); border-radius: 12px; color: white; font-size: 18px; font-weight: 650;
+      background: linear-gradient(145deg,#0ea5e9,#4f46e5); box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    }
+    .org-art.purple { background: linear-gradient(145deg,#a855f7,#4f46e5); }
+    .org-art.orange { background: linear-gradient(145deg,#f59e0b,#ea580c); }
+    .org-meta { min-width: 0; flex: 1; }
+    .org-name { margin: 0; overflow: hidden; color: var(--foreground); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .org-source { margin: 2px 0 0; overflow: hidden; color: var(--foreground-55); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .org-desc { min-height: 36px; margin: 12px 0 0; color: var(--foreground-65); font-size: 12px; line-height: 18px; }
+    .org-bottom { margin-top: auto; padding-top: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+    .status { margin: 0; overflow: hidden; color: var(--foreground-55); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .action, .refresh {
+      height: 32px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      border-radius: 6px; color: var(--background); background: var(--foreground); font-size: 12px; font-weight: 580; cursor: pointer;
+    }
+    .refresh { color: var(--foreground-65); background: transparent; }
+    .warning {
+      margin: 0 0 16px; padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+      border: 1px solid color-mix(in srgb,#f59e0b 25%,transparent); border-radius: 8px;
+      color: color-mix(in srgb,#b45309 75%,var(--foreground)); background: color-mix(in srgb,#f59e0b 8%,transparent); font-size: 12px;
+    }
+    .buddy {
+      height: 100%; min-height: 0; padding-top: var(--tabbar-height); display: grid; grid-template-columns: 240px 1fr;
+      background: var(--background);
+    }
+    .buddy-sidebar { border-right: 1px solid var(--foreground-10); padding: 16px 12px; }
+    .buddy-logo { display: flex; align-items: center; gap: 8px; padding: 8px; font-size: 14px; font-weight: 650; }
+    .new-chat-row { margin-top: 16px; padding: 9px 10px; border-radius: 8px; background: var(--foreground-5); font-size: 13px; }
+    .buddy-main { min-width: 0; display: flex; flex-direction: column; }
+    .buddy-header { height: 48px; padding: 0 20px; display: flex; align-items: center; border-bottom: 1px solid var(--foreground-10); font-size: 13px; font-weight: 600; }
+    .buddy-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--foreground-65); }
+    .buddy-empty .app-glyph { margin-bottom: 12px; }
+    .buddy-empty-title { margin: 0; font-size: 18px; color: var(--foreground); }
+    .composer-wrap { width: 100%; max-width: 760px; margin: 0 auto; padding: 12px 16px 24px; }
+    .composer {
+      min-height: 84px; padding: 14px; display: flex; align-items: flex-end; gap: 10px;
+      border-radius: 12px; background: var(--background); box-shadow: var(--shadow-minimal);
+    }
+    .composer-text { min-height: 42px; flex: 1; color: var(--foreground); font-size: 14px; line-height: 20px; white-space: pre-wrap; }
+    .composer-send { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--background); background: var(--foreground); }
+    @media (max-width: 767px) {
+      .tabbar { padding-left: 8px; }
+      .tab { min-width: 88px; }
+      .main { padding: calc(var(--tabbar-height) + 24px) 24px 32px; }
+      .content { gap: 32px; }
+      .prompt-form { min-height: 68px; }
+      .prompt-input { font-size: 15px; }
+      .icon-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+      .org-grid { grid-template-columns: 1fr; }
+      .refresh span { display: none; }
+      .buddy { grid-template-columns: 1fr; }
+      .buddy-sidebar { display: none; }
+      .buddy-header { height: 56px; }
+    }
+    #root { display: none; }
+    /* approximate:new-chat-destination-shell */
+    #renderer-frame {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: var(--background);
+    }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <iframe id="renderer-frame" title="Updated Polo Home renderer"></iframe>
+  <div id="root"></div>
+  <script id="prototype-config" type="application/json">
+{
+  "scenes": ["catalog", "offline"],
+  "themes": ["light", "dark"],
+  "langs": ["zh-Hans", "en"]
+}
+  </script>
+  <script type="text/babel" data-presets="env,react">
+    const prototypeConfig = JSON.parse(document.getElementById("prototype-config").textContent);
+    function readPrototypeParameters() {
+      const query = new URLSearchParams(window.location.search);
+      const pick = (name, values) => values.includes(query.get(name)) ? query.get(name) : values[0];
+      return {
+        scene: pick("scene", prototypeConfig.scenes),
+        theme: pick("theme", prototypeConfig.themes),
+        lang: pick("lang", prototypeConfig.langs),
+      };
+    }
+    const initialParameters = readPrototypeParameters();
+    const rendererUrl = new URL("assets/renderer/index.html", window.location.href);
+    rendererUrl.search = new URLSearchParams({
+      page: "after",
+      scene: initialParameters.scene,
+      theme: initialParameters.theme,
+      lang: initialParameters.lang,
+    }).toString();
+    document.getElementById("renderer-frame").src = rendererUrl.href;
+    document.documentElement.classList.toggle("dark", initialParameters.theme === "dark");
+    document.documentElement.dataset.theme = initialParameters.theme;
+    document.documentElement.dataset.scene = initialParameters.scene;
+    document.documentElement.lang = initialParameters.lang;
+
+    const copy = {
+      "zh-Hans": {
+        ask: "问问 Pro Buddy", placeholder: "想做什么?", hint: "Enter 进入新对话",
+        recent: "最近使用", recentDesc: "快速返回你的 Polo 应用和最近工作。",
+        org: "北极星工作室应用", orgDesc: "此创作者空间发布的应用。", refresh: "刷新",
+        external: "外部应用", externalDesc: "仅存储在此设备上的个人网站快捷方式。", add: "添加外部应用",
+        ready: "可以打开", remote: "在 Polo 中安全打开", update: "更新 2.4.0 可用",
+        open: "打开", updateAction: "更新", offline: "当前处于离线状态，仍可打开已安装且准备完成的应用。",
+        newChat: "新对话", emptyTitle: "New chat", emptyText: "输入消息...",
+      },
+      en: {
+        ask: "Ask Pro Buddy", placeholder: "What would you like to work on?", hint: "Enter to open a new chat",
+        recent: "Recently used", recentDesc: "Jump back into your Polo apps and recent work.",
+        org: "Northstar Studio apps", orgDesc: "Apps published for this creator space.", refresh: "Refresh",
+        external: "External apps", externalDesc: "Personal website shortcuts stored only on this device.", add: "Add external app",
+        ready: "Ready to open", remote: "Opens securely in Polo", update: "Update 2.4.0 available",
+        open: "Open", updateAction: "Update", offline: "You are offline. Installed and prepared apps can still be opened.",
+        newChat: "New chat", emptyTitle: "New chat", emptyText: "Type a message...",
+      },
+    };
+    const Icon = ({ name = "sparkles" }) => {
+      if (name === "home") return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>;
+      if (name === "close") return <svg className="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18"/></svg>;
+      if (name === "refresh") return <svg className="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></svg>;
+      return <img className="app-glyph" src="assets/sparkles.svg" alt="" />;
+    };
+    function TabBar({ onHome, onBuddy }) {
+      return <div className="tabbar">
+        <button className="home-button" onClick={onHome} aria-label="Home"><Icon name="home" /></button>
+        <div className="tabs">
+          <button className="tab" onClick={onBuddy}><Icon /><span className="tab-title">Pro Buddy</span><span className="tab-close"><Icon name="close" /></span></button>
+          <button className="tab"><span className="letter">N</span><span className="tab-title">Northstar wiki</span><span className="tab-close"><Icon name="close" /></span></button>
+        </div>
+      </div>;
+    }
+    function AppTile({ kind, name, onClick }) {
+      return <button className="app-icon" onClick={onClick}>
+        <span className={`app-art ${kind}`}>
+          {kind === "brand" ? <Icon /> : kind === "add" ? <span className="letter">＋</span> : <span className="letter">{name.slice(0,1)}</span>}
+        </span>
+        <span className="app-name">{name}</span>
+      </button>;
+    }
+    function OrgCard({ tone, letter, name, source, description, status, action }) {
+      return <article className="org-card">
+        <div className="org-top">
+          <div className={`org-art ${tone}`}>{letter}</div>
+          <div className="org-meta"><h3 className="org-name">{name}</h3><p className="org-source">{source}</p></div>
+        </div>
+        <p className="org-desc">{description}</p>
+        <div className="org-bottom"><p className="status">{status}</p><button className="action">{action}</button></div>
+      </article>;
+    }
+    function Buddy({ c, question, onHome }) {
+      return <div className="shell">
+        <TabBar onHome={onHome} onBuddy={() => {}} />
+        <div className="buddy">
+          <aside className="buddy-sidebar">
+            <div className="buddy-logo"><Icon />Pro Buddy</div>
+            <div className="new-chat-row">{c.newChat}</div>
+          </aside>
+          <section className="buddy-main">
+            <header className="buddy-header">{c.newChat}</header>
+            <div className="buddy-empty"><Icon /><h1 className="buddy-empty-title">{c.emptyTitle}</h1></div>
+            <div className="composer-wrap"><div className="composer"><div className="composer-text">{question || c.emptyText}</div><div className="composer-send">↑</div></div></div>
+          </section>
+        </div>
+      </div>;
+    }
+    function Home({ c, parameters, onBuddy, onQuestion }) {
+      const zh = parameters.lang === "zh-Hans";
+      const [question, setQuestion] = React.useState("");
+      const submit = (event) => {
+        event.preventDefault();
+        if (question.trim()) onQuestion(question.trim());
+      };
+      return <div className="shell">
+        <TabBar onHome={() => {}} onBuddy={() => onBuddy("")} />
+        <main className="main" data-testid="home-app-hub">
+          <div className="content">
+            <section className="prompt-section" aria-label={c.ask}>
+              <p className="prompt-kicker"><Icon />{c.ask}</p>
+              <form className="prompt-form" onSubmit={submit}>
+                <input className="prompt-input" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={c.placeholder} autoFocus />
+                <button className="prompt-submit" type="submit" disabled={!question.trim()} aria-label={c.newChat}>↑</button>
+              </form>
+              <p className="prompt-hint">{c.hint}</p>
+            </section>
+            <section>
+              <div className="section-head"><div><h1 className="section-title primary">{c.recent}</h1><p className="section-copy">{c.recentDesc}</p></div></div>
+              <div className="icon-grid">
+                <AppTile kind="brand" name="Pro Buddy" onClick={() => onBuddy("")} />
+                <AppTile kind="kanban" name="Kanban" />
+                <AppTile kind="airdrop" name="AirDrop" />
+              </div>
+            </section>
+            <section>
+              <div className="section-head">
+                <div><h2 className="section-title">{c.org}</h2><p className="section-copy">{c.orgDesc}</p></div>
+                <button className="refresh"><Icon name="refresh" /><span>{c.refresh}</span></button>
+              </div>
+              {parameters.scene === "offline" && <div className="warning">◌ {c.offline}</div>}
+              <div className="org-grid">
+                <OrgCard letter="I" name="Insight Hub" source={zh ? "北极星工作室" : "Northstar Studio"} description={zh ? "集中查看团队指标与每周洞察。" : "Review team metrics and weekly insights."} status={c.ready} action={c.open} />
+                <OrgCard tone="purple" letter="C" name="Campaign Studio" source={zh ? "北极星工作室" : "Northstar Studio"} description={zh ? "快速制作并审阅活动内容。" : "Create and review campaign content."} status={c.remote} action={c.open} />
+                <OrgCard tone="orange" letter="P" name="Client Portal" source={zh ? "北极星工作室" : "Northstar Studio"} description={zh ? "管理客户交付与共享资料。" : "Manage client deliveries and shared files."} status={c.update} action={c.updateAction} />
+              </div>
+            </section>
+            <section>
+              <div className="section-head"><div><h2 className="section-title">{c.external}</h2><p className="section-copy">{c.externalDesc}</p></div></div>
+              <div className="icon-grid">
+                <AppTile kind="notion" name="Notion" />
+                <AppTile kind="figma" name="Figma" />
+                <AppTile kind="add" name={c.add} />
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>;
+    }
+    function PrototypeApp() {
+      const [parameters, setParameters] = React.useState(initialParameters);
+      const [question, setQuestion] = React.useState(null);
+      React.useEffect(() => {
+        const refresh = () => {
+          const next = readPrototypeParameters();
+          document.documentElement.classList.toggle("dark", next.theme === "dark");
+          document.documentElement.dataset.theme = next.theme;
+          document.documentElement.dataset.scene = next.scene;
+          document.documentElement.lang = next.lang;
+          setParameters(next);
+        };
+        window.addEventListener("popstate", refresh);
+        return () => window.removeEventListener("popstate", refresh);
+      }, []);
+      const c = copy[parameters.lang];
+      return question !== null
+        ? <Buddy c={c} question={question} onHome={() => setQuestion(null)} />
+        : <Home c={c} parameters={parameters} onBuddy={setQuestion} onQuestion={setQuestion} />;
+    }
+    ReactDOM.createRoot(document.getElementById("root")).render(<PrototypeApp />);
+  </script>
+</body>
+</html>

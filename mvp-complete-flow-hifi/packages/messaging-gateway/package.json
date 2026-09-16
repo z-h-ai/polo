@@ -1,0 +1,27 @@
+{
+  "name": "@polo-ai/messaging-gateway",
+  "version": "0.10.0",
+  "license": "Apache-2.0",
+  "description": "Messaging gateway for Polo AI — Telegram & WhatsApp",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@polo-ai/core": "workspace:*",
+    "@polo-ai/messaging-whatsapp-worker": "workspace:*",
+    "@polo-ai/server-core": "workspace:*",
+    "@polo-ai/shared": "workspace:*",
+    "@larksuiteoapi/node-sdk": "^1.62.1",
+    "grammy": "^1.35.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "@types/node": "^22.0.0"
+  }
+}

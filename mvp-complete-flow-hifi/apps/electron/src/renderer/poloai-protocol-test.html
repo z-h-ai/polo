@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>poloai:// Protocol Test</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7f8;
+        color: #172026;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      header {
+        padding: 20px 24px;
+        border-bottom: 1px solid #d8dee2;
+        background: #ffffff;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 650;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(260px, 380px) 1fr;
+        gap: 16px;
+        padding: 16px;
+      }
+
+      section {
+        min-width: 0;
+        background: #ffffff;
+        border: 1px solid #d8dee2;
+        border-radius: 8px;
+      }
+
+      .controls {
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      textarea,
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #b8c2ca;
+        border-radius: 6px;
+        padding: 10px;
+        font: inherit;
+        background: #ffffff;
+        color: inherit;
+      }
+
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+        background: #1f6f68;
+        color: #ffffff;
+      }
+
+      button.secondary {
+        background: #26323a;
+      }
+
+      .stream,
+      .events {
+        padding: 16px;
+        overflow: auto;
+      }
+
+      .stream {
+        white-space: pre-wrap;
+        line-height: 1.5;
+      }
+
+      .events {
+        border-top: 1px solid #d8dee2;
+        max-height: 40vh;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        background: #f8fafb;
+      }
+
+      @media (max-width: 760px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>poloai:// Protocol Test</h1>
+    </header>
+    <main>
+      <section class="controls">
+        <label>
+          Message
+          <textarea id="message">Analyze this test message and respond briefly.</textarea>
+        </label>
+        <label>
+          Callback ID
+          <input id="callback-id" readonly />
+        </label>
+        <label>
+          Session ID
+          <input id="session-id" readonly placeholder="Waiting for ack" />
+        </label>
+        <button id="send-first">New session and send</button>
+        <button id="send-follow-up" class="secondary">Send follow-up</button>
+      </section>
+      <section>
+        <div id="stream" class="stream"></div>
+        <pre id="events" class="events"></pre>
+      </section>
+    </main>
+    <script>
+      const callbackId = crypto.randomUUID()
+      let sessionId = null
+
+      const callbackInput = document.getElementById('callback-id')
+      const sessionInput = document.getElementById('session-id')
+      const messageInput = document.getElementById('message')
+      const stream = document.getElementById('stream')
+      const events = document.getElementById('events')
+
+      callbackInput.value = callbackId
+
+      function logEvent(msg) {
+        events.textContent += `${JSON.stringify(msg)}\n`
+        events.scrollTop = events.scrollHeight
+      }
+
+      function sendUrl(url) {
+        logEvent({ outbound: url })
+        location.href = url
+      }
+
+      window.addEventListener('message', (event) => {
+        const msg = event.data
+        if (!msg || msg.callbackId !== callbackId) return
+
+        logEvent(msg)
+        if (msg.type === 'poloai:ack') {
+          sessionId = msg.result && msg.result.sessionId ? msg.result.sessionId : sessionId
+          sessionInput.value = sessionId || ''
+        } else if (msg.type === 'poloai:event') {
+          if (msg.event.type === 'text_delta') stream.textContent += msg.event.delta || ''
+          if (msg.event.type === 'text_complete') stream.textContent += msg.event.text || ''
+          if (msg.event.type === 'error') stream.textContent += `\n[error] ${msg.event.error || ''}`
+          if (msg.event.type === 'complete') stream.textContent += '\n[complete]\n'
+        } else if (msg.type === 'poloai:error') {
+          stream.textContent += `\n[${msg.error.code}] ${msg.error.message}\n`
+        }
+      })
+
+      document.getElementById('send-first').addEventListener('click', () => {
+        stream.textContent = ''
+        const input = encodeURIComponent(messageInput.value)
+        sendUrl(`poloai://action/new-session?input=${input}&send=true&callbackId=${callbackId}`)
+      })
+
+      document.getElementById('send-follow-up').addEventListener('click', () => {
+        if (!sessionId) {
+          logEvent({ error: 'No sessionId yet' })
+          return
+        }
+        const input = encodeURIComponent(messageInput.value)
+        sendUrl(`poloai://action/send-message/${sessionId}?input=${input}&callbackId=${callbackId}`)
+      })
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1689 @@
+{
+  "card": "POO-71",
+  "title": "MVP 完整流程高保真原型",
+  "generated": "2026-09-16",
+  "generator": "Claude（设计交付；Electron/Admin/Browser 产品代码零改动）",
+  "prototype": {
+    "file": "prototype.html",
+    "sha256": "8986da95dd817cfb98e4d050e9e36b83e61a318bf0c9795604a7e756a6caa0e7",
+    "screens": 90,
+    "offline": true,
+    "network_requests": 0,
+    "routes": "#s=<屏 ID>；?clean=1 隐藏演示 chrome；?audit=1 供自动化溢出审计",
+    "viewports": [
+      "1440x900",
+      "1024x768"
+    ]
+  },
+  "companion": {
+    "feature-map.md": "fd2cbac3bcf34b0d43235c93492ea5527d73444157e54b02ff45ee478e235a17",
+    "review.md": "a9f90a044f7758c819109462e74648128476bcc9ac07fde47079aef7653937f1",
+    "visual-acceptance.md": "9775d49ffb9de1f97f6453deaa4581aa6477657f60a7c10b28b3dd94580ff03d"
+  },
+  "input_baseline": {
+    "dev_worktree": "01f4447c",
+    "integration_candidate": "integration/pol68-g5-client@3dc20ca（仅作「集成候选已实现」屏的还原依据）",
+    "note": "dev 与集成候选不混称：还原自 C-INT 的屏 cls=integ；其余以本 worktree 样式与 POO-70 结论为准"
+  },
+  "inputs": [
+    {
+      "name": "poo70-spec.md",
+      "kind": "产品结论权威（POO-70 spec.md，已接受 D-PC-04）",
+      "origin": "POO-70/docs/client-journey-policy-interview/docs/client-journey-review/spec.md",
+      "snapshot": "sources/poo70-spec.md",
+      "sha256": "346d94926c940bf97676424ccba810e2cdccf937176e79b6d9b554001ecd762d"
+    },
+    {
+      "name": "poo70-module-review.md",
+      "kind": "模块方案 M01—M11（POO-70 module-review.md）",
+      "origin": "POO-70/docs/client-journey-policy-interview/docs/client-journey-review/module-review.md",
+      "snapshot": "sources/poo70-module-review.md",
+      "sha256": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f"
+    },
+    {
+      "name": "poo70-implementation-delta-review.md",
+      "kind": "现状差异（POO-70 implementation-delta-review.md）",
+      "origin": "POO-70/docs/client-journey-policy-interview/docs/client-journey-review/implementation-delta-review.md",
+      "snapshot": "sources/poo70-implementation-delta-review.md",
+      "sha256": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540"
+    },
+    {
+      "name": "renderer-index.css",
+      "kind": "真实样式令牌（apps/electron/src/renderer/index.css）",
+      "origin": "apps/electron/src/renderer/index.css @ dev 01f4447c",
+      "snapshot": "sources/renderer-index.css",
+      "sha256": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf"
+    },
+    {
+      "name": "DESIGN.md",
+      "kind": "设计系统文档（本卡 docs/DESIGN.md）",
+      "origin": "docs/DESIGN.md @ dev 01f4447c",
+      "snapshot": null,
+      "sha256": "214e90085d7d1f9dfb9cc45a81de182a92bbb85523d4d726929419844b21efdf"
+    },
+    {
+      "name": "cint-integration-ref",
+      "kind": "集成候选参照（不落地代码，仅还原已实现交互）",
+      "origin": "C-INT integration/pol68-g5-client @ 3dc20ca",
+      "snapshot": null,
+      "sha256": null
+    }
+  ],
+  "legend": {
+    "reuse": "直接复用（M05/M06/M08 现有界面）",
+    "adjust": "调整关键页",
+    "new": "新增 / 构想（需 owner 评审）",
+    "integ": "集成候选已实现（还原自 C-INT 3dc20ca）",
+    "state": "已有状态 / 行为",
+    "cross": "跨端交接（浏览器端负责）"
+  },
+  "modules": [
+    {
+      "id": "M01",
+      "name": "登录与空间承接",
+      "screens": [
+        "P-M01-LOGIN-PASSWORD",
+        "P-M01-LOGIN-PHONE",
+        "P-M01-LOGIN-CODE",
+        "P-M01-LOGIN-CANCEL",
+        "P-M01-PERSONAL-PREP",
+        "P-M01-PERSONAL-PREP-FAIL",
+        "P-M01-REOPEN",
+        "P-M01-INVITE-BROWSER",
+        "P-M01-INVITE-MISMATCH",
+        "P-M01-INVITE-PENDING",
+        "P-M01-REFRESH-FAIL",
+        "P-M01-NOT-INSTALLED",
+        "P-M01-CREATE-ENT",
+        "P-M01-COLD-START"
+      ]
+    },
+    {
+      "id": "M02",
+      "name": "空间切换",
+      "screens": [
+        "P-M02-SWITCHER",
+        "P-M02-CONFIRM",
+        "P-M02-STOPPING",
+        "P-M02-STOP-FAILED",
+        "P-M02-STOP-CANCEL",
+        "P-M02-TARGET-LOADING",
+        "P-M02-TARGET-FAILED",
+        "P-M02-ACCESS-LOST"
+      ]
+    },
+    {
+      "id": "M03",
+      "name": "首页与全部 Apps",
+      "screens": [
+        "P-M03-HOME-PERSONAL",
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M03-HOME-OFFLINE",
+        "P-M03-HOME-ENT",
+        "P-M03-ALL-APPS",
+        "P-M03-ALL-APPS-ENT-EMPTY",
+        "P-M03-INSPECTOR",
+        "P-M03-MANAGE-HOME",
+        "P-M03-CONTROLS"
+      ]
+    },
+    {
+      "id": "M04",
+      "name": "App 容器",
+      "screens": [
+        "P-M04-APP-VIEW",
+        "P-M04-PREPARE",
+        "P-M04-PREP-FAILED",
+        "P-M04-CLOSE-ACTIVE",
+        "P-M04-TERM-FAILED",
+        "P-M04-BACKGROUND",
+        "P-M04-RUNTIME",
+        "P-M04-PERM-DENIED"
+      ]
+    },
+    {
+      "id": "M05",
+      "name": "助手 · 会话",
+      "screens": [
+        "P-M05-CHAT",
+        "P-M05-NEW",
+        "P-M05-STOPPED",
+        "P-M05-QUESTION",
+        "P-M05-QUESTION-REOPEN"
+      ]
+    },
+    {
+      "id": "M06",
+      "name": "助手 · 技能与数据源",
+      "screens": [
+        "P-M06-SKILLS",
+        "P-M06-SKILL-DENIED",
+        "P-M06-TOOLS"
+      ]
+    },
+    {
+      "id": "M07",
+      "name": "我的圈子",
+      "screens": [
+        "P-M07-LIST",
+        "P-M07-EMPTY",
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-JOIN-FREE",
+        "P-M07-JOIN-PENDING",
+        "P-M07-DETAIL-PAID",
+        "P-M07-PAY-BROWSER",
+        "P-M07-PAY-RETURN-FAIL",
+        "P-M07-RENEW",
+        "P-M07-EXPIRED",
+        "P-M07-LEAVE"
+      ]
+    },
+    {
+      "id": "M08",
+      "name": "会话文件",
+      "screens": [
+        "P-M08-FILES",
+        "P-M08-FILE-MISSING"
+      ]
+    },
+    {
+      "id": "M09",
+      "name": "积分不足",
+      "screens": [
+        "P-M09-PRE-BLOCK",
+        "P-M09-STREAM-CUT",
+        "P-M09-APP-BANNER",
+        "P-M09-ENT-NOTIFY",
+        "P-M09-USER-STOP",
+        "P-M09-BROWSER",
+        "P-M09-CHECKING",
+        "P-M09-NOT-YET",
+        "P-M09-RESUMED"
+      ]
+    },
+    {
+      "id": "M10",
+      "name": "账号菜单与设置",
+      "screens": [
+        "P-M10-MENU",
+        "P-M10-MENU-NOPRIV",
+        "P-M10-SETTINGS",
+        "P-M10-SETTINGS-APPEARANCE",
+        "P-M10-ADMIN-BROWSER",
+        "P-M10-ADMIN-RETURN"
+      ]
+    },
+    {
+      "id": "M11",
+      "name": "异常与恢复",
+      "screens": [
+        "P-M11-REAUTH",
+        "P-M11-REVOKE",
+        "P-M11-PERSONAL-RESTRICTED",
+        "P-M11-BLOCKED-WITHDRAWN",
+        "P-M11-BLOCKED-EXPIRED",
+        "P-M11-BLOCKED-VERSION",
+        "P-M11-OFFLINE-HOME",
+        "P-M11-OFFLINE-RUNNING",
+        "P-M11-CONTRACT",
+        "P-M11-CONTRACT-DL",
+        "P-M11-CONTRACT-FAIL",
+        "P-M11-SPACE-ERROR",
+        "P-M11-REOPEN-RECOVERY"
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "id": "P-M01-LOGIN-PASSWORD",
+      "module": "M01",
+      "title": "登录 · 密码登录",
+      "cls": "reuse",
+      "note": "真实登录卡直接复用：品牌块、分段 tab、协议勾选均为现有样式。",
+      "route": "#s=P-M01-LOGIN-PASSWORD"
+    },
+    {
+      "id": "P-M01-LOGIN-PHONE",
+      "module": "M01",
+      "title": "登录 · 验证码登录",
+      "cls": "reuse",
+      "note": "验证码登录分段复用；“+86 / 发送验证码 / 5 分钟有效”为现有文案。",
+      "route": "#s=P-M01-LOGIN-PHONE"
+    },
+    {
+      "id": "P-M01-LOGIN-CODE",
+      "module": "M01",
+      "title": "登录 · 验证码已发送",
+      "cls": "reuse",
+      "note": "倒计时重发属于现有行为；验证码错误会内联提示，不弹窗。",
+      "route": "#s=P-M01-LOGIN-CODE"
+    },
+    {
+      "id": "P-M01-LOGIN-CANCEL",
+      "module": "M01",
+      "title": "登录 · 用户取消",
+      "cls": "state",
+      "note": "取消后留在登录入口并可重试；不产生副作用（C-R08）。",
+      "route": "#s=P-M01-LOGIN-CANCEL"
+    },
+    {
+      "id": "P-M01-PERSONAL-PREP",
+      "module": "M01",
+      "title": "我的空间 · 准备中",
+      "cls": "adjust",
+      "note": "唯一「我的空间」幂等创建；重试不产生第二个空间（PC-F01）。",
+      "route": "#s=P-M01-PERSONAL-PREP"
+    },
+    {
+      "id": "P-M01-PERSONAL-PREP-FAIL",
+      "module": "M01",
+      "title": "我的空间 · 准备失败",
+      "cls": "adjust",
+      "note": "准备失败给出重试入口并说明幂等；不阻塞重新登录。",
+      "route": "#s=P-M01-PERSONAL-PREP-FAIL"
+    },
+    {
+      "id": "P-M01-REOPEN",
+      "module": "M01",
+      "title": "重开 · 登录恢复",
+      "cls": "state",
+      "note": "过期会话要求重新登录；恢复后核对访问权，不自动重做业务动作。",
+      "route": "#s=P-M01-REOPEN"
+    },
+    {
+      "id": "P-M01-INVITE-BROWSER",
+      "module": "M01",
+      "title": "邀请确认（浏览器交接）",
+      "cls": "cross",
+      "note": "浏览器端只画交接卡；加入成功仅作为桌面刷新的输入（PC-F05）。",
+      "route": "#s=P-M01-INVITE-BROWSER"
+    },
+    {
+      "id": "P-M01-INVITE-MISMATCH",
+      "module": "M01",
+      "title": "邀请 · 账号不匹配",
+      "cls": "cross",
+      "note": "邀请不交给错误账号；改用受邀账号后才能接受。",
+      "route": "#s=P-M01-INVITE-MISMATCH"
+    },
+    {
+      "id": "P-M01-INVITE-PENDING",
+      "module": "M01",
+      "title": "共享邀请 · 待审批",
+      "cls": "cross",
+      "note": "共享邀请需 Owner/Manager 审批；批准前企业不出现在可用空间。",
+      "route": "#s=P-M01-INVITE-PENDING"
+    },
+    {
+      "id": "P-M01-REFRESH-FAIL",
+      "module": "M01",
+      "title": "加入后 · 企业列表刷新失败",
+      "cls": "state",
+      "note": "成员关系已保留；核对同账号后重试，不需要重新接受邀请（C-R01）。",
+      "route": "#s=P-M01-REFRESH-FAIL"
+    },
+    {
+      "id": "P-M01-NOT-INSTALLED",
+      "module": "M01",
+      "title": "未安装 · 下载指引",
+      "cls": "cross",
+      "note": "同账号登录后企业出现在空间列表；不强制立即安装。",
+      "route": "#s=P-M01-NOT-INSTALLED"
+    },
+    {
+      "id": "P-M01-CREATE-ENT",
+      "module": "M01",
+      "title": "创建企业（浏览器交接）",
+      "cls": "cross",
+      "note": "创建在浏览器端完成且幂等；进入与否由用户在桌面端决定（PC-F07）。",
+      "route": "#s=P-M01-CREATE-ENT"
+    },
+    {
+      "id": "P-M01-COLD-START",
+      "module": "M01",
+      "title": "冷启动 · 候选目标重验",
+      "cls": "state",
+      "note": "冷启动重验账号/邀请/空间列表；不自动切换空间。",
+      "route": "#s=P-M01-COLD-START"
+    },
+    {
+      "id": "P-M02-SWITCHER",
+      "module": "M02",
+      "title": "空间切换器（下拉）",
+      "cls": "integ",
+      "note": "集成候选真实组件：无活动直切，有活动进入确认；切换只影响本机。",
+      "route": "#s=P-M02-SWITCHER"
+    },
+    {
+      "id": "P-M02-CONFIRM",
+      "module": "M02",
+      "title": "切换确认 · 终止 3 项",
+      "cls": "integ",
+      "note": "展示将终止的 App 与助手任务；取消留在原空间（C-R04）。",
+      "route": "#s=P-M02-CONFIRM"
+    },
+    {
+      "id": "P-M02-STOPPING",
+      "module": "M02",
+      "title": "终止进度",
+      "cls": "integ",
+      "note": "逐项展示已终止/停止中；全部停止后才提交切换（PC-F06）。",
+      "route": "#s=P-M02-STOPPING"
+    },
+    {
+      "id": "P-M02-STOP-FAILED",
+      "module": "M02",
+      "title": "部分停止失败",
+      "cls": "integ",
+      "note": "1 项失败：重试失败项或取消；已终止项不自动复活（C-R04）。",
+      "route": "#s=P-M02-STOP-FAILED"
+    },
+    {
+      "id": "P-M02-STOP-CANCEL",
+      "module": "M02",
+      "title": "取消切换 · 仍在原空间",
+      "cls": "integ",
+      "note": "取消的是切换，不撤销已完成的停止——这是关键规则。",
+      "route": "#s=P-M02-STOP-CANCEL"
+    },
+    {
+      "id": "P-M02-TARGET-LOADING",
+      "module": "M02",
+      "title": "目标空间加载中",
+      "cls": "integ",
+      "note": "目录、权限、计量与助手集合一起切换；不展示混合内容。",
+      "route": "#s=P-M02-TARGET-LOADING"
+    },
+    {
+      "id": "P-M02-TARGET-FAILED",
+      "module": "M02",
+      "title": "目标空间加载失败",
+      "cls": "integ",
+      "note": "重试加载或留在原空间；已停止任务保持停止。",
+      "route": "#s=P-M02-TARGET-FAILED"
+    },
+    {
+      "id": "P-M02-ACCESS-LOST",
+      "module": "M02",
+      "title": "目标无权访问",
+      "cls": "integ",
+      "note": "已从切换器移除并说明原因；联系管理员恢复（C-R05）。",
+      "route": "#s=P-M02-ACCESS-LOST"
+    },
+    {
+      "id": "P-M03-HOME-PERSONAL",
+      "module": "M03",
+      "title": "首页 · 个人空间（有常用）",
+      "cls": "adjust",
+      "note": "固定 Polo 助手 + 最多 5 个常用 App；“我的圈子”与“全部 Apps”并列（D-PC-07 · D-PC-01）。",
+      "route": "#s=P-M03-HOME-PERSONAL"
+    },
+    {
+      "id": "P-M03-HOME-ZERO",
+      "module": "M03",
+      "title": "首页 · 首登零常用",
+      "cls": "adjust",
+      "note": "零常用引导去全部 Apps；助手卡始终可用，不强迫先配置。",
+      "route": "#s=P-M03-HOME-ZERO"
+    },
+    {
+      "id": "P-M03-HOME-EMPTY-DIR",
+      "module": "M03",
+      "title": "首页 · 真空目录",
+      "cls": "adjust",
+      "note": "企业未分发且圈子无作品时的诚实空态，说明何时会出现内容。",
+      "route": "#s=P-M03-HOME-EMPTY-DIR"
+    },
+    {
+      "id": "P-M03-HOME-LOAD-FAIL",
+      "module": "M03",
+      "title": "首页 · 目录加载失败",
+      "cls": "state",
+      "note": "目录失败不阻塞助手；重试幂等（C-R01）。",
+      "route": "#s=P-M03-HOME-LOAD-FAIL"
+    },
+    {
+      "id": "P-M03-HOME-OFFLINE",
+      "module": "M03",
+      "title": "首页 · 离线缓存目录",
+      "cls": "state",
+      "note": "缓存目录标注获取时间；已安装可打开，未安装/更新不可用（C-R07）。",
+      "route": "#s=P-M03-HOME-OFFLINE"
+    },
+    {
+      "id": "P-M03-HOME-ENT",
+      "module": "M03",
+      "title": "首页 · 企业空间（晨星科技）",
+      "cls": "adjust",
+      "note": "企业首页按 D-PC-07 不放管理卡（现状差异见待裁决清单）。",
+      "route": "#s=P-M03-HOME-ENT"
+    },
+    {
+      "id": "P-M03-ALL-APPS",
+      "module": "M03",
+      "title": "全部 Apps · 来源分组",
+      "cls": "adjust",
+      "note": "企业/圈子/个人来源分组；同名 App 靠来源区分，不合并。",
+      "route": "#s=P-M03-ALL-APPS"
+    },
+    {
+      "id": "P-M03-ALL-APPS-ENT-EMPTY",
+      "module": "M03",
+      "title": "全部 Apps · 企业目录为空",
+      "cls": "state",
+      "note": "企业未分发时的空态；与个人隐藏、来源撤下区分展示。",
+      "route": "#s=P-M03-ALL-APPS-ENT-EMPTY"
+    },
+    {
+      "id": "P-M03-INSPECTOR",
+      "module": "M03",
+      "title": "App 详情（inspector）",
+      "cls": "adjust",
+      "note": "来源/版本/状态原因/权限说明；“为何阻断”不归因，只给路径。",
+      "route": "#s=P-M03-INSPECTOR"
+    },
+    {
+      "id": "P-M03-MANAGE-HOME",
+      "module": "M03",
+      "title": "管理常用 Apps（上限 5）",
+      "cls": "adjust",
+      "note": "上限 5 个在这里生效；Polo 助手固定不占名额（D-PC-07 收口首页方案）。",
+      "route": "#s=P-M03-MANAGE-HOME"
+    },
+    {
+      "id": "P-M03-CONTROLS",
+      "module": "M03",
+      "title": "个人隐藏 / 恢复显示",
+      "cls": "adjust",
+      "note": "只影响本设备的显示；与来源侧撤下/到期分开说明。",
+      "route": "#s=P-M03-CONTROLS"
+    },
+    {
+      "id": "P-M04-APP-VIEW",
+      "module": "M04",
+      "title": "App 容器 · 全屏 FDE 占位",
+      "cls": "adjust",
+      "note": "App 占满主内容工作区，内部界面归 FDE；原型用中性占位（D-PC-05 容器边界）。",
+      "route": "#s=P-M04-APP-VIEW"
+    },
+    {
+      "id": "P-M04-PREPARE",
+      "module": "M04",
+      "title": "准备与权限确认",
+      "cls": "state",
+      "note": "安装对话框复用现有结构：权限说明 + 下载进度 + 确认打开。",
+      "route": "#s=P-M04-PREPARE"
+    },
+    {
+      "id": "P-M04-PREP-FAILED",
+      "module": "M04",
+      "title": "准备失败",
+      "cls": "state",
+      "note": "失败不影响已安装版本；重试幂等，可先用当前版本（C-R02）。",
+      "route": "#s=P-M04-PREP-FAILED"
+    },
+    {
+      "id": "P-M04-CLOSE-ACTIVE",
+      "module": "M04",
+      "title": "关闭 · 三选项",
+      "cls": "adjust",
+      "note": "取消 / 后台继续 / 终止并关闭；展示正在运行的任务（D-PC-07 收口关闭方案）。",
+      "route": "#s=P-M04-CLOSE-ACTIVE"
+    },
+    {
+      "id": "P-M04-TERM-FAILED",
+      "module": "M04",
+      "title": "终止失败 · 标签保留",
+      "cls": "adjust",
+      "note": "终止失败保留标签并可重试；不出现“看似关了、后台还在跑”（C-R03）。",
+      "route": "#s=P-M04-TERM-FAILED"
+    },
+    {
+      "id": "P-M04-BACKGROUND",
+      "module": "M04",
+      "title": "后台继续",
+      "cls": "adjust",
+      "note": "后台任务有持续入口（顶栏运行 pill → 运行状态）。",
+      "route": "#s=P-M04-BACKGROUND"
+    },
+    {
+      "id": "P-M04-RUNTIME",
+      "module": "M04",
+      "title": "运行状态中心",
+      "cls": "adjust",
+      "note": "按空间列出本机运行项：进入 / 停止 / 全部终止并切换。",
+      "route": "#s=P-M04-RUNTIME"
+    },
+    {
+      "id": "P-M04-PERM-DENIED",
+      "module": "M04",
+      "title": "OS 权限被拒",
+      "cls": "adjust",
+      "note": "给系统设置路径后由用户主动重试；不自动反复请求（C-R06）。",
+      "route": "#s=P-M04-PERM-DENIED"
+    },
+    {
+      "id": "P-M05-CHAT",
+      "module": "M05",
+      "title": "助手 · 对话生成中",
+      "cls": "reuse",
+      "note": "三栏结构、会话行、活动行、停止按钮均为现有界面直接复用（D-PC-06）。",
+      "route": "#s=P-M05-CHAT"
+    },
+    {
+      "id": "P-M05-NEW",
+      "module": "M05",
+      "title": "助手 · 新会话",
+      "cls": "reuse",
+      "note": "空会话占位与建议 chips 复用现有样式。",
+      "route": "#s=P-M05-NEW"
+    },
+    {
+      "id": "P-M05-STOPPED",
+      "module": "M05",
+      "title": "助手 · 停止生成",
+      "cls": "reuse",
+      "note": "停止保留已生成部分与输入内容（PC-F02）。",
+      "route": "#s=P-M05-STOPPED"
+    },
+    {
+      "id": "P-M05-QUESTION",
+      "module": "M05",
+      "title": "助手 · 追问待回答",
+      "cls": "reuse",
+      "note": "问题卡 + 回答/暂不回答；会话状态跨重开保留。",
+      "route": "#s=P-M05-QUESTION"
+    },
+    {
+      "id": "P-M05-QUESTION-REOPEN",
+      "module": "M05",
+      "title": "助手 · 重开后问题恢复",
+      "cls": "reuse",
+      "note": "重开恢复问题与草稿；不替用户重复提交（PC-F10）。",
+      "route": "#s=P-M05-QUESTION-REOPEN"
+    },
+    {
+      "id": "P-M06-SKILLS",
+      "module": "M06",
+      "title": "技能 · 授权/已启用/设备准备",
+      "cls": "reuse",
+      "note": "技能三态 + 同名来源区分；侧栏技能列表直接复用。",
+      "route": "#s=P-M06-SKILLS"
+    },
+    {
+      "id": "P-M06-SKILL-DENIED",
+      "module": "M06",
+      "title": "技能 · 启用失败（无授权）",
+      "cls": "reuse",
+      "note": "无授权给联系作者路径；不影响会话其余部分。",
+      "route": "#s=P-M06-SKILL-DENIED"
+    },
+    {
+      "id": "P-M06-TOOLS",
+      "module": "M06",
+      "title": "数据源 / 自动化 / Browser",
+      "cls": "reuse",
+      "note": "侧栏数据源/自动化与助手内 Browser 均为现有入口。",
+      "route": "#s=P-M06-TOOLS"
+    },
+    {
+      "id": "P-M08-FILES",
+      "module": "M08",
+      "title": "原对话文件",
+      "cls": "reuse",
+      "note": "附件与生成文件留在会话内；不建统一文件汇总页（D-PC-03）。",
+      "route": "#s=P-M08-FILES"
+    },
+    {
+      "id": "P-M08-FILE-MISSING",
+      "module": "M08",
+      "title": "文件缺失",
+      "cls": "reuse",
+      "note": "缺失给重选路径；会话其余内容不受影响（C-R02）。",
+      "route": "#s=P-M08-FILE-MISSING"
+    },
+    {
+      "id": "P-M07-LIST",
+      "module": "M07",
+      "title": "我的圈子 · 列表",
+      "cls": "new",
+      "note": "个人空间稳定入口，与「全部 Apps」并列（D-PC-07 收口 M07 入口）；本轮新增页。",
+      "route": "#s=P-M07-LIST"
+    },
+    {
+      "id": "P-M07-EMPTY",
+      "module": "M07",
+      "title": "我的圈子 · 空态",
+      "cls": "new",
+      "note": "说明圈子来源（作者邀请）与作品获得路径。",
+      "route": "#s=P-M07-EMPTY"
+    },
+    {
+      "id": "P-M07-DETAIL-FOCUS",
+      "module": "M07",
+      "title": "圈子详情 · 已加入",
+      "cls": "new",
+      "note": "已获得作品 + 订阅信息 + 到期规则；续费/退出都在这里。",
+      "route": "#s=P-M07-DETAIL-FOCUS"
+    },
+    {
+      "id": "P-M07-JOIN-FREE",
+      "module": "M07",
+      "title": "加入免费圈子",
+      "cls": "new",
+      "note": "免费即时生效；作品自动出现在 Apps。",
+      "route": "#s=P-M07-JOIN-FREE"
+    },
+    {
+      "id": "P-M07-JOIN-PENDING",
+      "module": "M07",
+      "title": "圈子 · 待审批",
+      "cls": "new",
+      "note": "共享圈子需 Owner/Manager 审批；批准前不出现作品。",
+      "route": "#s=P-M07-JOIN-PENDING"
+    },
+    {
+      "id": "P-M07-DETAIL-PAID",
+      "module": "M07",
+      "title": "付费订阅详情",
+      "cls": "new",
+      "note": "价格/周期/手动续费/12 个月上限/支付渠道（浏览器）全在此说明。",
+      "route": "#s=P-M07-DETAIL-PAID"
+    },
+    {
+      "id": "P-M07-PAY-BROWSER",
+      "module": "M07",
+      "title": "圈子支付（浏览器交接）",
+      "cls": "cross",
+      "note": "支付在浏览器完成；桌面端只发起并确认结果。",
+      "route": "#s=P-M07-PAY-BROWSER"
+    },
+    {
+      "id": "P-M07-PAY-RETURN-FAIL",
+      "module": "M07",
+      "title": "已支付 · 刷新失败",
+      "cls": "new",
+      "note": "订单已在，不重复扣款；确认前不显示已到期（C-R01）。",
+      "route": "#s=P-M07-PAY-RETURN-FAIL"
+    },
+    {
+      "id": "P-M07-RENEW",
+      "module": "M07",
+      "title": "手动续费",
+      "cls": "new",
+      "note": "从到期日起算、上限 12 个月；不自动扣款。",
+      "route": "#s=P-M07-RENEW"
+    },
+    {
+      "id": "P-M07-EXPIRED",
+      "module": "M07",
+      "title": "圈子到期",
+      "cls": "new",
+      "note": "作品保留但标记到期，不能再启动；续费后立即恢复。",
+      "route": "#s=P-M07-EXPIRED"
+    },
+    {
+      "id": "P-M07-LEAVE",
+      "module": "M07",
+      "title": "退出圈子",
+      "cls": "new",
+      "note": "退出先停运行任务；已获得作品按来源策略处理。",
+      "route": "#s=P-M07-LEAVE"
+    },
+    {
+      "id": "P-M09-PRE-BLOCK",
+      "module": "M09",
+      "title": "发送前积分不足",
+      "cls": "new",
+      "note": "输入保留、发送不可用；充值走浏览器（PC-N03）。",
+      "route": "#s=P-M09-PRE-BLOCK"
+    },
+    {
+      "id": "P-M09-STREAM-CUT",
+      "module": "M09",
+      "title": "生成中不足 · 部分输出",
+      "cls": "new",
+      "note": "已生成部分保留并如实标注；不假装完成（PC-N03）。",
+      "route": "#s=P-M09-STREAM-CUT"
+    },
+    {
+      "id": "P-M09-APP-BANNER",
+      "module": "M09",
+      "title": "App 内平台提示（非模态）",
+      "cls": "new",
+      "note": "App 内只用非模态横幅；不接管 App 自身界面。",
+      "route": "#s=P-M09-APP-BANNER"
+    },
+    {
+      "id": "P-M09-ENT-NOTIFY",
+      "module": "M09",
+      "title": "企业积分 · 通知 Owner",
+      "cls": "new",
+      "note": "Member 不能充值：通知 Owner；额度裁决不在客户端。",
+      "route": "#s=P-M09-ENT-NOTIFY"
+    },
+    {
+      "id": "P-M09-USER-STOP",
+      "module": "M09",
+      "title": "用户主动停止 ≠ 积分不足",
+      "cls": "state",
+      "note": "两种停止原因分开展示，避免误导。",
+      "route": "#s=P-M09-USER-STOP"
+    },
+    {
+      "id": "P-M09-BROWSER",
+      "module": "M09",
+      "title": "充值（浏览器交接）",
+      "cls": "cross",
+      "note": "浏览器完成支付；到账以桌面端核对为准。",
+      "route": "#s=P-M09-BROWSER"
+    },
+    {
+      "id": "P-M09-CHECKING",
+      "module": "M09",
+      "title": "返回后 · 单次查询中",
+      "cls": "new",
+      "note": "返回只做一次查询；会话与草稿保留，不自动发送（PC-N03）。",
+      "route": "#s=P-M09-CHECKING"
+    },
+    {
+      "id": "P-M09-NOT-YET",
+      "module": "M09",
+      "title": "未到账 / 查询失败",
+      "cls": "new",
+      "note": "保持阻断并保留重试；不重复发起多次查询。",
+      "route": "#s=P-M09-NOT-YET"
+    },
+    {
+      "id": "P-M09-RESUMED",
+      "module": "M09",
+      "title": "到账解除 · 由用户决定",
+      "cls": "new",
+      "note": "解除后不自动发送/续写；是否继续由用户决定（已冻结）。",
+      "route": "#s=P-M09-RESUMED"
+    },
+    {
+      "id": "P-M10-MENU",
+      "module": "M10",
+      "title": "账号菜单 · 有管理资格",
+      "cls": "adjust",
+      "note": "管理入口（企业管理/创作者工作台/充值账单）统一收口在账号菜单（D-PC-07）。",
+      "route": "#s=P-M10-MENU"
+    },
+    {
+      "id": "P-M10-MENU-NOPRIV",
+      "module": "M10",
+      "title": "账号菜单 · 无资格",
+      "cls": "adjust",
+      "note": "无资格时不显示管理入口，而不是灰置。",
+      "route": "#s=P-M10-MENU-NOPRIV"
+    },
+    {
+      "id": "P-M10-SETTINGS",
+      "module": "M10",
+      "title": "设置 · 账号安全",
+      "cls": "reuse",
+      "note": "设置页复用现有 11 页结构与导航。",
+      "route": "#s=P-M10-SETTINGS"
+    },
+    {
+      "id": "P-M10-SETTINGS-APPEARANCE",
+      "module": "M10",
+      "title": "设置 · 外观",
+      "cls": "reuse",
+      "note": "主题等个人偏好随账号，不随空间。",
+      "route": "#s=P-M10-SETTINGS-APPEARANCE"
+    },
+    {
+      "id": "P-M10-ADMIN-BROWSER",
+      "module": "M10",
+      "title": "企业管理后台（浏览器交接）",
+      "cls": "cross",
+      "note": "后台独立登录；桌面端只保留入口（D-PC-07）。",
+      "route": "#s=P-M10-ADMIN-BROWSER"
+    },
+    {
+      "id": "P-M10-ADMIN-RETURN",
+      "module": "M10",
+      "title": "返回后 · 资格刷新",
+      "cls": "state",
+      "note": "返回重新核对资格；责任以后台数据为准。",
+      "route": "#s=P-M10-ADMIN-RETURN"
+    },
+    {
+      "id": "P-M11-REAUTH",
+      "module": "M11",
+      "title": "会话过期 · 重新登录",
+      "cls": "state",
+      "note": "登录后回到上次空间与页面；运行任务原地等待（C-R08）。",
+      "route": "#s=P-M11-REAUTH"
+    },
+    {
+      "id": "P-M11-REVOKE",
+      "module": "M11",
+      "title": "运行中被移除",
+      "cls": "adjust",
+      "note": "终止本机企业活动后回安全入口；个人空间仍可用（PC-F11）。",
+      "route": "#s=P-M11-REVOKE"
+    },
+    {
+      "id": "P-M11-PERSONAL-RESTRICTED",
+      "module": "M11",
+      "title": "个人也受限 · 安全页",
+      "cls": "adjust",
+      "note": "最小操作集：联系管理员 / 退出登录；不归因。",
+      "route": "#s=P-M11-PERSONAL-RESTRICTED"
+    },
+    {
+      "id": "P-M11-BLOCKED-WITHDRAWN",
+      "module": "M11",
+      "title": "作品 · 分发被撤下",
+      "cls": "state",
+      "note": "保留安装但不可启动；状态原因如实展示。",
+      "route": "#s=P-M11-BLOCKED-WITHDRAWN"
+    },
+    {
+      "id": "P-M11-BLOCKED-EXPIRED",
+      "module": "M11",
+      "title": "作品 · 圈子订阅到期",
+      "cls": "state",
+      "note": "续费后立即恢复，不需要重新安装。",
+      "route": "#s=P-M11-BLOCKED-EXPIRED"
+    },
+    {
+      "id": "P-M11-BLOCKED-VERSION",
+      "module": "M11",
+      "title": "作品 · 版本紧急阻断",
+      "cls": "state",
+      "note": "安全问题紧急阻断；升级路径可见（PC-F08）。",
+      "route": "#s=P-M11-BLOCKED-VERSION"
+    },
+    {
+      "id": "P-M11-OFFLINE-HOME",
+      "module": "M11",
+      "title": "离线打开",
+      "cls": "state",
+      "note": "缓存可用范围如实标注；联网自动续上（C-R07）。",
+      "route": "#s=P-M11-OFFLINE-HOME"
+    },
+    {
+      "id": "P-M11-OFFLINE-RUNNING",
+      "module": "M11",
+      "title": "运行中断网",
+      "cls": "adjust",
+      "note": "本地可继续、联网步骤等待；用户可选择终止（C-R07）。",
+      "route": "#s=P-M11-OFFLINE-RUNNING"
+    },
+    {
+      "id": "P-M11-CONTRACT",
+      "module": "M11",
+      "title": "需要升级 Polo",
+      "cls": "integ",
+      "note": "集成候选 ContractGate：最低版本阻断企业空间，个人空间不受影响。",
+      "route": "#s=P-M11-CONTRACT"
+    },
+    {
+      "id": "P-M11-CONTRACT-DL",
+      "module": "M11",
+      "title": "正在下载更新",
+      "cls": "integ",
+      "note": "后台下载；可用个人空间，不被强制等待。",
+      "route": "#s=P-M11-CONTRACT-DL"
+    },
+    {
+      "id": "P-M11-CONTRACT-FAIL",
+      "module": "M11",
+      "title": "更新没有完成",
+      "cls": "integ",
+      "note": "幂等重试，不出现半更新状态；重试/帮助路径可见。",
+      "route": "#s=P-M11-CONTRACT-FAIL"
+    },
+    {
+      "id": "P-M11-SPACE-ERROR",
+      "module": "M11",
+      "title": "空间列表加载失败",
+      "cls": "integ",
+      "note": "集成候选 space-error 卡：重试或离线继续（缓存）。",
+      "route": "#s=P-M11-SPACE-ERROR"
+    },
+    {
+      "id": "P-M11-REOPEN-RECOVERY",
+      "module": "M11",
+      "title": "重开恢复",
+      "cls": "adjust",
+      "note": "恢复会话与标签；运行任务核对状态，不假装完成（PC-F10）。",
+      "route": "#s=P-M11-REOPEN-RECOVERY"
+    }
+  ],
+  "scene_map": {
+    "PC-F01": {
+      "label": "首次进入和有效会话恢复",
+      "screens": [
+        "P-M01-LOGIN-PASSWORD",
+        "P-M01-PERSONAL-PREP",
+        "P-M01-PERSONAL-PREP-FAIL",
+        "P-M03-HOME-ZERO",
+        "P-M01-COLD-START",
+        "P-M01-REOPEN"
+      ]
+    },
+    "PC-F02": {
+      "label": "目录与全部 Apps（来源/版本/状态）",
+      "screens": [
+        "P-M03-ALL-APPS",
+        "P-M03-ALL-APPS-ENT-EMPTY",
+        "P-M03-INSPECTOR",
+        "P-M03-HOME-PERSONAL",
+        "P-M03-CONTROLS"
+      ]
+    },
+    "PC-F03": {
+      "label": "内容订阅（我的圈子）",
+      "screens": [
+        "P-M07-LIST",
+        "P-M07-EMPTY",
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-JOIN-FREE",
+        "P-M07-JOIN-PENDING",
+        "P-M07-DETAIL-PAID",
+        "P-M07-PAY-BROWSER",
+        "P-M07-PAY-RETURN-FAIL",
+        "P-M07-RENEW",
+        "P-M07-EXPIRED",
+        "P-M07-LEAVE"
+      ]
+    },
+    "PC-F04": {
+      "label": "用助手完成工作（会话/技能/文件）",
+      "screens": [
+        "P-M05-CHAT",
+        "P-M05-NEW",
+        "P-M05-STOPPED",
+        "P-M05-QUESTION",
+        "P-M05-QUESTION-REOPEN",
+        "P-M06-SKILLS",
+        "P-M06-SKILL-DENIED",
+        "P-M06-TOOLS",
+        "P-M08-FILES",
+        "P-M08-FILE-MISSING"
+      ]
+    },
+    "PC-F05": {
+      "label": "浏览器邀请承接",
+      "screens": [
+        "P-M01-INVITE-BROWSER",
+        "P-M01-INVITE-MISMATCH",
+        "P-M01-INVITE-PENDING",
+        "P-M01-NOT-INSTALLED",
+        "P-M01-REFRESH-FAIL"
+      ]
+    },
+    "PC-F06": {
+      "label": "空间切换（含活动任务）",
+      "screens": [
+        "P-M02-SWITCHER",
+        "P-M02-CONFIRM",
+        "P-M02-STOPPING",
+        "P-M02-STOP-FAILED",
+        "P-M02-STOP-CANCEL",
+        "P-M02-TARGET-LOADING",
+        "P-M02-TARGET-FAILED",
+        "P-M02-ACCESS-LOST"
+      ]
+    },
+    "PC-F07": {
+      "label": "创建企业",
+      "screens": [
+        "P-M01-CREATE-ENT",
+        "P-M02-SWITCHER",
+        "P-M03-HOME-ENT"
+      ]
+    },
+    "PC-F08": {
+      "label": "版本紧急阻断与升级",
+      "screens": [
+        "P-M11-CONTRACT",
+        "P-M11-CONTRACT-DL",
+        "P-M11-CONTRACT-FAIL",
+        "P-M11-BLOCKED-VERSION"
+      ]
+    },
+    "PC-F09": {
+      "label": "账号、偏好与管理后台入口",
+      "screens": [
+        "P-M10-MENU",
+        "P-M10-MENU-NOPRIV",
+        "P-M10-SETTINGS",
+        "P-M10-SETTINGS-APPEARANCE",
+        "P-M10-ADMIN-BROWSER",
+        "P-M10-ADMIN-RETURN"
+      ]
+    },
+    "PC-F10": {
+      "label": "客户端重开恢复",
+      "screens": [
+        "P-M01-REOPEN",
+        "P-M11-REOPEN-RECOVERY",
+        "P-M05-QUESTION-REOPEN"
+      ]
+    },
+    "PC-F11": {
+      "label": "成员撤权与安全退回",
+      "screens": [
+        "P-M11-REVOKE",
+        "P-M11-PERSONAL-RESTRICTED"
+      ]
+    },
+    "PC-N01": {
+      "label": "零常用 / 真空目录 / 加载失败",
+      "screens": [
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M03-HOME-OFFLINE"
+      ]
+    },
+    "PC-N02": {
+      "label": "从授权列表打开 App（容器边界）",
+      "screens": [
+        "P-M04-APP-VIEW",
+        "P-M04-PREPARE",
+        "P-M04-PREP-FAILED",
+        "P-M04-CLOSE-ACTIVE",
+        "P-M04-BACKGROUND",
+        "P-M04-RUNTIME"
+      ]
+    },
+    "PC-N03": {
+      "label": "积分阻断与充值人工恢复",
+      "screens": [
+        "P-M09-PRE-BLOCK",
+        "P-M09-STREAM-CUT",
+        "P-M09-APP-BANNER",
+        "P-M09-ENT-NOTIFY",
+        "P-M09-USER-STOP",
+        "P-M09-BROWSER",
+        "P-M09-CHECKING",
+        "P-M09-NOT-YET",
+        "P-M09-RESUMED"
+      ]
+    },
+    "PC-N04": {
+      "label": "助手等待用户回答与重开恢复",
+      "screens": [
+        "P-M05-QUESTION-REOPEN"
+      ]
+    },
+    "C-R01": {
+      "label": "会话 / 账号失效恢复",
+      "screens": [
+        "P-M11-REAUTH",
+        "P-M01-REOPEN",
+        "P-M01-REFRESH-FAIL",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M07-PAY-RETURN-FAIL"
+      ]
+    },
+    "C-R02": {
+      "label": "空态 / 失败态分立",
+      "screens": [
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M03-ALL-APPS-ENT-EMPTY",
+        "P-M03-HOME-OFFLINE",
+        "P-M04-PREP-FAILED",
+        "P-M08-FILE-MISSING"
+      ]
+    },
+    "C-R03": {
+      "label": "上下文归属（回执不跨空间）",
+      "screens": [
+        "P-M02-TARGET-LOADING",
+        "P-M02-STOPPING",
+        "P-M04-TERM-FAILED"
+      ]
+    },
+    "C-R04": {
+      "label": "取消 / 中断不回滚已完成停止",
+      "screens": [
+        "P-M02-CONFIRM",
+        "P-M02-STOP-FAILED",
+        "P-M02-STOP-CANCEL"
+      ]
+    },
+    "C-R05": {
+      "label": "重新打开重验，不猜成功",
+      "screens": [
+        "P-M02-ACCESS-LOST",
+        "P-M11-REOPEN-RECOVERY",
+        "P-M05-QUESTION-REOPEN"
+      ]
+    },
+    "C-R06": {
+      "label": "桌面权限被拒给路径",
+      "screens": [
+        "P-M04-PERM-DENIED"
+      ]
+    },
+    "C-R07": {
+      "label": "切空间不搬数据 / 离线边界",
+      "screens": [
+        "P-M02-SWITCHER",
+        "P-M03-HOME-OFFLINE",
+        "P-M11-OFFLINE-HOME",
+        "P-M11-OFFLINE-RUNNING"
+      ]
+    },
+    "C-R08": {
+      "label": "Browser 返回需同账号验证与自身刷新",
+      "screens": [
+        "P-M01-LOGIN-CANCEL",
+        "P-M11-REAUTH",
+        "P-M01-REFRESH-FAIL",
+        "P-M09-CHECKING",
+        "P-M09-NOT-YET",
+        "P-M07-PAY-RETURN-FAIL",
+        "P-M10-ADMIN-RETURN"
+      ]
+    },
+    "D-PC-01": {
+      "label": "保留首页；零常用引导全部 Apps",
+      "screens": [
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-PERSONAL"
+      ]
+    },
+    "D-PC-02": {
+      "label": "App 负责业务内容/保存/找回",
+      "screens": [
+        "P-M04-APP-VIEW",
+        "P-M03-INSPECTOR"
+      ]
+    },
+    "D-PC-03": {
+      "label": "独立文件汇总页延后；文件留原对话",
+      "screens": [
+        "P-M08-FILES",
+        "P-M08-FILE-MISSING"
+      ]
+    },
+    "D-PC-04": {
+      "label": "本轮整体方案与 C-R06 恢复交互接受",
+      "screens": [
+        "P-M11-REAUTH",
+        "P-M11-REVOKE",
+        "P-M11-PERSONAL-RESTRICTED",
+        "P-M11-BLOCKED-WITHDRAWN",
+        "P-M11-BLOCKED-EXPIRED",
+        "P-M11-BLOCKED-VERSION",
+        "P-M11-OFFLINE-HOME",
+        "P-M11-OFFLINE-RUNNING",
+        "P-M11-CONTRACT",
+        "P-M11-CONTRACT-DL",
+        "P-M11-CONTRACT-FAIL",
+        "P-M11-SPACE-ERROR",
+        "P-M11-REOPEN-RECOVERY"
+      ]
+    },
+    "D-PC-05": {
+      "label": "FDE 负责 App 内部；App 占满工作区",
+      "screens": [
+        "P-M04-APP-VIEW",
+        "P-M11-REOPEN-RECOVERY"
+      ]
+    },
+    "D-PC-06": {
+      "label": "助手整体框架直接复用",
+      "screens": [
+        "P-M05-CHAT",
+        "P-M05-NEW",
+        "P-M05-STOPPED",
+        "P-M05-QUESTION",
+        "P-M05-QUESTION-REOPEN",
+        "P-M06-SKILLS",
+        "P-M06-SKILL-DENIED",
+        "P-M06-TOOLS",
+        "P-M08-FILES",
+        "P-M08-FILE-MISSING"
+      ]
+    },
+    "D-PC-07": {
+      "label": "首页/关闭/圈子入口/积分提示 + 管理入口统一账号菜单",
+      "screens": [
+        "P-M03-HOME-PERSONAL",
+        "P-M03-HOME-ENT",
+        "P-M03-MANAGE-HOME",
+        "P-M04-CLOSE-ACTIVE",
+        "P-M07-LIST",
+        "P-M09-PRE-BLOCK",
+        "P-M10-MENU"
+      ]
+    },
+    "J-PC-01": {
+      "label": "没有邀请也能开始使用（M01）",
+      "screens": [
+        "P-M01-LOGIN-PASSWORD",
+        "P-M01-LOGIN-PHONE",
+        "P-M01-LOGIN-CODE",
+        "P-M01-LOGIN-CANCEL",
+        "P-M01-PERSONAL-PREP",
+        "P-M01-PERSONAL-PREP-FAIL",
+        "P-M01-REOPEN",
+        "P-M01-INVITE-BROWSER",
+        "P-M01-INVITE-MISMATCH",
+        "P-M01-INVITE-PENDING",
+        "P-M01-REFRESH-FAIL",
+        "P-M01-NOT-INSTALLED",
+        "P-M01-CREATE-ENT",
+        "P-M01-COLD-START"
+      ]
+    },
+    "J-PC-02": {
+      "label": "工作中切换个人与企业（M02）",
+      "screens": [
+        "P-M02-SWITCHER",
+        "P-M02-CONFIRM",
+        "P-M02-STOPPING",
+        "P-M02-STOP-FAILED",
+        "P-M02-STOP-CANCEL",
+        "P-M02-TARGET-LOADING",
+        "P-M02-TARGET-FAILED",
+        "P-M02-ACCESS-LOST"
+      ]
+    },
+    "J-PC-03": {
+      "label": "积分不足后继续工作（M09）",
+      "screens": [
+        "P-M09-PRE-BLOCK",
+        "P-M09-STREAM-CUT",
+        "P-M09-APP-BANNER",
+        "P-M09-ENT-NOTIFY",
+        "P-M09-USER-STOP",
+        "P-M09-BROWSER",
+        "P-M09-CHECKING",
+        "P-M09-NOT-YET",
+        "P-M09-RESUMED"
+      ]
+    },
+    "J-PC-04": {
+      "label": "用助手完成工作（M05/M06/M08）",
+      "screens": [
+        "P-M05-CHAT",
+        "P-M05-NEW",
+        "P-M05-STOPPED",
+        "P-M05-QUESTION",
+        "P-M05-QUESTION-REOPEN",
+        "P-M06-SKILLS",
+        "P-M06-SKILL-DENIED",
+        "P-M06-TOOLS",
+        "P-M08-FILES",
+        "P-M08-FILE-MISSING"
+      ]
+    },
+    "J-PC-05": {
+      "label": "通过圈子获得能力（M07）",
+      "screens": [
+        "P-M07-LIST",
+        "P-M07-EMPTY",
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-JOIN-FREE",
+        "P-M07-JOIN-PENDING",
+        "P-M07-DETAIL-PAID",
+        "P-M07-PAY-BROWSER",
+        "P-M07-PAY-RETURN-FAIL",
+        "P-M07-RENEW",
+        "P-M07-EXPIRED",
+        "P-M07-LEAVE"
+      ]
+    },
+    "J-PC-06": {
+      "label": "管账号和进入后台（M10；M11 恢复旅程原文亦归 J-PC-06）",
+      "screens": [
+        "P-M10-MENU",
+        "P-M10-MENU-NOPRIV",
+        "P-M10-SETTINGS",
+        "P-M10-SETTINGS-APPEARANCE",
+        "P-M10-ADMIN-BROWSER",
+        "P-M10-ADMIN-RETURN",
+        "P-M11-REAUTH",
+        "P-M11-REVOKE",
+        "P-M11-PERSONAL-RESTRICTED",
+        "P-M11-BLOCKED-WITHDRAWN",
+        "P-M11-BLOCKED-EXPIRED",
+        "P-M11-BLOCKED-VERSION",
+        "P-M11-OFFLINE-HOME",
+        "P-M11-OFFLINE-RUNNING",
+        "P-M11-CONTRACT",
+        "P-M11-CONTRACT-DL",
+        "P-M11-CONTRACT-FAIL",
+        "P-M11-SPACE-ERROR",
+        "P-M11-REOPEN-RECOVERY"
+      ]
+    },
+    "J-PC-07": {
+      "label": "管理打开的 App（M04）",
+      "screens": [
+        "P-M04-APP-VIEW",
+        "P-M04-PREPARE",
+        "P-M04-PREP-FAILED",
+        "P-M04-CLOSE-ACTIVE",
+        "P-M04-TERM-FAILED",
+        "P-M04-BACKGROUND",
+        "P-M04-RUNTIME",
+        "P-M04-PERM-DENIED"
+      ]
+    }
+  },
+  "stories": [
+    {
+      "id": "S1",
+      "name": "故事 1 · 首登加入企业并使用",
+      "steps": [
+        {
+          "screen": "P-M01-LOGIN-PASSWORD",
+          "screen_title": "登录 · 密码登录",
+          "narration": "小王首次使用 Polo，用账号密码登录。"
+        },
+        {
+          "screen": "P-M01-PERSONAL-PREP",
+          "screen_title": "我的空间 · 准备中",
+          "narration": "登录成功，系统为它准备唯一的「我的空间」。"
+        },
+        {
+          "screen": "P-M03-HOME-ZERO",
+          "screen_title": "首页 · 首登零常用",
+          "narration": "首登还没有常用 App：助手始终可用，引导去全部 Apps。"
+        },
+        {
+          "screen": "P-M03-ALL-APPS",
+          "screen_title": "全部 Apps · 来源分组",
+          "narration": "在全部 Apps 里按来源浏览：企业分发、圈子作品。"
+        },
+        {
+          "screen": "P-M03-INSPECTOR",
+          "screen_title": "App 详情（inspector）",
+          "narration": "查看详情：来源、版本与状态原因都在这里核对。"
+        },
+        {
+          "screen": "P-M04-PREPARE",
+          "screen_title": "准备与权限确认",
+          "narration": "准备「合同审查」更新：确认权限后下载。"
+        },
+        {
+          "screen": "P-M04-APP-VIEW",
+          "screen_title": "App 容器 · 全屏 FDE 占位",
+          "narration": "App 占满主内容工作区，内部界面归 FDE（原型为中性占位）。"
+        },
+        {
+          "screen": "P-M05-CHAT",
+          "screen_title": "助手 · 对话生成中",
+          "narration": "回到 Polo 助手，让助手基于附件整理报价汇总。"
+        },
+        {
+          "screen": "P-M08-FILES",
+          "screen_title": "原对话文件",
+          "narration": "附件与生成文件都留在会话里，重开后可继续。"
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "name": "故事 2 · 日常切换空间（部分停止失败）",
+      "steps": [
+        {
+          "screen": "P-M03-HOME-ENT",
+          "screen_title": "首页 · 企业空间（晨星科技）",
+          "narration": "小王在晨星科技工作，首页显示 3 项运行中。"
+        },
+        {
+          "screen": "P-M04-RUNTIME",
+          "screen_title": "运行状态中心",
+          "narration": "运行状态中心按空间列出本机任务：App 与助手生成。"
+        },
+        {
+          "screen": "P-M02-SWITCHER",
+          "screen_title": "空间切换器（下拉）",
+          "narration": "从顶栏空间切换器发起切换；有活动任务时会先确认。"
+        },
+        {
+          "screen": "P-M02-CONFIRM",
+          "screen_title": "切换确认 · 终止 3 项",
+          "narration": "确认框列出将被终止的 3 项任务。"
+        },
+        {
+          "screen": "P-M02-STOPPING",
+          "screen_title": "终止进度",
+          "narration": "逐项终止中；全部停止后才提交切换。"
+        },
+        {
+          "screen": "P-M02-STOP-FAILED",
+          "screen_title": "部分停止失败",
+          "narration": "1 项未能终止：重试失败项，或取消切换。"
+        },
+        {
+          "screen": "P-M02-STOP-CANCEL",
+          "screen_title": "取消切换 · 仍在原空间",
+          "narration": "小王取消切换：留在晨星科技，已终止的项不会自动复活。"
+        },
+        {
+          "screen": "P-M04-BACKGROUND",
+          "screen_title": "后台继续",
+          "narration": "改为后台继续：顶栏保留运行入口，随时可查看。"
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "name": "故事 3 · 积分不足 → 浏览器 → 单次查询",
+      "steps": [
+        {
+          "screen": "P-M05-CHAT",
+          "screen_title": "助手 · 对话生成中",
+          "narration": "小王正在让助手按客户分组整理报价汇总。"
+        },
+        {
+          "screen": "P-M09-PRE-BLOCK",
+          "screen_title": "发送前积分不足",
+          "narration": "发送前发现积分不足：输入保留，发送不可用。"
+        },
+        {
+          "screen": "P-M09-BROWSER",
+          "screen_title": "充值（浏览器交接）",
+          "narration": "去浏览器完成充值；桌面端只发起与确认结果。"
+        },
+        {
+          "screen": "P-M09-CHECKING",
+          "screen_title": "返回后 · 单次查询中",
+          "narration": "回到 Polo：只做一次到账查询，会话与草稿保留。"
+        },
+        {
+          "screen": "P-M09-NOT-YET",
+          "screen_title": "未到账 / 查询失败",
+          "narration": "第一次查询未到账：保持阻断，可再查一次。"
+        },
+        {
+          "screen": "P-M09-RESUMED",
+          "screen_title": "到账解除 · 由用户决定",
+          "narration": "积分到账：解除阻断，但不自动发送——由小王决定。"
+        },
+        {
+          "screen": "P-M05-CHAT",
+          "screen_title": "助手 · 对话生成中",
+          "narration": "小王自己点下发送，继续刚才的整理。"
+        }
+      ]
+    }
+  ],
+  "screenshots": {
+    "1440x900": [
+      {
+        "id": "P-M01-INVITE-BROWSER",
+        "sha256": "32377782c7e5042e92580114e47e2726ac13415e67482c67749914346a45b723"
+      },
+      {
+        "id": "P-M01-LOGIN-PASSWORD",
+        "sha256": "59cd8c1e5fcb43121ca1dc40dea49f1f322f03bd1095258aa9b6350edc42cc3f"
+      },
+      {
+        "id": "P-M01-PERSONAL-PREP",
+        "sha256": "cbec3e11cc3043a7a241c7dd5f47612eeffbc653083f8188693e5a8474488e56"
+      },
+      {
+        "id": "P-M02-CONFIRM",
+        "sha256": "3f620866d237a786967a14a3bc1d58fa1288dd82287ac87dd1b2dceffa9708a1"
+      },
+      {
+        "id": "P-M02-STOP-FAILED",
+        "sha256": "2d4ec1a64f806b422ae9cb519d57458121827456e790adee9891f8a9d01b1359"
+      },
+      {
+        "id": "P-M02-SWITCHER",
+        "sha256": "7a428c00c5c9bf9aeaec7430af07857b58079a661f8dbb2ab18f8a792b456898"
+      },
+      {
+        "id": "P-M03-ALL-APPS",
+        "sha256": "b3e70a8f00c2c52afd34b120672a39670684eecf3be908c2c67fa91abcd04ad8"
+      },
+      {
+        "id": "P-M03-HOME-ENT",
+        "sha256": "5103d6cc576f9fdfcc8523556dd2a2bfe3d6bf87bf7f2daa02e5747b262c5f5a"
+      },
+      {
+        "id": "P-M03-HOME-PERSONAL",
+        "sha256": "36a0e3dccc0ca7b047a586df94ba630f7f0d4042d10ead52d1dae02958deebf1"
+      },
+      {
+        "id": "P-M03-HOME-ZERO",
+        "sha256": "4c8456a4711e6a3195755f23b135aa6d429c7113a8cadc2dca622ff4de0bafc1"
+      },
+      {
+        "id": "P-M04-APP-VIEW",
+        "sha256": "a31cb8c380beaaca0fa98a324a675500a8862953d10e5ad5ae072b9479f48889"
+      },
+      {
+        "id": "P-M04-CLOSE-ACTIVE",
+        "sha256": "0b40a0301fc005cad76490a20da46e5baf3805890dcb0f114aedbe73ca4984f7"
+      },
+      {
+        "id": "P-M04-PERM-DENIED",
+        "sha256": "663c812f4d7c74aa5350ea33bfb58de7777b42f979f1aa5896d4b7e07f6b02d8"
+      },
+      {
+        "id": "P-M05-CHAT",
+        "sha256": "becaf4828a58a0df73f76bb04f500112b43089d6d446167e0e7c3f84fd824860"
+      },
+      {
+        "id": "P-M05-QUESTION-REOPEN",
+        "sha256": "00aafa5768a2cd7fcd44bf2a808716847929f46d90d91bea147b1c1c1a8b54bf"
+      },
+      {
+        "id": "P-M06-SKILLS",
+        "sha256": "26171b3a95d8fda3dfd116a6ce8ae65c3ea8dfdcf9c8c02d646473a72cb62914"
+      },
+      {
+        "id": "P-M07-DETAIL-PAID",
+        "sha256": "310a0811ce8f2f3eaa496c4dd121527fc0355cd5bb09c27e59f360ad0e7c4bf7"
+      },
+      {
+        "id": "P-M07-LIST",
+        "sha256": "dba9a738bdc081a9a707628e8061dd0ad1fe87ac7649e313c8f3684b70418b01"
+      },
+      {
+        "id": "P-M08-FILES",
+        "sha256": "4e6caebaea41688c7017ea98f5ade81efa02492dc9ae3df3ba4a87dad9bb8c65"
+      },
+      {
+        "id": "P-M09-BROWSER",
+        "sha256": "c55fc4904688d22944f4b84c8fe58ba733765b007c78128701f2cfe439c051e3"
+      },
+      {
+        "id": "P-M09-PRE-BLOCK",
+        "sha256": "b47d30c498365368094ae3a0f9e44e23837f4c914a8bc4e9843bf9d1a6695042"
+      },
+      {
+        "id": "P-M09-RESUMED",
+        "sha256": "946dfa4e439f4fc558febf07d8cfc7340c69c55eda1c127c4750ee6356ebd640"
+      },
+      {
+        "id": "P-M10-MENU",
+        "sha256": "8976dc0c9b3f9a5defd78e3ab9b21ec840874e1eb007e31c49d2be11feb532b0"
+      },
+      {
+        "id": "P-M11-CONTRACT",
+        "sha256": "785d46d774037e201dc2fa72ec31fa5f2e618208c8333711fb75471531d46ce6"
+      },
+      {
+        "id": "P-M11-OFFLINE-HOME",
+        "sha256": "f418a1dda32604ec8456be2d81606b3f58ee2a4b5d680b8fcb0d31bafe365340"
+      },
+      {
+        "id": "P-M11-REOPEN-RECOVERY",
+        "sha256": "87fbcb25b26f3bc1c3ce513a003afcaefba29f1f8731b9c5692a515c1fa0713d"
+      }
+    ],
+    "1024x768": [
+      {
+        "id": "P-M02-SWITCHER",
+        "sha256": "0b3f945df10b66b7b28c87580a1e6d1531d27009e69d4e2dfa0caecaf7c78143"
+      },
+      {
+        "id": "P-M03-ALL-APPS",
+        "sha256": "cf875db5c58d9775f05d03ed107c6a76af04db109e22b9a3577b2e037aed3fb3"
+      },
+      {
+        "id": "P-M03-HOME-PERSONAL",
+        "sha256": "d9d4baa1ee0f2b8b33870ac25c43488ef55528a1526f766c9543ce59f7ecf241"
+      },
+      {
+        "id": "P-M03-HOME-ZERO",
+        "sha256": "62bd00f8abf8c04dcec538c581ba1f95800f8bb7ca059f287a712b6ae818e675"
+      },
+      {
+        "id": "P-M04-APP-VIEW",
+        "sha256": "c6436c6a5ae2758950eccf21e424a1abe7f4704fbeebb47860979c4a96cb5ede"
+      },
+      {
+        "id": "P-M05-CHAT",
+        "sha256": "525c79fbcf058866de0837d3185892c94c8ebd4ccf715d1caa65afd4e8055176"
+      },
+      {
+        "id": "P-M07-LIST",
+        "sha256": "a426f115cb51259836fffa3797fb8e6fdee3c1e0bf6bd3c342e1d3058a76b934"
+      },
+      {
+        "id": "P-M08-FILES",
+        "sha256": "0156b7c89a0a9223a43bdb3155c3bb21aeaeaab3fa8a8aa7b7bd993df3daef1e"
+      },
+      {
+        "id": "P-M09-PRE-BLOCK",
+        "sha256": "60acd2e15ca4b10e5620843af8d27a7e94697ab82c8f1590b951483617b26997"
+      },
+      {
+        "id": "P-M10-MENU",
+        "sha256": "be39f37f51857d361febd0c8cc872ed6b9fd184fae924466fa4a308af0c90572"
+      }
+    ]
+  },
+  "visual_acceptance": {
+    "method": "Playwright 1.63 (chromium channel=chrome, headless, deviceScaleFactor=1)",
+    "script_checks": "90 屏 × 2 视口：pageerror/console.error=0、requestfailed=0、横向溢出=0、空渲染=0；data-go 57 项全部命中 SCREENS；页面索引浮层实测：90 项分组可见、点项跳屏即关、遮罩/Esc/✕ 关闭、点卡片空白不关、0 pageerror",
+    "detail": "visual-acceptance.md"
+  },
+  "boundaries": [
+    "不修改 Electron/Admin/Browser 产品代码；本卡只含文档与原型，不发布",
+    "浏览器端只画交接卡（cls=cross，共 8 屏），不代表浏览器端设计",
+    "App 内部一律中性 FDE 占位（D-PC-05 容器边界）",
+    "全部数据为虚构演示数据；离线可用，无网络请求",
+    "dev（01f4447c）与集成候选（3dc20ca）不混称"
+  ],
+  "pending_decisions": [
+    "企业首页是否放「企业管理」卡（原型按 D-PC-07 不放；C-INT 现状含管理入口）",
+    "常用 Apps 上限的对外措辞（冻结为最多 5 个）",
+    "圈子续费展示措辞（冻结口径：从到期日起算、上限 12 个月）",
+    "圈子订阅支付要素（虚构演示数据）",
+    "企业 Member 积分不足通知 Owner 的文案",
+    "充值套餐与金额（虚构演示数据）"
+  ]
+}

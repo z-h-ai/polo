@@ -1,0 +1,99 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'bun:test'
+import {
+  assertApprovedReleaseIdentity,
+  createDraftReleaseIdentity,
+  parseDraftReleaseIdentity,
+  RELEASE_ASSET_NAMES,
+  selectDraftRelease,
+} from './electron-release-draft-identity'
+
+async function fixture(): Promise<{ root: string, release: object }> {
+  const root = await mkdtemp(join(tmpdir(), 'polo-draft-identity-'))
+  const assets = await Promise.all(RELEASE_ASSET_NAMES.map(async (name, index) => {
+    const contents = `asset-${index + 1}`
+    await writeFile(join(root, name), contents)
+    return { id: index + 1, name, size: Buffer.byteLength(contents), state: 'uploaded' }
+  }))
+  return { root, release: { id: 123, draft: true, assets } }
+}
+
+describe('approved Draft Release identity', () => {
+  it('pins the numeric release ID and all nine uploaded asset IDs, names, sizes, and SHA-256 digests', async () => {
+    const { root, release } = await fixture()
+    try {
+      const identity = await createDraftReleaseIdentity(root, release)
+      expect(identity.releaseId).toBe(123)
+      expect(identity.assets).toHaveLength(9)
+      expect(identity.assets.map(asset => asset.name).sort()).toEqual([...RELEASE_ASSET_NAMES].sort())
+      expect(identity.assets.every(asset => /^[a-f0-9]{64}$/.test(asset.sha256))).toBe(true)
+      expect(parseDraftReleaseIdentity(identity)).toEqual(identity)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('rejects non-Draft releases and incomplete or forged approved identities', async () => {
+    const { root, release } = await fixture()
+    try {
+      await expect(createDraftReleaseIdentity(root, { ...release, draft: false }))
+        .rejects.toThrow('must remain a Draft')
+      expect(() => parseDraftReleaseIdentity({ releaseId: 123, assets: [] }))
+        .toThrow('complete release whitelist')
+      const identity = await createDraftReleaseIdentity(root, release)
+      identity.assets[0]!.sha256 = 'not-a-digest'
+      expect(() => parseDraftReleaseIdentity(identity)).toThrow('asset identity is invalid')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('revalidates only the exact approved release ID, Draft state, tag, commit, and complete asset identity', async () => {
+    const { root, release } = await fixture()
+    try {
+      const identity = await createDraftReleaseIdentity(root, release)
+      const approved = {
+        ...release,
+        tag_name: 'v1.2.3',
+        target_commitish: 'a'.repeat(40),
+      }
+      expect(() => assertApprovedReleaseIdentity(approved, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).not.toThrow()
+      expect(() => assertApprovedReleaseIdentity({ ...approved, id: 124 }, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).toThrow('ID does not match')
+      expect(() => assertApprovedReleaseIdentity({ ...approved, draft: false }, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).toThrow('draft state')
+      expect(() => assertApprovedReleaseIdentity({ ...approved, assets: approved.assets.slice(1) }, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).toThrow('assets do not match')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('selects one authenticated Draft from paginated releases by exact tag and commit', () => {
+    const commit = 'a'.repeat(40)
+    const selected = {
+      id: 123,
+      draft: true,
+      tag_name: 'v0.15.9',
+      target_commitish: commit,
+      assets: [],
+    }
+    expect(selectDraftRelease([
+      [{ ...selected, id: 122, draft: false }],
+      [selected, { ...selected, id: 124, tag_name: 'v0.15.8' }],
+    ], { tag: 'v0.15.9', commit })).toEqual(selected)
+    expect(() => selectDraftRelease([[selected], [{ ...selected, id: 124 }]], {
+      tag: 'v0.15.9', commit,
+    })).toThrow('found 2')
+    expect(() => selectDraftRelease([[selected]], {
+      tag: 'v0.15.9', commit: 'b'.repeat(40),
+    })).toThrow('found 0')
+    expect(() => selectDraftRelease([[selected]], {
+      tag: '../v0.15.9', commit,
+    })).toThrow('strict v-prefixed SemVer')
+    expect(() => selectDraftRelease([[selected]], {
+      tag: 'v0.15.9-01', commit,
+    })).toThrow('strict v-prefixed SemVer')
+  })
+})
