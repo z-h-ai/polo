@@ -1,0 +1,44 @@
+[
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "head": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "status": ""
+  },
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-94/feat/product-space-credit-recharge",
+    "branch": "POL-94/feat/product-space-credit-recharge",
+    "head": "9ae3e7308317fe2dce5b5fb714bd0955c7054335",
+    "status": ""
+  },
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-admin-dir/integration/pol68-g5-admin",
+    "branch": "integration/pol68-g5-admin",
+    "head": "1fbf393811bc78b02a8a2de17796b6d61d3d88ee",
+    "status": ""
+  },
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-admin-dir/dev",
+    "branch": "dev",
+    "head": "04c64fd5afb14e918463c699c0994789551d6944",
+    "status": "?? .DS_Store"
+  },
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "head": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "status": ""
+  },
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-dir/dev",
+    "branch": "dev",
+    "head": "01f4447cf77612ca2c62d9c7155601a51bdb7b5b",
+    "status": ""
+  },
+  {
+    "path": "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview",
+    "branch": "POO-70/docs/client-journey-policy-interview",
+    "head": "01f4447cf77612ca2c62d9c7155601a51bdb7b5b",
+    "status": "?? docs/client-journey-review/"
+  }
+]

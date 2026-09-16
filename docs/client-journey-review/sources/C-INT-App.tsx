@@ -1,0 +1,3359 @@
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import { i18n } from '@polo-ai/shared/i18n'
+import { useTheme } from '@/hooks/useTheme'
+import type { ThemeOverrides } from '@config/theme'
+import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult } from '../shared/types'
+import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
+import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
+import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
+import { generateMessageId } from '../shared/types'
+import { useEventProcessor } from './event-processor'
+import type { AgentEvent, Effect } from './event-processor'
+import { AppShell } from '@/components/app-shell/AppShell'
+import type { AppShellContextType, ChatAccessIssue, ChatAccessStatus } from '@/context/AppShellContext'
+import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
+import { WorkspacePicker } from '@/components/workspace'
+import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
+import { SplashScreen } from '@/components/SplashScreen'
+import { TooltipProvider } from '@polo-ai/ui'
+import { FocusProvider } from '@/context/FocusContext'
+import { ModalProvider } from '@/context/ModalContext'
+import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
+import { useWindowCloseHandler } from '@/hooks/useWindowCloseHandler'
+import { useOnboarding } from '@/hooks/useOnboarding'
+import { useNotifications } from '@/hooks/useNotifications'
+import { useSession } from '@/hooks/useSession'
+import { useUpdateChecker } from '@/hooks/useUpdateChecker'
+import { NavigationProvider } from '@/contexts/NavigationContext'
+import { navigate, routes } from './lib/navigate'
+import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
+import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
+import { applySnapshotUnderGuard, clearPendingQuestionForDeletedSession, PendingQuestionTerminalGuard, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
+import { stripMarkdown } from './utils/text'
+import { coerceInputText } from './lib/input-text'
+import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
+import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
+import { extractWorkspaceSlugFromPath } from '@polo-ai/shared/utils/workspace-slug'
+import { DEFAULT_THINKING_LEVEL } from '@polo-ai/shared/agent/thinking-levels'
+import { initRendererPerf } from './lib/perf'
+import {
+  initializeSessionsAtom,
+  addSessionAtom,
+  removeSessionAtom,
+  updateSessionAtom,
+  replaceLoadedSessionAtom,
+  refreshSessionsMetadataAtom,
+  sessionAtomFamily,
+  sessionMetaMapAtom,
+  sessionIdsAtom,
+  loadedSessionsAtom,
+  forceSessionMessagesReloadAtom,
+  backgroundTasksAtomFamily,
+  extractSessionMeta,
+  windowWorkspaceIdAtom,
+  type SessionMeta,
+} from '@/atoms/sessions'
+import { sourcesAtom } from '@/atoms/sources'
+import { skillsAtom } from '@/atoms/skills'
+import { extractBadges } from '@/lib/mentions'
+import { getDefaultStore } from 'jotai'
+import {
+  ShikiThemeProvider,
+  PlatformProvider,
+  ImagePreviewOverlay,
+  PDFPreviewOverlay,
+  CodePreviewOverlay,
+  DocumentFormattedMarkdownOverlay,
+  JSONPreviewOverlay,
+} from '@polo-ai/ui'
+import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
+import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
+import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
+import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '@/components/app-shell/TransportConnectionBanner'
+import { getFileManagerName } from '@/lib/platform'
+import { rendererLog } from '@/lib/logger'
+import { ActionRegistryProvider } from '@/actions'
+import { toast } from 'sonner'
+import { TabShellProvider } from '@/context/TabShellContext'
+import { TabShell } from '@/components/tab-browser/TabShell'
+import {
+  ProductSpaceProvider,
+  type ProductSpaceContextValue,
+} from '@/context/ProductSpaceContext'
+import { useProductSpaceContextState } from '@/hooks/useProductSpaceContext'
+import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
+import { ProductSpaceSwitchDialog } from '@/components/product-space/ProductSpaceSwitchDialog'
+import { ProductSpaceContractGate } from '@/components/product-space/ProductSpaceContractGate'
+import {
+  emitAdminAuthFailure,
+  emitAdminCatalogSessionAuthFailure,
+  getAdminErrorCode,
+  isAdminAuthFailureResult,
+  subscribeToAdminAuthFailures,
+  type AdminErrorLike,
+} from '@/lib/admin-auth-failure'
+import { Button } from '@/components/ui/button'
+import {
+  isProductSpaceContractUnsupported,
+  reportProductSpaceContractFailure,
+  subscribeToProductSpaceContractFailures,
+} from '@/lib/product-space-contract-failure'
+import { onTargetProjectionFailure } from '@/lib/target-projection'
+
+/** App-level states for the ProductSpace-first client shell. */
+type AppState =
+  | 'loading'
+  | 'onboarding'
+  | 'reauth'
+  | 'contract-blocked'
+  | 'space-error'
+  | 'workspace-picker'
+  | 'ready'
+
+/** Type for the Jotai store returned by useStore() */
+type JotaiStore = ReturnType<typeof getDefaultStore>
+
+type SessionListRefreshOptions = {
+  removeMissing?: boolean
+  reason?: string
+  selectedSessionId?: string | null
+}
+
+const SESSION_REFRESH_LOG_ID_LIMIT = 25
+/** Window in which a failed post-switch load can roll back to the origin space. */
+const ROLLBACK_WINDOW_MS = 120_000
+
+function summarizeIds(ids: Iterable<string>, limit = SESSION_REFRESH_LOG_ID_LIMIT) {
+  const all = Array.from(ids)
+  return {
+    count: all.length,
+    ids: all.slice(0, limit),
+    truncated: all.length > limit,
+  }
+}
+
+function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Record<string, number> {
+  const distribution: Record<string, number> = {}
+  for (const session of sessions) {
+    const key = session.workspaceId || '(missing)'
+    distribution[key] = (distribution[key] ?? 0) + 1
+  }
+  return distribution
+}
+
+function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
+  return result.errorCode === 'TOKEN_REVOKED'
+}
+
+function isAdminSessionChangedResult(
+  result: { loggedIn?: boolean; errorCode?: string },
+): boolean {
+  return result.loggedIn === false && result.errorCode === 'SESSION_CHANGED'
+}
+
+function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
+  return result.errorCode === 'ACCOUNT_DISABLED'
+    || (result.status === 403 && /disabled|禁用/i.test(result.message ?? ''))
+}
+
+function readErrorField(error: unknown, field: 'errorCode' | 'code' | 'status' | 'message'): unknown {
+  if (!error || typeof error !== 'object') return undefined
+  return (error as Record<string, unknown>)[field]
+}
+
+function getErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  const message = readErrorField(error, 'message')
+  if (typeof message === 'string') return message
+  if (typeof error === 'string') return error
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+function isQuotaExhaustedError(error: unknown): boolean {
+  const code = String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? '').toUpperCase()
+  const status = Number(readErrorField(error, 'status'))
+  const message = getErrorText(error)
+
+  return code === 'QUOTA_EXHAUSTED'
+    || code === 'QUOTA_LIMIT_EXCEEDED'
+    || code === 'USAGE_LIMIT_EXCEEDED'
+    || code === 'INSUFFICIENT_QUOTA'
+    || status === 429
+    || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
+}
+
+/**
+ * Helper to handle background task events from the agent.
+ * Updates the backgroundTasksAtomFamily based on event type.
+ * Extracted to avoid code duplication between streaming and non-streaming paths.
+ */
+function handleBackgroundTaskEvent(
+  store: JotaiStore,
+  sessionId: string,
+  event: { type: string },
+  agentEvent: unknown
+): void {
+  // Type guard for accessing properties
+  const evt = agentEvent as Record<string, unknown>
+  const backgroundTasksAtom = backgroundTasksAtomFamily(sessionId)
+
+  if (event.type === 'task_backgrounded' && 'taskId' in evt && 'toolUseId' in evt) {
+    const currentTasks = store.get(backgroundTasksAtom)
+    const exists = currentTasks.some(t => t.toolUseId === evt.toolUseId)
+    if (!exists) {
+      store.set(backgroundTasksAtom, [
+        ...currentTasks,
+        {
+          id: evt.taskId as string,
+          type: 'agent' as const,
+          toolUseId: evt.toolUseId as string,
+          startTime: Date.now(),
+          elapsedSeconds: 0,
+          intent: evt.intent as string | undefined,
+        },
+      ])
+    }
+  } else if (event.type === 'shell_backgrounded' && 'shellId' in evt && 'toolUseId' in evt) {
+    const currentTasks = store.get(backgroundTasksAtom)
+    const exists = currentTasks.some(t => t.toolUseId === evt.toolUseId)
+    if (!exists) {
+      store.set(backgroundTasksAtom, [
+        ...currentTasks,
+        {
+          id: evt.shellId as string,
+          type: 'shell' as const,
+          toolUseId: evt.toolUseId as string,
+          startTime: Date.now(),
+          elapsedSeconds: 0,
+          intent: evt.intent as string | undefined,
+        },
+      ])
+    }
+  } else if (event.type === 'task_progress' && 'toolUseId' in evt && 'elapsedSeconds' in evt) {
+    const currentTasks = store.get(backgroundTasksAtom)
+    store.set(backgroundTasksAtom, currentTasks.map(t =>
+      t.toolUseId === evt.toolUseId
+        ? { ...t, elapsedSeconds: evt.elapsedSeconds as number }
+        : t
+    ))
+  } else if (event.type === 'task_completed' && 'taskId' in evt) {
+    // Remove task when background task completes
+    const currentTasks = store.get(backgroundTasksAtom)
+    store.set(backgroundTasksAtom, currentTasks.filter(t => t.id !== evt.taskId))
+  } else if (event.type === 'shell_killed' && 'shellId' in evt) {
+    // Remove shell task when KillShell succeeds
+    const currentTasks = store.get(backgroundTasksAtom)
+    store.set(backgroundTasksAtom, currentTasks.filter(t => t.id !== evt.shellId))
+  } else if (event.type === 'tool_result' && 'toolUseId' in evt) {
+    // Remove task when it completes - but NOT if this is the initial backgrounding result
+    // Background tasks return immediately with agentId/shell_id/backgroundTaskId,
+    // we should only remove when the task actually completes
+    const result = typeof evt.result === 'string' ? evt.result : JSON.stringify(evt.result)
+    const isBackgroundingResult = result && (
+      /agentId:\s*[a-zA-Z0-9_-]+/.test(result) ||
+      /shell_id:\s*[a-zA-Z0-9_-]+/.test(result) ||
+      /"backgroundTaskId":\s*"[a-zA-Z0-9_-]+"/.test(result)
+    )
+    if (!isBackgroundingResult) {
+      const currentTasks = store.get(backgroundTasksAtom)
+      store.set(backgroundTasksAtom, currentTasks.filter(t => t.toolUseId !== evt.toolUseId))
+    }
+  }
+  // Note: We do NOT clear background tasks on complete/error/interrupted
+  // Background tasks should persist and keep running after the turn ends
+  // They are only removed when:
+  // 1. task_completed event arrives (background task finished)
+  // 2. Their tool_result comes back (foreground task finished)
+  // 3. KillShell succeeds (shell_killed event)
+}
+
+function SessionLoadErrorScreen({
+  message,
+  onRetry,
+  onRollback,
+}: {
+  message: string
+  onRetry: () => void
+  onRollback?: () => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
+        <h2 className="text-lg font-semibold text-foreground">{t("errors.failedToLoadSessions")}</h2>
+        <p className="mt-2 text-sm text-foreground/60">
+          {t("errors.failedToLoadSessionsDesc")}
+        </p>
+        <p className="mt-3 rounded-lg bg-foreground/5 px-3 py-2 text-left text-xs text-foreground/70 break-words">
+          {message}
+        </p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-4 inline-flex h-8 items-center justify-center rounded-[8px] bg-foreground text-background px-3 text-sm font-medium hover:opacity-90 transition-opacity"
+        >
+          {t("errors.retryLoadingSessions")}
+        </button>
+        {onRollback ? (
+          <button
+            type="button"
+            data-testid="product-space-rollback"
+            onClick={onRollback}
+            className="mt-2 block w-full text-sm text-foreground/60 underline-offset-2 hover:underline"
+          >
+            {t("productSpace.rollback.button")}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+export default function App() {
+  const { t } = useTranslation()
+
+  // Initialize renderer perf tracking early (debug mode = running from source)
+  // Uses useEffect with empty deps to run once on mount before any session switches
+  useEffect(() => {
+    window.electronAPI.isDebugMode().then((isDebug) => {
+      initRendererPerf(isDebug)
+    })
+  }, [])
+
+  // App state: loading -> check auth -> onboarding or ready
+  const [appState, setAppState] = useState<AppState>('loading')
+  const appStateRef = useRef<AppState>(appState)
+  appStateRef.current = appState
+  // Space scope mirror for callbacks that must read the active ProductSpace
+  // without being re-created on every context change.
+  const productSpaceScopeRef = useRef<{
+    accountId: string | null
+    activeId: string | null
+    personalId: string | null
+  }>({ accountId: null, activeId: null, personalId: null })
+  const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
+
+  // Per-session Jotai atom setters for isolated updates
+  // NOTE: No sessionsAtom - we don't store a Session[] array anywhere to prevent memory leaks
+  // Instead we use:
+  // - sessionMetaMapAtom for lightweight listing
+  // - sessionAtomFamily(id) for individual session data
+  const initializeSessions = useSetAtom(initializeSessionsAtom)
+  const addSession = useSetAtom(addSessionAtom)
+  const removeSession = useSetAtom(removeSessionAtom)
+  const updateSessionDirect = useSetAtom(updateSessionAtom)
+  const replaceLoadedSession = useSetAtom(replaceLoadedSessionAtom)
+  const store = useStore()
+
+  // Helper to update a session by ID with partial fields
+  // Uses per-session atom directly instead of updating an array
+  const updateSessionById = useCallback((
+    sessionId: string,
+    updates: Partial<Session> | ((session: Session) => Partial<Session>)
+  ) => {
+    updateSessionDirect(sessionId, (prev) => {
+      if (!prev) return prev
+      const partialUpdates = typeof updates === 'function' ? updates(prev) : updates
+      return { ...prev, ...partialUpdates }
+    })
+  }, [updateSessionDirect])
+
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  // Window's workspace ID — shared atom so Root/ThemeProvider stays in sync on switch
+  const [windowWorkspaceId, setWindowWorkspaceId] = useAtom(windowWorkspaceIdAtom)
+
+  // Derive workspace slug for SDK skill qualification
+  const windowWorkspaceSlug = useMemo(() => {
+    if (!windowWorkspaceId) return null
+    const workspace = workspaces.find(w => w.id === windowWorkspaceId)
+    return workspace?.slug ?? windowWorkspaceId
+  }, [windowWorkspaceId, workspaces])
+
+  // Get initial sessionId and focused mode from URL params (for "Open in New Window" feature)
+  const { initialSessionId, isFocusedMode } = useMemo(() => {
+    const params = new URLSearchParams(window.location.search)
+    return {
+      initialSessionId: params.get('sessionId'),
+      isFocusedMode: params.get('focused') === 'true',
+    }
+  }, [])
+
+  // Derive remote workspace ID for session matching in NavigationContext
+  const windowRemoteWorkspaceId = useMemo(() => {
+    if (!windowWorkspaceId) return null
+    const workspace = workspaces.find(w => w.id === windowWorkspaceId)
+    return workspace?.remoteServer?.remoteWorkspaceId ?? null
+  }, [windowWorkspaceId, workspaces])
+
+  // LLM connections with authentication status (for provider selection)
+  const [llmConnections, setLlmConnections] = useState<LlmConnectionWithStatus[]>([])
+  const [llmConnectionsLoaded, setLlmConnectionsLoaded] = useState(false)
+  // Workspace default LLM connection (for new sessions)
+  const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
+  // Global default LLM connection slug (from app config)
+  const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
+  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
+  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null>(null)
+  const currentAdminUserIdRef = useRef<string | null>(null)
+  const currentAdminUserGenerationRef = useRef(0)
+  const commitCurrentAdminUser = useCallback((
+    user: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null,
+  ) => {
+    const nextAccountId = user?.userId ?? null
+    if (currentAdminUserIdRef.current !== nextAccountId) {
+      currentAdminUserGenerationRef.current += 1
+    }
+    currentAdminUserIdRef.current = nextAccountId
+    setCurrentAdminUser(user)
+  }, [])
+  // Narrow-viewport surface boundary (Review R31/R32): the route-scoped
+  // narrow guard and the Home-only narrow rendering boundary live inside the
+  // ready shell (TabShell/TabContent, provider-owned hydrated route), so the
+  // lifecycle screens below are NEVER blocked by the unhydrated ambient tab
+  // atom. The narrow viewport only drives retained-preview cleanup here.
+  const narrowViewport = useNarrowViewport()
+  const productSpaceRefreshGenerationRef = useRef(0)
+  const invalidateProductSpaceDeepLinkRefresh = useCallback(() => {
+    productSpaceRefreshGenerationRef.current += 1
+  }, [])
+  const productSpace = useProductSpaceContextState()
+  // Stable access for callbacks defined before the hook value settles; the
+  // object identity changes every render but the ref always tracks the latest.
+  const productSpaceRef = useRef(productSpace)
+  productSpaceRef.current = productSpace
+  const {
+    bootstrap: bootstrapProductSpace,
+    clearAccount: clearProductSpaceAccount,
+    refreshProductSpaces,
+    retryBootstrap: retryProductSpaceBootstrap,
+    requestSwitch,
+    confirmStopAndSwitch,
+    retryFailedStops,
+    retryTargetLoad,
+    cancelSwitch,
+    stopSwitchExecution,
+    dismissTargetAccessLost,
+  } = productSpace
+  // Derive connection default model override from the default LLM connection
+  const defaultConnection = useMemo(() => {
+    return llmConnections.find(c => c.slug === defaultLlmConnectionSlug) ?? null
+  }, [llmConnections, defaultLlmConnectionSlug])
+
+  const chatAccessStatus = useMemo<ChatAccessStatus | null>(() => {
+    if (runtimeChatAccessIssue) {
+      return { issue: runtimeChatAccessIssue }
+    }
+    if (llmConnectionsLoaded && llmConnections.length === 0) {
+      return { issue: 'no-ai-service' }
+    }
+    return null
+  }, [llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
+
+  const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
+  // Permission requests per session (queue to handle multiple concurrent requests)
+  const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
+  // Credential requests per session (queue to handle multiple concurrent requests)
+  const [pendingCredentials, setPendingCredentials] = useState<Map<string, CredentialRequest[]>>(new Map())
+  // Pending agent questions per session (request_user_input).
+  // At most one per session — a new requestId replaces the previous entry.
+  // Survives refresh/restart via Session.pendingQuestion hydration.
+  // State model: realtime events are authoritative; session snapshots only
+  // fill holes (an existing entry is never downgraded by an in-flight fetch);
+  // resolutions are requestId-guarded so a stale resolution never deletes a
+  // newer card.
+  const [pendingQuestions, setPendingQuestions] = useState<Map<string, QuestionRequest>>(new Map())
+  // Terminal markers (resolved requestIds / deleted sessions): an in-flight
+  // session snapshot whose payload is OLDER than a local resolution or
+  // deletion must never re-fill the hole that the newer realtime event made.
+  const pendingQuestionGuardRef = useRef(new PendingQuestionTerminalGuard())
+  // Synchronous mirror: snapshot reducers must apply against the CURRENT map
+  // inside the guard scope (before endSnapshot), not during a later render.
+  const pendingQuestionsRef = useRef(pendingQuestions)
+  const applyPendingQuestions = useCallback((updater: (prev: Map<string, QuestionRequest>) => Map<string, QuestionRequest>) => {
+    const next = updater(pendingQuestionsRef.current)
+    pendingQuestionsRef.current = next
+    setPendingQuestions(next)
+    return next
+  }, [])
+  // Draft composer state per session (text + attachment refs), preserved across mode
+  // switches, conversation changes, and app restarts. Using a ref avoids re-renders
+  // during typing; attachments are stored as lightweight refs (path + name) and
+  // hydrated via readFileAttachment() on session switch.
+  const sessionDraftsRef = useRef<Map<string, SessionDraft>>(new Map())
+  // Unified session options for all session-scoped settings
+  const [sessionOptions, setSessionOptions] = useState<Map<string, SessionOptions>>(new Map())
+
+  // Theme state (app-level only)
+  const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
+  // Reset confirmation dialog
+  const [showResetDialog, setShowResetDialog] = useState(false)
+
+  // Auto-update state
+  const updateChecker = useUpdateChecker()
+
+  // Splash screen state - tracks when app is fully ready (all data loaded)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const [sessionLoadError, setSessionLoadError] = useState<string | null>(null)
+  const [splashExiting, setSplashExiting] = useState(false)
+  const [splashHidden, setSplashHidden] = useState(false)
+
+  // Notifications enabled state (from app settings)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true)
+
+  // Sources and skills for badge extraction
+  const sources = useAtomValue(sourcesAtom)
+  const skills = useAtomValue(skillsAtom)
+
+  // Compute if app is fully ready (all data loaded)
+  const isFullyReady = appState === 'ready' && sessionsLoaded
+
+  // Trigger splash exit animation when fully ready
+  useEffect(() => {
+    if (isFullyReady && !splashExiting) {
+      setSplashExiting(true)
+    }
+  }, [isFullyReady, splashExiting])
+
+  // Handler for when splash exit animation completes
+  const handleSplashExitComplete = useCallback(() => {
+    setSplashHidden(true)
+  }, [])
+
+  // Apply theme via hook (injects CSS variables)
+  // shikiTheme is passed to ShikiThemeProvider to ensure correct syntax highlighting
+  // theme for dark-only themes in light system mode
+  const { shikiTheme, isDark } = useTheme({ appTheme })
+
+  // Ref for sessionOptions to access current value in event handlers without re-registering
+  const sessionOptionsRef = useRef(sessionOptions)
+  // Keep ref in sync with state
+  useEffect(() => {
+    sessionOptionsRef.current = sessionOptions
+  }, [sessionOptions])
+
+  const applyPermissionModeState = useCallback((sessionId: string, state: PermissionModeState, source: 'event' | 'reconcile') => {
+    setSessionOptions(prev => {
+      const next = new Map(prev)
+      const current = next.get(sessionId) ?? defaultSessionOptions
+      const currentVersion = current.permissionModeVersion ?? -1
+
+      if (state.modeVersion < currentVersion) {
+        window.electronAPI.debugLog(
+          '[ModeSync] Ignoring stale permission mode update',
+          { sessionId, source, incoming: state.modeVersion, current: currentVersion }
+        )
+        return prev
+      }
+
+      if (
+        state.modeVersion === currentVersion &&
+        current.permissionMode !== state.permissionMode
+      ) {
+        window.electronAPI.debugLog(
+          '[ModeSync] Equal modeVersion with differing mode detected, applying and requesting reconciliation',
+          {
+            sessionId,
+            source,
+            modeVersion: state.modeVersion,
+            currentMode: current.permissionMode,
+            incomingMode: state.permissionMode,
+          }
+        )
+      }
+
+      next.set(sessionId, {
+        ...current,
+        permissionMode: state.permissionMode,
+        permissionModeVersion: state.modeVersion,
+      })
+      return next
+    })
+  }, [])
+
+  const reconcilePermissionModeState = useCallback(async (sessionId: string) => {
+    try {
+      const state = await window.electronAPI.getSessionPermissionModeState(sessionId)
+      if (!state) return
+      applyPermissionModeState(sessionId, state, 'reconcile')
+    } catch (error) {
+      window.electronAPI.debugLog('[ModeSync] Failed to reconcile permission mode', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [applyPermissionModeState])
+
+  // Event processor hook - handles all agent events through pure functions
+  const { processAgentEvent, clearStreamingState } = useEventProcessor()
+
+  const syncSessionOptionsFromSession = useCallback((session: Session) => {
+    setSessionOptions(prev => {
+      const next = new Map(prev)
+      const current = next.get(session.id)
+      const merged = {
+        ...defaultSessionOptions,
+        ...current,
+        permissionMode: session.permissionMode ?? defaultSessionOptions.permissionMode,
+        thinkingLevel: session.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+      }
+
+      const hasNonDefaultMode = merged.permissionMode !== defaultSessionOptions.permissionMode
+      const hasNonDefaultThinking = merged.thinkingLevel !== DEFAULT_THINKING_LEVEL
+
+      if (!hasNonDefaultMode && !hasNonDefaultThinking && merged.permissionModeVersion == null) {
+        next.delete(session.id)
+      } else {
+        next.set(session.id, merged)
+      }
+
+      return next
+    })
+  }, [])
+
+  const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the RPC is issued and
+    // closes after the payload has been applied synchronously — terminal
+    // markers are pinned for the whole in-flight window.
+    try {
+      let outcome: 'refreshed' | 'preserved_stale_messages' | 'failed' = 'refreshed'
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessionMessages(sessionId),
+        fresh => {
+          if (!fresh) {
+            outcome = 'failed'
+            return
+          }
+          const prevSession = store.get(sessionAtomFamily(sessionId))
+          const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
+          const nextSession = preservedStaleMessages
+            ? { ...fresh, messages: prevSession.messages }
+            : fresh
+
+          clearStreamingState(sessionId)
+          replaceLoadedSession(nextSession)
+          syncSessionOptionsFromSession(nextSession)
+          // Opening/refreshing a session fills a MISSING pending question from
+          // the snapshot — an existing entry (fresher realtime state) is never
+          // downgraded by the fetch.
+          applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
+          void reconcilePermissionModeState(sessionId)
+          if (preservedStaleMessages) outcome = 'preserved_stale_messages'
+        },
+      )
+      return outcome
+    } catch (err) {
+      console.error(`[App] Failed to refresh session ${sessionId}:`, err)
+      return 'failed'
+    }
+  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, store])
+
+  const loadSessionsFromServer = useCallback(async () => {
+    setSessionLoadError(null)
+
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
+    // closes after the snapshot has been applied synchronously.
+    // The runtime enforces the committed ProductSpace: sessions bound to
+    // other spaces never cross the sessions:list boundary.
+    let loadedSessions: Session[] = []
+    try {
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessions(),
+        sessions => {
+          loadedSessions = sessions
+          // Initialize per-session atoms and metadata map
+          // NOTE: No sessionsAtom used - sessions are only in per-session atoms
+          initializeSessions(loadedSessions)
+
+          // Hydrate pending agent questions from the snapshot — fill holes
+          // only: entries that already exist came from fresher realtime
+          // events and are never downgraded by the list fetch.
+          applyPendingQuestions(prev => {
+            let next = prev
+            for (const session of loadedSessions) {
+              next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+            }
+            return next
+          })
+        },
+      )
+
+      // Initialize unified sessionOptions from session data
+      const optionsMap = new Map<string, SessionOptions>()
+      for (const s of loadedSessions) {
+        const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
+        const hasNonDefaultThinking = s.thinkingLevel && s.thinkingLevel !== DEFAULT_THINKING_LEVEL
+        if (hasNonDefaultMode || hasNonDefaultThinking) {
+          optionsMap.set(s.id, {
+            permissionMode: s.permissionMode ?? 'ask',
+            thinkingLevel: s.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+          })
+        }
+      }
+      setSessionOptions(optionsMap)
+
+      await Promise.allSettled(
+        loadedSessions.map((s) => reconcilePermissionModeState(s.id))
+      )
+
+      setSessionsLoaded(true)
+
+      if (initialSessionId && windowWorkspaceId) {
+        const session = loadedSessions.find(s => s.id === initialSessionId)
+        if (session) {
+          navigate(routes.view.allSessions(session.id))
+        }
+      }
+    } catch (err) {
+      console.error('[App] Failed to load sessions:', err)
+      const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
+
+      if (shouldTreatSessionLoadFailureAsTransportFallback(transportState)) {
+        console.error('[App] Treating session load failure as transport fallback:', transportState)
+        setSessionsLoaded(true)
+        setSessionLoadError(null)
+        return
+      }
+
+      // A target projection that fails right after a committed switch is a
+      // half-switched surface: the trusted reverse transaction back to the
+      // frozen origin space runs automatically — the user never has to
+      // discover a manual rollback. If the reverse transaction itself fails,
+      // the safe error screen with the manual rollback action remains.
+      const committedSwitch = lastCommittedSwitchRef.current
+      if (
+        committedSwitch
+        && Date.now() - committedSwitch.at < ROLLBACK_WINDOW_MS
+      ) {
+        const rolledBack = await productSpaceRef.current.rollbackToOrigin(committedSwitch.from)
+          .catch(() => false)
+        if (rolledBack) {
+          lastCommittedSwitchRef.current = null
+          setSessionLoadError(null)
+          setSessionsLoaded(false)
+          void loadSessionsFromServer()
+          return
+        }
+      }
+
+      setSessionLoadError(formatSessionLoadFailure(err))
+      setSessionsLoaded(true)
+    }
+  }, [initializeSessions, initialSessionId, reconcilePermissionModeState, windowWorkspaceId])
+
+  // Any OTHER failing target projection (skills, sources, …) triggers the
+  // same automatic reverse transaction — never a half-loaded ready shell.
+  useEffect(() => {
+    return onTargetProjectionFailure(() => {
+      const committedSwitch = lastCommittedSwitchRef.current
+      if (!committedSwitch) return
+      if (Date.now() - committedSwitch.at >= ROLLBACK_WINDOW_MS) return
+      const entry = committedSwitch
+      lastCommittedSwitchRef.current = null
+      void productSpaceRef.current.rollbackToOrigin(entry.from)
+        .then(rolledBack => {
+          if (!rolledBack) throw new Error('rollback failed')
+          setSessionLoadError(null)
+          setSessionsLoaded(false)
+          void loadSessionsFromServer()
+        })
+        .catch(() => {
+          // The automatic rollback failed: restore the window so the safe
+          // error screen with the manual rollback action takes over.
+          lastCommittedSwitchRef.current = entry
+          toast.error(t('productSpace.rollback.failed'))
+        })
+    })
+  }, [loadSessionsFromServer])
+
+  const refreshSessionListMetadataFromServer = useCallback(async (options: SessionListRefreshOptions = {}): Promise<Map<string, SessionMeta> | null> => {
+    const {
+      removeMissing = true,
+      reason = 'manual-or-authoritative',
+      selectedSessionId = null,
+    } = options
+    const beforeMetaMap = store.get(sessionMetaMapAtom)
+    const beforeIds = new Set(beforeMetaMap.keys())
+    const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
+
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
+    // closes after the snapshot has been applied synchronously (same helper
+    // as every other list path).
+    let sessions: Session[] = []
+    let nextMetaMap: Map<string, SessionMeta> | null = null
+    try {
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessions(),
+        fetchedSessions => {
+          sessions = fetchedSessions
+          const returnedIds = new Set(sessions.map(s => s.id))
+          const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
+          const addedIds = sessions.map(s => s.id).filter(id => !beforeIds.has(id))
+          const logPayload = {
+            reason,
+            removeMissing,
+            windowWorkspaceId,
+            windowRemoteWorkspaceId,
+            selectedSessionId,
+            beforeCount: beforeIds.size,
+            returnedCount: sessions.length,
+            beforeIds: summarizeIds(beforeIds),
+            returnedIds: summarizeIds(returnedIds),
+            missingIds: summarizeIds(missingIds),
+            addedIds: summarizeIds(addedIds),
+            beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
+            returnedWorkspaceIds: workspaceDistribution(sessions),
+            transportState,
+          }
+
+          rendererLog.info('[App] Session list metadata refresh result', logPayload)
+          if (!removeMissing && missingIds.length > 0) {
+            rendererLog.warn('[App] Non-destructive refresh preserved sessions omitted by getSessions(); this indicates a partial backend response or workspace-context mismatch', logPayload)
+          }
+
+          const loadedSessionIds = store.get(loadedSessionsAtom)
+
+          // Single transactional atom write — all cross-atom mutations happen
+          // inside one Jotai write function so React subscribers see one
+          // consistent update instead of intermediate states.
+          nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing })
+
+          // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
+          for (const session of sessions) {
+            syncSessionOptionsFromSession(session)
+          }
+          // Reconnect metadata refresh carries the pending state — fill missing
+          // entries; existing event-driven entries are never touched.
+          applyPendingQuestions(prev => {
+            let next = prev
+            for (const session of sessions) {
+              next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+            }
+            return next
+          })
+        },
+      )
+      await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
+
+      return nextMetaMap
+    } catch (err) {
+      rendererLog.error('[App] Failed to refresh session list metadata after reconnect:', {
+        reason,
+        removeMissing,
+        windowWorkspaceId,
+        windowRemoteWorkspaceId,
+        selectedSessionId,
+        beforeCount: beforeIds.size,
+        beforeIds: summarizeIds(beforeIds),
+        beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
+        transportState,
+        error: err,
+      })
+      return null
+    }
+  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, pendingQuestionGuardRef, windowWorkspaceId, windowRemoteWorkspaceId])
+
+  // Stale session watchdog — catches stuck sessions that the reconnect protocol misses
+  const { trackSessionActivity } = useStaleSessionRecovery({
+    store,
+    refreshSessionFromServer,
+  })
+
+  const DRAFT_SAVE_DEBOUNCE_MS = 500
+
+  const resolveDefaultConnectionSlug = useCallback((connections: LlmConnectionWithStatus[]) => {
+    return connections.find(c => c.isDefault)?.slug ?? connections[0]?.slug
+  }, [])
+
+  // Refresh LLM connections from config (called on workspace change and after connection updates)
+  const refreshLlmConnections = useCallback(async () => {
+    const connections = await window.electronAPI.listLlmConnectionsWithStatus()
+    setLlmConnections(connections)
+    setLlmConnectionsLoaded(true)
+    setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
+    // Also refresh workspace default
+    if (windowWorkspaceId) {
+      const settings = await window.electronAPI.getWorkspaceSettings(windowWorkspaceId)
+      setWorkspaceDefaultLlmConnection(settings?.defaultLlmConnection)
+    }
+  }, [resolveDefaultConnectionSlug, windowWorkspaceId])
+
+  const refreshAdminUser = useCallback(async () => {
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      const user = status.loggedIn && status.userId
+        ? {
+            userId: status.userId,
+            username: status.username,
+            displayName: status.displayName,
+          }
+        : null
+      if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
+        invalidateProductSpaceDeepLinkRefresh()
+      }
+      commitCurrentAdminUser(user)
+      return user
+    } catch {
+      if (currentAdminUserIdRef.current !== null) {
+        invalidateProductSpaceDeepLinkRefresh()
+      }
+      commitCurrentAdminUser(null)
+      return null
+    }
+  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
+
+  const continueAfterProductSpace = useCallback((workspaceId: string | null) => {
+    setAppState(workspaceId ? 'ready' : 'workspace-picker')
+  }, [])
+
+  const routeThroughProductSpace = useCallback(async (
+    accountId: string | null,
+    workspaceId: string | null,
+  ) => {
+    if (!accountId) {
+      continueAfterProductSpace(workspaceId)
+      return
+    }
+
+    try {
+      const next = await bootstrapProductSpace(accountId)
+      if (currentAdminUserIdRef.current !== accountId || next === null) return
+      if (next === 'ready') {
+        continueAfterProductSpace(workspaceId)
+      } else if (next === 'contract-blocked') {
+        setAppState('contract-blocked')
+      } else {
+        setAppState('space-error')
+      }
+    } catch (error) {
+      if (currentAdminUserIdRef.current !== accountId) return
+      if (isAdminAuthFailureResult(error as AdminErrorLike)) {
+        invalidateProductSpaceDeepLinkRefresh()
+        commitCurrentAdminUser(null)
+        setAppState('onboarding')
+      } else {
+        setAppState('space-error')
+      }
+    }
+  }, [
+    bootstrapProductSpace,
+    commitCurrentAdminUser,
+    continueAfterProductSpace,
+    invalidateProductSpaceDeepLinkRefresh,
+  ])
+
+  // Handle onboarding completion
+  const handleOnboardingComplete = useCallback(async () => {
+    // Completing authentication starts a fresh ProductSpace bootstrap.
+    invalidateProductSpaceDeepLinkRefresh()
+    let targetWorkspaceId: string | null = windowWorkspaceId
+    let signedInUser: Awaited<ReturnType<typeof refreshAdminUser>> = null
+    try {
+      signedInUser = await refreshAdminUser()
+      // Reload workspaces after onboarding
+      const ws = await window.electronAPI.getWorkspaces()
+      if (ws.length > 0) {
+        // Switch to workspace in-place (no window close/reopen)
+        await window.electronAPI.switchWorkspace(ws[0].id)
+        setWindowWorkspaceId(ws[0].id)
+        setWorkspaces(ws)
+        targetWorkspaceId = ws[0].id
+      } else {
+        setWorkspaces(ws)
+        targetWorkspaceId = null
+      }
+    } catch (error) {
+      console.error('[App] Failed to load workspaces after onboarding:', error)
+      // The space route still runs; workspace state can recover later.
+    }
+    await routeThroughProductSpace(signedInUser?.userId ?? null, targetWorkspaceId)
+  }, [
+    invalidateProductSpaceDeepLinkRefresh,
+    refreshAdminUser,
+    routeThroughProductSpace,
+    setWindowWorkspaceId,
+    windowWorkspaceId,
+  ])
+
+  const acquirePhoneAuthChallenge = useCallback(async () => {
+    const result = await window.electronAPI.adminAcquirePhoneAuthChallenge()
+    return result.success ? result.challengeToken : null
+  }, [])
+
+  // Onboarding hook — onConfigSaved fires immediately when billing is saved,
+  // ensuring connection state updates before the wizard closes.
+  const onboarding = useOnboarding({
+    onComplete: handleOnboardingComplete,
+    onConfigSaved: refreshLlmConnections,
+    initialSetupNeeds: setupNeeds || undefined,
+    phoneAuthChallengeProvider: acquirePhoneAuthChallenge,
+  })
+  const showAdminKicked = onboarding.showAdminKicked
+  const handleAdminRelogin = onboarding.handleAdminRelogin
+
+  const enterAdminLogin = useCallback(() => {
+    setSetupNeeds({
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    })
+    handleAdminRelogin()
+    setAppState('onboarding')
+  }, [handleAdminRelogin])
+
+  const enterAdminKicked = useCallback(() => {
+    setSetupNeeds({
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    })
+    showAdminKicked()
+    setAppState('onboarding')
+  }, [showAdminKicked])
+
+  const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
+    invalidateProductSpaceDeepLinkRefresh()
+    clearProductSpaceAccount(currentAdminUserIdRef.current)
+    commitCurrentAdminUser(null)
+    if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
+      enterAdminKicked()
+    } else {
+      enterAdminLogin()
+    }
+  }, [
+    clearProductSpaceAccount,
+    commitCurrentAdminUser,
+    enterAdminKicked,
+    enterAdminLogin,
+    invalidateProductSpaceDeepLinkRefresh,
+  ])
+
+  // Reauth login handler - placeholder (reauth is not currently used)
+  const handleReauthLogin = useCallback(async () => {
+    invalidateProductSpaceDeepLinkRefresh()
+    let validation = await window.electronAPI.adminValidate()
+    if (isAdminSessionChangedResult(validation)) {
+      validation = await window.electronAPI.adminValidate()
+    }
+    if (!validation.loggedIn && isAdminKickedResult(validation)) {
+      enterAdminKicked()
+      return
+    }
+    if (!validation.loggedIn) {
+      enterAdminLogin()
+      return
+    }
+
+    // Re-check setup needs
+    const needs = await window.electronAPI.getSetupNeeds()
+    if (needs.isFullyConfigured) {
+      setAppState('ready')
+    } else {
+      setSetupNeeds(needs)
+      setAppState('onboarding')
+    }
+  }, [
+    enterAdminKicked,
+    enterAdminLogin,
+    invalidateProductSpaceDeepLinkRefresh,
+  ])
+
+  // Reauth reset handler - open reset confirmation dialog
+  const handleReauthReset = useCallback(() => {
+    setShowResetDialog(true)
+  }, [])
+
+  const startupInitializationGenerationRef = useRef(0)
+  const startupInitializationHandlersRef = useRef({
+    handleAdminAuthFailure,
+    routeThroughProductSpace,
+    setWindowWorkspaceId,
+  })
+  startupInitializationHandlersRef.current = {
+    handleAdminAuthFailure,
+    routeThroughProductSpace,
+    setWindowWorkspaceId,
+  }
+
+  // Check auth state and get window's workspace ID exactly once on mount. The
+  // generation prevents a StrictMode/unmount cleanup from committing stale async work.
+  useEffect(() => {
+    const generation = ++startupInitializationGenerationRef.current
+    let cancelled = false
+    const isCurrentInitialization = () => (
+      !cancelled
+      && generation === startupInitializationGenerationRef.current
+    )
+
+    const initialize = async () => {
+      try {
+        // Get this window's workspace ID (passed via URL query param from main process)
+        const wsId = await window.electronAPI.getWindowWorkspace()
+        if (!isCurrentInitialization()) return
+        startupInitializationHandlersRef.current.setWindowWorkspaceId(wsId)
+
+        let needs = await window.electronAPI.getSetupNeeds()
+        if (!isCurrentInitialization()) return
+        const adminStatus = await window.electronAPI.adminGetStatus()
+        if (!isCurrentInitialization()) return
+        let signedInAccountId: string | null = null
+
+        if (adminStatus.adminUrl) {
+          let validation = await window.electronAPI.adminValidate()
+          if (isAdminSessionChangedResult(validation)) {
+            validation = await window.electronAPI.adminValidate()
+          }
+          if (!isCurrentInitialization()) return
+          if (!validation.loggedIn) {
+            startupInitializationHandlersRef.current.handleAdminAuthFailure(validation)
+            return
+          }
+
+          const syncResult = await window.electronAPI.adminSyncConnections()
+          if (!isCurrentInitialization()) return
+          if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
+            startupInitializationHandlersRef.current.handleAdminAuthFailure(syncResult)
+            return
+          }
+
+          const signedInUser = {
+            userId: validation.user.id,
+            username: validation.user.username,
+            displayName: validation.user.displayName,
+          }
+          if (currentAdminUserIdRef.current !== signedInUser.userId) {
+            invalidateProductSpaceDeepLinkRefresh()
+          }
+          commitCurrentAdminUser(signedInUser)
+          signedInAccountId = signedInUser.userId
+          needs = await window.electronAPI.getSetupNeeds()
+          if (!isCurrentInitialization()) return
+        }
+
+        setSetupNeeds(needs)
+
+        if (needs.needsAdminLogin) {
+          setAppState('onboarding')
+          return
+        }
+
+        // LLM connection setup is admin-managed. If local setup is incomplete only
+        // because no user-managed LLM connection exists, enter the app and let the
+        // existing runtime unavailable-connection handling surface send-time errors.
+        await startupInitializationHandlersRef.current.routeThroughProductSpace(
+          signedInAccountId,
+          wsId,
+        )
+      } catch (error) {
+        if (!isCurrentInitialization()) return
+        console.error('Failed to check auth state:', error)
+        // If check fails, show onboarding to be safe
+        setAppState('onboarding')
+      }
+    }
+
+    void initialize()
+    return () => {
+      cancelled = true
+      if (startupInitializationGenerationRef.current === generation) {
+        startupInitializationGenerationRef.current += 1
+      }
+    }
+  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
+
+  useEffect(() => {
+    const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
+      if (validation.loggedIn) return
+      handleAdminAuthFailure(validation)
+    })
+    return () => { cleanup() }
+  }, [handleAdminAuthFailure])
+
+  useEffect(() => {
+    return subscribeToAdminAuthFailures(handleAdminAuthFailure)
+  }, [handleAdminAuthFailure])
+
+  // PC-F11 single gate: any ProductSpace DTO reporting contract
+  // incompatibility tears down the fence and projections through the hook's
+  // trusted transition and renders the upgrade gate.
+  useEffect(() => {
+    return subscribeToProductSpaceContractFailures(() => {
+      productSpace.enterContractBlocked(currentAdminUserIdRef.current)
+    })
+  }, [productSpace.enterContractBlocked])
+
+  const productSpaceDeepLinkHandlersRef = useRef({
+    refreshProductSpaces: () => {},
+  })
+  productSpaceDeepLinkHandlersRef.current = {
+    refreshProductSpaces: () => {
+      void refreshProductSpaces()
+    },
+  }
+
+  // Enterprise creation and invite completion deep links ask the client to
+  // refresh its space list. The current ProductSpace never changes as a side
+  // effect of a refresh; the switcher simply shows the new enterprise.
+  useEffect(() => {
+    const cleanup = window.electronAPI.onDeepLinkNavigate(navigation => {
+      const isRefreshSignal = navigation.productSpaceRefresh === true
+        || typeof navigation.joinToken === 'string'
+      if (!isRefreshSignal) return
+      productSpaceDeepLinkHandlersRef.current.refreshProductSpaces()
+    })
+    return () => {
+      cleanup()
+    }
+  }, [])
+
+  // Session selection state
+  const [sessionSelection, setSession] = useSession()
+
+  // Notification system - shows native OS notifications and badge count
+  const handleNavigateToSession = useCallback((sessionId: string) => {
+    // Navigate to the session via central routing (uses allSessions filter)
+    navigate(routes.view.allSessions(sessionId))
+  }, [])
+
+  const { isWindowFocused, showSessionNotification } = useNotifications({
+    workspaceId: windowWorkspaceId,
+    // NOTE: sessions removed - hook now uses sessionMetaMapAtom internally
+    // to prevent closures from retaining full message arrays
+    onNavigateToSession: handleNavigateToSession,
+    enabled: notificationsEnabled,
+  })
+
+  // Load workspaces, sessions, model, notifications setting, and drafts when app is ready
+  useEffect(() => {
+    if (appState !== 'ready') return
+
+    window.electronAPI.getWorkspaces().then(setWorkspaces)
+    window.electronAPI.getNotificationsEnabled().then(setNotificationsEnabled).catch(() => {})
+    void refreshAdminUser()
+
+    // Show actionable toast for missing system dependencies (Windows only)
+    window.electronAPI.getSystemWarnings().then((warnings) => {
+      if (warnings.vcredistMissing) {
+        toast.warning(t('toast.vcRedistNotFound'), {
+          description: t('toast.vcRedistNotFoundDesc'),
+          duration: Infinity,
+          action: {
+            label: 'Install',
+            onClick: () => window.electronAPI.openUrl(warnings.downloadUrl ?? 'https://aka.ms/vs/17/release/vc_redist.x64.exe'),
+          },
+        })
+      }
+    }).catch(() => { /* non-fatal startup check */ })
+    void loadSessionsFromServer()
+    // Load LLM connections with authentication status
+    window.electronAPI.listLlmConnectionsWithStatus().then((connections) => {
+      setLlmConnections(connections)
+      setLlmConnectionsLoaded(true)
+      setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
+    })
+    // Load persisted input drafts into ref (no re-render needed).
+    // Attachment files are not read here — hydration happens lazily when the session
+    // is opened so app startup isn't delayed by reading potentially large files.
+    window.electronAPI.getAllDrafts().then((drafts) => {
+      if (Object.keys(drafts).length > 0) {
+        sessionDraftsRef.current = new Map(Object.entries(drafts))
+      }
+    })
+    // Load app-level theme
+    window.electronAPI.getAppTheme().then(setAppTheme)
+  }, [appState, loadSessionsFromServer, resolveDefaultConnectionSlug, refreshAdminUser])
+
+  // Subscribe to theme change events (live updates when theme.json changes)
+  useEffect(() => {
+    const cleanupApp = window.electronAPI.onAppThemeChange((theme) => {
+      setAppTheme(theme)
+    })
+    return () => {
+      cleanupApp()
+    }
+  }, [])
+
+  // Subscribe to LLM connections change events (live updates when models are fetched)
+  useEffect(() => {
+    const cleanup = window.electronAPI.onLlmConnectionsChanged(() => {
+      refreshLlmConnections()
+    })
+    return () => { cleanup() }
+  }, [refreshLlmConnections])
+
+  // Refresh LLM connections and workspace default when workspace changes
+  useEffect(() => {
+    if (windowWorkspaceId) {
+      refreshLlmConnections()
+    }
+  }, [windowWorkspaceId, refreshLlmConnections])
+
+  // Listen for session events - uses centralized event processor for consistent state transitions
+  //
+  // SOURCE OF TRUTH LOGIC:
+  // - During streaming (atom.isProcessing = true): Atom is source of truth
+  //   All events read from and write to atom. This preserves streaming data.
+  // - When not streaming: React state is source of truth
+  //   Events read/write React state, which syncs to atoms via useEffect.
+  // - Handoff events (complete, error, etc.): End streaming, sync atom → React state
+  //
+  // This is simpler and more robust than checking event types - we just ask
+  // "is this session currently streaming?" and route accordingly.
+  useEffect(() => {
+    // Handoff events signal end of streaming - need to sync back to React state
+    // Also includes todo_state_changed so status updates immediately reflect in sidebar
+    // async_operation included so shimmer effect on session titles updates in real-time
+    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'session_status_changed', 'session_flagged', 'session_unflagged', 'name_changed', 'labels_changed', 'title_generated', 'async_operation'])
+
+    // Helper to handle side effects (same logic for both paths)
+    const handleEffects = (effects: Effect[], sessionId: string, eventType: string) => {
+      for (const effect of effects) {
+        switch (effect.type) {
+          case 'permission_request': {
+            setPendingPermissions(prevPerms => {
+              const next = new Map(prevPerms)
+              const existingQueue = next.get(sessionId) || []
+              next.set(sessionId, [...existingQueue, effect.request])
+              return next
+            })
+
+            // Native notification for approval-required pauses (same gating as completion notifications)
+            const notifySession = store.get(sessionAtomFamily(sessionId))
+            if (notifySession && !notifySession.hidden) {
+              const isAdminPrompt = effect.request.type === 'admin_approval'
+              const promptBody = isAdminPrompt
+                ? `Admin approval required: ${effect.request.appName || effect.request.toolName}`
+                : `Permission required: ${effect.request.toolName}`
+              showSessionNotification(notifySession, promptBody)
+            }
+            break
+          }
+          case 'permission_mode_changed': {
+            if (typeof effect.modeVersion === 'number' && effect.changedAt && effect.changedBy) {
+              applyPermissionModeState(effect.sessionId, {
+                permissionMode: effect.permissionMode,
+                modeVersion: effect.modeVersion,
+                changedAt: effect.changedAt,
+                changedBy: effect.changedBy,
+              }, 'event')
+            } else {
+              // Backward compatibility: apply mode optimistically then reconcile authoritative state.
+              setSessionOptions(prevOpts => {
+                const next = new Map(prevOpts)
+                const current = next.get(effect.sessionId) ?? defaultSessionOptions
+                next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
+                return next
+              })
+              void reconcilePermissionModeState(effect.sessionId)
+            }
+            break
+          }
+          case 'credential_request': {
+            setPendingCredentials(prevCreds => {
+              const next = new Map(prevCreds)
+              const existingQueue = next.get(sessionId) || []
+              next.set(sessionId, [...existingQueue, effect.request])
+              return next
+            })
+            break
+          }
+          case 'question_request': {
+            // A new requestId replaces any previous pending question —
+            // the old card's local answers are dropped with it.
+            applyPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request, pendingQuestionGuardRef.current))
+            // Native notification (same gating as permission notifications)
+            const notifySession = store.get(sessionAtomFamily(sessionId))
+            if (notifySession && !notifySession.hidden) {
+              showSessionNotification(notifySession, i18n.t('chat.questionNotification'))
+            }
+            break
+          }
+          case 'question_resolved': {
+            // requestId-conditional: never delete a newer question card that
+            // replaced the one this resolution is about.
+            applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId, pendingQuestionGuardRef.current))
+            break
+          }
+          case 'restore_input': {
+            // Queued messages were removed from chat on abort — restore their text to the input field.
+            // Append to existing draft (user may have started typing) rather than overwrite.
+            const existingDraft = sessionDraftsRef.current.get(sessionId)
+            const existingText = coerceInputText(existingDraft?.text)
+            const restoredText = coerceInputText(effect.text)
+            const restored = existingText
+              ? `${existingText}\n\n${restoredText}`
+              : restoredText
+            handleInputChange(sessionId, restored)
+            // handleInputChange updates the ref but ChatPage has local state.
+            // Dispatch a custom event so ChatPage re-reads the draft.
+            window.dispatchEvent(new CustomEvent('craft:restore-input', {
+              detail: { sessionId, text: restored },
+            }))
+            break
+          }
+          case 'toast_error': {
+            toast.error(effect.message, { duration: 5000 })
+            break
+          }
+        }
+      }
+
+      // Clear pending permissions and credentials on complete
+      if (eventType === 'complete') {
+        setPendingPermissions(prevPerms => {
+          if (prevPerms.has(sessionId)) {
+            const next = new Map(prevPerms)
+            next.delete(sessionId)
+            return next
+          }
+          return prevPerms
+        })
+        setPendingCredentials(prevCreds => {
+          if (prevCreds.has(sessionId)) {
+            const next = new Map(prevCreds)
+            next.delete(sessionId)
+            return next
+          }
+          return prevCreds
+        })
+      }
+    }
+
+    const cleanup = window.electronAPI.onSessionEvent((event: SessionEvent) => {
+      if (!('sessionId' in event)) return
+
+      const sessionId = event.sessionId
+      const workspaceId = windowWorkspaceId ?? ''
+
+      // Session lifecycle events are handled explicitly (not by the agent event processor).
+      if (event.type === 'session_created') {
+        // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the fetch RPC and
+        // closes after the payload has been applied synchronously.
+        pendingQuestionGuardRef.current.beginSnapshot()
+        window.electronAPI.getSessionMessages(sessionId)
+          .then((createdSession: Session | null) => {
+            if (createdSession) {
+              const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)
+              if (existingMeta) {
+                replaceLoadedSession(createdSession)
+              } else {
+                addSession(createdSession)
+              }
+              syncSessionOptionsFromSession(createdSession)
+              applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
+              return
+            }
+            return window.electronAPI.getSessions().then(initializeSessions)
+          })
+          .catch((error: unknown) => console.error('Failed to handle session_created event:', error))
+          .finally(() => pendingQuestionGuardRef.current.endSnapshot())
+        return
+      }
+
+      if (event.type === 'session_deleted') {
+        // Deletion is a terminal state: the pending question (if any) expires —
+        // clear unconditionally so no stale card survives in any window
+        // (repeated events are idempotent).
+        applyPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId, pendingQuestionGuardRef.current))
+        removeSession(sessionId)
+        return
+      }
+
+      const agentEvent = event as unknown as AgentEvent
+
+      // Track activity for stale session watchdog
+      trackSessionActivity(sessionId)
+
+      // Dispatch window event when compaction completes
+      // This allows FreeFormInput to sequence the plan execution message after compaction
+      // Note: markCompactionComplete is called on the backend (sessions.ts) to ensure
+      // it happens even if CMD+R occurs during compaction
+      if (event.type === 'info' && event.statusType === 'compaction_complete') {
+        window.dispatchEvent(new CustomEvent('craft:compaction-complete', {
+          detail: { sessionId }
+        }))
+      }
+
+      // Check if session is currently streaming (atom is source of truth)
+      const atomSession = store.get(sessionAtomFamily(sessionId))
+      const isStreaming = atomSession?.isProcessing === true
+      const isHandoff = handoffEventTypes.has(event.type)
+
+      // During streaming OR for handoff events: use atom as source of truth
+      // This ensures all events during streaming see the complete state
+      if (isStreaming || isHandoff) {
+        const currentSession = atomSession ?? null
+
+        // Process the event
+        const { session: updatedSession, effects } = processAgentEvent(
+          agentEvent,
+          currentSession,
+          workspaceId
+        )
+
+        // Update atom directly (UI sees update immediately)
+        updateSessionDirect(sessionId, () => updatedSession)
+
+        // Handle side effects
+        handleEffects(effects, sessionId, event.type)
+
+        // Handle background task events
+        handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
+
+        // For handoff events, update metadata map for list display
+        // NOTE: No sessionsAtom to sync - atom and metadata are the source of truth
+        if (isHandoff) {
+          // Update metadata map
+          const metaMap = store.get(sessionMetaMapAtom)
+          const newMetaMap = new Map(metaMap)
+          newMetaMap.set(sessionId, extractSessionMeta(updatedSession))
+          store.set(sessionMetaMapAtom, newMetaMap)
+
+          // Show notification on complete (when window is not focused)
+          // Skip hidden sessions (mini-agent sessions) - they shouldn't trigger notifications
+          if (event.type === 'complete' && !updatedSession.hidden) {
+            // Get the last assistant/plan message as preview
+            const lastMessage = updatedSession.messages.findLast(
+              m => (m.role === 'assistant' || m.role === 'plan') && !m.isIntermediate
+            )
+            // Strip markdown so OS notifications display clean plain text
+            const rawPreview = lastMessage?.content?.substring(0, 200) || undefined
+            const preview = rawPreview ? stripMarkdown(rawPreview).substring(0, 100) || undefined : undefined
+            showSessionNotification(updatedSession, preview)
+          }
+        }
+
+        return
+      }
+
+      // Not streaming: use per-session atoms directly (no sessionsAtom)
+      const currentSession = store.get(sessionAtomFamily(sessionId))
+
+      const { session: updatedSession, effects } = processAgentEvent(
+        agentEvent,
+        currentSession,
+        workspaceId
+      )
+
+      // Handle side effects
+      handleEffects(effects, sessionId, event.type)
+
+      // Handle background task events
+      handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
+
+      // Update per-session atom
+      updateSessionDirect(sessionId, () => updatedSession)
+
+      // Update metadata map
+      const metaMap = store.get(sessionMetaMapAtom)
+      const newMetaMap = new Map(metaMap)
+      newMetaMap.set(sessionId, extractSessionMeta(updatedSession))
+      store.set(sessionMetaMapAtom, newMetaMap)
+    })
+
+    return cleanup
+  }, [
+    processAgentEvent,
+    trackSessionActivity,
+    windowWorkspaceId,
+    store,
+    updateSessionDirect,
+    replaceLoadedSession,
+    showSessionNotification,
+    initializeSessions,
+    addSession,
+    removeSession,
+    syncSessionOptionsFromSession,
+    applyPermissionModeState,
+    reconcilePermissionModeState,
+  ])
+
+  // Transport reconnect recovery — refresh session metadata plus active/processing
+  // session content after stale reconnects.
+  useEffect(() => {
+    const cleanup = window.electronAPI.onReconnected(async (isStale: boolean) => {
+      if (!isStale) {
+        // Server replayed buffered events — we're caught up, nothing to do
+        console.info('[App] Reconnected with event replay — no refresh needed')
+        return
+      }
+
+      console.warn('[App] Stale reconnect — refreshing session metadata and active/processing sessions')
+
+      const refreshedMetaMap = await refreshSessionListMetadataFromServer({
+        removeMissing: false,
+        reason: 'stale-reconnect',
+        selectedSessionId: sessionSelection.selected,
+      })
+      const metaMap = refreshedMetaMap ?? store.get(sessionMetaMapAtom)
+      const refreshIds = getSessionsToRefreshAfterStaleReconnect(metaMap, sessionSelection.selected)
+
+      console.info(`[App] Stale reconnect — refreshing ${refreshIds.length} session(s):`, refreshIds)
+
+      // Refresh full message content only for the active session plus any
+      // session still marked processing after the metadata refresh.
+      for (const sessionId of refreshIds) {
+        let refreshResult = await refreshSessionFromServer(sessionId)
+        if (refreshResult !== 'refreshed') {
+          // Server may need time to restart session subprocess after reconnect,
+          // or it may still be lazily loading session messages.
+          for (const delay of [2000, 4000]) {
+            console.warn(`[App] Retrying session refresh for ${sessionId} after ${delay}ms (${refreshResult})`)
+            await new Promise(r => setTimeout(r, delay))
+            refreshResult = await refreshSessionFromServer(sessionId)
+            if (refreshResult === 'refreshed') break
+          }
+        }
+      }
+
+      // Final fallback: if the active session is still empty, force a reload
+      // even when the session is already marked loaded.
+      if (sessionSelection.selected) {
+        const session = store.get(sessionAtomFamily(sessionSelection.selected))
+        if (session && (!session.messages || session.messages.length === 0)) {
+          console.warn('[App] Active session still has no messages after stale reconnect refresh — forcing message reload')
+          await store.set(forceSessionMessagesReloadAtom, sessionSelection.selected)
+        } else if (session) {
+          console.info(`[App] Stale reconnect recovery complete — active session has ${session.messages?.length ?? 0} messages`)
+        }
+      }
+
+    })
+
+    return cleanup
+  }, [store, sessionSelection.selected, refreshSessionFromServer, refreshSessionListMetadataFromServer])
+
+  // Listen for menu bar events
+  useEffect(() => {
+    const unsubNewChat = window.electronAPI.onMenuNewChat(() => {
+      setMenuNewChatTrigger(n => n + 1)
+    })
+    const unsubSettings = window.electronAPI.onMenuOpenSettings(() => {
+      handleOpenSettings()
+    })
+    const unsubShortcuts = window.electronAPI.onMenuKeyboardShortcuts(() => {
+      navigate(routes.view.settings('shortcuts'))
+    })
+    return () => {
+      unsubNewChat()
+      unsubSettings()
+      unsubShortcuts()
+    }
+  }, [])
+
+  const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
+    const session = await window.electronAPI.createSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
+    addSession(session)
+    syncSessionOptionsFromSession(session)
+
+    return session
+  }, [addSession, syncSessionOptionsFromSession])
+
+  // Dedicated, trusted creation path for the Edit Popover session: the server
+  // stamps the 'edit-popover' origin + owner identity. The generic
+  // handleCreateSession above can never grant that origin.
+  const handleCreateEditPopoverSession = useCallback(async (
+    workspaceId: string,
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+  ): Promise<Session> => {
+    const session = await window.electronAPI.createEditPopoverSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
+    addSession(session)
+    syncSessionOptionsFromSession(session)
+
+    return session
+  }, [addSession, syncSessionOptionsFromSession])
+
+  // Deep link navigation is initialized later after handleInputChange is defined
+
+  const handleDeleteSession = useCallback(async (sessionId: string, skipConfirmation = false): Promise<boolean> => {
+    // Show confirmation dialog before deleting (unless skipped or session is empty)
+    if (!skipConfirmation) {
+      // Check if session has any messages using session metadata from Jotai store
+      // We use store.get() instead of closing over sessions to prevent memory leaks
+      // (closures would retain the full sessions array with all messages)
+      const metaMap = store.get(sessionMetaMapAtom)
+      const meta = metaMap.get(sessionId)
+      // Session is empty if it has no lastFinalMessageId (no assistant responses) and no name (set on first user message)
+      const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
+
+      if (!isEmpty) {
+        const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
+        if (!confirmed) return false
+      }
+    }
+
+    await window.electronAPI.deleteSession(sessionId)
+    // Remove from per-session atom and metadata map (no sessionsAtom)
+    removeSession(sessionId)
+    return true
+  }, [store, removeSession])
+
+  // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
+  const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
+    window.electronAPI.deleteSession(sessionId)
+    removeSession(sessionId)
+  }, [removeSession])
+
+  const handleFlagSession = useCallback((sessionId: string) => {
+    updateSessionById(sessionId, { isFlagged: true })
+    window.electronAPI.sessionCommand(sessionId, { type: 'flag' })
+  }, [updateSessionById])
+
+  const handleUnflagSession = useCallback((sessionId: string) => {
+    updateSessionById(sessionId, { isFlagged: false })
+    window.electronAPI.sessionCommand(sessionId, { type: 'unflag' })
+  }, [updateSessionById])
+
+  const handleArchiveSession = useCallback((sessionId: string) => {
+    updateSessionById(sessionId, { isArchived: true, archivedAt: Date.now() })
+    window.electronAPI.sessionCommand(sessionId, { type: 'archive' })
+  }, [updateSessionById])
+
+  const handleUnarchiveSession = useCallback((sessionId: string) => {
+    updateSessionById(sessionId, { isArchived: false, archivedAt: undefined })
+    window.electronAPI.sessionCommand(sessionId, { type: 'unarchive' })
+  }, [updateSessionById])
+
+  /**
+   * Set which session user is actively viewing (for unread state machine).
+   * Called when user navigates to a session. Main process uses this to determine
+   * whether to mark new assistant messages as unread.
+   */
+  const handleSetActiveViewingSession = useCallback((sessionId: string) => {
+    // Optimistic UI update: clear hasUnread immediately
+    updateSessionById(sessionId, { hasUnread: false })
+    // Tell main process user is viewing this session
+    window.electronAPI.sessionCommand(sessionId, { type: 'setActiveViewing', workspaceId: windowWorkspaceId ?? '' })
+  }, [updateSessionById, windowWorkspaceId])
+
+  const handleMarkSessionRead = useCallback((sessionId: string) => {
+    // Update hasUnread flag (primary source of truth for NEW badge)
+    // Also update lastReadMessageId for backwards compatibility
+    updateSessionById(sessionId, (s) => {
+      const lastFinalId = s.messages.findLast(
+        m => (m.role === 'assistant' || m.role === 'plan') && !m.isIntermediate
+      )?.id
+      return {
+        hasUnread: false,
+        ...(lastFinalId ? { lastReadMessageId: lastFinalId } : {}),
+      }
+    })
+    window.electronAPI.sessionCommand(sessionId, { type: 'markRead' })
+  }, [updateSessionById])
+
+  const handleMarkSessionUnread = useCallback((sessionId: string) => {
+    // Set hasUnread flag (primary source of truth for NEW badge)
+    updateSessionById(sessionId, { hasUnread: true, lastReadMessageId: undefined })
+    window.electronAPI.sessionCommand(sessionId, { type: 'markUnread' })
+  }, [updateSessionById])
+
+  const handleSessionStatusChange = useCallback((sessionId: string, state: SessionStatus) => {
+    updateSessionById(sessionId, { sessionStatus: state })
+    window.electronAPI.sessionCommand(sessionId, { type: 'setSessionStatus', state })
+  }, [updateSessionById])
+
+  const handleRenameSession = useCallback((sessionId: string, name: string) => {
+    updateSessionById(sessionId, { name })
+    window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
+  }, [updateSessionById])
+
+  const checkAdminAccountDisabledBeforeSend = useCallback(async (): Promise<boolean> => {
+    if (!currentAdminUser || runtimeChatAccessIssue === 'account-disabled') {
+      return runtimeChatAccessIssue === 'account-disabled'
+    }
+
+    try {
+      const validation = await window.electronAPI.adminValidate()
+      if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
+        setRuntimeChatAccessIssue('account-disabled')
+        invalidateProductSpaceDeepLinkRefresh()
+        commitCurrentAdminUser(null)
+        return true
+      }
+    } catch (error) {
+      if (isAdminAccountDisabledResult({
+        loggedIn: false,
+        errorCode: String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? ''),
+        status: Number(readErrorField(error, 'status')),
+        message: getErrorText(error),
+      })) {
+        setRuntimeChatAccessIssue('account-disabled')
+        invalidateProductSpaceDeepLinkRefresh()
+        commitCurrentAdminUser(null)
+        return true
+      }
+    }
+
+    return false
+  }, [
+    currentAdminUser,
+    commitCurrentAdminUser,
+    invalidateProductSpaceDeepLinkRefresh,
+    runtimeChatAccessIssue,
+  ])
+
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+    try {
+      if (chatAccessStatus) {
+        return
+      }
+
+      if (llmConnectionsLoaded && llmConnections.length === 0) {
+        return
+      }
+
+      if (await checkAdminAccountDisabledBeforeSend()) {
+        return
+      }
+
+      // Capture pre-send processing state so we can flag mid-stream sends
+      // for the queued badge (#616 follow-up — covers Pi steer path which
+      // returns status 'accepted', not 'queued').
+      const sendingMidStream = store.get(sessionAtomFamily(sessionId))?.isProcessing === true
+
+      // Step 1: Store attachments and get persistent metadata
+      let storedAttachments: StoredAttachment[] | undefined
+      let processedAttachments: FileAttachment[] | undefined
+
+      if (attachments?.length) {
+        // Store each attachment to disk (generates thumbnails, converts Office→markdown)
+        // Use allSettled so one failure doesn't kill all attachments
+        const storeResults = await Promise.allSettled(
+          attachments.map(a => window.electronAPI.storeAttachment(sessionId, a))
+        )
+
+        // Filter successful stores, warn about failures
+        storedAttachments = []
+        const successfulAttachments: FileAttachment[] = []
+        storeResults.forEach((result, i) => {
+          if (result.status === 'fulfilled') {
+            storedAttachments!.push(result.value)
+            successfulAttachments.push(attachments[i])
+          } else {
+            console.warn(`Failed to store attachment "${attachments[i].name}":`, result.reason)
+          }
+        })
+
+        // Notify user about failed attachments
+        const failedCount = storeResults.filter(r => r.status === 'rejected').length
+        if (failedCount > 0) {
+          console.warn(`${failedCount} attachment(s) failed to store`)
+          // Add warning message to session so user knows some attachments weren't included
+          const failedNames = attachments
+            .filter((_, i) => storeResults[i].status === 'rejected')
+            .map(a => a.name)
+            .join(', ')
+          updateSessionById(sessionId, (s) => ({
+            messages: [...s.messages, {
+              id: generateMessageId(),
+              role: 'warning' as const,
+              content: `⚠️ ${failedCount} attachment(s) could not be stored and will not be sent: ${failedNames}`,
+              timestamp: Date.now()
+            }]
+          }))
+        }
+
+        // Step 2: Create processed attachments for Claude
+        // - Office files: Convert to text with markdown content
+        // - Others: Use original FileAttachment
+        // - All: Include storedPath so agent knows where files are stored
+        // - Resized images: Use resizedBase64 instead of original large base64
+        processedAttachments = await Promise.all(
+          successfulAttachments.map(async (att, i) => {
+            const stored = storedAttachments?.[i]
+            if (!stored) {
+              console.error(`Missing stored attachment at index ${i}`)
+              return att // Fall back to original
+            }
+            // Include storedPath and markdownPath for all attachment types
+            // Agent will use Read tool to access text/office files via these paths
+            // If image was resized, use the resized base64 for Claude API
+            return {
+              ...att,
+              storedPath: stored.storedPath,
+              markdownPath: stored.markdownPath,
+              // Use resized base64 if available (for images that exceeded size limits)
+              base64: stored.resizedBase64 ?? att.base64,
+            }
+          })
+        )
+      }
+
+      // Step 3: Extract badges from mentions (sources/skills) with embedded icons
+      // Badges are self-contained for display in UserMessageBubble and viewer
+      // Merge with any externally provided badges (e.g., from EditPopover context badges)
+      // Use workspace slug (not UUID) for skill qualification - SDK expects "workspaceSlug:skillSlug"
+      const mentionBadges: ContentBadge[] = windowWorkspaceSlug
+        ? extractBadges(message, skills, sources, windowWorkspaceSlug)
+        : []
+      const badges: ContentBadge[] = [...(externalBadges || []), ...mentionBadges]
+
+      // Step 4.1: Detect SDK slash commands (e.g., /compact) and create command badges
+      // This makes /compact render as an inline badge rather than raw text
+      const commandMatch = message.match(/^\/([a-z]+)(\s|$)/i)
+      if (commandMatch && commandMatch[1].toLowerCase() === 'compact') {
+        const commandText = commandMatch[0].trimEnd() // "/compact" without trailing space
+        badges.unshift({
+          type: 'command',
+          label: 'Compact',
+          rawText: commandText,
+          start: 0,
+          end: commandText.length,
+        })
+      }
+
+      // Step 4.2: Detect plan execution messages and create file badges
+      // Pattern: "Read the plan at <path> and execute it."
+      // This is sent after compaction when accepting a plan, displays as clickable file badge
+      // Only the file path is replaced with a badge - surrounding text remains visible
+      const planExecuteMatch = message.match(/^(Read the plan at )(.+?)( and execute it\.?)$/i)
+      if (planExecuteMatch) {
+        const prefix = planExecuteMatch[1]      // "Read the plan at "
+        const filePath = planExecuteMatch[2]    // the actual path
+        const fileName = filePath.split('/').pop() || 'plan.md'
+        badges.push({
+          type: 'file',
+          label: fileName,
+          rawText: filePath,
+          filePath: filePath,
+          start: prefix.length,
+          end: prefix.length + filePath.length,
+        })
+      }
+
+      // Step 5: Create user message with StoredAttachments (for UI display)
+      // Mark as isPending for optimistic UI — will be confirmed by user_message
+      // event. Flag mid-stream sends as queued so the bubble renders with the
+      // dashed-draft treatment immediately. Applies to both backends:
+      // Pi steers (server emits status: 'accepted' but the renderer preserves
+      // isQueued through that update) and Claude queues (server emits 'queued'
+      // which confirms it). Cleared by 'processing' status or when the current
+      // turn ends.
+      const userMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content: message,
+        timestamp: Date.now(),
+        attachments: storedAttachments,
+        badges: badges.length > 0 ? badges : undefined,
+        isPending: true,  // Optimistic - will be confirmed by backend
+        isQueued: sendingMidStream,
+      }
+
+      // Optimistic UI update - add user message and set processing state
+      updateSessionById(sessionId, (s) => ({
+        messages: [...s.messages, userMessage],
+        isProcessing: true,
+        lastMessageAt: Date.now()
+      }))
+
+      // Step 6: Send to Claude with processed attachments + stored attachments for persistence.
+      // Desktop interactive turns explicitly declare their invocation source so
+      // request_user_input is registered for this turn (P0 entry-eligibility contract).
+      // The Edit Popover exception is server-side: its session carries the
+      // 'edit-popover' origin recorded at creation — no per-turn marker exists.
+      await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
+        skillSlugs,
+        badges: badges.length > 0 ? badges : undefined,
+        optimisticMessageId: userMessage.id,
+        invocationSource: 'desktop',
+      })
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      if (isQuotaExhaustedError(error)) {
+        setRuntimeChatAccessIssue('quota-exhausted')
+      }
+      updateSessionById(sessionId, (s) => ({
+        isProcessing: false,
+        messages: [
+          ...s.messages,
+          {
+            id: generateMessageId(),
+            role: 'error' as const,
+            content: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            timestamp: Date.now()
+          }
+        ]
+      }))
+    }
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
+
+  /**
+   * Unified handler for all session option changes.
+   * Handles persistence and backend sync for each option type.
+   */
+  const handleSessionOptionsChange = useCallback((sessionId: string, updates: SessionOptionUpdates) => {
+    setSessionOptions(prev => {
+      const next = new Map(prev)
+      const current = next.get(sessionId) ?? defaultSessionOptions
+      next.set(sessionId, mergeSessionOptions(current, updates))
+      return next
+    })
+
+    // Handle persistence/backend for specific options
+    if (updates.permissionMode !== undefined) {
+      // Sync permission mode change with backend
+      window.electronAPI.sessionCommand(sessionId, { type: 'setPermissionMode', mode: updates.permissionMode })
+    }
+    if (updates.thinkingLevel !== undefined) {
+      // Sync thinking level change with backend (session-level, persisted)
+      window.electronAPI.sessionCommand(sessionId, { type: 'setThinkingLevel', level: updates.thinkingLevel })
+    }
+  }, [sessionOptions])
+
+  // Handle input draft changes per session with debounced persistence
+  const draftSaveTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  // Cleanup draft save timers on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      draftSaveTimeoutRef.current.forEach(clearTimeout)
+      draftSaveTimeoutRef.current.clear()
+    }
+  }, [])
+
+  // Getter for draft text - reads from ref without triggering re-renders
+  const getDraft = useCallback((sessionId: string): string => {
+    const draft = sessionDraftsRef.current.get(sessionId) as unknown
+    const text = draft && typeof draft === 'object'
+      ? (draft as { text?: unknown }).text
+      : draft
+    return coerceInputText(text)
+  }, [])
+
+  // Getter for persisted attachment refs (path + name only — not hydrated files).
+  // Consumers that need FileAttachment objects should call hydrateDraftAttachments.
+  const getDraftAttachmentRefs = useCallback((sessionId: string): DraftAttachmentRef[] => {
+    const attachments = sessionDraftsRef.current.get(sessionId)?.attachments
+    return Array.isArray(attachments) ? attachments : []
+  }, [])
+
+  // Hydrate persisted attachment refs into full FileAttachment objects.
+  //  - Track C (ref.content set): reconstruct directly from the inlined bytes.
+  //  - Track P (path-only): re-read from disk via the readUserAttachment RPC.
+  // Missing/moved files on Track P are silently dropped with a console warn — same
+  // UX as any other editor draft restore when the backing file is gone.
+  const hydrateDraftAttachments = useCallback(async (sessionId: string): Promise<FileAttachment[]> => {
+    const attachments = sessionDraftsRef.current.get(sessionId)?.attachments
+    const refs = Array.isArray(attachments) ? attachments : []
+    if (refs.length === 0) return []
+    const results = await Promise.all(
+      refs.map(async (ref) => {
+        if (ref.content) {
+          return attachmentFromContentRef(ref)
+        }
+        try {
+          const attachment = await window.electronAPI.readUserAttachment(ref.path)
+          if (!attachment) {
+            console.warn('[drafts] Attachment missing on restore, dropping:', ref.path)
+            return null
+          }
+          return attachment
+        } catch (err) {
+          console.warn('[drafts] Failed to restore attachment, dropping:', ref.path, err)
+          return null
+        }
+      })
+    )
+    return results.filter((a): a is FileAttachment => a !== null)
+  }, [])
+
+  // Write a debounced snapshot of the current ref entry to disk.
+  const schedulePersistDraft = useCallback((sessionId: string) => {
+    const existingTimeout = draftSaveTimeoutRef.current.get(sessionId)
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
+    }
+    const timeout = setTimeout(() => {
+      const draft = sessionDraftsRef.current.get(sessionId) ?? { text: '' }
+      window.electronAPI.setDraft(sessionId, draft)
+      draftSaveTimeoutRef.current.delete(sessionId)
+    }, DRAFT_SAVE_DEBOUNCE_MS)
+    draftSaveTimeoutRef.current.set(sessionId, timeout)
+  }, [])
+
+  const handleInputChange = useCallback((sessionId: string, value: string) => {
+    const text = coerceInputText(value)
+    const existing = sessionDraftsRef.current.get(sessionId)
+    const existingAttachments = Array.isArray(existing?.attachments) ? existing.attachments : []
+    const nextDraft: SessionDraft = {
+      text,
+      ...(existingAttachments.length > 0
+        ? { attachments: existingAttachments }
+        : {}),
+    }
+    const isEmpty = !nextDraft.text && (!nextDraft.attachments || nextDraft.attachments.length === 0)
+    if (isEmpty) {
+      sessionDraftsRef.current.delete(sessionId)
+    } else {
+      sessionDraftsRef.current.set(sessionId, nextDraft)
+    }
+    schedulePersistDraft(sessionId)
+  }, [schedulePersistDraft])
+
+  const handleAttachmentsChange = useCallback((sessionId: string, attachments: FileAttachment[]) => {
+    const existing = sessionDraftsRef.current.get(sessionId)
+    const refs: DraftAttachmentRef[] = []
+    for (const a of attachments) {
+      const ref = toDraftRef(a)
+      if (ref) {
+        refs.push(ref)
+      } else {
+        console.warn('[drafts] attachment exceeds per-draft size cap, not persisted:', a.name, a.size)
+      }
+    }
+    const nextDraft: SessionDraft = {
+      text: coerceInputText(existing?.text),
+      ...(refs.length > 0 ? { attachments: refs } : {}),
+    }
+    const isEmpty = !nextDraft.text && (!nextDraft.attachments || nextDraft.attachments.length === 0)
+    if (isEmpty) {
+      sessionDraftsRef.current.delete(sessionId)
+    } else {
+      sessionDraftsRef.current.set(sessionId, nextDraft)
+    }
+    schedulePersistDraft(sessionId)
+  }, [schedulePersistDraft])
+
+  // Open new chat - creates session and selects it
+  // Used by components via AppShellContext and for programmatic navigation
+  const openNewChat = useCallback(async (params: NewChatActionParams = {}) => {
+    if (!windowWorkspaceId) {
+      console.warn('[App] Cannot open new chat: no workspace ID')
+      return
+    }
+
+    const session = await handleCreateSession(windowWorkspaceId)
+
+    if (params.name) {
+      await window.electronAPI.sessionCommand(session.id, { type: 'rename', name: params.name })
+    }
+
+    // Navigate to the chat view - this sets both selectedSession and activeView
+    navigate(routes.view.allSessions(session.id))
+
+    // Pre-fill input if provided (after a small delay to ensure component is mounted)
+    if (params.input) {
+      setTimeout(() => handleInputChange(session.id, params.input!), 100)
+    }
+  }, [windowWorkspaceId, handleCreateSession, handleInputChange])
+
+  const handleRespondToPermission = useCallback(async (
+    sessionId: string,
+    requestId: string,
+    allowed: boolean,
+    alwaysAllow: boolean,
+    options?: import('../shared/types').PermissionResponseOptions,
+  ) => {
+    const success = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
+
+    if (success) {
+      // Remove only the first permission from the queue (the one we just responded to)
+      setPendingPermissions(prev => {
+        const next = new Map(prev)
+        const queue = next.get(sessionId) || []
+        const remainingQueue = queue.slice(1) // Remove first item
+        if (remainingQueue.length === 0) {
+          next.delete(sessionId)
+        } else {
+          next.set(sessionId, remainingQueue)
+        }
+        return next
+      })
+      // Note: No need to force session refresh - per-session atoms update automatically
+    } else {
+      // Response failed (agent/session gone) - clear the permission anyway
+      // to avoid UI being stuck with stale permission
+      setPendingPermissions(prev => {
+        const next = new Map(prev)
+        const queue = next.get(sessionId) || []
+        const remainingQueue = queue.slice(1)
+        if (remainingQueue.length === 0) {
+          next.delete(sessionId)
+        } else {
+          next.set(sessionId, remainingQueue)
+        }
+        return next
+      })
+    }
+  }, [])
+
+  const handleRespondToCredential = useCallback(async (sessionId: string, requestId: string, response: CredentialResponse) => {
+    const success = await window.electronAPI.respondToCredential(sessionId, requestId, response)
+
+    if (success) {
+      // Remove only the first credential from the queue (the one we just responded to)
+      setPendingCredentials(prev => {
+        const next = new Map(prev)
+        const queue = next.get(sessionId) || []
+        const remainingQueue = queue.slice(1) // Remove first item
+        if (remainingQueue.length === 0) {
+          next.delete(sessionId)
+        } else {
+          next.set(sessionId, remainingQueue)
+        }
+        return next
+      })
+      // Note: No need to force session refresh - per-session atoms update automatically
+    } else {
+      // Response failed (agent/session gone) - clear the credential anyway
+      // to avoid UI being stuck with stale credential request
+      setPendingCredentials(prev => {
+        const next = new Map(prev)
+        const queue = next.get(sessionId) || []
+        const remainingQueue = queue.slice(1)
+        if (remainingQueue.length === 0) {
+          next.delete(sessionId)
+        } else {
+          next.set(sessionId, remainingQueue)
+        }
+        return next
+      })
+    }
+  }, [])
+
+  // Resolve a pending agent question (answer or "skip for now").
+  // Terminal results clear the card; transient_failure rejects so the
+  // QuestionRequest component keeps its state and allows retry.
+  const handleRespondToQuestion = useCallback(async (
+    sessionId: string,
+    resolution: QuestionResolution,
+  ): Promise<QuestionResolutionResult> => {
+    const result = await window.electronAPI.respondToQuestion(sessionId, resolution)
+    // requestId-conditional cleanup: if the agent already fired a follow-up
+    // question (q2) while this resolution (q1) was in flight, the stale
+    // resolution must not delete the newer card.
+    const resolvedRequestId = questionResolutionRequestId(resolution)
+
+    switch (result.status) {
+      case 'accepted':
+      case 'cancelled':
+      case 'already_answered':
+        applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
+        break
+      case 'stale':
+      case 'session_missing':
+        // One-time readable notice, then drop the stale card
+        toast.error(i18n.t('toast.questionNoLongerActive'), { duration: 5000 })
+        applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
+        break
+      case 'transient_failure':
+        throw new Error(result.message)
+    }
+
+    return result
+  }, [])
+
+  // Locate the Edit Popover session that still owns an active pending
+  // question for the given workspace + popover owner and seed it into the
+  // shared pendingQuestions map. The popover's hidden session is not reachable
+  // through the session list, so a reopen / renderer reload / app restart
+  // would otherwise orphan the persisted request. The server derives the
+  // association from the session's 'edit-popover' origin + the authoritative
+  // pendingQuestion + an exact workspace/owner match, so it clears exactly
+  // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
+  // deleted) and can never cross workspaces or popover owners.
+  const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<EditPopoverRestoreOutcome> => {
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the lookup RPC and
+    // closes after the seed has been applied synchronously — terminal markers
+    // are pinned for the whole in-flight window (an RPC rejection absorbs as
+    // transient; retry ownership (bounded loop) lives in
+    // useEditPopoverSessionRestore).
+    let outcome: EditPopoverRestoreOutcome = { outcome: 'transient' }
+    await applySnapshotUnderGuard(
+      pendingQuestionGuardRef.current,
+      () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
+      result => {
+        if (!result) {
+          outcome = { outcome: 'empty' }
+          return
+        }
+        // Seed the authoritative request through the SNAPSHOT path (fill-only
+        // + terminal guard) — the same ordering rules as a session fetch: a
+        // realtime card that arrived while the RPC was in flight is never
+        // overwritten, and a terminal (resolved/superseded) requestId is
+        // never re-seeded. usePendingQuestion(inlineSessionId) resolves and
+        // every existing event-driven cleanup keeps working.
+        applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, { id: result.sessionId, pendingQuestion: result.request }, pendingQuestionGuardRef.current))
+        outcome = { outcome: 'found', sessionId: result.sessionId }
+      },
+    )
+    return outcome
+  }, [])
+
+  // Centralized link interceptor: classifies file types and decides whether to
+  // show an in-app preview overlay or open externally. Replaces the old
+  // handleOpenFile/handleOpenUrl that always opened in external apps.
+  const linkInterceptor = useLinkInterceptor({
+    // Scope seal (Review R33/R34): every opened preview is stamped with the
+    // immutable ProductSpace context key that opened it.
+    scopeKey: () => productSpace.productSpaceContextKey ?? null,
+    openFileExternal: async (path) => {
+      try {
+        await window.electronAPI.openFile(path)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        console.error('Failed to open file:', error)
+        toast.error(t('toast.failedToOpenFile'), {
+          description: message,
+        })
+      }
+    },
+    openUrl: async (url) => {
+      try {
+        await window.electronAPI.openUrl(url)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        console.error('Failed to open URL:', error)
+        // The blocked-URL classifier already explains WHY and (for file:)
+        // points the user at preview blocks. Don't append the generic
+        // "use Open File instead" hint when the message already carries
+        // that guidance.
+        const hasRichGuidance = /URL blocked/.test(message)
+        const tail = hasRichGuidance ? '' : '. If this is a local path, use Open File instead.'
+        toast.error(t('toast.failedToOpenLink'), {
+          description: `${message}${tail}`,
+        })
+      }
+    },
+    showInFolder: async (path) => {
+      try {
+        await window.electronAPI.showInFolder(path)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        console.error('Failed to show in folder:', error)
+        toast.error(t("toast.failedToReveal", { fileManager: getFileManagerName() }), {
+          description: message,
+        })
+      }
+    },
+    readFile: (path) => window.electronAPI.readFile(path),
+    readFileDataUrl: (path) => window.electronAPI.readFileDataUrl(path),
+    readFileBinary: (path) => window.electronAPI.readFileBinary(path),
+  })
+  // Entering the narrow viewport closes any retained file preview: the
+  // narrow-Home surface never mounts the preview renderer, and a retained
+  // preview must not resurface when the window is widened again.
+  // Review R33/R34: a preview SEALED to a previous scope (stale epoch/key)
+  // is closed as well — the render-time rejection below covers the first
+  // committed layout; this passive close releases the retained state.
+  useEffect(() => {
+    if (!linkInterceptor.previewState) return
+    const stale = narrowViewport
+      || linkInterceptor.previewState.scopeKey !== (productSpace.productSpaceContextKey ?? null)
+    if (stale) linkInterceptor.closePreview()
+  }, [narrowViewport, linkInterceptor.previewState, linkInterceptor.closePreview, productSpace.productSpaceContextKey])
+
+  // Render-time scope seal (Review R33/R34): a preview opened under a
+  // PREVIOUS account/ProductSpace epoch is rejected SYNCHRONOUSLY — the
+  // target scope's first committed layout never mounts or displays the
+  // stale preview overlay/content/path. (The passive close above then
+  // releases the retained state.)
+  const previewScopeKey = linkInterceptor.previewState?.scopeKey ?? null
+  const previewStale =
+    linkInterceptor.previewState !== null
+    && previewScopeKey !== (productSpace.productSpaceContextKey ?? null)
+
+  const connectionState = useTransportConnectionState()
+  const showTransportConnectionBanner = shouldShowTransportConnectionBanner(connectionState)
+
+  const handleReconnectTransport = useCallback(() => {
+    void window.electronAPI.reconnectTransport().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(t('toast.reconnectFailed'), { description: message })
+    })
+  }, [])
+
+  const handleOpenFile = linkInterceptor.handleOpenFile
+  const handleOpenUrl = linkInterceptor.handleOpenUrl
+
+  const handleOpenSettings = useCallback(() => {
+    navigate(routes.view.settings())
+  }, [])
+
+  const handleOpenKeyboardShortcuts = useCallback(() => {
+    navigate(routes.view.settings('shortcuts'))
+  }, [])
+
+  const handleOpenStoredUserPreferences = useCallback(() => {
+    navigate(routes.view.settings('preferences'))
+  }, [])
+
+  // Show reset confirmation dialog
+  const handleReset = useCallback(() => {
+    setShowResetDialog(true)
+  }, [])
+
+  // Execute reset after user confirms in dialog
+  const executeReset = useCallback(async () => {
+    const logoutSnapshot = {
+      accountId: currentAdminUserIdRef.current,
+      generation: currentAdminUserGenerationRef.current,
+    }
+    const isCurrentLogout = () => (
+      currentAdminUserIdRef.current === logoutSnapshot.accountId
+      && currentAdminUserGenerationRef.current === logoutSnapshot.generation
+    )
+    invalidateProductSpaceDeepLinkRefresh()
+    try {
+      const result = await window.electronAPI.logout()
+      if (!result.success || !isCurrentLogout()) return
+      invalidateProductSpaceDeepLinkRefresh()
+      // Reset all state
+      // Clear session atoms - initialize with empty array clears all per-session atoms
+      initializeSessions([])
+      setWorkspaces([])
+      setWindowWorkspaceId(null)
+      setRuntimeChatAccessIssue(null)
+      setLlmConnectionsLoaded(false)
+      clearProductSpaceAccount(logoutSnapshot.accountId)
+      commitCurrentAdminUser(null)
+      // Reset setupNeeds to force fresh onboarding start
+      setSetupNeeds({
+        needsBillingConfig: true,
+        needsCredentials: true,
+        needsAdminLogin: false,
+        isFullyConfigured: false,
+      })
+      // Reset onboarding hook state
+      onboarding.reset()
+      setAppState('onboarding')
+    } catch (error) {
+      console.error('Reset failed:', error)
+    } finally {
+      setShowResetDialog(false)
+    }
+  }, [
+    commitCurrentAdminUser,
+    onboarding,
+    initializeSessions,
+    clearProductSpaceAccount,
+    invalidateProductSpaceDeepLinkRefresh,
+    setWindowWorkspaceId,
+  ])
+
+  const handleAdminLogout = useCallback(async () => {
+    const logoutSnapshot = {
+      accountId: currentAdminUserIdRef.current,
+      generation: currentAdminUserGenerationRef.current,
+    }
+    const isCurrentLogout = () => (
+      currentAdminUserIdRef.current === logoutSnapshot.accountId
+      && currentAdminUserGenerationRef.current === logoutSnapshot.generation
+    )
+    invalidateProductSpaceDeepLinkRefresh()
+    // The Main fence and any prepared switch transaction must be revoked
+    // BEFORE credentials are invalidated — otherwise a stale fence survives
+    // the logout. A failed revoke aborts the logout (fail-closed): credential
+    // cleanup never completes against a live runtime scope.
+    try {
+      const revoke = await window.electronAPI.productSpaceRevokeActiveContext()
+      if (!revoke?.success) {
+        toast.error(t('productSpace.logout.revokeFailed'))
+        return
+      }
+    } catch {
+      toast.error(t('productSpace.logout.revokeFailed'))
+      return
+    }
+    try {
+      const result = await window.electronAPI.adminLogout()
+      if (!result.success || !isCurrentLogout()) return
+      invalidateProductSpaceDeepLinkRefresh()
+      clearProductSpaceAccount(logoutSnapshot.accountId)
+      initializeSessions([])
+      setWorkspaces([])
+      setWindowWorkspaceId(null)
+      setLlmConnections([])
+      setLlmConnectionsLoaded(false)
+      setDefaultLlmConnectionSlug(undefined)
+      setWorkspaceDefaultLlmConnection(undefined)
+      setRuntimeChatAccessIssue(null)
+      commitCurrentAdminUser(null)
+      setSetupNeeds({
+        needsBillingConfig: false,
+        needsCredentials: false,
+        needsAdminLogin: true,
+        isFullyConfigured: false,
+      })
+      handleAdminRelogin()
+      setAppState('onboarding')
+    } catch (error) {
+      console.error('Admin logout failed:', error)
+    }
+  }, [
+    commitCurrentAdminUser,
+    handleAdminRelogin,
+    initializeSessions,
+    clearProductSpaceAccount,
+    invalidateProductSpaceDeepLinkRefresh,
+    setWindowWorkspaceId,
+  ])
+
+  // Handle workspace selection
+  // - Default: switch workspace in same window (in-window switching)
+  // - With openInNewWindow=true: open in new window (or focus existing)
+  const handleSelectWorkspace = useCallback(async (workspaceId: string, openInNewWindow = false) => {
+    // If selecting current workspace, do nothing
+    if (workspaceId === windowWorkspaceId) return
+
+    if (openInNewWindow) {
+      // Open (or focus) the window for the selected workspace
+      window.electronAPI.openWorkspace(workspaceId)
+    } else {
+      // Switch workspace in current window
+      // 1. Update the main process's window-workspace mapping
+      await window.electronAPI.switchWorkspace(workspaceId)
+
+      // 2. Update React state to trigger re-renders
+      setWindowWorkspaceId(workspaceId)
+
+      // 3. Clear selected session - the old session belongs to the previous workspace
+      // and should not remain selected when switching to a new workspace.
+      // This prevents showing stale session data from the wrong workspace.
+      setSession({ selected: null })
+
+      // 4. Clear pending permissions/credentials (not relevant to new workspace)
+      setPendingPermissions(new Map())
+      setPendingCredentials(new Map())
+
+      // 5. Clear session options from previous workspace
+      // (session IDs are unique UUIDs, but clearing prevents unbounded memory growth
+      // and ensures no stale state from old workspace persists)
+      setSessionOptions(new Map())
+
+      // 6. Clear message drafts from previous workspace
+      // (prevents memory growth on repeated workspace switches)
+      sessionDraftsRef.current.clear()
+
+      // 7. Reset sources and skills atoms to empty
+      // (prevents stale data flash during workspace switch - AppShell will reload)
+      store.set(sourcesAtom, [])
+      store.set(skillsAtom, [])
+
+      // 8. Clear session atoms BEFORE workspace switch
+      // This prevents stale session data from the previous workspace being visible.
+      store.set(sessionMetaMapAtom, new Map())
+      store.set(sessionIdsAtom, [])
+
+      // Note: NavigationContext detects the workspaceId change and handles
+      // panel restoration from the stored workspace URL (or defaults to allSessions).
+      // Sessions and theme will reload automatically due to windowWorkspaceId dependency
+      // in useEffect hooks.
+    }
+  }, [windowWorkspaceId, setSession, store])
+
+  // Handle workspace switch by slug (called by NavigationContext on popstate when ?ws= changes)
+  const handleSwitchWorkspaceBySlug = useCallback((slug: string) => {
+    const target = workspaces.find(w => w.slug === slug)
+    if (target) {
+      handleSelectWorkspace(target.id)
+    }
+  }, [workspaces, handleSelectWorkspace])
+
+  // Handle workspace refresh (e.g., after icon upload)
+  const handleRefreshWorkspaces = useCallback(() => {
+    window.electronAPI.getWorkspaces().then(setWorkspaces)
+  }, [])
+
+  // Handle cancel during onboarding
+  const handleOnboardingCancel = useCallback(() => {
+    onboarding.handleCancel()
+  }, [onboarding])
+
+  // Build context value for AppShell component
+  // This is memoized to prevent unnecessary re-renders
+  // IMPORTANT: Must be before early returns to maintain consistent hook order
+  const appShellContextValue = useMemo<AppShellContextType>(() => ({
+    // Data
+    // NOTE: sessions is NOT included - use sessionMetaMapAtom for listing
+    // and useSession(id) hook for individual sessions. This prevents memory leaks.
+    workspaces,
+    activeWorkspaceId: windowWorkspaceId,
+    activeWorkspaceSlug: windowWorkspaceSlug,
+    llmConnections,
+    workspaceDefaultLlmConnection,
+    chatAccessStatus,
+    currentAdminUser,
+    onAdminLogout: handleAdminLogout,
+    refreshLlmConnections,
+    pendingPermissions,
+    pendingCredentials,
+    pendingQuestions,
+    getDraft,
+    getDraftAttachmentRefs,
+    hydrateDraftAttachments,
+    sessionOptions,
+    // Session callbacks
+    onCreateSession: handleCreateSession,
+    onCreateEditPopoverSession: handleCreateEditPopoverSession,
+    onSendMessage: handleSendMessage,
+    onRenameSession: handleRenameSession,
+    onFlagSession: handleFlagSession,
+    onUnflagSession: handleUnflagSession,
+    onArchiveSession: handleArchiveSession,
+    onUnarchiveSession: handleUnarchiveSession,
+    onMarkSessionRead: handleMarkSessionRead,
+    onMarkSessionUnread: handleMarkSessionUnread,
+    onSetActiveViewingSession: handleSetActiveViewingSession,
+    onSessionStatusChange: handleSessionStatusChange,
+    onDeleteSession: handleDeleteSession,
+    onRespondToPermission: handleRespondToPermission,
+    onRespondToCredential: handleRespondToCredential,
+    onRespondToQuestion: handleRespondToQuestion,
+    onGetEditPopoverPendingQuestion: handleGetEditPopoverPendingQuestion,
+    // File/URL handlers
+    onOpenFile: handleOpenFile,
+    onOpenUrl: handleOpenUrl,
+    // Workspace
+    onSelectWorkspace: handleSelectWorkspace,
+    onRefreshWorkspaces: handleRefreshWorkspaces,
+    // App actions
+    onOpenSettings: handleOpenSettings,
+    onOpenKeyboardShortcuts: handleOpenKeyboardShortcuts,
+    onOpenStoredUserPreferences: handleOpenStoredUserPreferences,
+    onReset: handleReset,
+    // Session options
+    onSessionOptionsChange: handleSessionOptionsChange,
+    onInputChange: handleInputChange,
+    onAttachmentsChange: handleAttachmentsChange,
+    // New chat (via deep link navigation)
+    openNewChat,
+  }), [
+    // NOTE: sessions removed to prevent memory leaks - components use atoms instead
+    workspaces,
+    windowWorkspaceId,
+    windowWorkspaceSlug,
+    llmConnections,
+    workspaceDefaultLlmConnection,
+    chatAccessStatus,
+    currentAdminUser,
+    handleAdminLogout,
+    refreshLlmConnections,
+    pendingPermissions,
+    pendingCredentials,
+    pendingQuestions,
+    getDraft,
+    getDraftAttachmentRefs,
+    hydrateDraftAttachments,
+    sessionOptions,
+    handleCreateSession,
+    handleCreateEditPopoverSession,
+    handleSendMessage,
+    handleRenameSession,
+    handleFlagSession,
+    handleUnflagSession,
+    handleArchiveSession,
+    handleUnarchiveSession,
+    handleMarkSessionRead,
+    handleMarkSessionUnread,
+    handleSetActiveViewingSession,
+    handleSessionStatusChange,
+    handleDeleteSession,
+    handleRespondToPermission,
+    handleRespondToCredential,
+    handleRespondToQuestion,
+    handleGetEditPopoverPendingQuestion,
+    handleOpenFile,
+    handleOpenUrl,
+    handleSelectWorkspace,
+    handleRefreshWorkspaces,
+    handleOpenSettings,
+    handleOpenKeyboardShortcuts,
+    handleOpenStoredUserPreferences,
+    handleReset,
+    handleSessionOptionsChange,
+    handleInputChange,
+    handleAttachmentsChange,
+    openNewChat,
+  ])
+
+  const handleSelectProductSpace = useCallback((productSpaceId: string) => {
+    void requestSwitch(productSpaceId)
+  }, [requestSwitch])
+
+  const handleRefreshProductSpaces = useCallback(() => {
+    void refreshProductSpaces()
+  }, [refreshProductSpaces])
+
+  const productSpaceContextValue = useMemo<ProductSpaceContextValue | null>(() => {
+    if (
+      !currentAdminUser?.userId
+      || !productSpace.activeProductSpaceId
+      || !productSpace.activeProductSpace
+      || !productSpace.personalProductSpaceId
+      || !productSpace.productSpaceContextKey
+    ) {
+      return null
+    }
+    return {
+      accountId: currentAdminUser.userId,
+      activeProductSpaceId: productSpace.activeProductSpaceId,
+      activeProductSpace: productSpace.activeProductSpace,
+      productSpaces: productSpace.productSpaces,
+      allProductSpaces: productSpace.allProductSpaces,
+      personalProductSpaceId: productSpace.personalProductSpaceId,
+      productSpaceContextKey: productSpace.productSpaceContextKey,
+      contextVersion: productSpace.contextVersion,
+      pendingSwitch: productSpace.pendingSwitch,
+      onSelectProductSpace: handleSelectProductSpace,
+      onRefreshProductSpaces: handleRefreshProductSpaces,
+      onConfirmStopAndSwitch: () => {
+        void confirmStopAndSwitch()
+      },
+      onRetryFailedStops: () => {
+        void retryFailedStops()
+      },
+      onRetryTargetLoad: () => {
+        void retryTargetLoad()
+      },
+      onCancelSwitch: cancelSwitch,
+      onDismissTargetAccessLost: dismissTargetAccessLost,
+      onStopSwitchExecution: (executionId: string) => {
+        void stopSwitchExecution(executionId)
+      },
+    }
+  }, [
+    cancelSwitch,
+    stopSwitchExecution,
+    confirmStopAndSwitch,
+    currentAdminUser?.userId,
+    dismissTargetAccessLost,
+    handleRefreshProductSpaces,
+    handleSelectProductSpace,
+    productSpace.activeProductSpace,
+    productSpace.activeProductSpaceId,
+    productSpace.allProductSpaces,
+    productSpace.contextVersion,
+    productSpace.personalProductSpaceId,
+    productSpace.productSpaceContextKey,
+    productSpace.productSpaces,
+    productSpace.pendingSwitch,
+    retryFailedStops,
+    retryTargetLoad,
+  ])
+  const startupCatalogSpaceId = productSpaceContextValue?.activeProductSpaceId
+  const startupCatalogContextKey = productSpaceContextValue?.productSpaceContextKey
+
+  productSpaceScopeRef.current = {
+    accountId: productSpaceContextValue?.accountId ?? null,
+    activeId: productSpaceContextValue?.activeProductSpaceId ?? null,
+    personalId: productSpaceContextValue?.personalProductSpaceId ?? null,
+  }
+
+  // A committed space switch remounts the whole shell through the context key
+  // and reloads the session list so only target-space history is visible.
+  const loadedSpaceContextVersionRef = useRef<number | null>(null)
+  const previousActiveSpaceRef = useRef<string | null>(null)
+  const lastCommittedSwitchRef = useRef<{ from: string; to: string; at: number } | null>(null)
+  useEffect(() => {
+    if (appState !== 'ready') return
+    if (!productSpaceContextValue) return
+    if (
+      loadedSpaceContextVersionRef.current !== null
+      && loadedSpaceContextVersionRef.current === productSpaceContextValue.contextVersion
+    ) return
+    const fromSpace = previousActiveSpaceRef.current
+    previousActiveSpaceRef.current = productSpaceContextValue.activeProductSpaceId
+    if (
+      fromSpace
+      && fromSpace !== productSpaceContextValue.activeProductSpaceId
+      && productSpace.flowState === 'ready'
+    ) {
+      lastCommittedSwitchRef.current = {
+        from: fromSpace,
+        to: productSpaceContextValue.activeProductSpaceId,
+        at: Date.now(),
+      }
+    }
+    loadedSpaceContextVersionRef.current = productSpaceContextValue.contextVersion
+    // A committed switch must not leave any origin-space projection behind:
+    // previews, watchers, pending permission/credential prompts and session
+    // atoms are dropped together with the keyed shell remount.
+    linkInterceptor.closePreview()
+    setPendingPermissions(new Map())
+    setPendingCredentials(new Map())
+    void window.electronAPI.unwatchSessionFiles().catch(() => {})
+    setSessionsLoaded(false)
+    void loadSessionsFromServer()
+  }, [appState, productSpaceContextValue, loadSessionsFromServer, linkInterceptor.closePreview])
+
+  useEffect(() => {
+    if (!startupCatalogSpaceId) return
+    let cancelled = false
+    void window.electronAPI.productSpaceGetCatalog(
+      startupCatalogSpaceId,
+    ).then((result) => {
+      if (cancelled) return
+      if (!result.success) {
+        // PC-F11 is a single global gate: a contract-incompatible Catalog
+        // reported by this warmup — even when no useAppCatalog consumer is
+        // mounted (e.g. a restored assistant tab) — must revoke the fence
+        // and enter the upgrade screen. Network failures stay local.
+        if (isProductSpaceContractUnsupported(result)) {
+          reportProductSpaceContractFailure({
+            errorCode: 'product_space_contract_unsupported',
+            source: 'catalog-warmup',
+          })
+          return
+        }
+        emitAdminCatalogSessionAuthFailure(result)
+      }
+    }).catch(() => {
+      // Home surfaces refresh failures; the unified Catalog has no legacy fallback.
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [startupCatalogContextKey, startupCatalogSpaceId])
+
+  // Platform actions for @polo-ai/ui components (overlays, etc.)
+  // Memoized to prevent re-renders when these callbacks don't change
+  // NOTE: Must be defined before early returns to maintain consistent hook order
+  const platformActions = useMemo(() => ({
+    onOpenFile: handleOpenFile,
+    onOpenUrl: handleOpenUrl,
+    // Bypass link interceptor — opens file directly in system editor.
+    // Used by overlay header badges (when already viewing a file, "Open" should launch editor).
+    onOpenFileExternal: linkInterceptor.openFileExternal,
+    // Read file contents as UTF-8 string (used by datatable/spreadsheet/html-preview src fields)
+    onReadFile: (path: string) => window.electronAPI.readFile(path),
+    // Read file as data URL (used by image-preview blocks)
+    onReadFileDataUrl: (path: string) => window.electronAPI.readFileDataUrl(path),
+    // Read file as binary Uint8Array (used by PDF preview blocks)
+    onReadFileBinary: (path: string) => window.electronAPI.readFileBinary(path),
+    // Reveal a file in the system file manager (Finder on macOS, Explorer on Windows, etc.)
+    onRevealInFinder: (path: string) => {
+      window.electronAPI.showInFolder(path).catch(() => {})
+    },
+    // Platform-specific file manager name for UI labels
+    fileManagerName: getFileManagerName(),
+    // Hide/show macOS traffic lights when fullscreen overlays are open
+    onSetTrafficLightsVisible: (visible: boolean) => {
+      window.electronAPI.setTrafficLightsVisible(visible)
+    },
+  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
+
+  // Loading state - show splash screen
+  if (appState === 'loading') {
+    return <SplashScreen isExiting={false} />
+  }
+
+  // Reauth state - session expired, need to re-login
+  // ModalProvider + WindowCloseHandler ensures X button works on Windows
+  if (appState === 'reauth') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ReauthScreen
+            onLogin={handleReauthLogin}
+            onReset={handleReauthReset}
+          />
+          <ResetConfirmationDialog
+            open={showResetDialog}
+            onConfirm={executeReset}
+            onCancel={() => setShowResetDialog(false)}
+          />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Onboarding state
+  // ModalProvider + WindowCloseHandler ensures X button works on Windows
+  // (without this, the close IPC message has no listener and window stays open)
+  if (appState === 'onboarding') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <OnboardingWizard
+            state={onboarding.state}
+            onContinue={onboarding.handleContinue}
+            onBack={onboarding.handleBack}
+            onSelectProvider={onboarding.handleSelectProvider}
+            onSkipSetup={onboarding.handleSkipSetup}
+            onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
+            onSubmitCredential={onboarding.handleSubmitCredential}
+            onAdminLogin={onboarding.handleAdminLogin}
+            onAdminSendPhoneCode={onboarding.handleAdminSendPhoneCode}
+            onAdminVerifyPhoneCode={onboarding.handleAdminVerifyPhoneCode}
+            onAdminRelogin={onboarding.handleAdminRelogin}
+            onSubmitLocalModel={onboarding.handleSubmitLocalModel}
+            onStartOAuth={onboarding.handleStartOAuth}
+            onFinish={onboarding.handleFinish}
+            isWaitingForCode={onboarding.isWaitingForCode}
+            onSubmitAuthCode={onboarding.handleSubmitAuthCode}
+            onCancelOAuth={onboarding.handleCancelOAuth}
+            copilotDeviceCode={onboarding.copilotDeviceCode}
+            onBrowseGitBash={onboarding.handleBrowseGitBash}
+            onUseGitBashPath={onboarding.handleUseGitBashPath}
+            onRecheckGitBash={onboarding.handleRecheckGitBash}
+            onClearError={onboarding.handleClearError}
+          />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // PC-F11 contract gate — the client cannot safely understand the server
+  // ProductSpace contract, so business surfaces stay blocked.
+  if (appState === 'contract-blocked') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ProductSpaceContractGate />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Space list failed to load and no verified device-local context exists.
+  // POO-41 safe-degraded state: reload the space or sign out.
+  if (appState === 'space-error') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <div
+            className="flex h-full items-center justify-center p-6"
+            data-testid="product-space-error-screen"
+          >
+            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
+              <h2 className="text-lg font-semibold text-foreground">
+                {t('productSpace.error.loadTitle')}
+              </h2>
+              <p className="mt-2 text-sm text-foreground/60">
+                {t('productSpace.error.loadDesc')}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  data-testid="product-space-error-logout"
+                  onClick={() => {
+                    void handleAdminLogout()
+                  }}
+                >
+                  {t('productSpace.error.logout')}
+                </Button>
+                <Button
+                  type="button"
+                  data-testid="product-space-error-retry"
+                  onClick={() => {
+                    void retryProductSpaceBootstrap().then(next => {
+                      if (next === 'ready') {
+                        continueAfterProductSpace(windowWorkspaceId)
+                      } else if (next === 'contract-blocked') {
+                        setAppState('contract-blocked')
+                      }
+                    }).catch(() => {})
+                  }}
+                >
+                  {t('productSpace.error.retry')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Workspace picker — thin client with no workspace selected
+  if (appState === 'workspace-picker') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <WorkspacePicker
+            onSelectWorkspace={async (id) => {
+              await window.electronAPI.switchWorkspace(id)
+              setWindowWorkspaceId(id)
+              setAppState('ready')
+            }}
+          />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Show splash until exit animation completes
+  const showSplash = !splashHidden
+
+  // PC-F11 at runtime: if the ProductSpace contract became unsupported while
+  // the shell was open, the hook has already revoked the Main fence and torn
+  // down its context; the contract gate is the only allowed surface.
+  if (appState === 'ready' && productSpace.flowState === 'contract-blocked') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ProductSpaceContractGate />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Membership loss whose personal-space fallback failed: the last complete
+  // verified projection is kept, but the safe error page replaces the shell
+  // so Apps, assistant, files and writes stay blocked (never a providerless
+  // ready shell).
+  if (appState === 'ready' && productSpace.flowState === 'error') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <div
+            className="flex h-full items-center justify-center p-6"
+            data-testid="product-space-error-screen"
+          >
+            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
+              <h2 className="text-lg font-semibold text-foreground">
+                {t('productSpace.error.loadTitle')}
+              </h2>
+              <p className="mt-2 text-sm text-foreground/60">
+                {t('productSpace.error.loadDesc')}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  data-testid="product-space-error-logout"
+                  onClick={() => {
+                    void handleAdminLogout()
+                  }}
+                >
+                  {t('productSpace.error.logout')}
+                </Button>
+                <Button
+                  type="button"
+                  data-testid="product-space-error-retry"
+                  onClick={() => {
+                    void retryProductSpaceBootstrap().then(next => {
+                      if (next === 'ready') {
+                        continueAfterProductSpace(windowWorkspaceId)
+                      } else if (next === 'contract-blocked') {
+                        setAppState('contract-blocked')
+                      }
+                    }).catch(() => {})
+                  }}
+                >
+                  {t('productSpace.error.retry')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
+  // Ready state - main app with splash overlay during data loading
+  return (
+    <PlatformProvider actions={platformActions}>
+    <ShikiThemeProvider shikiTheme={shikiTheme}>
+      <ActionRegistryProvider>
+      <FocusProvider>
+        <DismissibleLayerProvider>
+        <ModalProvider>
+        <TooltipProvider delayDuration={0}>
+          {/* Handle window close requests (X button, Cmd+W) - close modal first if open */}
+          <WindowCloseHandler />
+
+          {/* Splash screen overlay - fades out when fully ready */}
+          {showSplash && (
+            <SplashScreen
+              isExiting={splashExiting}
+              onExitComplete={handleSplashExitComplete}
+            />
+          )}
+
+          <MaybeProductSpaceProvider value={productSpaceContextValue}>
+            <TabShellProvider
+              key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
+              workspaceId={windowWorkspaceId}
+              productSpaceScope={
+                productSpaceContextValue?.accountId && productSpaceContextValue?.activeProductSpaceId
+                  ? {
+                      accountId: productSpaceContextValue.accountId,
+                      productSpaceId: productSpaceContextValue.activeProductSpaceId,
+                    }
+                  : null
+              }
+            >
+              <TabShell
+              renderPolo={() => (
+                <NavigationProvider
+                  workspaceId={windowWorkspaceId}
+                  workspaceSlug={windowWorkspaceSlug}
+                  onSwitchWorkspaceBySlug={handleSwitchWorkspaceBySlug}
+                  onCreateSession={handleCreateSession}
+                  onInputChange={handleInputChange}
+                  getDraft={getDraft}
+                  onAutoDeleteEmptySession={handleAutoDeleteEmptySession}
+                  isReady={appState === 'ready'}
+                  isSessionsReady={sessionsLoaded}
+                  remoteWorkspaceId={windowRemoteWorkspaceId}
+                >
+                  <div data-testid="polo-app-root" className="flex h-full min-h-0 flex-col text-foreground">
+                    {showTransportConnectionBanner && connectionState && (
+                      <TransportConnectionBanner
+                        state={connectionState}
+                        onRetry={handleReconnectTransport}
+                      />
+                    )}
+                    <div className="flex-1 min-h-0">
+                      {sessionLoadError ? (
+                        <SessionLoadErrorScreen
+                          message={sessionLoadError}
+                          onRetry={() => { void loadSessionsFromServer() }}
+                          onRollback={
+                            lastCommittedSwitchRef.current
+                              && Date.now() - lastCommittedSwitchRef.current.at < ROLLBACK_WINDOW_MS
+                              ? () => {
+                                // Trusted reverse transaction through the
+                                // ProductSpace context: Main restores the
+                                // origin fence, then the full origin
+                                // projection (selection, context key, shell)
+                                // is republished before sessions reload.
+                                // The rollback target is the real frozen
+                                // origin of the failing transaction — never
+                                // a personal-space default.
+                                const entry = lastCommittedSwitchRef.current
+                                if (!entry) return
+                                void productSpace.rollbackToOrigin(entry.from)
+                                  .then(rolledBack => {
+                                    if (!rolledBack) throw new Error('rollback failed')
+                                    lastCommittedSwitchRef.current = null
+                                    setSessionLoadError(null)
+                                    setSessionsLoaded(false)
+                                    void loadSessionsFromServer()
+                                  })
+                                  .catch(() => {
+                                    toast.error(t('productSpace.rollback.failed'))
+                                  })
+                              }
+                              : undefined
+                          }
+                        />
+                      ) : (
+                        <AppShell
+                          contextValue={appShellContextValue}
+                          defaultLayout={[20, 32, 48]}
+                          menuNewChatTrigger={menuNewChatTrigger}
+                          isFocusedMode={isFocusedMode}
+                        />
+                      )}
+                    </div>
+                    <ResetConfirmationDialog
+                      open={showResetDialog}
+                      onConfirm={executeReset}
+                      onCancel={() => setShowResetDialog(false)}
+                    />
+                  </div>
+                </NavigationProvider>
+              )}
+              />
+              {/* File preview overlay — lives INSIDE the ProductSpace-keyed
+                  boundary so a committed switch unmounts any origin-space file
+                  preview together with the rest of the origin projection.
+                  Review R31/R32: a narrow viewport never mounts the preview
+                  renderer — retained previews are closed on entry (effect at
+                  the useNarrowViewport declaration) so the POO-43 Home
+                  surface can never be overlaid by a preview. */}
+              {linkInterceptor.previewState && !previewStale && !narrowViewport && (
+                <div data-testid="file-preview-overlay">
+                  <FilePreviewRenderer
+                    state={linkInterceptor.previewState}
+                    onClose={linkInterceptor.closePreview}
+                    loadDataUrl={linkInterceptor.readFileDataUrl}
+                    loadPdfData={linkInterceptor.readFileBinary}
+                    isDark={isDark}
+                  />
+                </div>
+              )}
+            </TabShellProvider>
+            <ProductSpaceSwitchDialog />
+          </MaybeProductSpaceProvider>
+        </TooltipProvider>
+        </ModalProvider>
+        </DismissibleLayerProvider>
+      </FocusProvider>
+      </ActionRegistryProvider>
+    </ShikiThemeProvider>
+    </PlatformProvider>
+  )
+}
+
+function MaybeProductSpaceProvider({
+  value,
+  children,
+}: {
+  value: ProductSpaceContextValue | null
+  children: React.ReactNode
+}) {
+  return value
+    ? <ProductSpaceProvider value={value}>{children}</ProductSpaceProvider>
+    : <>{children}</>
+}
+
+/**
+ * Component that handles window close requests.
+ * Must be inside ModalProvider to access the modal registry.
+ */
+function WindowCloseHandler() {
+  useWindowCloseHandler()
+  return null
+}
+
+/**
+ * FilePreviewRenderer - Routes file preview state to the correct overlay component.
+ *
+ * Handles all preview types from the link interceptor:
+ * - image → ImagePreviewOverlay (binary, loaded via data URL)
+ * - pdf → PDFPreviewOverlay (binary, embedded via Chromium viewer)
+ * - code/text → CodePreviewOverlay (syntax highlighted)
+ * - markdown → DocumentFormattedMarkdownOverlay
+ * - json → JSONPreviewOverlay
+ *
+ * File path badges with "Open" / "Reveal in {file manager}" menus are provided
+ * automatically by PlatformContext — no per-overlay callback props needed.
+ */
+function FilePreviewRenderer({
+  state,
+  onClose,
+  loadDataUrl,
+  loadPdfData,
+  isDark,
+}: {
+  state: FilePreviewState
+  onClose: () => void
+  loadDataUrl: (path: string) => Promise<string>
+  loadPdfData: (path: string) => Promise<Uint8Array>
+  isDark: boolean
+}) {
+  const theme = isDark ? 'dark' : 'light' as const
+
+  switch (state.type) {
+    case 'image':
+      return (
+        <ImagePreviewOverlay
+          isOpen
+          onClose={onClose}
+          filePath={state.filePath}
+          loadDataUrl={loadDataUrl}
+          theme={theme}
+        />
+      )
+
+    case 'pdf':
+      return (
+        <PDFPreviewOverlay
+          isOpen
+          onClose={onClose}
+          filePath={state.filePath}
+          loadPdfData={loadPdfData}
+          theme={theme}
+        />
+      )
+
+    case 'code':
+    case 'text':
+      return (
+        <CodePreviewOverlay
+          isOpen
+          onClose={onClose}
+          filePath={state.filePath}
+          content={state.content ?? ''}
+          language={state.type === 'code' ? state.language : 'plaintext'}
+          mode="read"
+          theme={theme}
+          error={state.error}
+        />
+      )
+
+    case 'markdown': {
+      // Show PLAN header for .md files in plans folder (handles both absolute and relative paths)
+      const isPlanFile =
+        (state.filePath.includes('/plans/') || state.filePath.startsWith('plans/')) &&
+        state.filePath.endsWith('.md')
+      return (
+        <DocumentFormattedMarkdownOverlay
+          isOpen
+          onClose={onClose}
+          content={state.content ?? ''}
+          filePath={state.filePath}
+          variant={isPlanFile ? 'plan' : 'response'}
+        />
+      )
+    }
+
+    case 'json': {
+      // JSONPreviewOverlay expects parsed data, not a raw string.
+      // @uiw/react-json-view crashes on null value, so guard against it.
+      let parsedData: unknown = null
+      try {
+        if (state.content) parsedData = JSON.parse(state.content)
+      } catch {
+        // If parsing fails, fall back to showing as code
+        return (
+          <CodePreviewOverlay
+            isOpen
+            onClose={onClose}
+            filePath={state.filePath}
+            content={state.content ?? ''}
+            language="json"
+            mode="read"
+            theme={theme}
+            error={state.error}
+          />
+        )
+      }
+      // If read failed and content is empty, show raw code overlay with the read error.
+      if ((!state.content || !state.content.trim()) && state.error) {
+        return (
+          <CodePreviewOverlay
+            isOpen
+            onClose={onClose}
+            filePath={state.filePath}
+            content={state.content ?? ''}
+            language="json"
+            mode="read"
+            theme={theme}
+            error={state.error}
+          />
+        )
+      }
+      return (
+        <JSONPreviewOverlay
+          isOpen
+          onClose={onClose}
+          filePath={state.filePath}
+          title={state.filePath.split('/').pop() ?? 'JSON'}
+          data={parsedData}
+          theme={theme}
+          error={state.error}
+        />
+      )
+    }
+
+    default:
+      return null
+  }
+}

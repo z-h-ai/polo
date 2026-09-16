@@ -1,0 +1,416 @@
+[
+  {
+    "id": "POO-70",
+    "revision": "618aa66f93a04e38a5c5c941981d78fc2f908ea55bbbfa5a9598fb0a4e9cf2cb",
+    "path": "sources/POO-70.md",
+    "sha256": "7876b37311cea0eb030e15b69f9502a2ee828534d5a2e5685a35e804c300ddeb"
+  },
+  {
+    "id": "POL-111",
+    "revision": "22b983ff3f380791a6be3929664a8fc4ea6e6fa379e9fc1bb02dbc81f0073523",
+    "path": "sources/POL-111.md",
+    "sha256": "7049994a11402ce73c9881f3bc8b88fd448b6ac169a786e06815aca685f8f5b2"
+  },
+  {
+    "id": "POL-112",
+    "revision": "0faff616d1031bf169138bb2b9e2039cc2d396f2eefb7f4708dfb6aeba42a44b",
+    "path": "sources/POL-112.md",
+    "sha256": "cdabdc172bf6504ff5daca9c4382e3d4979fbd613e32d2dfa9e424bf256f2231"
+  },
+  {
+    "id": "POL-94",
+    "revision": "30689c70faa68293d044f5ffb7687d66b88c878fb2b89253e6d648bcfcfee55b",
+    "path": "sources/POL-94.md",
+    "sha256": "f6bfadc4a94a954e959be63beb609ee81a27f01af04c489b843e99754cdc207f"
+  },
+  {
+    "id": "POO-41",
+    "revision": "d92d2695bfc771f56219b4d0e9f6b93c75565af508481bb8083ddb8609d97496",
+    "path": "sources/POO-41.md",
+    "sha256": "7ba81f65ba4f1d18adf45fbe2c60965bc66ce757faddaa689f0fccff9746456f"
+  },
+  {
+    "id": "POO-43",
+    "revision": "8ea5427645fd696fe6289bade2c9e49ee3e56cc5cfdbfc385cf0a53e1b71b6f9",
+    "path": "sources/POO-43.md",
+    "sha256": "5438f1fe8525cc0ff74852080bfd0c33d1d64dda083b8123cd104e0fa9927a40"
+  },
+  {
+    "id": "POO-47",
+    "revision": "17293ba77f4744a52d2042bb7dd0039bf73a600b45ee8a4a7b46449aa4218c6c",
+    "path": "sources/POO-47.md",
+    "sha256": "0782424ede598675faa4cb285ed7aec583ff8f73c7c6bd7d2fd6b5ee4b08ed61"
+  },
+  {
+    "id": "POO-55",
+    "revision": "a5051aaa1e1fdca715fb652fb8de58b48883eef7ad52126051d6a5b1a831d3a3",
+    "path": "sources/POO-55.md",
+    "sha256": "f9c3dc31f862477158dbf3657a5ab636b36085a50032e18d3bcc9342b3b2626e"
+  },
+  {
+    "id": "POO-56",
+    "revision": "ac392256a14d604d274b0c232dd3add33036cbbe12e95781f8a55c4916b021fa",
+    "path": "sources/POO-56.md",
+    "sha256": "7731067fad29a2ee2fdf4a726746734c23f927c52c7999b32cadd516d85f6822"
+  },
+  {
+    "id": "POO-57",
+    "revision": "12c207078e8db13c43929a1e815dd1d027d0849acc58db4587e26fc36f9985b6",
+    "path": "sources/POO-57.md",
+    "sha256": "ae6238c2a3955e92da83ada9649a02831b0f0989ead39b10c4e7d5f6fdc9d57a"
+  },
+  {
+    "id": "A-DOC-CONTEXT.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "revision": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "original_path": "CONTEXT.md",
+    "path": "sources/A-DOC-CONTEXT.md",
+    "sha256": "f29473cee6a2427ca6ca06dbe27fc33719f269ae0f39700555fe0a1abaae68e3"
+  },
+  {
+    "id": "A-DOC-polo-client-user-flows.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "revision": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "original_path": "docs/polo-client-user-flows.md",
+    "path": "sources/A-DOC-polo-client-user-flows.md",
+    "sha256": "bc52fea34f68dfbab7b4d1bc47afd31819db4913440616e8c3d096497a6d4b84"
+  },
+  {
+    "id": "A-DOC-product-function-baseline.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "revision": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "original_path": "docs/product-function-baseline.md",
+    "path": "sources/A-DOC-product-function-baseline.md",
+    "sha256": "1898f27c1a9fbce290f932633205c922b5e533fd65c652f14eaebe22f820f4cd"
+  },
+  {
+    "id": "A-DOC-product-space-contract.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "revision": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "original_path": "docs/product-space-contract.md",
+    "path": "sources/A-DOC-product-space-contract.md",
+    "sha256": "ebcb6bc81f4cc5cd0caa50d4753f154ef2feec3ef68d0166059bdef3107f3a5b"
+  },
+  {
+    "id": "A-DOC-user-flows-permissions-and-states.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "revision": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "original_path": "docs/user-flows-permissions-and-states.md",
+    "path": "sources/A-DOC-user-flows-permissions-and-states.md",
+    "sha256": "2e5c350342d8983784f67691451bd46ebf4bd7bed5f5106e60e205882898c046"
+  },
+  {
+    "id": "A-DOC-0019-runtime-metering-and-prepaid-recharge-are-separate.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs",
+    "branch": "POL-68/refactor/comm-defs",
+    "revision": "c43754bab5700f20998eef971c0ff27f36eba743",
+    "original_path": "docs/adr/0019-runtime-metering-and-prepaid-recharge-are-separate.md",
+    "path": "sources/A-DOC-0019-runtime-metering-and-prepaid-recharge-are-separate.md",
+    "sha256": "8dcbdc2bf8ed54e83ea16f3b83c572c112f60d46471647bee4f1e73b34425e41"
+  },
+  {
+    "id": "A-PAY-payment-requirements-round2-handoff.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-94/feat/product-space-credit-recharge",
+    "branch": "POL-94/feat/product-space-credit-recharge",
+    "revision": "9ae3e7308317fe2dce5b5fb714bd0955c7054335",
+    "original_path": "docs/payment-requirements-round2-handoff.md",
+    "path": "sources/A-PAY-payment-requirements-round2-handoff.md",
+    "sha256": "20e3c5e891f01eae2f8dabe193ec36ae0fdba09e14b9c3a3e28f04595a671a99"
+  },
+  {
+    "id": "A-PAY-payment-round2-user-flows-and-page-states.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-94/feat/product-space-credit-recharge",
+    "branch": "POL-94/feat/product-space-credit-recharge",
+    "revision": "9ae3e7308317fe2dce5b5fb714bd0955c7054335",
+    "original_path": "docs/payment-round2-user-flows-and-page-states.md",
+    "path": "sources/A-PAY-payment-round2-user-flows-and-page-states.md",
+    "sha256": "ac4a2e73473870a85daec79f1b1f4eb1b0fc138d0efd73e3d9ce4db088f18ec2"
+  },
+  {
+    "id": "A-PAY-payment-round2-implementation-orchestration-plan.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/POL-94/feat/product-space-credit-recharge",
+    "branch": "POL-94/feat/product-space-credit-recharge",
+    "revision": "9ae3e7308317fe2dce5b5fb714bd0955c7054335",
+    "original_path": "docs/payment-round2-implementation-orchestration-plan.md",
+    "path": "sources/A-PAY-payment-round2-implementation-orchestration-plan.md",
+    "sha256": "4f4f60054040ca9bdbae4cca6358573eb1122306d863353fa30fdd5e42a45142"
+  },
+  {
+    "id": "C-INT-HomePage.tsx",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "apps/electron/src/renderer/components/tab-browser/HomePage.tsx",
+    "path": "sources/C-INT-HomePage.tsx",
+    "sha256": "b56e82b77ad99678b5df4bd0ee9ebb378267628d73a1fcb1c3450d93170702de"
+  },
+  {
+    "id": "C-INT-HomeSpaceContext.tsx",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "apps/electron/src/renderer/components/product-space/HomeSpaceContext.tsx",
+    "path": "sources/C-INT-HomeSpaceContext.tsx",
+    "sha256": "bdb56963443572e35165a4f8ee8af44b1c856a0e3805cee4d6ea3ceed5e6964e"
+  },
+  {
+    "id": "C-INT-ProductSpaceSwitcher.tsx",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "apps/electron/src/renderer/components/product-space/ProductSpaceSwitcher.tsx",
+    "path": "sources/C-INT-ProductSpaceSwitcher.tsx",
+    "sha256": "9ca993876bcefc8a0599c85ea09304aab521d0d31313672f6cbff0403a300886"
+  },
+  {
+    "id": "C-INT-ProductSpaceContractGate.tsx",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "apps/electron/src/renderer/components/product-space/ProductSpaceContractGate.tsx",
+    "path": "sources/C-INT-ProductSpaceContractGate.tsx",
+    "sha256": "3441fc49ec2a004c7d54dea97c0f39c7ea465a437905dc37e6dcc85238c82e76"
+  },
+  {
+    "id": "C-INT-useProductSpaceContext.ts",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "apps/electron/src/renderer/hooks/useProductSpaceContext.ts",
+    "path": "sources/C-INT-useProductSpaceContext.ts",
+    "sha256": "42d1c592941c443d2d8574d1ace17a853bfe4f540789aa656c4c72863d487b13"
+  },
+  {
+    "id": "C-INT-App.tsx",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "apps/electron/src/renderer/App.tsx",
+    "path": "sources/C-INT-App.tsx",
+    "sha256": "2da4fb84e62dcf2f4a766b1aa860ba028d6af0eb13157d2bf3b61c17afa9ce34"
+  },
+  {
+    "id": "C-INT-DESIGN.md",
+    "repository_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+    "branch": "integration/pol68-g5-client",
+    "revision": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+    "original_path": "docs/DESIGN.md",
+    "path": "sources/C-INT-DESIGN.md",
+    "sha256": "214e90085d7d1f9dfb9cc45a81de182a92bbb85523d4d726929419844b21efdf"
+  },
+  {
+    "id": "POL-112-r5",
+    "revision": "d822be3b8fddd34cc0196a1e2662f1d21ff33846942907ae33d169bb7df36b55",
+    "path": "sources/POL-112-r5.md",
+    "sha256": "c5439190a890b46a78a00deaafebdbd5eddd85979451584e89ab6b6adfdf72c3"
+  },
+  {
+    "id": "POO-70-user-r2",
+    "revision": "r2",
+    "path": "sources/user-decision-r2.md",
+    "sha256": "8f88ab57a8ccad0fb3d246bb68c122e344d89f33a76a2c3e6974c57a709d8351"
+  },
+  {
+    "id": "POL-112-r6",
+    "revision": "433de86878c7c00ad6c07daf2768686395ed6e74f2b418d7398198fb89cdb993",
+    "path": "sources/POL-112-r6.md",
+    "sha256": "6ffb9f785c5ee4b274675dd8b81bbe64ed3fcf4390d8437fce85a0a01fa65644"
+  },
+  {
+    "id": "POO-70-user-r3",
+    "revision": "r3",
+    "path": "sources/user-decision-r3.md",
+    "sha256": "42a0cf6869cab30473d9bcbd2ce30fbef3b6a64ddcad873ff77710c655bf328f"
+  },
+  {
+    "id": "POO-70-user-r4",
+    "path": "sources/user-decision-r4.md",
+    "revision": "r4",
+    "sha256": "7b311f3ccafa026ca1e4142aca3f1613101dc779315036ddc24251ee136c8c10"
+  },
+  {
+    "id": "POL-112-r8",
+    "path": "sources/POL-112-r8.md",
+    "revision": "73036acad645a8ef504d8ba4b14096856d72c83fa678c273a0117a469a41cbaf",
+    "sha256": "483d8d7098a2bef77a16b0d08f78cc5d6bf3e54e6d1538f880012690431b8539"
+  },
+  {
+    "id": "POL-111-spec-input",
+    "revision": "22b983ff3f380791a6be3929664a8fc4ea6e6fa379e9fc1bb02dbc81f0073523",
+    "path": "sources/POL-111-spec-input.md",
+    "sha256": "7049994a11402ce73c9881f3bc8b88fd448b6ac169a786e06815aca685f8f5b2"
+  },
+  {
+    "id": "POL-94-spec-input",
+    "revision": "30689c70faa68293d044f5ffb7687d66b88c878fb2b89253e6d648bcfcfee55b",
+    "path": "sources/POL-94-spec-input.md",
+    "sha256": "f6bfadc4a94a954e959be63beb609ee81a27f01af04c489b843e99754cdc207f"
+  },
+  {
+    "id": "POO-41-spec-input",
+    "revision": "d92d2695bfc771f56219b4d0e9f6b93c75565af508481bb8083ddb8609d97496",
+    "path": "sources/POO-41-spec-input.md",
+    "sha256": "7ba81f65ba4f1d18adf45fbe2c60965bc66ce757faddaa689f0fccff9746456f"
+  },
+  {
+    "id": "POO-47-spec-input",
+    "revision": "17293ba77f4744a52d2042bb7dd0039bf73a600b45ee8a4a7b46449aa4218c6c",
+    "path": "sources/POO-47-spec-input.md",
+    "sha256": "0782424ede598675faa4cb285ed7aec583ff8f73c7c6bd7d2fd6b5ee4b08ed61"
+  },
+  {
+    "id": "POO-48-spec-input",
+    "revision": "b7b780a1bf79bf3ec3d4c7a28aa31fbea664853c1c9b4c5eec4044961e49410c",
+    "path": "sources/POO-48-spec-input.md",
+    "sha256": "ca51953b479ea77bc01340cc344253afdf3c3b291d6ecb9548d94b5ab766b96d"
+  },
+  {
+    "id": "POO-49-spec-input",
+    "revision": "0faafc2f21299a1da5873238972912798cda137f70b739d6b8adf18bbe78b12a",
+    "path": "sources/POO-49-spec-input.md",
+    "sha256": "ee6a47b61c990579e4eb8a21bfd834409cddcdda18175c94b7919d304ebb0e2e"
+  },
+  {
+    "id": "POO-52-spec-input",
+    "revision": "acdf2457c101256295eb480295275f992e71a4e89dde41b0c0795c705f8b52c3",
+    "path": "sources/POO-52-spec-input.md",
+    "sha256": "93d1c144b2957dcba04aa9e2b8ce63b7fdd7bf3c9cf4c86619c6a3ea930aede3"
+  },
+  {
+    "id": "POO-55-spec-input",
+    "revision": "a5051aaa1e1fdca715fb652fb8de58b48883eef7ad52126051d6a5b1a831d3a3",
+    "path": "sources/POO-55-spec-input.md",
+    "sha256": "f9c3dc31f862477158dbf3657a5ab636b36085a50032e18d3bcc9342b3b2626e"
+  },
+  {
+    "id": "POO-56-spec-input",
+    "revision": "ac392256a14d604d274b0c232dd3add33036cbbe12e95781f8a55c4916b021fa",
+    "path": "sources/POO-56-spec-input.md",
+    "sha256": "7731067fad29a2ee2fdf4a726746734c23f927c52c7999b32cadd516d85f6822"
+  },
+  {
+    "id": "POO-57-spec-input",
+    "revision": "12c207078e8db13c43929a1e815dd1d027d0849acc58db4587e26fc36f9985b6",
+    "path": "sources/POO-57-spec-input.md",
+    "sha256": "ae6238c2a3955e92da83ada9649a02831b0f0989ead39b10c4e7d5f6fdc9d57a"
+  },
+  {
+    "id": "POO-58-spec-input",
+    "revision": "85852a27c5749e5892912e1dc664e4e8906e91d6fb2eb70b4f3e64afa98c6657",
+    "path": "sources/POO-58-spec-input.md",
+    "sha256": "91612c7b34220002cca4ccd8a902b353afff3c6c47aa26d8bc0ba082d9fdedd2"
+  },
+  {
+    "id": "POO-59-spec-input",
+    "revision": "051580a2e32329536dfebd75be5ba29cca195960d676d45216a2b3fdeacbc169",
+    "path": "sources/POO-59-spec-input.md",
+    "sha256": "c3fec91db1c08ef7bf655732444fd24ba18c6a9586a406f0dca1f41e5ee4d05b"
+  },
+  {
+    "id": "POO-60-spec-input",
+    "revision": "6ca2375b3d935913ab1bd540cc4b53f6a2c7c19ca221e6881b32120a0e3486d6",
+    "path": "sources/POO-60-spec-input.md",
+    "sha256": "e14e3cac93a86ec54fd691438906975246639eb22853aa43882d35140b14d45e"
+  },
+  {
+    "id": "POO-61-spec-input",
+    "revision": "684cc7ccee0073f1b07bf26f802f9d0d8b1eae871f8daf3ab8c9c4356b5e21d0",
+    "path": "sources/POO-61-spec-input.md",
+    "sha256": "367a99c870cb92ce29863062578da734abe05edcd6416d40ebbf080a7ea5caaa"
+  },
+  {
+    "id": "POO-62-spec-input",
+    "revision": "dab5472e8f7f27fb3f280b5f93857f4c64f39d6d780d443bd1331e958a0b379f",
+    "path": "sources/POO-62-spec-input.md",
+    "sha256": "2134a8047c37dd92ac53e4ae88568175c777409dc9bdd93edd5dbe73dcf9bc6b"
+  },
+  {
+    "id": "POO-63-spec-input",
+    "revision": "717cf6d4af8ff04c6f9a5d7a1c6c94cf620e33dcbf018ca8ca40bfdb355519c2",
+    "path": "sources/POO-63-spec-input.md",
+    "sha256": "c8d36be91611a47afd111f68fb2e9a9ed8874398ec193dcc4c326e8e9651ede9"
+  },
+  {
+    "id": "POO-64-spec-input",
+    "revision": "248805b9236d90395a84d6610c832fb3157bfa2175661ad4eed9f8736e59f117",
+    "path": "sources/POO-64-spec-input.md",
+    "sha256": "6dea7f81208c859e94b2ede26177b389ce0fe858e7928091c19f033c84cfe056"
+  },
+  {
+    "id": "POO-65-spec-input",
+    "revision": "60f8c1c1119fae02d2b39f29e20d770c9f5cafa5285be379098e682e63354822",
+    "path": "sources/POO-65-spec-input.md",
+    "sha256": "e14d64a6ff0d2196ec2a195aa76ae4933508962b818b999624a5b668661cb242"
+  },
+  {
+    "id": "POO-66-spec-input",
+    "revision": "ac6ca64b46ff4c89a7cf6d2a2e8128c7c87b9dcfa51a174935f1a8b348ece52f",
+    "path": "sources/POO-66-spec-input.md",
+    "sha256": "5ac359dec449a26c6e0acc08f59d352c9186dd889c87a75987a31467e096db5a"
+  },
+  {
+    "id": "POO-70-spec-input",
+    "revision": "e44c94c5073d52e32cff0e5455dddf5ce981be5e380f27f240244f4f47da7a83",
+    "path": "sources/POO-70-spec-input.md",
+    "sha256": "724298103c4fc3c7265f24c171a1f5bb72390c1ff5dbb979506be4f6ca5765cc"
+  },
+  {
+    "id": "POL-112-spec-input",
+    "revision": "c7545bbe507571abb840e75dd5891f5fb6b4c38cbc4884215389a1172e9e5545",
+    "path": "sources/POL-112-spec-input.md",
+    "sha256": "62ce5a83c7eae9d3eb8763bb9de994b97542a9e2fc22d0678b5d3f10e9051c54"
+  },
+  {
+    "id": "POO-42-spec-input",
+    "revision": "1a8fa99a2f75a4b1e7923409815b3ea29469b85ef3a7936f755b64bd4c3474ce",
+    "path": "sources/POO-42-spec-input.md",
+    "sha256": "24b6db8bd76790d9209217feafe798b5b7d597766693e278a8328aae27542f2e"
+  },
+  {
+    "id": "POO-43-spec-input",
+    "revision": "8ea5427645fd696fe6289bade2c9e49ee3e56cc5cfdbfc385cf0a53e1b71b6f9",
+    "path": "sources/POO-43-spec-input.md",
+    "sha256": "6079926c0d60c70e65c50d3ab2d10aaceb0caa23f43f22b1cb1b20b03c311d17"
+  },
+  {
+    "id": "POO-53-spec-input",
+    "revision": "32d01016f401beb735415a8750ba2eedcb30a2a6d447b0cbbb9418bcc3f72933",
+    "path": "sources/POO-53-spec-input.md",
+    "sha256": "5d32c3fa9cbe184b45e1b681809f6ca071d59b2f7e080b31a124dffaace87d07"
+  },
+  {
+    "id": "POO-54-spec-input",
+    "revision": "211aa9f53feb27edb49ee63dccd4cc4f799f755437534da8d55b7eb9df2481b0",
+    "path": "sources/POO-54-spec-input.md",
+    "sha256": "574ea6ce98bd138a719509ed1efae8ab60e0398b6b1d5624d1f3d49786789cad"
+  },
+  {
+    "id": "module-m02",
+    "revision": "m02-r1",
+    "path": "module-m02.md",
+    "sha256": "b64232d02f2ee4140d00ca2b76c9c56d9c9c2ee47a5b808972628cb251588ca4"
+  },
+  {
+    "id": "module-review-complete",
+    "revision": "complete-r1",
+    "path": "sources/module-review-presented.md",
+    "sha256": "b31f336e269ccbadefe278bc928232fab830893eb23281eb678b853e8bb42dff"
+  },
+  {
+    "id": "D-PC-04",
+    "revision": "accepted-v1",
+    "path": "sources/user-decision-r5.md",
+    "sha256": "4d04051001e5186f1cd0f5944ca52420f8759f682bc2aa03df378aefd2725b46"
+  },
+  {
+    "id": "module-review-accepted",
+    "revision": "accepted-v1",
+    "path": "module-review.md",
+    "sha256": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f"
+  }
+]

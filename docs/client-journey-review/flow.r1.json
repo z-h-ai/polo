@@ -1,0 +1,1606 @@
+{
+  "schema_version": 1,
+  "title": "POO-70：小王从首次进入到取得结果",
+  "revision": "interview-r1",
+  "sources": [
+    {
+      "id": "R1",
+      "label": "review-r1.md",
+      "revision": "r1",
+      "path": "sources/review-r1.md",
+      "sha256": "5dc06f68935ad01ca2cdebecb0c69bba79e3c2555b79576193c7c086dd89cdd8"
+    },
+    {
+      "id": "ID112",
+      "label": "POL-112.md",
+      "revision": "0faff616-r3",
+      "path": "sources/POL-112.md",
+      "sha256": "cdabdc172bf6504ff5daca9c4382e3d4979fbd613e32d2dfa9e424bf256f2231"
+    },
+    {
+      "id": "PAY94",
+      "label": "POL-94.md",
+      "revision": "30689c70",
+      "path": "sources/POL-94.md",
+      "sha256": "f6bfadc4a94a954e959be63beb609ee81a27f01af04c489b843e99754cdc207f"
+    },
+    {
+      "id": "OLDPC",
+      "label": "A-DOC-polo-client-user-flows.md",
+      "revision": "c43754b",
+      "path": "sources/A-DOC-polo-client-user-flows.md",
+      "sha256": "bc52fea34f68dfbab7b4d1bc47afd31819db4913440616e8c3d096497a6d4b84"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "DESKTOP",
+      "actor": "小王 / 业务账号",
+      "surface": "Polo 桌面"
+    },
+    {
+      "id": "BROWSER",
+      "actor": "小王或有权 Owner",
+      "surface": "系统浏览器"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "N-FIRST-AUTH",
+      "title": "PC-F01/05 · 登录与企业邀请",
+      "lane": "BROWSER",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：登录有密码与配置开启的手机模式；服务端有邀请 API。",
+        "继承：指定邀请确认后加入；共享邀请审批；不在本卡改身份。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "等待确认",
+          "feedback": "登录方式/找回由 POL-112 继续定义",
+          "result": ""
+        },
+        {
+          "id": "pending",
+          "label": "等待企业审批",
+          "feedback": "快速共享邀请需 Owner/Manager 批准",
+          "result": ""
+        },
+        {
+          "id": "rejected",
+          "label": "邀请不可接受",
+          "feedback": "错账号、过期、暂停均不取得资格",
+          "result": "回共享登录/邀请恢复，不进入企业"
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-SPACES",
+      "title": "PC-F05 · 返回桌面并选甲企业",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：App.tsx 的交接处理会刷新空间列表，不自动切换。",
+        "若客户端未打开，下次登录/启动重新取列表；合法回跳细节由 POL-112。"
+      ],
+      "states": [
+        {
+          "id": "refresh",
+          "label": "正在核对空间",
+          "feedback": "浏览器成功尚不等于桌面已刷新",
+          "result": ""
+        },
+        {
+          "id": "failed",
+          "label": "刷新失败",
+          "feedback": "成员事实保留；可再次刷新",
+          "result": ""
+        },
+        {
+          "id": "ready",
+          "label": "甲企业可选",
+          "feedback": "小王主动选择；不改变其他设备",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-HOME",
+      "title": "PC-N01 · 甲企业首页",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：首页固定助手，不自动挑选常用 App。",
+        "D-PC-01 待决：保留首页加明确引导，还是首次直接进全部 Apps。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "零常用但有可用 App",
+          "feedback": "建议保留首页，清楚引导去全部 Apps",
+          "result": ""
+        },
+        {
+          "id": "empty",
+          "label": "还没有分发工作 App",
+          "feedback": "联系企业管理员；助手须有当前企业授权",
+          "result": "保持甲企业上下文，不以个人圈子补企业授权"
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-APPS",
+      "title": "PC-F07 · 全部 Apps",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：C-INT 已有 AllAppsView、Catalog 和不可用条目。",
+        "报价整理 App 是访谈示例。个人圈子 App 不在企业目录。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "找到报价整理 App",
+          "feedback": "核对甲企业来源、版本、状态",
+          "result": ""
+        },
+        {
+          "id": "failed",
+          "label": "目录请求失败",
+          "feedback": "显示失败与重试，不当成空目录",
+          "result": ""
+        },
+        {
+          "id": "denied",
+          "label": "App 暂不可用",
+          "feedback": "展示停止分发/版本限制原因",
+          "result": "不启动；保留不可用说明"
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-OPEN",
+      "title": "PC-APP-01 · 首次准备确认",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：HomePage 已有首次准备确认和启动交接。",
+        "取消不执行任务；打开 App 与主动发起任务是两个动作。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "版本、大小、权限",
+          "feedback": "用户确认后自动准备并打开；已准备可直接打开",
+          "result": ""
+        },
+        {
+          "id": "failed",
+          "label": "准备失败",
+          "feedback": "保留可重试状态，不假装打开成功",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-RUN",
+      "title": "PC-F07 · App 内执行",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：受信运行基础已集成；完整 Tab/结果/恢复由 POO-55—58 等承接。",
+        "建议流程不承诺该示例 App 已有实现。企业数据和费用归企业。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "选择材料并发起任务",
+          "feedback": "小王明确选本机表格，再点 App 内执行",
+          "result": ""
+        },
+        {
+          "id": "running",
+          "label": "正在处理",
+          "feedback": "固定甲企业、App 与启动版本",
+          "result": ""
+        },
+        {
+          "id": "partial",
+          "label": "只取得部分结果",
+          "feedback": "真实部分保留，未完成部分不标成功",
+          "result": ""
+        },
+        {
+          "id": "interrupted",
+          "label": "断网或重开后需核对",
+          "feedback": "先核对原执行；不自动重跑",
+          "result": ""
+        },
+        {
+          "id": "revoked",
+          "label": "甲企业权限被撤销",
+          "feedback": "停止操作/运行；企业数据不迁个人",
+          "result": "安全回我的空间或受限页，不继续显示企业内容"
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-RESULT",
+      "title": "PC-N02 · 结果与保存",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "继承 POO-47/56：不抓 App 页面正文，不自动把完成当作保存。",
+        "建议：可用时引导 App 自己的保存/导出。"
+      ],
+      "states": [
+        {
+          "id": "shown",
+          "label": "App 内看到结果",
+          "feedback": "任务完成不等于已保存",
+          "result": ""
+        },
+        {
+          "id": "saved",
+          "label": "已明确保存",
+          "feedback": "平台收到 App 声明的摘要/关联文件，才出现保存记录",
+          "result": ""
+        },
+        {
+          "id": "unsaved",
+          "label": "尚未保存到任务与结果",
+          "feedback": "D-PC-02：允许使用并明确限制，或要求支持保存后才准入",
+          "result": "仍可在 App 内查看；平台不承诺重开找回"
+        }
+      ]
+    },
+    {
+      "id": "N-FIRST-FILES",
+      "title": "PC-N02 · 稍后找回",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：POO-56 结果页面待交付；POO-57 独立工作树未集成。",
+        "这一步是目标流程，不是当前可用声明。失效文件应说明原因。"
+      ],
+      "states": [
+        {
+          "id": "done",
+          "label": "任务与结果 / 文件",
+          "feedback": "同一空间有权限时查看已报告摘要；文件默认应用打开",
+          "result": "首次完整旅程结束：取得且能找回已保存结果"
+        }
+      ]
+    },
+    {
+      "id": "N-SWITCH-HOME",
+      "title": "PC-F06 · 正在甲企业执行",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "继承：不跨空间后台运行；从选择器发起切换。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "准备切换我的空间",
+          "feedback": "当前企业任务仍在运行",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-SWITCH-CONFIRM",
+      "title": "S-005 · 终止全部并切换",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "源码现状：POO-42 已集成此状态机；完整助手/Tab 接入仍需下游验收。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "列出运行项",
+          "feedback": "可以取消并继续原任务",
+          "result": ""
+        },
+        {
+          "id": "failed",
+          "label": "部分终止失败",
+          "feedback": "留原空间，重试失败项或取消",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-SWITCH-TARGET",
+      "title": "S-004 · 我的空间",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "企业数据和费用仍属甲企业，没有搬进个人。"
+      ],
+      "states": [
+        {
+          "id": "done",
+          "label": "切换完成",
+          "feedback": "只展示个人目录/结果/权限；其他设备不跟随",
+          "result": "回到个人首页；从助手切换则去目标会话列表，不自动打开旧对话"
+        }
+      ]
+    },
+    {
+      "id": "N-PAY-BLOCK",
+      "title": "PC-N03 · 原 App 积分不足",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "继承 POL-94：平台非模态提示。本人/Owner 可充值，成员通知 Owner。"
+      ],
+      "states": [
+        {
+          "id": "blocked",
+          "label": "部分结果与不足提示",
+          "feedback": "保留原 App，不能继续新执行",
+          "result": ""
+        },
+        {
+          "id": "member",
+          "label": "成员联系 Owner",
+          "feedback": "Member/Manager 不提供企业充值，主动通知 Owner",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-PAY-BROWSER",
+      "title": "Browser · 当前空间充值",
+      "lane": "BROWSER",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "只讨论现有充值流程；本画布不创建订单，不进行真实付款。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "商品和订单",
+          "feedback": "本人或 Owner 自行选择；不自动下单",
+          "result": ""
+        },
+        {
+          "id": "returned",
+          "label": "返回桌面",
+          "feedback": "浏览器显示支付成功也不代表已发放",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-PAY-CHECK",
+      "title": "PC-N03 · 用户单次查询",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "继承：orderId 及目标由服务端重验；回执不能解除另一空间的限制。",
+        "取消只回原 App；切空间/过期必须重验，不自动重放。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "是否完成 / 是否恢复",
+          "feedback": "只有用户点击才查询一次",
+          "result": ""
+        },
+        {
+          "id": "unknown",
+          "label": "未到账/处理中/查询失败",
+          "feedback": "保留阻断，允许用户再次点击",
+          "result": ""
+        }
+      ]
+    },
+    {
+      "id": "N-PAY-RESUME",
+      "title": "PC-N03 · 解除不足",
+      "lane": "DESKTOP",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ],
+      "content": [
+        "Member 被人工暂停时不因充值恢复；到账与资格需分别验证。"
+      ],
+      "states": [
+        {
+          "id": "ready",
+          "label": "恢复可操作",
+          "feedback": "原内容仍在；用户决定是否在 App 内重新发起",
+          "result": "不自动发送、不自动续写、不自动创建 Run、不自动重试"
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "B-FIRST-01",
+      "from": {
+        "node": "N-FIRST-AUTH",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-SPACES",
+        "state": "refresh"
+      },
+      "action": "模拟指定邀请确认成功",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟指定邀请确认成功",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-02",
+      "from": {
+        "node": "N-FIRST-AUTH",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-AUTH",
+        "state": "pending"
+      },
+      "action": "模拟共享邀请待审批",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟共享邀请待审批",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-03",
+      "from": {
+        "node": "N-FIRST-AUTH",
+        "state": "pending"
+      },
+      "to": {
+        "node": "N-FIRST-SPACES",
+        "state": "refresh"
+      },
+      "action": "模拟审批通过",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟审批通过",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-04",
+      "from": {
+        "node": "N-FIRST-AUTH",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-AUTH",
+        "state": "rejected"
+      },
+      "action": "模拟邀请失效/账号不符",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟邀请失效/账号不符",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-05",
+      "from": {
+        "node": "N-FIRST-SPACES",
+        "state": "refresh"
+      },
+      "to": {
+        "node": "N-FIRST-SPACES",
+        "state": "failed"
+      },
+      "action": "模拟桌面刷新失败",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟桌面刷新失败",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-06",
+      "from": {
+        "node": "N-FIRST-SPACES",
+        "state": "failed"
+      },
+      "to": {
+        "node": "N-FIRST-SPACES",
+        "state": "refresh"
+      },
+      "action": "重试刷新",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "重试刷新",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-07",
+      "from": {
+        "node": "N-FIRST-SPACES",
+        "state": "refresh"
+      },
+      "to": {
+        "node": "N-FIRST-SPACES",
+        "state": "ready"
+      },
+      "action": "模拟取得有效列表",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟取得有效列表",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-08",
+      "from": {
+        "node": "N-FIRST-SPACES",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-HOME",
+        "state": "ready"
+      },
+      "action": "选择甲企业",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "选择甲企业",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-09",
+      "from": {
+        "node": "N-FIRST-HOME",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-APPS",
+        "state": "ready"
+      },
+      "action": "查看全部 Apps",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "查看全部 Apps",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-10",
+      "from": {
+        "node": "N-FIRST-HOME",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-HOME",
+        "state": "empty"
+      },
+      "action": "模拟真正未分发",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟真正未分发",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-11",
+      "from": {
+        "node": "N-FIRST-APPS",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-APPS",
+        "state": "failed"
+      },
+      "action": "模拟目录网络失败",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟目录网络失败",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-12",
+      "from": {
+        "node": "N-FIRST-APPS",
+        "state": "failed"
+      },
+      "to": {
+        "node": "N-FIRST-APPS",
+        "state": "ready"
+      },
+      "action": "重试并取得目录",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "重试并取得目录",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-13",
+      "from": {
+        "node": "N-FIRST-APPS",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-APPS",
+        "state": "denied"
+      },
+      "action": "模拟 App 授权失效",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟 App 授权失效",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-14",
+      "from": {
+        "node": "N-FIRST-APPS",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-OPEN",
+        "state": "ready"
+      },
+      "action": "打开报价整理 App",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "打开报价整理 App",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-15",
+      "from": {
+        "node": "N-FIRST-OPEN",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-APPS",
+        "state": "ready"
+      },
+      "action": "取消准备",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "取消准备",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-16",
+      "from": {
+        "node": "N-FIRST-OPEN",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-OPEN",
+        "state": "failed"
+      },
+      "action": "模拟准备失败",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟准备失败",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-17",
+      "from": {
+        "node": "N-FIRST-OPEN",
+        "state": "failed"
+      },
+      "to": {
+        "node": "N-FIRST-OPEN",
+        "state": "ready"
+      },
+      "action": "重试准备",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "重试准备",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-18",
+      "from": {
+        "node": "N-FIRST-OPEN",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-RUN",
+        "state": "ready"
+      },
+      "action": "确认权限并打开",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "确认权限并打开",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-19",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-FIRST-RUN",
+        "state": "running"
+      },
+      "action": "选择材料并主动执行",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "选择材料并主动执行",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-20",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "running"
+      },
+      "to": {
+        "node": "N-FIRST-RESULT",
+        "state": "shown"
+      },
+      "action": "模拟任务完整返回",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟任务完整返回",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-21",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "running"
+      },
+      "to": {
+        "node": "N-FIRST-RUN",
+        "state": "partial"
+      },
+      "action": "模拟部分输出",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟部分输出",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-22",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "partial"
+      },
+      "to": {
+        "node": "N-FIRST-RESULT",
+        "state": "shown"
+      },
+      "action": "查看真实部分结果",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "查看真实部分结果",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-23",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "running"
+      },
+      "to": {
+        "node": "N-FIRST-RUN",
+        "state": "interrupted"
+      },
+      "action": "模拟断网/进程中断",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟断网/进程中断",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-24",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "interrupted"
+      },
+      "to": {
+        "node": "N-FIRST-RUN",
+        "state": "ready"
+      },
+      "action": "恢复后核对原任务未完成，回到可操作状态",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "恢复后核对原任务未完成，回到可操作状态",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-25",
+      "from": {
+        "node": "N-FIRST-RUN",
+        "state": "running"
+      },
+      "to": {
+        "node": "N-FIRST-RUN",
+        "state": "revoked"
+      },
+      "action": "模拟成员被移除",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟成员被移除",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-26",
+      "from": {
+        "node": "N-FIRST-RESULT",
+        "state": "shown"
+      },
+      "to": {
+        "node": "N-FIRST-RESULT",
+        "state": "saved"
+      },
+      "action": "在 App 内明确保存并报告",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "在 App 内明确保存并报告",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-27",
+      "from": {
+        "node": "N-FIRST-RESULT",
+        "state": "shown"
+      },
+      "to": {
+        "node": "N-FIRST-RESULT",
+        "state": "unsaved"
+      },
+      "action": "模拟 App 不支持保存报告",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟 App 不支持保存报告",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-FIRST-28",
+      "from": {
+        "node": "N-FIRST-RESULT",
+        "state": "saved"
+      },
+      "to": {
+        "node": "N-FIRST-FILES",
+        "state": "done"
+      },
+      "action": "关闭后从同一空间找回",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "关闭后从同一空间找回",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-SW-01",
+      "from": {
+        "node": "N-SWITCH-HOME",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "ready"
+      },
+      "action": "选择我的空间",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "选择我的空间",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-SW-02",
+      "from": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-SWITCH-HOME",
+        "state": "ready"
+      },
+      "action": "取消，继续原任务",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "取消，继续原任务",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-SW-03",
+      "from": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "failed"
+      },
+      "action": "模拟终止失败",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟终止失败",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-SW-04",
+      "from": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "failed"
+      },
+      "to": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "ready"
+      },
+      "action": "重试失败项",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "重试失败项",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-SW-05",
+      "from": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "failed"
+      },
+      "to": {
+        "node": "N-SWITCH-HOME",
+        "state": "ready"
+      },
+      "action": "取消切换",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "取消切换",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-SW-06",
+      "from": {
+        "node": "N-SWITCH-CONFIRM",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-SWITCH-TARGET",
+        "state": "done"
+      },
+      "action": "模拟全部停止且目标加载成功",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟全部停止且目标加载成功",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-01",
+      "from": {
+        "node": "N-PAY-BLOCK",
+        "state": "blocked"
+      },
+      "to": {
+        "node": "N-PAY-BROWSER",
+        "state": "ready"
+      },
+      "action": "个人本人 / 企业 Owner 去充值",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "个人本人 / 企业 Owner 去充值",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-02",
+      "from": {
+        "node": "N-PAY-BLOCK",
+        "state": "blocked"
+      },
+      "to": {
+        "node": "N-PAY-BLOCK",
+        "state": "member"
+      },
+      "action": "我是 Member / Manager",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "我是 Member / Manager",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-03",
+      "from": {
+        "node": "N-PAY-BLOCK",
+        "state": "member"
+      },
+      "to": {
+        "node": "N-PAY-CHECK",
+        "state": "ready"
+      },
+      "action": "Owner 处理后，主动检查",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "Owner 处理后，主动检查",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-04",
+      "from": {
+        "node": "N-PAY-BROWSER",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-PAY-BROWSER",
+        "state": "returned"
+      },
+      "action": "模拟 Browser 返回",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "模拟 Browser 返回",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-05",
+      "from": {
+        "node": "N-PAY-BROWSER",
+        "state": "returned"
+      },
+      "to": {
+        "node": "N-PAY-CHECK",
+        "state": "ready"
+      },
+      "action": "桌面展示查询提示",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "桌面展示查询提示",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-06",
+      "from": {
+        "node": "N-PAY-CHECK",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-PAY-BLOCK",
+        "state": "blocked"
+      },
+      "action": "还没有 / 取消",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "还没有 / 取消",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-07",
+      "from": {
+        "node": "N-PAY-CHECK",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-PAY-CHECK",
+        "state": "unknown"
+      },
+      "action": "点击一次查询，模拟仍未恢复",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "点击一次查询，模拟仍未恢复",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-08",
+      "from": {
+        "node": "N-PAY-CHECK",
+        "state": "unknown"
+      },
+      "to": {
+        "node": "N-PAY-CHECK",
+        "state": "ready"
+      },
+      "action": "决定再次主动查询",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "决定再次主动查询",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    },
+    {
+      "id": "B-PAY-09",
+      "from": {
+        "node": "N-PAY-CHECK",
+        "state": "ready"
+      },
+      "to": {
+        "node": "N-PAY-RESUME",
+        "state": "ready"
+      },
+      "action": "点击一次查询，模拟服务端确认恢复",
+      "condition": "讨论中的示例条件，真实产品须核验",
+      "kind": "next",
+      "feedback": "点击一次查询，模拟服务端确认恢复",
+      "status": "suggested",
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§5 三条代表旅程与异常恢复"
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "J-PC-01",
+      "title": "首次：邀请到取得结果",
+      "goal": "PC-F01/05/07；PC-N01/02。先明确已有与拟议行为。",
+      "entries": [
+        {
+          "label": "从这里开始",
+          "at": {
+            "node": "N-FIRST-AUTH",
+            "state": "ready"
+          }
+        }
+      ],
+      "nodes": [
+        "N-FIRST-AUTH",
+        "N-FIRST-SPACES",
+        "N-FIRST-HOME",
+        "N-FIRST-APPS",
+        "N-FIRST-OPEN",
+        "N-FIRST-RUN",
+        "N-FIRST-RESULT",
+        "N-FIRST-FILES"
+      ],
+      "transitions": [
+        "B-FIRST-01",
+        "B-FIRST-02",
+        "B-FIRST-03",
+        "B-FIRST-04",
+        "B-FIRST-05",
+        "B-FIRST-06",
+        "B-FIRST-07",
+        "B-FIRST-08",
+        "B-FIRST-09",
+        "B-FIRST-10",
+        "B-FIRST-11",
+        "B-FIRST-12",
+        "B-FIRST-13",
+        "B-FIRST-14",
+        "B-FIRST-15",
+        "B-FIRST-16",
+        "B-FIRST-17",
+        "B-FIRST-18",
+        "B-FIRST-19",
+        "B-FIRST-20",
+        "B-FIRST-21",
+        "B-FIRST-22",
+        "B-FIRST-23",
+        "B-FIRST-24",
+        "B-FIRST-25",
+        "B-FIRST-26",
+        "B-FIRST-27",
+        "B-FIRST-28"
+      ]
+    },
+    {
+      "id": "J-PC-02",
+      "title": "日常：安全切换",
+      "goal": "PC-F06/08；S-004/005。",
+      "entries": [
+        {
+          "label": "从这里开始",
+          "at": {
+            "node": "N-SWITCH-HOME",
+            "state": "ready"
+          }
+        }
+      ],
+      "nodes": [
+        "N-SWITCH-HOME",
+        "N-SWITCH-CONFIRM",
+        "N-SWITCH-TARGET"
+      ],
+      "transitions": [
+        "B-SW-01",
+        "B-SW-02",
+        "B-SW-03",
+        "B-SW-04",
+        "B-SW-05",
+        "B-SW-06"
+      ]
+    },
+    {
+      "id": "J-PC-03",
+      "title": "失败：充值后人工恢复",
+      "goal": "PC-N03 / POL-94。Browser 成功不直接当作桌面恢复。",
+      "entries": [
+        {
+          "label": "从这里开始",
+          "at": {
+            "node": "N-PAY-BLOCK",
+            "state": "blocked"
+          }
+        }
+      ],
+      "nodes": [
+        "N-PAY-BLOCK",
+        "N-PAY-BROWSER",
+        "N-PAY-CHECK",
+        "N-PAY-RESUME"
+      ],
+      "transitions": [
+        "B-PAY-01",
+        "B-PAY-02",
+        "B-PAY-03",
+        "B-PAY-04",
+        "B-PAY-05",
+        "B-PAY-06",
+        "B-PAY-07",
+        "B-PAY-08",
+        "B-PAY-09"
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D-PC-01",
+      "question": "首次尚未配置常用 App，从哪里开始？",
+      "recommendation": "保留首页，在零常用时明确引导查看当前空间全部 Apps；不自动挑选。",
+      "status": "decision",
+      "nodes": [
+        "N-FIRST-HOME"
+      ],
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§8 D-PC-01"
+        }
+      ]
+    },
+    {
+      "id": "D-PC-02",
+      "question": "App 未报告保存结果时怎样承诺？",
+      "recommendation": "允许使用，明确尚未保存；支持时引导 App 自己保存/导出，不假装能找回。",
+      "status": "decision",
+      "nodes": [
+        "N-FIRST-RESULT",
+        "N-FIRST-FILES"
+      ],
+      "refs": [
+        {
+          "source": "R1",
+          "section": "§8 D-PC-02"
+        }
+      ]
+    }
+  ]
+}
