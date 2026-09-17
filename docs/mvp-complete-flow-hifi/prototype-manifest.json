@@ -1362,10 +1362,10 @@
      "feedback": "切换到「助手 · 对话生成中」"
     },
     {
-     "id": "T-P-M02-STOP-CANCEL-014-P-M04-PREPARE",
+     "id": "T-P-M02-STOP-CANCEL-014-P-M04-APP-VIEW",
      "label": "重新打开",
-     "to": "P-M04-PREPARE",
-     "feedback": "切换到「准备与权限确认」"
+     "to": "P-M04-APP-VIEW",
+     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
     },
     {
      "id": "T-P-M02-STOP-CANCEL-015-P-M04-APP-VIEW",
@@ -2534,10 +2534,10 @@
      "feedback": "切换到「助手 · 对话生成中」"
     },
     {
-     "id": "T-P-M03-HOME-ENT-AFTER-CANCEL-015-P-M04-PREPARE",
+     "id": "T-P-M03-HOME-ENT-AFTER-CANCEL-015-P-M04-APP-VIEW",
      "label": "重新打开",
-     "to": "P-M04-PREPARE",
-     "feedback": "切换到「准备与权限确认」"
+     "to": "P-M04-APP-VIEW",
+     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
     },
     {
      "id": "T-P-M03-HOME-ENT-AFTER-CANCEL-016-P-M04-PREPARE",
@@ -2649,10 +2649,10 @@
      "feedback": "切换到「助手 · 对话生成中」"
     },
     {
-     "id": "T-P-M03-HOME-ENT-AFTER-CLOSE-015-P-M04-PREPARE",
+     "id": "T-P-M03-HOME-ENT-AFTER-CLOSE-015-P-M04-APP-VIEW",
      "label": "重新打开",
-     "to": "P-M04-PREPARE",
-     "feedback": "切换到「准备与权限确认」"
+     "to": "P-M04-APP-VIEW",
+     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
     },
     {
      "id": "T-P-M03-HOME-ENT-AFTER-CLOSE-016-P-M04-PREPARE",
@@ -2821,76 +2821,76 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
-    },
-    {
-     "id": "T-P-M03-ALL-APPS-ZERO-003-P-M02-SWITCHER-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ZERO-002-P-M02-SWITCHER-PERSONAL",
      "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-004-P-M02-CONFIRM-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ZERO-003-P-M02-CONFIRM-PERSONAL",
      "label": "晨晨星科技企业空间 · 成员",
      "to": "P-M02-CONFIRM-PERSONAL",
      "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-005-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ZERO-004-P-M04-RUNTIME-PERSONAL",
      "label": "",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-006-P-M10-MENU",
+     "id": "T-P-M03-ALL-APPS-ZERO-005-P-M10-MENU",
      "label": "王",
      "to": "P-M10-MENU",
      "feedback": "切换到「账号菜单 · 有管理资格」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-007-P-M10-SETTINGS",
+     "id": "T-P-M03-ALL-APPS-ZERO-006-P-M10-SETTINGS",
      "label": "账号与偏好管理客户端设置",
      "to": "P-M10-SETTINGS",
      "feedback": "切换到「设置 · 账号安全」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-008-P-M09-BROWSER",
+     "id": "T-P-M03-ALL-APPS-ZERO-007-P-M09-BROWSER",
      "label": "充值与账单在系统浏览器打开",
      "to": "P-M09-BROWSER",
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-009-P-M01-LOGIN-PASSWORD",
+     "id": "T-P-M03-ALL-APPS-ZERO-008-P-M01-LOGIN-PASSWORD",
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-010-P-M07-DETAIL-PAID",
+     "id": "T-P-M03-ALL-APPS-ZERO-009-P-M07-DETAIL-PAID",
      "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-011-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ZERO-010-P-M04-RUNTIME-PERSONAL",
      "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-012-P-M11-OFFLINE-HOME",
+     "id": "T-P-M03-ALL-APPS-ZERO-011-P-M11-OFFLINE-HOME",
      "label": "重试连接",
      "to": "P-M11-OFFLINE-HOME",
      "feedback": "切换到「离线打开」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-013-P-M03-HOME-ZERO",
+     "id": "T-P-M03-ALL-APPS-ZERO-012-P-M03-HOME-ZERO",
      "label": "返回首页",
      "to": "P-M03-HOME-ZERO",
      "feedback": "切换到「首页 · 首登零常用」"
+    },
+    {
+     "id": "T-P-M03-ALL-APPS-ZERO-013-P-M03-HOME-PERSONAL",
+     "label": "添加到首页",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
      "id": "T-P-M03-ALL-APPS-ZERO-014-P-M03-HOME-PERSONAL",
@@ -2899,31 +2899,25 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-015-P-M03-HOME-PERSONAL",
-     "label": "添加到首页",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
-    },
-    {
-     "id": "T-P-M03-ALL-APPS-ZERO-016-P-M07-DETAIL-FOCUS",
+     "id": "T-P-M03-ALL-APPS-ZERO-015-P-M07-DETAIL-FOCUS",
      "label": "查看圈子详情",
      "to": "P-M07-DETAIL-FOCUS",
      "feedback": "切换到「圈子详情 · 已加入」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-017-P-M04-APP-VIEW-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ZERO-016-P-M04-APP-VIEW-PERSONAL",
      "label": "打开",
      "to": "P-M04-APP-VIEW-PERSONAL",
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-018-P-M07-DETAIL-PAID",
+     "id": "T-P-M03-ALL-APPS-ZERO-017-P-M07-DETAIL-PAID",
      "label": "查看圈子详情",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ZERO-019-P-M04-APP-VIEW-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ZERO-018-P-M04-APP-VIEW-PERSONAL",
      "label": "打开",
      "to": "P-M04-APP-VIEW-PERSONAL",
      "feedback": "切换到「App 容器 · 我的空间」"
@@ -7622,10 +7616,10 @@
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M07-RENEW-EXPIRED-014-P-M07-RENEW",
-     "label": "管理成员资格",
-     "to": "P-M07-RENEW",
-     "feedback": "切换到「手动续费」"
+     "id": "T-P-M07-RENEW-EXPIRED-014-P-M07-RENEW-EXPIRED",
+     "label": "续费恢复",
+     "to": "P-M07-RENEW-EXPIRED",
+     "feedback": "切换到「手动续费 · 到期恢复」"
     },
     {
      "id": "T-P-M07-RENEW-EXPIRED-015-P-M03-ALL-APPS",
@@ -7634,14 +7628,14 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M07-RENEW-EXPIRED-016-P-M04-APP-VIEW-PERSONAL",
-     "label": "打开",
-     "to": "P-M04-APP-VIEW-PERSONAL",
-     "feedback": "切换到「App 容器 · 我的空间」"
+     "id": "T-P-M07-RENEW-EXPIRED-016-P-M07-RENEW-EXPIRED",
+     "label": "续费恢复",
+     "to": "P-M07-RENEW-EXPIRED",
+     "feedback": "切换到「手动续费 · 到期恢复」"
     },
     {
      "id": "T-P-M07-RENEW-EXPIRED-017-P-M04-APP-VIEW-PERSONAL",
-     "label": "打开",
+     "label": "仍可打开",
      "to": "P-M04-APP-VIEW-PERSONAL",
      "feedback": "切换到「App 容器 · 我的空间」"
     },
