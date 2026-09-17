@@ -1,7 +1,7 @@
 {
  "schema_version": 2,
  "title": "Polo 桌面客户端 · MVP 完整流程高保真原型",
- "revision": "poo70-master-r9-v2-3",
+ "revision": "poo70-dpc07-v2-2",
  "mode": "high_fidelity",
  "files": {
   "review": "prototype.html",
@@ -10,10 +10,10 @@
  "sources": [
   {
    "id": "poo70-spec",
-   "label": "POO-70 客户端产品与用户流程说明",
-   "revision": "master-r9（2026-09-17）",
-   "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec.md",
-   "sha256": "630d8ac00de04d49045a7e6fbb10575311372f8bcb6292def6f8dadc45bf2936"
+   "label": "POO-70 需求 Spec（已确认结论 D-PC/PC-F/PC-N/C-R/J-PC）",
+   "revision": "poo70 已确认结论快照（2026-09，sources/poo70-spec.md）",
+   "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec-before-master-r9.md",
+   "sha256": "346d94926c940bf97676424ccba810e2cdccf937176e79b6d9b554001ecd762d"
   },
   {
    "id": "poo70-module-review",
@@ -77,27 +77,6 @@
    "revision": "user-decision-r8（2026-09-16）",
    "path": "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md",
    "sha256": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46"
-  },
-  {
-   "id": "dpc08-source",
-   "label": "D-PC-08 主说明与共享边界整理依据",
-   "revision": "user-decision-r9（2026-09-17）",
-   "path": "docs/client-journey-review/sources/user-decision-r9.md",
-   "sha256": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668"
-  },
-  {
-   "id": "prototype-before-master-r9",
-   "label": "master-r9 修订前 manifest",
-   "revision": "poo70-dpc07-v2-2",
-   "path": "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r9.json",
-   "sha256": "95505c4bba96dc748f88511dc91a5251922eb9353106ba642358e4ce63ad67e9"
-  },
-  {
-   "id": "master-r9-review",
-   "label": "master-r9 原型一致性评审快照",
-   "revision": "master-r9（2026-09-17）",
-   "path": "docs/mvp-complete-flow-hifi/sources/master-r9-review-snapshot.json",
-   "sha256": "e402721f1bbf3127ab9f35850a4e3741b346823ce0a47374bba7c59260b4cca6"
   }
  ],
  "flow": null,
@@ -145,11 +124,11 @@
   ]
  },
  "summary": [
-  "本轮按 POO-70 master-r9 与 D-PC-08 修正已明确规则的遗漏，不增加新产品能力。",
-  "我的空间聚合多个圈子的有效权益，圈子不进入空间选择器；企业只展示自己的导入/启用/分发能力，不继承个人圈子，也不出现圈子订阅通知。",
-  "私域加入可以来自分享链接、二维码、定向邀请、付费或审批入口；当前不建设公开市场。",
-  "个人空间有活动时选择企业，先展示终止确认；取消留在个人空间，确认后才切换。",
-  "本修订为评审材料，状态为修改待复看；未启动产品编码、发布或真实产品验收。"
+  "把 POO-70 已确认的 90 屏 MVP 完整流程按 product-ui-prototype v2 官方模板契约重建：surface.html 纯产品表面（官方运行时协议）+ prototype.html 官方评审壳（面板四标签、锚定标注、深链、故事自动同步）。",
+  "视觉令牌与组件绑定仓库设计 Skill polo-ai-design-system（authority = G4 冻结稿 product.css，POO-41 artifactCommit ef3528ef；Skill 已在 POO-70 worktree 落地）。",
+  "D-PC-07 五项收口（首页组合、关闭三选项、圈子入口、容器级积分提示、账号菜单管理入口）以锚定标注呈现待核对；评审 brief 绑定 user-decision-r8 快照。",
+  "移除违反已确认结论的旧残留：首页「系统工具」文件/任务与结果入口、通知的「结果在任务与结果查看」、「查看历史结果」更名；App 内部为中性 FDE 占位，浏览器端只画交接卡。",
+  "目标视口 1440×900 与 1024×768；本阶段只做 light 主题视觉验收（D-THEME-LIGHT）。"
  ],
  "modules": [
   {
@@ -651,6 +630,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M02-SWITCHER-011-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M02-SWITCHER-012-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -760,6 +745,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M02-CONFIRM-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M02-CONFIRM-011-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -812,151 +803,6 @@
      "label": "终止全部并切换",
      "to": "P-M02-STOPPING",
      "feedback": "切换到「终止进度」"
-    }
-   ]
-  },
-  {
-   "id": "P-M02-CONFIRM-PERSONAL",
-   "journey": "J2 空间切换",
-   "node": "P-M02-CONFIRM-PERSONAL",
-   "state": "default",
-   "title": "切换确认 · 从我的空间到企业",
-   "status": "suggested",
-   "module": "M02",
-   "category": "调整",
-   "annotation": "我的空间有活动时也必须先说明将终止的运行项；取消留在我的空间，确认后才进入企业（PC-F06/C-R04）。",
-   "transitions": [
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-001-M03-HOME-PERSONAL",
-     "label": "首页",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "返回我的空间首页"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-002-M04-RUNTIME",
-     "label": "3 项运行中",
-     "to": "P-M04-RUNTIME",
-     "feedback": "切换到「运行状态中心」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-003-M02-SWITCHER",
-     "label": "晨 晨星科技企业空间 · Member",
-     "to": "P-M02-SWITCHER",
-     "feedback": "切换到「空间切换器（下拉）」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-004-M03-HOME-PERSONAL",
-     "label": "我我的空间个人空间 · 个人",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-005-M04-RUNTIME",
-     "label": "通知",
-     "to": "P-M04-RUNTIME",
-     "feedback": "切换到「运行状态中心」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-006-M10-MENU",
-     "label": "打开账号菜单",
-     "to": "P-M10-MENU",
-     "feedback": "切换到「账号菜单 · 有管理资格」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-007-M10-SETTINGS",
-     "label": "账号与偏好管理客户端设置",
-     "to": "P-M10-SETTINGS",
-     "feedback": "切换到「设置 · 账号安全」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-008-M09-BROWSER",
-     "label": "充值与账单在系统浏览器打开",
-     "to": "P-M09-BROWSER",
-     "feedback": "切换到「充值（浏览器交接）」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-009-M01-LOGIN-PASSWORD",
-     "label": "退出登录保留本机文件",
-     "to": "P-M01-LOGIN-PASSWORD",
-     "feedback": "切换到「登录 · 密码登录」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-010-M07-DETAIL-PAID",
-     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
-     "to": "P-M07-DETAIL-PAID",
-     "feedback": "切换到「付费订阅详情」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-011-M04-RUNTIME",
-     "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
-     "to": "P-M04-RUNTIME",
-     "feedback": "切换到「运行状态中心」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-020-M03-HOME-PERSONAL",
-     "label": "取消切换",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "取消切换，留在我的空间；运行项不变"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-021-M03-HOME-ENT",
-     "label": "终止全部并切换",
-     "to": "P-M03-HOME-ENT",
-     "feedback": "确认终止当前活动后进入晨星科技"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-012-M07-LIST",
-     "label": "我的圈子2 个圈子",
-     "to": "P-M07-LIST",
-     "feedback": "切换到「我的圈子 · 列表」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-013-M03-ALL-APPS",
-     "label": "全部 Apps",
-     "to": "P-M03-ALL-APPS",
-     "feedback": "切换到「全部 Apps · 来源分组」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-014-M06-SKILLS",
-     "label": "管理 Skills",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-015-M05-CHAT",
-     "label": "打开助手",
-     "to": "P-M05-CHAT",
-     "feedback": "切换到「助手 · 对话生成中」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-016-M04-APP-VIEW",
-     "label": "打开",
-     "to": "P-M04-APP-VIEW",
-     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-017-M04-APP-VIEW",
-     "label": "打开",
-     "to": "P-M04-APP-VIEW",
-     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-020-M03-HOME-LOAD-FAIL",
-     "label": "分支：目录加载失败",
-     "to": "P-M03-HOME-LOAD-FAIL",
-     "feedback": "进入分支场景「首页 · 目录加载失败」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-021-M03-HOME-OFFLINE",
-     "label": "分支：离线缓存目录",
-     "to": "P-M03-HOME-OFFLINE",
-     "feedback": "进入分支场景「首页 · 离线缓存目录」"
-    },
-    {
-     "id": "T-M02-CONFIRM-PERSONAL-BG-022-M01-REOPEN",
-     "label": "分支：重开客户端 · 会话过期",
-     "to": "P-M01-REOPEN",
-     "feedback": "进入分支场景「重开 · 登录恢复」"
     }
    ]
   },
@@ -1024,6 +870,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M02-STOPPING-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M02-STOPPING-011-M04-RUNTIME",
@@ -1153,6 +1005,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M02-STOP-FAILED-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M02-STOP-FAILED-011-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -1272,6 +1130,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M02-STOP-CANCEL-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M02-STOP-CANCEL-011-M04-RUNTIME",
@@ -1395,6 +1259,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M02-TARGET-LOADING-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M02-TARGET-LOADING-011-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -1514,6 +1384,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M02-TARGET-FAILED-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M02-TARGET-FAILED-011-M04-RUNTIME",
@@ -1637,6 +1513,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M02-ACCESS-LOST-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M02-ACCESS-LOST-011-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -1716,10 +1598,10 @@
      "feedback": "切换到「空间切换器（下拉）」"
     },
     {
-     "id": "T-M03-HOME-PERSONAL-004-M02-CONFIRM-PERSONAL",
+     "id": "T-M03-HOME-PERSONAL-004-M03-HOME-ENT",
      "label": "晨晨星科技企业空间 · Member",
-     "to": "P-M02-CONFIRM-PERSONAL",
-     "feedback": "切换到「切换确认 · 从我的空间到企业」"
+     "to": "P-M03-HOME-ENT",
+     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
     },
     {
      "id": "T-M03-HOME-PERSONAL-005-M04-RUNTIME",
@@ -1971,7 +1853,7 @@
    "status": "suggested",
    "module": "M03",
    "category": "调整",
-   "annotation": "个人目录为空时说明尚未加入提供 App 的圈子，或已加入圈子尚未分发；不混入企业目录。",
+   "annotation": "企业未分发且圈子无作品时的诚实空态，说明何时会出现内容。",
    "transitions": [
     {
      "id": "T-M03-HOME-EMPTY-DIR-001-M03-HOME-PERSONAL",
@@ -2298,7 +2180,7 @@
    "status": "decision",
    "module": "M03",
    "category": "调整",
-   "annotation": "企业首页只展示企业导入、启用并向本人分发的能力；不含个人圈子、圈子订阅或管理卡（D-PC-07/08）。",
+   "annotation": "企业首页按 D-PC-07 不放管理卡（现状差异见待裁决清单）。「分支：」虚线按钮是评审分支入口（无自然产品入口的失败/取消路径），非产品按钮。",
    "transitions": [
     {
      "id": "T-M03-HOME-ENT-001-M03-HOME-ENT",
@@ -2353,6 +2235,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M03-HOME-ENT-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M03-HOME-ENT-011-M04-RUNTIME",
@@ -2425,7 +2313,7 @@
    "status": "suggested",
    "module": "M03",
    "category": "调整",
-   "annotation": "我的空间聚合多个圈子的有效 App 权益；圈子不是空间，同名作品按稳定条目和实际权益来源区分。",
+   "annotation": "企业/圈子/个人来源分组；同名 App 靠来源区分，不合并。「分支：」虚线按钮是评审分支入口（无自然产品入口的失败/取消路径），非产品按钮。",
    "transitions": [
     {
      "id": "T-M03-ALL-APPS-001-M03-HOME-PERSONAL",
@@ -3101,6 +2989,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M04-APP-VIEW-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M04-APP-VIEW-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -3220,6 +3114,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M04-PREPARE-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M04-PREPARE-011-M04-RUNTIME",
@@ -3347,6 +3247,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M04-PREP-FAILED-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M04-PREP-FAILED-011-M04-RUNTIME",
@@ -3486,6 +3392,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M04-CLOSE-ACTIVE-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M04-CLOSE-ACTIVE-013-M04-RUNTIME",
@@ -3629,6 +3541,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M04-TERM-FAILED-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M04-TERM-FAILED-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -3750,6 +3668,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M04-BACKGROUND-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M04-BACKGROUND-011-M04-RUNTIME",
@@ -3899,6 +3823,12 @@
      "feedback": "进入分支场景「运行中被移除」"
     },
     {
+     "id": "T-M04-RUNTIME-014-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M04-RUNTIME-015-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -4026,6 +3956,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M04-PERM-DENIED-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M04-PERM-DENIED-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -4145,6 +4081,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M05-CHAT-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M05-CHAT-013-M04-RUNTIME",
@@ -4485,6 +4427,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M05-STOPPED-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M05-STOPPED-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -4634,6 +4582,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M05-QUESTION-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M05-QUESTION-013-M04-RUNTIME",
@@ -4793,6 +4747,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M05-QUESTION-REOPEN-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M05-QUESTION-REOPEN-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -4948,6 +4908,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M06-SKILLS-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M06-SKILLS-013-M04-RUNTIME",
@@ -5117,6 +5083,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M06-SKILL-DENIED-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M06-SKILL-DENIED-013-M04-RUNTIME",
@@ -5306,6 +5278,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M06-TOOLS-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M06-TOOLS-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -5443,6 +5421,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M08-FILES-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M08-FILES-013-M04-RUNTIME",
@@ -5588,6 +5572,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M08-FILE-MISSING-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M08-FILE-MISSING-013-M04-RUNTIME",
@@ -5801,7 +5791,7 @@
    "status": "suggested",
    "module": "M07",
    "category": "新增",
-   "annotation": "没有圈子时说明私域来源可为分享链接、二维码、定向邀请、付费或审批入口；不虚构公开市场。",
+   "annotation": "说明圈子来源（作者邀请）与作品获得路径。",
    "transitions": [
     {
      "id": "T-M07-EMPTY-001-M03-HOME-PERSONAL",
@@ -5882,10 +5872,10 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-M07-EMPTY-014-M07-JOIN-FREE",
-     "label": "使用已有链接或二维码",
-     "to": "P-M07-JOIN-FREE",
-     "feedback": "进入圈子加入确认"
+     "id": "T-M07-EMPTY-014-M01-INVITE-BROWSER",
+     "label": "打开邀请链接（演示）",
+     "to": "P-M01-INVITE-BROWSER",
+     "feedback": "切换到「邀请确认（浏览器交接）」"
     }
    ]
   },
@@ -7256,6 +7246,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M09-APP-BANNER-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M09-APP-BANNER-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -7371,6 +7367,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M09-ENT-NOTIFY-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M09-ENT-NOTIFY-013-M04-RUNTIME",
@@ -8802,6 +8804,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M11-REVOKE-010-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M11-REVOKE-011-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -8966,6 +8974,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M11-BLOCKED-WITHDRAWN-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M11-BLOCKED-WITHDRAWN-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -9075,6 +9089,12 @@
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
+     "id": "T-M11-BLOCKED-EXPIRED-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
+    },
+    {
      "id": "T-M11-BLOCKED-EXPIRED-013-M04-RUNTIME",
      "label": "数据报表生成器已在后台完成 · 顶栏运行入口可查看",
      "to": "P-M04-RUNTIME",
@@ -9182,6 +9202,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M11-BLOCKED-VERSION-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M11-BLOCKED-VERSION-013-M04-RUNTIME",
@@ -9412,6 +9438,12 @@
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-M11-OFFLINE-RUNNING-012-M07-DETAIL-PAID",
+     "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
+     "to": "P-M07-DETAIL-PAID",
+     "feedback": "切换到「付费订阅详情」"
     },
     {
      "id": "T-M11-OFFLINE-RUNNING-013-M04-RUNTIME",
@@ -9705,11 +9737,6 @@
      "description": "使用后的个人首页：Polo 助手固定 + 用户配置的常用 Apps"
     },
     {
-     "id": "S1-05A",
-     "scene": "P-M02-CONFIRM-PERSONAL",
-     "description": "我的空间有运行项：先确认终止，再进入企业空间"
-    },
-    {
      "id": "S1-06",
      "scene": "P-M03-HOME-ENT",
      "description": "切入企业空间首页（晨星科技）：企业目录与常用区"
@@ -9903,12 +9930,6 @@
    "status": "confirmed",
    "scope": "视觉与管理入口收口（顶栏品牌 / 标签 / 运行 / 空间 / 通知 / 账号）",
    "source_revision": "poo70 已确认结论快照（2026-09，sources/poo70-spec.md）"
-  },
-  {
-   "id": "D-PC-08",
-   "status": "confirmed",
-   "scope": "圈子权益只聚合到我的空间；圈子不是空间；企业不继承个人圈子且不订阅圈子；无公开市场，私域不等于仅邀请",
-   "source_revision": "user-decision-r9（2026-09-17）"
   },
   {
    "id": "PC-F01",
@@ -10158,11 +10179,10 @@
   }
  ],
  "change": {
-  "previous_revision": "poo70-dpc07-v2-2",
+  "previous_revision": "poo71-hifi-v2-1",
   "changed_scenes": [
    "P-M02-ACCESS-LOST",
    "P-M02-CONFIRM",
-   "P-M02-CONFIRM-PERSONAL",
    "P-M02-STOP-CANCEL",
    "P-M02-STOP-FAILED",
    "P-M02-STOPPING",
@@ -10170,9 +10190,16 @@
    "P-M02-TARGET-FAILED",
    "P-M02-TARGET-LOADING",
    "P-M03-ALL-APPS",
+   "P-M03-ALL-APPS-ENT-EMPTY",
+   "P-M03-CONTROLS",
    "P-M03-HOME-EMPTY-DIR",
    "P-M03-HOME-ENT",
+   "P-M03-HOME-LOAD-FAIL",
+   "P-M03-HOME-OFFLINE",
    "P-M03-HOME-PERSONAL",
+   "P-M03-HOME-ZERO",
+   "P-M03-INSPECTOR",
+   "P-M03-MANAGE-HOME",
    "P-M04-APP-VIEW",
    "P-M04-BACKGROUND",
    "P-M04-CLOSE-ACTIVE",
@@ -10182,25 +10209,47 @@
    "P-M04-RUNTIME",
    "P-M04-TERM-FAILED",
    "P-M05-CHAT",
+   "P-M05-NEW",
    "P-M05-QUESTION",
    "P-M05-QUESTION-REOPEN",
    "P-M05-STOPPED",
    "P-M06-SKILL-DENIED",
    "P-M06-SKILLS",
    "P-M06-TOOLS",
+   "P-M07-DETAIL-FOCUS",
+   "P-M07-DETAIL-PAID",
    "P-M07-EMPTY",
+   "P-M07-EXPIRED",
+   "P-M07-JOIN-FREE",
+   "P-M07-JOIN-PENDING",
+   "P-M07-LEAVE",
+   "P-M07-LIST",
+   "P-M07-RENEW",
    "P-M08-FILE-MISSING",
    "P-M08-FILES",
    "P-M09-APP-BANNER",
+   "P-M09-CHECKING",
    "P-M09-ENT-NOTIFY",
+   "P-M09-NOT-YET",
+   "P-M09-PRE-BLOCK",
+   "P-M09-RESUMED",
+   "P-M09-STREAM-CUT",
+   "P-M09-USER-STOP",
+   "P-M10-ADMIN-RETURN",
+   "P-M10-MENU",
+   "P-M10-MENU-NOPRIV",
+   "P-M10-SETTINGS",
+   "P-M10-SETTINGS-APPEARANCE",
    "P-M11-BLOCKED-EXPIRED",
    "P-M11-BLOCKED-VERSION",
    "P-M11-BLOCKED-WITHDRAWN",
+   "P-M11-OFFLINE-HOME",
    "P-M11-OFFLINE-RUNNING",
+   "P-M11-REOPEN-RECOVERY",
    "P-M11-REVOKE"
   ],
   "removed_scenes": [],
-  "summary": "同步 master-r9/D-PC-08：修正圈子私域入口、个人与企业目录边界和企业空间通知；新增个人空间有活动时切企业确认页；产品说明成为唯一来源。修改待下一次视觉复看。"
+  "summary": "按 D-PC-07 收口重建评审材料：修复设计 Skill 断链（收敛提交移除了 .agents/skills，验证 fail closed）；绑定 D-PC-07 评审快照并为 11 个收口场景添加锚定标注；移除首页「系统工具」区（文件/任务与结果入口违反 D-PC-03 与 Spec §8 POO-56/57 调整结论，共 27 处）；后台完成通知不再指向「任务与结果」（D-PC-02）；「查看历史结果」更名「查看运行记录」（App 业务历史归 App，Polo 只提供运行记录）；prototype.html 与 surface 运行时按 product-ui-prototype 官方模板契约重建。"
  },
  "checks": {
   "offline": true,
@@ -10208,12 +10257,12 @@
   "review_separated": true
  },
  "review": {
-  "source": "master-r9-review",
-  "item": "POO-70 / D-PC-08 主说明与原型一致性修订",
-  "revision": "master-r9（2026-09-17）",
-  "current": "poo70-dpc07-v2-2 已完成 D-PC-07 视觉收口，但圈子空态仍把私域分发写成仅邀请，个人有运行项时切企业缺少确认页，企业空间通知仍混入个人圈子消息。",
-  "target": "补 D-PC-08：多圈子权益只聚合到我的空间；企业目录不继承个人圈子且不订阅圈子；私域入口包含分享链接、二维码、定向邀请、付费或审批。新增个人空间有活动时切企业的确认页，并移除企业空间中的个人圈子通知。",
-  "reason": "这些是已明确产品规则的遗漏或违背，按维护约定直接修正，不重新访谈。",
-  "question": "下一次视觉走查只需核对修订后的边界与呈现是否清楚；本次发布不视为已复看或视觉接受。"
+  "source": "dpc07-decision",
+  "item": "POO-70 / D-PC-07 视觉与管理入口收口",
+  "revision": "user-decision-r8（2026-09-16）",
+  "current": "现状基线 dev 01f4447c：M03 首页自动记录最近 6 个 App（HomePage.tsx MAX_RECENT_APPS=6）；M04 关闭按钮直接 closeTab、无活动判断；M07 客户端无「我的圈子」页面与稳定入口；M09 无容器级积分提示、无返回后单次查询页面；M10 管理项挂在空间切换器/桌面组织管理弹窗，未收口到账号菜单。",
+  "target": "M03 沿现有首页视觉：固定 Polo 助手 + 最多 5 个用户主动选择的常用 App + 稳定「全部 Apps」入口，零常用/真空目录/加载失败分别呈现；M04 有活动关闭用「取消 / 后台继续 / 终止并关闭」，后台继续为普通操作、终止并关闭为危险操作，终止失败保留标签和真实状态；M07「我的圈子」放个人空间稳定导航，与「全部 Apps」并列；M09 用 Polo 容器级积分提示，浏览器返回后仅提供用户主动「查询最新状态」单次动作；M10 企业管理、创作者工作台、平台后台等所有管理入口统一放账号菜单，空间选择器不承担管理入口。",
+  "reason": "用户 2026-09-16 接受 M03/M04/M07/M09 推荐方案，并明确「M10 管理入口的位置，都放账号菜单」；确认原文见本 bundle sources/user-decision-r8.md，现状差异依据见 docs/client-journey-review/implementation-delta-review.md。",
+  "question": "请按 D-PC-07 逐项核对五个收口点的页面呈现：①首页组合（固定助手 + ≤5 常用 + 全部 Apps + 我的圈子入口）②关闭三选项与终止失败留标签 ③我的圈子在个人空间稳定导航 ④积分容器级提示与主动单次查询 ⑤账号菜单统一管理入口、空间选择器无管理项。以上是否与你的确认一致？"
  }
 }

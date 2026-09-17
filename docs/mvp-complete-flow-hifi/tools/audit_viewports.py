@@ -14,7 +14,7 @@ from playwright.sync_api import sync_playwright
 BUNDLE = Path(__file__).resolve().parents[1]
 SHOTS = {
     '1440x900': ['P-M01-INVITE-BROWSER', 'P-M01-LOGIN-PASSWORD', 'P-M01-PERSONAL-PREP',
-                 'P-M02-CONFIRM', 'P-M02-STOP-FAILED', 'P-M02-SWITCHER', 'P-M03-ALL-APPS',
+                 'P-M02-CONFIRM', 'P-M02-CONFIRM-PERSONAL', 'P-M02-STOP-FAILED', 'P-M02-SWITCHER', 'P-M03-ALL-APPS',
                  'P-M03-HOME-ENT', 'P-M03-HOME-PERSONAL', 'P-M03-HOME-ZERO', 'P-M04-APP-VIEW',
                  'P-M04-CLOSE-ACTIVE', 'P-M04-PERM-DENIED', 'P-M05-CHAT',
                  'P-M05-QUESTION-REOPEN', 'P-M06-SKILLS', 'P-M07-DETAIL-PAID', 'P-M07-LIST',
@@ -64,18 +64,20 @@ def main():
         browser = p.chromium.launch()
         for tag, w, h in [('1440x900', 1440, 900), ('1024x768', 1024, 768)]:
             page = browser.new_page(viewport={'width': w, 'height': h})
-            page.goto((BUNDLE / 'surface.html').as_uri() + f'?scene={ids[0]}')
+            page.goto((BUNDLE / 'surface.html').as_uri() + f'#scene={ids[0]}')
             surface = page.main_frame
             out_dir = BUNDLE / 'screenshots' / tag
             out_dir.mkdir(parents=True, exist_ok=True)
             scene_problems = {}
             for sid in ids:
-                # surface 直接加载时 window.parent === window，postMessage 自激活
+                # surface 直接加载时 window.parent === window；官方运行时仍要求 session/epoch。
                 surface.evaluate(
                     """(sid) => window.postMessage(
-                         {type: 'product-ui-prototype:show-scene', version: 1, scene: sid}, '*')""",
+                         {type: 'product-ui-prototype:show-scene', version: 1,
+                          session: 'viewport-audit', epoch: 0, scene: sid,
+                          theme: 'light', language: 'zh-CN'}, '*')""",
                     sid)
-                page.wait_for_timeout(60)
+                page.wait_for_function('(sid) => document.body.dataset.currentScene === sid', arg=sid)
                 probs = surface.evaluate(AUDIT_JS)
                 if probs:
                     scene_problems[sid] = probs

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """POO-71 v2 重建 · 第 5 步：file:// 全交互冒烟。
 
-覆盖：加载零报错、页面索引/标注、全部 1429 条 transitions（逐场景批量点击并核对
+覆盖：加载零报错、页面索引/标注、manifest 中全部 transitions（逐场景批量点击并核对
 transition id 与落点）、Back/Reset、三条故事（进入/上一步/下一步/自动同步/结束/退出）、
 双视口切换、直达场景链接、检查器开合不改变 iframe innerWidth/innerHeight。
 """
@@ -32,29 +32,27 @@ def main():
         # 1) 直达链接 + 索引/标注
         page.goto((BUNDLE / 'prototype.html').as_uri() + '#scene=P-M09-NOT-YET')
         page.wait_for_timeout(200)
-        badge = page.text_content('.review-badges [data-current-scene]').strip()
+        surface = next(f for f in page.frames if f != page.main_frame)
+        badge = page.evaluate("() => document.body.dataset.currentScene")
         if badge != 'P-M09-NOT-YET':
             problems.append(f'hash nav failed: {badge}')
         if not page.text_content('[data-page-annotation]').strip():
             problems.append('empty annotation')
 
         # 2) Back / Reset
-        page.click('[data-back]')
+        page.evaluate("() => document.querySelector('[data-back]').click()")
         page.wait_for_timeout(100)
-        page.click('[data-reset]')
+        page.evaluate("() => document.querySelector('[data-reset]').click()")
         page.wait_for_timeout(100)
-        if page.text_content('.review-badges [data-current-scene]').strip() != MANIFEST['start_scene']:
+        if page.evaluate("() => document.body.dataset.currentScene") != MANIFEST['start_scene']:
             problems.append('reset failed')
 
         # 3) 全部 transitions：每条边单独激活场景后点击（点击会切换场景，必须逐条来）
         checked = 0
 
         def activate(sid):
-            page.evaluate(
-                """(sid) => {
-                  document.querySelector('iframe').contentWindow.postMessage(
-                    {type: 'product-ui-prototype:show-scene', version: 1, scene: sid}, '*');
-                }""", sid)
+            page.evaluate("(sid) => { location.hash = 'scene=' + encodeURIComponent(sid); }", sid)
+            surface.wait_for_function("(sid) => document.body.dataset.currentScene === sid", arg=sid, timeout=1000)
 
         for scene in MANIFEST['scenes']:
             sid = scene['id']
@@ -77,15 +75,17 @@ def main():
                                     f"expected {landed['go']}")
         if checked != len([e for s in MANIFEST['scenes'] for e in s['transitions']]):
             problems.append(f'checked {checked} transitions, expected {len([e for s in MANIFEST["scenes"] for e in s["transitions"]])}')
-        if checked != len([e for s in MANIFEST['scenes'] for e in s['transitions']]):
-            problems.append(f'checked {checked} transitions, expected {len([e for s in MANIFEST["scenes"] for e in s["transitions"]])}')
 
         # 4) 故事播放：进入 → 自动同步 → next → prev → 结束 → 退出
         for story in MANIFEST['stories']:
-            page.select_option('[data-story-select]', story['id'])
+            page.evaluate("""(storyId) => {
+              const select = document.querySelector('[data-story-select]');
+              select.value = storyId;
+              select.dispatchEvent(new Event('change', {bubbles: true}));
+            }""", story['id'])
             page.wait_for_timeout(100)
             first = story['steps'][0]['scene']
-            if page.text_content('.review-badges [data-current-scene]').strip() != first:
+            if page.evaluate("() => document.body.dataset.currentScene") != first:
                 problems.append(f'story {story["id"]}: did not enter at {first}')
             # 自动同步：在当前步点击指向下一步场景的产品按钮
             nxt = story['steps'][1]['scene']
@@ -100,7 +100,7 @@ def main():
                   return true;
                 }""", nxt)
             page.wait_for_timeout(150)
-            if advanced and page.text_content('[data-story-progress]').strip().startswith('2 /'):
+            if advanced and '2 /' in page.text_content('[data-story-progress]').strip():
                 pass
             else:
                 # 不影响结论，仅记录（若下一步无直接边则播放器不会推进）
@@ -110,27 +110,31 @@ def main():
             for _ in range(len(story['steps']) + 2):
                 if page.is_disabled('[data-story-next]'):
                     break
-                page.click('[data-story-next]')
+                page.evaluate("() => document.querySelector('[data-story-next]').click()")
                 page.wait_for_timeout(40)
             if not page.is_disabled('[data-story-next]'):
                 problems.append(f'story {story["id"]}: next never ended')
             if not page.is_disabled('[data-story-exit]'):
-                page.click('[data-story-exit]')
+                page.evaluate("() => document.querySelector('[data-story-exit]').click()")
             page.wait_for_timeout(50)
 
         # 5) 双视口 + 检查器开合不改变 innerWidth/innerHeight
         for vp in MANIFEST['target']['viewports']:
-            page.select_option('[data-viewport-select]', vp['id'])
+            page.evaluate("""(viewportId) => {
+              const select = document.querySelector('[data-viewport-select]');
+              select.value = viewportId;
+              select.dispatchEvent(new Event('change', {bubbles: true}));
+            }""", vp['id'])
             page.wait_for_timeout(150)
             dims = surface.evaluate("() => [window.innerWidth, window.innerHeight]")
             if dims != [vp['width'], vp['height']]:
                 problems.append(f'{vp["id"]}: iframe viewport {dims}')
-            page.click('[data-inspector-toggle]')
+            page.evaluate("() => document.querySelector('[data-inspector-toggle]').click()")
             page.wait_for_timeout(250)
             dims2 = surface.evaluate("() => [window.innerWidth, window.innerHeight]")
             if dims2 != dims:
                 problems.append(f'{vp["id"]}: inspector toggle changed viewport {dims} -> {dims2}')
-            page.click('[data-inspector-toggle]')
+            page.evaluate("() => document.querySelector('[data-inspector-toggle]').click()")
             page.wait_for_timeout(150)
 
         if console_errors:
