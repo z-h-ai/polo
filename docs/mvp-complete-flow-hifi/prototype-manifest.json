@@ -1,7 +1,7 @@
 {
  "schema_version": 2,
  "title": "Polo 桌面客户端 · MVP 完整流程高保真原型",
- "revision": "poo70-ux-r3-v2-6",
+ "revision": "poo70-ux-r4-v2-7",
  "mode": "high_fidelity",
  "files": {
   "review": "prototype.html",
@@ -1653,10 +1653,10 @@
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-003-P-M02-SWITCHER",
-     "label": "晨 晨星科技企业空间 · 成员",
-     "to": "P-M02-SWITCHER",
-     "feedback": "切换到「空间切换器（下拉）」"
+     "id": "T-P-M02-ACCESS-LOST-003-P-M02-SWITCHER-PERSONAL",
+     "label": "我 我的空间个人空间 · 个人",
+     "to": "P-M02-SWITCHER-PERSONAL",
+     "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
      "id": "T-P-M02-ACCESS-LOST-004-P-M02-CONFIRM-PERSONAL",
@@ -1753,7 +1753,7 @@
    "status": "suggested",
    "module": "M03",
    "category": "调整",
-   "annotation": "固定 Polo 助手 + 最多 5 个常用 App；「我的圈子」与「全部 Apps」并列（D-PC-07 · D-PC-01）。",
+   "annotation": "个人空间首页（日常态演示）：常用 Apps 与 1 项后台运行任务为个人空间的既有演示状态——首登旅程从 HOME-ZERO 进入时，共享场景不会随用户动作变化（静态原型场景级状态的演示代价）；固定 Polo 助手 + 最多 5 个常用 App（D-PC-07 · D-PC-01）。",
    "transitions": [
     {
      "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
@@ -2008,91 +2008,85 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
-    },
-    {
-     "id": "T-P-M03-HOME-EMPTY-DIR-003-P-M02-SWITCHER-PERSONAL",
+     "id": "T-P-M03-HOME-EMPTY-DIR-002-P-M02-SWITCHER-PERSONAL",
      "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-004-P-M02-CONFIRM-PERSONAL",
+     "id": "T-P-M03-HOME-EMPTY-DIR-003-P-M02-CONFIRM-PERSONAL",
      "label": "晨晨星科技企业空间 · 成员",
      "to": "P-M02-CONFIRM-PERSONAL",
      "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-005-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M03-HOME-EMPTY-DIR-004-P-M04-RUNTIME-PERSONAL",
      "label": "",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-006-P-M10-MENU",
+     "id": "T-P-M03-HOME-EMPTY-DIR-005-P-M10-MENU",
      "label": "王",
      "to": "P-M10-MENU",
      "feedback": "切换到「账号菜单 · 有管理资格」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-007-P-M10-SETTINGS",
+     "id": "T-P-M03-HOME-EMPTY-DIR-006-P-M10-SETTINGS",
      "label": "账号与偏好管理客户端设置",
      "to": "P-M10-SETTINGS",
      "feedback": "切换到「设置 · 账号安全」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-008-P-M09-BROWSER",
+     "id": "T-P-M03-HOME-EMPTY-DIR-007-P-M09-BROWSER",
      "label": "充值与账单在系统浏览器打开",
      "to": "P-M09-BROWSER",
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-009-P-M01-LOGIN-PASSWORD",
+     "id": "T-P-M03-HOME-EMPTY-DIR-008-P-M01-LOGIN-PASSWORD",
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-010-P-M07-DETAIL-PAID",
+     "id": "T-P-M03-HOME-EMPTY-DIR-009-P-M07-DETAIL-PAID",
      "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-011-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M03-HOME-EMPTY-DIR-010-P-M04-RUNTIME-PERSONAL",
      "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-012-P-M07-LIST",
+     "id": "T-P-M03-HOME-EMPTY-DIR-011-P-M07-LIST",
      "label": "我的圈子3 个圈子",
      "to": "P-M07-LIST",
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-013-P-M03-ALL-APPS",
+     "id": "T-P-M03-HOME-EMPTY-DIR-012-P-M03-ALL-APPS",
      "label": "全部 Apps",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-014-P-M06-SKILLS-PERSONAL",
+     "id": "T-P-M03-HOME-EMPTY-DIR-013-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
      "to": "P-M06-SKILLS-PERSONAL",
      "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-015-P-M05-CHAT-PERSONAL",
+     "id": "T-P-M03-HOME-EMPTY-DIR-014-P-M05-CHAT-PERSONAL",
      "label": "打开助手",
      "to": "P-M05-CHAT-PERSONAL",
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-016-P-M03-ALL-APPS",
+     "id": "T-P-M03-HOME-EMPTY-DIR-015-P-M03-ALL-APPS",
      "label": "去全部 Apps 挑选",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
@@ -3071,10 +3065,10 @@
    "annotation": "企业未分发时的空态；与个人隐藏、来源撤下区分展示。",
    "transitions": [
     {
-     "id": "T-P-M03-ALL-APPS-ENT-EMPTY-001-P-M03-HOME-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ENT-EMPTY-001-P-M03-HOME-ENT",
      "label": "首页",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
+     "to": "P-M03-HOME-ENT",
+     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
     },
     {
      "id": "T-P-M03-ALL-APPS-ENT-EMPTY-002-P-M04-RUNTIME",
@@ -3143,10 +3137,10 @@
      "feedback": "切换到「离线打开」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ENT-EMPTY-013-P-M03-HOME-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ENT-EMPTY-013-P-M03-HOME-ENT",
      "label": "返回首页",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
+     "to": "P-M03-HOME-ENT",
+     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
     },
     {
      "id": "T-P-M03-ALL-APPS-ENT-EMPTY-014-P-M03-MANAGE-HOME",
@@ -5903,7 +5897,7 @@
     },
     {
      "id": "T-P-M06-SKILLS-PERSONAL-005-P-M02-SWITCHER-PERSONAL",
-     "label": "晨 晨星科技企业空间 · 成员",
+     "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
@@ -6054,7 +6048,7 @@
     },
     {
      "id": "T-P-M06-TOOLS-PERSONAL-005-P-M02-SWITCHER-PERSONAL",
-     "label": "晨 晨星科技企业空间 · 成员",
+     "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
@@ -6658,7 +6652,7 @@
     },
     {
      "id": "T-P-M08-FILES-PERSONAL-005-P-M02-SWITCHER-PERSONAL",
-     "label": "晨 晨星科技企业空间 · 成员",
+     "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
@@ -8444,49 +8438,67 @@
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-014-P-M07-LEAVE",
-     "label": "管理成员资格",
-     "to": "P-M07-LEAVE",
-     "feedback": "切换到「退出圈子」"
+     "id": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW",
+     "label": "续费",
+     "to": "P-M07-RENEW",
+     "feedback": "切换到「手动续费」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-015-P-M03-ALL-APPS",
+     "id": "T-P-M07-LEAVE-PAID-015-P-M07-LEAVE-PAID",
+     "label": "退出圈子",
+     "to": "P-M07-LEAVE-PAID",
+     "feedback": "切换到「退出圈子 · 北极星设计圈」"
+    },
+    {
+     "id": "T-P-M07-LEAVE-PAID-016-P-M07-EXPIRED",
+     "label": "（演示）模拟到期",
+     "to": "P-M07-EXPIRED",
+     "feedback": "切换到「圈子到期」"
+    },
+    {
+     "id": "T-P-M07-LEAVE-PAID-017-P-M03-ALL-APPS",
      "label": "查看全部 Apps",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-016-P-M04-APP-VIEW-PERSONAL",
+     "id": "T-P-M07-LEAVE-PAID-018-P-M04-APP-VIEW-PERSONAL",
      "label": "打开",
      "to": "P-M04-APP-VIEW-PERSONAL",
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-017-P-M06-SKILLS-PERSONAL",
+     "id": "T-P-M07-LEAVE-PAID-019-P-M04-APP-VIEW-PERSONAL",
+     "label": "打开",
+     "to": "P-M04-APP-VIEW-PERSONAL",
+     "feedback": "切换到「App 容器 · 我的空间」"
+    },
+    {
+     "id": "T-P-M07-LEAVE-PAID-020-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
      "to": "P-M06-SKILLS-PERSONAL",
      "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-018-P-M06-SKILLS-PERSONAL",
+     "id": "T-P-M07-LEAVE-PAID-021-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
      "to": "P-M06-SKILLS-PERSONAL",
      "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-019-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-LEAVE-PAID-022-P-M07-DETAIL-PAID",
      "label": "",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-020-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-LEAVE-PAID-023-P-M07-DETAIL-PAID",
      "label": "取消",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-021-P-M07-DETAIL-PAID-AFTER-LEAVE",
+     "id": "T-P-M07-LEAVE-PAID-024-P-M07-DETAIL-PAID-AFTER-LEAVE",
      "label": "确认退出",
      "to": "P-M07-DETAIL-PAID-AFTER-LEAVE",
      "feedback": "切换到「圈子详情 · 已退出」"
@@ -11049,25 +11061,31 @@
      "feedback": "切换到「运行状态中心」"
     },
     {
-     "id": "T-P-M11-OFFLINE-RUNNING-013-P-M04-APP-VIEW",
+     "id": "T-P-M11-OFFLINE-RUNNING-013-P-M11-OFFLINE-RUNNING",
      "label": "重试连接",
+     "to": "P-M11-OFFLINE-RUNNING",
+     "feedback": "切换到「运行中断网」"
+    },
+    {
+     "id": "T-P-M11-OFFLINE-RUNNING-014-P-M04-APP-VIEW",
+     "label": "（演示）网络已恢复",
      "to": "P-M04-APP-VIEW",
      "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
     },
     {
-     "id": "T-P-M11-OFFLINE-RUNNING-014-P-M03-INSPECTOR",
+     "id": "T-P-M11-OFFLINE-RUNNING-015-P-M03-INSPECTOR",
      "label": "权限",
      "to": "P-M03-INSPECTOR",
      "feedback": "切换到「App 详情（inspector）」"
     },
     {
-     "id": "T-P-M11-OFFLINE-RUNNING-015-P-M04-RUNTIME",
+     "id": "T-P-M11-OFFLINE-RUNNING-016-P-M04-RUNTIME",
      "label": "查看执行",
      "to": "P-M04-RUNTIME",
      "feedback": "切换到「运行状态中心」"
     },
     {
-     "id": "T-P-M11-OFFLINE-RUNNING-016-P-M04-CLOSE-ACTIVE",
+     "id": "T-P-M11-OFFLINE-RUNNING-017-P-M04-CLOSE-ACTIVE",
      "label": "终止执行",
      "to": "P-M04-CLOSE-ACTIVE",
      "feedback": "切换到「关闭 · 三选项」"
@@ -11866,33 +11884,21 @@
   }
  ],
  "change": {
-  "previous_revision": "poo70-ux-r1-v2-5",
+  "previous_revision": "poo70-ux-r3-v2-6",
   "changed_scenes": [
-   "P-M01-LOGIN-CODE",
-   "P-M01-PERSONAL-PREP-FAIL",
-   "P-M02-ACCESS-LOST",
-   "P-M02-STOPPING",
-   "P-M03-ALL-APPS-ENT-EMPTY",
-   "P-M03-ALL-APPS-ZERO",
-   "P-M03-HOME-ENT",
-   "P-M04-APP-VIEW-PERSONAL",
-   "P-M04-RUNTIME-PERSONAL",
-   "P-M05-CHAT-PERSONAL",
-   "P-M05-NEW",
-   "P-M06-SKILLS",
    "P-M06-SKILLS-PERSONAL",
    "P-M06-TOOLS-PERSONAL",
-   "P-M07-DETAIL-FOCUS",
-   "P-M07-DETAIL-PAID",
-   "P-M07-JOIN-FREE",
-   "P-M07-JOIN-PENDING",
-   "P-M07-LIST",
    "P-M08-FILES-PERSONAL",
-   "P-M10-SETTINGS",
-   "P-M11-SUPPORT-BROWSER"
+   "P-M02-ACCESS-LOST",
+   "P-M03-ALL-APPS-ENT-EMPTY",
+   "P-M11-OFFLINE-RUNNING",
+   "P-M03-HOME-EMPTY-DIR",
+   "P-M09-PRE-BLOCK",
+   "P-M07-LEAVE-PAID",
+   "P-M03-HOME-PERSONAL"
   ],
   "removed_scenes": [],
-  "summary": "R2 复测后收敛轮：新增个人技能/数据源/会话文件三个变体场景（个人助手衍生入口不再跨空间，C-R03）；个人会话 composer 补「发送→发送前阻断」正序与行内「停止」（PC-N03）；ACCESS-LOST 按唯一直达入口改个人上下文；ENT-EMPTY 企业身份收尾；首登圈子线 4 屏删运行 pill、JOIN-FREE 背景未加入态；DETAIL-PAID 增「（演示）模拟到期」；文案统一包 8 处（运行任务/免费加入审批/切换为密码登录/技能白话副标等）。8 项判定不改并写入 annotation/术语表。本修订为评审材料，状态为修改待复看；未启动产品编码、发布或真实产品验收。"
+  "summary": "收敛修复轮（R3 复测反馈 10 条全清）：三个个人变体场景顶栏空间徽标改「我的空间」（多行正则静默失败根因）；ACCESS-LOST 背景/徽标/主内容全部个人化；ENT-EMPTY 首页标签与返回首页改企业向；OFFLINE-RUNNING 重试自环+演示恢复；HOME-EMPTY-DIR 删运行 pill（空目录无运行任务）；PRE-BLOCK 补生成中行承接上文；LEAVE-PAID 背景重建为北极星设计圈详情。HOME-PERSONAL 演示状态口径写入 annotation。本修订为评审材料，状态为修改待复看。"
  },
  "checks": {
   "offline": true,
