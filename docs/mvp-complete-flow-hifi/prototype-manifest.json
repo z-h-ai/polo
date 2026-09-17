@@ -5223,6 +5223,12 @@
      "label": "添加文件",
      "to": "P-M08-FILES-PERSONAL",
      "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M05-NEW-026-P-M05-CHAT-PERSONAL",
+     "label": "",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     }
    ]
   },
