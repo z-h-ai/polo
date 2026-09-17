@@ -1,6 +1,6 @@
 # POO-70 · MVP 完整流程高保真 — 评审指南
 
-日期：2026-09-17 · 修订 `poo70-ux-r1-v2-5`（继承 D-PC-07/08/09，按用户走查反馈迭代） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 功能地图：[feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) · 机器可读追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)
+日期：2026-09-17 · 修订 `poo70-ux-r3-v2-6`（继承 D-PC-07/08/09，经两轮用户走查迭代收敛） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 功能地图：[feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) · 机器可读追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)
 
 **评审承诺**：产品 owner 打开 prototype.html 一个入口，即可完成四条代表故事走查 + 全部模块视觉确认 + 查看本轮修订与后续输入；全程无需账号、网络、支付或真实 AI。
 
@@ -15,7 +15,9 @@
 
 **ux-r1 / 用户走查迭代（poo70-ux-r1-v2-5）**：5 名模拟用户（2 名小白 / 3 名目标用户）走查全部 11 个模块流程，产出 93 条反馈（正面 30 / 负面 63），由 PM 评审归并为 19 项修复与 11 个新场景（92→103 场景，1539 条 transitions）。修复重点：①跨空间上下文统一（C-R03）——新增个人 App 容器、个人运行中心、个人助手会话与个人方向切换器，7 处个人「打开」不再落入企业「报价整理」，充值链整链落在个人空间（PC-N03：Member 不能自费充值）；②状态账目可判读（C-R04）——取消切换与终止并关闭各有独立落态首页（1 项 / 2 项运行中账目式），后台继续计数修正，首登零状态删除运行 pill 并新增零常用版全部 Apps；③恢复链闭合——升级失败改为可达（演示注入）、下载完成先过重开恢复核对（C-R05）、新增支持请求交接卡、版本阻断给联系管理员出路、离线两屏重试行为一致、被阻断 App 的标签激活改自环；④圈子线（PC-F03 / D-PC-09）——到期续费起算日立即生效（与有效期内续费区分）、付费圈补退出链、来源撤销后作品账目改写（已退出圈不可用 + 重新加入路径）；⑤全局卫生——无关场景的「已在后台继续运行」toast（38→1）与「已重新核对管理资格」（13→1）清理、「（不假装完成）」元语言改写、术语统一（Skill→技能、角色词中文化）、死按钮接线（权限弹窗 ×/暂不打开、生成中断发送禁用、登录取消改走密码流程、验证码重发演示注入）。故事路径同步：故事 1 步 4 → ALL-APPS-ZERO；故事 2 步 8 → AFTER-CANCEL；故事 3 起讫 → CHAT-PERSONAL。11 个新场景：P-M02-SWITCHER-PERSONAL、P-M03-HOME-ENT-AFTER-CANCEL、P-M03-HOME-ENT-AFTER-CLOSE、P-M03-ALL-APPS-ZERO、P-M04-APP-VIEW-PERSONAL、P-M04-RUNTIME-PERSONAL、P-M05-CHAT-PERSONAL、P-M07-RENEW-EXPIRED、P-M07-LEAVE-PAID、P-M07-DETAIL-PAID-AFTER-LEAVE、P-M11-SUPPORT-BROWSER。本轮状态为「修改待复看」。
 
-**v2 契约说明**：本卡按 product-ui-prototype v2 契约构建——`surface.html` 是纯产品表面（103 场景、1539 条 transitions 全部静态声明，无演示控制代码；44 条「分支：」评审按钮已移除，对应失败/取消状态改由 review_entries 进入）；`prototype.html` 是官方评审壳，用 iframe 按真实视口加载 surface，集中放页面索引、页面说明、锚定标注揭示、本轮评审、故事播放与视口切换。两文件均离线零网络请求，场景内容与 POO-41 G4 冻结稿、POO-70 已确认结论逐条绑定（manifest `sources`/`confirmations` 含 sha256 快照）。
+**ux-r3 / 收敛轮（poo70-ux-r3-v2-6）**：R2 五名复测用户确认 19 项修复中绝大多数生效（含 1 个本轮引入的标签失衡 blocker，已修复并加全文标签平衡校验与 106 屏首屏渲染回归门）。按 PM 收敛判定：①新增个人技能/数据源/会话文件 3 个变体场景，个人助手衍生入口全程不跨空间（C-R03）；②个人会话 composer 补「发送→发送前阻断」正序与行内「停止」（PC-N03）；③ACCESS-LOST 按唯一直达入口改个人上下文；④ENT-EMPTY 企业身份收尾；⑤首登圈子线 4 屏删运行 pill、JOIN-FREE 背景未加入态；⑥DETAIL-PAID 增「（演示）模拟到期」；⑦文案统一包 8 处。8 项判定不改（中性容器口径、切换只终止源空间、演示粒度等）并写入场景 annotation；术语表 3 条（Skill 保留英文、角色词括注、圈子主≠企业所有者）。本轮状态为「修改待复看」。
+
+**v2 契约说明**：本卡按 product-ui-prototype v2 契约构建——`surface.html` 是纯产品表面（106 场景、1601 条 transitions 全部静态声明，无演示控制代码；44 条「分支：」评审按钮已移除，对应失败/取消状态改由 review_entries 进入）；`prototype.html` 是官方评审壳，用 iframe 按真实视口加载 surface，集中放页面索引、页面说明、锚定标注揭示、本轮评审、故事播放与视口切换。两文件均离线零网络请求，场景内容与 POO-41 G4 冻结稿、POO-70 已确认结论逐条绑定（manifest `sources`/`confirmations` 含 sha256 快照）。
 
 ---
 
@@ -133,9 +135,9 @@
 | 6 | 评审进入“最后来源失效” | [P-M11-BLOCKED-EXPIRED](prototype.html#scene=P-M11-BLOCKED-EXPIRED) | 两个来源都无效后才阻断；恢复任一来源即可重新打开 |
 | 7 | 评审进入企业首页 | [P-M03-HOME-ENT](prototype.html#scene=P-M03-HOME-ENT) | 只出现企业内部导入作品，无“我的圈子”及个人授权来源 |
 
-## 3. 页面索引（103 屏全量）
+## 3. 页面索引（106 屏全量）
 
-以下 ID 均可用 `#scene=<ID>` 直达（评审壳或 surface 直开均可）。103 场景通过产品操作或 35 个 review_entries 评审入口覆盖；「分类」见图例（[feature-map.md §1](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)）。
+以下 ID 均可用 `#scene=<ID>` 直达（评审壳或 surface 直开均可）。106 场景通过产品操作或 35 个 review_entries 评审入口覆盖；「分类」见图例（[feature-map.md §1](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)）。
 
 ### M01 登录与空间承接（14 屏）
 
@@ -212,14 +214,15 @@
 | [P-M05-QUESTION](prototype.html#scene=P-M05-QUESTION) | 助手 · 追问待回答 | 直接复用 | 问题卡 + 回答/暂不回答；会话状态跨重开保留。 |
 | [P-M05-QUESTION-REOPEN](prototype.html#scene=P-M05-QUESTION-REOPEN) | 助手 · 重开后问题恢复 | 直接复用 | 重开恢复问题与草稿；不替用户重复提交（PC-F10）。 |
 | [P-M05-CHAT-PERSONAL](prototype.html#scene=P-M05-CHAT-PERSONAL) | 助手 · 报价汇总（我的空间） | 新增 / 构想 | 个人空间会话，含用户气泡；充值链落点（PC-N03）。 |
-### M06 助手 · 技能与数据源（3 屏）
+### M06 助手 · 技能与数据源（5 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
 | [P-M06-SKILLS](prototype.html#scene=P-M06-SKILLS) | 技能 · 授权/已启用/设备准备 | 直接复用 | 技能三态 + 同名来源区分；侧栏技能列表直接复用。 |
 | [P-M06-SKILL-DENIED](prototype.html#scene=P-M06-SKILL-DENIED) | 技能 · 启用失败（无授权） | 直接复用 | 无授权给联系作者路径；不影响会话其余部分。 |
 | [P-M06-TOOLS](prototype.html#scene=P-M06-TOOLS) | 数据源 / 自动化 / Browser | 直接复用 | 侧栏数据源/自动化与助手内 Browser 均为现有入口。 |
-
+| [P-M06-SKILLS-PERSONAL](prototype.html#scene=P-M06-SKILLS-PERSONAL) | 技能 · 我的空间 | 新增 / 构想 | 个人空间技能页：圈子来源技能在此管理，未授权内联展示（C-R03 · D-PC-08）。 |
+| [P-M06-TOOLS-PERSONAL](prototype.html#scene=P-M06-TOOLS-PERSONAL) | 数据源 / 自动化 · 我的空间 | 新增 / 构想 | 个人空间的数据源、自动化与 Browser 入口（PC-F04）。 |
 ### M07 我的圈子（15 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
@@ -239,13 +242,13 @@
 | [P-M07-RENEW-EXPIRED](prototype.html#scene=P-M07-RENEW-EXPIRED) | 手动续费 · 到期恢复 | 新增 / 构想 | 到期后重新购买：起算日立即生效（PC-F03 · A-PAY）。 |
 | [P-M07-LEAVE-PAID](prototype.html#scene=P-M07-LEAVE-PAID) | 退出圈子 · 北极星设计圈 | 新增 / 构想 | 付费圈退出确认：只撤销本圈来源（D-PC-09）。 |
 | [P-M07-DETAIL-PAID-AFTER-LEAVE](prototype.html#scene=P-M07-DETAIL-PAID-AFTER-LEAVE) | 圈子详情 · 已退出 | 新增 / 构想 | 退出后账目：独有作品不可用可重加，共同授权继续可用。 |
-### M08 会话文件（2 屏）
+### M08 会话文件（3 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
 | [P-M08-FILES](prototype.html#scene=P-M08-FILES) | 原对话文件 | 直接复用 | 附件与生成文件留在会话内；不建统一文件汇总页（D-PC-03）。 |
 | [P-M08-FILE-MISSING](prototype.html#scene=P-M08-FILE-MISSING) | 文件缺失 | 直接复用 | 缺失给重选路径；会话其余内容不受影响（C-R02）。 |
-
+| [P-M08-FILES-PERSONAL](prototype.html#scene=P-M08-FILES-PERSONAL) | 会话文件 · 报价汇总（我的空间） | 新增 / 构想 | 个人会话的附件与生成文件；文件留在原对话（D-PC-03 · C-R03）。 |
 ### M09 积分不足（9 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |

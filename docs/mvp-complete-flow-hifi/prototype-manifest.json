@@ -1,7 +1,7 @@
 {
  "schema_version": 2,
  "title": "Polo 桌面客户端 · MVP 完整流程高保真原型",
- "revision": "poo70-ux-r1-v2-5",
+ "revision": "poo70-ux-r3-v2-6",
  "mode": "high_fidelity",
  "files": {
   "review": "prototype.html",
@@ -166,10 +166,10 @@
   ]
  },
  "summary": [
-  "本轮落实用户走查反馈（93 条）与 PM 评审：修复跨空间上下文错乱、状态账目不一致、断链死按钮与全局 toast 污染。",
-  "个人空间获得完整链路：个人 App 容器、个人运行中心、个人助手会话与个人方向切换器；充值链按 PC-N03 落在个人空间。",
-  "圈子线补齐到期恢复续费、付费圈退出与来源撤销后的作品账目（D-PC-09）。",
-  "全局术语统一：技能（Skill）、运行任务、角色词中文化；产品表面只保留用户当下需要读的内容。",
+  "R3 收敛轮：个人助手衍生页（技能/数据源/会话文件）全部空间一致；充值链正序可走（发送→阻断→充值→恢复）。",
+  "ACCESS-LOST、ENT-EMPTY、首登圈子线的身份与账目收尾；到期可用「（演示）模拟到期」在产品表面走通。",
+  "不改项（8）均给出依据并写入场景 annotation：中性容器口径、切换只终止源空间、演示粒度边界。",
+  "术语表：Skill 为产品名词保留英文；角色词首次出现用「中文（English）」；圈子主（圈子 Owner）≠企业所有者（企业 Owner）。",
   "本修订为评审材料，状态为修改待复看；未启动产品编码、发布或真实产品验收。"
  ],
  "modules": [
@@ -289,7 +289,7 @@
     },
     {
      "id": "T-P-M01-LOGIN-CODE-002-P-M01-LOGIN-PHONE",
-     "label": "验证码登录",
+     "label": "切换为密码登录",
      "to": "P-M01-LOGIN-PHONE",
      "feedback": "切换到「登录 · 验证码登录」"
     },
@@ -757,10 +757,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M02-SWITCHER-PERSONAL-015-P-M06-SKILLS",
+     "id": "T-P-M02-SWITCHER-PERSONAL-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M02-SWITCHER-PERSONAL-016-P-M05-CHAT-PERSONAL",
@@ -993,10 +993,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M02-CONFIRM-PERSONAL-014-P-M06-SKILLS",
+     "id": "T-P-M02-CONFIRM-PERSONAL-014-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M02-CONFIRM-PERSONAL-015-P-M05-CHAT-PERSONAL",
@@ -1641,16 +1641,16 @@
    "annotation": "已从切换器移除并说明原因；联系管理员恢复（C-R05）。",
    "transitions": [
     {
-     "id": "T-P-M02-ACCESS-LOST-001-P-M03-HOME-ENT",
+     "id": "T-P-M02-ACCESS-LOST-001-P-M03-HOME-PERSONAL",
      "label": "首页",
-     "to": "P-M03-HOME-ENT",
-     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-002-P-M04-RUNTIME",
-     "label": "3 项运行中",
-     "to": "P-M04-RUNTIME",
-     "feedback": "切换到「运行状态中心」"
+     "id": "T-P-M02-ACCESS-LOST-002-P-M04-RUNTIME-PERSONAL",
+     "label": "1 项运行中",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
      "id": "T-P-M02-ACCESS-LOST-003-P-M02-SWITCHER",
@@ -1659,10 +1659,10 @@
      "feedback": "切换到「空间切换器（下拉）」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-004-P-M03-HOME-PERSONAL",
-     "label": "我我的空间个人空间 · 个人",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
+     "id": "T-P-M02-ACCESS-LOST-004-P-M02-CONFIRM-PERSONAL",
+     "label": "晨晨星科技企业空间 · 成员",
+     "to": "P-M02-CONFIRM-PERSONAL",
+     "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
      "id": "T-P-M02-ACCESS-LOST-005-P-M04-RUNTIME",
@@ -1737,10 +1737,10 @@
      "feedback": "切换到「App 详情（inspector）」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-017-P-M03-HOME-ENT",
+     "id": "T-P-M02-ACCESS-LOST-017-P-M02-SWITCHER-PERSONAL",
      "label": "知道了",
-     "to": "P-M03-HOME-ENT",
-     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
+     "to": "P-M02-SWITCHER-PERSONAL",
+     "feedback": "切换到「空间切换器 · 从我的空间打开」"
     }
    ]
   },
@@ -1834,10 +1834,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M03-HOME-PERSONAL-014-P-M06-SKILLS",
+     "id": "T-P-M03-HOME-PERSONAL-014-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M03-HOME-PERSONAL-015-P-M05-CHAT-PERSONAL",
@@ -1963,10 +1963,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M03-HOME-ZERO-013-P-M06-SKILLS",
+     "id": "T-P-M03-HOME-ZERO-013-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M03-HOME-ZERO-014-P-M05-CHAT-PERSONAL",
@@ -2080,10 +2080,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M03-HOME-EMPTY-DIR-014-P-M06-SKILLS",
+     "id": "T-P-M03-HOME-EMPTY-DIR-014-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M03-HOME-EMPTY-DIR-015-P-M05-CHAT-PERSONAL",
@@ -2298,10 +2298,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M03-HOME-OFFLINE-016-P-M06-SKILLS",
+     "id": "T-P-M03-HOME-OFFLINE-016-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M03-HOME-OFFLINE-017-P-M05-CHAT-PERSONAL",
@@ -2332,7 +2332,7 @@
    "status": "decision",
    "module": "M03",
    "category": "调整",
-   "annotation": "企业首页只展示企业导入、启用并向本人分发的能力；不含个人圈子、圈子订阅或管理卡（D-PC-07/08）。",
+   "annotation": "企业空间首页。注意：切换空间只终止源空间（发出切换的一方）的活动——个人→企业成功切换后企业自己的 3 项运行任务不受影响（PC-F06）；真实实现中个人→企业有逐项终止进度与「已停止 1 项」回执，原型为直落演示。",
    "transitions": [
     {
      "id": "T-P-M03-HOME-ENT-001-P-M03-HOME-ENT",
@@ -3089,10 +3089,10 @@
      "feedback": "切换到「空间切换器（下拉）」"
     },
     {
-     "id": "T-P-M03-ALL-APPS-ENT-EMPTY-004-P-M03-HOME-PERSONAL",
+     "id": "T-P-M03-ALL-APPS-ENT-EMPTY-004-P-M03-HOME-ENT",
      "label": "我我的空间个人空间 · 个人",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
+     "to": "P-M03-HOME-ENT",
+     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
     },
     {
      "id": "T-P-M03-ALL-APPS-ENT-EMPTY-005-P-M04-RUNTIME",
@@ -3180,22 +3180,22 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
+     "id": "T-P-M03-INSPECTOR-002-P-M04-RUNTIME",
+     "label": "3 项运行中",
+     "to": "P-M04-RUNTIME",
+     "feedback": "切换到「运行状态中心」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-003-P-M02-SWITCHER-PERSONAL",
-     "label": "我 我的空间个人空间 · 个人",
-     "to": "P-M02-SWITCHER-PERSONAL",
-     "feedback": "切换到「空间切换器 · 从我的空间打开」"
+     "id": "T-P-M03-INSPECTOR-003-P-M02-SWITCHER",
+     "label": "晨 晨星科技企业空间 · 成员",
+     "to": "P-M02-SWITCHER",
+     "feedback": "切换到「空间切换器（下拉）」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-004-P-M02-CONFIRM-PERSONAL",
-     "label": "晨晨星科技企业空间 · 成员",
-     "to": "P-M02-CONFIRM-PERSONAL",
-     "feedback": "切换到「切换确认 · 从我的空间到企业」"
+     "id": "T-P-M03-INSPECTOR-004-P-M03-HOME-PERSONAL",
+     "label": "我我的空间个人空间 · 个人",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
      "id": "T-P-M03-INSPECTOR-005-P-M04-RUNTIME-PERSONAL",
@@ -3258,10 +3258,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-015-P-M06-SKILLS",
+     "id": "T-P-M03-INSPECTOR-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M03-INSPECTOR-016-P-M05-CHAT-PERSONAL",
@@ -3282,22 +3282,22 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-019-P-M03-HOME-PERSONAL",
+     "id": "T-P-M03-INSPECTOR-019-P-M03-HOME-ENT",
      "label": "",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
+     "to": "P-M03-HOME-ENT",
+     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-020-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M03-INSPECTOR-020-P-M04-RUNTIME",
      "label": "查看运行记录",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
+     "to": "P-M04-RUNTIME",
+     "feedback": "切换到「运行状态中心」"
     },
     {
-     "id": "T-P-M03-INSPECTOR-021-P-M03-HOME-PERSONAL",
+     "id": "T-P-M03-INSPECTOR-021-P-M03-HOME-ENT",
      "label": "关闭",
-     "to": "P-M03-HOME-PERSONAL",
-     "feedback": "切换到「首页 · 个人空间（有常用）」"
+     "to": "P-M03-HOME-ENT",
+     "feedback": "切换到「首页 · 企业空间（晨星科技）」"
     }
    ]
   },
@@ -3645,7 +3645,7 @@
    "status": "suggested",
    "module": "M04",
    "category": "新增",
-   "annotation": "个人空间中性 App 容器：chrome、标签与运行为我的空间；业务界面由 App 提供（C-R03 · D-PC-05）。",
+   "annotation": "个人空间中性 App 容器：单场景承载多入口（增长打法手册/数据报表生成器/会议纪要整理都落此屏），因此不写死 App 名称——写死任一名称即复发「点 A 开 B」；chrome/空间正确性优先，App 名称在真实产品由标签页与容器标题呈现。",
    "transitions": [
     {
      "id": "T-P-M04-APP-VIEW-PERSONAL-001-P-M03-HOME-PERSONAL",
@@ -4528,7 +4528,7 @@
    "status": "suggested",
    "module": "M04",
    "category": "新增",
-   "annotation": "个人空间运行中心：只列当前空间任务（C-R03）；单项停止的演示锚定企业运行中心，本屏提供进入。",
+   "annotation": "个人空间运行中心：只列当前空间任务（C-R03）。个人运行项产品上同样可停止（PC-F02 无空间差异），演示将完整停止链锚定在企业运行中心，避免共享落态账目复杂化。",
    "transitions": [
     {
      "id": "T-P-M04-RUNTIME-PERSONAL-001-P-M03-HOME-PERSONAL",
@@ -4615,10 +4615,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M04-RUNTIME-PERSONAL-015-P-M06-SKILLS",
+     "id": "T-P-M04-RUNTIME-PERSONAL-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M04-RUNTIME-PERSONAL-016-P-M05-CHAT-PERSONAL",
@@ -5014,22 +5014,22 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M05-CHAT-PERSONAL-016-P-M08-FILES",
+     "id": "T-P-M05-CHAT-PERSONAL-016-P-M08-FILES-PERSONAL",
      "label": "会话文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M05-CHAT-PERSONAL-017-P-M06-SKILLS",
+     "id": "T-P-M05-CHAT-PERSONAL-017-P-M06-SKILLS-PERSONAL",
      "label": "技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M05-CHAT-PERSONAL-018-P-M06-TOOLS",
+     "id": "T-P-M05-CHAT-PERSONAL-018-P-M06-TOOLS-PERSONAL",
      "label": "数据源 / 自动化",
-     "to": "P-M06-TOOLS",
-     "feedback": "切换到「数据源 / 自动化 / Browser」"
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
     },
     {
      "id": "T-P-M05-CHAT-PERSONAL-019-P-M05-NEW",
@@ -5050,16 +5050,22 @@
      "feedback": "切换到「OS 权限被拒」"
     },
     {
-     "id": "T-P-M05-CHAT-PERSONAL-022-P-M08-FILES",
-     "label": "添加文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "id": "T-P-M05-CHAT-PERSONAL-022-P-M09-USER-STOP",
+     "label": "停止",
+     "to": "P-M09-USER-STOP",
+     "feedback": "切换到「用户主动停止 ≠ 积分不足」"
     },
     {
-     "id": "T-P-M05-CHAT-PERSONAL-023-P-M05-STOPPED",
+     "id": "T-P-M05-CHAT-PERSONAL-023-P-M08-FILES-PERSONAL",
+     "label": "添加文件",
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M05-CHAT-PERSONAL-024-P-M09-PRE-BLOCK",
      "label": "",
-     "to": "P-M05-STOPPED",
-     "feedback": "切换到「助手 · 停止生成」"
+     "to": "P-M09-PRE-BLOCK",
+     "feedback": "切换到「发送前积分不足」"
     }
    ]
   },
@@ -5072,7 +5078,7 @@
    "status": "confirmed",
    "module": "M05",
    "category": "复用",
-   "annotation": "空会话占位与建议 chips 复用现有样式。",
+   "annotation": "新会话框架屏为「直接复用」演示（D-PC-06），空间叙事以入口场景为准；发送走发送前积分阻断链（PC-N03）。",
    "transitions": [
     {
      "id": "T-P-M05-NEW-001-P-M03-HOME-PERSONAL",
@@ -5171,22 +5177,22 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M05-NEW-017-P-M08-FILES",
+     "id": "T-P-M05-NEW-017-P-M08-FILES-PERSONAL",
      "label": "会话文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M05-NEW-018-P-M06-SKILLS",
+     "id": "T-P-M05-NEW-018-P-M06-SKILLS-PERSONAL",
      "label": "技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M05-NEW-019-P-M06-TOOLS",
+     "id": "T-P-M05-NEW-019-P-M06-TOOLS-PERSONAL",
      "label": "数据源 / 自动化",
-     "to": "P-M06-TOOLS",
-     "feedback": "切换到「数据源 / 自动化 / Browser」"
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
     },
     {
      "id": "T-P-M05-NEW-020-P-M05-NEW",
@@ -5213,16 +5219,16 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M05-NEW-024-P-M06-SKILLS",
+     "id": "T-P-M05-NEW-024-P-M06-SKILLS-PERSONAL",
      "label": "浏览技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M05-NEW-025-P-M08-FILES",
+     "id": "T-P-M05-NEW-025-P-M08-FILES-PERSONAL",
      "label": "添加文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     }
    ]
   },
@@ -5861,6 +5867,296 @@
    ]
   },
   {
+   "id": "P-M06-SKILLS-PERSONAL",
+   "journey": "J6 Skills 与数据源",
+   "node": "P-M06-SKILLS-PERSONAL",
+   "state": "default",
+   "title": "技能 · 我的空间",
+   "status": "suggested",
+   "module": "M06",
+   "category": "新增",
+   "annotation": "个人空间技能页：圈子来源技能在此管理（D-PC-08）；未授权技能内联展示「无法启用 · 需圈子授权」，个人入口不落企业无授权页（C-R03 · PC-F04）。",
+   "transitions": [
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-001-P-M03-HOME-PERSONAL",
+     "label": "首页",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-002-P-M05-CHAT-PERSONAL",
+     "label": "Polo 助手",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-003-P-M03-HOME-PERSONAL",
+     "label": "−",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-004-P-M04-RUNTIME-PERSONAL",
+     "label": "1 项运行中",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-005-P-M02-SWITCHER-PERSONAL",
+     "label": "晨 晨星科技企业空间 · 成员",
+     "to": "P-M02-SWITCHER-PERSONAL",
+     "feedback": "切换到「空间切换器 · 从我的空间打开」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-006-P-M02-CONFIRM-PERSONAL",
+     "label": "晨晨星科技企业空间 · 成员",
+     "to": "P-M02-CONFIRM-PERSONAL",
+     "feedback": "切换到「切换确认 · 从我的空间到企业」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-007-P-M04-RUNTIME-PERSONAL",
+     "label": "",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-008-P-M10-MENU",
+     "label": "王",
+     "to": "P-M10-MENU",
+     "feedback": "切换到「账号菜单 · 有管理资格」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-009-P-M10-SETTINGS",
+     "label": "账号与偏好管理客户端设置",
+     "to": "P-M10-SETTINGS",
+     "feedback": "切换到「设置 · 账号安全」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-010-P-M09-BROWSER",
+     "label": "充值与账单在系统浏览器打开",
+     "to": "P-M09-BROWSER",
+     "feedback": "切换到「充值（浏览器交接）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-011-P-M01-LOGIN-PASSWORD",
+     "label": "退出登录保留本机文件",
+     "to": "P-M01-LOGIN-PASSWORD",
+     "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-012-P-M04-RUNTIME-PERSONAL",
+     "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-013-P-M11-OFFLINE-HOME",
+     "label": "重试连接",
+     "to": "P-M11-OFFLINE-HOME",
+     "feedback": "切换到「离线打开」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-014-P-M05-NEW",
+     "label": "新建对话",
+     "to": "P-M05-NEW",
+     "feedback": "切换到「助手 · 新会话」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-015-P-M05-CHAT-PERSONAL",
+     "label": "全部对话",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-016-P-M08-FILES-PERSONAL",
+     "label": "会话文件",
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-017-P-M06-SKILLS-PERSONAL",
+     "label": "技能",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-018-P-M06-TOOLS-PERSONAL",
+     "label": "数据源 / 自动化",
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-019-P-M05-NEW",
+     "label": "",
+     "to": "P-M05-NEW",
+     "feedback": "切换到「助手 · 新会话」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-020-P-M05-CHAT-PERSONAL",
+     "label": "报价汇总刚刚",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-021-P-M04-PERM-DENIED",
+     "label": "权限",
+     "to": "P-M04-PERM-DENIED",
+     "feedback": "切换到「OS 权限被拒」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-022-P-M06-SKILLS-PERSONAL",
+     "label": "停用",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-SKILLS-PERSONAL-023-P-M06-SKILLS-PERSONAL",
+     "label": "停用",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
+    }
+   ]
+  },
+  {
+   "id": "P-M06-TOOLS-PERSONAL",
+   "journey": "J6 Skills 与数据源",
+   "node": "P-M06-TOOLS-PERSONAL",
+   "state": "default",
+   "title": "数据源 / 自动化 · 我的空间",
+   "status": "suggested",
+   "module": "M06",
+   "category": "新增",
+   "annotation": "个人空间的数据源、自动化与 Browser 入口（PC-F04 随空间隔离）。",
+   "transitions": [
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-001-P-M03-HOME-PERSONAL",
+     "label": "首页",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-002-P-M05-CHAT-PERSONAL",
+     "label": "Polo 助手",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-003-P-M03-HOME-PERSONAL",
+     "label": "−",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-004-P-M04-RUNTIME-PERSONAL",
+     "label": "1 项运行中",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-005-P-M02-SWITCHER-PERSONAL",
+     "label": "晨 晨星科技企业空间 · 成员",
+     "to": "P-M02-SWITCHER-PERSONAL",
+     "feedback": "切换到「空间切换器 · 从我的空间打开」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-006-P-M02-CONFIRM-PERSONAL",
+     "label": "晨晨星科技企业空间 · 成员",
+     "to": "P-M02-CONFIRM-PERSONAL",
+     "feedback": "切换到「切换确认 · 从我的空间到企业」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-007-P-M04-RUNTIME-PERSONAL",
+     "label": "",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-008-P-M10-MENU",
+     "label": "王",
+     "to": "P-M10-MENU",
+     "feedback": "切换到「账号菜单 · 有管理资格」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-009-P-M10-SETTINGS",
+     "label": "账号与偏好管理客户端设置",
+     "to": "P-M10-SETTINGS",
+     "feedback": "切换到「设置 · 账号安全」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-010-P-M09-BROWSER",
+     "label": "充值与账单在系统浏览器打开",
+     "to": "P-M09-BROWSER",
+     "feedback": "切换到「充值（浏览器交接）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-011-P-M01-LOGIN-PASSWORD",
+     "label": "退出登录保留本机文件",
+     "to": "P-M01-LOGIN-PASSWORD",
+     "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-012-P-M04-RUNTIME-PERSONAL",
+     "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-013-P-M11-OFFLINE-HOME",
+     "label": "重试连接",
+     "to": "P-M11-OFFLINE-HOME",
+     "feedback": "切换到「离线打开」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-014-P-M05-NEW",
+     "label": "新建对话",
+     "to": "P-M05-NEW",
+     "feedback": "切换到「助手 · 新会话」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-015-P-M05-CHAT-PERSONAL",
+     "label": "全部对话",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-016-P-M08-FILES-PERSONAL",
+     "label": "会话文件",
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-017-P-M06-SKILLS-PERSONAL",
+     "label": "技能",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-018-P-M06-TOOLS-PERSONAL",
+     "label": "数据源 / 自动化",
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-019-P-M05-NEW",
+     "label": "",
+     "to": "P-M05-NEW",
+     "feedback": "切换到「助手 · 新会话」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-020-P-M05-CHAT-PERSONAL",
+     "label": "报价汇总刚刚",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M06-TOOLS-PERSONAL-021-P-M04-PERM-DENIED",
+     "label": "权限",
+     "to": "P-M04-PERM-DENIED",
+     "feedback": "切换到「OS 权限被拒」"
+    }
+   ]
+  },
+  {
    "id": "P-M06-SKILL-DENIED",
    "journey": "J6 Skills 与数据源",
    "node": "P-M06-SKILL-DENIED",
@@ -6326,6 +6622,145 @@
    ]
   },
   {
+   "id": "P-M08-FILES-PERSONAL",
+   "journey": "J8 会话文件",
+   "node": "P-M08-FILES-PERSONAL",
+   "state": "default",
+   "title": "会话文件 · 报价汇总（我的空间）",
+   "status": "suggested",
+   "module": "M08",
+   "category": "新增",
+   "annotation": "个人会话「报价汇总」的附件与生成文件；文件留在原对话（D-PC-03 · C-R03）。",
+   "transitions": [
+    {
+     "id": "T-P-M08-FILES-PERSONAL-001-P-M03-HOME-PERSONAL",
+     "label": "首页",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-002-P-M05-CHAT-PERSONAL",
+     "label": "Polo 助手",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-003-P-M03-HOME-PERSONAL",
+     "label": "−",
+     "to": "P-M03-HOME-PERSONAL",
+     "feedback": "切换到「首页 · 个人空间（有常用）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-004-P-M04-RUNTIME-PERSONAL",
+     "label": "1 项运行中",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-005-P-M02-SWITCHER-PERSONAL",
+     "label": "晨 晨星科技企业空间 · 成员",
+     "to": "P-M02-SWITCHER-PERSONAL",
+     "feedback": "切换到「空间切换器 · 从我的空间打开」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-006-P-M02-CONFIRM-PERSONAL",
+     "label": "晨晨星科技企业空间 · 成员",
+     "to": "P-M02-CONFIRM-PERSONAL",
+     "feedback": "切换到「切换确认 · 从我的空间到企业」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-007-P-M04-RUNTIME-PERSONAL",
+     "label": "",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-008-P-M10-MENU",
+     "label": "王",
+     "to": "P-M10-MENU",
+     "feedback": "切换到「账号菜单 · 有管理资格」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-009-P-M10-SETTINGS",
+     "label": "账号与偏好管理客户端设置",
+     "to": "P-M10-SETTINGS",
+     "feedback": "切换到「设置 · 账号安全」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-010-P-M09-BROWSER",
+     "label": "充值与账单在系统浏览器打开",
+     "to": "P-M09-BROWSER",
+     "feedback": "切换到「充值（浏览器交接）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-011-P-M01-LOGIN-PASSWORD",
+     "label": "退出登录保留本机文件",
+     "to": "P-M01-LOGIN-PASSWORD",
+     "feedback": "切换到「登录 · 密码登录」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-012-P-M04-RUNTIME-PERSONAL",
+     "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
+     "to": "P-M04-RUNTIME-PERSONAL",
+     "feedback": "切换到「运行状态 · 我的空间」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-013-P-M11-OFFLINE-HOME",
+     "label": "重试连接",
+     "to": "P-M11-OFFLINE-HOME",
+     "feedback": "切换到「离线打开」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-014-P-M05-NEW",
+     "label": "新建对话",
+     "to": "P-M05-NEW",
+     "feedback": "切换到「助手 · 新会话」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-015-P-M05-CHAT-PERSONAL",
+     "label": "全部对话",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-016-P-M08-FILES-PERSONAL",
+     "label": "会话文件",
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-017-P-M06-SKILLS-PERSONAL",
+     "label": "技能",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-018-P-M06-TOOLS-PERSONAL",
+     "label": "数据源 / 自动化",
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-019-P-M05-NEW",
+     "label": "",
+     "to": "P-M05-NEW",
+     "feedback": "切换到「助手 · 新会话」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-020-P-M05-CHAT-PERSONAL",
+     "label": "报价汇总刚刚",
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
+    },
+    {
+     "id": "T-P-M08-FILES-PERSONAL-021-P-M04-PERM-DENIED",
+     "label": "权限",
+     "to": "P-M04-PERM-DENIED",
+     "feedback": "切换到「OS 权限被拒」"
+    }
+   ]
+  },
+  {
    "id": "P-M08-FILE-MISSING",
    "journey": "J8 会话文件",
    "node": "P-M08-FILE-MISSING",
@@ -6500,97 +6935,91 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-LIST-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
-    },
-    {
-     "id": "T-P-M07-LIST-003-P-M02-SWITCHER-PERSONAL",
+     "id": "T-P-M07-LIST-002-P-M02-SWITCHER-PERSONAL",
      "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
-     "id": "T-P-M07-LIST-004-P-M02-CONFIRM-PERSONAL",
+     "id": "T-P-M07-LIST-003-P-M02-CONFIRM-PERSONAL",
      "label": "晨晨星科技企业空间 · 成员",
      "to": "P-M02-CONFIRM-PERSONAL",
      "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
-     "id": "T-P-M07-LIST-005-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-LIST-004-P-M04-RUNTIME-PERSONAL",
      "label": "",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LIST-006-P-M10-MENU",
+     "id": "T-P-M07-LIST-005-P-M10-MENU",
      "label": "王",
      "to": "P-M10-MENU",
      "feedback": "切换到「账号菜单 · 有管理资格」"
     },
     {
-     "id": "T-P-M07-LIST-007-P-M10-SETTINGS",
+     "id": "T-P-M07-LIST-006-P-M10-SETTINGS",
      "label": "账号与偏好管理客户端设置",
      "to": "P-M10-SETTINGS",
      "feedback": "切换到「设置 · 账号安全」"
     },
     {
-     "id": "T-P-M07-LIST-008-P-M09-BROWSER",
+     "id": "T-P-M07-LIST-007-P-M09-BROWSER",
      "label": "充值与账单在系统浏览器打开",
      "to": "P-M09-BROWSER",
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M07-LIST-009-P-M01-LOGIN-PASSWORD",
+     "id": "T-P-M07-LIST-008-P-M01-LOGIN-PASSWORD",
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
-     "id": "T-P-M07-LIST-010-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-LIST-009-P-M07-DETAIL-PAID",
      "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-LIST-011-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-LIST-010-P-M04-RUNTIME-PERSONAL",
      "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LIST-012-P-M11-OFFLINE-HOME",
+     "id": "T-P-M07-LIST-011-P-M11-OFFLINE-HOME",
      "label": "重试连接",
      "to": "P-M11-OFFLINE-HOME",
      "feedback": "切换到「离线打开」"
     },
     {
-     "id": "T-P-M07-LIST-013-P-M03-HOME-PERSONAL",
+     "id": "T-P-M07-LIST-012-P-M03-HOME-PERSONAL",
      "label": "返回首页",
      "to": "P-M03-HOME-PERSONAL",
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-LIST-014-P-M07-JOIN-FREE",
+     "id": "T-P-M07-LIST-013-P-M07-JOIN-FREE",
      "label": "使用邀请链接加入",
      "to": "P-M07-JOIN-FREE",
      "feedback": "切换到「加入免费圈子」"
     },
     {
-     "id": "T-P-M07-LIST-015-P-M07-DETAIL-FOCUS",
+     "id": "T-P-M07-LIST-014-P-M07-DETAIL-FOCUS",
      "label": "查看圈子",
      "to": "P-M07-DETAIL-FOCUS",
      "feedback": "切换到「圈子详情 · 已加入」"
     },
     {
-     "id": "T-P-M07-LIST-016-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-LIST-015-P-M07-DETAIL-PAID",
      "label": "查看圈子",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-LIST-017-P-M03-ALL-APPS",
+     "id": "T-P-M07-LIST-016-P-M03-ALL-APPS",
      "label": "查看 App",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
@@ -6720,106 +7149,100 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
-    },
-    {
-     "id": "T-P-M07-DETAIL-FOCUS-003-P-M02-SWITCHER-PERSONAL",
+     "id": "T-P-M07-DETAIL-FOCUS-002-P-M02-SWITCHER-PERSONAL",
      "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-004-P-M02-CONFIRM-PERSONAL",
+     "id": "T-P-M07-DETAIL-FOCUS-003-P-M02-CONFIRM-PERSONAL",
      "label": "晨晨星科技企业空间 · 成员",
      "to": "P-M02-CONFIRM-PERSONAL",
      "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-005-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-DETAIL-FOCUS-004-P-M04-RUNTIME-PERSONAL",
      "label": "",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-006-P-M10-MENU",
+     "id": "T-P-M07-DETAIL-FOCUS-005-P-M10-MENU",
      "label": "王",
      "to": "P-M10-MENU",
      "feedback": "切换到「账号菜单 · 有管理资格」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-007-P-M10-SETTINGS",
+     "id": "T-P-M07-DETAIL-FOCUS-006-P-M10-SETTINGS",
      "label": "账号与偏好管理客户端设置",
      "to": "P-M10-SETTINGS",
      "feedback": "切换到「设置 · 账号安全」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-008-P-M09-BROWSER",
+     "id": "T-P-M07-DETAIL-FOCUS-007-P-M09-BROWSER",
      "label": "充值与账单在系统浏览器打开",
      "to": "P-M09-BROWSER",
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-009-P-M01-LOGIN-PASSWORD",
+     "id": "T-P-M07-DETAIL-FOCUS-008-P-M01-LOGIN-PASSWORD",
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-010-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-DETAIL-FOCUS-009-P-M07-DETAIL-PAID",
      "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-011-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-DETAIL-FOCUS-010-P-M04-RUNTIME-PERSONAL",
      "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-012-P-M11-OFFLINE-HOME",
+     "id": "T-P-M07-DETAIL-FOCUS-011-P-M11-OFFLINE-HOME",
      "label": "重试连接",
      "to": "P-M11-OFFLINE-HOME",
      "feedback": "切换到「离线打开」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-013-P-M07-LIST",
+     "id": "T-P-M07-DETAIL-FOCUS-012-P-M07-LIST",
      "label": "返回我的圈子",
      "to": "P-M07-LIST",
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-014-P-M07-LEAVE",
+     "id": "T-P-M07-DETAIL-FOCUS-013-P-M07-LEAVE",
      "label": "退出圈子",
      "to": "P-M07-LEAVE",
      "feedback": "切换到「退出圈子」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-015-P-M03-ALL-APPS",
+     "id": "T-P-M07-DETAIL-FOCUS-014-P-M03-ALL-APPS",
      "label": "查看全部 Apps",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-016-P-M04-APP-VIEW-PERSONAL",
+     "id": "T-P-M07-DETAIL-FOCUS-015-P-M04-APP-VIEW-PERSONAL",
      "label": "打开",
      "to": "P-M04-APP-VIEW-PERSONAL",
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-017-P-M06-SKILLS",
+     "id": "T-P-M07-DETAIL-FOCUS-016-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-FOCUS-018-P-M06-SKILLS",
-     "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "id": "T-P-M07-DETAIL-FOCUS-017-P-M06-SKILLS-PERSONAL",
+     "label": "在助手中开启",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     }
    ]
   },
@@ -6841,109 +7264,103 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
-    },
-    {
-     "id": "T-P-M07-JOIN-FREE-003-P-M02-SWITCHER-PERSONAL",
+     "id": "T-P-M07-JOIN-FREE-002-P-M02-SWITCHER-PERSONAL",
      "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-004-P-M02-CONFIRM-PERSONAL",
+     "id": "T-P-M07-JOIN-FREE-003-P-M02-CONFIRM-PERSONAL",
      "label": "晨晨星科技企业空间 · 成员",
      "to": "P-M02-CONFIRM-PERSONAL",
      "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-005-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-JOIN-FREE-004-P-M04-RUNTIME-PERSONAL",
      "label": "",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-006-P-M10-MENU",
+     "id": "T-P-M07-JOIN-FREE-005-P-M10-MENU",
      "label": "王",
      "to": "P-M10-MENU",
      "feedback": "切换到「账号菜单 · 有管理资格」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-007-P-M10-SETTINGS",
+     "id": "T-P-M07-JOIN-FREE-006-P-M10-SETTINGS",
      "label": "账号与偏好管理客户端设置",
      "to": "P-M10-SETTINGS",
      "feedback": "切换到「设置 · 账号安全」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-008-P-M09-BROWSER",
+     "id": "T-P-M07-JOIN-FREE-007-P-M09-BROWSER",
      "label": "充值与账单在系统浏览器打开",
      "to": "P-M09-BROWSER",
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-009-P-M01-LOGIN-PASSWORD",
+     "id": "T-P-M07-JOIN-FREE-008-P-M01-LOGIN-PASSWORD",
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-010-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-JOIN-FREE-009-P-M07-DETAIL-PAID",
      "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-011-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-JOIN-FREE-010-P-M04-RUNTIME-PERSONAL",
      "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-012-P-M11-OFFLINE-HOME",
+     "id": "T-P-M07-JOIN-FREE-011-P-M11-OFFLINE-HOME",
      "label": "重试连接",
      "to": "P-M11-OFFLINE-HOME",
      "feedback": "切换到「离线打开」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-013-P-M03-HOME-PERSONAL",
+     "id": "T-P-M07-JOIN-FREE-012-P-M03-HOME-PERSONAL",
      "label": "返回首页",
      "to": "P-M03-HOME-PERSONAL",
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-014-P-M07-JOIN-FREE",
+     "id": "T-P-M07-JOIN-FREE-013-P-M07-JOIN-FREE",
      "label": "使用邀请链接加入",
      "to": "P-M07-JOIN-FREE",
      "feedback": "切换到「加入免费圈子」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-015-P-M07-DETAIL-FOCUS",
+     "id": "T-P-M07-JOIN-FREE-014-P-M07-DETAIL-FOCUS",
      "label": "查看圈子",
      "to": "P-M07-DETAIL-FOCUS",
      "feedback": "切换到「圈子详情 · 已加入」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-016-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-JOIN-FREE-015-P-M07-DETAIL-PAID",
      "label": "查看圈子",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-017-P-M07-LIST",
+     "id": "T-P-M07-JOIN-FREE-016-P-M07-LIST",
      "label": "",
      "to": "P-M07-LIST",
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-018-P-M07-LIST",
+     "id": "T-P-M07-JOIN-FREE-017-P-M07-LIST",
      "label": "暂不加入",
      "to": "P-M07-LIST",
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M07-JOIN-FREE-019-P-M07-DETAIL-FOCUS",
+     "id": "T-P-M07-JOIN-FREE-018-P-M07-DETAIL-FOCUS",
      "label": "确认加入",
      "to": "P-M07-DETAIL-FOCUS",
      "feedback": "切换到「圈子详情 · 已加入」"
@@ -6968,103 +7385,97 @@
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-002-P-M04-RUNTIME-PERSONAL",
-     "label": "1 项运行中",
-     "to": "P-M04-RUNTIME-PERSONAL",
-     "feedback": "切换到「运行状态 · 我的空间」"
-    },
-    {
-     "id": "T-P-M07-JOIN-PENDING-003-P-M02-SWITCHER-PERSONAL",
+     "id": "T-P-M07-JOIN-PENDING-002-P-M02-SWITCHER-PERSONAL",
      "label": "我 我的空间个人空间 · 个人",
      "to": "P-M02-SWITCHER-PERSONAL",
      "feedback": "切换到「空间切换器 · 从我的空间打开」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-004-P-M02-CONFIRM-PERSONAL",
+     "id": "T-P-M07-JOIN-PENDING-003-P-M02-CONFIRM-PERSONAL",
      "label": "晨晨星科技企业空间 · 成员",
      "to": "P-M02-CONFIRM-PERSONAL",
      "feedback": "切换到「切换确认 · 从我的空间到企业」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-005-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-JOIN-PENDING-004-P-M04-RUNTIME-PERSONAL",
      "label": "",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-006-P-M10-MENU",
+     "id": "T-P-M07-JOIN-PENDING-005-P-M10-MENU",
      "label": "王",
      "to": "P-M10-MENU",
      "feedback": "切换到「账号菜单 · 有管理资格」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-007-P-M10-SETTINGS",
+     "id": "T-P-M07-JOIN-PENDING-006-P-M10-SETTINGS",
      "label": "账号与偏好管理客户端设置",
      "to": "P-M10-SETTINGS",
      "feedback": "切换到「设置 · 账号安全」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-008-P-M09-BROWSER",
+     "id": "T-P-M07-JOIN-PENDING-007-P-M09-BROWSER",
      "label": "充值与账单在系统浏览器打开",
      "to": "P-M09-BROWSER",
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-009-P-M01-LOGIN-PASSWORD",
+     "id": "T-P-M07-JOIN-PENDING-008-P-M01-LOGIN-PASSWORD",
      "label": "退出登录保留本机文件",
      "to": "P-M01-LOGIN-PASSWORD",
      "feedback": "切换到「登录 · 密码登录」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-010-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-JOIN-PENDING-009-P-M07-DETAIL-PAID",
      "label": "北极星设计圈有更新品牌语气分析 v1.4.0 · 下次使用生效",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-011-P-M04-RUNTIME-PERSONAL",
+     "id": "T-P-M07-JOIN-PENDING-010-P-M04-RUNTIME-PERSONAL",
      "label": "数据报表生成器已在后台完成顶栏运行入口可查看",
      "to": "P-M04-RUNTIME-PERSONAL",
      "feedback": "切换到「运行状态 · 我的空间」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-012-P-M11-OFFLINE-HOME",
+     "id": "T-P-M07-JOIN-PENDING-011-P-M11-OFFLINE-HOME",
      "label": "重试连接",
      "to": "P-M11-OFFLINE-HOME",
      "feedback": "切换到「离线打开」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-013-P-M03-HOME-PERSONAL",
+     "id": "T-P-M07-JOIN-PENDING-012-P-M03-HOME-PERSONAL",
      "label": "返回首页",
      "to": "P-M03-HOME-PERSONAL",
      "feedback": "切换到「首页 · 个人空间（有常用）」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-014-P-M07-JOIN-FREE",
+     "id": "T-P-M07-JOIN-PENDING-013-P-M07-JOIN-FREE",
      "label": "使用邀请链接加入",
      "to": "P-M07-JOIN-FREE",
      "feedback": "切换到「加入免费圈子」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-015-P-M07-DETAIL-FOCUS",
+     "id": "T-P-M07-JOIN-PENDING-014-P-M07-DETAIL-FOCUS",
      "label": "查看圈子",
      "to": "P-M07-DETAIL-FOCUS",
      "feedback": "切换到「圈子详情 · 已加入」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-016-P-M07-DETAIL-PAID",
+     "id": "T-P-M07-JOIN-PENDING-015-P-M07-DETAIL-PAID",
      "label": "查看圈子",
      "to": "P-M07-DETAIL-PAID",
      "feedback": "切换到「付费订阅详情」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-017-P-M07-LIST",
+     "id": "T-P-M07-JOIN-PENDING-016-P-M07-LIST",
      "label": "",
      "to": "P-M07-LIST",
      "feedback": "切换到「我的圈子 · 列表」"
     },
     {
-     "id": "T-P-M07-JOIN-PENDING-018-P-M07-LIST",
+     "id": "T-P-M07-JOIN-PENDING-017-P-M07-LIST",
      "label": "知道了",
      "to": "P-M07-LIST",
      "feedback": "切换到「我的圈子 · 列表」"
@@ -7173,16 +7584,16 @@
      "feedback": "切换到「退出圈子 · 北极星设计圈」"
     },
     {
-     "id": "T-P-M07-DETAIL-PAID-016-P-M03-ALL-APPS",
+     "id": "T-P-M07-DETAIL-PAID-016-P-M07-EXPIRED",
+     "label": "（演示）模拟到期",
+     "to": "P-M07-EXPIRED",
+     "feedback": "切换到「圈子到期」"
+    },
+    {
+     "id": "T-P-M07-DETAIL-PAID-017-P-M03-ALL-APPS",
      "label": "查看全部 Apps",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
-    },
-    {
-     "id": "T-P-M07-DETAIL-PAID-017-P-M04-APP-VIEW-PERSONAL",
-     "label": "打开",
-     "to": "P-M04-APP-VIEW-PERSONAL",
-     "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
      "id": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
@@ -7191,16 +7602,22 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-PAID-019-P-M06-SKILLS",
-     "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "id": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+     "label": "打开",
+     "to": "P-M04-APP-VIEW-PERSONAL",
+     "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-PAID-020-P-M06-SKILLS",
+     "id": "T-P-M07-DETAIL-PAID-020-P-M06-SKILLS-PERSONAL",
+     "label": "打开助手技能",
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
+    },
+    {
+     "id": "T-P-M07-DETAIL-PAID-021-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     }
    ]
   },
@@ -7318,16 +7735,16 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-018-P-M06-SKILLS",
+     "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-018-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-019-P-M06-SKILLS",
+     "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-019-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     }
    ]
   },
@@ -7495,16 +7912,16 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-RENEW-018-P-M06-SKILLS",
+     "id": "T-P-M07-RENEW-018-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-RENEW-019-P-M06-SKILLS",
+     "id": "T-P-M07-RENEW-019-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M07-RENEW-020-P-M07-DETAIL-PAID",
@@ -7640,16 +8057,16 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-RENEW-EXPIRED-018-P-M06-SKILLS",
+     "id": "T-P-M07-RENEW-EXPIRED-018-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-RENEW-EXPIRED-019-P-M06-SKILLS",
+     "id": "T-P-M07-RENEW-EXPIRED-019-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M07-RENEW-EXPIRED-020-P-M07-EXPIRED",
@@ -7785,16 +8202,16 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-EXPIRED-018-P-M06-SKILLS",
+     "id": "T-P-M07-EXPIRED-018-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-EXPIRED-019-P-M06-SKILLS",
+     "id": "T-P-M07-EXPIRED-019-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     }
    ]
   },
@@ -7906,16 +8323,16 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-017-P-M06-SKILLS",
+     "id": "T-P-M07-LEAVE-017-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-018-P-M06-SKILLS",
+     "id": "T-P-M07-LEAVE-018-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M07-LEAVE-019-P-M07-DETAIL-FOCUS",
@@ -8045,16 +8462,16 @@
      "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-017-P-M06-SKILLS",
+     "id": "T-P-M07-LEAVE-PAID-017-P-M06-SKILLS-PERSONAL",
      "label": "打开助手技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M07-LEAVE-PAID-018-P-M06-SKILLS",
+     "id": "T-P-M07-LEAVE-PAID-018-P-M06-SKILLS-PERSONAL",
      "label": "在助手中管理",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M07-LEAVE-PAID-019-P-M07-DETAIL-PAID",
@@ -8184,22 +8601,22 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-PRE-BLOCK-017-P-M08-FILES",
+     "id": "T-P-M09-PRE-BLOCK-017-P-M08-FILES-PERSONAL",
      "label": "会话文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-PRE-BLOCK-018-P-M06-SKILLS",
+     "id": "T-P-M09-PRE-BLOCK-018-P-M06-SKILLS-PERSONAL",
      "label": "技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M09-PRE-BLOCK-019-P-M06-TOOLS",
+     "id": "T-P-M09-PRE-BLOCK-019-P-M06-TOOLS-PERSONAL",
      "label": "数据源 / 自动化",
-     "to": "P-M06-TOOLS",
-     "feedback": "切换到「数据源 / 自动化 / Browser」"
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
     },
     {
      "id": "T-P-M09-PRE-BLOCK-020-P-M05-NEW",
@@ -8226,10 +8643,10 @@
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M09-PRE-BLOCK-024-P-M08-FILES",
+     "id": "T-P-M09-PRE-BLOCK-024-P-M08-FILES-PERSONAL",
      "label": "添加文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     }
    ]
   },
@@ -8341,22 +8758,22 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-STREAM-CUT-017-P-M08-FILES",
+     "id": "T-P-M09-STREAM-CUT-017-P-M08-FILES-PERSONAL",
      "label": "会话文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-STREAM-CUT-018-P-M06-SKILLS",
+     "id": "T-P-M09-STREAM-CUT-018-P-M06-SKILLS-PERSONAL",
      "label": "技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M09-STREAM-CUT-019-P-M06-TOOLS",
+     "id": "T-P-M09-STREAM-CUT-019-P-M06-TOOLS-PERSONAL",
      "label": "数据源 / 自动化",
-     "to": "P-M06-TOOLS",
-     "feedback": "切换到「数据源 / 自动化 / Browser」"
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
     },
     {
      "id": "T-P-M09-STREAM-CUT-020-P-M05-NEW",
@@ -8383,10 +8800,10 @@
      "feedback": "切换到「充值（浏览器交接）」"
     },
     {
-     "id": "T-P-M09-STREAM-CUT-024-P-M08-FILES",
+     "id": "T-P-M09-STREAM-CUT-024-P-M08-FILES-PERSONAL",
      "label": "添加文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     }
    ]
   },
@@ -8766,22 +9183,22 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-USER-STOP-017-P-M08-FILES",
+     "id": "T-P-M09-USER-STOP-017-P-M08-FILES-PERSONAL",
      "label": "会话文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-USER-STOP-018-P-M06-SKILLS",
+     "id": "T-P-M09-USER-STOP-018-P-M06-SKILLS-PERSONAL",
      "label": "技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M09-USER-STOP-019-P-M06-TOOLS",
+     "id": "T-P-M09-USER-STOP-019-P-M06-TOOLS-PERSONAL",
      "label": "数据源 / 自动化",
-     "to": "P-M06-TOOLS",
-     "feedback": "切换到「数据源 / 自动化 / Browser」"
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
     },
     {
      "id": "T-P-M09-USER-STOP-020-P-M05-NEW",
@@ -8802,10 +9219,10 @@
      "feedback": "切换到「OS 权限被拒」"
     },
     {
-     "id": "T-P-M09-USER-STOP-023-P-M08-FILES",
+     "id": "T-P-M09-USER-STOP-023-P-M08-FILES-PERSONAL",
      "label": "添加文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
      "id": "T-P-M09-USER-STOP-024-P-M05-CHAT-PERSONAL",
@@ -8936,10 +9353,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M09-CHECKING-015-P-M06-SKILLS",
+     "id": "T-P-M09-CHECKING-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M09-CHECKING-016-P-M05-CHAT-PERSONAL",
@@ -9077,10 +9494,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M09-NOT-YET-015-P-M06-SKILLS",
+     "id": "T-P-M09-NOT-YET-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M09-NOT-YET-016-P-M05-CHAT-PERSONAL",
@@ -9222,22 +9639,22 @@
      "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-RESUMED-017-P-M08-FILES",
+     "id": "T-P-M09-RESUMED-017-P-M08-FILES-PERSONAL",
      "label": "会话文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M09-RESUMED-018-P-M06-SKILLS",
+     "id": "T-P-M09-RESUMED-018-P-M06-SKILLS-PERSONAL",
      "label": "技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M09-RESUMED-019-P-M06-TOOLS",
+     "id": "T-P-M09-RESUMED-019-P-M06-TOOLS-PERSONAL",
      "label": "数据源 / 自动化",
-     "to": "P-M06-TOOLS",
-     "feedback": "切换到「数据源 / 自动化 / Browser」"
+     "to": "P-M06-TOOLS-PERSONAL",
+     "feedback": "切换到「数据源 / 自动化 · 我的空间」"
     },
     {
      "id": "T-P-M09-RESUMED-020-P-M05-NEW",
@@ -9258,10 +9675,10 @@
      "feedback": "切换到「OS 权限被拒」"
     },
     {
-     "id": "T-P-M09-RESUMED-023-P-M08-FILES",
+     "id": "T-P-M09-RESUMED-023-P-M08-FILES-PERSONAL",
      "label": "添加文件",
-     "to": "P-M08-FILES",
-     "feedback": "切换到「原对话文件」"
+     "to": "P-M08-FILES-PERSONAL",
+     "feedback": "切换到「会话文件 · 报价汇总（我的空间）」"
     },
     {
      "id": "T-P-M09-RESUMED-024-P-M05-CHAT-PERSONAL",
@@ -9379,10 +9796,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M10-MENU-017-P-M06-SKILLS",
+     "id": "T-P-M10-MENU-017-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M10-MENU-018-P-M05-CHAT-PERSONAL",
@@ -9508,10 +9925,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M10-MENU-NOPRIV-015-P-M06-SKILLS",
+     "id": "T-P-M10-MENU-NOPRIV-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M10-MENU-NOPRIV-016-P-M05-CHAT-PERSONAL",
@@ -9886,10 +10303,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M10-ADMIN-RETURN-015-P-M06-SKILLS",
+     "id": "T-P-M10-ADMIN-RETURN-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M10-ADMIN-RETURN-016-P-M05-CHAT-PERSONAL",
@@ -10523,10 +10940,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M11-OFFLINE-HOME-016-P-M06-SKILLS",
+     "id": "T-P-M11-OFFLINE-HOME-016-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M11-OFFLINE-HOME-017-P-M05-CHAT-PERSONAL",
@@ -10853,10 +11270,10 @@
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M11-REOPEN-RECOVERY-015-P-M06-SKILLS",
+     "id": "T-P-M11-REOPEN-RECOVERY-015-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
      "id": "T-P-M11-REOPEN-RECOVERY-016-P-M05-CHAT-PERSONAL",
@@ -10887,7 +11304,7 @@
    "status": "suggested",
    "module": "M11",
    "category": "跨端",
-   "annotation": "跨端交接卡：支持请求在浏览器创建，桌面保留当前状态；返回到来源屏（生成边界 · PC-F08）。",
+   "annotation": "跨端交接卡：支持请求在浏览器创建，桌面保留当前状态；「复制编号（演示）」在真实实现中给剪贴板成功反馈（按钮态或 toast），静态转场契约不表达点击瞬态。",
    "transitions": [
     {
      "id": "T-P-M11-SUPPORT-BROWSER-001-P-M11-BLOCKED-VERSION",
@@ -11449,114 +11866,33 @@
   }
  ],
  "change": {
-  "previous_revision": "poo70-master-r10-v2-4",
+  "previous_revision": "poo70-ux-r1-v2-5",
   "changed_scenes": [
-   "P-M01-COLD-START",
-   "P-M01-CREATE-ENT",
-   "P-M01-INVITE-BROWSER",
-   "P-M01-INVITE-MISMATCH",
-   "P-M01-INVITE-PENDING",
-   "P-M01-LOGIN-CANCEL",
    "P-M01-LOGIN-CODE",
-   "P-M01-LOGIN-PASSWORD",
-   "P-M01-LOGIN-PHONE",
-   "P-M01-NOT-INSTALLED",
-   "P-M01-PERSONAL-PREP",
    "P-M01-PERSONAL-PREP-FAIL",
-   "P-M01-REFRESH-FAIL",
-   "P-M01-REOPEN",
    "P-M02-ACCESS-LOST",
-   "P-M02-CONFIRM",
-   "P-M02-CONFIRM-PERSONAL",
-   "P-M02-STOP-CANCEL",
-   "P-M02-STOP-FAILED",
    "P-M02-STOPPING",
-   "P-M02-SWITCHER",
-   "P-M02-SWITCHER-PERSONAL",
-   "P-M02-TARGET-FAILED",
-   "P-M02-TARGET-LOADING",
-   "P-M03-ALL-APPS",
    "P-M03-ALL-APPS-ENT-EMPTY",
    "P-M03-ALL-APPS-ZERO",
-   "P-M03-CONTROLS",
-   "P-M03-HOME-EMPTY-DIR",
    "P-M03-HOME-ENT",
-   "P-M03-HOME-ENT-AFTER-CANCEL",
-   "P-M03-HOME-ENT-AFTER-CLOSE",
-   "P-M03-HOME-LOAD-FAIL",
-   "P-M03-HOME-OFFLINE",
-   "P-M03-HOME-PERSONAL",
-   "P-M03-HOME-ZERO",
-   "P-M03-INSPECTOR",
-   "P-M03-MANAGE-HOME",
-   "P-M04-APP-VIEW",
    "P-M04-APP-VIEW-PERSONAL",
-   "P-M04-BACKGROUND",
-   "P-M04-CLOSE-ACTIVE",
-   "P-M04-PERM-DENIED",
-   "P-M04-PREP-FAILED",
-   "P-M04-PREPARE",
-   "P-M04-RUNTIME",
    "P-M04-RUNTIME-PERSONAL",
-   "P-M04-TERM-FAILED",
-   "P-M05-CHAT",
    "P-M05-CHAT-PERSONAL",
    "P-M05-NEW",
-   "P-M05-QUESTION",
-   "P-M05-QUESTION-REOPEN",
-   "P-M05-STOPPED",
-   "P-M06-SKILL-DENIED",
    "P-M06-SKILLS",
-   "P-M06-TOOLS",
+   "P-M06-SKILLS-PERSONAL",
+   "P-M06-TOOLS-PERSONAL",
    "P-M07-DETAIL-FOCUS",
    "P-M07-DETAIL-PAID",
-   "P-M07-DETAIL-PAID-AFTER-LEAVE",
-   "P-M07-EMPTY",
-   "P-M07-EXPIRED",
    "P-M07-JOIN-FREE",
    "P-M07-JOIN-PENDING",
-   "P-M07-LEAVE",
-   "P-M07-LEAVE-PAID",
    "P-M07-LIST",
-   "P-M07-PAY-BROWSER",
-   "P-M07-PAY-RETURN-FAIL",
-   "P-M07-RENEW",
-   "P-M07-RENEW-EXPIRED",
-   "P-M07-SOURCE-FALLBACK",
-   "P-M08-FILE-MISSING",
-   "P-M08-FILES",
-   "P-M09-APP-BANNER",
-   "P-M09-BROWSER",
-   "P-M09-CHECKING",
-   "P-M09-ENT-NOTIFY",
-   "P-M09-NOT-YET",
-   "P-M09-PRE-BLOCK",
-   "P-M09-RESUMED",
-   "P-M09-STREAM-CUT",
-   "P-M09-USER-STOP",
-   "P-M10-ADMIN-BROWSER",
-   "P-M10-ADMIN-RETURN",
-   "P-M10-MENU",
-   "P-M10-MENU-NOPRIV",
+   "P-M08-FILES-PERSONAL",
    "P-M10-SETTINGS",
-   "P-M10-SETTINGS-APPEARANCE",
-   "P-M11-BLOCKED-EXPIRED",
-   "P-M11-BLOCKED-VERSION",
-   "P-M11-BLOCKED-WITHDRAWN",
-   "P-M11-CONTRACT",
-   "P-M11-CONTRACT-DL",
-   "P-M11-CONTRACT-FAIL",
-   "P-M11-OFFLINE-HOME",
-   "P-M11-OFFLINE-RUNNING",
-   "P-M11-PERSONAL-RESTRICTED",
-   "P-M11-REAUTH",
-   "P-M11-REOPEN-RECOVERY",
-   "P-M11-REVOKE",
-   "P-M11-SPACE-ERROR",
    "P-M11-SUPPORT-BROWSER"
   ],
   "removed_scenes": [],
-  "summary": "根据 5 名模拟用户（2 小白 / 3 目标用户）走查全部流程的 93 条反馈与 PM 评审，修复 19 项问题并新增 11 个场景：跨空间上下文统一（个人 App 容器/运行中心/助手会话/切换器，充值链整链个人空间化）；状态账目可判读（取消切换与终止关闭的独立落态、后台计数、首登零状态无运行任务）；恢复链闭合（升级失败可达、支持交接卡、离线重试一致、版本阻断出路）；圈子线（到期续费立即生效、付费圈退出链、来源撤销账目）；全局卫生（无关 toast 清理、术语统一 Skill→技能、角色词中文化、文案大白话化）。本修订为评审材料，状态为修改待复看；未启动产品编码、发布或真实产品验收。"
+  "summary": "R2 复测后收敛轮：新增个人技能/数据源/会话文件三个变体场景（个人助手衍生入口不再跨空间，C-R03）；个人会话 composer 补「发送→发送前阻断」正序与行内「停止」（PC-N03）；ACCESS-LOST 按唯一直达入口改个人上下文；ENT-EMPTY 企业身份收尾；首登圈子线 4 屏删运行 pill、JOIN-FREE 背景未加入态；DETAIL-PAID 增「（演示）模拟到期」；文案统一包 8 处（运行任务/免费加入审批/切换为密码登录/技能白话副标等）。8 项判定不改并写入 annotation/术语表。本修订为评审材料，状态为修改待复看；未启动产品编码、发布或真实产品验收。"
  },
  "checks": {
   "offline": true,

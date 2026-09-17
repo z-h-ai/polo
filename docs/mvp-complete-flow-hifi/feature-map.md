@@ -1,10 +1,10 @@
 # POO-70 · MVP 完整流程高保真 — 一页功能地图
 
-日期：2026-09-17 · 分支 `POO-70/docs/client-journey-policy-interview` · 修订 `poo70-ux-r1-v2-5` · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html)
+日期：2026-09-17 · 分支 `POO-70/docs/client-journey-policy-interview` · 修订 `poo70-ux-r3-v2-6` · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html)
 
 **用途**：产品 owner 用一个浏览器标签完成 MVP 全流程视觉评审。本页回答“每个模块覆盖了什么、画的是什么、依据是什么”；逐步走查见 [review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)；机器可读追溯见 [prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)。
 
-**原型形态（v2 契约）**：`surface.html` 为纯产品表面，103 场景的交互全部静态声明为 1539 条 transitions（ux-r1 / 用户走查迭代后），不含任何演示控制代码；`prototype.html` 为评审壳，集中承载页面索引、页面说明、本轮评审、故事播放与视口切换。两文件离线零网络请求，由 `validate_prototype.py` 以 manifest 精确校验（嵌入与文件 canonical 一致、边集一致、sha256 源绑定）。
+**原型形态（v2 契约）**：`surface.html` 为纯产品表面，106 场景的交互全部静态声明为 1601 条 transitions（ux-r3 收敛轮后），不含任何演示控制代码；`prototype.html` 为评审壳，集中承载页面索引、页面说明、本轮评审、故事播放与视口切换。两文件离线零网络请求，由 `validate_prototype.py` 以 manifest 精确校验（嵌入与文件 canonical 一致、边集一致、sha256 源绑定）。
 
 **输入基线（不可混称）**：
 - 产品结论权威：POO-70 `spec.md`（已接受，D-PC-04），快照存于本卡 `sources/poo70-spec.md`
@@ -112,11 +112,11 @@
 | M05 助手会话 | 6 | reuse 5 · new 1 | 完整（含个人空间会话） |
 | M06 技能与数据源 | 3 | reuse 3 | 完整（直接复用） |
 | M07 我的圈子 | 15 | new 13 · adjust 1 · cross 1 | 完整（含到期恢复续费与付费圈退出链） |
-| M08 会话文件 | 2 | reuse 2 | 完整（直接复用） |
+| M08 会话文件 | 3 | reuse 2 · new 1 | 完整（含个人会话文件页） |
 | M09 积分不足 | 9 | new 7 · state 1 · cross 1 | 完整（新增，需评审） |
 | M10 账号菜单与设置 | 6 | adjust 2 · reuse 2 · state 1 · cross 1 | 完整 |
 | M11 异常与恢复 | 14 | adjust 4 · state 5 · integ 4 · cross 1 | 完整（含支持请求交接卡） |
-| **合计** | **103** | 103 场景 · 1539 条 transitions；产品路径与 35 个 review entries 覆盖全部场景 | M01—M11 全覆盖 |
+| **合计** | **106** | 106 场景 · 1601 条 transitions；产品路径与 35 个 review entries 覆盖全部场景 | M01—M11 全覆盖 |
 
 ---
 
@@ -145,4 +145,4 @@
 - **dev 与集成候选不混称**：还原自 C-INT `3dc20ca` 的屏标注“集成候选已实现”；其余均以本 worktree（dev `01f4447c`）样式与 POO-70 结论为准。
 - **「分支：」虚线按钮是评审入口**：无自然产品入口的失败/取消路径（登录验证码→冷启动、切换器→无权目标、重开恢复→追问恢复等）以虚线「分支：」按钮保证可达；它是评审分支入口，不是产品设计，产品化时须映射到真实触发或测试入口（review.md §6）。
 - **评审 chrome 只在评审壳**：页面索引、页面说明、本轮评审、故事播放、视口切换、Back/Reset 全部在 `prototype.html`；`surface.html` 不含任何此类内容（校验器以字符串与结构双重断言）。
-- **构建工具链**：`tools/extract_scenes.py`（自 v1 提取 90 场景 + 补分支边）→ `tools/build_surface.py`（组装 surface）→ `tools/build_manifest.py` / `tools/build_review.py` / `tools/sync_manifest.py` → `tools/rebuild_master_r9.py`（历史 D-PC-08 修订）→ `tools/rebuild_master_r10.py`（同步 D-PC-09）→ `tools/smoke_review.py`（1539 边逐条点击核对；ux-r1 后全绿）→ `tools/smoke_dpc09.py`（多圈专项）→ `tools/audit_viewports.py`（103×2 溢出/可达审计）+ `tools/ux_round.py`（用户走查迭代同步）。
+- **构建工具链**：`tools/extract_scenes.py`（自 v1 提取 90 场景 + 补分支边）→ `tools/build_surface.py`（组装 surface）→ `tools/build_manifest.py` / `tools/build_review.py` / `tools/sync_manifest.py` → `tools/rebuild_master_r9.py`（历史 D-PC-08 修订）→ `tools/rebuild_master_r10.py`（同步 D-PC-09）→ `tools/smoke_review.py`（1601 边逐条点击核对；ux-r3 后全绿）+ `tools/ux_round.py`（DOM→三方 manifest 同步）→ `tools/smoke_dpc09.py`（多圈专项）→ `tools/audit_viewports.py`（103×2 溢出/可达审计）+ `tools/ux_round.py`（用户走查迭代同步）。

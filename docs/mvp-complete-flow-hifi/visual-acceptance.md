@@ -1,6 +1,6 @@
 # POO-70 · MVP 完整流程高保真 — 视觉验收
 
-日期：2026-09-17 · 修订 `poo70-ux-r1-v2-5`（继承 D-PC-07/08/09，按用户走查反馈迭代） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
+日期：2026-09-17 · 修订 `poo70-ux-r3-v2-6`（继承 D-PC-07/08/09，经两轮用户走查迭代收敛） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
 
 截图均直接对 `surface.html`（纯产品表面，无任何评审 chrome）拍摄——v2 契约下产品表面与评审 chrome 分离于两个文件，不再需要 `?clean=1` 之类的隐藏开关。
 
@@ -11,10 +11,10 @@
 | 检查项 | 方法 | 范围 | 结果 |
 | --- | --- | --- | --- |
 | v2 契约校验 | `validate_prototype.py`：双文件嵌入 manifest 与文件 canonical 一致、surface `(data-go,data-transition)` 有序多重集 == manifest 声明、评审壳结构（1 iframe + 3 inspector tab + 评审 brief）、禁 fixed/禁评审字符串、离线正则、源 sha256 实算、全场景自 start_scene 可达 | 两文件 + manifest + 16 项 sources + 设计 Skill 绑定 | **通过**：`valid v2 high_fidelity prototype: 92 scenes, offline and source-bound` |
-| 全部 transitions 落点 | Playwright 逐场景激活后逐按钮点击，核对 `data-transition`/`data-go` 与实际落点 | **1539 / 1539 条** | **全部命中**，0 失效边、0 脚本异常（工具 `tools/smoke_review.py`） |
+| 全部 transitions 落点 | Playwright 逐场景激活后逐按钮点击，核对 `data-transition`/`data-go` 与实际落点 | **1601 / 1601 条** | **全部命中**，0 失效边、0 脚本异常（工具 `tools/smoke_review.py`） |
 | 脚本异常（pageerror / console.error） | Playwright 页面事件监听 | 评审壳全交互冒烟全程 | **0** |
 | 网络请求 | v2 禁网校验（`https?://`、协议相对 URL、fetch/XHR/WebSocket/EventSource 调用）+ surface CSP `connect-src 'none'` | 两文件 | **0 外部引用、0 网络调用**（仅 file:// 本地打开） |
-| 横向溢出 | 每场景激活后测 scene/document `scrollWidth` | 103 场景 × 2 视口 = 206 次加载 | **0 屏溢出** |
+| 横向溢出 | 每场景激活后测 scene/document `scrollWidth` | 106 场景 × 2 视口 = 212 次加载 | **0 屏溢出** |
 | 交互元素可达性 | 每个可见 button/a/input 逐个 `scrollIntoView(nearest)` 后立即测矩形是否越出视口（±4px 容差） | 同上 | **0 元素越界** |
 | 页面索引 / 页面说明 / 本轮评审 | Playwright 实测：三标签切换、分组跳转、当前屏标注 | 评审壳检查器 | **通过**：92 项按 11 模块分组；标注含 ID/分类/依据/需求节点；本轮评审标签含现状→差异→依据→评审问题 |
 | Back / Reset / 直达链接 | Playwright 实测 | 评审壳 | **通过**：`#scene=<ID>` 直达、Back 回退、Reset 回起始屏 |
@@ -82,7 +82,7 @@
 
 | 验收标准 | 证据 |
 | --- | --- |
-| M01—M11 均有页面或「直接复用」证据 | [feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) §2/§3；103 场景逐场景 `category` 标注（manifest `scenes[].category`，11 modules 集合恰好等于场景所用） |
+| M01—M11 均有页面或「直接复用」证据 | [feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) §2/§3；106 场景逐场景 `category` 标注（manifest `scenes[].category`，11 modules 集合恰好等于场景所用） |
 | PC-F01—F11 / PC-N01—N04 / C-R01—C-R08 / J-PC-01—07 / D-PC-01—09 / M01—M11 可追溯 | manifest `confirmations` 50 条，每条含结论 + `source_revision` + 实算 sha256 快照 |
 | 四条故事连续走通（含成功/失败/取消/过期/重开/跨端） | manifest `stories` 4 条（S1 12 步 / S2 14 步 / S3 7 步 / S4 7 步）；评审壳「故事」下拉实测通过（本文 §1）；路径与验证点见 review.md §2 |
 | 关键页面截图 + 无溢出/遮挡/不可达 | 本文 §1（1383 边全命中、184 次加载零溢出、零元素越界）+ §2/§3（41 张截图，按 `poo70-master-r10-v2-4` 重摄） |
