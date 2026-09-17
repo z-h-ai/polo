@@ -1,6 +1,6 @@
 # POO-70 · MVP 完整流程高保真 — 视觉验收
 
-日期：2026-09-17 · 修订 `poo70-master-r9-v2-3`（继承 D-PC-07，按 master-r9 / D-PC-08 同步） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
+日期：2026-09-17 · 修订 `poo70-master-r10-v2-4`（继承 D-PC-07/08，按 D-PC-09 同步） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
 
 截图均直接对 `surface.html`（纯产品表面，无任何评审 chrome）拍摄——v2 契约下产品表面与评审 chrome 分离于两个文件，不再需要 `?clean=1` 之类的隐藏开关。
 
@@ -10,20 +10,20 @@
 
 | 检查项 | 方法 | 范围 | 结果 |
 | --- | --- | --- | --- |
-| v2 契约校验 | `validate_prototype.py`：双文件嵌入 manifest 与文件 canonical 一致、surface `(data-go,data-transition)` 有序多重集 == manifest 声明、评审壳结构（1 iframe + 3 inspector tab + 评审 brief）、禁 fixed/禁评审字符串、离线正则、源 sha256 实算、全场景自 start_scene 可达 | 两文件 + manifest + 13 项 sources + 设计 Skill 绑定 | **通过**：`valid v2 high_fidelity prototype: 91 scenes, offline and source-bound` |
-| 全部 transitions 落点 | Playwright 逐场景激活后逐按钮点击，核对 `data-transition`/`data-go` 与实际落点 | **1364 / 1364 条** | **全部命中**，0 失效边、0 脚本异常（工具 `tools/smoke_review.py`） |
+| v2 契约校验 | `validate_prototype.py`：双文件嵌入 manifest 与文件 canonical 一致、surface `(data-go,data-transition)` 有序多重集 == manifest 声明、评审壳结构（1 iframe + 3 inspector tab + 评审 brief）、禁 fixed/禁评审字符串、离线正则、源 sha256 实算、全场景自 start_scene 可达 | 两文件 + manifest + 16 项 sources + 设计 Skill 绑定 | **通过**：`valid v2 high_fidelity prototype: 92 scenes, offline and source-bound` |
+| 全部 transitions 落点 | Playwright 逐场景激活后逐按钮点击，核对 `data-transition`/`data-go` 与实际落点 | **1383 / 1383 条** | **全部命中**，0 失效边、0 脚本异常（工具 `tools/smoke_review.py`） |
 | 脚本异常（pageerror / console.error） | Playwright 页面事件监听 | 评审壳全交互冒烟全程 | **0** |
 | 网络请求 | v2 禁网校验（`https?://`、协议相对 URL、fetch/XHR/WebSocket/EventSource 调用）+ surface CSP `connect-src 'none'` | 两文件 | **0 外部引用、0 网络调用**（仅 file:// 本地打开） |
-| 横向溢出 | 每场景激活后测 scene/document `scrollWidth` | 91 场景 × 2 视口 = 182 次加载 | **0 屏溢出** |
+| 横向溢出 | 每场景激活后测 scene/document `scrollWidth` | 92 场景 × 2 视口 = 184 次加载 | **0 屏溢出** |
 | 交互元素可达性 | 每个可见 button/a/input 逐个 `scrollIntoView(nearest)` 后立即测矩形是否越出视口（±4px 容差） | 同上 | **0 元素越界** |
-| 页面索引 / 页面说明 / 本轮评审 | Playwright 实测：三标签切换、分组跳转、当前屏标注 | 评审壳检查器 | **通过**：91 项按 11 模块分组；标注含 ID/分类/依据/需求节点；本轮评审标签含现状→差异→依据→评审问题 |
+| 页面索引 / 页面说明 / 本轮评审 | Playwright 实测：三标签切换、分组跳转、当前屏标注 | 评审壳检查器 | **通过**：92 项按 11 模块分组；标注含 ID/分类/依据/需求节点；本轮评审标签含现状→差异→依据→评审问题 |
 | Back / Reset / 直达链接 | Playwright 实测 | 评审壳 | **通过**：`#scene=<ID>` 直达、Back 回退、Reset 回起始屏 |
-| 三条故事播放 | Playwright 实测：进入/自动同步/下一步到末尾/退出 | S1（12 步）/ S2（14 步）/ S3（7 步） | **通过**：进入落首步、产品点击自动推进、末步禁用 next、可退出 |
+| 四条故事播放 | Playwright 实测：进入/自动同步/下一步到末尾/退出 | S1（12 步）/ S2（14 步）/ S3（7 步）/ S4（7 步） | **通过**：进入落首步、产品点击自动推进、末步禁用 next、可退出 |
 | 视口切换真实性 | Playwright 读 iframe `innerWidth`/`innerHeight`，并验证检查器开合不改变二者 | 1440×900 与 1024×768 | **通过**：两档均精确等于所选视口；检查器只改变显示缩放 |
 
 检查工具：Playwright（`chromium.launch()` headless，deviceScaleFactor=1）；审计明细见 `build/viewport-audit.json`（空对象即零问题）；构建工具链见 [feature-map.md §5](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)。
 
-## 2. 截图索引 — 1440×900（27 张）
+## 2. 截图索引 — 1440×900（30 张）
 
 文件位于 `screenshots/1440x900/`：
 
@@ -48,16 +48,19 @@
 | [P-M06-SKILLS](screenshots/1440x900/P-M06-SKILLS.png) | M06 | 技能列表（同名并列 + 授权态） |
 | [P-M07-LIST](screenshots/1440x900/P-M07-LIST.png) | M07 | 我的圈子列表（本轮新增） |
 | [P-M07-DETAIL-PAID](screenshots/1440x900/P-M07-DETAIL-PAID.png) | M07 | 付费订阅详情（虚构演示数据） |
+| [P-M07-EXPIRED](screenshots/1440x900/P-M07-EXPIRED.png) | M07 | 单一圈子来源到期，另有来源的作品仍可打开 |
+| [P-M07-SOURCE-FALLBACK](screenshots/1440x900/P-M07-SOURCE-FALLBACK.png) | M07 | 退出一个圈子后，同一作品经其他来源继续可用 |
 | [P-M08-FILES](screenshots/1440x900/P-M08-FILES.png) | M08 | 会话文件（留原对话，D-PC-03） |
 | [P-M09-PRE-BLOCK](screenshots/1440x900/P-M09-PRE-BLOCK.png) | M09 | 发送前积分不足（输入保留） |
 | [P-M09-BROWSER](screenshots/1440x900/P-M09-BROWSER.png) | M09 | 充值浏览器交接卡 |
 | [P-M09-RESUMED](screenshots/1440x900/P-M09-RESUMED.png) | M09 | 到账解除 · 由用户决定发送 |
 | [P-M10-MENU](screenshots/1440x900/P-M10-MENU.png) | M10 | 账号菜单（管理入口按资格出现） |
+| [P-M11-BLOCKED-EXPIRED](screenshots/1440x900/P-M11-BLOCKED-EXPIRED.png) | M11 | 最后一个有效来源失效才阻断 |
 | [P-M11-CONTRACT](screenshots/1440x900/P-M11-CONTRACT.png) | M11 | 需要升级 Polo（ContractGate 还原） |
 | [P-M11-REOPEN-RECOVERY](screenshots/1440x900/P-M11-REOPEN-RECOVERY.png) | M11 | 重开恢复（不猜成功） |
 | [P-M11-OFFLINE-HOME](screenshots/1440x900/P-M11-OFFLINE-HOME.png) | M11 | 离线打开（缓存范围如实标注） |
 
-## 3. 截图索引 — 1024×768（10 张）
+## 3. 截图索引 — 1024×768（11 张）
 
 文件位于 `screenshots/1024x768/`，验证 G4 布局在小视口下收敛（顶栏收纳、卡片栅格降列、助手三栏压缩）：
 
@@ -69,6 +72,7 @@
 | [P-M04-APP-VIEW](screenshots/1024x768/P-M04-APP-VIEW.png) | M04 |
 | [P-M05-CHAT](screenshots/1024x768/P-M05-CHAT.png) | M05 |
 | [P-M07-LIST](screenshots/1024x768/P-M07-LIST.png) | M07 |
+| [P-M07-SOURCE-FALLBACK](screenshots/1024x768/P-M07-SOURCE-FALLBACK.png) | M07 |
 | [P-M08-FILES](screenshots/1024x768/P-M08-FILES.png) | M08 |
 | [P-M09-PRE-BLOCK](screenshots/1024x768/P-M09-PRE-BLOCK.png) | M09 |
 | [P-M10-MENU](screenshots/1024x768/P-M10-MENU.png) | M10 |
@@ -78,11 +82,11 @@
 
 | 验收标准 | 证据 |
 | --- | --- |
-| M01—M11 均有页面或「直接复用」证据 | [feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) §2/§3；91 场景逐场景 `category` 标注（manifest `scenes[].category`，11 modules 集合恰好等于场景所用） |
-| PC-F01—F11 / PC-N01—N04 / C-R01—C-R08 / J-PC-01—07 / D-PC-01—08 / M01—M11 可追溯 | manifest `confirmations` 49 条，每条含结论 + `source_revision` + 实算 sha256 快照 |
-| 三条故事连续点击走通（含成功/失败/取消/过期/重开/跨端） | manifest `stories` 3 条（S1 12 步 / S2 14 步 / S3 7 步）；评审壳「故事」下拉实测通过（本文 §1）；路径与验证点见 review.md §2 |
-| 关键页面截图 + 无溢出/遮挡/不可达 | 本文 §1（1364 边全命中、182 次加载零溢出、零元素越界）+ §2/§3（37 张截图，按 `poo70-master-r9-v2-3` 重摄） |
-| 「当前已有」绑定源码/截图 | manifest `sources` 13 项（POO-70 主说明、历史快照、v1 原型、G4 设计依据、D-PC-07/08 原话与本轮差异快照，均实算 sha256）；设计 Skill 绑定 `.agents/skills/polo-ai-design-system` |
+| M01—M11 均有页面或「直接复用」证据 | [feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) §2/§3；92 场景逐场景 `category` 标注（manifest `scenes[].category`，11 modules 集合恰好等于场景所用） |
+| PC-F01—F11 / PC-N01—N04 / C-R01—C-R08 / J-PC-01—07 / D-PC-01—09 / M01—M11 可追溯 | manifest `confirmations` 50 条，每条含结论 + `source_revision` + 实算 sha256 快照 |
+| 四条故事连续走通（含成功/失败/取消/过期/重开/跨端） | manifest `stories` 4 条（S1 12 步 / S2 14 步 / S3 7 步 / S4 7 步）；评审壳「故事」下拉实测通过（本文 §1）；路径与验证点见 review.md §2 |
+| 关键页面截图 + 无溢出/遮挡/不可达 | 本文 §1（1383 边全命中、184 次加载零溢出、零元素越界）+ §2/§3（41 张截图，按 `poo70-master-r10-v2-4` 重摄） |
+| 「当前已有」绑定源码/截图 | manifest `sources` 16 项（POO-70 主说明、历史快照、v1 原型、G4 设计依据、D-PC-07/08/09 原话与本轮差异快照，均实算 sha256）；设计 Skill 绑定 `.agents/skills/polo-ai-design-system` |
 | 双视口 1440×900 与 1024×768 | manifest `target.viewports`；评审壳真实 iframe 视口实测（本文 §1）；截图两档各成目录 |
 | owner 同一评审入口复看本轮修订 | prototype.html（页面索引 + 页面说明 + 本轮评审标签 + 故事下拉）+ review.md §6 已解决项与后续输入；当前状态“修改待复看” |
 | 离线零网络请求 | v2 禁网校验 + surface CSP `connect-src 'none'`；file:// 冒烟全程 0 网络调用 |

@@ -2,7 +2,7 @@
 """POO-71 v2 重建 · 第 5 步：file:// 全交互冒烟。
 
 覆盖：加载零报错、页面索引/标注、manifest 中全部 transitions（逐场景批量点击并核对
-transition id 与落点）、Back/Reset、三条故事（进入/上一步/下一步/自动同步/结束/退出）、
+transition id 与落点）、Back/Reset、全部故事（进入/上一步/下一步/自动同步/结束/退出）、
 双视口切换、直达场景链接、检查器开合不改变 iframe innerWidth/innerHeight。
 """
 import json

@@ -185,12 +185,12 @@ def run():
         page.evaluate('''() => document.querySelector('[data-story-exit]')?.click()''')
         page.wait_for_timeout(600)
 
-        # 9. 评审壳含本轮评审 brief（D-PC-08），且新增切换确认页可直达。
+        # 9. 评审壳含当前修订 brief（D-PC-09），且既有切换确认页仍可直达。
         page.goto(REVIEW + '#scene=P-M03-HOME-PERSONAL')
         page.wait_for_timeout(1200)
         sh9 = shell_state(page)
-        check('review brief bound to D-PC-08',
-              'D-PC-08' in sh9['brief'], sh9['brief'][:160])
+        check('review brief bound to D-PC-09',
+              'D-PC-09' in sh9['brief'], sh9['brief'][:160])
         page.goto(REVIEW + '#scene=P-M02-CONFIRM-PERSONAL')
         page.wait_for_timeout(900)
         check('personal-to-enterprise confirmation is reachable',

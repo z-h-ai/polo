@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """POO-71 v2 重建 · 第 6 步：双视口全场景审计 + 代表屏重摄。
 
-对 90 场景 × 2 视口检查：
+对 manifest 全部场景 × 2 视口检查：
   - 横向溢出（scene scrollWidth > clientWidth，或 body 出现横向滚动）；
   - 交互元素超出视口右/下边界 > 4px（不可达风险）；
-并按旧名单重摄 screenshots/（1440×900 26 张 + 1024×768 10 张）。
+并按代表名单重摄 screenshots/。
 """
 import json
 from pathlib import Path
@@ -18,10 +18,11 @@ SHOTS = {
                  'P-M03-HOME-ENT', 'P-M03-HOME-PERSONAL', 'P-M03-HOME-ZERO', 'P-M04-APP-VIEW',
                  'P-M04-CLOSE-ACTIVE', 'P-M04-PERM-DENIED', 'P-M05-CHAT',
                  'P-M05-QUESTION-REOPEN', 'P-M06-SKILLS', 'P-M07-DETAIL-PAID', 'P-M07-LIST',
+                 'P-M07-EXPIRED', 'P-M07-SOURCE-FALLBACK',
                  'P-M08-FILES', 'P-M09-BROWSER', 'P-M09-PRE-BLOCK', 'P-M09-RESUMED',
-                 'P-M10-MENU', 'P-M11-CONTRACT', 'P-M11-OFFLINE-HOME', 'P-M11-REOPEN-RECOVERY'],
+                 'P-M10-MENU', 'P-M11-BLOCKED-EXPIRED', 'P-M11-CONTRACT', 'P-M11-OFFLINE-HOME', 'P-M11-REOPEN-RECOVERY'],
     '1024x768': ['P-M02-SWITCHER', 'P-M03-ALL-APPS', 'P-M03-HOME-PERSONAL', 'P-M03-HOME-ZERO',
-                 'P-M04-APP-VIEW', 'P-M05-CHAT', 'P-M07-LIST', 'P-M08-FILES',
+                 'P-M04-APP-VIEW', 'P-M05-CHAT', 'P-M07-LIST', 'P-M07-SOURCE-FALLBACK', 'P-M08-FILES',
                  'P-M09-PRE-BLOCK', 'P-M10-MENU'],
 }
 
@@ -82,6 +83,14 @@ def main():
                 if probs:
                     scene_problems[sid] = probs
                 if sid in SHOTS[tag]:
+                    surface.evaluate("""() => {
+                      const scene = document.querySelector('.scene.active');
+                      scene.scrollTop = 0; scene.scrollLeft = 0;
+                      scene.querySelectorAll('*').forEach(el => {
+                        if (el.scrollTop) el.scrollTop = 0;
+                        if (el.scrollLeft) el.scrollLeft = 0;
+                      });
+                    }""")
                     page.screenshot(path=str(out_dir / f'{sid}.png'))
             report[tag] = scene_problems
             page.close()
