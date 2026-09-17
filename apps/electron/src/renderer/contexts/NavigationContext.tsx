@@ -781,7 +781,7 @@ export function NavigationProvider({
                     parsed.params.input!,
                     undefined,
                     undefined,
-                    badges ? { badges } : undefined
+                    badges ? { badges, invocationSource: 'desktop' } : { invocationSource: 'desktop' }
                   ).catch(error => {
                     if (callbackId) {
                       reportActionError('internal_error', error)
@@ -821,7 +821,7 @@ export function NavigationProvider({
           }
 
           try {
-            await window.electronAPI.sendMessage(parsed.id, parsed.params.input)
+            await window.electronAPI.sendMessage(parsed.id, parsed.params.input, undefined, undefined, { invocationSource: 'desktop' })
             reportActionResult({ sessionId: parsed.id })
           } catch (error) {
             // SessionManager rejects with `Session ${id} not found` for missing

@@ -87,6 +87,8 @@ import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
+import { endAccountProductSpaceRuntimes } from './account-lifecycle'
+import { whenInitialSyncTrustedProductSpaceAccountRestored } from '@polo-ai/server-core/handlers/rpc'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
@@ -127,6 +129,9 @@ import {
   getScopedLocalAppRuntimeRegistry,
   hasLocalAppRuntimeManager,
   shutdownLocalAppRuntime,
+  teardownCoordinatorRuntimesForAccount,
+  teardownCoordinatorRuntimesForCatalogScopes,
+  teardownCoordinatorRuntimesForOrganization,
 } from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
@@ -954,30 +959,46 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
-            onAdminSessionEnding: (accountId: string) =>
-              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
+            onAdminSessionEnding: (accountId: string) => {
+              // Fence FIRST (synchronously blocks new starts via the deny
+              // gate + lifecycle generation), then coordinator revoke/abort/
+              // bounded cleanup, then the slow exact-generation stops.
+              getScopedLocalAppRuntimeRegistry().fenceAccount(accountId)
+              return teardownCoordinatorRuntimesForAccount(accountId).then(() =>
+                endAccountProductSpaceRuntimes(
+                  accountId,
+                  getScopedLocalAppRuntimeRegistry(),
+                ))
+            },
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
             onAdminCatalogScopeDenied: (
               accountId: string,
               organizationId: string,
-            ) => getScopedLocalAppRuntimeRegistry().stopOrganization(
-              accountId,
-              organizationId,
-            ),
+            ) => {
+              getScopedLocalAppRuntimeRegistry().fenceOrganization(accountId, organizationId)
+              return teardownCoordinatorRuntimesForOrganization(accountId, organizationId)
+                .then(() => getScopedLocalAppRuntimeRegistry().stopOrganization(
+                  accountId,
+                  organizationId,
+                ))
+            },
             onAdminCatalogAppsWithdrawn: (
               accountId: string,
               organizationId: string,
               catalogAppIds: readonly string[],
-            ) => getScopedLocalAppRuntimeRegistry().stopApps(
-              catalogAppIds.map(catalogAppId => ({
+            ) => {
+              const scopes = catalogAppIds.map(catalogAppId => ({
                 kind: 'catalog' as const,
                 accountId,
                 organizationId,
                 catalogAppId,
-              })),
-            ),
+              }))
+              getScopedLocalAppRuntimeRegistry().fenceApps(scopes)
+              return teardownCoordinatorRuntimesForCatalogScopes(scopes)
+                .then(() => getScopedLocalAppRuntimeRegistry().stopApps(scopes))
+            },
             onAdminCatalogAppsAuthorized: (
               accountId: string,
               organizationId: string,
@@ -1347,6 +1368,16 @@ app.whenReady().then(async () => {
         console.log(`POLO_AI_SERVER_TOKEN=${instance.token}`)
       }
     }
+
+    // Restore the synchronous authenticated-account mirror from the
+    // persisted Admin credentials BEFORE any window exists, so the webview
+    // attach gate never has to decide on the fail-closed `unknown` state in
+    // practice. Bounded: on a stalled restore the gate stays `unknown` and
+    // refuses every partition (fail-closed) instead of blocking startup.
+    await Promise.race([
+      whenInitialSyncTrustedProductSpaceAccountRestored(),
+      new Promise(resolve => setTimeout(resolve, 5_000)),
+    ])
 
     // Create initial windows (restores from saved state or opens first workspace)
     // In headless mode the server runs without any UI — skip window creation.

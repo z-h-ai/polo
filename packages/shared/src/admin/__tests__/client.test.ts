@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { AdminClient } from '../client.ts';
 import { AdminError } from '../types.ts';
+import { parseProductSpaceCatalogResponseForProductSpace } from '../../product-spaces/index.ts';
 
 let originalFetch: typeof globalThis.fetch;
 let fetchCalls: { url: string; init: RequestInit }[] = [];
@@ -1452,5 +1453,202 @@ describe('AdminClient', () => {
         'Content-Type': 'application/json',
       });
     }
+  });
+
+  it('resolves an App launch against the exact trusted ProductSpace Catalog tuple', async () => {
+    const context = {
+      id: 'space-a',
+      kind: 'enterprise',
+      enterpriseId: 'enterprise-a',
+      name: 'Studio A',
+      role: 'member',
+      accessMode: 'active',
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+    } as const;
+    const catalog = {
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogRevision: 'revision-a',
+      entries: [
+        {
+          kind: 'built_in_app',
+          catalogEntryId: 'polo-entry',
+          builtInAppId: 'polo_assistant',
+          name: 'Polo',
+          description: '',
+          availability: 'available',
+        },
+        {
+          kind: 'app',
+          catalogEntryId: 'entry-a',
+          artifactInstanceId: 'artifact-a',
+          version: { versionId: 'version-a', version: '1.2.3' },
+          name: 'App A',
+          description: '',
+          availability: 'available',
+          sources: [{ kind: 'enterprise_import', name: 'Studio A' }],
+          permissions: [],
+        },
+      ],
+    } as const;
+    mockJsonFetch({
+      contractVersion: 1,
+      productSpaceId: 'space-a',
+      catalogEntryId: 'entry-a',
+      resolvedAt: '2026-09-04T12:00:00.000Z',
+      expiresAt: '2026-09-04T12:10:00.000Z',
+      subject: {
+        kind: 'artifact_instance',
+        artifactType: 'app',
+        artifactInstanceId: 'artifact-a',
+        versionId: 'version-a',
+        version: '1.2.3',
+      },
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+      delivery: {
+        kind: 'web_url',
+        url: 'https://app.example.test',
+        launchToken: 'fresh-launch-token',
+      },
+    });
+    const client = new AdminClient('https://admin.example.com');
+
+    const launch = await client.resolveProductSpaceLaunch(
+      'access-token',
+      context as never,
+      parseProductSpaceCatalogResponseForProductSpace(catalog, context as never),
+      'entry-a' as never,
+      { platform: 'darwin', arch: 'arm64' },
+    );
+
+    expect(launch.subject).toMatchObject({ artifactInstanceId: 'artifact-a' });
+    expect(fetchCalls[0]).toMatchObject({
+      url: 'https://admin.example.com/api/product-spaces/space-a/catalog/entry-a/resolve-launch',
+      init: {
+        method: 'POST',
+        body: JSON.stringify({ platform: 'darwin', arch: 'arm64' }),
+      },
+    });
+
+    mockJsonFetch({
+      ...launch,
+      subject: { ...launch.subject, artifactInstanceId: 'artifact-from-another-entry' },
+    });
+    await expect(client.resolveProductSpaceLaunch(
+      'access-token',
+      context as never,
+      parseProductSpaceCatalogResponseForProductSpace(catalog, context as never),
+      'entry-a' as never,
+      { platform: 'darwin', arch: 'arm64' },
+    )).rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+
+    mockJsonFetch({
+      ...launch,
+      subject: { ...launch.subject, versionId: 'version-b', version: '2.0.0' },
+    });
+    await expect(client.resolveProductSpaceLaunch(
+      'access-token',
+      context as never,
+      parseProductSpaceCatalogResponseForProductSpace(catalog, context as never),
+      'entry-a' as never,
+      { platform: 'darwin', arch: 'arm64' },
+    )).rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+  });
+});
+
+describe('AdminClient POL-102 App billing (POO-54)', () => {
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchCalls = [];
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('starts an App run at the frozen path with derived-identity fields only', async () => {
+    mockJsonFetch({ run: { runId: 'run-1', status: 'running' } });
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.startAppRun('access-token', {
+      runId: 'run-1',
+      workspaceId: 'ws-a',
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      artifactInstanceId: 'artifact-a',
+      versionId: 'version-a',
+      version: '1.0.0',
+    }, { signal: new AbortController().signal });
+    expect(result).toEqual({ run: { runId: 'run-1', status: 'running' } });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/runs');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.headers).toMatchObject({ Authorization: 'Bearer access-token' });
+  });
+
+  it('records idempotent usage receipts on the frozen path', async () => {
+    mockJsonFetch({ runId: 'run-1', requestId: 'req-1', recorded: true });
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.recordAppUsage('access-token', {
+      runId: 'run-1',
+      requestId: 'req-1',
+      inputTokens: 11,
+      outputTokens: 0,
+    });
+    expect(result).toEqual({ runId: 'run-1', requestId: 'req-1', recorded: true });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/usage');
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      runId: 'run-1', requestId: 'req-1', inputTokens: 11, outputTokens: 0,
+    }));
+  });
+
+  it('finishes an App run with PATCH and rejects invalid success shapes', async () => {
+    mockJsonFetch({ runId: 'run-1', status: 'completed' });
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.finishAppRun('access-token', 'run-1', { status: 'completed' });
+    expect(result).toEqual({ runId: 'run-1', status: 'completed' });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/runs/run-1');
+    expect(fetchCalls[0]!.init.method).toBe('PATCH');
+
+    mockJsonFetch({ runId: 'run-1', status: 'unexpected' });
+    await expect(client.finishAppRun('access-token', 'run-1', { status: 'completed' }))
+      .rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+  });
+
+  it('surfaces schema-validated typed billing errors as stable AdminError codes', async () => {
+    const client = new AdminClient('https://admin.example.com');
+    mockJsonFetch({ errorCode: 'insufficient_credit' }, 402);
+    await expect(client.startAppRun('access-token', {
+      runId: 'run-1', workspaceId: 'ws', accountId: 'a', productSpaceId: 's',
+      artifactInstanceId: 'i', versionId: 'v', version: '1.0.0',
+    })).rejects.toMatchObject({ errorCode: 'insufficient_credit' });
+    mockJsonFetch({ errorCode: 'run_finalized' }, 409);
+    await expect(client.finishAppRun('access-token', 'run-1', { status: 'completed' }))
+      .rejects.toMatchObject({ errorCode: 'run_finalized' });
+    mockJsonFetch({ errorCode: 'idempotency_conflict' }, 409);
+    await expect(client.recordAppUsage('access-token', {
+      runId: 'run-1', requestId: 'req-1', inputTokens: 0, outputTokens: 0,
+    })).rejects.toMatchObject({ errorCode: 'idempotency_conflict' });
+    // Ordinary upstream failures stay generic and never become credit errors.
+    mockJsonFetch({ errorCode: 'something_else' }, 500);
+    await expect(client.recordAppUsage('access-token', {
+      runId: 'run-1', requestId: 'req-1', inputTokens: 0, outputTokens: 0,
+    })).rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
+  });
+
+  it('honors an aborted caller signal on billing requests', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      return await new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }) as typeof globalThis.fetch;
+    const client = new AdminClient('https://admin.example.com');
+    const controller = new AbortController();
+    const pending = client.startAppRun('access-token', {
+      runId: 'run-1', workspaceId: 'ws', accountId: 'a', productSpaceId: 's',
+      artifactInstanceId: 'i', versionId: 'v', version: '1.0.0',
+    }, { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ errorCode: 'NETWORK_ERROR' });
+    globalThis.fetch = originalFetch;
   });
 });

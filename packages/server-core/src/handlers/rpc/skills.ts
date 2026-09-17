@@ -11,6 +11,13 @@ import {
 } from '@polo-ai/server-core/transport'
 import { CredentialManager } from '@polo-ai/shared/credentials'
 import type { HandlerDeps } from '../handler-deps'
+import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
+  isRuntimeProductSpaceRestricted,
+} from '../../runtime/product-space-executions'
 import {
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorSkillBackupRpcInputSchema,
@@ -33,11 +40,100 @@ import {
 } from '@polo-ai/shared/creator-skills'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
 import { getClientActiveSession } from './client-active-session'
+import {
+  EXECUTION_STOP_DRAIN_TIMEOUT_MS,
+  EXECUTION_STOP_POLL_INTERVAL_MS,
+  registerProductSpaceExecution,
+  unregisterProductSpaceExecution,
+  type RegisteredProductSpaceExecution,
+} from '../../runtime/product-space-executions'
+import {
+  ExecutionIdSchema,
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceExecutionScopeSchema,
+} from '@polo-ai/shared/product-spaces'
+import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 
 function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | null {
   if (ctx.workspaceId) return ctx.workspaceId
   if (ctx.webContentsId === null) return null
   return deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+}
+
+/**
+ * R33-2: an in-flight Creator Skill install/uninstall is a ProductSpace
+ * execution like any other. It is registered under its immutable trusted
+ * account/ProductSpace/Workspace scope BEFORE the awaited operation starts,
+ * exposes a real status ('running', 'stopping' once cancellation was
+ * requested) and a bounded cancellation (the shared Creator Skill
+ * cancellation controller + the shared stop drain deadline), so a
+ * read_only-restricted transition terminates Skill work through the same
+ * no-confirmation trusted path as Assistant and Local App executions and
+ * the restricted projection only becomes usable once every execution is
+ * terminal. `settle()` must run when the awaited operation completes.
+ */
+function registerSkillOperationExecution(input: {
+  accountId: string
+  productSpaceId: string
+  workspaceId: string
+  workspaceRoot: string
+  operationOwnerId: string
+  operationId: string
+  slug: string
+  version?: string
+}): { settle: () => void } {
+  let settled = false
+  let cancelRequested = false
+  const executionId = ExecutionIdSchema.parse(`skill-op:${input.operationId}`)
+  // R34 minor: the scope is validated through the shared runtime schema —
+  // no double assertions, no malformed identifiers can reach the registry.
+  const scope = ProductSpaceExecutionScopeSchema.parse({
+    contractVersion: PRODUCT_SPACE_CONTRACT_VERSION,
+    executionId,
+    accountId: input.accountId,
+    productSpaceId: input.productSpaceId,
+    workspaceId: input.workspaceId,
+    subject: {
+      kind: 'artifact_instance',
+      artifactType: 'skill',
+      artifactInstanceId: input.slug,
+      versionId: input.version ?? input.slug,
+      version: input.version ?? input.slug,
+    },
+  })
+  const execution: RegisteredProductSpaceExecution = {
+    scope,
+    kind: 'skill_operation',
+    name: input.slug,
+    ref: input.operationId,
+    generation: 0,
+    isActive: () => !settled,
+    getStatus: (): ExecutionStatus => (cancelRequested ? 'stopping' : 'running'),
+    stop: async () => {
+      cancelRequested = true
+      try {
+        await cancelCreatorSkillOperation(
+          input.workspaceRoot,
+          input.operationOwnerId,
+          input.operationId,
+        )
+      } catch {
+        // The bounded drain below decides the outcome.
+      }
+      const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
+      while (!settled && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, EXECUTION_STOP_POLL_INTERVAL_MS))
+      }
+      return settled ? 'stopped' as const : 'failed' as const
+    },
+  }
+  registerProductSpaceExecution(execution)
+  return {
+    settle: () => {
+      settled = true
+      unregisterProductSpaceExecution(executionId)
+    },
+  }
 }
 
 function getBoundWorkspace(
@@ -224,6 +320,55 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.creatorSkills.IGNORE_VERSION,
 ] as const
 
+/** Stable business-RPC error for an uncommitted (null) runtime fence. */
+export const SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED = 'PRODUCT_SPACE_CONTEXT_REQUIRED'
+
+/**
+ * Every Skills entry derives its scope from the trusted Admin session and
+ * the committed ProductSpace fence — never from renderer arguments. Without
+ * a trusted account or a committed fence bound to it, the Skills surface is
+ * closed: the same local Workspace can be entered from different
+ * ProductSpaces, so enumerating its files without the fence would leak one
+ * space's skill capabilities into another.
+ */
+async function requireTrustedSkillsScope(): Promise<{
+  accountId: string
+  productSpaceId: string
+}> {
+  const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+  if (!trustedAccountId) {
+    throw Object.assign(new Error('No trusted Admin session is available'), {
+      code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
+    })
+  }
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!activeProductSpaceId || !isRuntimeFenceBoundToAccount(trustedAccountId)) {
+    throw Object.assign(new Error('No committed ProductSpace is active for this account'), {
+      code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
+    })
+  }
+  // R32-3: a read_only-restricted space starts no Skill work.
+  if (isRuntimeProductSpaceRestricted(activeProductSpaceId)) {
+    throw Object.assign(new Error('The ProductSpace is restricted to read-only access'), {
+      code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
+    })
+  }
+  return { accountId: trustedAccountId, productSpaceId: activeProductSpaceId }
+}
+
+/**
+ * The offline read-only view may read installed skills (they are part of the
+ * restored history surface) but every mutation is refused: installs and
+ * deletes must be re-validated against a fresh online membership first.
+ */
+function assertSkillsWritable(): void {
+  if (isRuntimeOfflineReadOnly()) {
+    throw Object.assign(new Error('The offline read-only view cannot modify skills'), {
+      code: 'OFFLINE_READ_ONLY',
+    })
+  }
+}
+
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
   const recoveryByWorkspaceRoot = new Map<string, Promise<void>>()
   const ensureRecovered = (workspaceRoot: string): Promise<void> => {
@@ -283,6 +428,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
+    await requireTrustedSkillsScope()
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
@@ -302,6 +448,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Get files in a skill directory
   server.handle(RPC_CHANNELS.skills.GET_FILES, async (_ctx, workspaceId: string, skillSlug: string) => {
+    await requireTrustedSkillsScope()
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       deps.platform.logger?.error(`SKILLS_GET_FILES: Workspace not found: ${workspaceId}`)
@@ -357,6 +504,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         code: 'VALIDATION_ERROR',
       })
     }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const { workspaceId, skillSlug } = input.data
     const workspace = getBoundWorkspace(ctx, workspaceId, deps)
     if (!workspace) throw Object.assign(new Error('Workspace context mismatch'), {
@@ -376,17 +525,36 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     let detached = false
     let forceDeleteCredential: string | undefined
     if (managed || pendingDetach) {
-      const result = await uninstallCreatorSkill({
-        workspaceRoot: workspace.rootPath,
+      // R33-2: the in-flight uninstall is a cancellable ProductSpace
+      // execution under the trusted scope. One operationId binds the
+      // registration to the cancellation controller.
+      const deleteScope = await requireTrustedSkillsScope()
+      const deleteOperationId = crypto.randomUUID()
+      const deleteOperation = registerSkillOperationExecution({
+        accountId: deleteScope.accountId,
+        productSpaceId: deleteScope.productSpaceId,
         workspaceId: workspace.id,
-        operationId: crypto.randomUUID(),
+        workspaceRoot: workspace.rootPath,
+        operationOwnerId: ctx.clientId,
+        operationId: deleteOperationId,
         slug: skillSlug,
-      }, {
-        onError: error => deps.platform.logger?.error(
-          'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
-          error,
-        ),
       })
+      let result: Awaited<ReturnType<typeof uninstallCreatorSkill>>
+      try {
+        result = await uninstallCreatorSkill({
+          workspaceRoot: workspace.rootPath,
+          workspaceId: workspace.id,
+          operationId: deleteOperationId,
+          slug: skillSlug,
+        }, {
+          onError: error => deps.platform.logger?.error(
+            'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
+            error,
+          ),
+        })
+      } finally {
+        deleteOperation.settle()
+      }
       if (!result.success) throw Object.assign(new Error(result.message), {
         code: result.errorCode,
       })
@@ -410,6 +578,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!input.success) {
       return { success: false, errorCode: 'VALIDATION_ERROR' }
     }
+    await requireTrustedSkillsScope()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     return {
@@ -434,6 +603,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         retryable: false,
       }
     }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
@@ -456,38 +627,55 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     } catch {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
     }
-    const result = await installCreatorSkill(workspace.rootPath, {
-      ...input.data,
-      ...(workingDirectory ? { workingDirectory } : {}),
-    }, {
+    // R33-2: the in-flight install is a cancellable ProductSpace execution.
+    const skillScope = await requireTrustedSkillsScope()
+    const skillOperation = registerSkillOperationExecution({
+      accountId: skillScope.accountId,
+      productSpaceId: skillScope.productSpaceId,
+      workspaceId: workspace.id,
+      workspaceRoot: workspace.rootPath,
       operationOwnerId: ctx.clientId,
-      fetch: createCreatorSkillDownloadFetch(
-        deps.platform.getAdminAccessToken,
-      ),
-      onProgress: progress => pushTyped(
-        server,
-        RPC_CHANNELS.creatorSkills.PROGRESS,
-        { to: 'client', clientId: ctx.clientId },
-        progress,
-      ),
-      assertCommitAllowed: async identity => {
-        const check = await server.invokeClient(
-          ctx.clientId,
-          CLIENT_CREATOR_SKILL_COMMIT_CHECK,
-          identity,
-        ) as {
-          success?: boolean
-          creatorSkillArtifacts?: boolean
-          status?: 'active' | 'revoked' | 'archived'
-          errorCode?: string
-        }
-        assertCreatorSkillCommitAllowed(check)
-      },
-      onError: error => deps.platform.logger?.error(
-        'CREATOR_SKILLS_INSTALL: Server-side failure:',
-        error,
-      ),
+      operationId: input.data.operationId,
+      slug: input.data.grant.slug,
+      version: input.data.grant.version,
     })
+    let result: Awaited<ReturnType<typeof installCreatorSkill>>
+    try {
+      result = await installCreatorSkill(workspace.rootPath, {
+        ...input.data,
+        ...(workingDirectory ? { workingDirectory } : {}),
+      }, {
+        operationOwnerId: ctx.clientId,
+        fetch: createCreatorSkillDownloadFetch(
+          deps.platform.getAdminAccessToken,
+        ),
+        onProgress: progress => pushTyped(
+          server,
+          RPC_CHANNELS.creatorSkills.PROGRESS,
+          { to: 'client', clientId: ctx.clientId },
+          progress,
+        ),
+        assertCommitAllowed: async identity => {
+          const check = await server.invokeClient(
+            ctx.clientId,
+            CLIENT_CREATOR_SKILL_COMMIT_CHECK,
+            identity,
+          ) as {
+            success?: boolean
+            creatorSkillArtifacts?: boolean
+            status?: 'active' | 'revoked' | 'archived'
+            errorCode?: string
+          }
+          assertCreatorSkillCommitAllowed(check)
+        },
+        onError: error => deps.platform.logger?.error(
+          'CREATOR_SKILLS_INSTALL: Server-side failure:',
+          error,
+        ),
+      })
+    } finally {
+      skillOperation.settle()
+    }
     if (result.success) {
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
@@ -498,6 +686,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!CreatorSkillOperationIdSchema.safeParse(operationId).success) {
       return { success: false }
     }
+    await requireTrustedSkillsScope()
     const workspaceId = currentWorkspaceId(ctx, deps)
     const workspace = workspaceId
       ? getBoundWorkspace(ctx, workspaceId, deps)
@@ -526,6 +715,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         retryable: false,
       }
     }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
@@ -534,15 +725,31 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       return workspaceMutationError(input.data.operationId, 'workspace_read_only')
     }
     await ensureRecovered(workspace.rootPath)
-    const result = await uninstallCreatorSkill({
+    // R33-2: the in-flight uninstall is a cancellable ProductSpace execution.
+    const skillScope = await requireTrustedSkillsScope()
+    const skillOperation = registerSkillOperationExecution({
+      accountId: skillScope.accountId,
+      productSpaceId: skillScope.productSpaceId,
+      workspaceId: workspace.id,
       workspaceRoot: workspace.rootPath,
-      ...input.data,
-    }, {
-      onError: error => deps.platform.logger?.error(
-        'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
-        error,
-      ),
+      operationOwnerId: ctx.clientId,
+      operationId: input.data.operationId,
+      slug: input.data.slug,
     })
+    let result: Awaited<ReturnType<typeof uninstallCreatorSkill>>
+    try {
+      result = await uninstallCreatorSkill({
+        workspaceRoot: workspace.rootPath,
+        ...input.data,
+      }, {
+        onError: error => deps.platform.logger?.error(
+          'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
+          error,
+        ),
+      })
+    } finally {
+      skillOperation.settle()
+    }
     if (result.success) {
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
@@ -552,6 +759,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.LIST_BACKUPS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     try {
@@ -572,6 +780,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillBackupDeleteRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
@@ -595,6 +805,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillStatusUpdateRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     await ensureRecovered(workspace.rootPath)
@@ -616,6 +828,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.IGNORE_VERSION, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillIgnoreVersionRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
@@ -638,6 +852,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Open skill SKILL.md in editor
   server.handle(RPC_CHANNELS.skills.OPEN_EDITOR, async (_ctx, workspaceId: string, skillSlug: string) => {
+    await requireTrustedSkillsScope()
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
     if (workspace.remoteServer) throw new Error('Open in editor is not available for remote workspaces')
@@ -651,6 +866,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Open skill folder in Finder/Explorer
   server.handle(RPC_CHANNELS.skills.OPEN_FINDER, async (_ctx, workspaceId: string, skillSlug: string) => {
+    await requireTrustedSkillsScope()
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
     if (workspace.remoteServer) throw new Error('Show in Finder is not available for remote workspaces')

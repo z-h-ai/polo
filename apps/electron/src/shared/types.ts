@@ -223,6 +223,11 @@ import type {
   LocalAppStartResult,
   LocalAppLogsOptions,
   LocalAppUninstallOptions,
+  ProductSpaceAppIdentity,
+  ProductSpaceAppInstallState,
+  ProductSpaceBundleInstallRequest,
+  LocalAppLifecycleRequest,
+  ProductSpaceAppRuntimeStartResult,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -420,6 +425,15 @@ export interface ElectronAPI {
   markAllSessionsRead(workspaceId: string): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
+  /**
+   * Dedicated, trusted creation path for the Edit Popover session. The server
+   * stamps the 'edit-popover' origin + owner identity here — the generic
+   * createSession can never grant that origin.
+   */
+  createEditPopoverSession(
+    workspaceId: string,
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+  ): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
@@ -427,6 +441,14 @@ export interface ElectronAPI {
   getTaskOutput(taskId: string): Promise<string | null>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
+  respondToQuestion(sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution): Promise<import('@polo-ai/shared/protocol').QuestionResolutionResult>
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question for the given workspace + popover owner (hidden session, not
+   * reachable via the session list). Exact match only; returns null when no
+   * scoped popover session is waiting for an answer.
+   */
+  getEditPopoverPendingQuestion(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
 
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
@@ -592,10 +614,20 @@ export interface ElectronAPI {
       arch: 'arm64' | 'x64'
     }>
     install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
+    installProductSpaceBundle(request: ProductSpaceBundleInstallRequest): Promise<LocalAppInstalledApp>
+    getProductSpaceInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    getProductSpaceWithdrawnInstallStates(apps: ProductSpaceAppIdentity[]): Promise<ProductSpaceAppInstallState[]>
+    uninstallProductSpaceBundle(
+      app: ProductSpaceAppIdentity,
+      options?: LocalAppUninstallOptions,
+    ): Promise<void>
     cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
-    start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    start(request: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    start(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
     stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    stop(request: LocalAppLifecycleRequest): Promise<LocalAppRuntimeStatus>
     restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    restart(request: LocalAppLifecycleRequest): Promise<LocalAppStartResult | ProductSpaceAppRuntimeStartResult>
     uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
       app: CatalogLocalAppScope,
@@ -875,6 +907,13 @@ export interface ElectronAPI {
     contextKey: string,
     apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
   ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getHomeQuickAccess(
+    contextKey: string,
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
+  setHomeQuickAccess(
+    contextKey: string,
+    apps: import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[],
+  ): Promise<import('@polo-ai/shared/config/home-quick-access').HomeQuickAccessApp[]>
   getOrganizationContextStorage(
     accountId: string,
   ): Promise<
@@ -890,6 +929,168 @@ export interface ElectronAPI {
     import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
     | null
   >
+  getProductSpaceContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+  updateProductSpaceContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/product-space-context'
+    ).ProductSpaceContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+
+  // ProductSpace consumption (member spaces and the local runtime gate)
+  productSpaceList(): Promise<
+    | { success: true; contractVersion: number; personalProductSpaceId: string; productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[] }
+    | { success: false; errorCode: string; message: string; contractUnsupported?: boolean }
+  >
+  productSpaceListActiveExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; executions: import('@polo-ai/shared/product-spaces').ExecutionSummary[] }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceStopAllExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; result: import('@polo-ai/shared/product-spaces').StopAllExecutionsResult }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceGetCatalog(
+    productSpaceId: string,
+    knownRevision?: string,
+  ): Promise<
+    | {
+      success: true
+      notModified: boolean
+      contractVersion?: number
+      productSpaceId?: string
+      catalogRevision?: string
+      accessMode?: 'online' | 'offline'
+      warningCode?: string | null
+      entries: ReadonlyArray<Record<string, unknown>>
+      /** Credential-stripped tombstones emitted from the Main catalog authority. */
+      withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+      accessMode?: 'denied'
+      catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
+    }
+  >
+  productSpaceResolveLaunch(
+    productSpaceId: string,
+    catalogEntryId: string,
+  ): Promise<
+    | {
+      success: true
+      launch: import('@polo-ai/shared/product-spaces').ResolveLaunchResponse
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+    }
+  >
+  productSpacePrepareSwitch(
+    targetProductSpaceId: string,
+  ): Promise<
+    | {
+      success: true
+      token: string
+      from: string | null
+      to: string
+      executions: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceStopSwitchExecutions(
+    token: string,
+  ): Promise<
+    | { success: true; executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }> }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceCommitSwitch(
+    token: string,
+    targetProductSpaceId: string,
+  ): Promise<
+    | { success: true; from: string | null; to: string }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceStopExecution(
+    token: string,
+    executionId: string,
+  ): Promise<
+    | { success: true; executionId: string; status: 'stopped' }
+    | { success: false; errorCode: string; message?: string; status?: 'stopping' | 'failed' }
+  >
+  productSpaceRestrictActiveSpace(
+    accountId: string,
+    productSpaceId: string,
+    restricted: boolean,
+  ): Promise<
+    | { success: true; restricted?: boolean }
+    | { success: false; errorCode: string; message?: string; failedExecutionIds?: string[]; restricted?: boolean }
+  >
+  /** R34-2: Main's authoritative restriction state for one space. */
+  productSpaceGetRestrictionState(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; restricted: boolean }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceCancelSwitch(token: string): Promise<
+    | { success: false; errorCode: string; message?: string }
+    | {
+      success: true
+      /** Authoritative linearization verdict for the cancelled switch. */
+      outcome: 'cancelled' | 'already_committed' | 'no_transaction'
+      /** Present only for `already_committed`: the committed target space. */
+      committedTargetProductSpaceId?: string
+      /** Present only for `already_committed`: the CURRENT authoritative fence. */
+      activeProductSpaceId?: string | null
+    }
+  >
+  productSpaceRestoreOfflineView(): Promise<
+    | {
+      success: true
+      snapshot: {
+        contractVersion: number
+        personalProductSpaceId: string
+        productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[]
+        activeProductSpaceId: string
+      }
+    }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceRevokeActiveContext(): Promise<{ success: boolean }>
+  productSpaceCleanupLegacyState(): Promise<{
+    success: boolean
+    results: Record<string, boolean>
+  }>
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>

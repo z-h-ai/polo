@@ -1,0 +1,530 @@
+import { types } from 'node:util'
+import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
+import { TEXT_LIMIT } from './host-completion-protocol.ts'
+import { compareJsonData, createComparisonBudget, forEachOwnEnumerableDataProperty, isInertJsonDataArray, isInertJsonDataObject, readArrayElement, readArrayLength, readOwnDescriptor, readOwnEnumerableDataDescriptor } from './host-completion-json-data.ts'
+// Single responsibility: map Host/Pi message semantics onto an auditable body-metering result
+// (R12 §6.3). Owns typed slot identity, semantic/projection budgets, the 512KiB UTF-8 meter,
+// Unicode pending-surrogate handling, tool raw/tree group bookkeeping with max-or-double
+// representation strategy, the fail-fast content latch, and the immutable safe terminal snapshot
+// so `finish()` never re-reads provider-controlled objects. Does not own route/credential policy,
+// Pi registration, transport classification, terminal winner, usage legality or body release.
+
+// Typed structural slot identity (R12 §6.4): discriminated segments encoded with JSON.stringify.
+// Array index 0 and object property "0" are different kinds; separators, quotes, brackets,
+// JSON-like text or Unicode inside property names cannot alias another slot; tool raw, parsed-tree
+// and group identities are exact opaque keys — there is no startsWith group scan.
+export type HostSlotSegment =
+  | { kind: 'scope'; value: 'message' | 'content' }
+  | { kind: 'content-index'; value: number }
+  | { kind: 'block-kind'; value: string }
+  | { kind: 'field'; value: string }
+  | { kind: 'array-index'; value: number }
+  | { kind: 'object-property'; value: string }
+  | { kind: 'representation'; value: 'tool-raw' | 'tool-tree' }
+export const encodeSlotKey = (segments: HostSlotSegment[]): string => JSON.stringify(segments)
+export const contentPath = (index: number): HostSlotSegment[] => [{ kind: 'scope', value: 'content' }, { kind: 'content-index', value: index }]
+// Canonical block fields per kind: [property, slot name]. Delta append paths and absolute block
+// canonical paths share the identical segments so both dedupe into one logical slot. A Map keeps
+// hostile kinds like `__proto__`/`constructor`/`toString` from hitting inherited properties —
+// every unrecognised kind is an ordinary unknown block (R12 §6.4).
+const CANONICAL_BLOCK_FIELDS = new Map<string, Array<[string, string]>>([
+  ['text', [['text', 'text'], ['textSignature', 'textSignature']]],
+  ['thinking', [['thinking', 'thinking'], ['thinkingSignature', 'thinkingSignature']]],
+  ['toolCall', [['id', 'id'], ['name', 'name'], ['thoughtSignature', 'thoughtSignature'], ['arguments', 'arguments']]],
+])
+// Message fields carrying stream identity or accounting — never content bytes.
+const MESSAGE_IDENTITY_FIELDS = new Set(['content', 'usage', 'stopReason', 'timestamp', 'api', 'provider', 'model', 'responseModel', 'responseId', 'role'])
+// Semantic budget invariants (R12 §6.5): nodes count only entered string/array/non-null-object
+// nodes (message root 1, actual content array 1, each block object 1, each canonical/unknown
+// string/container 1; primitives are never nodes) — node 8192 allowed, the 8193rd latch-claims
+// result_too_large. Depth runs from the message root at depth 0; depth 16 allowed, depth-17 entry
+// latches without enumeration. projectionWork charges every inspected own enumerable object key
+// and every visited array position — 65536 allowed, the 65537th latches before descriptor/value.
+const NODE_BUDGET = 8192
+const NODE_DEPTH_LIMIT = 16
+const PROJECTION_WORK_CAP = 65_536
+interface SemanticBudget { nodes: number; projectionWork: number; dead: boolean }
+// Unicode pending invariant: only a delta working string holds back a trailing unpaired high
+// surrogate (the next delta's low surrogate joins it into one 4-byte code point); absolute
+// snapshots and terminal reconciliation pass pending=false, settling it as a 3-byte replacement
+// before the 512KiB gate.
+function countedBytes(value: string, pending: boolean): number {
+  const last = value.charCodeAt(value.length - 1)
+  return pending && last >= 0xD800 && last <= 0xDBFF ? Buffer.byteLength(value.slice(0, -1), 'utf8') : Buffer.byteLength(value, 'utf8')
+}
+function trieBytes(candidates: string[], cap: number): number {
+  const root = new Map<number, unknown>()
+  let edges = 0
+  for (const candidate of candidates) {
+    let node: Map<number, unknown> = root
+    for (const byte of Buffer.from(candidate, 'utf8')) {
+      let child = node.get(byte) as Map<number, unknown> | undefined
+      if (!child) {
+        child = new Map()
+        node.set(byte, child)
+        edges += 1
+        if (edges > cap) return cap + 1
+      }
+      node = child
+    }
+  }
+  return edges
+}
+// Immutable, provider-independent terminal snapshot: copied primitives only. `finish()` consumes
+// this instead of re-reading the hostile message object (R12 §6.7).
+export interface SafeTerminalSnapshot {
+  text: string
+  usage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number } | null
+  responseModel: string
+  model: string
+}
+// Usage capture taken eagerly at the `usage` yield during message projection (R9 issue 0):
+// 'ok' carries validated numbers so the terminal snapshot never re-reads the provider usage
+// object; 'incomplete' records a PRESENT but incomplete provider-final usage that was safely
+// read (some required member missing, none malformed) so the stream protocol can classify it
+// as provider_usage_invalid instead of result_too_large (R10 issue 1); 'none' means usage was
+// not among the enumerated own enumerable data keys; 'latched' means the shared budget is dead.
+type UsageCapture = { status: 'ok'; usage: NonNullable<SafeTerminalSnapshot['usage']> } | { status: 'incomplete' } | { status: 'none' } | { status: 'latched' }
+// Immutable single-pass terminal capture (R11 issue 0): meterMessage is the SOLE provider read
+// and charge pass — it captures the terminal text parts, the usage outcome, and both model
+// identities while it projects, and buildTerminalSnapshot consumes only this capture (no
+// descriptor re-reading, no re-charging, no model-after-usage reads).
+interface TerminalCapture {
+  text: string
+  usage: UsageCapture
+  responseModel: string
+  model: string
+}
+export interface ContentMeter {
+  onEvent(event: AssistantMessageEvent): void
+  isBodyOverLimit(): boolean
+  isSnapshotInconsistent(): boolean
+  hasToolContent(): boolean
+  snapshotTerminal(): SafeTerminalSnapshot | null
+  flushPendingSurrogatesToLimit(): boolean
+}
+interface Slot { canonical: string; bytes: number; base: string }
+interface ToolGroupState { rawSlotKey: string; treeSlotKeys: string[]; snapshotArgs: unknown }
+type AddString = (segments: HostSlotSegment[], value: string) => void
+export function createContentMeter(): ContentMeter {
+  const slots = new Map<string, Slot>()
+  const toolGroups = new Map<string, ToolGroupState>()
+  let observed = 0, sawToolContent = false, inconsistent = false
+  let lastDoneSnapshot: SafeTerminalSnapshot | null = null
+  const latchSemantic = (budget: SemanticBudget): false => {
+    budget.dead = true
+    observed = TEXT_LIMIT + 1
+    return false
+  }
+  const charge = (budget: SemanticBudget, counter: 'nodes' | 'projectionWork', cap: number): boolean => {
+    if (budget.dead) return false
+    budget[counter] += 1
+    if (budget[counter] > cap) return latchSemantic(budget)
+    return true
+  }
+  // Semantic walk invariant: each entered string/array/non-null-plain-object node charges one node
+  // unit at its own depth (children depth+1); primitive leaves are skipped uncharged; depth-17
+  // entry, Proxies and non-plain objects latch dead without enumerating contents.
+  function walkSemantic(value: unknown, segments: HostSlotSegment[], depth: number, budget: SemanticBudget, add: AddString): void {
+    if (budget.dead) return
+    if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') return
+    if (depth > NODE_DEPTH_LIMIT) {
+      latchSemantic(budget)
+      return
+    }
+    if (!charge(budget, 'nodes', NODE_BUDGET)) return
+    if (typeof value === 'string') {
+      if (value.length > 0) add(segments, value)
+      return
+    }
+    if (Array.isArray(value)) {
+      if (types.isProxy(value)) {
+        latchSemantic(budget)
+        return
+      }
+      const length = readArrayLength(value)
+      if (length === null) {
+        latchSemantic(budget)
+        return
+      }
+      for (let index = 0; index < length; index++) {
+        if (budget.dead) return
+        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return
+        const element = readArrayElement(value, index)
+        if (element.kind === 'missing') continue
+        if (element.kind === 'unsafe') {
+          latchSemantic(budget)
+          return
+        }
+        walkSemantic(element.value, [...segments, { kind: 'array-index', value: index }], depth + 1, budget, add)
+      }
+      return
+    }
+    if (!isInertJsonDataObject(value)) {
+      latchSemantic(budget)
+      return
+    }
+    for (const [key, item] of forEachOwnEnumerableDataProperty(value, () => charge(budget, 'projectionWork', PROJECTION_WORK_CAP), () => latchSemantic(budget))) {
+      if (budget.dead) return
+      walkSemantic(item, [...segments, { kind: 'object-property', value: key }], depth + 1, budget, add)
+    }
+  }
+  // Eager usage validation (R9 issue 0): the five required numbers are read and validated under
+  // the shared monotonic budget at the moment `usage` is projected, so a malformed first value
+  // latches before ANY later message descriptor can be enumerated. A present-but-incomplete
+  // usage (a required member safely read as missing, none malformed) keeps the distinct
+  // 'incomplete' state (R10 issue 1); a present-but-malformed data value latches immediately
+  // (never reinterpreted as missing or zero). No later usage key is read after the first
+  // malformed value.
+  function captureUsageNumbers(usageSource: object, budget: SemanticBudget, latchUnsafe: () => void): UsageCapture {
+    let input: number | null = null
+    let output: number | null = null
+    let cacheRead: number | null = null
+    let cacheWrite: number | null = null
+    let totalTokens: number | null = null
+    for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const) {
+      if (budget.dead) return { status: 'latched' }
+      if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return { status: 'latched' }
+      const descriptor = readOwnEnumerableDataDescriptor(usageSource, key)
+      if (descriptor.kind === 'unsafe') {
+        latchUnsafe()
+        return { status: 'latched' }
+      }
+      if (descriptor.kind !== 'data') continue
+      const value = descriptor.value
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        latchUnsafe()
+        return { status: 'latched' }
+      }
+      if (key === 'input') input = value
+      else if (key === 'output') output = value
+      else if (key === 'cacheRead') cacheRead = value
+      else if (key === 'cacheWrite') cacheWrite = value
+      else totalTokens = value
+    }
+    if (budget.dead) return { status: 'latched' }
+    // captureUsageNumbers only runs for an enumerated (present) usage object, so any non-ok
+    // outcome here is exactly the present-but-incomplete state (R10 issue 1).
+    return input !== null && output !== null && cacheRead !== null && cacheWrite !== null && totalTokens !== null
+      ? { status: 'ok', usage: { input, output, cacheRead, cacheWrite, totalTokens } }
+      : { status: 'incomplete' }
+  }
+  // Single-pass provider projection (R11 issue 0): the ONLY pass that reads or charges the
+  // terminal message. Fixed fields are read explicitly in the required order — usage, then
+  // responseModel, then model — before content positions and before the remaining-field walk,
+  // so a hostile value in any of them latches before any later provider read (R12 issue 0:
+  // non-enumerable identities are invisible to for...in and must never be skipped). Content
+  // positions are charged exactly once, and the remaining own enumerable fields are projected
+  // through a manual walk so no fixed-field descriptor is ever read twice. Everything the
+  // terminal snapshot needs is captured here.
+  function meterMessage(message: unknown, add: AddString, budget: SemanticBudget): TerminalCapture {
+    const capture: TerminalCapture = { text: '', usage: { status: 'none' }, responseModel: '', model: '' }
+    const textParts: string[] = []
+    if (budget.dead || message === null || typeof message !== 'object') return capture
+    if (!isInertJsonDataObject(message)) {
+      latchSemantic(budget)
+      return capture
+    }
+    if (!charge(budget, 'nodes', NODE_BUDGET)) return capture
+    // Outer usage fail-fast (R14 §6.3, R9 issue 0, R11 order fix): the usage descriptor is read
+    // ONCE, before content positions and before any later identity field, so a malformed,
+    // accessor-backed or non-enumerable usage latches before any later provider read. The key
+    // charge applies only when usage is present, matching the enumerated-key accounting.
+    const usageDescriptor = readOwnEnumerableDataDescriptor(message, 'usage')
+    if (usageDescriptor.kind === 'unsafe') {
+      latchSemantic(budget)
+      return capture
+    }
+    if (usageDescriptor.kind === 'data') {
+      if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return capture
+      if (!isInertJsonDataObject(usageDescriptor.value)) {
+        latchSemantic(budget)
+        return capture
+      }
+      capture.usage = captureUsageNumbers(usageDescriptor.value, budget, () => latchSemantic(budget))
+      if (capture.usage.status === 'latched') return capture
+    }
+    // Provider identity fields are read EXPLICITLY in the required fixed order (R12 issue 0,
+    // obs c96689d4a6bbce8ff94ef948): for...in cannot see a NON-ENUMERABLE responseModel/model,
+    // so the fixed-field reader is the only way to classify one. Truly missing fields and blank
+    // valid strings stay fallback-eligible exactly as before; a present non-enumerable field,
+    // accessor (incl. getterless/setterless), Proxy/reflective failure, or wrong-typed data
+    // value latches immediately — no later provider read, no body release, no model fallback.
+    // The key charge applies only when the field is present, matching enumerated accounting.
+    for (const identityField of ['responseModel', 'model'] as const) {
+      const identityDescriptor = readOwnEnumerableDataDescriptor(message, identityField)
+      if (identityDescriptor.kind === 'unsafe') {
+        latchSemantic(budget)
+        return capture
+      }
+      if (identityDescriptor.kind === 'data') {
+        if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return capture
+        const identityValue = identityDescriptor.value
+        if (typeof identityValue !== 'string') {
+          latchSemantic(budget)
+          return capture
+        }
+        if (identityField === 'responseModel') capture.responseModel = identityValue
+        else capture.model = identityValue
+      }
+    }
+    // Content: one descriptor read and ONE key charge, then each position charged exactly once.
+    const contentDescriptor = readOwnEnumerableDataDescriptor(message, 'content')
+    if (contentDescriptor.kind === 'unsafe') {
+      latchSemantic(budget)
+      return capture
+    }
+    if (contentDescriptor.kind === 'data') {
+      if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return capture
+      const content = contentDescriptor.value
+      if (content !== null && isInertJsonDataArray(content)) {
+        if (!charge(budget, 'nodes', NODE_BUDGET)) return capture
+        const length = readArrayLength(content)
+        if (length === null) {
+          latchSemantic(budget)
+          return capture
+        }
+        for (let index = 0; index < length; index++) {
+          if (budget.dead) return capture
+          if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) return capture
+          const element = readArrayElement(content, index)
+          if (element.kind === 'missing') continue
+          if (element.kind === 'unsafe') {
+            latchSemantic(budget)
+            return capture
+          }
+          meterBlock(element.value, index, add, budget, textParts)
+        }
+      } else if (content !== null) {
+        // Malformed (non-array) content is metered through the semantic walker at its typed path.
+        walkSemantic(content, [{ kind: 'scope', value: 'message' }, { kind: 'field', value: 'content' }], 1, budget, add)
+      }
+    }
+    // Remaining own enumerable fields, projected exactly once. usage, responseModel, model and
+    // content were already read and charged above, so their descriptors are never touched again.
+    for (const field in message) {
+      if (!Object.hasOwn(message, field)) continue
+      if (field === 'content' || field === 'usage' || field === 'responseModel' || field === 'model') continue
+      if (budget.dead) return capture
+      if (!charge(budget, 'projectionWork', PROJECTION_WORK_CAP)) {
+        latchSemantic(budget)
+        return capture
+      }
+      const descriptor = readOwnEnumerableDataDescriptor(message, field)
+      if (descriptor.kind !== 'data') {
+        latchSemantic(budget)
+        return capture
+      }
+      const value = descriptor.value
+      if (!MESSAGE_IDENTITY_FIELDS.has(field)) walkSemantic(value, [{ kind: 'scope', value: 'message' }, { kind: 'field', value: field }], 1, budget, add)
+    }
+    if (budget.dead) return capture
+    capture.text = textParts.join('')
+    return capture
+  }
+  function meterBlock(block: unknown, index: number, add: AddString, budget: SemanticBudget, textParts: string[]): void {
+    if (budget.dead) return
+    if (block === null || typeof block !== 'object') {
+      walkSemantic(block, [...contentPath(index)], 2, budget, add)
+      return
+    }
+    if (!isInertJsonDataObject(block)) {
+      latchSemantic(budget)
+      return
+    }
+    if (!charge(budget, 'nodes', NODE_BUDGET)) return
+    const typeDescriptor = readOwnEnumerableDataDescriptor(block, 'type')
+    // The block discriminator is only ever a descriptor-safe string; String() on a hostile value
+    // is forbidden (R12 §6.4), so anything else fails closed.
+    if (typeDescriptor.kind !== 'data' || typeof typeDescriptor.value !== 'string') {
+      latchSemantic(budget)
+      return
+    }
+    const blockKind = typeDescriptor.value
+    const blockPath: HostSlotSegment[] = [...contentPath(index), { kind: 'block-kind', value: blockKind }]
+    if (blockKind === 'toolCall') sawToolContent = true
+    const canonicalFields = CANONICAL_BLOCK_FIELDS.get(blockKind)
+    if (canonicalFields === undefined) {
+      for (const [field, value] of forEachOwnEnumerableDataProperty(block, () => charge(budget, 'projectionWork', PROJECTION_WORK_CAP), () => latchSemantic(budget))) {
+        if (budget.dead) return
+        // The structural `type` discriminator is framing, not content; its value is already the
+        // block-kind identity segment of every path in this block.
+        if (field === 'type') continue
+        walkSemantic(value, [...blockPath, { kind: 'field', value: field }], 3, budget, add)
+      }
+      return
+    }
+    for (const [property, slotName] of canonicalFields) {
+      if (budget.dead) return
+      const descriptor = readOwnEnumerableDataDescriptor(block, property)
+      if (descriptor.kind === 'unsafe') {
+        latchSemantic(budget)
+        return
+      }
+      if (descriptor.kind === 'missing') continue
+      const value = descriptor.value
+      if (property === 'arguments') {
+        meterToolArguments(index, value, add, budget)
+        continue
+      }
+      // A canonical string counts as one node and is metered into its dedicated slot; a canonical
+      // container enters the semantic walker; primitives are neither counted nor metered. The
+      // canonical text of a text block is captured in content order for the terminal snapshot
+      // (single-pass capture — the snapshot never re-reads the block).
+      if (typeof value === 'string') {
+        if (charge(budget, 'nodes', NODE_BUDGET)) {
+          add([...blockPath, { kind: 'field', value: slotName }], value)
+          if (blockKind === 'text' && slotName === 'text') textParts.push(value)
+        }
+      } else if (value !== null && typeof value === 'object') {
+        walkSemantic(value, [...blockPath, { kind: 'field', value: slotName }], 3, budget, add)
+      }
+    }
+    for (const [field, value] of forEachOwnEnumerableDataProperty(block, () => charge(budget, 'projectionWork', PROJECTION_WORK_CAP), () => latchSemantic(budget))) {
+      if (budget.dead) return
+      if (field === 'type' || canonicalFields.some(([property]) => property === field)) continue
+      walkSemantic(value, [...blockPath, { kind: 'field', value: field }], 3, budget, add)
+    }
+  }
+  function meterToolArguments(index: number, value: unknown, add: AddString, budget: SemanticBudget): void {
+    const groupPath: HostSlotSegment[] = [...contentPath(index), { kind: 'block-kind', value: 'toolCall' }]
+    const groupKey = encodeSlotKey(groupPath)
+    let group = toolGroups.get(groupKey)
+    if (group === undefined) {
+      group = {
+        rawSlotKey: encodeSlotKey([...groupPath, { kind: 'representation', value: 'tool-raw' }, { kind: 'field', value: 'rawJson' }]),
+        treeSlotKeys: [],
+        snapshotArgs: null,
+      }
+      toolGroups.set(groupKey, group)
+    }
+    const resolvedGroup = group
+    resolvedGroup.snapshotArgs = value ?? null
+    const treeRoot: HostSlotSegment[] = [...groupPath, { kind: 'representation', value: 'tool-tree' }, { kind: 'field', value: 'arguments' }]
+    walkSemantic(value, treeRoot, 3, budget, (segments, text) => {
+      const treeKey = encodeSlotKey(segments)
+      if (!resolvedGroup.treeSlotKeys.includes(treeKey)) resolvedGroup.treeSlotKeys.push(treeKey)
+      add(segments, text)
+    })
+  }
+  // Tool raw/tree reconcile invariant: the raw JSON string and the structured arguments are two
+  // representations of one tool call. When the raw string parses and the bounded comparison equals
+  // the snapshot, the group contributes max(raw, tree) — tree slots zeroed, raw slot carries the
+  // group. Any comparison reason other than equal (budget, depth, unsafe shape or difference)
+  // keeps both representations counted and latches `inconsistent`; an unparseable raw keeps both
+  // counted without a mismatch mark.
+  function reconcileToolGroup(group: ToolGroupState): void {
+    const rawSlot = slots.get(group.rawSlotKey)
+    if (rawSlot === undefined || rawSlot.canonical.length === 0) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawSlot.canonical)
+    } catch {
+      return
+    }
+    const comparison = createComparisonBudget()
+    const outcome = compareJsonData(parsed, group.snapshotArgs, 0, comparison)
+    let treeBytes = 0
+    for (const treeKey of group.treeSlotKeys) {
+      const treeSlot = slots.get(treeKey)
+      if (treeSlot === undefined) continue
+      treeBytes += treeSlot.bytes
+      if (outcome === 'equal') treeSlot.bytes = 0
+    }
+    if (outcome === 'equal') {
+      const groupBytes = Math.max(rawSlot.bytes, treeBytes)
+      observed -= rawSlot.bytes + treeBytes - groupBytes
+      rawSlot.bytes = groupBytes
+    } else {
+      inconsistent = true
+    }
+  }
+  // Immutable terminal snapshot assembled EXCLUSIVELY from the single-pass capture (R11 issue
+  // 0): no descriptor re-reading, no re-charging, no model-after-usage reads. 'incomplete' usage
+  // stays unset so the stream protocol classifies it as provider_usage_invalid; 'none' means
+  // usage was absent; a 'latched' budget is guarded by the caller.
+  function buildTerminalSnapshot(capture: TerminalCapture): SafeTerminalSnapshot {
+    const snapshot: SafeTerminalSnapshot = { text: capture.text, usage: null, responseModel: capture.responseModel, model: capture.model }
+    if (capture.usage.status === 'ok') snapshot.usage = capture.usage.usage
+    return snapshot
+  }
+  function meterEvent(event: AssistantMessageEvent): void {
+    const batch = new Map<string, string[]>()
+    const budget: SemanticBudget = { nodes: 0, projectionWork: 0, dead: false }
+    const appended = new Set<string>()
+    const add = (segments: HostSlotSegment[], value: string): void => {
+      if (typeof value !== 'string' || value.length === 0) return
+      const key = encodeSlotKey(segments)
+      batch.set(key, [...(batch.get(key) ?? []), value])
+    }
+    const append = (segments: HostSlotSegment[], delta: string): void => {
+      const key = encodeSlotKey(segments)
+      const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }
+      slot.base += delta
+      slots.set(key, slot)
+      batch.set(key, [...(batch.get(key) ?? []), slot.base])
+      appended.add(key)
+    }
+    if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+      append([...contentPath(event.contentIndex), { kind: 'block-kind', value: event.type === 'text_delta' ? 'text' : 'thinking' }, { kind: 'field', value: event.type === 'text_delta' ? 'text' : 'thinking' }], event.delta)
+    } else if (event.type === 'text_end' || event.type === 'thinking_end') {
+      add([...contentPath(event.contentIndex), { kind: 'block-kind', value: event.type === 'text_end' ? 'text' : 'thinking' }, { kind: 'field', value: event.type === 'text_end' ? 'text' : 'thinking' }], event.content)
+    } else if (event.type === 'toolcall_delta' || event.type === 'toolcall_start') {
+      if (event.type === 'toolcall_delta') append([...contentPath(event.contentIndex), { kind: 'block-kind', value: 'toolCall' }, { kind: 'representation', value: 'tool-raw' }, { kind: 'field', value: 'rawJson' }], event.delta)
+      sawToolContent = true
+    } else if (event.type === 'toolcall_end') {
+      meterBlock(event.toolCall, event.contentIndex, add, budget, [])
+      sawToolContent = true
+    }
+    const message = event.type === 'done' ? event.message : event.type === 'error' ? event.error : (event as { partial?: AssistantMessage }).partial
+    const capture = meterMessage(message, add, budget)
+    // Fail-fast: a latched projection budget skips the snapshot entirely — no further provider
+    // field reads after the first violation (R12 §6.3). The snapshot assembly itself performs
+    // zero reads (single-pass capture), so the budget cannot change while it runs.
+    if (event.type === 'done' && !budget.dead) {
+      lastDoneSnapshot = buildTerminalSnapshot(capture)
+    }
+    if (event.type === 'done' && event.reason === 'toolUse') sawToolContent = true
+    for (const [key, candidates] of batch) {
+      const slot = slots.get(key) ?? { canonical: '', bytes: 0, base: '' }
+      const unique = [...new Set([slot.canonical, ...candidates])]
+      const longest = unique.reduce((a, b) => (b.length > a.length ? b : a))
+      const forked = !unique.every((candidate) => candidate === longest || longest.startsWith(candidate))
+      const next = forked ? trieBytes(unique, TEXT_LIMIT) : countedBytes(longest, appended.has(key))
+      observed += next - slot.bytes
+      slots.set(key, { canonical: forked ? slot.canonical : longest, bytes: next, base: slot.base })
+      if (forked) inconsistent = true
+    }
+    for (const group of toolGroups.values()) {
+      if (budget.dead) break
+      reconcileToolGroup(group)
+    }
+  }
+  return {
+    onEvent(event: AssistantMessageEvent): void {
+      meterEvent(event)
+    },
+    isBodyOverLimit(): boolean {
+      return observed > TEXT_LIMIT
+    },
+    isSnapshotInconsistent(): boolean {
+      return inconsistent
+    },
+    hasToolContent(): boolean {
+      return sawToolContent
+    },
+    snapshotTerminal(): SafeTerminalSnapshot | null {
+      return lastDoneSnapshot
+    },
+    flushPendingSurrogatesToLimit(): boolean {
+      for (const slot of slots.values()) {
+        const full = Buffer.byteLength(slot.canonical, 'utf8')
+        if (full > slot.bytes) {
+          observed += full - slot.bytes
+          slot.bytes = full
+        }
+      }
+      return observed > TEXT_LIMIT
+    },
+  }
+}

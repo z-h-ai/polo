@@ -16,8 +16,8 @@ export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): vo
   registerWorkspaceGuiHandlers(server, deps)
   registerBrowserHandlers(server, deps)
   registerSettingsGuiHandlers(server, deps)
-  registerTabBrowserHandlers(server)
-  registerLocalAppHandlers(server)
+  registerTabBrowserHandlers(server, deps)
+  registerLocalAppHandlers(server, deps)
 }
 
 export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps, serverCtx?: ServerHandlerContext): void {

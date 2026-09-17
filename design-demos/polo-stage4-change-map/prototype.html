@@ -1,0 +1,192 @@
+<!doctype html>
+<!--
+  POO-44 / POO-48 / POO-49 / POO-50 combined explanation mock.
+  Scope: visual and state-flow review only. No production RPC, persistence, credit, or isolation implementation.
+-->
+<html lang="zh-Hans" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <title>Polo 助手 · Stage 4 改动说明 Mock</title>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --background: oklch(0.98 0.003 265);
+      --foreground: oklch(0.185 0.01 270);
+      --foreground-rgb: 38, 36, 42;
+      --accent: oklch(0.62 0.13 293);
+      --info: oklch(0.62 0.12 240);
+      --success: oklch(0.55 0.17 145);
+      --destructive: oklch(0.58 0.24 28);
+      --bg-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+      --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+      --border: oklch(from var(--foreground) l c h / 0.08);
+      --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+      --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+      --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+      --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+      --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+      --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+      --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+      --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+      --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+      --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+      --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+      --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+      --radius-edge: 14px;
+      --radius-inner: 10px;
+      --topbar-h: 48px;
+      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, monospace;
+    }
+    html[data-theme="dark"] {
+      --background: oklch(0.145 0.015 270);
+      --foreground: oklch(0.95 0.01 270);
+      --foreground-rgb: 237, 236, 240;
+      --accent: oklch(0.65 0.22 293);
+      --info: oklch(0.7 0.14 240);
+      --success: oklch(0.60 0.17 145);
+      --destructive: oklch(0.65 0.22 28);
+      --bg-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+      --border: oklch(from var(--foreground) l c h / 0.11);
+    }
+    * { box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: var(--foreground); background: var(--background); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+    button, input, textarea { font: inherit; color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-thumb { border-radius: 8px; background: var(--fg-20); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 1100px) {
+      [data-inspector] { width: 290px !important; }
+      [data-assistant-sidebar] { display: none !important; }
+    }
+    @media (max-width: 800px) {
+      [data-layout] { display: block !important; overflow: auto !important; }
+      [data-inspector] { width: auto !important; height: auto !important; margin-bottom: 10px; }
+      [data-stage] { height: 720px !important; }
+      [data-session-panel] { display: none !important; }
+      [data-global-header] { padding-left: 8px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="env,react">
+    const { useMemo, useState } = React;
+
+    const I = ({ d, size=17, sw=1.8 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{(Array.isArray(d)?d:[d]).map((p,i)=><path key={i} d={p}/>)}</svg>;
+    const icons = {
+      home:["M3 11 12 3l9 8","M5 10v10h14V10"], chat:["M4 4h16v13H8l-4 4z"], list:["M8 6h13","M8 12h13","M8 18h13","M3 6h.01","M3 12h.01","M3 18h.01"],
+      db:["M4 6c0 1.1 3.6 2 8 2s8-.9 8-2-3.6-2-8-2-8 .9-8 2Z","M4 6v12c0 1.1 3.6 2 8 2s8-.9 8-2V6","M4 12c0 1.1 3.6 2 8 2s8-.9 8-2"],
+      skill:"m13 2-9 12h8l-1 8 9-12h-8z", auto:["M4 6h16","M4 12h16","M4 18h16"], browser:["M4 4h16v16H4z","M4 8h16"],
+      attach:"m21.4 11-9.2 9.2a6 6 0 0 1-8.4-8.4L13 2.6a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.9-2.9l8.5-8.5",
+      send:["M12 19V5","m5 10-5-5-5 5"], lock:["M5 11h14v10H5z","M8 11V7a4 4 0 0 1 8 0v4"], card:["M3 7h18v12H3z","M3 10h18","M7 15h3"],
+      bell:["M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9","M10 21h4"], check:"m5 12 4 4L19 6", x:["M18 6 6 18","m6 6 12 12"], moon:"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"
+    };
+    const Polo = ({size=16}) => <svg width={size} height={size} viewBox="0 0 100 100" fill="none"><path d="M22 85V10h22a19 19 0 0 1 0 38H34" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/><circle cx="42" cy="76" r="9" fill="currentColor"/><circle cx="79" cy="76" r="9" fill="currentColor"/></svg>;
+
+    const TASKS = {
+      "44": { title:"统一外壳", layer:"组件放在哪里", summary:"不是重做 SessionList / ChatPage，而是把现有真实助手组件嵌入统一 App/Tab 外壳。", changes:["复用真实会话列表、消息、输入框、附件","账号、ProductSpace、App 目录等全局入口移交外壳","Sources、Skills、Automations、Browser 仍留在助手内"], seams:["TabShell / AppShell","TopBar / LeftSidebar","SessionList / ChatPage"], states:["normal"], labels:["复用，不重做"] },
+      "48": { title:"空间隔离", layer:"数据属于谁", summary:"界面基本不重做；所有会话、附件、Skill 和运行状态绑定不可变 accountId + productSpaceId。", changes:["Personal / Enterprise 显示完全独立的数据","跨空间旧 ID 与 URL 一律 fail closed","运行中切换必须先安全停止，失败则留在原空间"], seams:["SessionManager / session types","sessions / files / skills RPC","renderer atoms / event processor"], states:["space","foreign","running"], labels:["正常隔离","旧链接","运行中切换"] },
+      "49": { title:"积分恢复", layer:"异常时怎么停与恢复", summary:"增加发送前不足和生成中耗尽两条状态流；恢复必须由用户主动触发。", changes:["发送前：保留草稿，不创建消息，阻断发送","生成中：保留部分输出，只显示一次尾部提示","到账只解除阻断，不自动发送、不自动续写"], seams:["App draft state","ChatPage / ChatInputZone","InputContainer / access state"], states:["pre-owner","pre-member","mid"], labels:["发送前 · Owner","发送前 · Member","生成中耗尽"] },
+      "50": { title:"交互提问", layer:"需要裁决时怎么停与恢复", summary:"Agent 的结构化问题接管输入区；问题、草稿和恢复状态都属于当前 Session。", changes:["新增 request_user_input 跨引擎协议","QuestionRequest 临时替换普通输入框","pendingQuestion 持久化，回答后原会话继续"], seams:["StructuredInput / InputContainer","SessionManager / RPC","App context / event processor"], states:["question"], labels:["问题接管输入区"] }
+    };
+
+    function Btn({children,onClick,active=false,disabled=false,kind="default",style={}}) {
+      const [hover,setHover]=useState(false);
+      const bg = kind==="primary" ? "var(--foreground)" : active ? "var(--fg-7)" : hover&&!disabled ? "var(--fg-5)" : "transparent";
+      return <button disabled={disabled} onClick={onClick} onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)} style={{height:30,padding:"0 10px",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,borderRadius:7,border:kind==="primary"?"1px solid transparent":"1px solid var(--border)",background:bg,color:kind==="primary"?"var(--background)":"var(--foreground)",fontSize:12,fontWeight:500,cursor:disabled?"default":"pointer",opacity:disabled?.45:1,...style}}>{children}</button>;
+    }
+
+    function Inspector({task,state,setState}) {
+      const data=TASKS[task];
+      return <aside data-inspector style={{width:340,height:"100%",flex:"0 0 auto",padding:18,overflow:"auto",border:"1px solid var(--border)",borderRadius:14,background:"var(--background)",boxShadow:"0 8px 28px rgba(0,0,0,.06)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{padding:"3px 7px",borderRadius:6,background:"color-mix(in srgb,var(--accent) 10%,transparent)",color:"var(--accent)",fontFamily:"var(--font-mono)",fontSize:11}}>POO-{task}</span><span style={{fontSize:12,color:"var(--fg-50)"}}>{data.layer}</span></div>
+        <h2 style={{margin:"12px 0 6px",fontSize:22,letterSpacing:"-.02em"}}>{data.title}</h2>
+        <p style={{margin:0,color:"var(--fg-60)",fontSize:13,lineHeight:1.65}}>{data.summary}</p>
+        <div style={{marginTop:16,padding:12,borderRadius:10,background:"var(--fg-3)",border:"1px solid var(--border)"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--fg-50)",letterSpacing:".08em"}}>要改什么</div>
+          {data.changes.map((x,i)=><div key={x} style={{display:"flex",gap:8,marginTop:10,fontSize:13,lineHeight:1.45}}><span style={{color:"var(--accent)",fontFamily:"var(--font-mono)"}}>{i+1}</span><span>{x}</span></div>)}
+        </div>
+        <div style={{marginTop:16}}><div style={{fontSize:11,fontWeight:700,color:"var(--fg-50)",letterSpacing:".08em"}}>切换 Mock 状态</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{data.states.map((s,i)=><Btn key={s} active={state===s} onClick={()=>setState(s)}>{data.labels[i]}</Btn>)}</div></div>
+        <div style={{marginTop:18}}><div style={{fontSize:11,fontWeight:700,color:"var(--fg-50)",letterSpacing:".08em"}}>主要代码接缝</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{data.seams.map(x=><code key={x} style={{padding:"4px 7px",borderRadius:5,background:"var(--fg-5)",fontFamily:"var(--font-mono)",fontSize:10,color:"var(--fg-60)"}}>{x}</code>)}</div></div>
+        {task!=="50"&&<div style={{marginTop:18,padding:12,borderLeft:"3px solid var(--accent)",borderRadius:"0 8px 8px 0",background:"color-mix(in srgb,var(--accent) 5%,transparent)",fontSize:12,lineHeight:1.55}}><strong>与 POO-50 的重叠：</strong>{task==="44"?"共同触碰 ChatPage、输入区和 App 壳层状态传递。":task==="48"?"共同触碰 Session 持久化、metadata、IPC/RPC 和切换清理。":"共同触碰输入区接管、草稿保存、发送阻断和恢复优先级。"}</div>}
+      </aside>;
+    }
+
+    const SPACES = {
+      personal:{name:"Personal · 铭龙",sessions:["项目删除流程","整理研究资料","个人周报"],skill:"Writing Assistant",attachment:"audit-notes.md"},
+      enterprise:{name:"Acme Enterprise",sessions:["Q4 发布检查","客户工单归因","安全审计"],skill:"Enterprise Policy",attachment:"release-checklist.pdf"}
+    };
+
+    function QuestionComposer({onCancel}) {
+      const [choice,setChoice]=useState("");
+      return <div style={{minHeight:238,display:"flex",flexDirection:"column",overflow:"hidden",borderRadius:12,border:"1px solid var(--border)",background:"var(--background)",boxShadow:"0 4px 12px rgba(0,0,0,.06)",animation:"enter .18s ease"}}>
+        <div style={{padding:14,flex:1}}><div style={{display:"flex",justifyContent:"space-between",gap:12}}><div><strong style={{fontSize:14}}>删除方式</strong><p style={{margin:"5px 0 12px",fontSize:13,color:"var(--fg-60)"}}>删除项目后，相关数据应该如何处理？</p></div><span style={{height:22,padding:"0 8px",display:"grid",placeItems:"center",borderRadius:99,background:"var(--fg-5)",fontSize:11,color:"var(--fg-50)"}}>1 / 2</span></div>
+          {[['trash','移到废纸篓','推荐，可在 30 天内恢复'],['delete','永久删除','立即清除且无法恢复'],['other','其他','输入不同的处理方式']].map(([id,label,desc],i)=><button key={id} onClick={()=>setChoice(id)} style={{width:"100%",display:"flex",alignItems:"flex-start",gap:10,padding:"11px 12px",border:"1px solid var(--border)",borderBottom:i===2?"1px solid var(--border)":0,borderRadius:i===0?"8px 8px 0 0":i===2?"0 0 8px 8px":0,background:choice===id?"var(--fg-5)":"transparent",textAlign:"left",cursor:"pointer"}}><span style={{width:16,height:16,marginTop:1,borderRadius:99,border:`2px solid ${choice===id?'var(--accent)':'var(--fg-30)'}`,display:"grid",placeItems:"center"}}>{choice===id&&<span style={{width:7,height:7,borderRadius:99,background:"var(--accent)"}}/>}</span><span><span style={{fontSize:13,fontWeight:600}}>{label}</span>{id==='trash'&&<span style={{marginLeft:8,padding:"2px 5px",borderRadius:4,color:"var(--accent)",background:"color-mix(in srgb,var(--accent) 8%,transparent)",fontSize:9}}>推荐</span>}<small style={{display:"block",marginTop:2,color:"var(--fg-50)"}}>{desc}</small></span></button>)}
+        </div><div style={{display:"flex",alignItems:"center",gap:7,padding:9,borderTop:"1px solid var(--border)"}}><span style={{flex:1,fontSize:10,color:"var(--fg-50)"}}>问题期间 Agent 已 handoff，普通输入草稿保留</span><Btn onClick={onCancel}>暂不回答</Btn><Btn kind="primary" disabled={!choice}>下一步</Btn></div>
+      </div>;
+    }
+
+    function CreditCard({role="owner",tail=false,onUnlock}) {
+      const [phase,setPhase]=useState("blocked"), [checks,setChecks]=useState(0);
+      const owner=role==="owner";
+      const act=()=>owner?setPhase("recharge"):setPhase("notified");
+      const check=()=>{const n=checks+1;setChecks(n);if(n>1){setPhase("done");onUnlock?.();}else setPhase("pending")};
+      return <div style={{marginTop:tail?10:0,overflow:"hidden",border:"1px solid color-mix(in srgb,var(--destructive) 22%,transparent)",borderRadius:9,background:"color-mix(in srgb,var(--destructive) 3%,var(--background))"}}><div style={{display:"flex",gap:10,padding:12}}><span style={{width:28,height:28,display:"grid",placeItems:"center",borderRadius:8,color:"var(--destructive)",background:"color-mix(in srgb,var(--destructive) 10%,transparent)"}}><I d={icons.card} size={15}/></span><div><strong style={{fontSize:13,color:"var(--destructive)"}}>{tail?"生成因积分不足而停止":"当前 ProductSpace 积分不足"}</strong><div style={{marginTop:3,fontSize:12,color:"var(--fg-60)"}}>{tail?"部分回答已保留；充值后不会自动续写。":"消息未发送；草稿和附件保持不变。"}</div></div></div><div style={{display:"flex",alignItems:"center",gap:7,padding:8,borderTop:"1px solid var(--border)"}}><small style={{flex:1,color:phase==="pending"?"var(--destructive)":"var(--fg-50)"}}>{phase==="pending"?"暂未到账，可再次手动查询":phase==="done"?"已到账；仅解除阻断，不自动发送":phase==="notified"?"已通知 Owner":"只在点击时查询一次"}</small>{phase==="blocked"||phase==="notified"?<Btn kind="primary" onClick={act}><I d={owner?icons.card:icons.bell} size={13}/>{owner?"去充值":"通知 Owner"}</Btn>:phase!=="done"?<Btn kind="primary" onClick={check}><I d={icons.check} size={13}/>已完成，查询结果</Btn>:null}</div></div>;
+    }
+
+    function Chat({task,state,space,setSpace}) {
+      const data=SPACES[space];
+      const [draft,setDraft]=useState("继续补充：删除前导出审计记录"), [question,setQuestion]=useState(task==="50"), [unlocked,setUnlocked]=useState(false);
+      const foreign=task==="48"&&state==="foreign", running=task==="48"&&state==="running", pre=task==="49"&&state.startsWith("pre"), mid=task==="49"&&state==="mid", role=state==="pre-member"?"member":"owner";
+      React.useEffect(()=>{setQuestion(task==="50");setUnlocked(false)},[task,state]);
+      if(foreign)return <section style={{height:"100%",display:"grid",placeItems:"center",padding:24,borderRadius:14,background:"var(--background)",boxShadow:"0 0 0 1px var(--border)"}}><div style={{maxWidth:380,textAlign:"center"}}><span style={{width:44,height:44,margin:"0 auto 12px",display:"grid",placeItems:"center",borderRadius:10,color:"var(--destructive)",background:"color-mix(in srgb,var(--destructive) 8%,transparent)"}}><I d={icons.lock} size={21}/></span><h3 style={{margin:"0 0 6px",fontSize:15}}>无法打开此会话</h3><p style={{margin:0,color:"var(--fg-50)",fontSize:13,lineHeight:1.55}}>该 ID 属于另一个 ProductSpace。不会显示它是否存在，也不会回退读取消息、附件、Skill 或执行状态。</p><code style={{display:"block",marginTop:14,paddingTop:12,borderTop:"1px solid var(--border)",color:"var(--fg-40)",fontSize:10}}>NOT_FOUND · fail closed</code></div></section>;
+      return <section style={{height:"100%",minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden",borderRadius:14,background:"var(--background)",boxShadow:"0 0 0 1px var(--border),0 4px 12px rgba(0,0,0,.07)"}}>
+        <header style={{height:42,display:"flex",alignItems:"center",gap:8,padding:"0 10px 0 16px",borderBottom:"1px solid var(--fg-7)"}}><strong style={{fontSize:14}}>项目删除流程</strong><span style={{flex:1}}/><span style={{height:23,padding:"0 8px",display:"inline-flex",alignItems:"center",gap:6,borderRadius:6,background:"var(--fg-5)",fontSize:11,color:"var(--fg-50)"}}><i style={{width:7,height:7,borderRadius:99,background:"var(--success)"}}/>{data.name}</span></header>
+        {running&&<div style={{margin:8,padding:10,borderRadius:8,background:"color-mix(in srgb,var(--info) 9%,transparent)",color:"var(--info)",fontSize:12}}>正在运行的任务绑定 {data.name}。切换前必须安全停止；本 Mock 模拟停止失败，因此仍停留在原空间。</div>}
+        <main style={{flex:1,minHeight:0,overflow:"auto"}}><div style={{maxWidth:760,margin:"0 auto",padding:"28px 20px"}}><div style={{display:"flex",justifyContent:"flex-end"}}><p style={{maxWidth:"80%",margin:0,padding:"10px 14px",border:"1px solid var(--border)",borderRadius:10,background:"var(--user-bubble)",fontSize:14}}>把项目删除流程补完整。</p></div><p style={{margin:"18px 0 0",paddingLeft:22,fontSize:14,lineHeight:1.65}}>好的。我会沿用现有 SessionList、ChatPage、消息和输入框。当前会话使用 <strong>{data.skill}</strong>，附件是 <strong>{data.attachment}</strong>。</p>{mid&&<><p style={{margin:"18px 0 0",paddingLeft:22,fontSize:14,lineHeight:1.65}}>我已经补充了确认和审计记录，接下来会继续处理通知范围与权限校验……</p><div style={{paddingLeft:22}}><CreditCard role="owner" tail/></div></>}</div></main>
+        <div style={{maxWidth:760,width:"100%",margin:"0 auto",padding:"0 16px 16px"}}>{question?<QuestionComposer onCancel={()=>setQuestion(false)}/>:<>{pre&&!unlocked&&<div style={{marginBottom:8}}><CreditCard role={role} onUnlock={()=>setUnlocked(true)}/></div>}<div style={{overflow:"hidden",border:"1px solid var(--border)",borderRadius:12,background:"var(--background)",boxShadow:"0 3px 8px rgba(0,0,0,.05)"}}><textarea value={draft} onChange={e=>setDraft(e.target.value)} placeholder="你想处理什么？" style={{width:"100%",minHeight:76,padding:"14px 16px",resize:"none",border:0,outline:0,background:"transparent"}}/><div style={{display:"flex",alignItems:"center",gap:5,padding:8,borderTop:"1px solid var(--border)"}}><Btn><I d={icons.attach} size={14}/>附件</Btn><Btn><I d={icons.db} size={14}/>Sources</Btn><span style={{flex:1}}/><button disabled={pre&&!unlocked} style={{width:28,height:28,display:"grid",placeItems:"center",border:0,borderRadius:99,color:"var(--background)",background:pre&&!unlocked?"var(--fg-10)":"var(--foreground)",opacity:pre&&!unlocked?.45:1}}><I d={icons.send} size={14}/></button></div></div></>}</div>
+      </section>;
+    }
+
+    function PoloStage({task,state}) {
+      const [space,setSpace]=useState("personal");
+      const data=SPACES[space];
+      const sessions=task==="48"?data.sessions:SPACES.personal.sessions;
+      return <div data-stage style={{height:"100%",minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid var(--border)",borderRadius:14,background:"var(--bg-elevated)",boxShadow:"0 12px 36px rgba(0,0,0,.08)"}}>
+        <div style={{height:36,display:"flex",alignItems:"flex-end",gap:4,padding:"0 8px 0 72px",borderBottom:"1px solid var(--fg-10)",background:"var(--background)"}}><button style={{width:28,height:28,marginBottom:4,border:0,borderRadius:6,background:"var(--fg-5)"}}><I d={icons.home} size={15}/></button><button style={{height:32,minWidth:170,padding:"0 9px",display:"flex",alignItems:"center",gap:7,border:"1px solid var(--border)",borderBottomColor:"var(--background)",borderRadius:"7px 7px 0 0",background:"var(--fg-5)"}}><span style={{color:"var(--accent)",display:"flex"}}><Polo/></span><span style={{flex:1,textAlign:"left",fontSize:12}}>Polo 助手</span><I d={icons.x} size={12}/></button></div>
+        <div data-global-header style={{height:48,display:"flex",alignItems:"center",gap:8,padding:"0 12px",background:"var(--background)"}}><span style={{padding:"4px 7px",borderRadius:6,color:"var(--accent)",background:"color-mix(in srgb,var(--accent) 8%,transparent)"}}><Polo size={18}/></span><strong style={{fontSize:13}}>统一客户端外壳</strong><span style={{flex:1}}/><span style={{fontSize:10,color:"var(--fg-40)"}}>账号 / ProductSpace / App 目录 / 全局设置只在这里</span>{task==="48"?<div style={{display:"flex",gap:5}}>{Object.entries(SPACES).map(([id,s])=><Btn key={id} active={space===id} onClick={()=>state==="running"?null:setSpace(id)}>{s.name.split(" · ")[0]}</Btn>)}</div>:<Btn>Personal</Btn>}<Btn>App 目录</Btn><Btn>铭龙</Btn></div>
+        <div style={{flex:1,minHeight:0,display:"flex",gap:6,padding:"0 6px 6px"}}>
+          <aside data-assistant-sidebar style={{width:184,flex:"0 0 184px",padding:"4px 8px 12px"}}><Btn style={{width:"100%",justifyContent:"flex-start",marginBottom:9}}>＋ 新建会话</Btn>{[[icons.list,"全部会话"],[icons.db,"Sources"],[icons.skill,"Skills"],[icons.auto,"Automations"],[icons.browser,"Browser"]].map(([icon,label],i)=><button key={label} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"6px 8px",border:0,borderRadius:6,background:i===0?"var(--fg-7)":"transparent",fontSize:12,textAlign:"left"}}><I d={icon} size={14}/>{label}</button>)}<div style={{marginTop:14,padding:"9px 8px",borderRadius:8,border:"1px dashed var(--fg-20)",fontSize:10,lineHeight:1.45,color:"var(--fg-50)"}}>POO-44：这里不再出现账号、空间切换、App 目录、退出登录。</div></aside>
+          <aside data-session-panel style={{width:248,flex:"0 0 248px",overflow:"hidden",borderRadius:10,background:"var(--background)",boxShadow:"0 0 0 1px var(--border)"}}><div style={{padding:12,borderBottom:"1px solid var(--border)"}}><strong style={{fontSize:13}}>会话</strong><div style={{marginTop:8,padding:"7px 9px",borderRadius:7,background:"var(--fg-3)",fontSize:11,color:"var(--fg-40)"}}>搜索当前 ProductSpace</div></div><div style={{padding:7}}>{sessions.map((s,i)=><div key={s} style={{padding:"9px 10px",borderRadius:7,background:i===0?"var(--fg-7)":"transparent"}}><div style={{fontSize:12,fontWeight:i===0?600:400}}>{s}</div><small style={{display:"block",marginTop:3,color:"var(--fg-40)"}}>{task==="48"?data.name:"今天"}</small></div>)}</div></aside>
+          <main style={{flex:1,minWidth:0}}><Chat task={task} state={state} space={space} setSpace={setSpace}/></main>
+        </div>
+      </div>;
+    }
+
+    function App() {
+      const query=useMemo(()=>new URLSearchParams(window.location.search),[]);
+      const initialTask=TASKS[query.get("task")]?query.get("task"):"44";
+      const initialState=TASKS[initialTask].states.includes(query.get("state"))?query.get("state"):TASKS[initialTask].states[0];
+      const initialTheme=query.get("theme")==="dark"?"dark":"light";
+      const [task,setTask]=useState(initialTask), [state,setState]=useState(initialState), [theme,setTheme]=useState(initialTheme);
+      React.useEffect(()=>{document.documentElement.dataset.theme=theme},[]);
+      const choose=t=>{setTask(t);setState(TASKS[t].states[0])};
+      const toggle=()=>{const n=theme==="light"?"dark":"light";setTheme(n);document.documentElement.dataset.theme=n};
+      return <div style={{height:"100%",display:"flex",flexDirection:"column",background:"linear-gradient(135deg,var(--background),var(--fg-3))"}}>
+        <header style={{minHeight:68,display:"flex",alignItems:"center",gap:14,padding:"10px 18px",borderBottom:"1px solid var(--border)",background:"color-mix(in srgb,var(--background) 92%,transparent)"}}><div><div style={{fontSize:15,fontWeight:700}}>Polo 助手 Stage 4 · 改动说明 Mock</div><div style={{marginTop:3,fontSize:11,color:"var(--fg-50)"}}>点击任务和状态，观察“外壳、数据归属、积分恢复、交互提问”分别改变哪一层</div></div><nav style={{display:"flex",gap:6,marginLeft:10}}>{Object.entries(TASKS).map(([id,t])=><Btn key={id} active={task===id} onClick={()=>choose(id)}><span style={{fontFamily:"var(--font-mono)",color:task===id?"var(--accent)":"var(--fg-50)"}}>POO-{id}</span>{t.title}</Btn>)}</nav><span style={{flex:1}}/><Btn onClick={toggle}><I d={icons.moon} size={14}/>{theme==="light"?"深色":"浅色"}</Btn></header>
+        <main data-layout style={{flex:1,minHeight:0,display:"flex",gap:12,padding:12}}><Inspector task={task} state={state} setState={setState}/><div style={{flex:1,minWidth:0}}><PoloStage task={task} state={state}/></div></main>
+      </div>;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

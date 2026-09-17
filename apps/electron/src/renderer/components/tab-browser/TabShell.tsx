@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
-import { AddAppDialog } from './AddAppDialog'
 import { useTabShell } from '@/context/TabShellContext'
+import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
@@ -17,27 +17,47 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function TabShell({ renderPolo }: TabShellProps) {
-  const { activeTab, openTabs, activeTabId, activateHome, activateTab, closeTab } = useTabShell()
-  const [addAppOpen, setAddAppOpen] = useState(false)
+  const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
+  // Frozen narrow-window boundary (Review R38, restores the POO-41 contract):
+  // at/below the frozen 640px line EVERY route fails closed to the frozen
+  // WindowWidthGuard — the POO-41 authoritative 390x844 result is the guard
+  // screen, not a narrow work surface. Hook order is untouched: the hook is
+  // read before every early return and the decision renders after all hooks.
+  const narrowViewport = useNarrowViewport()
 
   useEffect(() => {
     const root = document.documentElement
+    // Scope-neutral pre-hydration (Review R33/R34): the process-global tab
+    // atoms still hold the PREVIOUS scope's route until hydration completes —
+    // never publish a stale route marker; leave the root marker neutral.
+    if (!isReady) {
+      delete root.dataset.activeTab
+      return () => {
+        delete root.dataset.activeTab
+      }
+    }
     root.dataset.activeTab = activeTab.type
     return () => {
       delete root.dataset.activeTab
     }
-  }, [activeTab.type])
+  }, [isReady, activeTab.type])
 
   useEffect(() => {
+    // Scope-neutral pre-hydration (Review R33/R34): do not register the
+    // deep-link handler with closures over the previous scope's tabs.
+    if (!isReady) return
     return window.electronAPI.onDeepLinkNavigate((nav) => {
       if (nav.view || nav.action || nav.joinToken || nav.tabType === 'polo') {
         const poloTab = openTabs.find((tab) => tab.type === 'polo')
         if (poloTab) activateTab(poloTab.id)
       }
     })
-  }, [activateTab, openTabs])
+  }, [isReady, activateTab, openTabs])
 
   useEffect(() => {
+    // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay
+    // unregistered until the keyed provider establishes the new scope.
+    if (!isReady) return
     const handleKeyDown = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey
       if (!mod || event.altKey || isEditableTarget(event.target)) return
@@ -81,13 +101,35 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activateHome, activateTab, activeTabId, closeTab, openTabs])
+  }, [isReady, activateHome, activateTab, activeTabId, closeTab, openTabs])
+
+  // PRE-HYDRATION FAIL-CLOSED boundary (Review R33 security finding):
+  // `openTabsAtom`/`activeTabAtom` are process-global and still hold the
+  // PREVIOUS account/ProductSpace scope's tab titles, URLs and active route
+  // until this keyed provider's hydration establishes the NEW scope. The
+  // hook-order-safe early return renders a scope-neutral boundary on EVERY
+  // width — the stale TabBar/TabContent/webview/active route can never be
+  // mounted or displayed, and it must not resurface on scope switches.
+  if (!isReady) {
+    return (
+      <div
+        className="h-full min-h-0 bg-background"
+        data-testid="shell-scope-loading"
+      />
+    )
+  }
+
+  // Narrow-route guard decision lives AFTER every hook in this component:
+  // rendering the frozen guard must not change the hook count between
+  // renders (React "fewer hooks" crash on route transitions).
+  if (narrowViewport) {
+    return <WindowWidthGuard />
+  }
 
   return (
     <div className="h-full min-h-0 bg-background">
       <TabBar />
-      <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
-      <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
+      <TabContent renderPolo={renderPolo} />
     </div>
   )
 }

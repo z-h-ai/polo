@@ -87,13 +87,40 @@ socket and adds the challenge response header in its built-in static server.
 
 Dynamic runtimes receive `PORT`, `HOST=127.0.0.1`, `POLO_APP_ID`,
 `POLO_APP_VERSION`, `POLO_APP_DATA_DIR`, `POLO_APP_BUNDLE_DIR`, and the
-per-start `POLO_APP_HEALTH_TOKEN`. Runtime cache paths are isolated by app and
-version. User data is stored outside version directories and survives updates
-and normal uninstall. The parent Polo environment is not inherited: only
-runtime essentials (`PATH`, temporary directory variables, locale/timezone,
-and required Windows system variables) plus the documented app variables are
-passed through. Polo credentials, service tokens, proxy credentials, and
-internal configuration are not exposed.
+per-start `POLO_APP_HEALTH_TOKEN`.
+
+Trusted dynamic runtimes (`python`/`js`) additionally receive two per-launch
+loopback API variables, injected fresh at each process start:
+
+- `POLO_APP_API_URL` — the local loopback URL of the app API gateway
+  (`/local-app-api/v1`).
+- `POLO_APP_API_TOKEN` — a generation-bound bearer token for that gateway.
+  It is signed exactly once per process generation and is used by the trusted
+  dynamic runtime for repeated authentication of every API request (run/start,
+  ai/query, run/finish, result/report, file/report) until the token is revoked
+  or reaches its fixed 24-hour expiry. It is a temporary App runtime credential,
+  but not a user, account, or Polo service credential.
+
+The API token is secret and ephemeral:
+
+- It must never be persisted or recorded: not written to logs, snapshots,
+  crash reports, exports, or any other artifact. Polo redacts the token from
+  captured runtime output; Apps must not echo it into their own logs or
+  responses.
+- It is revoked when the runtime generation it was signed for stops — on
+  stop, restart, replacement by a newer generation, capability expiry, and
+  coordinator shutdown. A revoked token is rejected by the gateway.
+
+Static runtimes do not receive these two variables: Polo owns their listening
+socket and their static-serving boundary remains as documented below.
+
+Runtime cache paths are isolated by app and version. User data is stored
+outside version directories and survives updates and normal uninstall. The
+parent Polo environment is not inherited: only runtime essentials (`PATH`,
+temporary directory variables, locale/timezone, and required Windows system
+variables) plus the documented app variables are passed through. Polo
+credentials, service tokens, proxy credentials, and internal configuration
+are not exposed.
 
 Runtime stdout/stderr is batched into bounded, rotating per-App logs. Log tail
 queries read backward from the current/rotated files instead of loading the

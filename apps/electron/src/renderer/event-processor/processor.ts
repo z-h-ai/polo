@@ -46,6 +46,8 @@ import {
   handleSessionUnshared,
   handleAuthRequest,
   handleAuthCompleted,
+  handleQuestionRequest,
+  handleQuestionResolved,
   handleUsageUpdate,
 } from './handlers/session'
 
@@ -179,6 +181,12 @@ export function processEvent(
 
     case 'credential_request':
       return handleCredentialRequest(state, event)
+
+    case 'question_request':
+      return handleQuestionRequest(state, event)
+
+    case 'question_resolved':
+      return handleQuestionResolved(state, event)
 
     case 'plan_submitted':
       return handlePlanSubmitted(state, event)

@@ -1,0 +1,99 @@
+<!DOCTYPE html><html lang="zh-Hans" data-theme="light" data-viewport="desktop" data-scene="space-home"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Polo POO-43 Home（对齐参考 · 快捷入口 + 管理首页 Apps）</title>
+  <style>
+:root {
+  color-scheme: light;
+  --background: oklch(.985 .004 270);
+  --surface: #fff;
+  --foreground: oklch(.19 .012 270);
+  --muted: oklch(.52 .012 270);
+  --border: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --accent: #6e56cf;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --success: #27956a;
+  --success-soft: color-mix(in srgb, var(--success) 11%, transparent);
+  --shadow: 0 1px 2px rgb(25 23 32 / 8%), 0 8px 22px rgb(25 23 32 / 4%);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(.16 .014 270);
+  --surface: oklch(.205 .014 270);
+  --foreground: oklch(.94 .008 270);
+  --muted: oklch(.68 .01 270);
+  --border: color-mix(in srgb, var(--foreground) 12%, var(--background));
+  --accent: #a98be1;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --success: #62c99a;
+  --success-soft: color-mix(in srgb, var(--success) 14%, transparent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 26px rgb(0 0 0 / 16%);
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; background: var(--background); color: var(--foreground); font-family: Inter, "PingFang SC", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+button { color: inherit; font: inherit; cursor: pointer; }
+
+.main { width: 100%; max-width: 1260px; margin: 0 auto; padding: 46px 44px 72px; overflow-y: auto; }
+
+.hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.hero h1 { margin: 0; font-size: 36px; line-height: 1.08; letter-spacing: -.05em; }
+.lead { max-width: 690px; margin: 13px 0 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+.quiet-link { display: inline-flex; min-height: 32px; align-items: center; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 12px; }
+.quiet-link:hover { background: color-mix(in srgb, var(--foreground) 5%, transparent); color: var(--foreground); }
+
+.section { margin-top: 34px; }
+.section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.section-head h2 { margin: 0; font-size: 20px; line-height: normal; letter-spacing: -.03em; }
+.section-head p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.head-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+
+.card { display: flex; min-height: 222px; flex-direction: column; padding: 20px; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); box-shadow: var(--shadow); }
+.art { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: 26px; border-radius: 13px; background: var(--success-soft); color: var(--success); font-size: 17px; }
+.assistant .art { background: var(--accent-soft); color: var(--accent); }
+.card h3 { margin: 0; font-size: 16px; line-height: normal; }
+.source { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: normal; }
+.description { margin: 17px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-top: auto; padding-top: 14px; }
+.button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--foreground); font-size: 12px; font-weight: 550; }
+.button.primary { border-color: var(--accent); background: var(--accent); color: white; font-weight: 600; }
+.button.ghost { border-color: transparent; color: var(--muted); }
+.button.ghost:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); color: var(--foreground); }
+
+.guard { display: none; position: fixed; z-index: 20; inset: 0; place-items: center; padding: 24px; background: var(--background); text-align: center; }
+.guard div { max-width: 320px; }
+.guard h1 { font-size: 24px; }
+.guard p { color: var(--muted); font-size: 14px; line-height: 1.55; }
+
+@media (max-width: 1080px) {
+  .main { padding: 36px 26px 58px; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card { min-height: 210px; padding: 18px; }
+}
+
+@media (max-width: 640px) {
+  .guard { display: grid; }
+  body { visibility: hidden; }
+  .guard { visibility: visible; }
+}
+  </style>
+</head>
+<body>
+  <div class="guard" aria-hidden="true"><div><p class="eyebrow">窗口保护</p><h1>窗口过窄</h1><p>请放大 Polo 窗口后继续使用工作台。Polo 客户端面向桌面窗口。</p></div></div>
+  <main id="app">
+    <section class="main">
+      <div class="hero"><div><h1>早上好</h1><p class="lead">在 <strong>我的空间</strong> 继续今天的工作。Apps、文件和运行状态始终跟随当前空间。</p></div><button class="quiet-link">我的圈子 · 3 个</button></div>
+      <section class="section">
+        <div class="section-head"><div><h2>常用 Apps</h2><p>Polo 助手固定在第一位，其余入口来自我的空间。</p></div><div class="head-actions"><button class="quiet-link">管理首页 Apps</button><button class="quiet-link">全部 Apps</button></div></div>
+        <div class="grid">
+          <article class="card assistant"><span class="art">✦</span><h3>Polo 助手</h3><p class="source">Polo 内置</p><p class="description">使用当前空间已经启用的 Skills 完成研究、整理和执行。</p><div class="actions"><button class="button primary">打开助手</button></div></article>
+          <article class="card"><span class="art">▣</span><h3>客户访谈整理</h3><p class="source">认证创作者 · 北极星共创社</p><p class="description">把录音与笔记整理为可审核洞察。</p><div class="actions"><button class="button ghost">打开</button></div></article>
+          <article class="card"><span class="art">▦</span><h3>素材清洗器</h3><p class="source">认证创作者 · 北极星共创社</p><p class="description">检查格式与字段，首次打开时会准备所需资源。</p><div class="actions"><button class="button ghost">打开</button></div></article>
+        </div>
+      </section>
+    </section>
+  </main>
+</body></html>

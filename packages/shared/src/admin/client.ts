@@ -44,6 +44,12 @@ import {
   type AdminPlatformRelease,
   type AdminSignedUpload,
   type AdminPlatformReleaseInput,
+  type AdminStartAppRunInput,
+  type AdminStartAppRunResponse,
+  type AdminRecordAppUsageInput,
+  type AdminRecordAppUsageResponse,
+  type AdminFinishAppRunInput,
+  type AdminFinishAppRunResponse,
 } from './types.ts';
 import { z, type ZodType } from 'zod';
 import {
@@ -81,7 +87,30 @@ import {
   AdminPlatformAppSchema,
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
+  AdminStartAppRunResponseSchema,
+  AdminRecordAppUsageResponseSchema,
+  AdminFinishAppRunResponseSchema,
 } from './schemas.ts';
+import {
+  createResolveLaunchPath,
+  createProductSpaceCatalogPath,
+  ListProductSpacesResponseSchema,
+  parseResolveLaunchResponseForProductSpace,
+  parseProductSpaceCatalogResponseForProductSpace,
+  PRODUCT_SPACE_CONTRACT_VERSION,
+  ProductSpaceResponsePathError,
+  ProductSpaceResponseScopeError,
+} from '../product-spaces/index.ts';
+import type {
+  ListProductSpacesResponse,
+  ResolveLaunchRequest,
+  ResolveLaunchResponse,
+} from '../product-spaces/types.ts';
+import type { CatalogEntryId } from '../product-spaces/ids.ts';
+import type {
+  TrustedProductSpaceCatalog,
+  TrustedProductSpaceSummary,
+} from '../product-spaces/schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -136,6 +165,8 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'upload_expired',
   'checksum_mismatch',
   'content_digest_mismatch',
+  'insufficient_credit',
+  'run_finalized',
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -153,6 +184,7 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
 };
 
 const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+  product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
   ACCOUNT_DISABLED: 'Admin account is disabled',
   TOKEN_REVOKED: 'Admin session is no longer valid',
@@ -205,6 +237,9 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   upload_expired: 'The upload address has expired',
   checksum_mismatch: 'The downloaded ZIP failed its checksum check',
   content_digest_mismatch: 'The extracted Skill content failed its integrity check',
+  account_transition_pending: 'The previous account is still shutting down. Retry the sign-in.',
+  insufficient_credit: 'This App has insufficient credit for the request',
+  run_finalized: 'This App run is already finalized',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
@@ -361,6 +396,127 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  /**
+   * Reads the ProductSpace v1 contract list. A response written for a
+   * different contractVersion fails closed with a dedicated error code so the
+   * client can block business surfaces instead of guessing.
+   */
+  async listProductSpaces(accessToken: string): Promise<ListProductSpacesResponse> {
+    const response = await this.request<unknown>(
+      '/api/me/product-spaces',
+      { method: 'GET', accessToken },
+    );
+    const parsed = ListProductSpacesResponseSchema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    const rawVersion = response
+      && typeof response === 'object'
+      && !Array.isArray(response)
+      ? (response as Record<string, unknown>).contractVersion
+      : undefined;
+    if (
+      rawVersion !== undefined
+      && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+    ) {
+      throw new AdminError(
+        'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+        'product_space_contract_unsupported',
+      );
+    }
+    throw new AdminError('ProductSpace list response is invalid', 'SERVER_ERROR');
+  }
+
+  /**
+   * Reads the unified ProductSpace Catalog and validates it against the
+   * trusted space summary at the client boundary. A valid DTO for another
+   * ProductSpace is rejected, never hydrated.
+   */
+  async getProductSpaceCatalog(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    knownRevision?: string,
+  ): Promise<TrustedProductSpaceCatalog | { notModified: true }> {
+    const query = new URLSearchParams();
+    if (knownRevision) query.set('revision', knownRevision);
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const response = await this.request<unknown>(
+      `${createProductSpaceCatalogPath(context.id)}${suffix}`,
+      { method: 'GET', accessToken, allowNotModified: true },
+    );
+    if (response === undefined) return { notModified: true };
+    try {
+      return parseProductSpaceCatalogResponseForProductSpace(response, context);
+    } catch (error) {
+      if (error instanceof ProductSpaceResponseScopeError || error instanceof ProductSpaceResponsePathError) {
+        throw new AdminError(
+          'ProductSpace catalog response failed the space boundary check',
+          'SERVER_ERROR',
+          { cause: error },
+        );
+      }
+      const rawVersion = response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        ? (response as Record<string, unknown>).contractVersion
+        : undefined;
+      if (
+        rawVersion !== undefined
+        && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+      ) {
+        throw new AdminError(
+          'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+          'product_space_contract_unsupported',
+        );
+      }
+      throw new AdminError('ProductSpace catalog response is invalid', 'SERVER_ERROR', { cause: error });
+    }
+  }
+
+  /**
+   * Resolves one exact Catalog entry for launch. The response is checked
+   * against both the trusted ProductSpace summary and the fresh Catalog used
+   * for this request, so an old id or a cross-space response fails closed.
+   */
+  async resolveProductSpaceLaunch(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    catalog: TrustedProductSpaceCatalog,
+    catalogEntryId: CatalogEntryId,
+    input: ResolveLaunchRequest,
+  ): Promise<ResolveLaunchResponse> {
+    const response = await this.request<unknown>(
+      createResolveLaunchPath(context.id, catalogEntryId),
+      { method: 'POST', accessToken, body: input },
+    );
+    try {
+      return parseResolveLaunchResponseForProductSpace(
+        response,
+        context,
+        catalog,
+        catalogEntryId,
+      );
+    } catch (error) {
+      const rawVersion = response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        ? (response as Record<string, unknown>).contractVersion
+        : undefined;
+      if (
+        rawVersion !== undefined
+        && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+      ) {
+        throw new AdminError(
+          'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+          'product_space_contract_unsupported',
+        );
+      }
+      throw new AdminError(
+        'ProductSpace launch response failed the Catalog boundary check',
+        'SERVER_ERROR',
+        { cause: error },
+      );
+    }
   }
 
   async getAppCatalog(
@@ -918,6 +1074,53 @@ export class AdminClient {
     return status;
   }
 
+  /**
+   * POL-102: starts one trusted App Run. Identity/workspace fields are
+   * capability-re-derived by the caller; payer/price stay server-side.
+   */
+  async startAppRun(
+    accessToken: string,
+    input: AdminStartAppRunInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminStartAppRunResponse> {
+    const response = await this.request<unknown>('/api/billing/runs', {
+      method: 'POST',
+      accessToken,
+      body: input,
+      signal: options?.signal,
+    });
+    return this.readSuccessResponse(response, AdminStartAppRunResponseSchema);
+  }
+
+  /** POL-102: records one idempotent (runId, requestId) usage receipt. */
+  async recordAppUsage(
+    accessToken: string,
+    input: AdminRecordAppUsageInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminRecordAppUsageResponse> {
+    const response = await this.request<unknown>('/api/billing/usage', {
+      method: 'POST',
+      accessToken,
+      body: input,
+      signal: options?.signal,
+    });
+    return this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+  }
+
+  /** POL-102: finishes an App Run with an idempotent terminal status. */
+  async finishAppRun(
+    accessToken: string,
+    runId: string,
+    input: AdminFinishAppRunInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<AdminFinishAppRunResponse> {
+    const response = await this.request<unknown>(
+      `/api/billing/runs/${encodeURIComponent(runId)}`,
+      { method: 'PATCH', accessToken, body: input, signal: options?.signal },
+    );
+    return this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+  }
+
   private async request<T>(path: string, options: {
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     accessToken?: string;
@@ -925,6 +1128,7 @@ export class AdminClient {
     headers?: Record<string, string>;
     retryingAfterRefresh?: boolean;
     allowNotModified?: boolean;
+    signal?: AbortSignal;
   }): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
@@ -938,6 +1142,11 @@ export class AdminClient {
     }
 
     const controller = new AbortController();
+    const callerSignal = options.signal;
+    const abortFromCaller = () =>
+      controller.abort(new AdminError('Admin request was aborted', 'NETWORK_ERROR'));
+    if (callerSignal?.aborted) abortFromCaller();
+    else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
     let timedOut = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const timeoutError = new AdminError(
@@ -983,6 +1192,7 @@ export class AdminClient {
       }
     } finally {
       if (timeout) clearTimeout(timeout);
+      callerSignal?.removeEventListener('abort', abortFromCaller);
     }
 
     if (!response) {

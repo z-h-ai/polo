@@ -6,7 +6,7 @@
  */
 
 import type { CredentialBackend } from './backends/types.ts';
-import type { CredentialCompareAndSwapResult } from './backends/types.ts';
+import type { CredentialCompareAndSwapResult, CredentialPresenceStatus } from './backends/types.ts';
 import type { CredentialId, CredentialType, StoredCredential, CredentialHealthStatus, CredentialHealthIssue } from './types.ts';
 import type { LlmAuthType, LlmProviderType } from '../config/llm-connections.ts';
 import { SecureStorageBackend } from './backends/secure-storage.ts';
@@ -355,6 +355,51 @@ export class CredentialManager {
   }
 
   /** Get admin access/refresh tokens. */
+  /**
+   * Discriminative admin-credential presence inspection for startup
+   * restore. `absent` requires every backend to support the inspection AND
+   * confirm the credential does not exist; any backend that reports the
+   * credential exists but cannot be read, decrypted or validated — or a
+   * backend that cannot confirm presence at all — yields
+   * `unreadable_or_invalid` so callers fail closed instead of degrading to
+   * signed-out.
+   *
+   * Mixed-backend aggregation is deliberately conservative: `found` from
+   * any backend wins immediately; `unreadable_or_invalid` from any backend
+   * dominates a bare `absent` from another; a backend without inspection
+   * support demotes a cross-backend `absent` to
+   * `unreadable_or_invalid` because absence could never be confirmed for
+   * it.
+   */
+  async inspectAdminCredentialPresence(): Promise<CredentialPresenceStatus> {
+    await this.ensureInitialized();
+    let sawUnreadable = false;
+    let sawUnreadableReason = 'one or more credential backends could not be read';
+    let sawUnsupported = false;
+    for (const backend of this.backends) {
+      if (!backend.inspectCredentialPresence) {
+        sawUnsupported = true;
+        continue;
+      }
+      const result = await backend.inspectCredentialPresence({ type: 'admin_token' });
+      if (result.status === 'found') return result;
+      if (result.status === 'unreadable_or_invalid') {
+        sawUnreadable = true;
+        sawUnreadableReason = result.reason;
+      }
+    }
+    if (sawUnreadable) {
+      return { status: 'unreadable_or_invalid', reason: sawUnreadableReason };
+    }
+    if (sawUnsupported) {
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'presence cannot be confirmed for all credential backends',
+      };
+    }
+    return { status: 'absent' };
+  }
+
   async getAdminTokens(): Promise<{
     accessToken: string;
     refreshToken: string;

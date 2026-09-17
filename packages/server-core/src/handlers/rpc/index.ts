@@ -11,8 +11,10 @@ import { registerOAuthHandlers } from './oauth'
 import { registerResourcesHandlers } from './resources'
 import { registerOnboardingHandlers } from './onboarding'
 import { registerSessionsHandlers } from './sessions'
+import { registerProductSpaceHandlers } from './product-space'
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
 export { clearClientActiveSession } from './client-active-session'
+export { whenInitialSyncTrustedProductSpaceAccountRestored } from './admin'
 import { registerServerHandlers } from './server'
 import type { ServerHandlerContext } from '../../bootstrap/headless-start'
 export type { ServerHandlerContext } from '../../bootstrap/headless-start'
@@ -41,6 +43,7 @@ export function registerCoreRpcHandlers(
   registerOnboardingHandlers(server, deps)
   registerResourcesHandlers(server, deps)
   registerSessionsHandlers(server, deps)
+  registerProductSpaceHandlers(server, deps)
   if (serverCtx) registerServerHandlers(server, deps, serverCtx)
   registerSettingsHandlers(server, deps)
   registerSkillsHandlers(server, deps)

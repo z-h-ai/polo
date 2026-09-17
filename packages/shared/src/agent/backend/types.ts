@@ -18,6 +18,10 @@ import type { ThinkingLevel } from '../thinking-levels.ts';
 import type { PermissionMode } from '../mode-manager.ts';
 import type { LoadedSource } from '../../sources/types.ts';
 import type { AuthRequest } from '../session-scoped-tools.ts';
+// Type-only import — erased at runtime, never a runtime cycle. The
+// registry's narrowed lease is the single shared contract (R53): no
+// anonymous {record, guard} redeclaration that could drift from it.
+import type { SessionScopedToolCallbackLease } from '../session-scoped-tool-callback-registry.ts';
 import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig as Session } from '../../sessions/storage.ts';
@@ -96,6 +100,18 @@ export type PlanCallback = (planPath: string) => void;
 export type AuthCallback = (request: AuthRequest) => void;
 
 /**
+ * Question request callback signature.
+ * Called when the agent requests structured user input (request_user_input).
+ * May return a Promise — the session layer's durable handoff is awaited by
+ * the tool handler so failures surface as tool errors.
+ */
+export type QuestionRequestedCallback = (
+  questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+  /** The issuing turn's processing generation, stamped by the agent at tool-call time. */
+  generationAtRequest: number
+) => void | Promise<void>;
+
+/**
  * Source change callback signature.
  * Called when a source is activated, deactivated, or modified.
  */
@@ -168,6 +184,27 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /**
+   * R51/R53: notified whenever the backend re-registers or merges its
+   * session-scoped callback record (e.g. PiAgent's per-turn merge) — the
+   * SessionManager re-binds the OWNER lease (`ManagedSession.callbackLease`)
+   * to the returned lease so disposal cleanup always CASses against the
+   * backend's CURRENT record/guard pair. The lease is the SHARED named
+   * contract (`SessionScopedToolCallbackLease`) with a REQUIRED owner token —
+   * no anonymous redeclaration that could drift from the registry.
+   */
+  onSessionCallbackLeaseChanged?: (lease: SessionScopedToolCallbackLease) => void;
+
+  /**
+   * R52-B/R53: the immutable RUNTIME OWNER TOKEN for this backend's
+   * construction. Carried by the backend's register/merge calls into the
+   * session-scoped callback registry — a mismatch with the live lease's
+   * owner REJECTS the outright (a stale runtime can never merge into a
+   * successor's record). Backends FAIL CLOSED when this is absent: the
+   * registry's owner-bearing APIs have no token-less path.
+   */
+  sessionCallbackOwnerToken?: string;
+
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -421,8 +458,11 @@ export interface AgentBackend {
    * Post-construction initialization.
    * Handles auth injection, initial config generation, etc.
    * Called after construction and callback wiring, before first chat().
+   * R51: `options.signal` is aborted by the SessionManager when the bounded
+   * construction wait expires — implementations must stop and apply zero
+   * further side effects once the signal fires.
    */
-  postInit(): Promise<PostInitResult>;
+  postInit(options?: { signal?: AbortSignal }): Promise<PostInitResult>;
 
   /**
    * Apply bridge/config updates mid-session.
@@ -486,6 +526,14 @@ export interface AgentBackend {
 
   /** Set permission mode */
   setPermissionMode(mode: PermissionMode): void;
+
+  /**
+   * Stamp the processing generation of the turn this agent is currently
+   * processing — called by the SessionManager at every turn start (and after
+   * agent creation) so request_user_input callbacks carry their issuing
+   * turn's generation.
+   */
+  setSessionTurnGeneration(generation: number): void;
 
   /** Cycle to next permission mode */
   cyclePermissionMode(): PermissionMode;
@@ -610,6 +658,16 @@ export interface AgentBackend {
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;
+
+  /** Called when the agent requests structured user input (request_user_input) */
+  onQuestionRequested: QuestionRequestedCallback | null;
+
+  /**
+   * Per-turn capability flag: whether the request_user_input tool is visible.
+   * Set by the session layer before each turn (desktop interactive sessions
+   * only); backends read it when building/registering their toolset.
+   */
+  allowRequestUserInput: boolean;
 
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;

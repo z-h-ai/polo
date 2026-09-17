@@ -1,4 +1,8 @@
 import { describe, it, expect, afterEach } from 'bun:test'
+import { accessSync, constants, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
+import { createPrivateKey, X509Certificate } from 'node:crypto'
 import { CliRpcClient } from './client.ts'
 import {
   serializeEnvelope,
@@ -387,53 +391,221 @@ describe('CliRpcClient', () => {
   })
 
   it('connects over wss:// with TLS', async () => {
-    const tls = generateSelfSignedCert()
-    if (!tls) {
-      // openssl not available — skip TLS test
-      console.log('  (skipped: openssl not available)')
+    await connectOverWssWithGeneratedTls()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TLS fixture oracle
+//
+// The fixture DISTINGUISHES "openssl genuinely absent" (the only legitimate
+// environmental skip) from "openssl present but broken / fixture invalid"
+// (which MUST fail the WSS test — a pass-looking skip would mask real
+// regressions in the fixture path).
+// ---------------------------------------------------------------------------
+
+/**
+ * The WSS handshake regression body. Shared verbatim by the happy-path test
+ * and the shadowed-openssl regression so the failure mapping (fixture
+ * failure ⇒ thrown error, never a skip) is exercised by both.
+ */
+async function connectOverWssWithGeneratedTls(): Promise<void> {
+  const fixture = generateSelfSignedCert()
+  if (fixture.status === 'unavailable') {
+    // ONLY legitimate skip: the openssl executable is genuinely absent.
+    console.log(`  (skipped: ${fixture.reason})`)
+    return
+  }
+  if (fixture.status === 'failure') {
+    throw new Error(`TLS fixture failed: ${fixture.reason}`)
+  }
+  server = createMockServer({ tls: { cert: fixture.cert, key: fixture.key } })
+
+  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+  try {
+    const client = new CliRpcClient(server.url)
+    const clientId = await client.connect()
+    expect(clientId).toBe('test-client-001')
+    expect(server.url.startsWith('wss://')).toBe(true)
+    client.destroy()
+  } finally {
+    if (prev === undefined) {
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
+    } else {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev
+    }
+  }
+}
+
+describe('TLS fixture oracle', () => {
+  it('reports unavailable only when openssl is genuinely absent from PATH', () => {
+    const prevPath = process.env.PATH
+    try {
+      process.env.PATH = join(tmpdir(), `polo-cli-absent-path-${Date.now()}`)
+      expect(generateSelfSignedCert().status).toBe('unavailable')
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH
+      else process.env.PATH = prevPath
+    }
+  })
+
+  it('fails instead of skipping when a broken openssl shadows the real one', () => {
+    if (process.platform === 'win32') {
+      console.log('  (skipped: POSIX-only stub simulation)')
       return
     }
-    server = createMockServer({ tls })
-
-    const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+    let dir: string | null = null
+    const prevPath = process.env.PATH
     try {
-      const client = new CliRpcClient(server.url)
-      const clientId = await client.connect()
-      expect(clientId).toBe('test-client-001')
-      expect(server.url.startsWith('wss://')).toBe(true)
-      client.destroy()
+      dir = mkdtempSync(join(tmpdir(), 'polo-cli-openssl-stub-'))
+      const stub = join(dir, 'openssl')
+      writeFileSync(stub, '#!/bin/sh\nexit 3\n', { mode: 0o755 })
+      // Sanity: the stub must truly be executable, else the simulation
+      // below would silently prove nothing.
+      accessSync(stub, constants.X_OK)
+      process.env.PATH = `${dir}${delimiter}${prevPath ?? ''}`
+
+      const fixture = generateSelfSignedCert()
+      expect(fixture.status).toBe('failure')
+      expect(fixture.status).not.toBe('unavailable')
+      if (fixture.status === 'failure') {
+        expect(fixture.reason.length).toBeGreaterThan(0)
+      }
     } finally {
-      if (prev === undefined) {
-        delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
-      } else {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev
+      if (prevPath === undefined) delete process.env.PATH
+      else process.env.PATH = prevPath
+      if (dir !== null) {
+        try {
+          rmSync(dir, { recursive: true, force: true })
+        } catch {
+          // best-effort cleanup
+        }
+      }
+    }
+  })
+
+  it('wss handshake body rejects (never skips) under a shadowed broken openssl', async () => {
+    if (process.platform === 'win32') {
+      console.log('  (skipped: POSIX-only stub simulation)')
+      return
+    }
+    let dir: string | null = null
+    const prevPath = process.env.PATH
+    try {
+      dir = mkdtempSync(join(tmpdir(), 'polo-cli-openssl-stub-'))
+      const stub = join(dir, 'openssl')
+      writeFileSync(stub, '#!/bin/sh\nexit 3\n', { mode: 0o755 })
+      accessSync(stub, constants.X_OK)
+      process.env.PATH = `${dir}${delimiter}${prevPath ?? ''}`
+      await expect(connectOverWssWithGeneratedTls()).rejects.toThrow('TLS fixture failed')
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH
+      else process.env.PATH = prevPath
+      if (dir !== null) {
+        try {
+          rmSync(dir, { recursive: true, force: true })
+        } catch {
+          // best-effort cleanup
+        }
       }
     }
   })
 })
 
 // ---------------------------------------------------------------------------
-// TLS cert helper — generates a real self-signed cert via openssl
+// TLS cert helper — hermetic self-signed fixture.
+//
+// The key and the cert are each written to their OWN file inside a private
+// temp directory, then read back and independently parse-validated
+// (createPrivateKey / X509Certificate). Never merge both PEMs through one
+// shared stream: under parallel test load a merged /dev/stdout stream
+// interleaves or truncates, and Bun.serve then rejects the corrupted key
+// with ERR_BORINGSSL DECODE_ERROR. The temp directory is removed in
+// `finally` on every path.
+//
+// The result is a TAGGED union — never a bare null — so the caller can tell
+// an environmental skip apart from a real failure:
+// - 'unavailable': openssl is genuinely absent from PATH (skip);
+// - 'failure': openssl exists but key/cert generation, file read or parse
+//   validation failed (the WSS test must FAIL on this);
+// - 'ready': usable cert/key pair.
+// The availability probe and the openssl spawns both receive the SAME PATH
+// snapshot so a test mutating process.env mid-flight can never make the
+// probe and the spawn resolve different binaries.
 // ---------------------------------------------------------------------------
 
-function generateSelfSignedCert(): { cert: string; key: string } | null {
+type TlsFixture =
+  | { status: 'ready'; cert: string; key: string }
+  | { status: 'unavailable'; reason: string }
+  | { status: 'failure'; reason: string }
+
+function generateSelfSignedCert(): TlsFixture {
+  const pathEnv = process.env.PATH ?? ''
+  if (Bun.which('openssl', { PATH: pathEnv }) === null) {
+    return { status: 'unavailable', reason: 'openssl executable not found in PATH' }
+  }
+  const spawnEnv = { ...process.env, PATH: pathEnv }
+  let dir: string | null = null
   try {
+    dir = mkdtempSync(join(tmpdir(), 'polo-cli-tls-'))
+    const keyPath = join(dir, 'key.pem')
+    const certPath = join(dir, 'cert.pem')
+
+    // 1) The EC private key is generated straight into its own file.
     const keyResult = Bun.spawnSync({
-      cmd: ['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
-        '-keyout', '/dev/stdout', '-out', '/dev/stdout',
-        '-days', '1', '-nodes', '-subj', '/CN=localhost', '-batch'],
+      cmd: ['openssl', 'genpkey', '-algorithm', 'EC',
+        '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-out', keyPath],
+      stdout: 'pipe',
       stderr: 'pipe',
+      env: spawnEnv,
     })
-    if (keyResult.exitCode !== 0) return null
+    if (keyResult.exitCode !== 0) {
+      return { status: 'failure', reason: `openssl key generation failed (exit ${keyResult.exitCode})` }
+    }
 
-    const pem = keyResult.stdout.toString()
-    const certMatch = pem.match(/(-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----)/)
-    const keyMatch = pem.match(/(-----BEGIN (?:EC )?PRIVATE KEY-----[\s\S]+?-----END (?:EC )?PRIVATE KEY-----)/)
-    if (!certMatch || !keyMatch) return null
+    // 2) The 1-day self-signed cert is signed FROM that key file into its
+    //    own file — no output ever shares a stream with the key.
+    const certResult = Bun.spawnSync({
+      cmd: ['openssl', 'req', '-x509', '-key', keyPath, '-out', certPath,
+        '-days', '1', '-subj', '/CN=localhost', '-batch'],
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: spawnEnv,
+    })
+    if (certResult.exitCode !== 0) {
+      return { status: 'failure', reason: `openssl certificate signing failed (exit ${certResult.exitCode})` }
+    }
 
-    return { cert: certMatch[1], key: keyMatch[1] }
-  } catch {
-    return null
+    // 3) Read each PEM independently and reject anything that fails to parse
+    //    so Bun.serve never sees a structurally broken fixture.
+    let key: string
+    let cert: string
+    try {
+      key = readFileSync(keyPath, 'utf8')
+      cert = readFileSync(certPath, 'utf8')
+    } catch (error) {
+      return { status: 'failure', reason: `generated PEM files unreadable: ${String(error)}` }
+    }
+    try {
+      createPrivateKey(key)
+      new X509Certificate(cert)
+    } catch (error) {
+      return { status: 'failure', reason: `generated PEM failed parse validation: ${String(error)}` }
+    }
+    return { status: 'ready', cert, key }
+  } catch (error) {
+    // The availability probe already passed, so anything throwing here is a
+    // broken fixture — it must FAIL the WSS test, never masquerade as an
+    // environmental skip.
+    return { status: 'failure', reason: `unexpected fixture error: ${String(error)}` }
+  } finally {
+    if (dir !== null) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // best-effort cleanup of a private temp directory
+      }
+    }
   }
 }

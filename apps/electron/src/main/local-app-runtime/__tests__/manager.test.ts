@@ -2008,3 +2008,458 @@ package = false
     ).rejects.toMatchObject({ code: 'UNSAFE_ARCHIVE' })
   })
 })
+
+describe('POO-54 exact-version runtime foundation', () => {
+  const bunPath = process.execPath
+
+  function makeJsServer(extraBody: string): string {
+    return `
+      const server = Bun.serve({
+        hostname: '127.0.0.1',
+        port: Number(process.env.PORT),
+        fetch() {
+          return new Response('ok', {
+            headers: { 'x-polo-app-health-token': process.env.POLO_APP_HEALTH_TOKEN },
+          })
+        },
+      })
+      ${extraBody}
+    `
+  }
+
+  async function installJsVersion(
+    runtime: LocalAppRuntimeManager,
+    appId: string,
+    version: string,
+    serverBody: string,
+  ): Promise<void> {
+    // No package.json: the dependency-preparation pass is skipped and the
+    // runtime starts as a plain Bun entry.
+    const bundle = await writeBundle(
+      appId,
+      version,
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': makeJsServer(serverBody) },
+    )
+    const archive = await archiveBundle(bundle, `${appId}-${version}`)
+    const url = await serveArchive(archive)
+    await runtime.install(requestFor(appId, version, url, archive))
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+  }
+
+  it('pins the exact version, binds the capability hook to one runtime generation, and redacts secrets across chunk boundaries', async () => {
+    const runtime = makeManager({ bunPath })
+    const app = 'poo54.exact'
+    // v1.0.0 prints the injected capability token in TWO writes per stream,
+    // INTERLEAVED across stdout and stderr so each stream withholds a tail
+    // while the other keeps emitting (a shared redactor would leak here).
+    await installJsVersion(runtime, app, '1.0.0', `
+      const token = process.env.POLO_APP_API_TOKEN ?? ''
+      if (token) {
+        process.stdout.write(token.slice(0, 10))
+        process.stderr.write(token.slice(0, 12))
+        setTimeout(() => {
+          process.stderr.write(token.slice(12) + '\\n')
+          process.stdout.write(token.slice(10) + '\\n')
+          setTimeout(() => {
+            process.stdout.write('x'.repeat(64) + '\\n')
+            process.stderr.write('y'.repeat(64) + '\\n')
+          }, 80)
+        }, 80)
+      }
+    `)
+    // v2.0.0 becomes currentVersion (simulating a Catalog update).
+    await installJsVersion(runtime, app, '2.0.0', '')
+
+    const hookCalls: Array<{ runtimeKind: string; runtimeGeneration: number }> = []
+    const startedV1 = await runtime.startExactVersion(app, '1.0.0', {
+      processEnvironment: input => {
+        hookCalls.push({ runtimeKind: input.runtimeKind, runtimeGeneration: input.runtimeGeneration })
+        return {
+          env: {
+            POLO_APP_API_URL: 'http://127.0.0.1:9/local-app-api/v1',
+            POLO_APP_API_TOKEN: 'secret-canary-token-0123456789',
+          },
+          sensitiveValues: ['secret-canary-token-0123456789'],
+        }
+      },
+    })
+    // The EXACT requested version runs even though currentVersion is 2.0.0.
+    expect(startedV1.version).toBe('1.0.0')
+    expect(startedV1.runtimeKind).toBe('js')
+    expect(startedV1.runtimeGeneration).toBeGreaterThan(0)
+    expect(hookCalls).toEqual([{
+      runtimeKind: 'js',
+      runtimeGeneration: startedV1.runtimeGeneration,
+    }])
+
+    // The capability token must never reach the bounded log in raw form,
+    // not even when its stdout writes span chunk boundaries.
+    let logs = ''
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      logs = await runtime.getLogs(app)
+      if (logs.includes('[REDACTED_RUNTIME_SECRET]')) break
+      await Bun.sleep(100)
+    }
+    expect(logs).toContain('[REDACTED_RUNTIME_SECRET]')
+    // Both interleaved streams are covered: stdout and stderr must each have
+    // been redacted (at least two redaction markers across the log).
+    expect(logs.split('[REDACTED_RUNTIME_SECRET]').length - 1).toBeGreaterThanOrEqual(2)
+    expect(logs).not.toContain('secret-canary-token')
+
+    // Generation-CAS stop: a stale generation can never stop the current one.
+    await expect(runtime.stopExact(app, startedV1.runtimeGeneration + 1000))
+      .rejects.toMatchObject({ code: 'STALE_RUNTIME_GENERATION' })
+    const stopped = await runtime.stopExact(app, startedV1.runtimeGeneration)
+    expect(stopped.status).toBe('stopped')
+
+    // A second exact start allocates a NEW runtime generation.
+    const startedV2 = await runtime.startExactVersion(app, '2.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })
+    expect(startedV2.version).toBe('2.0.0')
+    expect(startedV2.runtimeGeneration).toBeGreaterThan(startedV1.runtimeGeneration)
+    await runtime.stopExact(app, startedV2.runtimeGeneration)
+  }, 60_000)
+
+  it('never calls the capability hook for static runtimes and never rolls back a broken exact version', async () => {
+    const staticRuntime = makeManager({ bunPath })
+    const staticApp = 'poo54.static.app'
+    const staticBundle = await writeBundle(
+      staticApp,
+      '1.0.0',
+      { runtime: 'static', entry: ['dist'] },
+      { 'dist/index.html': '<html></html>' },
+    )
+    const staticArchive = await archiveBundle(staticBundle, 'static')
+    const staticUrl = await serveArchive(staticArchive)
+    await staticRuntime.install(requestFor(staticApp, '1.0.0', staticUrl, staticArchive))
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+
+    const hookCalls: unknown[] = []
+    const started = await staticRuntime.startExactVersion(staticApp, '1.0.0', {
+      processEnvironment: input => {
+        hookCalls.push(input)
+        return { env: { POLO_APP_API_TOKEN: 'must-not-be-injected' }, sensitiveValues: [] }
+      },
+    })
+    expect(started.runtimeKind).toBe('static')
+    expect(hookCalls).toHaveLength(0)
+    await staticRuntime.stopExact(staticApp, started.runtimeGeneration)
+
+    // A crashing exact version fails closed WITHOUT rolling back to another
+    // installed version, and the per-start unexpected-exit observer fires.
+    const unexpectedExits: Array<{ version: string; runtimeGeneration: number }> = []
+    const crashingManager = new LocalAppRuntimeManager({
+      rootDir: join(testRoot, 'runtime'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+      bunPath,
+      onUnexpectedExit: event => unexpectedExits.push({
+        version: event.version,
+        runtimeGeneration: event.runtimeGeneration,
+      }),
+    })
+    const crashApp = 'poo54.crash.app'
+    await installJsVersion(crashingManager, crashApp, '1.0.0', '')
+    await installJsVersion(crashingManager, crashApp, '3.0.0', `
+      setTimeout(() => process.exit(3), 0)
+    `)
+    await expect(crashingManager.startExactVersion(crashApp, '3.0.0', {
+      processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+    })).rejects.toMatchObject({ code: 'PROCESS_CRASHED' })
+    expect(unexpectedExits.length).toBeGreaterThan(0)
+    expect(unexpectedExits.at(-1)).toMatchObject({ version: '3.0.0' })
+    const status = await crashingManager.getRuntimeStatus(crashApp)
+    // currentVersion stays 3.0.0 — no silent rollback to 1.0.0.
+    expect(status.currentVersion).toBe('3.0.0')
+    expect(status.runningVersion).toBeUndefined()
+    await crashingManager.shutdown()
+    await staticRuntime.shutdown()
+  }, 60_000)
+})
+
+describe('POO-54 R2 per-version process namespaces', () => {
+  const bunPath = process.execPath
+
+  function makeHealthServer(): string {
+    return `
+      Bun.serve({
+        hostname: '127.0.0.1',
+        port: Number(process.env.PORT),
+        fetch() {
+          return new Response('ok', {
+            headers: { 'x-polo-app-health-token': process.env.POLO_APP_HEALTH_TOKEN },
+          })
+        },
+      })
+    `
+  }
+
+  it('v1 and v2 of one artifact run simultaneously in disjoint namespaces without mutual teardown', async () => {
+    const runtime = makeManager({ bunPath })
+    const app = 'poo54.versions'
+    for (const [version, marker] of [['1.0.0', 'V1'], ['2.0.0', 'V2']] as const) {
+      const bundle = await writeBundle(
+        app,
+        version,
+        { runtime: 'js', entry: ['server.js'] },
+        { 'server.js': `${makeHealthServer()}\nconsole.log('${marker} boot')` },
+      )
+      const archive = await archiveBundle(bundle, `${app}-${version}`)
+      const url = await serveArchive(archive)
+      await runtime.install(requestFor(app, version, url, archive))
+      await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+      downloadServer = null
+    }
+    const startExact = (version: string, processAppId: string) =>
+      runtime.startExactVersion(app, version, {
+        processAppId,
+        processEnvironment: () => ({ env: {}, sensitiveValues: [] }),
+      })
+    // Both versions start and stay live TOGETHER — v2's exact start must
+    // never stop v1 (they are different runtime identities).
+    const v1 = await startExact('1.0.0', `${app}.v1`)
+    const v2 = await startExact('2.0.0', `${app}.v2`)
+    expect(v1.runtimeGeneration).not.toBe(v2.runtimeGeneration)
+    const statusV1 = await runtime.getRuntimeStatus(`${app}.v1`)
+    const statusV2 = await runtime.getRuntimeStatus(`${app}.v2`)
+    expect(statusV1.status).toBe('running')
+    expect(statusV2.status).toBe('running')
+    expect(statusV1.runningVersion).toBe('1.0.0')
+    expect(statusV2.runningVersion).toBe('2.0.0')
+    // Logs are namespace-isolated per version.
+    const logsV1 = await runtime.getLogs(`${app}.v1`)
+    const logsV2 = await runtime.getLogs(`${app}.v2`)
+    expect(logsV1).toContain('V1 boot')
+    expect(logsV1).not.toContain('V2 boot')
+    expect(logsV2).toContain('V2 boot')
+    expect(logsV2).not.toContain('V1 boot')
+    // Stopping v1's namespace leaves v2 fully live.
+    await runtime.stopExact(`${app}.v1`, v1.runtimeGeneration)
+    const afterStopV1 = await runtime.getRuntimeStatus(`${app}.v1`)
+    const afterStopV2 = await runtime.getRuntimeStatus(`${app}.v2`)
+    // A process-only namespace has no install metadata: not_installed IS the
+    // stopped projection; the exact-stop result above already said 'stopped'.
+    expect(['stopped', 'not_installed']).toContain(afterStopV1.status)
+    expect(afterStopV2.status).toBe('running')
+    expect(afterStopV2.runningVersion).toBe('2.0.0')
+    await runtime.stopExact(`${app}.v2`, v2.runtimeGeneration)
+  }, 60_000)
+})
+
+describe('POO-54 R12 shutdown orchestration (coordinator failure never skips forced cleanup)', () => {
+  it('aggregates a coordinator exact-stop failure WITH the manager failure, force-reaps the real subprocess, and lets a quit retry converge', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const { LocalAppRuntimeCoordinator } = await import('../runtime-coordinator')
+
+    // A REAL js runtime subprocess whose graceful stop is injected to fail:
+    // only the manager's forced cleanup path (forceStopRuntime/SIGKILL) can
+    // reap it.
+    const bundleDir = await writeBundle(
+      'demo.r12-shutdown',
+      '1.0.0',
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': ownedNodeServerSource() },
+    )
+    const archive = await archiveBundle(bundleDir, 'r12-shutdown')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.r12-shutdown', '1.0.0', url, archive))
+    await runtime.start('demo.r12-shutdown')
+    const status = await runtime.getRuntimeStatus('demo.r12-shutdown')
+    expect(status.pid).toBeGreaterThan(0)
+
+    // A REAL coordinator with one active runtime whose exact stop FAILS.
+    const coordinator = new LocalAppRuntimeCoordinator({
+      admin: {
+        startAppRun: async () => ({}),
+        recordAppUsage: async () => ({}),
+        finishAppRun: async () => ({}),
+      },
+      createExecutor: () => {
+        throw new Error('no executor in this test')
+      },
+      resolveWorkspaceRoot: () => null,
+      loadWorkspaceConfig: () => undefined,
+      getDefaultLlmConnection: () => null,
+      stopRuntime: async () => {
+        throw new Error('coordinator exact stop exploded')
+      },
+    })
+    coordinator.registerActiveRuntime({
+      identity: {
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        artifactInstanceId: 'artifact-r12',
+        versionId: 'version-a',
+        version: '1.0.0',
+      },
+      executionId: 'exec-r12',
+      runtimeGeneration: 1,
+      scopeGeneration: 1,
+      workspaceId: 'ws-a',
+      runtimeKind: 'static',
+    })
+
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+      runtimes: Map<string, unknown>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    internals.killProcessTree = async () => {
+      throw new Error('injected graceful stop failure')
+    }
+
+    // (a) The coordinator rejection must NOT skip the manager: forced
+    // cleanup runs and reaps the real subprocess.
+    const firstFailure = await shutdownLocalAppRuntimeOwners({
+      coordinator,
+      manager: runtime,
+    }).then(() => null, (error: unknown) => error)
+    // (d) BOTH failures travel — none is lost to the other.
+    expect(firstFailure).toBeInstanceOf(AggregateError)
+    const reasons = (firstFailure as AggregateError).errors as unknown[]
+    expect(reasons).toHaveLength(2)
+    expect(reasons.some(error =>
+      String((error as Error).message).includes(
+        'coordinator shutdown: 1 runtime generation(s) failed to stop',
+      ))).toBe(true)
+    expect(reasons.some(error =>
+      String((error as Error).message).includes(
+        'Failed to confirm every managed local app process exited',
+      ))).toBe(true)
+    // (b) No real subprocess survives the forced cleanup.
+    expect(isProcessAlive(status.pid!)).toBe(false)
+    expect(internals.runtimes.has('demo.r12-shutdown')).toBe(false)
+
+    // (c) The before-quit retry CONVERGES: neither the coordinator's cached
+    // rejection nor the manager blocks the second attempt.
+    internals.killProcessTree = originalKill
+    await expect(shutdownLocalAppRuntimeOwners({
+      coordinator,
+      manager: runtime,
+    })).resolves.toBeUndefined()
+  }, 60_000)
+
+  it('propagates a single owner failure raw (no aggregation wrapper for one report)', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const failure = await shutdownLocalAppRuntimeOwners({
+      manager: {
+        shutdown: async () => {
+          throw Object.assign(new Error('registry sweep exploded'), { code: 'STOP_FAILED' })
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    expect(failure).toMatchObject({ code: 'STOP_FAILED' })
+    expect((failure as Error).message).toBe('registry sweep exploded')
+    // All owners succeed: the orchestration resolves.
+    await expect(shutdownLocalAppRuntimeOwners({
+      coordinator: { shutdown: async () => {} },
+      manager: { shutdown: async () => {} },
+      scopedRegistry: { shutdown: async () => {} },
+    })).resolves.toBeUndefined()
+  })
+})
+
+describe('POO-54 R13 shutdown orchestration (undefined rejections fail closed by settled status)', () => {
+  it('a coordinator Promise.reject(undefined) still rejects the orchestration and never skips the manager', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    let coordinatorShutdownCalls = 0
+    let managerShutdownCalls = 0
+    const outcome = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          coordinatorShutdownCalls += 1
+          throw undefined
+        },
+      },
+      manager: {
+        shutdown: async () => {
+          managerShutdownCalls += 1
+        },
+      },
+    }).then(
+      () => ({ settled: 'resolved' as const }),
+      (error: unknown) => ({ settled: 'rejected' as const, error }),
+    )
+    // The manager ALWAYS ran after the coordinator failure.
+    expect(coordinatorShutdownCalls).toBe(1)
+    expect(managerShutdownCalls).toBe(1)
+    // The single failure is rethrown raw — here the failure VALUE is
+    // undefined, so the settled STATUS must decide: the orchestration
+    // rejects (never a false resolve).
+    expect(outcome).toMatchObject({ settled: 'rejected' })
+    expect((outcome as { error: unknown }).error).toBeUndefined()
+  })
+
+  it('coordinator AND manager both rejecting undefined aggregate into an AggregateError keeping both reports', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const failure = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          throw undefined
+        },
+      },
+      manager: {
+        shutdown: async () => {
+          throw undefined
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    // Both undefined reports travel: never a false "single raw failure".
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toHaveLength(2)
+  })
+})
+
+describe('POO-54 R14 shutdown orchestration (coordinator AggregateError stays a WHOLE failure: nested, inner errors never lost)', () => {
+  it('a coordinator multi-generation AggregateError nests intact in the orchestration aggregate and rethrows RAW when it is the only failure', async () => {
+    const { shutdownLocalAppRuntimeOwners } = await import('../shutdown-orchestration')
+    const inner = new AggregateError(
+      [new Error('stop-a'), new Error('stop-b')],
+      'coordinator shutdown: 2 runtime generation(s) failed to stop',
+    )
+    let managerShutdownCalls = 0
+    // Layer 1: the coordinator AggregateError is the ONLY failure — the
+    // single-failure path must rethrow it RAW (no re-wrap that could imply
+    // extraction), so both inner reasons stay reachable via `errors`.
+    const onlyFailure = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          throw inner
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    expect(onlyFailure).toBe(inner)
+    expect((onlyFailure as AggregateError).errors.map(error => (error as Error).message))
+      .toEqual(['stop-a', 'stop-b'])
+    // Layer 2: with a manager failure too, the coordinator AggregateError
+    // is nested AS ONE ELEMENT — never flattened away, never reduced to a
+    // `failures[0]`-style single reason.
+    const bothFailure = await shutdownLocalAppRuntimeOwners({
+      coordinator: {
+        shutdown: async () => {
+          throw inner
+        },
+      },
+      manager: {
+        shutdown: async () => {
+          managerShutdownCalls += 1
+          throw new Error('manager force-stop exploded')
+        },
+      },
+    }).then(() => null, (error: unknown) => error)
+    expect(bothFailure).toBeInstanceOf(AggregateError)
+    const reasons = (bothFailure as AggregateError).errors
+    expect(reasons).toHaveLength(2)
+    expect(reasons[0]).toBe(inner)
+    expect((reasons[0] as AggregateError).errors.map(error => (error as Error).message))
+      .toEqual(['stop-a', 'stop-b'])
+    expect((reasons[1] as Error).message).toBe('manager force-stop exploded')
+    expect(managerShutdownCalls).toBe(1)
+  })
+})

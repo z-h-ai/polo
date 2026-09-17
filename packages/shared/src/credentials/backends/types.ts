@@ -12,6 +12,18 @@ export interface CredentialCompareAndSwapResult {
   current: StoredCredential | null;
 }
 
+/**
+ * Discriminative presence inspection (startup restore): `absent` means the
+ * credential was confirmed not to exist; `found` means it exists and is
+ * structurally usable; `unreadable_or_invalid` means something is there but
+ * it could not be read, decrypted or validated — callers must fail closed
+ * instead of treating it as absent.
+ */
+export type CredentialPresenceStatus =
+  | { status: 'absent' }
+  | { status: 'found' }
+  | { status: 'unreadable_or_invalid'; reason: string };
+
 export interface CredentialBackend {
   /** Backend name for logging/debugging */
   readonly name: string;
@@ -27,6 +39,15 @@ export interface CredentialBackend {
 
   /** Re-read a credential from durable storage, bypassing process-local cache. */
   getFresh?(id: CredentialId): Promise<StoredCredential | null>;
+
+  /**
+   * Discriminative presence inspection. Optional: a manager whose backends
+   * all lack this method cannot confirm absence and fails closed with
+   * `unreadable_or_invalid` (never `absent`).
+   */
+  inspectCredentialPresence?(
+    id: CredentialId,
+  ): Promise<CredentialPresenceStatus>;
 
   /** Set/update a credential */
   set(id: CredentialId, credential: StoredCredential): Promise<void>;

@@ -30,6 +30,8 @@ export interface PanelProps {
   className?: string
   /** Optional inline styles */
   style?: React.CSSProperties
+  /** Stable test anchor for E2E/smoke selectors */
+  testId?: string
   /** Panel content */
   children: React.ReactNode
 }
@@ -42,10 +44,12 @@ export function Panel({
   width,
   className,
   style,
+  testId,
   children,
 }: PanelProps) {
   return (
     <div
+      data-testid={testId}
       className={cn(
         // Base styles shared by all panels
         // Note: No rounded corners here - parent container handles clipping via overflow-hidden

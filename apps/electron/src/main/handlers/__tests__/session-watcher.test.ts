@@ -86,7 +86,13 @@ function createTestHarness(sessionPaths: Map<string, string>) {
     sessionManager: {
       getSessionPath: (sessionId: string) => sessionPaths.get(sessionId) ?? null,
       waitForInit: async () => {},
-      getSessions: () => [],
+      getSessions: () => [...sessionPaths.keys()].map(id => ({
+        id,
+        workspaceId: 'ws-1',
+        productSpaceId: 'watch-test-space',
+        accountId: 'watch-test-account',
+        isProcessing: false,
+      })),
     } as unknown as HandlerDeps['sessionManager'],
     platform: {
       appRootPath: '',
@@ -149,6 +155,16 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('@polo-ai/server-core/runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
+
+setRuntimeActiveProductSpace('watch-test-space')
+// R37-3: the atomic scope capture proves the FENCE account equals the
+// synchronous mirror, so the runtime fence account is seeded too.
+setRuntimeActiveProductSpaceAccount('watch-test-account')
+// R32-2: the session fence now also requires the trusted account binding.
+setSyncTrustedProductSpaceAccountId('watch-test-account')
 
 describe('session file watcher isolation', () => {
   afterEach(async () => {
@@ -302,5 +318,54 @@ describe('session file watcher isolation', () => {
     expect(pushCalls.length).toBeGreaterThanOrEqual(1)
 
     cleanupSessionFileWatchForClient(CLIENT_A)
+  })
+
+  it('stops publishing when the watched session leaves the trusted account scope (R33-1)', async () => {
+    const dir = makeTempSessionDir()
+    const sessionPaths = new Map([['s1', dir]])
+    const {
+      server,
+      deps,
+      handlers,
+      pushCalls,
+      emitFileChange,
+    } = createTestHarness(sessionPaths)
+
+    const { registerSessionsHandlers, cleanupSessionFileWatchForClient } = await import('@polo-ai/server-core/handlers/rpc')
+    const { setSyncTrustedProductSpaceAccountId: setMirror } = await import('@polo-ai/server-core/handlers/rpc/trusted-product-space-account')
+    registerSessionsHandlers(server, deps)
+
+    const watchHandler = handlers.get(RPC_CHANNELS.sessions.WATCH_FILES)!
+
+    // Watch under the current trusted account.
+    await watchHandler(makeCtx(CLIENT_A), 's1')
+    const waitForPushCount = async (minimum: number): Promise<void> => {
+      const deadline = Date.now() + 2_000
+      while (pushCalls.length < minimum && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+    }
+    emitFileChange(dir, 'before-replacement.txt')
+    await waitForPushCount(1)
+    expect(pushCalls.length).toBeGreaterThanOrEqual(1)
+
+    // Account replacement: the watched session no longer belongs to the
+    // trusted account.
+    setMirror('replaced-account')
+
+    // A later file change must NOT be published; the watcher tears itself
+    // down instead.
+    emitFileChange(dir, 'after-replacement.txt')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    const pushesAfterReplacement = pushCalls.length
+
+    // No matter how many further changes arrive, nothing is published.
+    emitFileChange(dir, 'after-replacement-2.txt')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(pushCalls.length).toBe(pushesAfterReplacement)
+
+    cleanupSessionFileWatchForClient(CLIENT_A)
+    // Restore the mirror for harness symmetry (each file runs isolated).
+    setMirror('watch-test-account')
   })
 })

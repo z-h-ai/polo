@@ -157,6 +157,13 @@ interface ChatDisplayProps {
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
   onRespondToCredential?: (sessionId: string, requestId: string, response: CredentialResponse) => void
+  /** Pending agent question for this session (request_user_input) */
+  pendingQuestion?: import('../../../shared/types').QuestionRequest
+  /** Callback to resolve a pending question (answer or skip) */
+  onRespondToQuestion?: (
+    sessionId: string,
+    resolution: import('../../../shared/types').QuestionResolution,
+  ) => Promise<import('../../../shared/types').QuestionResolutionResult>
   /** @deprecated Manual thinking-level switching has been removed from the UI. */
   thinkingLevel?: ThinkingLevel
   /** @deprecated Manual thinking-level switching has been removed from the UI. */
@@ -439,10 +446,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   currentModel,
   textareaRef: externalTextareaRef,
   disabled = false,
-  pendingPermission,
-  onRespondToPermission,
-  pendingCredential,
-  onRespondToCredential,
+   pendingPermission,
+   onRespondToPermission,
+   pendingCredential,
+   onRespondToCredential,
+   pendingQuestion,
+   onRespondToQuestion,
   // Advanced options
   permissionMode = 'ask',
   onPermissionModeChange,
@@ -1305,8 +1314,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     viewport.scrollTop += delta
   }, [])
 
-  // Handle structured input responses (permissions and credentials)
-  const handleStructuredResponse = (response: StructuredResponse) => {
+  // Handle structured input responses (permissions, credentials, questions)
+  const handleStructuredResponse = (response: StructuredResponse): void | Promise<void> => {
     if ((response.type === 'permission' || response.type === 'admin_approval') && pendingPermission && onRespondToPermission) {
       if (response.type === 'permission') {
         const permResponse = response as PermissionResponse
@@ -1334,6 +1343,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         pendingCredential.requestId,
         credResponse
       )
+    } else if (response.type === 'question' && pendingQuestion && onRespondToQuestion) {
+      // Awaited by QuestionRequest: a transient_failure rejection keeps the
+      // card's state; terminal results unmount it via the App-level cleanup.
+      return onRespondToQuestion(pendingQuestion.sessionId, { action: 'answer', response: response.response })
+        .then(() => undefined)
+    } else if (response.type === 'question_cancel' && pendingQuestion && onRespondToQuestion) {
+      return onRespondToQuestion(pendingQuestion.sessionId, { action: 'cancel', requestId: response.requestId })
+        .then(() => undefined)
     }
   }
 
@@ -1358,8 +1375,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (pendingCredential) {
       return { type: 'credential', data: pendingCredential }
     }
+    if (pendingQuestion) {
+      return { type: 'question', data: pendingQuestion }
+    }
     return undefined
-  }, [pendingPermission, pendingCredential])
+  }, [pendingPermission, pendingCredential, pendingQuestion])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
   const allTurns = React.useMemo(() => {

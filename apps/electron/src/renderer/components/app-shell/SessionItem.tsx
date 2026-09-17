@@ -1,6 +1,6 @@
 import { formatDistanceToNowStrict } from "date-fns"
 import type { Locale } from "date-fns"
-import { Flag, ShieldAlert } from "lucide-react"
+import { Flag, ShieldAlert, MessageCircleQuestionMark } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -71,6 +71,7 @@ export function SessionItem({
     return ctx.flatLabels.some(l => l.id === labelId)
   }))
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
+  const hasPendingQuestion = ctx.hasPendingQuestion?.(item.id) ?? false
   const previewText = isCompactMode ? getSessionPreviewText(item) : null
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
@@ -114,6 +115,7 @@ export function SessionItem({
       onMouseDown={handleClick}
       buttonProps={{
         ...itemProps,
+        'data-testid': 'session-row',
         onKeyDown: (e: React.KeyboardEvent) => {
           ;(itemProps as { onKeyDown: (event: React.KeyboardEvent) => void }).onKeyDown(e)
           ctx.onKeyDown(e, item)
@@ -169,7 +171,7 @@ export function SessionItem({
           <div className={cn(
             "flex items-center justify-center overflow-hidden gap-1",
             "transition-all duration-200 ease-out",
-            (item.isProcessing || hasUnreadMeta(item) || item.lastMessageRole === 'plan' || hasPendingPrompt)
+            (item.isProcessing || hasUnreadMeta(item) || item.lastMessageRole === 'plan' || hasPendingPrompt || hasPendingQuestion)
               ? "opacity-100 ml-0"
               : "!w-0 opacity-0 -ml-[10px]"
           )}>
@@ -187,12 +189,19 @@ export function SessionItem({
               </svg>
             )}
             {hasPendingPrompt && <ShieldAlert className="h-3.5 w-3.5 text-info" />}
+            {hasPendingQuestion && (
+              <MessageCircleQuestionMark
+                className="h-3.5 w-3.5 text-info"
+                data-testid="session-pending-question"
+              />
+            )}
           </div>
         </>
       }
       title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
       titleClassName={cn("text-[13px]", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={previewText}
+      subtitleTestId={isCompactMode ? "session-row-expanded" : undefined}
       titleSuffix={
         hasMessagingBinding ? (
           <div className="flex items-center gap-1">

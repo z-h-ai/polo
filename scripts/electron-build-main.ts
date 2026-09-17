@@ -6,17 +6,19 @@
 import { spawn } from "bun";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import { join } from "path";
+import {
+  buildPiAgentServerBundle,
+  stagePiAgentServerBundleResource,
+} from "./build/pi-agent-server-staging.ts";
 
 const ROOT_DIR = join(import.meta.dir, "..");
+
 const DIST_DIR = join(ROOT_DIR, "apps/electron/dist");
 const ELECTRON_RESOURCES_DIR = join(ROOT_DIR, "apps/electron/resources");
 const OUTPUT_FILE = join(DIST_DIR, "main.cjs");
 const INTERCEPTOR_SOURCE = join(ROOT_DIR, "packages/shared/src/unified-network-interceptor.ts");
 const INTERCEPTOR_OUTPUT = join(DIST_DIR, "interceptor.cjs");
 const SESSION_TOOLS_CORE_DIR = join(ROOT_DIR, "packages/session-tools-core");
-const SESSION_SERVER_DIR = join(ROOT_DIR, "packages/session-mcp-server");
-const SESSION_SERVER_OUTPUT = join(SESSION_SERVER_DIR, "dist/index.js");
-const SESSION_SERVER_RESOURCE_DIR = join(ELECTRON_RESOURCES_DIR, "session-mcp-server");
 const PI_AGENT_SERVER_DIR = join(ROOT_DIR, "packages/pi-agent-server");
 const PI_AGENT_SERVER_OUTPUT = join(PI_AGENT_SERVER_DIR, "dist/index.js");
 const PI_AGENT_SERVER_RESOURCE_DIR = join(ELECTRON_RESOURCES_DIR, "pi-agent-server");
@@ -172,46 +174,10 @@ async function buildInterceptor(): Promise<void> {
   console.log("✅ Interceptor built successfully");
 }
 
-// Build the Session MCP Server (provides session-scoped tools like SubmitPlan for Codex sessions)
-async function buildSessionServer(): Promise<void> {
-  console.log("📋 Building Session MCP Server...");
-
-  // Ensure dist directory exists
-  const distDir = join(SESSION_SERVER_DIR, "dist");
-  if (!existsSync(distDir)) {
-    mkdirSync(distDir, { recursive: true });
-  }
-
-  const proc = spawn({
-    cmd: [
-      "bun", "build",
-      join(SESSION_SERVER_DIR, "src/index.ts"),
-      "--outfile", SESSION_SERVER_OUTPUT,
-      "--target", "node",
-      "--format", "cjs",
-    ],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    console.error("❌ Session server build failed with exit code", exitCode);
-    process.exit(exitCode);
-  }
-
-  // Verify output exists
-  if (!existsSync(SESSION_SERVER_OUTPUT)) {
-    console.error("❌ Session server output not found at", SESSION_SERVER_OUTPUT);
-    process.exit(1);
-  }
-
-  console.log("✅ Session server built successfully");
-}
-
 // Build the Pi Agent Server (subprocess for Pi SDK sessions)
+// Thin production wrapper around the testable core in
+// scripts/build/pi-agent-server-staging.ts (shared node-target args;
+// throws are translated into the packaging entry's failure policy).
 // Optional: skips if package directory is missing (e.g., not synced to OSS).
 async function buildPiAgentServer(): Promise<void> {
   if (!existsSync(join(PI_AGENT_SERVER_DIR, "src"))) {
@@ -221,55 +187,19 @@ async function buildPiAgentServer(): Promise<void> {
 
   console.log("🥧 Building Pi Agent Server...");
 
-  // Ensure dist directory exists
-  const distDir = join(PI_AGENT_SERVER_DIR, "dist");
-  if (!existsSync(distDir)) {
-    mkdirSync(distDir, { recursive: true });
-  }
-
-  // Use --target=bun --format=esm because the Pi SDK (@mariozechner/pi-coding-agent)
-  // is ESM-only. --target=node --format=cjs leaves ESM deps as external require()
-  // calls that fail at runtime since there are no node_modules relative to dist/.
-  const proc = spawn({
-    cmd: [
-      "bun", "build",
-      join(PI_AGENT_SERVER_DIR, "src/index.ts"),
-      "--outfile", PI_AGENT_SERVER_OUTPUT,
-      "--target", "bun",
-      "--format", "esm",
-      "--external", "koffi",
-    ],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    console.error("❌ Pi agent server build failed with exit code", exitCode);
-    process.exit(exitCode);
-  }
-
-  // Verify output exists
-  if (!existsSync(PI_AGENT_SERVER_OUTPUT)) {
-    console.error("❌ Pi agent server output not found at", PI_AGENT_SERVER_OUTPUT);
+  try {
+    await buildPiAgentServerBundle({
+      sourceEntry: join(PI_AGENT_SERVER_DIR, "src/index.ts"),
+      distDir: join(PI_AGENT_SERVER_DIR, "dist"),
+      resourceDir: PI_AGENT_SERVER_RESOURCE_DIR,
+      koffiSource: join(ROOT_DIR, "node_modules/koffi"),
+    }, ROOT_DIR);
+  } catch (error) {
+    console.error("❌ Pi agent server build failed:", error instanceof Error ? error.message : error);
     process.exit(1);
   }
 
   console.log("✅ Pi agent server built successfully");
-}
-
-function stageSessionServerResource(): void {
-  if (!existsSync(SESSION_SERVER_OUTPUT)) {
-    console.error("❌ Session server output not found at", SESSION_SERVER_OUTPUT);
-    process.exit(1);
-  }
-
-  rmSync(SESSION_SERVER_RESOURCE_DIR, { recursive: true, force: true });
-  mkdirSync(SESSION_SERVER_RESOURCE_DIR, { recursive: true });
-  cpSync(SESSION_SERVER_OUTPUT, join(SESSION_SERVER_RESOURCE_DIR, "index.js"));
-  console.log("📦 Staged Session MCP Server resource");
 }
 
 function stagePiAgentServerResource(): void {
@@ -278,29 +208,22 @@ function stagePiAgentServerResource(): void {
     return;
   }
 
-  if (!existsSync(PI_AGENT_SERVER_OUTPUT)) {
-    console.error("❌ Pi agent server output not found at", PI_AGENT_SERVER_OUTPUT);
+  try {
+    stagePiAgentServerBundleResource({
+      sourceEntry: join(PI_AGENT_SERVER_DIR, "src/index.ts"),
+      distDir: join(PI_AGENT_SERVER_DIR, "dist"),
+      resourceDir: PI_AGENT_SERVER_RESOURCE_DIR,
+      koffiSource: join(ROOT_DIR, "node_modules/koffi"),
+    });
+  } catch (error) {
+    console.error("❌ Pi agent server staging failed:", error instanceof Error ? error.message : error);
     process.exit(1);
   }
 
-  const koffiSource = join(ROOT_DIR, "node_modules/koffi");
-  if (!existsSync(koffiSource)) {
-    console.error("❌ koffi dependency not found at", koffiSource);
-    process.exit(1);
-  }
-
-  rmSync(PI_AGENT_SERVER_RESOURCE_DIR, { recursive: true, force: true });
-  mkdirSync(PI_AGENT_SERVER_RESOURCE_DIR, { recursive: true });
-  cpSync(PI_AGENT_SERVER_OUTPUT, join(PI_AGENT_SERVER_RESOURCE_DIR, "index.js"));
-  cpSync(koffiSource, join(PI_AGENT_SERVER_RESOURCE_DIR, "node_modules/koffi"), {
-    recursive: true,
-    force: true,
-  });
   console.log("📦 Staged Pi Agent Server resource");
 }
 
 function stageSubprocessResources(): void {
-  stageSessionServerResource();
   stagePiAgentServerResource();
 }
 
@@ -367,10 +290,6 @@ async function main(): Promise<void> {
 
   // Verify session tools core exists (shared utilities for session-scoped tools)
   verifySessionToolsCore();
-
-  // Build session server (provides session-scoped tools like SubmitPlan)
-  // Depends on session-tools-core being built first
-  await buildSessionServer();
 
   // Build Pi agent server (subprocess for Pi SDK sessions)
   await buildPiAgentServer();

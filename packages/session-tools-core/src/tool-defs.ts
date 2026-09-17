@@ -29,6 +29,8 @@ import {
   handleMicrosoftOAuthTrigger,
 } from './handlers/source-oauth.ts';
 import { handleCredentialPrompt } from './handlers/credential-prompt.ts';
+import { handleRequestUserInput } from './handlers/request-user-input.ts';
+import { RequestUserInputArgsSchema, REQUEST_USER_INPUT_OTHER_OPTION_ID } from './question-types.ts';
 import { handleUpdatePreferences } from './handlers/update-preferences.ts';
 import { handleTransformData } from './handlers/transform-data.ts';
 import { handleScriptSandbox } from './handlers/script-sandbox.ts';
@@ -91,6 +93,10 @@ export const CredentialPromptSchema = z.object({
   headerNames: z.array(z.string()).optional().describe('Header names for multi-header auth (e.g., ["DD-API-KEY", "DD-APPLICATION-KEY"])'),
   passwordRequired: z.boolean().optional().describe('For basic auth: whether password is required'),
 });
+
+// Re-export the canonical request_user_input schema so consumers can import
+// everything tool-related from this module.
+export { RequestUserInputArgsSchema } from './question-types.ts';
 
 export const CallLlmSchema = z.object({
   prompt: z.string().describe('Instructions for the LLM'),
@@ -329,6 +335,21 @@ The user will see a secure input UI with appropriate fields based on the auth mo
 
 **IMPORTANT:** After calling this tool, execution will be paused for user input.`,
 
+  request_user_input: `Ask the user 1-3 structured questions with selectable options when their answer changes the outcome of your work.
+
+Use this ONLY for product-level decisions that affect the user's results or permissions — never for internal implementation details or issues you can resolve yourself.
+
+**Rules:**
+- 1 to 3 questions per call; each question has 2 to 4 preset options.
+- \`id\`: 1-64 chars, letters/digits/"_"/"-" only. Question ids must be unique within the call; option ids unique within their question.
+- \`header\`: short section label (max 24 chars). \`question\`: the full question (max 500 chars).
+- \`multiple: true\` makes a question multi-select; otherwise single-select.
+- Mark at most one option per question as \`recommended: true\` and explain why in its description.
+- \`exclusive: true\` (multi-select only) marks an option that excludes all other choices (e.g. "don't send notifications"). Never infer exclusivity from wording — only set it when the option is truly exclusive.
+- A free-text "Other" option (max 2000 chars) is added automatically by the UI. NEVER declare an option with id "${REQUEST_USER_INPUT_OTHER_OPTION_ID}" or add your own "Other" option.
+
+**IMPORTANT:** After calling this tool, execution pauses until the user answers or skips. Do not output further content — the conversation resumes with their answers.`,
+
   update_user_preferences: `Update stored user preferences. Use this when you learn information about the user that would be helpful to remember for future conversations. This includes their name, timezone, location, preferred language, or any other relevant notes. Only update fields you have confirmed information about - don't guess.`,
 
   transform_data: `Transform data files using a script and write structured output for datatable/spreadsheet blocks, or extract HTML content for html-preview blocks.
@@ -514,7 +535,7 @@ export interface RegistrySessionToolDef extends SessionToolDefBase {
   handler: SessionToolHandler;
 }
 
-/** Tool executed by backend-specific adapters (Pi/Claude/session-mcp-server). */
+/** Tool executed by backend-specific adapters (Pi/Claude). */
 export interface BackendSessionToolDef extends SessionToolDefBase {
   executionMode: 'backend';
   handler: null;
@@ -538,6 +559,10 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'source_slack_oauth_trigger', description: TOOL_DESCRIPTIONS.source_slack_oauth_trigger, inputSchema: SourceOAuthTriggerSchema, executionMode: 'registry', safeMode: 'block', handler: handleSlackOAuthTrigger },
   { name: 'source_microsoft_oauth_trigger', description: TOOL_DESCRIPTIONS.source_microsoft_oauth_trigger, inputSchema: SourceOAuthTriggerSchema, executionMode: 'registry', safeMode: 'block', handler: handleMicrosoftOAuthTrigger },
   { name: 'source_credential_prompt', description: TOOL_DESCRIPTIONS.source_credential_prompt, inputSchema: CredentialPromptSchema, executionMode: 'registry', safeMode: 'block', handler: handleCredentialPrompt },
+  // Structured user questions — only registered for desktop interactive turns
+  // (see SessionToolFilterOptions.allowRequestUserInput). Safe in all permission
+  // modes: asking a question must not trigger another permission confirmation.
+  { name: 'request_user_input', description: TOOL_DESCRIPTIONS.request_user_input, inputSchema: RequestUserInputArgsSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRequestUserInput },
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
@@ -563,19 +588,30 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
 export interface SessionToolFilterOptions {
   /** Include the experimental send_developer_feedback tool. */
   includeDeveloperFeedback?: boolean;
+  /**
+   * Only desktop interactive main-session turns enable request_user_input.
+   * Messaging, automation, headless/CLI, internal, and hidden/mini turns
+   * MUST NOT enable it — every non-desktop source fails closed. Defaults
+   * to false so backends must opt in explicitly.
+   */
+  allowRequestUserInput?: boolean;
 }
 
 /**
  * Return session tools with optional feature filtering.
  *
  * Callers should use this helper instead of filtering ad hoc so tool visibility
- * stays consistent across Claude, Pi, and session-mcp-server backends.
+ * stays consistent across the Claude and Pi backend tool surfaces.
  */
 export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionToolDef[] {
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
+  const allowRequestUserInput = options?.allowRequestUserInput ?? false;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
+      return false;
+    }
+    if (!allowRequestUserInput && def.name === 'request_user_input') {
       return false;
     }
     return true;
@@ -646,7 +682,7 @@ export function getSessionSafeBlockedToolNames(options?: SessionToolNameOptions)
 /** Set of session tool names for quick membership checks. */
 export const SESSION_TOOL_NAMES = new Set(SESSION_TOOL_DEFS.map(d => d.name));
 
-/** Session tool names that must be handled by backend-specific adapters (Pi/Claude/session-mcp-server). */
+/** Session tool names that must be handled by backend-specific adapters (Pi/Claude). */
 export const SESSION_BACKEND_TOOL_NAMES = new Set(
   SESSION_TOOL_DEFS.filter(d => d.executionMode === 'backend').map(d => d.name)
 );
@@ -689,9 +725,13 @@ export interface JsonSchemaToolDef {
 export function getToolDefsAsJsonSchema(opts?: {
   prefix?: string;
   includeDeveloperFeedback?: boolean;
+  allowRequestUserInput?: boolean;
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
-  const defs = getSessionToolDefs({ includeDeveloperFeedback: opts?.includeDeveloperFeedback });
+  const defs = getSessionToolDefs({
+    includeDeveloperFeedback: opts?.includeDeveloperFeedback,
+    allowRequestUserInput: opts?.allowRequestUserInput,
+  });
 
   return defs.map(def => {
     // Explicit `as any` avoids TS2589 ("type instantiation is excessively deep")

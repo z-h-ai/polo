@@ -18,6 +18,7 @@ export type {
   SessionMetadata,
   SessionHeader,
   SessionPersistentField,
+  PendingAgentResume,
 } from './types.ts';
 
 // Field constants

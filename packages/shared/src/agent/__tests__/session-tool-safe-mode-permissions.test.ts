@@ -14,6 +14,10 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__call_llm',
       'mcp__session__browser_tool',
       'mcp__session__script_sandbox',
+      // request_user_input carries safeMode 'allow' in the canonical
+      // metadata — safe mode must classify it by that metadata (visibility
+      // is enforced separately by the toolset + capability gate).
+      'mcp__session__request_user_input',
     ] as const;
 
     for (const toolName of allowedTools) {

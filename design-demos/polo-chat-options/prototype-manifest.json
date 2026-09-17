@@ -1,0 +1,138 @@
+{
+  "schemaVersion": "1.0.0",
+  "flow": {
+    "id": "polo-chat-options",
+    "name": "Polo 助手结构化问题输入",
+    "intent": "Agent 发起会影响结果的选择后接管输入区，支持回答、暂不回答、失败重试，并在恢复普通输入框时保留草稿。"
+  },
+  "source": {
+    "root": "/Users/wow/project/z-h-ai/polo-dir/POO-50/feature/polo-chat-options",
+    "gitRevision": "01f4447cf77612ca2c62d9c7155601a51bdb7b5b",
+    "build": {
+      "status": "static-source-derived",
+      "command": "none"
+    }
+  },
+  "files": {
+    "before": "before.html",
+    "after": "after.html",
+    "comparison": "comparison.html",
+    "assets": "assets",
+    "screenshots": "screenshots"
+  },
+  "protocol": {
+    "scenes": ["question", "multi-other", "error", "cancelled", "resolved"],
+    "themes": ["light", "dark"],
+    "langs": ["zh-Hans", "en"],
+    "viewports": [
+      {"id": "desktop", "width": 1440, "height": 900},
+      {"id": "mobile", "width": 390, "height": 844}
+    ]
+  },
+  "states": [
+    {"scene":"question","theme":"light","lang":"zh-Hans"},
+    {"scene":"question","theme":"light","lang":"en"},
+    {"scene":"question","theme":"dark","lang":"zh-Hans"},
+    {"scene":"question","theme":"dark","lang":"en"},
+    {"scene":"multi-other","theme":"light","lang":"zh-Hans"},
+    {"scene":"multi-other","theme":"light","lang":"en"},
+    {"scene":"multi-other","theme":"dark","lang":"zh-Hans"},
+    {"scene":"multi-other","theme":"dark","lang":"en"},
+    {"scene":"error","theme":"light","lang":"zh-Hans"},
+    {"scene":"error","theme":"light","lang":"en"},
+    {"scene":"error","theme":"dark","lang":"zh-Hans"},
+    {"scene":"error","theme":"dark","lang":"en"},
+    {"scene":"cancelled","theme":"light","lang":"zh-Hans"},
+    {"scene":"cancelled","theme":"light","lang":"en"},
+    {"scene":"cancelled","theme":"dark","lang":"zh-Hans"},
+    {"scene":"cancelled","theme":"dark","lang":"en"},
+    {"scene":"resolved","theme":"light","lang":"zh-Hans"},
+    {"scene":"resolved","theme":"light","lang":"en"},
+    {"scene":"resolved","theme":"dark","lang":"zh-Hans"},
+    {"scene":"resolved","theme":"dark","lang":"en"}
+  ],
+  "regions": [
+    {
+      "id": "polo-app-shell",
+      "componentSources": [
+        "apps/electron/src/renderer/components/app-shell/AppShell.tsx",
+        "apps/electron/src/renderer/components/app-shell/ChatDisplay.tsx",
+        "apps/electron/src/renderer/components/app-shell/input/ChatInputZone.tsx"
+      ],
+      "styleSources": [
+        {
+          "path": "apps/electron/src/renderer/index.css",
+          "classification": "derived",
+          "context": "Static shell uses the current renderer color variables, radii, compact breakpoints, panel geometry, and shadow language.",
+          "derivation": "The live Electron shell is represented with deterministic session fixtures so the interaction can be reviewed without runtime services."
+        }
+      ],
+      "tokenSources": [
+        "apps/electron/src/renderer/index.css#:root",
+        "apps/electron/src/renderer/index.css#[data-theme=dark]"
+      ],
+      "resourceSources": ["inline SVG icons derived from current shell iconography"]
+    },
+    {
+      "id": "question-request",
+      "componentSources": [
+        "apps/electron/src/renderer/components/app-shell/input/InputContainer.tsx",
+        "apps/electron/src/renderer/components/app-shell/input/StructuredInput.tsx",
+        "apps/electron/src/renderer/components/app-shell/input/structured/PermissionRequest.tsx"
+      ],
+      "styleSources": [
+        {
+          "path": "apps/electron/src/renderer/components/app-shell/input/InputContainer.tsx",
+          "classification": "derived",
+          "context": "QuestionRequest reuses the production input-zone container, fixed footer, measured-height transition, scroll area, option controls, focus language, and compact width behavior.",
+          "derivation": "The proposed question schema and user-approved behavior are rendered inside the existing StructuredInput visual contract."
+        }
+      ],
+      "tokenSources": [
+        "apps/electron/src/renderer/index.css#--accent",
+        "apps/electron/src/renderer/index.css#--destructive",
+        "apps/electron/src/renderer/index.css#--border"
+      ],
+      "resourceSources": ["POO-50 task specification#QuestionRequest"]
+    },
+    {
+      "id": "scenario-controller",
+      "componentSources": [
+        "packages/server-core/src/sessions/SessionManager.ts",
+        "apps/electron/src/renderer/App.tsx",
+        "apps/electron/src/renderer/context/AppShellContext.tsx"
+      ],
+      "styleSources": [
+        {
+          "path": "design-demos/polo-chat-options/prototype.html#PrototypeScenarioController",
+          "classification": "approximate",
+          "context": "Prototype-only state machine for first-submit failure, retry success, cancellation, requestId reset, readable history, and draft restoration.",
+          "approximationId": "static-handoff-controller"
+        }
+      ],
+      "tokenSources": [],
+      "resourceSources": ["POO-50 task specification#architecture-and-data-flow"]
+    }
+  ],
+  "approximations": [
+    {
+      "id": "static-handoff-controller",
+      "reason": "Formal Agent, RPC, persistence, notification, and SessionManager handoff do not exist yet; deterministic local state is used only to review the agreed interaction contract.",
+      "originalContext": {
+        "detail": "The controller intentionally fails the first submit, succeeds on retry, and never emits an Agent continuation after cancellation."
+      }
+    }
+  ],
+  "screenshots": [
+    {"file":"screenshots/before-question-light-zh-Hans-desktop.png","page":"before","scene":"question","theme":"light","lang":"zh-Hans","viewport":"desktop"},
+    {"file":"screenshots/after-question-light-zh-Hans-desktop.png","page":"after","scene":"question","theme":"light","lang":"zh-Hans","viewport":"desktop"},
+    {"file":"screenshots/before-multi-other-dark-zh-Hans-mobile.png","page":"before","scene":"multi-other","theme":"dark","lang":"zh-Hans","viewport":"mobile"},
+    {"file":"screenshots/after-multi-other-dark-zh-Hans-mobile.png","page":"after","scene":"multi-other","theme":"dark","lang":"zh-Hans","viewport":"mobile"},
+    {"file":"screenshots/before-error-light-en-desktop.png","page":"before","scene":"error","theme":"light","lang":"en","viewport":"desktop"},
+    {"file":"screenshots/after-error-light-en-desktop.png","page":"after","scene":"error","theme":"light","lang":"en","viewport":"desktop"},
+    {"file":"screenshots/before-cancelled-light-zh-Hans-mobile.png","page":"before","scene":"cancelled","theme":"light","lang":"zh-Hans","viewport":"mobile"},
+    {"file":"screenshots/after-cancelled-light-zh-Hans-mobile.png","page":"after","scene":"cancelled","theme":"light","lang":"zh-Hans","viewport":"mobile"},
+    {"file":"screenshots/before-resolved-dark-en-desktop.png","page":"before","scene":"resolved","theme":"dark","lang":"en","viewport":"desktop"},
+    {"file":"screenshots/after-resolved-dark-en-desktop.png","page":"after","scene":"resolved","theme":"dark","lang":"en","viewport":"desktop"}
+  ]
+}

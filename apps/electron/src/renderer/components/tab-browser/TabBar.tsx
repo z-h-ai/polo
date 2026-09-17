@@ -28,6 +28,7 @@ export function TabBar() {
     <div
       className="fixed left-0 right-0 top-0 z-panel flex items-center border-b border-foreground/10 bg-background/95 titlebar-drag-region"
       style={{ height: 'var(--tabbar-height)', paddingLeft: trafficLightPadding, paddingRight: 8 }}
+      data-testid="app-topbar"
     >
       <Button
         variant="ghost"

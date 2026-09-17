@@ -428,6 +428,12 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
     }
   })
 
+  // R32-5: this test drives five full installer lifecycles (real filesystem
+  // + subprocess fixtures). Observed wall time: ~19s in isolation, >30s
+  // under full-suite parallel load (the previous 30s bound fired there).
+  // The explicit 60s bound (~3× the isolated worst case) keeps the test
+  // reliably bounded under load without weakening any rollback assertion
+  // or hiding a hang.
   it('rolls back every App/runtime backup, publication, and chmod failure point', () => {
     for (const failurePoint of [
       'current-backup',
@@ -614,7 +620,11 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
           name.startsWith('.terminal-install.')),
       ).toHaveLength(0)
     }
-  }, 30_000)
+    // Generous budget: this test runs the REAL installer end-to-end ten
+    // times (5 failure points × initial + failing install). Under a fully
+    // loaded shared test process the subprocesses starve CPU and a tight
+    // ceiling flakes — the assertions themselves are unchanged.
+  }, 240_000)
 
   it('installs the packaged canonical wrappers and removes only verified ownership', () => {
     const home = createHome()

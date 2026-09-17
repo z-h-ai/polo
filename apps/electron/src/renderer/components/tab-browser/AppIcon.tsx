@@ -4,10 +4,11 @@ import { cn } from '@/lib/utils'
 import { POLO_APP_ID, type AppDefinition } from '../../../shared/tab-browser-types'
 
 interface AppIconProps {
-  app: AppDefinition
-  onOpen: (app: AppDefinition) => void
-  onRemove?: (app: AppDefinition) => void
+  app: Pick<AppDefinition, 'id' | 'name' | 'iconUrl' | 'type'>
+  onOpen: (app: Pick<AppDefinition, 'id' | 'name' | 'iconUrl' | 'type'>) => void
+  onRemove?: (app: Pick<AppDefinition, 'id' | 'name' | 'iconUrl' | 'type'>) => void
   className?: string
+  testId?: string
 }
 
 const FALLBACK_COLORS = [
@@ -29,7 +30,7 @@ function colorForName(name: string) {
   return FALLBACK_COLORS[hash % FALLBACK_COLORS.length]
 }
 
-export function AppIcon({ app, onOpen, onRemove, className }: AppIconProps) {
+export function AppIcon({ app, onOpen, onRemove, className, testId }: AppIconProps) {
   const isBuiltin = app.type === 'builtin'
 
   return (
@@ -40,6 +41,8 @@ export function AppIcon({ app, onOpen, onRemove, className }: AppIconProps) {
         className,
       )}
       onClick={() => onOpen(app)}
+      data-app-id={app.id}
+      data-testid={testId}
       onContextMenu={(event) => {
         if (isBuiltin || !onRemove) return
         event.preventDefault()
