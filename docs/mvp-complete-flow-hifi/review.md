@@ -1,6 +1,6 @@
 # POO-70 · MVP 完整流程高保真 — 评审指南
 
-日期：2026-09-17 · 修订 `poo70-master-r10-v2-4`（继承 D-PC-07/08，按 D-PC-09 同步） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 功能地图：[feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) · 机器可读追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)
+日期：2026-09-17 · 修订 `poo70-ux-r1-v2-5`（继承 D-PC-07/08/09，按用户走查反馈迭代） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 功能地图：[feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) · 机器可读追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)
 
 **评审承诺**：产品 owner 打开 prototype.html 一个入口，即可完成四条代表故事走查 + 全部模块视觉确认 + 查看本轮修订与后续输入；全程无需账号、网络、支付或真实 AI。
 
@@ -12,7 +12,10 @@
 
 **产品表面内容边界收口**：本轮按“原型不是 PRD”的要求，把所有说明性、设计性、开发性内容从产品表面移到评审壳/说明：①移除 44 个「分支：」虚线评审按钮（连同 `scenario-strip`/`scenario-jump` 样式），原本靠这些按钮可达的 35 个失败/取消/交接状态改为 `review_entries` 独立评审入口（评审壳「本轮评审」或直达链接进入，不计入产品操作）；②故事 2/3 中三处系统触发状态（`P-M02-STOP-FAILED`、`P-M01-REOPEN`、`P-M09-STREAM-CUT`）的 story step 改 `arrival: review`，由评审入口进入而非伪造产品按钮；③清理 `FDE 工作区` 标题与「内部界面归 App 开发者」「逐项终止后才会提交切换」「创建在浏览器端完成且幂等」「支付在浏览器完成；桌面端只发起并确认结果」等机制/责任文案——这些说明移到对应场景的 `annotation`（评审壳「页面说明」可见），**独立语义审查后的补充清理**：独立审查员复查后发现产品表面仍有机制/责任/设计理由文案残留，第二轮清理：①13 个 M10/M11 场景的 toast 尾注「· 责任以后台数据为准」移除（保留「已重新核对管理资格」状态结果），责任说明移 annotation；②4 处「幂等」术语改写为用户语「可以安全重试…」（P-M01-PERSONAL-PREP / PREP-FAIL / P-M04-PREP-FAILED / P-M11-CONTRACT-FAIL）；③P-M01-COLD-START 删「不自动切换空间」、P-M10-SETTINGS 删「· 独立登录」「· 偏好随账号，不随空间」「· 运行任务原地等待」、P-M10-SETTINGS-APPEARANCE 删「个人偏好随账号，不随空间」、P-M09-NOT-YET/CHECKING/RESUMED 删「保持阻断」「不重复发起多次查询」「不会自动发送会话草稿」「不会自动发送或续写」、P-M04-APP-VIEW 等删「· 切换标签不中断」、P-M07-PAY-RETURN-FAIL 删「；确认前不会显示「已到期」」、P-M03-HOME-LOAD-FAIL 删「· 重试不会产生重复内容」、P-M01-INVITE-MISMATCH 改「不交给错误账号」→「请切换到受邀账号」——这些非动作保证/作用域机制说明均移至对应场景 annotation。**第三轮（独立审查同义改写残留）**：独立审查员第二轮复查发现 18 个硬词虽清零，但可见区仍残留同义改写的类别 4 非动作保证文案与类别 2 机制/流程说明（硬词清单未覆盖），逐项清理：①P-M01-PERSONAL-PREP/PREP-FAIL 删「不会重复创建」「无副作用」（改「本次未写入」）；②P-M02-CONFIRM/CONFIRM-PERSONAL/STOP-FAILED/STOP-CANCEL/TARGET-FAILED 删「已终止的项不会自动恢复」「保持停止」等不自动恢复/保持停止保证；③P-M02-STOPPING「全部停止后才提交切换」改「请稍候」、P-M02-TARGET-LOADING「一起加载；不展示混合内容」改「正在加载目录、权限与助手」；④P-M03-INSPECTOR/P-M11-PERSONAL-RESTRICTED 删「不归因」；⑤P-M11-CONTRACT「最低版本阻断企业空间」改用户视角「当前版本无法使用企业空间」；⑥P-M04-TERM-FAILED 删「标签已保留」「标签保留并可重试」；⑦P-M11-BLOCKED-EXPIRED 删「不需要重复安装」、P-M01-LOGIN-CANCEL 删「未产生任何副作用」——全部移至对应场景 annotation。另清 2 条含「评审/分支/POO-71」的 CSS 注释。产品表面只保留用户当下需要读、会点击、会感知的内容。当前状态为“修改待复看”。
 
-**v2 契约说明**：本卡按 product-ui-prototype v2 契约构建——`surface.html` 是纯产品表面（92 场景、1339 条 transitions 全部静态声明，无演示控制代码；44 条「分支：」评审按钮已移除，对应失败/取消状态改由 review_entries 进入）；`prototype.html` 是官方评审壳，用 iframe 按真实视口加载 surface，集中放页面索引、页面说明、锚定标注揭示、本轮评审、故事播放与视口切换。两文件均离线零网络请求，场景内容与 POO-41 G4 冻结稿、POO-70 已确认结论逐条绑定（manifest `sources`/`confirmations` 含 sha256 快照）。
+
+**ux-r1 / 用户走查迭代（poo70-ux-r1-v2-5）**：5 名模拟用户（2 名小白 / 3 名目标用户）走查全部 11 个模块流程，产出 93 条反馈（正面 30 / 负面 63），由 PM 评审归并为 19 项修复与 11 个新场景（92→103 场景，1539 条 transitions）。修复重点：①跨空间上下文统一（C-R03）——新增个人 App 容器、个人运行中心、个人助手会话与个人方向切换器，7 处个人「打开」不再落入企业「报价整理」，充值链整链落在个人空间（PC-N03：Member 不能自费充值）；②状态账目可判读（C-R04）——取消切换与终止并关闭各有独立落态首页（1 项 / 2 项运行中账目式），后台继续计数修正，首登零状态删除运行 pill 并新增零常用版全部 Apps；③恢复链闭合——升级失败改为可达（演示注入）、下载完成先过重开恢复核对（C-R05）、新增支持请求交接卡、版本阻断给联系管理员出路、离线两屏重试行为一致、被阻断 App 的标签激活改自环；④圈子线（PC-F03 / D-PC-09）——到期续费起算日立即生效（与有效期内续费区分）、付费圈补退出链、来源撤销后作品账目改写（已退出圈不可用 + 重新加入路径）；⑤全局卫生——无关场景的「已在后台继续运行」toast（38→1）与「已重新核对管理资格」（13→1）清理、「（不假装完成）」元语言改写、术语统一（Skill→技能、角色词中文化）、死按钮接线（权限弹窗 ×/暂不打开、生成中断发送禁用、登录取消改走密码流程、验证码重发演示注入）。故事路径同步：故事 1 步 4 → ALL-APPS-ZERO；故事 2 步 8 → AFTER-CANCEL；故事 3 起讫 → CHAT-PERSONAL。11 个新场景：P-M02-SWITCHER-PERSONAL、P-M03-HOME-ENT-AFTER-CANCEL、P-M03-HOME-ENT-AFTER-CLOSE、P-M03-ALL-APPS-ZERO、P-M04-APP-VIEW-PERSONAL、P-M04-RUNTIME-PERSONAL、P-M05-CHAT-PERSONAL、P-M07-RENEW-EXPIRED、P-M07-LEAVE-PAID、P-M07-DETAIL-PAID-AFTER-LEAVE、P-M11-SUPPORT-BROWSER。本轮状态为「修改待复看」。
+
+**v2 契约说明**：本卡按 product-ui-prototype v2 契约构建——`surface.html` 是纯产品表面（103 场景、1539 条 transitions 全部静态声明，无演示控制代码；44 条「分支：」评审按钮已移除，对应失败/取消状态改由 review_entries 进入）；`prototype.html` 是官方评审壳，用 iframe 按真实视口加载 surface，集中放页面索引、页面说明、锚定标注揭示、本轮评审、故事播放与视口切换。两文件均离线零网络请求，场景内容与 POO-41 G4 冻结稿、POO-70 已确认结论逐条绑定（manifest `sources`/`confirmations` 含 sha256 快照）。
 
 ---
 
@@ -40,7 +43,7 @@
 | 1 | 打开原型，进入登录页 | [P-M01-LOGIN-PASSWORD](prototype.html#scene=P-M01-LOGIN-PASSWORD) | G4 login-split 双栏：品牌故事 + 登录方式切换（密码/验证码）+ 协议说明，与 POO-41 冻结稿同构 |
 | 2 | 输入账号密码，点「登录」 | [P-M01-PERSONAL-PREP](prototype.html#scene=P-M01-PERSONAL-PREP) | 唯一的“我的空间”准备中；重试幂等，不产生第二个空间 |
 | 3 | 准备完成自动进入首页 | [P-M03-HOME-ZERO](prototype.html#scene=P-M03-HOME-ZERO) | 首登零常用：Polo 助手始终可用，并引导“全部 Apps” |
-| 4 | 点「全部 Apps」 | [P-M03-ALL-APPS](prototype.html#scene=P-M03-ALL-APPS) | “我的空间”只聚合多个圈子的有效作品；圈子不是空间，同名 App 按来源区分 |
+| 4 | 点「去全部 Apps 挑选」 | [P-M03-ALL-APPS-ZERO](prototype.html#scene=P-M03-ALL-APPS-ZERO) | 首登零常用目录：无“移出首页”、账目干净；同一作品只显示一次并保留全部来源（D-PC-09） |
 | 5 | 使用后回个人首页 | [P-M03-HOME-PERSONAL](prototype.html#scene=P-M03-HOME-PERSONAL) | Polo 助手固定；常用 Apps 来自个人已有权益；“我的圈子”管理关系 |
 | 6 | 选择“晨星科技”且个人有运行项 | [P-M02-CONFIRM-PERSONAL](prototype.html#scene=P-M02-CONFIRM-PERSONAL) | 先说明将终止的个人空间活动；取消仍在个人空间，确认后才切换 |
 | 7 | 进入企业首页 | [P-M03-HOME-ENT](prototype.html#scene=P-M03-HOME-ENT) | 只展示企业导入、启用并向本人分发的作品，不出现个人圈子或圈子通知 |
@@ -75,7 +78,8 @@
 | 4 | 选「我的空间」 | [P-M02-CONFIRM](prototype.html#scene=P-M02-CONFIRM) | 确认框列出将被终止的 3 项（App ×2 + 助手生成 ×1），取消留在原空间 |
 | 5 | 点「终止并切换」 | [P-M02-STOPPING](prototype.html#scene=P-M02-STOPPING) | 逐项停止中；全部停止后才提交切换 |
 | 6 | 注入失败（演示） | [P-M02-STOP-FAILED](prototype.html#scene=P-M02-STOP-FAILED) | 1 项停止失败：可重试失败项或取消；已终止项不自动复活 |
-| 7 | 点「取消切换」 | [P-M02-STOP-CANCEL](prototype.html#scene=P-M02-STOP-CANCEL) | 留在晨星科技；已完成的停止不回滚——这是本故事的核心规则 |
+| 7 | 点「取消切换」 | [P-M02-STOP-CANCEL](prototype.html#scene=P-M02-STOP-CANCEL) | 留在晨星科技；已完成的停止不回滚（顶栏 1 项运行中=停止失败项）——这是本故事的核心规则 |
+| 8 | 点「返回首页」 | [P-M03-HOME-ENT-AFTER-CANCEL](prototype.html#scene=P-M03-HOME-ENT-AFTER-CANCEL) | 落点账目可判读：2 个 App 已终止可重新打开，仅停止失败的助手项仍运行 |
 | 8 | 点「后台继续」后从顶栏运行入口查看 | [P-M04-BACKGROUND](prototype.html#scene=P-M04-BACKGROUND) | 改为后台继续：顶栏保留运行 pill 入口，任务在后台不丢 |
 
 变体分支：
@@ -95,13 +99,13 @@
 
 | 步 | 操作 | 到达屏 | 你会看到 / 验证点 |
 | --- | --- | --- | --- |
-| 1 | 打开原型，进入助手会话 | [P-M05-CHAT](prototype.html#scene=P-M05-CHAT) | 小王正让助手按客户分组整理报价汇总，上下文完整 |
+| 1 | 打开原型，进入助手会话 | [P-M05-CHAT-PERSONAL](prototype.html#scene=P-M05-CHAT-PERSONAL) | 小王在「我的空间」让助手按客户分组整理报价汇总（含自己的消息气泡）；充值链按 PC-N03 落在个人空间 |
 | 2 | 把问题补全后点「发送」 | [P-M09-PRE-BLOCK](prototype.html#scene=P-M09-PRE-BLOCK) | 发送前积分不足：输入完整保留、发送不可用、原因与去充值入口同屏 |
 | 3 | 点「去充值」 | [P-M09-BROWSER](prototype.html#scene=P-M09-BROWSER) | 浏览器交接卡：桌面只发起与确认结果，支付在浏览器完成 |
 | 4 | 回到 Polo | [P-M09-CHECKING](prototype.html#scene=P-M09-CHECKING) | 只做一次到账查询；会话、草稿与部分输出全部保留 |
 | 5 | 点「再查一次」（演示未到账） | [P-M09-NOT-YET](prototype.html#scene=P-M09-NOT-YET) | 未到账：保持阻断、不丢内容；可再查或稍后再说 |
 | 6 | 注入到账（演示） | [P-M09-RESUMED](prototype.html#scene=P-M09-RESUMED) | 到账解除阻断，但不自动发送/续写——是否继续由用户决定 |
-| 7 | 点「继续发送」 | [P-M05-CHAT](prototype.html#scene=P-M05-CHAT) | 回到会话，小王自己点发送，接着刚才的整理继续 |
+| 7 | 点「继续发送」 | [P-M05-CHAT-PERSONAL](prototype.html#scene=P-M05-CHAT-PERSONAL) | 回到个人空间会话，不切企业；小王自己点发送，接着刚才的整理继续 |
 
 变体分支：
 
@@ -129,9 +133,9 @@
 | 6 | 评审进入“最后来源失效” | [P-M11-BLOCKED-EXPIRED](prototype.html#scene=P-M11-BLOCKED-EXPIRED) | 两个来源都无效后才阻断；恢复任一来源即可重新打开 |
 | 7 | 评审进入企业首页 | [P-M03-HOME-ENT](prototype.html#scene=P-M03-HOME-ENT) | 只出现企业内部导入作品，无“我的圈子”及个人授权来源 |
 
-## 3. 页面索引（92 屏全量）
+## 3. 页面索引（103 屏全量）
 
-以下 ID 均可用 `#scene=<ID>` 直达（评审壳或 surface 直开均可）。92 场景通过产品操作或 35 个 review_entries 评审入口覆盖；「分类」见图例（[feature-map.md §1](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)）。
+以下 ID 均可用 `#scene=<ID>` 直达（评审壳或 surface 直开均可）。103 场景通过产品操作或 35 个 review_entries 评审入口覆盖；「分类」见图例（[feature-map.md §1](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)）。
 
 ### M01 登录与空间承接（14 屏）
 
@@ -152,7 +156,7 @@
 | [P-M01-CREATE-ENT](prototype.html#scene=P-M01-CREATE-ENT) | 创建企业（浏览器交接） | 跨端交接 | 创建在浏览器端完成且幂等；进入与否由用户在桌面端决定（PC-F07）。 |
 | [P-M01-COLD-START](prototype.html#scene=P-M01-COLD-START) | 冷启动 · 候选目标重验 | 已有状态 / 行为 | 冷启动重验账号/邀请/空间列表；不自动切换空间。 |
 
-### M02 空间切换（9 屏）
+### M02 空间切换（10 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
@@ -165,8 +169,8 @@
 | [P-M02-TARGET-LOADING](prototype.html#scene=P-M02-TARGET-LOADING) | 目标空间加载中 | 集成候选已实现 | 目录、权限、计量与助手集合一起切换；不展示混合内容。 |
 | [P-M02-TARGET-FAILED](prototype.html#scene=P-M02-TARGET-FAILED) | 目标空间加载失败 | 集成候选已实现 | 重试加载或留在原空间；已停止任务保持停止。 |
 | [P-M02-ACCESS-LOST](prototype.html#scene=P-M02-ACCESS-LOST) | 目标无权访问 | 集成候选已实现 | 已从切换器移除并说明原因；联系管理员恢复（C-R05）。 |
-
-### M03 首页与全部 Apps（11 屏）
+| [P-M02-SWITCHER-PERSONAL](prototype.html#scene=P-M02-SWITCHER-PERSONAL) | 空间切换器 · 从我的空间打开 | 新增 / 构想 | 个人方向切换：无权目标保留原因说明（C-R05）；有活动切企业先确认（PC-F06）。 |
+### M03 首页与全部 Apps（14 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
@@ -181,8 +185,10 @@
 | [P-M03-INSPECTOR](prototype.html#scene=P-M03-INSPECTOR) | App 详情（inspector） | 调整关键页 | 来源/版本/状态原因/权限说明；“为何阻断”不归因，只给路径。 |
 | [P-M03-MANAGE-HOME](prototype.html#scene=P-M03-MANAGE-HOME) | 管理常用 Apps（上限 5） | 调整关键页 | 上限 5 个在这里生效；Polo 助手固定不占名额（D-PC-07 收口首页方案）。 |
 | [P-M03-CONTROLS](prototype.html#scene=P-M03-CONTROLS) | 个人隐藏 / 恢复显示 | 调整关键页 | 只影响本设备的显示；与来源侧撤下/到期分开说明。 |
-
-### M04 App 容器（8 屏）
+| [P-M03-HOME-ENT-AFTER-CANCEL](prototype.html#scene=P-M03-HOME-ENT-AFTER-CANCEL) | 首页 · 晨星科技（取消切换后） | 新增 / 构想 | 取消切换不撤销已完成的停止（C-R04）：账目式落点。 |
+| [P-M03-HOME-ENT-AFTER-CLOSE](prototype.html#scene=P-M03-HOME-ENT-AFTER-CLOSE) | 首页 · 晨星科技（报价整理已关闭） | 新增 / 构想 | 终止并关闭/单项停止/重试成功的共同落态，顶栏与卡片账目一致。 |
+| [P-M03-ALL-APPS-ZERO](prototype.html#scene=P-M03-ALL-APPS-ZERO) | 全部 Apps · 首登零常用 | 新增 / 构想 | 零常用目录态，保留 D-PC-09 去重演示（PC-N01）。 |
+### M04 App 容器（10 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
@@ -194,8 +200,9 @@
 | [P-M04-BACKGROUND](prototype.html#scene=P-M04-BACKGROUND) | 后台继续 | 调整关键页 | 后台任务有持续入口（顶栏运行 pill → 运行状态）。 |
 | [P-M04-RUNTIME](prototype.html#scene=P-M04-RUNTIME) | 运行状态中心 | 调整关键页 | 按空间列出本机运行项：进入 / 停止 / 全部终止并切换。 |
 | [P-M04-PERM-DENIED](prototype.html#scene=P-M04-PERM-DENIED) | OS 权限被拒 | 调整关键页 | 给系统设置路径后由用户主动重试；不自动反复请求（C-R06）。 |
-
-### M05 助手 · 会话（5 屏）
+| [P-M04-APP-VIEW-PERSONAL](prototype.html#scene=P-M04-APP-VIEW-PERSONAL) | App 容器 · 我的空间 | 新增 / 构想 | 个人空间中性容器：chrome/标签/运行为我的空间（C-R03 · D-PC-05）。 |
+| [P-M04-RUNTIME-PERSONAL](prototype.html#scene=P-M04-RUNTIME-PERSONAL) | 运行状态 · 我的空间 | 新增 / 构想 | 个人空间运行中心：只列当前空间任务（C-R03）。 |
+### M05 助手 · 会话（6 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
@@ -204,7 +211,7 @@
 | [P-M05-STOPPED](prototype.html#scene=P-M05-STOPPED) | 助手 · 停止生成 | 直接复用 | 停止保留已生成部分与输入内容（PC-F02）。 |
 | [P-M05-QUESTION](prototype.html#scene=P-M05-QUESTION) | 助手 · 追问待回答 | 直接复用 | 问题卡 + 回答/暂不回答；会话状态跨重开保留。 |
 | [P-M05-QUESTION-REOPEN](prototype.html#scene=P-M05-QUESTION-REOPEN) | 助手 · 重开后问题恢复 | 直接复用 | 重开恢复问题与草稿；不替用户重复提交（PC-F10）。 |
-
+| [P-M05-CHAT-PERSONAL](prototype.html#scene=P-M05-CHAT-PERSONAL) | 助手 · 报价汇总（我的空间） | 新增 / 构想 | 个人空间会话，含用户气泡；充值链落点（PC-N03）。 |
 ### M06 助手 · 技能与数据源（3 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
@@ -213,7 +220,7 @@
 | [P-M06-SKILL-DENIED](prototype.html#scene=P-M06-SKILL-DENIED) | 技能 · 启用失败（无授权） | 直接复用 | 无授权给联系作者路径；不影响会话其余部分。 |
 | [P-M06-TOOLS](prototype.html#scene=P-M06-TOOLS) | 数据源 / 自动化 / Browser | 直接复用 | 侧栏数据源/自动化与助手内 Browser 均为现有入口。 |
 
-### M07 我的圈子（12 屏）
+### M07 我的圈子（15 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
@@ -229,7 +236,9 @@
 | [P-M07-EXPIRED](prototype.html#scene=P-M07-EXPIRED) | 圈子到期 | 新增 / 构想 | 仅本圈提供的作品需续费；另有有效来源的同一作品继续可用。 |
 | [P-M07-LEAVE](prototype.html#scene=P-M07-LEAVE) | 退出圈子 | 新增 / 构想 | 退出只撤销当前圈子来源；确认前说明哪些作品仍可用。 |
 | [P-M07-SOURCE-FALLBACK](prototype.html#scene=P-M07-SOURCE-FALLBACK) | 授权来源更新 · 仍可使用 | 调整关键页 | 同一创作者的晨星增长圈来源撤销后，晨星设计圈仍有效；同一作品保持一个条目。 |
-
+| [P-M07-RENEW-EXPIRED](prototype.html#scene=P-M07-RENEW-EXPIRED) | 手动续费 · 到期恢复 | 新增 / 构想 | 到期后重新购买：起算日立即生效（PC-F03 · A-PAY）。 |
+| [P-M07-LEAVE-PAID](prototype.html#scene=P-M07-LEAVE-PAID) | 退出圈子 · 北极星设计圈 | 新增 / 构想 | 付费圈退出确认：只撤销本圈来源（D-PC-09）。 |
+| [P-M07-DETAIL-PAID-AFTER-LEAVE](prototype.html#scene=P-M07-DETAIL-PAID-AFTER-LEAVE) | 圈子详情 · 已退出 | 新增 / 构想 | 退出后账目：独有作品不可用可重加，共同授权继续可用。 |
 ### M08 会话文件（2 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
@@ -262,7 +271,7 @@
 | [P-M10-ADMIN-BROWSER](prototype.html#scene=P-M10-ADMIN-BROWSER) | 企业管理后台（浏览器交接） | 跨端交接 | 后台独立登录；桌面端只保留入口（D-PC-07）。 |
 | [P-M10-ADMIN-RETURN](prototype.html#scene=P-M10-ADMIN-RETURN) | 返回后 · 资格刷新 | 已有状态 / 行为 | 返回重新核对资格；责任以后台数据为准。 |
 
-### M11 异常与恢复（13 屏）
+### M11 异常与恢复（14 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
@@ -325,6 +334,7 @@ POO-70 已冻结的 8 条「共同恢复契约」逐一映射到原型屏幕：
 | 圈子价格、周期、充值套餐与金额 | 缺真实商业输入 | 原型中的数字是演示数据；正式页面接入前由 POL-94/对应业务 owner 提供，不由客户端代选 |
 | “分支：”虚线按钮 | 已移除产品表面 | 44 个评审虚线按钮已从产品表面移除，对应失败/取消/交接状态改为 35 个 review_entries 评审入口；Plan 时把每个 review_entry 映射到真实触发或测试入口，不要求用户批准为产品按钮 |
 | 同一作品能否分发到多个圈子 | 已确认（D-PC-09） | 可多圈分发；我的空间按作品去重并保留全部有效来源；单一来源失效继续可用，最后来源失效才阻断。POL-94 旧单圈限制已被替代 |
+| [P-M11-SUPPORT-BROWSER](prototype.html#scene=P-M11-SUPPORT-BROWSER) | 联系管理员（浏览器交接） | 跨端交接 | 支持请求在浏览器创建，桌面保留当前状态（生成边界）。 |
 
 ## 7. 已知限制
 
