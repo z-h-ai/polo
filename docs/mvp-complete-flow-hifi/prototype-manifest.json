@@ -1701,40 +1701,40 @@
      "feedback": "切换到「运行状态中心」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-011-P-M03-ALL-APPS",
+     "id": "T-P-M02-ACCESS-LOST-011-P-M07-LIST",
+     "label": "我的圈子3 个圈子",
+     "to": "P-M07-LIST",
+     "feedback": "切换到「我的圈子 · 列表」"
+    },
+    {
+     "id": "T-P-M02-ACCESS-LOST-012-P-M03-ALL-APPS",
      "label": "全部 Apps",
      "to": "P-M03-ALL-APPS",
      "feedback": "切换到「全部 Apps · 作品去重与授权来源」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-012-P-M06-SKILLS",
+     "id": "T-P-M02-ACCESS-LOST-013-P-M06-SKILLS-PERSONAL",
      "label": "管理技能",
-     "to": "P-M06-SKILLS",
-     "feedback": "切换到「技能 · 授权/已启用/设备准备」"
+     "to": "P-M06-SKILLS-PERSONAL",
+     "feedback": "切换到「技能 · 我的空间」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-013-P-M05-CHAT",
+     "id": "T-P-M02-ACCESS-LOST-014-P-M05-CHAT-PERSONAL",
      "label": "打开助手",
-     "to": "P-M05-CHAT",
-     "feedback": "切换到「助手 · 对话生成中」"
+     "to": "P-M05-CHAT-PERSONAL",
+     "feedback": "切换到「助手 · 报价汇总（我的空间）」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-014-P-M04-APP-VIEW",
+     "id": "T-P-M02-ACCESS-LOST-015-P-M04-APP-VIEW-PERSONAL",
      "label": "打开",
-     "to": "P-M04-APP-VIEW",
-     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
+     "to": "P-M04-APP-VIEW-PERSONAL",
+     "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
-     "id": "T-P-M02-ACCESS-LOST-015-P-M04-APP-VIEW",
+     "id": "T-P-M02-ACCESS-LOST-016-P-M04-APP-VIEW-PERSONAL",
      "label": "打开",
-     "to": "P-M04-APP-VIEW",
-     "feedback": "切换到「App 容器 · 全屏 FDE 占位」"
-    },
-    {
-     "id": "T-P-M02-ACCESS-LOST-016-P-M03-INSPECTOR",
-     "label": "查看原因",
-     "to": "P-M03-INSPECTOR",
-     "feedback": "切换到「App 详情（inspector）」"
+     "to": "P-M04-APP-VIEW-PERSONAL",
+     "feedback": "切换到「App 容器 · 我的空间」"
     },
     {
      "id": "T-P-M02-ACCESS-LOST-017-P-M02-SWITCHER-PERSONAL",
