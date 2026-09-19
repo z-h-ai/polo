@@ -359,3 +359,21 @@ POO-70 已冻结的 8 条「共同恢复契约」逐一映射到原型屏幕：
 - **结构（structure）**：`sync_manifest.py` + `validate_prototype.py --previous prototype-manifest-before-master-r10.json` 通过——v2 high_fidelity，92 scenes，1339 transitions，0「分支：」transitions，35 review_entries，6 arrival=review steps，56 changed_scenes，0 removed_scenes；surface actions 与 declared transitions 严格匹配；source sha256 与 `--previous` 基线 compare 通过。
 - **语义（semantic，独立 context）**：用 deep-reasoner 子代理（独立 context，不继承生成者自评）做三轮复查。第一轮发现 13 屏「责任以后台数据为准」+ 4 屏「幂等」等硬词残留→第二轮清理；第二轮复查发现 18 硬词虽清零但 13 处同义改写残留（不会重复创建/不会自动恢复/保持停止/才提交切换/一起加载/不归因/最低版本阻断/标签保留/不需要重复安装/未产生副作用）→第三轮清理；第三轮复查结论：**达标**——可见区不含需求说明/设计理由/机制说明/责任免责/非动作保证/评审代号，剩余「不会/自动」句式经语义判定均为合法产品安抚、动作范围澄清或状态说明。独立审查 trace 见会话记录。
 - **浏览器（browser，抽样）**：playwright headless 对第三轮 14 个 scene 渲染验证——全部含合法文案、无违规文案、0 JS 错误，截图存 `screenshots/r3-verify/`。**未做完整 92 场景×2 视口 coverage 与 1339 transition rendered control 全集证据**（当前环境能力不足）；`quality-report.json` 因此**未生成**——按 skill「Missing browser or independent review capability means incomplete, never an invented pass」原则，不伪造完整 browser pass。完整 browser coverage 与 `quality-report.json` 留待具备全集截图能力时补。
+
+
+## v3 迁移记录（2026-09-19）
+
+- 输入基础与操作分类：本次为 product-ui-prototype v2→v3 **就地迁移（incremental）**，对象仅为本 bundle 既有 v2 产物（prototype.html 旧评审控制台、surface.html 产品页、prototype-manifest.json v2 与本记录）；未按 rebuild 隔离规则重新生成产品 HTML/CSS/JS，产品文案、布局与交互除分支场景约定清理外不变。
+- 操作分组：① manifest 升级 v3（schema_version/files/default_story/review_entries 补齐，revision → poo70-ux-r4-v3-8）；② 评审控制台按 v3 模板生成 review.html；③ surface.html 更名 prototype.html 并同步嵌入 manifest；④ 分支场景约定清理（详见下）；⑤ 运行时适配（next-step hint 支持；POL-114 另含状态物化与通道清理）。
+
+### 分支场景约定清理明细
+
+- v2 遗留问题修复：118 个空 label 转换（其中多数为顶栏「通知」等图标按钮）以控件可见文本/aria-label 回填；P-M01-REFRESH-FAIL 在 v2 已不可达，补 review_entries；story S2 第 11 步（P-M11-REOPEN-RECOVERY→P-M03-HOME-ENT）无申报转换，改 arrival:review。
+- 演示控件清理：（演示）模拟到期 ×2、（演示）模拟下载失败、（演示）网络已恢复 ×2 共 5 处移除，目标场景（P-M07-EXPIRED、P-M11-CONTRACT-FAIL 已有评审入口；P-M03-HOME-PERSONAL 可经真实操作可达）不受影响；（演示）重新发送 改为真实文案「重新发送」，（演示）全部停止，继续切换 去掉演示前缀。
+- 产品页运行时为纯旧代协议实现，整体替换为 v3 模板运行时（补 next-step hint 上报）。
+- 迁移后交付件：review.html / prototype.html / prototype-manifest.json / quality-report.json；surface.html 与旧 v2 控制台退出交付。
+
+
+### 语义评审修复轮（2026-09-19）
+
+- 独立语义评审发现漏网演示控件：P-M11-OFFLINE-RUNNING 的「（演示）网络已恢复」（T-P-M11-OFFLINE-RUNNING-014-P-M04-APP-VIEW），已按同约定移除（该场景保留真实「重试连接」；目标场景 P-M04-APP-VIEW 另有 41 处真实入口）。复验通过。

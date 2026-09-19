@@ -1,0 +1,636 @@
+{
+ "schema_version": 1,
+ "revision": "poo70-ux-r4-v3-8",
+ "generation": {
+  "mode": "incremental",
+  "context_id": "gen-v3-migration-POO-70-r1",
+  "inputs": [
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec.md",
+    "revision": "master-r10（2026-09-17）",
+    "sha256": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md",
+    "revision": "poo70 已确认结论快照（2026-09，sources/poo70-spec.md）",
+    "sha256": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f",
+    "role": "confirmation"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/poo70-implementation-delta-review.md",
+    "revision": "poo70 已确认结论快照（2026-09，sources/poo70-spec.md）",
+    "sha256": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540",
+    "role": "confirmation"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/prototype-v1.html",
+    "revision": "poo71-hifi-v1-single-file",
+    "sha256": "8986da95dd817cfb98e4d050e9e36b83e61a318bf0c9795604a7e756a6caa0e7",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/prototype-v1-manifest.json",
+    "revision": "poo71-hifi-v1-single-file",
+    "sha256": "2b080798a7fb5942102f5ada26696472bc403e5baa4b4bad103355cda0d50b0d",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/g4-product.css",
+    "revision": "poo41-g4-freeze（2026-08-11）",
+    "sha256": "fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/g4-review-record.md",
+    "revision": "poo41-g4-freeze（2026-08-11）",
+    "sha256": "56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843",
+    "role": "confirmation"
+   },
+   {
+    "path": "apps/electron/src/renderer/index.css",
+    "revision": "dev 01f4447c",
+    "sha256": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/dpc07-review-snapshot.json",
+    "revision": "user-decision-r8（2026-09-16）",
+    "sha256": "1aebd54b40e6c4c0c8edba5a41746f4b801152499cd946035f9941573eaae82f",
+    "role": "confirmation"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md",
+    "revision": "user-decision-r8（2026-09-16）",
+    "sha256": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/client-journey-review/sources/user-decision-r9.md",
+    "revision": "user-decision-r9（2026-09-17）",
+    "sha256": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r9.json",
+    "revision": "poo70-dpc07-v2-2",
+    "sha256": "95505c4bba96dc748f88511dc91a5251922eb9353106ba642358e4ce63ad67e9",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/master-r9-review-snapshot.json",
+    "revision": "master-r9（2026-09-17）",
+    "sha256": "e402721f1bbf3127ab9f35850a4e3741b346823ce0a47374bba7c59260b4cca6",
+    "role": "confirmation"
+   },
+   {
+    "path": "docs/client-journey-review/sources/user-decision-r10.md",
+    "revision": "user-decision-r10（2026-09-16）",
+    "sha256": "6632e91ffc8bff40d2a877e41a939f843a1ffdc1197fea9083cf372877395e44",
+    "role": "product-description"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r10.json",
+    "revision": "poo70-master-r9-v2-3",
+    "sha256": "bab02de861a6fe804df8377255c92a4acd1c17c907147ccc80c32900dbbc38e5",
+    "role": "confirmation"
+   },
+   {
+    "path": "docs/mvp-complete-flow-hifi/sources/master-r10-review-snapshot.json",
+    "revision": "master-r10（2026-09-17）",
+    "sha256": "5f94d18060ef0d2e58a28c3006e90ae6f80ab82adbc444a7adc09bdbbac0a453",
+    "role": "confirmation"
+   },
+   {
+    "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "revision": "poo70-dpc07-adopt-1（2026-09-17，POO-70 worktree 落地 G4 提取式 Skill，权威仍为 POO-41 冻结稿）",
+    "sha256": "6837910b54b28f525c7a372266334c3cf54ecd3820963720bdce89db1665c6d9",
+    "role": "design"
+   },
+   {
+    "path": "docs/DESIGN.md",
+    "revision": "poo70-dpc07-adopt-1（2026-09-17，POO-70 worktree 落地 G4 提取式 Skill，权威仍为 POO-41 冻结稿）",
+    "sha256": "214e90085d7d1f9dfb9cc45a81de182a92bbb85523d4d726929419844b21efdf",
+    "role": "design"
+   }
+  ],
+  "trace": "migration-trace"
+ },
+ "input_review": {
+  "path": "docs/mvp-complete-flow-hifi/review.md",
+  "sha256": "bc87c82d2430a985e221d0e8f1e55af1f12f678961bd6fed22b59fec4bd29636"
+ },
+ "fingerprints": {
+  "SKILL.md": "5b66faeba05fbfb08c53f8aea45df9682bd44acece505f2fb8b7a5e4855a6e37",
+  "references/manifest.md": "55e9b80ec696500444c9e7f035c10d9ca9e20c5485ce494f56ffe592f80fff9c",
+  "references/quality-report.md": "a03dcc641f363f53491774289759ff90e08204103ea50169134f558f3f9434db",
+  "assets/review-template.html": "93b41844b19bf3750b1c7c999e231bb9ff3947d526cacd64e0da322ffb47f881",
+  "assets/prototype-template.html": "132f613368873189c71254b5d9964519fbb1c36ef9f1a16542d4c530c776f9f5",
+  "scripts/validate_prototype.py": "8080aabfc4ac42a6ef7281c8f093e5cef11f08e3953230d55d8c495412fe877d",
+  "scripts/quality_report.py": "822a3a3062fba59f8ca1e9a5d5beeec1a33b64cd0b8cd954d239e4d6d6e78e4b",
+  "scripts/sync_manifest.py": "bf819234ba7ad9646484c89c372b23b220cb74a794027c758795303151f0f7bc"
+ },
+ "artifacts": {
+  "docs/mvp-complete-flow-hifi/prototype-manifest.json": "05cd396dc226c1cd26900e01e9f120c7aad4e624ba7b5846f55f11639accc793",
+  "docs/mvp-complete-flow-hifi/review.html": "86caab08d216963e850551281768ab3fab51362ac8f3e231dd192145c1b56dc2",
+  "docs/mvp-complete-flow-hifi/prototype.html": "e1a6060634f53dd57983f31edc4f1b2550c7e2e7de1035b9b81aaa9404f01265",
+  "docs/mvp-complete-flow-hifi/sources/poo70-spec.md": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871",
+  "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f",
+  "docs/mvp-complete-flow-hifi/sources/poo70-implementation-delta-review.md": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540",
+  "docs/mvp-complete-flow-hifi/sources/prototype-v1.html": "8986da95dd817cfb98e4d050e9e36b83e61a318bf0c9795604a7e756a6caa0e7",
+  "docs/mvp-complete-flow-hifi/sources/prototype-v1-manifest.json": "2b080798a7fb5942102f5ada26696472bc403e5baa4b4bad103355cda0d50b0d",
+  "docs/mvp-complete-flow-hifi/sources/g4-product.css": "fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218",
+  "docs/mvp-complete-flow-hifi/sources/g4-review-record.md": "56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843",
+  "apps/electron/src/renderer/index.css": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf",
+  "docs/mvp-complete-flow-hifi/sources/dpc07-review-snapshot.json": "1aebd54b40e6c4c0c8edba5a41746f4b801152499cd946035f9941573eaae82f",
+  "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46",
+  "docs/client-journey-review/sources/user-decision-r9.md": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668",
+  "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r9.json": "95505c4bba96dc748f88511dc91a5251922eb9353106ba642358e4ce63ad67e9",
+  "docs/mvp-complete-flow-hifi/sources/master-r9-review-snapshot.json": "e402721f1bbf3127ab9f35850a4e3741b346823ce0a47374bba7c59260b4cca6",
+  "docs/client-journey-review/sources/user-decision-r10.md": "6632e91ffc8bff40d2a877e41a939f843a1ffdc1197fea9083cf372877395e44",
+  "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r10.json": "bab02de861a6fe804df8377255c92a4acd1c17c907147ccc80c32900dbbc38e5",
+  "docs/mvp-complete-flow-hifi/sources/master-r10-review-snapshot.json": "5f94d18060ef0d2e58a28c3006e90ae6f80ab82adbc444a7adc09bdbbac0a453",
+  ".agents/skills/polo-ai-design-system/SKILL.md": "6837910b54b28f525c7a372266334c3cf54ecd3820963720bdce89db1665c6d9",
+  "docs/DESIGN.md": "214e90085d7d1f9dfb9cc45a81de182a92bbb85523d4d726929419844b21efdf"
+ },
+ "evidence": {
+  "migration-trace": {
+   "path": "tmp-v3-evidence/POO-70/migration-trace.jsonl",
+   "sha256": "36cd33d9c6af55d008d1985314318dd86d6c2752ed824051364f19b56e7b1f21"
+  },
+  "structure-log": {
+   "path": "tmp-v3-evidence/POO-70/structure-log.json",
+   "sha256": "2bd24ab03a6260bf1c10b368928519f1168eee3905766e22ea72cb93f4c82ba7"
+  },
+  "structure": {
+   "path": "tmp-v3-evidence/POO-70/structure-check.json",
+   "sha256": "8878cc37db5a19ea15f4fa172de4b1e75622c262e044b3f067845c0cc948ec49"
+  },
+  "browser": {
+   "path": "tmp-v3-evidence/POO-70/browser-check.json",
+   "sha256": "c6f0432925ac90f96089a151ae592b079a87df2dad1b5aeab409a5de4fc252da"
+  },
+  "raw-log": {
+   "path": "tmp-v3-evidence/POO-70/raw-log.jsonl",
+   "sha256": "b2b15ae6f69a0d6b3a216dbf7c5612e8e1b832ae65b8de549dff8a76ce6a0ac3"
+  },
+  "shot-narrow": {
+   "path": "tmp-v3-evidence/POO-70/screens/_narrow-desktop-1440x900.png",
+   "sha256": "89841dc8486eb31517933cf21a923e7306fb4425bb05ba5b37c78ccdb657a9da"
+  },
+  "semantic": {
+   "path": "tmp-v3-evidence/POO-70/semantic-check.json",
+   "sha256": "35967633bcb7d33fa845ef85d1f600ffad32e544c411d249fa0274ad0983a0b6"
+  },
+  "shot-P-M01-LOGIN-PASSWORD": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-LOGIN-PASSWORD@desktop-1440x900.png",
+   "sha256": "4b95cb041d785a64dc1ef4570103bccc24083fee015401692271535e7a24c3f1"
+  },
+  "shot-P-M01-LOGIN-PHONE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-LOGIN-PHONE@desktop-1440x900.png",
+   "sha256": "f67f433c9643d56aacb7ef6ef25263b88d481971e4046d2827b27d901cfcbf02"
+  },
+  "shot-P-M01-LOGIN-CODE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-LOGIN-CODE@desktop-1440x900.png",
+   "sha256": "ac7f795e07b27f6d58352c6c585231e274f9d52458267c5eca70d92bc942ba06"
+  },
+  "shot-P-M01-LOGIN-CANCEL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-LOGIN-CANCEL@desktop-1440x900.png",
+   "sha256": "a9f15019b4daa256f3c568d20d9c919a4e6c0633793f7aecd64e9f6674e3bbe2"
+  },
+  "shot-P-M01-PERSONAL-PREP": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-PERSONAL-PREP@desktop-1440x900.png",
+   "sha256": "20cd9b2ee34c26aa5e1c1d14428756e8a7de962cf897667605e7e35f6b0ae1da"
+  },
+  "shot-P-M01-PERSONAL-PREP-FAIL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-PERSONAL-PREP-FAIL@desktop-1440x900.png",
+   "sha256": "a30af419f536a65b64f81614ff7e3f9d26c843cb9c2183fd0bee2f8518b95a99"
+  },
+  "shot-P-M01-REOPEN": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-REOPEN@desktop-1440x900.png",
+   "sha256": "91aa7e711ec622e4a263189d8838f4829a788483d00ef2d84c6e05c988842607"
+  },
+  "shot-P-M01-INVITE-BROWSER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-INVITE-BROWSER@desktop-1440x900.png",
+   "sha256": "f90b4b59700e5b5e832b9e2c698dce480394a9eb1bd76286ee144ae981936276"
+  },
+  "shot-P-M01-INVITE-MISMATCH": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-INVITE-MISMATCH@desktop-1440x900.png",
+   "sha256": "1d5a639cebf2b9ba151ecebe6d622b0fc59bec9d5a8741bf69a207e4046b4b93"
+  },
+  "shot-P-M01-INVITE-PENDING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-INVITE-PENDING@desktop-1440x900.png",
+   "sha256": "5ade031598c3ce6dc0c46a69dcd07f001a36b7c4d2e651d53ec105fa3677f315"
+  },
+  "shot-P-M01-REFRESH-FAIL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-REFRESH-FAIL@desktop-1440x900.png",
+   "sha256": "024190fbd82bb85a7b0f54cbc75952544df324d7fa8e38b31a8bd66af8976867"
+  },
+  "shot-P-M01-NOT-INSTALLED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-NOT-INSTALLED@desktop-1440x900.png",
+   "sha256": "462f115495c5d34c3d1c1ca73e92deb53a248b7bcbddc355ae33fc5febf19802"
+  },
+  "shot-P-M01-CREATE-ENT": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-CREATE-ENT@desktop-1440x900.png",
+   "sha256": "b6b11a46c520cf625b7dc85cfeb1a1bb2b51a46073d0d86c3f3f0eabdae40e41"
+  },
+  "shot-P-M01-COLD-START": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M01-COLD-START@desktop-1440x900.png",
+   "sha256": "e63fecd91c6a56dfa09ff6dcbb288760cd2a7be71a53b6885bc178467ca9b10e"
+  },
+  "shot-P-M02-SWITCHER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-SWITCHER@desktop-1440x900.png",
+   "sha256": "214dbb5d57ce81083081510fbc15f73fc9afb794082ecb32193580ce6499b958"
+  },
+  "shot-P-M02-SWITCHER-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-SWITCHER-PERSONAL@desktop-1440x900.png",
+   "sha256": "f659815618bb7d348cc7f40b2735fc9524de3e77bb1f8e795858d9a6fab9991f"
+  },
+  "shot-P-M02-CONFIRM": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-CONFIRM@desktop-1440x900.png",
+   "sha256": "cf1245e57b0b757c49e7622cc73df8c2174b3db298d9569d7024d04fce6ba389"
+  },
+  "shot-P-M02-CONFIRM-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-CONFIRM-PERSONAL@desktop-1440x900.png",
+   "sha256": "dee37d39c2f9057e9e0753c0576ade6445b74ef3a1be1c16464b10e169a8a131"
+  },
+  "shot-P-M02-STOPPING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-STOPPING@desktop-1440x900.png",
+   "sha256": "a01443af1b7363f12023a9f53bbd3dfabc18e01e4ca801eff5b5f81b91838844"
+  },
+  "shot-P-M02-STOP-FAILED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-STOP-FAILED@desktop-1440x900.png",
+   "sha256": "1d691b79f02127b4f5b4d5b6f332d50d8d27e6ee074a37ac79edb9fc22423ecf"
+  },
+  "shot-P-M02-STOP-CANCEL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-STOP-CANCEL@desktop-1440x900.png",
+   "sha256": "fd80e7ae01b4572a1e0f85498f900be8675f85fb48a000e96248aec7d6ee5469"
+  },
+  "shot-P-M02-TARGET-LOADING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-TARGET-LOADING@desktop-1440x900.png",
+   "sha256": "70dd464020c688f4b5037748883719d49b0277d50eb4db000695f4f6e1e401a5"
+  },
+  "shot-P-M02-TARGET-FAILED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-TARGET-FAILED@desktop-1440x900.png",
+   "sha256": "66f442a1352295ae75435bbfcd854c4a0c8b8a2b772ee35cd34e7595dc33cdfc"
+  },
+  "shot-P-M02-ACCESS-LOST": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M02-ACCESS-LOST@desktop-1440x900.png",
+   "sha256": "f2deee1b149fff5df3afefb08a9557b87e12666c2c8299ae90ed2ea3f4a17478"
+  },
+  "shot-P-M03-HOME-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-PERSONAL@desktop-1440x900.png",
+   "sha256": "ef697ab0463647f6c4a6746efedc792d4285cd3fe8772f120865b63f9b0e87bf"
+  },
+  "shot-P-M03-HOME-ZERO": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-ZERO@desktop-1440x900.png",
+   "sha256": "f2f299b66c772f117147fd4a3bd97ae7ebac1b452881962b8864253fed1942b7"
+  },
+  "shot-P-M03-HOME-EMPTY-DIR": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-EMPTY-DIR@desktop-1440x900.png",
+   "sha256": "ac263f3f08e2a16f32b282276e8c76668a9bbeef28aea2bcb196134d4a5300a6"
+  },
+  "shot-P-M03-HOME-LOAD-FAIL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-LOAD-FAIL@desktop-1440x900.png",
+   "sha256": "54cf3a8f04b7157ae0bbf4484656013a298b1c81ef026a33a066221ef28e220b"
+  },
+  "shot-P-M03-HOME-OFFLINE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-OFFLINE@desktop-1440x900.png",
+   "sha256": "33be11c7fc67f711c6992ace56c8793474eedcab8c395db408bab28567e16007"
+  },
+  "shot-P-M03-HOME-ENT": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-ENT@desktop-1440x900.png",
+   "sha256": "975cba783b173b24424cb47f79d2d36b55ebf9965da6bc14a65247b3880e5de1"
+  },
+  "shot-P-M03-HOME-ENT-AFTER-CANCEL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-ENT-AFTER-CANCEL@desktop-1440x900.png",
+   "sha256": "9a8d1d59b5a2825202c24032c73a1d3ee921156c730e5ca29e1c37b3e7cff109"
+  },
+  "shot-P-M03-HOME-ENT-AFTER-CLOSE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-HOME-ENT-AFTER-CLOSE@desktop-1440x900.png",
+   "sha256": "ffdad9307bf550bd6320502a85818fd6fa086825b2264dc24e2114de1e6156a5"
+  },
+  "shot-P-M03-ALL-APPS": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-ALL-APPS@desktop-1440x900.png",
+   "sha256": "d81b1fc136fe76ef3d74659cbeb025bd73f642956b8218f0d7c9eab18b7a9197"
+  },
+  "shot-P-M03-ALL-APPS-ZERO": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-ALL-APPS-ZERO@desktop-1440x900.png",
+   "sha256": "bb59e81dcf7e6f12850ea12984aa8252ce1af2afc99811991155d8b5363a0564"
+  },
+  "shot-P-M07-SOURCE-FALLBACK": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-SOURCE-FALLBACK@desktop-1440x900.png",
+   "sha256": "0d53615a145380959581ee0a9e348ae8800da27166ff0935c74a9985544247ae"
+  },
+  "shot-P-M03-ALL-APPS-ENT-EMPTY": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-ALL-APPS-ENT-EMPTY@desktop-1440x900.png",
+   "sha256": "fcdd3822e165624648dd0bf08c08db4e3c5cf436a8745543c1b59cd868ebd9e0"
+  },
+  "shot-P-M03-INSPECTOR": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-INSPECTOR@desktop-1440x900.png",
+   "sha256": "71848283e92ce61fd48470261b8ec41d1b92673d669e13a03fb1df80855e239a"
+  },
+  "shot-P-M03-MANAGE-HOME": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-MANAGE-HOME@desktop-1440x900.png",
+   "sha256": "e95fa9b58f599917b223bc2421e8c0df72287c9c0ed1c11d24ffc8b2ab111bf7"
+  },
+  "shot-P-M03-CONTROLS": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M03-CONTROLS@desktop-1440x900.png",
+   "sha256": "f26424b32663e47e3c71ea9e37b0e6a64d9aa7f4164bcbdfd81fdb2bac436714"
+  },
+  "shot-P-M04-APP-VIEW": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-APP-VIEW@desktop-1440x900.png",
+   "sha256": "2aeb5ed6a384dd944e7ec33a1bcacdb467a5dba7e6903af4e6d5b8dba8a523c2"
+  },
+  "shot-P-M04-APP-VIEW-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-APP-VIEW-PERSONAL@desktop-1440x900.png",
+   "sha256": "ee0584dc8d27f3ad607d9865ac5ab61b6b6b4f87e55a1ad129b6923d1e8d9b1d"
+  },
+  "shot-P-M04-PREPARE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-PREPARE@desktop-1440x900.png",
+   "sha256": "2b7681df3e48055aaae98dba8c6a2301d217323d5f117d4b25296b89e8f47af5"
+  },
+  "shot-P-M04-PREP-FAILED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-PREP-FAILED@desktop-1440x900.png",
+   "sha256": "76a49b459b2bf46af42600cac095db3c61df0b19361869677f4d4c47787760a9"
+  },
+  "shot-P-M04-CLOSE-ACTIVE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-CLOSE-ACTIVE@desktop-1440x900.png",
+   "sha256": "d80902e0f0379c98ee06dafc2e27364a02375cb4de275dab1bd1cc48de52ceac"
+  },
+  "shot-P-M04-TERM-FAILED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-TERM-FAILED@desktop-1440x900.png",
+   "sha256": "e7743543bf3522a2b38391b1792a9d6a19e11cec0a48604553fd26c81d2ebf8e"
+  },
+  "shot-P-M04-BACKGROUND": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-BACKGROUND@desktop-1440x900.png",
+   "sha256": "c7115cfd84ac96741ae8f77b7ce8f23d83e31604d911468a464d41886309dba8"
+  },
+  "shot-P-M04-RUNTIME": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-RUNTIME@desktop-1440x900.png",
+   "sha256": "c30ce7cea43c799028efc5e79b125ddc133d81ce49f4de68013f33fcdaa84631"
+  },
+  "shot-P-M04-RUNTIME-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-RUNTIME-PERSONAL@desktop-1440x900.png",
+   "sha256": "ec0c040b7b165dc9e057bdba4306e2e981065e8f88d8afa1fb544ae50a9911ef"
+  },
+  "shot-P-M04-PERM-DENIED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M04-PERM-DENIED@desktop-1440x900.png",
+   "sha256": "02d88f2732578f2f1f15724e40ea36c8fc98f7578fac8b3b522805aa014777ec"
+  },
+  "shot-P-M05-CHAT": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M05-CHAT@desktop-1440x900.png",
+   "sha256": "6e17bfd9a2a5a1d704f5bf287da7cb0c2bf452ecc4f61982eea58caf4f4c1cd5"
+  },
+  "shot-P-M05-CHAT-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M05-CHAT-PERSONAL@desktop-1440x900.png",
+   "sha256": "26c6b23a577a0048d37f70f5e80122c01f30584c890ccb2829379e9a2da165d7"
+  },
+  "shot-P-M05-NEW": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M05-NEW@desktop-1440x900.png",
+   "sha256": "eed5a6ac39eee6ffaa8ab2c2045b361f67d5467f0ee7fcd13fcc358b0a9cb2a2"
+  },
+  "shot-P-M05-STOPPED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M05-STOPPED@desktop-1440x900.png",
+   "sha256": "b170b2d2c3c09576354506f1c056f525563e3a55b4e8509a60a9650598e6d994"
+  },
+  "shot-P-M05-QUESTION": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M05-QUESTION@desktop-1440x900.png",
+   "sha256": "7a5529d57456de92685db85d80d6afe71f10be846d9a2f228b7d440511b48977"
+  },
+  "shot-P-M05-QUESTION-REOPEN": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M05-QUESTION-REOPEN@desktop-1440x900.png",
+   "sha256": "2eb32156aeb121043ab6c0407ac7c84ac5cd51a00629063cae87a1ac7717df46"
+  },
+  "shot-P-M06-SKILLS": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M06-SKILLS@desktop-1440x900.png",
+   "sha256": "76b482b4767e4bd64a0607adb221fecc25a475313300217fe79ce9a8edb0ac16"
+  },
+  "shot-P-M06-SKILLS-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M06-SKILLS-PERSONAL@desktop-1440x900.png",
+   "sha256": "088aada84e7e8acfb4d9e0a2a5fd24b1206104f4a27ec14538c48194153b0609"
+  },
+  "shot-P-M06-TOOLS-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M06-TOOLS-PERSONAL@desktop-1440x900.png",
+   "sha256": "c03dcc3db1cb001f98ae6aa69c6a7b87369b8f80fb31bd4ce4e69369485a4f8f"
+  },
+  "shot-P-M06-SKILL-DENIED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M06-SKILL-DENIED@desktop-1440x900.png",
+   "sha256": "d995f973b8b5e2a8185a71ebefd9a99b107397e2bfbc731b66ad6e58a5659119"
+  },
+  "shot-P-M06-TOOLS": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M06-TOOLS@desktop-1440x900.png",
+   "sha256": "76c860510a46ebe9dc4ef30f29f42521265b5afb9e0fd5cd67b5aa63d676f655"
+  },
+  "shot-P-M08-FILES": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M08-FILES@desktop-1440x900.png",
+   "sha256": "268e4b4731f7215760b10ee05510ab6b833d83a7147d30aa03b31fa3d4c8fe76"
+  },
+  "shot-P-M08-FILES-PERSONAL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M08-FILES-PERSONAL@desktop-1440x900.png",
+   "sha256": "285af951afa80558ed8567230d119b22ac48e3b0bc8e9ab397939bc66b733fc6"
+  },
+  "shot-P-M08-FILE-MISSING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M08-FILE-MISSING@desktop-1440x900.png",
+   "sha256": "74137b306ce70de6f83c18c37d9455d8de4a4ba78992a69121e1cb04dff32ab0"
+  },
+  "shot-P-M07-LIST": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-LIST@desktop-1440x900.png",
+   "sha256": "758dd1e53b039bc3dab9742fa4a8987e48713cf2ce624e565739e446a7c3419b"
+  },
+  "shot-P-M07-EMPTY": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-EMPTY@desktop-1440x900.png",
+   "sha256": "7752417606e7cf0beb699b471dde7d563e30351423a9432e74bfbf5eb02314dc"
+  },
+  "shot-P-M07-DETAIL-FOCUS": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-DETAIL-FOCUS@desktop-1440x900.png",
+   "sha256": "621c77c2ad7181aa419ee53a98f61cbbd7ab936aabad6af9da78b78f3afbd66e"
+  },
+  "shot-P-M07-JOIN-FREE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-JOIN-FREE@desktop-1440x900.png",
+   "sha256": "78da9d08310ad46c8dc4d09160bfff6d798331fccef0a24d8ea492b091099dab"
+  },
+  "shot-P-M07-JOIN-PENDING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-JOIN-PENDING@desktop-1440x900.png",
+   "sha256": "db67149ca7d81cde248c1ba721404b6d0a3dbff9d92f6c62f79a5ff36257b6f0"
+  },
+  "shot-P-M07-DETAIL-PAID": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-DETAIL-PAID@desktop-1440x900.png",
+   "sha256": "b6006f2607339bd876e0ae8efd6d1d5f3d17349de8d8f39353a1ac101f804e5c"
+  },
+  "shot-P-M07-DETAIL-PAID-AFTER-LEAVE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-DETAIL-PAID-AFTER-LEAVE@desktop-1440x900.png",
+   "sha256": "2803c2567b36896d56126d13a3ad64c4b889bce945e8d70be9050884fe6ada72"
+  },
+  "shot-P-M07-PAY-BROWSER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-PAY-BROWSER@desktop-1440x900.png",
+   "sha256": "a86e1351c200546793e0905f17d951aebe6335ffc597a40659bb49ea934e14da"
+  },
+  "shot-P-M07-PAY-RETURN-FAIL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-PAY-RETURN-FAIL@desktop-1440x900.png",
+   "sha256": "c643dbe74cf69b958ce149314f1be72c3eebbc6b3352808263a9a146dee3ea54"
+  },
+  "shot-P-M07-RENEW": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-RENEW@desktop-1440x900.png",
+   "sha256": "eefed1ad221a0f070ee2d223627c264d434916226ba47bdb6f93df94a66ed087"
+  },
+  "shot-P-M07-RENEW-EXPIRED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-RENEW-EXPIRED@desktop-1440x900.png",
+   "sha256": "6e530741e134a2ba46e10ea117156cb5358009d5afcea94efadfbb6afed85f90"
+  },
+  "shot-P-M07-EXPIRED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-EXPIRED@desktop-1440x900.png",
+   "sha256": "f690bf62571b93c1052b7fbee862a42cad93e95b1251295553bf33be30be542a"
+  },
+  "shot-P-M07-LEAVE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-LEAVE@desktop-1440x900.png",
+   "sha256": "4c2328664bf51bbbd109dbd83a95f1a9ada993a1ee97db87afec92e4427fa3f8"
+  },
+  "shot-P-M07-LEAVE-PAID": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M07-LEAVE-PAID@desktop-1440x900.png",
+   "sha256": "df83ee3736e761a6c67490e2157cb63bc6e5ad872f90640727f06c52bd03cfd7"
+  },
+  "shot-P-M09-PRE-BLOCK": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-PRE-BLOCK@desktop-1440x900.png",
+   "sha256": "c6096e35bc9da9d15cc957b6606c630d2fc79a743b2345b3ad65c17b8d8af9a2"
+  },
+  "shot-P-M09-STREAM-CUT": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-STREAM-CUT@desktop-1440x900.png",
+   "sha256": "5073379bacaa3edd04fcc0342871c3067eac47bdc19b73e9b971db7d6387ee73"
+  },
+  "shot-P-M09-APP-BANNER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-APP-BANNER@desktop-1440x900.png",
+   "sha256": "4a0129f708ab6106c562e465473c32854f1df57bd30f56ea7a8397e261d27444"
+  },
+  "shot-P-M09-ENT-NOTIFY": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-ENT-NOTIFY@desktop-1440x900.png",
+   "sha256": "d9c7d13cae1ea04226ad997e7da262c56593e66f1839bafd57ce756604b86b8b"
+  },
+  "shot-P-M09-USER-STOP": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-USER-STOP@desktop-1440x900.png",
+   "sha256": "734f2d43d57c5fe2c563fe4de5fdc46760828f00b069b729b255c74ea5eefc52"
+  },
+  "shot-P-M09-BROWSER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-BROWSER@desktop-1440x900.png",
+   "sha256": "24f14beb4e30e1f3088cd5e2d9616bebc7a738ea86d30b694e79b992a6e8277e"
+  },
+  "shot-P-M09-CHECKING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-CHECKING@desktop-1440x900.png",
+   "sha256": "d27897a3ac4c6824b5924082fe62419a93b3d7aa2401705c960bee88a3595ad2"
+  },
+  "shot-P-M09-NOT-YET": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-NOT-YET@desktop-1440x900.png",
+   "sha256": "a0cc4acd6c2352c95e92d664bbf001e34e8fb39b0fd6b81fc8965cb551b4c3ed"
+  },
+  "shot-P-M09-RESUMED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M09-RESUMED@desktop-1440x900.png",
+   "sha256": "fb6ccbacb6b380c9373a64106dafc51d675962c19ed10a0630b8e75932b7cd15"
+  },
+  "shot-P-M10-MENU": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M10-MENU@desktop-1440x900.png",
+   "sha256": "537e773a081481bc6cde32ff84a68e46e2344cb5db0218d5fed456fbd5532f05"
+  },
+  "shot-P-M10-MENU-NOPRIV": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M10-MENU-NOPRIV@desktop-1440x900.png",
+   "sha256": "15066e91c370de432d8541f5e254c0a2d0d6a070d5cda2f385bbca5e16ba2251"
+  },
+  "shot-P-M10-SETTINGS": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M10-SETTINGS@desktop-1440x900.png",
+   "sha256": "8149ad6ebca25fdffa4d28a0c27d9e9e7330457dcc966fef47071adac9e0ff5c"
+  },
+  "shot-P-M10-SETTINGS-APPEARANCE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M10-SETTINGS-APPEARANCE@desktop-1440x900.png",
+   "sha256": "0ca92dadeac261b31395e4bad4fd97bee2239154bb8b8fec11ed936aac90bbb1"
+  },
+  "shot-P-M10-ADMIN-BROWSER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M10-ADMIN-BROWSER@desktop-1440x900.png",
+   "sha256": "e38dc0839bb7eac86efba68e1f0bd9a07fc41fda9edfcd20e96b3e630083430a"
+  },
+  "shot-P-M10-ADMIN-RETURN": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M10-ADMIN-RETURN@desktop-1440x900.png",
+   "sha256": "e4ae7029df353bc98634a32d092de6ae9dc92776e93ca76e8a20bb954bfc0f4a"
+  },
+  "shot-P-M11-REAUTH": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-REAUTH@desktop-1440x900.png",
+   "sha256": "92d21072cec925cbdd4ee363717843bc00ba5dda6891b3420ecc618d753d6e6a"
+  },
+  "shot-P-M11-REVOKE": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-REVOKE@desktop-1440x900.png",
+   "sha256": "d81a2ead02201666c3ea0e970a109b136c46530bf200aa3a4d0c5d75867eb06e"
+  },
+  "shot-P-M11-PERSONAL-RESTRICTED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-PERSONAL-RESTRICTED@desktop-1440x900.png",
+   "sha256": "f1c655daed2d275770d530a0222a024ed148982531291ed5d37cd2eddb1b26a7"
+  },
+  "shot-P-M11-BLOCKED-WITHDRAWN": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-BLOCKED-WITHDRAWN@desktop-1440x900.png",
+   "sha256": "9d9f21dac6ba2268638fb19ee46cdb2cb79ce71a58d84d8d9ecf5247e3e46152"
+  },
+  "shot-P-M11-BLOCKED-EXPIRED": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-BLOCKED-EXPIRED@desktop-1440x900.png",
+   "sha256": "57135ef3e9f0d256ea6ebc9b8415d3c0646893f54a50c796e80a6f3a07f51479"
+  },
+  "shot-P-M11-BLOCKED-VERSION": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-BLOCKED-VERSION@desktop-1440x900.png",
+   "sha256": "054e35449ab4295cf9e497cc6f5977b167d93878d2a7c6e58040abedc27ed659"
+  },
+  "shot-P-M11-OFFLINE-HOME": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-OFFLINE-HOME@desktop-1440x900.png",
+   "sha256": "4ae4da769c9a2cc98e56df14ac38360a511963be96a31a2cbf42768be7fc7baa"
+  },
+  "shot-P-M11-OFFLINE-RUNNING": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-OFFLINE-RUNNING@desktop-1440x900.png",
+   "sha256": "72fd5823361dd8c6a41200e9acbfa777b670d18273ab8342246786280cd876b8"
+  },
+  "shot-P-M11-CONTRACT": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-CONTRACT@desktop-1440x900.png",
+   "sha256": "3add58c2bdc4c21455d7f1f14dc18113b2fdf1e6357e0dd76b646fa1f4aa9ee1"
+  },
+  "shot-P-M11-CONTRACT-DL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-CONTRACT-DL@desktop-1440x900.png",
+   "sha256": "cec5e23e4c438a9999718174623e154bb24ebfc17eecc3ad263692a4e40b091e"
+  },
+  "shot-P-M11-CONTRACT-FAIL": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-CONTRACT-FAIL@desktop-1440x900.png",
+   "sha256": "56bce77f1aeb7aefe1714e7f22efc35ccca2ff1dc3569f76d678416535d4cc7e"
+  },
+  "shot-P-M11-SPACE-ERROR": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-SPACE-ERROR@desktop-1440x900.png",
+   "sha256": "1680729255af12f4a1ee04b90a2e8f934b024993b6e1059e09999bc6c7298360"
+  },
+  "shot-P-M11-REOPEN-RECOVERY": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-REOPEN-RECOVERY@desktop-1440x900.png",
+   "sha256": "9b3da78a080eccc4abc1e3a252c76ae93d20148ee3ea2e97d388c16d55ad6406"
+  },
+  "shot-P-M11-SUPPORT-BROWSER": {
+   "path": "tmp-v3-evidence/POO-70/screens/P-M11-SUPPORT-BROWSER@desktop-1440x900.png",
+   "sha256": "d91b6053ab347b01b39d6a83c2e85a91638fe3a086a1160e446dfa06946ac6fa"
+  },
+  "semantic-trace": {
+   "path": "tmp-v3-evidence/POO-70/semantic-trace.jsonl",
+   "sha256": "bffad6498e3f83f96d2e1ef3c623a1defa6be6ed9e67ed653915c3a983c7b529"
+  },
+  "screens": {
+   "path": "tmp-v3-evidence/POO-70/screens-index.json",
+   "sha256": "e6cd429791911d155515fcabb09287e17b144f5936e34adcb11b55dd4ed6c7e8"
+  },
+  "fix-verification": {
+   "path": "tmp-v3-evidence/POO-70/fix-verification.json",
+   "sha256": "c30d55324d3b96effe99e110000aaab6ac6f02938aadd9d8c0087777dc361663"
+  }
+ },
+ "checks": {
+  "structure": {
+   "status": "passed",
+   "evidence": "structure"
+  },
+  "browser": {
+   "status": "passed",
+   "evidence": "browser"
+  },
+  "semantic": {
+   "status": "passed",
+   "evidence": "semantic"
+  }
+ }
+}
