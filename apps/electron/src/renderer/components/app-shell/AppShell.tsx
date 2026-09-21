@@ -119,7 +119,7 @@ import {
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
-import { SkillsListPanel } from "./SkillsListPanel"
+import { SkillsManagerPanel } from "./skills/SkillsManagerPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
@@ -3175,10 +3175,9 @@ function AppShellContent({
             )}
             {isSkillsNavigation(navState) && activeWorkspaceId && (
               /* Skills List */
-              <SkillsListPanel
+              <SkillsManagerPanel
                 skills={skillsWithLiveSafety}
                 workspaceId={activeWorkspaceId}
-                workspaceRootPath={activeWorkspace?.rootPath}
                 availableCreatorSkillVersions={availableCreatorSkillVersions}
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
