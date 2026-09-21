@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -15,8 +15,36 @@ import {
 import { AppIcon } from './AppIcon'
 import {
   OrganizationAppCard,
+  statusText,
   type CatalogPrimaryAction,
 } from './OrganizationAppCard'
+import {
+  AllAppsPage,
+  dedupeCircleSourcedApps,
+  type CircleDirectoryEntry,
+  type CircleSourcedApp,
+  type OrganizationDirectoryEntry,
+} from './AllAppsPage'
+import { AppInspector, type AppInspectorTarget } from './AppInspector'
+import { ManageHomeApps, type ManageHomeAppItem } from './ManageHomeApps'
+import { HiddenApps, type HiddenAppItem } from './HiddenApps'
+import {
+  DirectoryLoadFailedState,
+  EmptyDirectoryState,
+  OfflineDirectoryState,
+  ZeroFrequentState,
+} from './HomeStates'
+import { useHomeView } from './HomeViewState'
+import {
+  HOME_FREQUENT_APP_LIMIT,
+  loadHiddenHomeApps,
+  loadHomePinnedApps,
+  saveHiddenHomeApps,
+  saveHomePinnedApps,
+  type HiddenHomeAppKind,
+  type HiddenHomeAppRef,
+  type PinnedHomeAppRef,
+} from './home-surface-preferences'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -28,8 +56,10 @@ import {
 } from '@/components/ui/dialog'
 import { useAppCatalog } from '@/hooks/useAppCatalog'
 import { useTabShell } from '@/context/TabShellContext'
+import { useHomeSurfaceSlots } from '@/context/HomeSurfaceSlotsContext'
 import {
   BUILTIN_APP_IDS,
+  POLO_APP_DEFINITION,
   type AppDefinition,
 } from '../../../shared/tab-browser-types'
 import {
@@ -49,6 +79,22 @@ interface HomePageProps {
 
 const MAX_RECENT_APPS = 6
 export const ORGANIZATION_APP_PAGE_SIZE = 60
+
+/** 个人隐藏/常用偏好里可被固定或隐藏的目录条目。 */
+interface DirectoryPreferenceTarget {
+  id: string
+  name: string
+  iconUrl?: string
+  kind: PinnedHomeAppRef['kind']
+}
+
+/** 可被隐藏的目录条目（组织/圈子；外部快捷方式走移除流程）。 */
+interface HidePreferenceTarget {
+  id: string
+  name: string
+  iconUrl?: string
+  kind: HiddenHomeAppKind
+}
 
 export function selectOrganizationAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
@@ -95,6 +141,22 @@ export function formatBytes(t: TFunction, sizeBytes: number): string {
   } ${t(unitKeys[unit]!)}`
 }
 
+function formatCatalogSyncedAt(
+  language: string,
+  syncedAt: number | undefined,
+): string | null {
+  if (!syncedAt || !Number.isFinite(syncedAt) || syncedAt <= 0) return null
+  const date = new Date(syncedAt)
+  try {
+    return new Intl.DateTimeFormat(language, {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date)
+  } catch {
+    return date.toLocaleTimeString()
+  }
+}
+
 function catalogTabDefinition(
   scopeKey: string,
   app: CatalogApp,
@@ -135,12 +197,18 @@ function AddExternalAppTile({ onClick }: { onClick: () => void }) {
 }
 
 export function HomePage({ onAddApp }: HomePageProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { installedApps, openApp, removeApp } = useTabShell()
   const catalog = useAppCatalog()
+  const getStatus = catalog.getStatus
+  const homeSlots = useHomeSurfaceSlots()
+  const homeView = useHomeView()
+  const view = homeView.view
   const [recentApps, setRecentApps] = useState<HomeRecentAppPreference[]>([])
   const recentLoadGenerationRef = useRef(0)
   const recentMutationGenerationRef = useRef(0)
+  const [pinnedRefs, setPinnedRefs] = useState<PinnedHomeAppRef[]>([])
+  const [hiddenRefs, setHiddenRefs] = useState<HiddenHomeAppRef[]>([])
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
     appConfigVersion: string
@@ -181,28 +249,24 @@ export function HomePage({ onAddApp }: HomePageProps) {
       catalog.state.statuses,
     ],
   )
-  const displayedOrganizationApps = organizationApps.slice(0, organizationAppLimit)
-  useEffect(() => {
-    setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
-  }, [
-    catalog.organization?.organizationContextKey,
-    catalog.state.catalog?.appConfigVersion,
-  ])
-  useEffect(() => {
-    // Logs are scoped to the exact account/organization/App tuple. Advancing
-    // this independent request generation prevents an older organization
-    // context from publishing into a later dialog.
-    logsRequestGenerationRef.current += 1
-    logsTargetScopeKeyRef.current = null
-    setLogsTarget(null)
-    setLogs('')
-    setLogsLoading(false)
-  }, [catalog.organization?.organizationContextKey])
   const activeOrganization = catalog.organization?.organizationSummaries.find(
     item => item.id === catalog.organization?.activeOrganizationId,
   )
+  // 个人空间（我的空间 / 未加入组织）：首页展示常用区、我的圈子、个人快捷方式；
+  // 企业空间只展示企业作品（D-PC-08），不放管理卡（D-PC-07）。
+  const isPersonalSpace = !catalog.organization
+    || activeOrganization?.type === 'creator_space'
   const recentContextKey = createHomeRecentContextKey(
     catalog.organization?.organizationContextKey,
+  )
+
+  // 圈子来源目录数据：与 ws-circles-account 的约定形状（CircleSourcedApp）。
+  // 产品内真实来源数据待接入（.ws-requests/WS-HOME-APPS.md 台单），
+  // 接入前目录页的圈子区不出现，去重逻辑单测与 demo 覆盖。
+  const circleSourcedApps = useMemo<CircleSourcedApp[]>(() => [], [])
+  const dedupedCircleApps = useMemo(
+    () => dedupeCircleSourcedApps(circleSourcedApps),
+    [circleSourcedApps],
   )
 
   useEffect(() => {
@@ -210,6 +274,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
     recentLoadGenerationRef.current = generation
     const mutationGeneration = recentMutationGenerationRef.current
     setRecentApps([])
+    // 本设备常用/隐藏偏好与最近记录同一上下文键：切空间时整组重置。
+    setPinnedRefs(loadHomePinnedApps(recentContextKey))
+    setHiddenRefs(loadHiddenHomeApps(recentContextKey))
+    homeView.reset()
     void loadHomeRecentApps(recentContextKey)
       .then(apps => {
         // A local open in this same context fences the older hydration result:
@@ -224,7 +292,16 @@ export function HomePage({ onAddApp }: HomePageProps) {
       .catch(() => {
         // Launcher history is non-critical; keep the current section usable.
       })
-  }, [recentContextKey])
+  }, [recentContextKey, homeView])
+
+  const pinnedIds = useMemo(
+    () => new Set(pinnedRefs.map(ref => ref.id)),
+    [pinnedRefs],
+  )
+  const hiddenIds = useMemo(
+    () => new Set(hiddenRefs.map(ref => ref.id)),
+    [hiddenRefs],
+  )
 
   const recordRecent = (
     id: string,
@@ -295,7 +372,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
       return
     }
     if (action === 'retry') {
-      const status = catalog.getStatus(app)
+      const status = getStatus(app)
       if (!status?.currentVersion) {
         const appConfigVersion = catalog.state.catalog?.appConfigVersion
         if (!appConfigVersion) {
@@ -379,14 +456,137 @@ export function HomePage({ onAddApp }: HomePageProps) {
     }
   }
 
-  const compatibleWithHost = (app: CatalogApp): boolean => {
+  const compatibleWithHost = useCallback((app: CatalogApp): boolean => {
     if (app.deliveryMode !== 'local_bundle') return true
     const release = app.currentRelease
     const host = catalog.state.host
     if (!release || !host) return true
     return (!release.platform || release.platform === host.platform)
       && (!release.arch || release.arch === host.arch)
+  }, [catalog.state.host])
+
+  const scopeKeyFor = useCallback((app: CatalogApp): string | null => {
+    try {
+      return catalog.scopeKeyForApp(app)
+    } catch {
+      return null
+    }
+  }, [catalog.scopeKeyForApp])
+
+  // ----- 常用（固定）应用：解析 + 偏好操作 -----
+
+  const organizationAppByScopeKey = useMemo(() => {
+    const map = new Map<string, CatalogApp>()
+    for (const app of organizationApps) {
+      const scopeKey = scopeKeyFor(app)
+      if (scopeKey) map.set(scopeKey, app)
+    }
+    return map
+  }, [organizationApps, scopeKeyFor])
+
+  const togglePinnedTarget = (
+    target: DirectoryPreferenceTarget,
+    pinned: boolean,
+  ) => {
+    setPinnedRefs(current => {
+      if (pinned) {
+        const next = current.filter(ref => !(
+          ref.kind === target.kind && ref.id === target.id
+        ))
+        return saveHomePinnedApps(recentContextKey, next)
+      }
+      if (current.length >= HOME_FREQUENT_APP_LIMIT) {
+        toast.error(t('homeApps.manage.full'))
+        return current
+      }
+      if (current.some(ref => ref.kind === target.kind && ref.id === target.id)) {
+        return current
+      }
+      return saveHomePinnedApps(recentContextKey, [
+        ...current,
+        {
+          id: target.id,
+          kind: target.kind,
+          name: target.name,
+          iconUrl: target.iconUrl,
+        },
+      ])
+    })
   }
+
+  const removePinnedById = (id: string) => {
+    setPinnedRefs(current => (
+      saveHomePinnedApps(
+        recentContextKey,
+        current.filter(ref => ref.id !== id),
+      )
+    ))
+  }
+
+  const hideDirectoryTarget = (target: HidePreferenceTarget) => {
+    setHiddenRefs(current => {
+      if (current.some(ref => ref.kind === target.kind && ref.id === target.id)) {
+        return current
+      }
+      return saveHiddenHomeApps(recentContextKey, [
+        ...current,
+        { id: target.id, kind: target.kind, name: target.name },
+      ])
+    })
+  }
+
+  const restoreHiddenById = (id: string) => {
+    setHiddenRefs(current => (
+      saveHiddenHomeApps(
+        recentContextKey,
+        current.filter(ref => ref.id !== id),
+      )
+    ))
+  }
+
+  interface ResolvedPinnedEntry {
+    key: string
+    definition: AppDefinition
+    onOpen: () => void
+    item: ManageHomeAppItem
+  }
+
+  const resolvedPinned = useMemo<ResolvedPinnedEntry[]>(() => {
+    const entries: ResolvedPinnedEntry[] = []
+    for (const ref of pinnedRefs) {
+      if (ref.kind === 'external') {
+        const app = installedApps.find(candidate => candidate.id === ref.id)
+        if (!app) continue
+        entries.push({
+          key: `pinned:external:${app.id}`,
+          definition: app,
+          onOpen: () => openPersonalApp(app),
+          item: { id: ref.id, name: app.name, iconUrl: app.iconUrl, kind: ref.kind },
+        })
+        continue
+      }
+      if (ref.kind === 'organization') {
+        const app = organizationAppByScopeKey.get(ref.id)
+        if (!app || app.availability !== 'available') continue
+        const status = getStatus(app)
+        const url = app.remoteUrl || status?.url || 'http://127.0.0.1'
+        entries.push({
+          key: `pinned:organization:${ref.id}`,
+          definition: catalogTabDefinition(ref.id, app, url),
+          onOpen: () => { void openCatalogApp(app) },
+          item: { id: ref.id, name: app.name, iconUrl: app.iconUrl, kind: ref.kind },
+        })
+        continue
+      }
+      // 圈子来源条目：产品内尚未接入真实数据（见 circleSourcedApps 注释）。
+    }
+    return entries
+  }, [
+    getStatus,
+    installedApps,
+    organizationAppByScopeKey,
+    pinnedRefs,
+  ])
 
   const resolvedRecent = (() => {
     const entries: Array<{
@@ -397,6 +597,8 @@ export function HomePage({ onAddApp }: HomePageProps) {
     const seen = new Set<string>()
 
     for (const item of recentApps) {
+      // 个人空间里 Polo 助手已固定在常用区（D-PC-07），最近记录不再重复它。
+      if (isPersonalSpace && item.kind === 'builtin') continue
       if (item.kind === 'organization') {
         const app = organizationApps.find(candidate => {
           try {
@@ -406,7 +608,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
           }
         })
         if (!app || app.availability !== 'available') continue
-        const status = catalog.getStatus(app)
+        const status = getStatus(app)
         const url = app.remoteUrl || status?.url || 'http://127.0.0.1'
         const scopeKey = catalog.scopeKeyForApp(app)
         const key = `organization:${scopeKey}`
@@ -434,21 +636,444 @@ export function HomePage({ onAddApp }: HomePageProps) {
     return entries.slice(0, MAX_RECENT_APPS)
   })()
   const remainingBuiltinApps = builtinApps.filter(app => (
-    !resolvedRecent.some(item => item.key === `builtin:${app.id}`)
+    !(isPersonalSpace && app.id === POLO_APP_DEFINITION.id)
+    && !resolvedRecent.some(item => item.key === `builtin:${app.id}`)
   ))
 
-  return (
-    <main
-      className="h-full min-h-0 overflow-y-auto bg-background px-6 py-8 text-foreground sm:px-8"
-      data-testid="home-app-hub"
-    >
-      <div className="mx-auto w-full max-w-[1120px] space-y-10">
+  useEffect(() => {
+    setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
+  }, [
+    catalog.organization?.organizationContextKey,
+    catalog.state.catalog?.appConfigVersion,
+  ])
+  useEffect(() => {
+    // Logs are scoped to the exact account/organization/App tuple. Advancing
+    // this independent request generation prevents an older organization
+    // context from publishing into a later dialog.
+    logsRequestGenerationRef.current += 1
+    logsTargetScopeKeyRef.current = null
+    setLogsTarget(null)
+    setLogs('')
+    setLogsLoading(false)
+  }, [catalog.organization?.organizationContextKey])
+
+  const hiddenOrganizationScopeKeys = useMemo(() => new Set(hiddenRefs
+    .filter(ref => ref.kind === 'organization')
+    .map(ref => ref.id)), [hiddenRefs])
+
+  const visibleOrganizationApps = useMemo(
+    () => organizationApps.filter(app => {
+      const scopeKey = scopeKeyFor(app)
+      return scopeKey === null || !hiddenOrganizationScopeKeys.has(scopeKey)
+    }),
+    [hiddenOrganizationScopeKeys, organizationApps, scopeKeyFor],
+  )
+  const displayedOrganizationApps = visibleOrganizationApps.slice(
+    0,
+    organizationAppLimit,
+  )
+
+  // ----- 目录页 / 管理页数据 -----
+
+  const directoryCircleEntries = useMemo<CircleDirectoryEntry[]>(
+    () => dedupedCircleApps
+      .filter(entry => !hiddenIds.has(entry.appId))
+      .map(entry => ({ ...entry, pinned: pinnedIds.has(entry.appId) })),
+    [dedupedCircleApps, hiddenIds, pinnedIds],
+  )
+
+  const directoryOrganizationEntries = useMemo<OrganizationDirectoryEntry[]>(() => {
+    const entries: OrganizationDirectoryEntry[] = []
+    for (const app of visibleOrganizationApps) {
+      const scopeKey = scopeKeyFor(app)
+      if (scopeKey === null) continue
+      const status = getStatus(app)
+      entries.push({
+        id: scopeKey,
+        app,
+        status,
+        statusLoading: Boolean(
+          catalog.state.statusLoadingScopeKeys?.[scopeKey],
+        ),
+        statusUnavailable: Boolean(
+          !status
+          && !catalog.state.statusLoadingScopeKeys?.[scopeKey]
+          && catalog.state.statusErrorScopeKeys?.[scopeKey],
+        ),
+        compatible: compatibleWithHost(app),
+        offline: catalog.state.accessMode === 'offline',
+        pinned: pinnedIds.has(scopeKey),
+      })
+    }
+    return entries
+  }, [
+    compatibleWithHost,
+    getStatus,
+    pinnedIds,
+    scopeKeyFor,
+    catalog.state.accessMode,
+    catalog.state.statusErrorScopeKeys,
+    catalog.state.statusLoadingScopeKeys,
+    visibleOrganizationApps,
+  ])
+
+  const manageCandidates = useMemo<ManageHomeAppItem[]>(() => {
+    const pinnedKeys = new Set(pinnedRefs.map(ref => `${ref.kind}:${ref.id}`))
+    const items: ManageHomeAppItem[] = []
+    for (const app of visibleOrganizationApps) {
+      if (app.availability !== 'available') continue
+      const scopeKey = scopeKeyFor(app)
+      if (scopeKey === null) continue
+      if (pinnedKeys.has(`organization:${scopeKey}`)) continue
+      items.push({
+        id: scopeKey,
+        name: app.name,
+        iconUrl: app.iconUrl,
+        kind: 'organization',
+      })
+    }
+    for (const app of externalApps) {
+      if (pinnedKeys.has(`external:${app.id}`)) continue
+      items.push({
+        id: app.id,
+        name: app.name,
+        iconUrl: app.iconUrl,
+        kind: 'external',
+      })
+    }
+    return items
+  }, [externalApps, pinnedRefs, scopeKeyFor, visibleOrganizationApps])
+
+  const managePinned = useMemo<ManageHomeAppItem[]>(
+    () => resolvedPinned.map(entry => entry.item),
+    [resolvedPinned],
+  )
+
+  const hiddenListItems = useMemo<HiddenAppItem[]>(() => (
+    hiddenRefs.map(ref => {
+      if (ref.kind === 'organization') {
+        const app = organizationAppByScopeKey.get(ref.id)
+        return {
+          id: ref.id,
+          name: app?.name ?? ref.name ?? ref.id,
+          iconUrl: app?.iconUrl,
+          sourceLabel: activeOrganization?.name,
+        }
+      }
+      return {
+        id: ref.id,
+        name: ref.name ?? ref.id,
+        sourceLabel: t('homeApps.allApps.circleSection'),
+      }
+    })
+  ), [
+    activeOrganization?.name,
+    hiddenRefs,
+    organizationAppByScopeKey,
+    t,
+  ])
+
+  const inspectorTarget = useMemo<AppInspectorTarget | null>(() => {
+    if (view.kind !== 'inspector') return null
+    if (view.source === 'circle') {
+      const entry = dedupedCircleApps.find(candidate => (
+        candidate.appId === view.id
+      ))
+      if (!entry) return null
+      return {
+        name: entry.name,
+        iconUrl: entry.iconUrl,
+        sources: entry.sources.map(source => ({
+          label: source.circleName,
+          detail: source.creator,
+          valid: source.valid,
+        })),
+        statusLabel: entry.blocked
+          ? t('homeApps.allApps.blocked')
+          : t('homeApps.inspector.statusAvailable'),
+        statusTone: entry.blocked ? 'destructive' : 'success',
+        blockedPath: entry.blocked
+          ? t('homeApps.inspector.blockedPath')
+          : undefined,
+      }
+    }
+    const app = organizationAppByScopeKey.get(view.id)
+    if (!app) return null
+    const status = getStatus(app)
+    const blocked = app.availability !== 'available'
+    return {
+      name: app.name,
+      iconUrl: app.iconUrl,
+      sources: [{
+        label: activeOrganization?.name || t('homeApps.organization.current'),
+        valid: !blocked,
+      }],
+      version: status?.currentVersion ?? app.currentRelease?.version,
+      statusLabel: statusText(t, app, status, compatibleWithHost(app)),
+      statusTone: blocked || status?.status === 'broken'
+        ? 'destructive'
+        : status?.status === 'running' ? 'success' : 'info',
+      statusReason: blocked
+        ? (
+            app.availability === 'withdrawn'
+              ? t('homeApps.status.withdrawn')
+              : t('homeApps.status.unauthorized')
+          )
+        : status?.error
+          ? homeAppOperationErrorText(t, status.error, 'open')
+          : undefined,
+      blockedPath: blocked
+        ? t('homeApps.inspector.blockedPath')
+        : undefined,
+      permissions: app.permissions,
+    }
+  }, [
+    activeOrganization?.name,
+    getStatus,
+    compatibleWithHost,
+    dedupedCircleApps,
+    organizationAppByScopeKey,
+    t,
+    view,
+  ])
+
+  const syncedAtText = formatCatalogSyncedAt(
+    i18n.language,
+    catalog.state.catalog?.syncedAt,
+  )
+
+  const orgSection = catalog.organization && (
+    <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div>
+          <h2 id="organization-apps-heading" className="text-base font-semibold">
+            {t('homeApps.organization.title', {
+              name: activeOrganization?.name || t('homeApps.organization.current'),
+            })}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {activeOrganization?.type === 'creator_space'
+              ? t('homeApps.organization.creatorDescription')
+              : t('homeApps.organization.enterpriseDescription')}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={homeView.openAllApps}
+          >
+            {t('homeApps.allApps.title')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={catalog.state.refreshing}
+            onClick={() => { void catalog.sync(true) }}
+          >
+            <Icons.RefreshCw className={catalog.state.refreshing ? 'animate-spin' : ''} />
+            {t('homeApps.actions.refresh')}
+          </Button>
+        </div>
+      </div>
+
+      {catalog.state.warningCode && catalog.state.accessMode !== 'offline' && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <Icons.WifiOff className="size-4 shrink-0" />
+          {catalogStateMessage(t, catalog.state.warningCode, 'warning')}
+        </div>
+      )}
+
+      {catalog.state.accessMode === 'offline' && !catalog.state.loading && (
+        <div className="mb-4">
+          <OfflineDirectoryState
+            description={t('homeApps.organization.offlineWarning')}
+            fetchedAtLine={syncedAtText
+              ? t('homeApps.offline.syncedAt', { time: syncedAtText })
+              : t('homeApps.offline.title')}
+          />
+        </div>
+      )}
+
+      {catalog.state.statusErrorCode && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <span className="flex items-center gap-2">
+            <Icons.CircleAlert className="size-4 shrink-0" />
+            {t('homeApps.errors.statusReadFailed')}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => { void catalog.refreshRuntimeStatuses() }}
+          >
+            {t('homeApps.actions.tryAgain')}
+          </Button>
+        </div>
+      )}
+
+      {catalog.state.loading ? (
+        <div className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10">
+          <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : catalog.state.errorCode && !catalog.state.catalog ? (
+        <DirectoryLoadFailedState
+          title={t('homeApps.organization.loadFailed')}
+          description={catalogStateMessage(t, catalog.state.errorCode, 'error')}
+          retryLabel={t('homeApps.actions.tryAgain')}
+          onRetry={() => { void catalog.sync(true) }}
+        />
+      ) : visibleOrganizationApps.length === 0 ? (
+        <EmptyDirectoryState
+          title={t('homeApps.organization.empty')}
+          description={
+            activeOrganization?.type === 'creator_space'
+              ? t('homeApps.organization.emptyCreator')
+              : t('homeApps.organization.emptyEnterprise')
+          }
+        />
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {displayedOrganizationApps.map(app => {
+              const scopeKey = scopeKeyFor(app)
+              if (scopeKey === null) return null
+              const status = getStatus(app)
+              const blocked = app.availability !== 'available'
+              return (
+                <div
+                  key={scopeKey}
+                  className={blocked ? 'flex flex-col gap-2' : undefined}
+                >
+                  <OrganizationAppCard
+                    app={app}
+                    status={status}
+                    statusLoading={Boolean(
+                      catalog.state.statusLoadingScopeKeys?.[scopeKey],
+                    )}
+                    statusUnavailable={Boolean(
+                      !status
+                      && !catalog.state.statusLoadingScopeKeys?.[scopeKey]
+                      && catalog.state.statusErrorScopeKeys?.[scopeKey],
+                    )}
+                    compatible={compatibleWithHost(app)}
+                    offline={catalog.state.accessMode === 'offline'}
+                    onPrimaryAction={(target, action) => {
+                      void handlePrimaryAction(target, action)
+                    }}
+                    onStop={(target) => { void handleStop(target) }}
+                    onUninstall={setUninstallTarget}
+                    onViewLogs={(target) => { void showLogs(target) }}
+                  />
+                  {blocked && (
+                    <div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => homeView.inspectApp(scopeKey, 'organization')}
+                      >
+                        {t('homeApps.allApps.viewReason')}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {displayedOrganizationApps.length < visibleOrganizationApps.length && (
+            <div className="mt-5 flex justify-center">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setOrganizationAppLimit(current => (
+                    current + ORGANIZATION_APP_PAGE_SIZE
+                  ))
+                }}
+              >
+                {t('homeApps.actions.loadMore')}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )
+
+  const homeSurface = (
+    <>
+      {isPersonalSpace && (
+        <section aria-labelledby="frequent-apps-heading" data-testid="home-frequent-section">
+          <div className="mb-4 flex items-end justify-between gap-4">
+            <div>
+              <h1 id="frequent-apps-heading" className="text-lg font-semibold">
+                {t('homeApps.frequent.title')}
+              </h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('homeApps.frequent.description')}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={homeView.openManage}
+              >
+                {t('homeApps.frequent.manage')}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={homeView.openAllApps}
+              >
+                {t('homeApps.allApps.title')}
+              </Button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
+            {/* Polo 助手固定在首页、不占常用名额（D-PC-07 M03 收口）。 */}
+            <div data-testid="home-assistant-card">
+              <AppIcon
+                app={POLO_APP_DEFINITION}
+                onOpen={openPersonalApp}
+              />
+            </div>
+            {resolvedPinned.slice(0, HOME_FREQUENT_APP_LIMIT).map(entry => (
+              <AppIcon
+                key={entry.key}
+                app={entry.definition}
+                onOpen={entry.onOpen}
+              />
+            ))}
+          </div>
+          {resolvedPinned.length === 0 && (
+            <ZeroFrequentState
+              title={t('homeApps.frequent.zeroTitle')}
+              description={t('homeApps.frequent.zeroDescription')}
+              actionLabel={t('homeApps.frequent.zeroAction')}
+              onAction={homeView.openAllApps}
+            />
+          )}
+        </section>
+      )}
+
+      {/* 跨 WS 挂载点：我的圈子入口（ws-circles-account 提供；个人空间）。 */}
+      {isPersonalSpace && homeSlots.circlesEntry && (
+        <div data-testid="home-circles-slot">{homeSlots.circlesEntry()}</div>
+      )}
+
+      {isPersonalSpace && (
         <section aria-labelledby="recent-apps-heading">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
-              <h1 id="recent-apps-heading" className="text-lg font-semibold">
+              <h2 id="recent-apps-heading" className="text-base font-semibold">
                 {t('homeApps.recent.title')}
-              </h1>
+              </h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 {t('homeApps.recent.description')}
               </p>
@@ -484,144 +1109,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
             </div>
           )}
         </section>
+      )}
 
-        {catalog.organization && (
-          <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <h2 id="organization-apps-heading" className="text-base font-semibold">
-                  {t('homeApps.organization.title', {
-                    name: activeOrganization?.name || t('homeApps.organization.current'),
-                  })}
-                </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {activeOrganization?.type === 'creator_space'
-                    ? t('homeApps.organization.creatorDescription')
-                    : t('homeApps.organization.enterpriseDescription')}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={catalog.state.refreshing}
-                onClick={() => { void catalog.sync(true) }}
-              >
-                <Icons.RefreshCw className={catalog.state.refreshing ? 'animate-spin' : ''} />
-                {t('homeApps.actions.refresh')}
-              </Button>
-            </div>
+      {orgSection}
 
-            {catalog.state.warningCode && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <Icons.WifiOff className="size-4 shrink-0" />
-                {catalogStateMessage(t, catalog.state.warningCode, 'warning')}
-              </div>
-            )}
-
-            {catalog.state.statusErrorCode && (
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <span className="flex items-center gap-2">
-                  <Icons.CircleAlert className="size-4 shrink-0" />
-                  {t('homeApps.errors.statusReadFailed')}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { void catalog.refreshRuntimeStatuses() }}
-                >
-                  {t('homeApps.actions.tryAgain')}
-                </Button>
-              </div>
-            )}
-
-            {catalog.state.loading ? (
-              <div className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10">
-                <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : catalog.state.errorCode && !catalog.state.catalog ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center">
-                <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {t('homeApps.organization.loadFailed')}
-                </p>
-                <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                  {catalogStateMessage(t, catalog.state.errorCode, 'error')}
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => { void catalog.sync(true) }}
-                >
-                  {t('homeApps.actions.tryAgain')}
-                </Button>
-              </div>
-            ) : organizationApps.length === 0 ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-foreground/15 px-6 text-center">
-                <Icons.LayoutGrid className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {t('homeApps.organization.empty')}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {activeOrganization?.type === 'creator_space'
-                    ? t('homeApps.organization.emptyCreator')
-                    : t('homeApps.organization.emptyEnterprise')}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {displayedOrganizationApps.map(app => {
-                    const scopeKey = catalog.scopeKeyForApp(app)
-                    const status = catalog.getStatus(app)
-                    return (
-                      <OrganizationAppCard
-                        key={scopeKey}
-                        app={app}
-                        status={status}
-                        statusLoading={Boolean(
-                          catalog.state.statusLoadingScopeKeys?.[scopeKey],
-                        )}
-                        statusUnavailable={Boolean(
-                          !status
-                          && !catalog.state.statusLoadingScopeKeys?.[scopeKey]
-                          && catalog.state.statusErrorScopeKeys?.[scopeKey],
-                        )}
-                        compatible={compatibleWithHost(app)}
-                        offline={catalog.state.accessMode === 'offline'}
-                        onPrimaryAction={(target, action) => {
-                          void handlePrimaryAction(target, action)
-                        }}
-                        onStop={(target) => { void handleStop(target) }}
-                        onUninstall={setUninstallTarget}
-                        onViewLogs={(target) => { void showLogs(target) }}
-                      />
-                    )
-                  })}
-                </div>
-                {displayedOrganizationApps.length < organizationApps.length && (
-                  <div className="mt-5 flex justify-center">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setOrganizationAppLimit(current => (
-                          current + ORGANIZATION_APP_PAGE_SIZE
-                        ))
-                      }}
-                    >
-                      {t('homeApps.actions.loadMore')}
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
-          </section>
-        )}
-
+      {isPersonalSpace && (
         <section aria-labelledby="external-apps-heading">
           <div className="mb-4">
             <h2 id="external-apps-heading" className="text-base font-semibold">
@@ -643,6 +1135,91 @@ export function HomePage({ onAddApp }: HomePageProps) {
             <AddExternalAppTile onClick={onAddApp} />
           </div>
         </section>
+      )}
+    </>
+  )
+
+  return (
+    <main
+      className="h-full min-h-0 overflow-y-auto bg-background px-6 py-8 text-foreground sm:px-8"
+      data-testid="home-app-hub"
+    >
+      <div className="mx-auto w-full max-w-[1120px] space-y-10">
+        {view.kind === 'home' && homeSurface}
+
+        {view.kind === 'all-apps' && (
+          <AllAppsPage
+            onBack={homeView.goHome}
+            loading={Boolean(catalog.organization) && catalog.state.loading}
+            organizationEntries={directoryOrganizationEntries}
+            circleEntries={directoryCircleEntries}
+            hiddenCount={hiddenRefs.length}
+            onViewHidden={homeView.openHidden}
+            onTogglePinned={togglePinnedTarget}
+            onHide={hideDirectoryTarget}
+            onInspectOrganization={(entry) => {
+              homeView.inspectApp(entry.id, 'organization')
+            }}
+            onInspectCircle={(entry) => {
+              homeView.inspectApp(entry.appId, 'circle')
+            }}
+            onOpenCircleApp={undefined}
+            onOrganizationPrimaryAction={(target, action) => {
+              void handlePrimaryAction(target, action)
+            }}
+            onOrganizationStop={(target) => { void handleStop(target) }}
+            onOrganizationUninstall={setUninstallTarget}
+            onOrganizationViewLogs={(target) => { void showLogs(target) }}
+            emptyState={(
+              <EmptyDirectoryState
+                title={t('homeApps.allApps.emptyTitle')}
+                description={isPersonalSpace
+                  ? t('homeApps.allApps.emptyDescription')
+                  : t('homeApps.allApps.emptyEnterpriseDescription')}
+              />
+            )}
+          />
+        )}
+
+        {view.kind === 'inspector' && (
+          inspectorTarget
+            ? (
+              <AppInspector
+                target={inspectorTarget}
+                onBack={homeView.goHome}
+                onOpen={() => {
+                  if (view.kind !== 'inspector') return
+                  const app = organizationAppByScopeKey.get(view.id)
+                  if (app) void openCatalogApp(app)
+                }}
+              />
+            )
+            : (
+              <EmptyDirectoryState
+                title={t('homeApps.inspector.unavailableTitle')}
+                description={t('homeApps.inspector.unavailableDescription')}
+              />
+            )
+        )}
+
+        {view.kind === 'manage' && (
+          <ManageHomeApps
+            pinned={managePinned}
+            candidates={manageCandidates}
+            onRemove={removePinnedById}
+            onAdd={item => togglePinnedTarget(item, false)}
+            onViewHidden={homeView.openHidden}
+            onBack={homeView.goHome}
+          />
+        )}
+
+        {view.kind === 'hidden' && (
+          <HiddenApps
+            hidden={hiddenListItems}
+            onRestore={restoreHiddenById}
+            onBack={homeView.openManage}
+          />
+        )}
       </div>
 
       <Dialog open={Boolean(installTarget)} onOpenChange={(open) => {

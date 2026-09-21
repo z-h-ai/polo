@@ -131,7 +131,9 @@ afterEach(() => {
 })
 
 describe('HomePage round-two regressions', () => {
-  it('shows a labeled built-in launcher for a signed-out fresh or cleared profile', () => {
+  // POO-70 WS-HOME-APPS 迁移：Polo 助手不再走「内置应用」启动器，
+  // 而是固定在常用区首卡（home-assistant-card，D-PC-07）。
+  it('shows the fixed Polo assistant card for a signed-out fresh or cleared profile', () => {
     localStorage.setItem('polo-home-recent-apps', JSON.stringify([{
       id: 'old-app',
       kind: 'external',
@@ -145,13 +147,14 @@ describe('HomePage round-two regressions', () => {
       createElement(HomePage, { onAddApp: () => {} }),
     ))
 
-    expect(screen.getByTestId('builtin-app-launcher')).toBeTruthy()
-    expect(screen.getByText('Built-in apps')).toBeTruthy()
-    expect(screen.getByText('Polo 助手')).toBeTruthy()
+    expect(screen.getByTestId('home-frequent-section')).toBeTruthy()
+    const assistantCard = screen.getByTestId('home-assistant-card')
+    expect(within(assistantCard).getByText('Polo 助手')).toBeTruthy()
+    expect(screen.queryByTestId('builtin-app-launcher')).toBeNull()
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(screen.getByText('Polo 助手'))
+    fireEvent.click(within(assistantCard).getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
@@ -185,12 +188,15 @@ describe('HomePage round-two regressions', () => {
       expect(setHomeRecentApps).toHaveBeenCalledTimes(1)
     })
     expect(localStorage.getItem('craft-home-recent-apps')).toBeNull()
-    const launcher = screen.getByTestId('builtin-app-launcher')
-    expect(within(launcher).getByText('Polo 助手')).toBeTruthy()
+    const assistantCard = screen.getByTestId('home-assistant-card')
+    expect(within(assistantCard).getByText('Polo 助手')).toBeTruthy()
+    // 最近使用区与外部应用区都会列出该快捷方式。
+    expect(screen.getAllByText('External Recent').length)
+      .toBeGreaterThanOrEqual(2)
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(within(launcher).getByText('Polo 助手'))
+    fireEvent.click(within(assistantCard).getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
