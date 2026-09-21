@@ -24,11 +24,13 @@ import { apiKeyInputComponents } from './api-key-input'
 import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
+import { spaceSwitchComponents } from './space-switch'
 
 export * from './types'
 
 export const componentRegistry: ComponentEntry[] = [
   ...mobileWebUIComponents,
+  ...spaceSwitchComponents,
   ...apiKeyInputComponents,
   ...onboardingComponents,
   ...chatComponents,

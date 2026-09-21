@@ -137,7 +137,7 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
     } else {
       setState((previous) => ({ ...previous, phase: 'targetFailed' }))
     }
-  }, [deps])
+  }, [deps, patch])
 
   /** Sequential stop pass over the ledger. Already-stopped items are skipped
    *  (retry only acts on failed/unfinished items; stopped items never revive). */
@@ -261,11 +261,7 @@ export function SpaceSwitchFlowProvider({
   children: React.ReactNode
 }) {
   const flow = useSpaceSwitchFlowMachine(deps)
-  return (
-    <SpaceSwitchFlowContext.Provider value={flow}>
-      {children}
-    </SpaceSwitchFlowContext.Provider>
-  )
+  return React.createElement(SpaceSwitchFlowContext.Provider, { value: flow }, children)
 }
 
 /** Consumer of the mounted space-switch transaction. */
