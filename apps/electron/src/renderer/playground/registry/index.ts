@@ -24,11 +24,19 @@ import { apiKeyInputComponents } from './api-key-input'
 import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
+import { circlesComponents } from './circles'
+import { sessionFilesComponents } from './session-files'
+import { creditsFlowsComponents } from './credits-flows'
+import { accountSettingsComponents } from './account-settings'
 
 export * from './types'
 
 export const componentRegistry: ComponentEntry[] = [
   ...mobileWebUIComponents,
+  ...circlesComponents,
+  ...sessionFilesComponents,
+  ...creditsFlowsComponents,
+  ...accountSettingsComponents,
   ...apiKeyInputComponents,
   ...onboardingComponents,
   ...chatComponents,
