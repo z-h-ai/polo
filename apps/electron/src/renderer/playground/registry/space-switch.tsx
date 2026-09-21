@@ -106,14 +106,14 @@ const SCRIPT_OPTIONS = [
 type DemoScript = (typeof SCRIPT_OPTIONS)[number]
 
 const SCRIPT_LABELS: Record<DemoScript, string> = {
-  'confirm-ent': '确认（企业 → 个人，3 项）',
-  'confirm-personal': '确认（个人 → 企业，1 项）',
-  stopping: '停止中（逐项停止）',
-  'stop-failed': '部分失败（第 2 项失败）',
-  'stop-cancel': '取消后落态（已停止 2/3）',
-  'target-loading': '目标加载中',
-  'target-failed': '目标加载失败',
-  'access-lost': '失权说明（北方贸易）',
+  'confirm-ent': 'P-M02-CONFIRM · 确认（企业→个人，3 项）',
+  'confirm-personal': 'P-M02-CONFIRM-PERSONAL · 确认（个人→企业，1 项）',
+  stopping: 'P-M02-STOPPING · 停止中（逐项停止）',
+  'stop-failed': 'P-M02-STOP-FAILED · 部分失败（第 2 项失败）',
+  'stop-cancel': 'P-M02-STOP-CANCEL · 取消后落态（已停止 2/3）',
+  'target-loading': 'P-M02-TARGET-LOADING · 目标加载中',
+  'target-failed': 'P-M02-TARGET-FAILED · 目标加载失败',
+  'access-lost': 'P-M02-ACCESS-LOST · 失权说明（北方贸易）',
 }
 
 const TARGETS: Record<DemoScript, SpaceSwitchTarget> = {
