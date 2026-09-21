@@ -660,6 +660,7 @@
   "fileViewer.noFileSelected": "Ningún archivo seleccionado",
   "filter.exclude": "Excluir",
   "filter.include": "Incluir",
+  "hifiShared.stayHere": "Quedarme en el espacio actual",
   "hints.analyzeSpreadsheet": "Analiza una {file:spreadsheet} y publica los insights en {source:Slack}",
   "hints.combineSlackThreads": "Combina hilos de {source:Slack} en un resumen semanal para {source:Notion}",
   "hints.fetchFigmaDesigns": "Obtén diseños de {source:Figma} y genera componentes React en tu {folder}",
