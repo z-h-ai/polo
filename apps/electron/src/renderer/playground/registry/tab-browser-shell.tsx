@@ -1,19 +1,22 @@
 import * as React from 'react'
 import type { ComponentEntry } from './types'
 import { TabBar } from '@/components/tab-browser/TabBar'
-import { OrganizationProvider, type OrganizationContextValue } from '@/context/OrganizationContext'
-import { TabShellContext, type TabShellContextValue } from '@/context/TabShellContext'
+import {
+  DemoFixedContainer,
+  MockOrganizationProvider,
+  MockTabShellProvider,
+  makeOrganizationSummary,
+} from '../mocks'
 import {
   HOME_TAB_ID,
   POLO_APP_ID,
   POLO_TAB_ID,
   type TabInstance,
 } from '../../../shared/tab-browser-types'
-import type { OrganizationSummary } from '../../../shared/types'
 
 // =============================================================================
 // Tab Browser Shell Playground (prototype R8/R9/R10 verification)
-// Renders the real TabBar with mocked tab + organization contexts:
+// Renders the real TabBar with the shared playground mocks:
 // - R9: passive space indicator + avatar account menu with 「切换空间」 submenu
 // - R10: the space list excludes the suspended/removed organization
 // - R8: tab close glyph as two centered lines in a 24×24 hit area
@@ -46,71 +49,33 @@ const DEMO_TABS: TabInstance[] = [
 
 const ACTIVE_WEBAPP_TAB_ID = 'tab-quote'
 
-function organizationSummary(
-  id: string,
-  name: string,
-  type: 'creator_space' | 'enterprise_workspace',
-  role: 'owner' | 'manager' | 'member',
-): OrganizationSummary {
-  return {
-    id,
-    type,
-    name,
-    purpose: `${name} demo purpose`,
-    membership: { id: `membership-${id}`, role, status: 'active' },
-    memberCount: 6,
-  }
-}
+const PERSONAL_SPACE = makeOrganizationSummary({
+  id: 'org-personal',
+  name: '我的空间',
+  purpose: '我的空间 demo purpose',
+  type: 'creator_space',
+  membership: { role: 'owner', status: 'active' },
+  memberCount: 6,
+})
 
-const PERSONAL_SPACE = organizationSummary('org-personal', '我的空间', 'creator_space', 'owner')
-const ENTERPRISE_SPACE = organizationSummary('org-enterprise', '晨星科技', 'enterprise_workspace', 'member')
-const REVOKED_SPACE: OrganizationSummary = {
-  ...organizationSummary('org-revoked', '已失权企业', 'enterprise_workspace', 'member'),
+const ENTERPRISE_SPACE = makeOrganizationSummary({
+  id: 'org-enterprise',
+  name: '晨星科技',
+  purpose: '晨星科技 demo purpose',
+  type: 'enterprise_workspace',
+  membership: { role: 'member', status: 'active' },
+  memberCount: 6,
+})
+
+const REVOKED_SPACE = makeOrganizationSummary({
+  id: 'org-revoked',
+  name: '已失权企业',
+  purpose: '已失权企业 demo purpose',
+  type: 'enterprise_workspace',
   status: 'suspended',
-  membership: { id: 'membership-org-revoked', role: 'member', status: 'removed' },
-}
-
-function buildTabShellValue(activeTabId: string): TabShellContextValue {
-  return {
-    installedApps: [],
-    openTabs: DEMO_TABS,
-    activeTab: DEMO_TABS.find(tab => tab.id === activeTabId) ?? DEMO_TABS[0]!,
-    activeTabId,
-    isReady: true,
-    activeWebAppNavigation: {
-      canGoBack: true,
-      canGoForward: false,
-      isLoading: false,
-      goBack: () => {},
-      goForward: () => {},
-      reloadOrStop: () => {},
-    },
-    activateHome: () => {},
-    activateTab: () => {},
-    openApp: () => {},
-    closeTab: () => {},
-    reorderTabs: () => {},
-    addApp: async () => {},
-    removeApp: async () => {},
-    updateTabInfo: () => {},
-    registerWebAppNavigation: () => {},
-  }
-}
-
-function buildOrganizationValue(personalSpaceActive: boolean): OrganizationContextValue {
-  const active = personalSpaceActive ? PERSONAL_SPACE : ENTERPRISE_SPACE
-  return {
-    accountId: 'account-demo',
-    activeOrganizationId: active.id,
-    organizationSummaries: [PERSONAL_SPACE, ENTERPRISE_SPACE, REVOKED_SPACE],
-    organizationMembershipRole: active.membership.role,
-    organizationContextKey: `account-demo:${active.id}`,
-    contextVersion: 1,
-    onSelectOrganization: () => {},
-    onManageOrganization: () => {},
-    onCreateOrganization: () => {},
-  }
-}
+  membership: { role: 'member', status: 'removed' },
+  memberCount: 6,
+})
 
 interface TabBarShellDemoProps {
   menuOpen?: boolean
@@ -119,42 +84,34 @@ interface TabBarShellDemoProps {
 }
 
 function TabBarShellDemo({ menuOpen = false, zoom = false, personalSpace = false }: TabBarShellDemoProps) {
-  const tabShellValue = React.useMemo(
-    () => buildTabShellValue(zoom ? HOME_TAB_ID : ACTIVE_WEBAPP_TAB_ID),
-    [zoom],
-  )
-  const organizationValue = React.useMemo(
-    () => buildOrganizationValue(personalSpace),
-    [personalSpace],
-  )
+  const activeTabId = zoom ? HOME_TAB_ID : ACTIVE_WEBAPP_TAB_ID
+  const activeOrganizationId = personalSpace ? PERSONAL_SPACE.id : ENTERPRISE_SPACE.id
 
   return (
-    <OrganizationProvider value={organizationValue}>
-      <TabShellContext.Provider value={tabShellValue}>
-        <div className="relative w-[880px] overflow-hidden rounded-lg border border-border bg-background">
-          {/* The transform turns this box into the containing block for the
-              TabBar's `fixed` positioning, so the bar is clipped to the demo. */}
+    <MockOrganizationProvider
+      organizations={[PERSONAL_SPACE, ENTERPRISE_SPACE, REVOKED_SPACE]}
+      activeId={activeOrganizationId}
+    >
+      <MockTabShellProvider tabs={DEMO_TABS} activeTabId={activeTabId}>
+        {/* The transformed inner layer is the containing block for the
+            TabBar's `fixed` positioning, so the bar is clipped to the demo. */}
+        <DemoFixedContainer scale={zoom ? 2.2 : undefined}>
+          <TabBar
+            account={{
+              user: { username: 'wang', displayName: '小王' },
+              onLogout: () => {},
+              defaultOpen: menuOpen,
+            }}
+          />
           <div
-            className="relative h-[220px] w-full"
-            style={zoom ? { transform: 'scale(2.2)', transformOrigin: 'top left' } : { transform: 'translateZ(0)' }}
+            className="flex items-center justify-center bg-foreground/2 text-xs text-muted-foreground"
+            style={{ height: 'var(--tabbar-height)', marginTop: 'var(--tabbar-height)' }}
           >
-            <TabBar
-              account={{
-                user: { username: 'wang', displayName: '小王' },
-                onLogout: () => {},
-                defaultOpen: menuOpen,
-              }}
-            />
-            <div
-              className="flex items-center justify-center bg-foreground/2 text-xs text-muted-foreground"
-              style={{ height: 'var(--tabbar-height)', marginTop: 'var(--tabbar-height)' }}
-            >
-              (home / app content area)
-            </div>
+            (home / app content area)
           </div>
-        </div>
-      </TabShellContext.Provider>
-    </OrganizationProvider>
+        </DemoFixedContainer>
+      </MockTabShellProvider>
+    </MockOrganizationProvider>
   )
 }
 
