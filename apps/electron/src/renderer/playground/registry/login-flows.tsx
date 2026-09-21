@@ -65,7 +65,7 @@ function prepareExpired(flow: UseAuthFlowReturn) {
   flow.markSessionExpired()
 }
 
-function LoginFlowsDemo({ scene }: { scene: string }) {
+export function LoginFlowsDemo({ scene }: { scene: string }) {
   const { t } = useTranslation()
 
   switch (scene) {
