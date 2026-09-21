@@ -26,3 +26,8 @@ provider 的接线位置（App 根部）也归 ws-home-apps / 集成时收口。
 - `hifiShared.stayHere` 已新增（7 locale 全量、真实翻译）。原型各场景按钮文案更具体
   （「留在我的空间」「留在晨星科技」「稍后再说」等），各 WS 优先在自己的命名空间
   （如 `spaceSwitch.*`）写场景级文案，`hifiShared.stayHere` 仅作通用兜底。
+
+## 4. demo 缩放变体导航按钮语义（评审已接受偏差，记录备查）
+
+demo 迁移后 navigation mock 对非 webapp 活动标签置 null，与真实 provider 一致，
+属有意行为对齐。

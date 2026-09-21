@@ -91,9 +91,7 @@
   --hifi-font-size-page: 22px;
   --hifi-line-height-page: 1.25;
   --hifi-font-size-state: 24px;
-  --hifi-line-height-state: 1.2;
   --hifi-font-size-flow: 26px;
-  --hifi-line-height-flow: 1.16;
   --hifi-font-size-display: 36px;
   --hifi-line-height-display: 1.12;
 }
@@ -180,9 +178,7 @@
   --text-hifi-page: var(--hifi-font-size-page);
   --text-hifi-page--line-height: var(--hifi-line-height-page);
   --text-hifi-state: var(--hifi-font-size-state);
-  --text-hifi-state--line-height: var(--hifi-line-height-state);
   --text-hifi-flow: var(--hifi-font-size-flow);
-  --text-hifi-flow--line-height: var(--hifi-line-height-flow);
   --text-hifi-display: var(--hifi-font-size-display);
   --text-hifi-display--line-height: var(--hifi-line-height-display);
 }

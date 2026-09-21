@@ -64,7 +64,7 @@ export function StateCard({
               className="grid grid-cols-[116px_minmax(0,1fr)] gap-3 border-b border-hifi-border px-[13px] py-[11px] text-hifi-base last:border-b-0"
             >
               <dt className="text-hifi-fg-50">{fact.label}</dt>
-              <dd className="m-0 min-w-0 font-medium [overflow-wrap:anywhere]">{fact.value}</dd>
+              <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{fact.value}</dd>
             </div>
           ))}
         </dl>
