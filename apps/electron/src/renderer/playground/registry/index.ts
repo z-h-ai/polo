@@ -15,6 +15,7 @@ import { editPopoverComponents } from './edit-popover'
 import { automationComponents } from './automations'
 import { entityListComponents } from './entity-lists'
 import { browserUiComponents } from './browser-ui'
+import { tabBrowserShellComponents } from './tab-browser-shell'
 import { plannerComponents } from './planner'
 import { customShadowsComponents } from './custom-shadows'
 import { transportBannerComponents } from './transport-banner'
@@ -46,6 +47,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...automationComponents,
   ...entityListComponents,
   ...browserUiComponents,
+  ...tabBrowserShellComponents,
   ...plannerComponents,
   ...customShadowsComponents,
   ...transportBannerComponents,

@@ -43,6 +43,8 @@ interface TabBarProps {
   account?: {
     user: AccountMenuUser | null
     onLogout: () => void | Promise<void>
+    /** Playground/preview: render with the account menu expanded. */
+    defaultOpen?: boolean
   } | null
 }
 
@@ -163,6 +165,7 @@ export function TabBar({ account }: TabBarProps) {
             user={account.user}
             onLogout={account.onLogout}
             onOpenSettings={openPoloSettings}
+            defaultOpen={account.defaultOpen}
           />
         )}
       </div>

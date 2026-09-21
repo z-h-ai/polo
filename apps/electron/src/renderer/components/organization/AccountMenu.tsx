@@ -22,6 +22,8 @@ interface AccountMenuProps {
   user: AccountMenuUser | null
   onLogout: () => void | Promise<void>
   onOpenSettings: () => void
+  /** Render with the menu and its space submenu expanded (playground/preview). */
+  defaultOpen?: boolean
 }
 
 function isActiveOrganizationSummary(organization: {
@@ -40,7 +42,7 @@ function isActiveOrganizationSummary(organization: {
  * space and active enterprises only — revoked or suspended spaces are never
  * listed as switchable rows (R10).
  */
-export function AccountMenu({ user, onLogout, onOpenSettings }: AccountMenuProps) {
+export function AccountMenu({ user, onLogout, onOpenSettings, defaultOpen = false }: AccountMenuProps) {
   const { t } = useTranslation()
   const organization = useOptionalOrganizationContext()
 
@@ -67,7 +69,7 @@ export function AccountMenu({ user, onLogout, onOpenSettings }: AccountMenuProps
   const initials = displayName.trim().charAt(0).toUpperCase() || '?'
 
   return (
-    <DropdownMenu>
+    <DropdownMenu defaultOpen={defaultOpen}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -90,7 +92,7 @@ export function AccountMenu({ user, onLogout, onOpenSettings }: AccountMenuProps
 
         {organization && (
           <div className="p-1">
-            <DropdownMenuSub>
+            <DropdownMenuSub defaultOpen={defaultOpen}>
               <StyledDropdownMenuSubTrigger data-testid="account-space-entry">
                 <ArrowLeftRight className="size-3.5" />
                 <span className="flex min-w-0 flex-1 flex-col items-start">
