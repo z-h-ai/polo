@@ -85,3 +85,6 @@ credentials.enc
 
 # ZCode session plan artifacts
 .zcode/
+
+# HiFi implementation orchestrator specs (POO-70)
+.tmp/
