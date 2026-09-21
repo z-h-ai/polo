@@ -52,6 +52,7 @@ interface TabShellContextValue {
 
 /** Exported for the component playground, which mocks the context value directly. */
 export const TabShellContext = createContext<TabShellContextValue | null>(null)
+export type { TabShellContextValue }
 
 interface TabShellProviderProps {
   workspaceId?: string | null
