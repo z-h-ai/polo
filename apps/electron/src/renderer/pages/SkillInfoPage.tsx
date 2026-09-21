@@ -512,6 +512,32 @@ export default function SkillInfoPage({
             </Info_Table>
           </Info_Section>
 
+          {/* Local lifecycle (POO-70 HiFi skills manager detail landing):
+              mirrors the SkillDetailSheet facts so the info page and the
+              manager panel describe the same local copy. */}
+          <Info_Section title={t('skillsManager.detail.section.title')}>
+            <Info_Table>
+              <Info_Table.Row label={t('skillsManager.install.scope')}>
+                {t('skillsManager.install.scope.value')}
+              </Info_Table.Row>
+              <Info_Table.Row label={t('skillsManager.install.version')}>
+                {creatorInstalledVersion
+                  ? `v${creatorInstalledVersion}`
+                  : t('skillsManager.detail.version.unknown')}
+              </Info_Table.Row>
+              <Info_Table.Row label={t('skillsManager.install.provider')}>
+                {creatorInstallation
+                  ? activeWorkspace?.name ?? t('skillsManager.space.personal')
+                  : skill.source === 'global'
+                    ? t('skillsManager.source.builtin')
+                    : t('skillsManager.source.personal')}
+              </Info_Table.Row>
+            </Info_Table>
+            <p className="px-4 pb-3 text-xs text-muted-foreground">
+              {t('skillsManager.footnote.disable')}
+            </p>
+          </Info_Section>
+
           {/* Advisory tool requests never grant or remember permission. */}
           {skill.metadata.alwaysAllow && skill.metadata.alwaysAllow.length > 0 && (
             <Info_Section title={t('skillInfo.requestedTools')}>
