@@ -103,10 +103,18 @@ export function reduceAuthFlow(
       if (state.step !== 'idle') return state
       return { ...state, step: 'password' }
     case 'modeSwitched':
-      if (state.step !== 'password' && state.step !== 'phone') return state
+      // Any login entry (including the code step) may switch back to the
+      // password / phone entries (P-M01-LOGIN-CODE “切换为密码登录”).
+      if (!isLoginStep(state.step)) return state
       if (action.mode !== 'password' && action.mode !== 'phone') return state
       if (state.step === action.mode) return state
-      return { ...state, step: action.mode, error: false }
+      return {
+        ...state,
+        step: action.mode,
+        error: false,
+        codeResendAt: undefined,
+        codeExpiresAt: undefined,
+      }
     case 'phoneChanged':
       return { ...state, phone: normalizeMainlandPhoneInput(action.value) }
     case 'codeChanged':

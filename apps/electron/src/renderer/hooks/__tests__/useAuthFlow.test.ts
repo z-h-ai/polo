@@ -29,6 +29,13 @@ describe('reduceAuthFlow legal transitions', () => {
     ).toBe('password')
   })
 
+  it('switches from the code step back to the password entry and drops the countdown', () => {
+    const code = at('code', { codeResendAt: NOW + 59_000, codeExpiresAt: NOW + 300_000 })
+    expect(
+      reduceAuthFlow(code, { type: 'modeSwitched', mode: 'password' }),
+    ).toMatchObject({ step: 'password', codeResendAt: undefined })
+  })
+
   it('normalizes the phone while typing and keeps digits-only codes for the code step', () => {
     const typing = reduceAuthFlow(at('phone'), {
       type: 'phoneChanged',
