@@ -1,5 +1,7 @@
 # POO-70 · MVP 完整流程高保真 — 视觉验收
 
+> 以下是 2026-09-17 的 v2 历史截图与验收记录，不能作为当前 r10 原型的视觉验收。当前入口已按 D-PC-10 改为「顶栏显示当前空间、头像菜单 → 切换空间」；[r9 企业账号菜单](build/space-entry-r9/account-1440.png)、[r9 空间列表（1024）](build/space-entry-r9/switcher-1024.png)、[r10 失权通知](build/revoked-space-r10/notification-P-M04-NOTIFY-PERSONAL.png) 和 [r9 / r10 增量检查](build/revoked-space-r10/browser-check.json) 供本轮复看，完整质量状态仍见 [quality-report.json](quality-report.json)。
+
 日期：2026-09-17 · 修订 `poo70-ux-r4-v2-7`（继承 D-PC-07/08/09，经四轮用户走查迭代收敛） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
 
 截图均直接对 `surface.html`（纯产品表面，无任何评审 chrome）拍摄——v2 契约下产品表面与评审 chrome 分离于两个文件，不再需要 `?clean=1` 之类的隐藏开关。

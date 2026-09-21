@@ -19,7 +19,7 @@ description: Polo 桌面客户端（Electron 工作台）产品 UI 的视觉令�
 
 ## 结构组件（直接复用，不重画）
 
-- **workbench-bar 顶栏**：品牌、标签、运行状态 pill、空间切换器 popover、通知、账号菜单。空间切换器是 M02 的唯一入口，**不承担管理入口**（D-PC-07）。
+- **workbench-bar 顶栏**：品牌、标签、运行状态 pill、当前空间静态标识、通知、账号菜单。头像菜单中的「切换空间」进入 M02 空间列表；顶栏始终显示已提交的当前空间，但不再提供独立切换下拉（D-PC-10）。管理入口仍只在账号菜单按资格出现（D-PC-07）。
 - **app-shell + workspace-main**：主内容工作区。App 打开后占满工作区（D-PC-05），容器外不得加 App 内部 chrome。
 - **product-card / card-grid / app-art**：App 卡与常用区，来源行 source-line 必须保留（同名靠来源辨识）。
 - **assistant-shell 三栏 + chat-composer**：侧栏 / 会话导航 / 主面板。助手、Skills、会话文件、数据源共用（D-PC-06 直接复用，不得为概念线框重画）。
@@ -32,10 +32,10 @@ description: Polo 桌面客户端（Electron 工作台）产品 UI 的视觉令�
 
 ## 原型指导
 
-- 高保真原型离线双文件：`surface.html` 纯产品表面 + `prototype.html` 评审壳；零网络请求、零外部资源。
+- 高保真原型离线双文件：`prototype.html` 纯产品表面 + `review.html` 评审壳（product-ui-prototype v3）；零网络请求、零外部资源。
 - 演示数据一律虚构（人名、企业、价格、积分），不使用真实账号或真实 App 材料。
 - App 内部一律中性 FDE 占位；不得用示例 App 的执行/结果页充当 Polo 产品设计。
-- 失败/取消分支若无可自然触达的产品按钮，用带「分支」前缀的次要按钮表达，并在标注中说明。
+- 失败/取消分支若无可自然触达的产品按钮，用评审壳的 `review_entries` 进入，不在产品表面增加演示按钮。
 - 目标视口 1440×900 与 1024×768：不得出现非预期横向溢出、遮挡或不可达操作。
 
 ## 边界

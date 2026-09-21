@@ -1,0 +1,9 @@
+{
+  "source": "desktop-review-r6",
+  "item": "desktop-container-local-skills",
+  "revision": "desktop-ux-r6",
+  "current": "普通应用被当作任务运行；本机安装与来源授权混合，部分跳转跨空间。",
+  "target": "应用即开即用；Skill 在助手内管理本机副本；企业共享与个人圈子独立。",
+  "reason": "匹配 macOS Electron 容器、非技术员工与组织复用的产品定位。",
+  "question": "应用打开/关闭、本机 Skill 生命周期与企业/圈子内容获取是否符合实际使用？"
+}

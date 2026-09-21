@@ -49,13 +49,15 @@
 | 3 | 准备完成自动进入首页 | [P-M03-HOME-ZERO](prototype.html#scene=P-M03-HOME-ZERO) | 首登零常用：Polo 助手始终可用，并引导“全部 Apps” |
 | 4 | 点「去全部 Apps 挑选」 | [P-M03-ALL-APPS-ZERO](prototype.html#scene=P-M03-ALL-APPS-ZERO) | 首登零常用目录：无“移出首页”、账目干净；同一作品只显示一次并保留全部来源（D-PC-09） |
 | 5 | 使用后回个人首页 | [P-M03-HOME-PERSONAL](prototype.html#scene=P-M03-HOME-PERSONAL) | Polo 助手固定；常用 Apps 来自个人已有权益；“我的圈子”管理关系 |
-| 6 | 选择“晨星科技”且个人有运行项 | [P-M02-CONFIRM-PERSONAL](prototype.html#scene=P-M02-CONFIRM-PERSONAL) | 先说明将终止的个人空间活动；取消仍在个人空间，确认后才切换 |
-| 7 | 进入企业首页 | [P-M03-HOME-ENT](prototype.html#scene=P-M03-HOME-ENT) | 只展示企业导入、启用并向本人分发的作品，不出现个人圈子或圈子通知 |
-| 8 | 打开有更新的 App | [P-M04-PREPARE](prototype.html#scene=P-M04-PREPARE) | 权限说明 + 下载校验；可取消，准备成功后再打开 |
-| 9 | 使用 App | [P-M04-APP-VIEW](prototype.html#scene=P-M04-APP-VIEW) | App 占满主内容工作区；FDE 区域为中性占位，业务结果由 App 负责 |
-| 10 | 查看运行状态 | [P-M04-RUNTIME](prototype.html#scene=P-M04-RUNTIME) | 只列当前企业空间的 App/助手活动 |
-| 11 | 打开 Polo 助手 | [P-M05-CHAT](prototype.html#scene=P-M05-CHAT) | G4 三栏助手框架；当前空间的会话、Skills 与计量主体一致 |
-| 12 | 打开会话文件 | [P-M08-FILES](prototype.html#scene=P-M08-FILES) | 附件与生成文件留在原对话；无独立文件汇总页 |
+| 6 | 点头像打开账号菜单 | [P-M10-MENU](prototype.html#scene=P-M10-MENU) | 顶栏继续显示「我的空间」，菜单内可见「切换空间」 |
+| 7 | 点「切换空间」 | [P-M02-SWITCHER-PERSONAL](prototype.html#scene=P-M02-SWITCHER-PERSONAL) | 列出我的空间与有效企业，圈子不作为空间 |
+| 8 | 选择“晨星科技”且个人有运行项 | [P-M02-CONFIRM-PERSONAL](prototype.html#scene=P-M02-CONFIRM-PERSONAL) | 先说明将终止的个人空间活动；取消仍在个人空间，确认后才切换 |
+| 9 | 进入企业首页 | [P-M03-HOME-ENT](prototype.html#scene=P-M03-HOME-ENT) | 只展示企业导入、启用并向本人分发的作品，不出现个人圈子或圈子通知 |
+| 10 | 打开有更新的 App | [P-M04-PREPARE](prototype.html#scene=P-M04-PREPARE) | 权限说明 + 下载校验；可取消，准备成功后再打开 |
+| 11 | 使用 App | [P-M04-APP-VIEW](prototype.html#scene=P-M04-APP-VIEW) | App 占满主内容工作区；FDE 区域为中性占位，业务结果由 App 负责 |
+| 12 | 查看运行状态 | [P-M04-RUNTIME](prototype.html#scene=P-M04-RUNTIME) | 只列当前企业空间的 App/助手活动 |
+| 13 | 打开 Polo 助手 | [P-M05-CHAT](prototype.html#scene=P-M05-CHAT) | G4 三栏助手框架；当前空间的会话、Skills 与计量主体一致 |
+| 14 | 打开会话文件 | [P-M08-FILES](prototype.html#scene=P-M08-FILES) | 附件与生成文件留在原对话；无独立文件汇总页 |
 
 变体分支：
 
@@ -78,12 +80,13 @@
 | --- | --- | --- | --- |
 | 1 | 打开原型，进入企业空间首页 | [P-M03-HOME-ENT](prototype.html#scene=P-M03-HOME-ENT) | 晨星科技首页，运行中 3 项；按 D-PC-07 不放管理卡，管理入口只在账号菜单 |
 | 2 | 点顶栏「运行」入口 | [P-M04-RUNTIME](prototype.html#scene=P-M04-RUNTIME) | 运行状态中心按空间列 App 任务与助手生成，含逐项停止 |
-| 3 | 点顶栏空间切换器 | [P-M02-SWITCHER](prototype.html#scene=P-M02-SWITCHER) | 集成候选真实组件：列表含我的空间 + 可用企业，当前项高亮 |
-| 4 | 选「我的空间」 | [P-M02-CONFIRM](prototype.html#scene=P-M02-CONFIRM) | 确认框列出将被终止的 3 项（App ×2 + 助手生成 ×1），取消留在原空间 |
-| 5 | 点「终止并切换」 | [P-M02-STOPPING](prototype.html#scene=P-M02-STOPPING) | 逐项停止中；全部停止后才提交切换 |
-| 6 | 注入失败（演示） | [P-M02-STOP-FAILED](prototype.html#scene=P-M02-STOP-FAILED) | 1 项停止失败：可重试失败项或取消；已终止项不自动复活 |
-| 7 | 点「取消切换」 | [P-M02-STOP-CANCEL](prototype.html#scene=P-M02-STOP-CANCEL) | 留在晨星科技；已完成的停止不回滚（顶栏 1 项运行中=停止失败项）——这是本故事的核心规则 |
-| 8 | 点「返回首页」 | [P-M03-HOME-ENT-AFTER-CANCEL](prototype.html#scene=P-M03-HOME-ENT-AFTER-CANCEL) | 落点账目可判读：2 个 App 已终止可重新打开，仅停止失败的助手项仍运行 |
+| 3 | 点右上角头像 | [P-M10-MENU-ENT](prototype.html#scene=P-M10-MENU-ENT) | 账号菜单内有「切换空间」；顶栏仍可看到晨星科技 |
+| 4 | 点「切换空间」 | [P-M02-SWITCHER](prototype.html#scene=P-M02-SWITCHER) | 列表含我的空间 + 可用企业，当前项高亮 |
+| 5 | 选「我的空间」 | [P-M02-CONFIRM](prototype.html#scene=P-M02-CONFIRM) | 确认框列出将被终止的 3 项（App ×2 + 助手生成 ×1），取消留在原空间 |
+| 6 | 点「终止并切换」 | [P-M02-STOPPING](prototype.html#scene=P-M02-STOPPING) | 逐项停止中；全部停止后才提交切换 |
+| 7 | 评审入口查看停止失败 | [P-M02-STOP-FAILED](prototype.html#scene=P-M02-STOP-FAILED) | 1 项停止失败：可重试失败项或取消；已终止项不自动复活 |
+| 8 | 点「取消切换」 | [P-M02-STOP-CANCEL](prototype.html#scene=P-M02-STOP-CANCEL) | 留在晨星科技；已完成的停止不回滚（顶栏 1 项运行中=停止失败项）——这是本故事的核心规则 |
+| 9 | 点「返回首页」 | [P-M03-HOME-ENT-AFTER-CANCEL](prototype.html#scene=P-M03-HOME-ENT-AFTER-CANCEL) | 落点账目可判读：2 个 App 已终止可重新打开，仅停止失败的助手项仍运行 |
 | 8 | 点「后台继续」后从顶栏运行入口查看 | [P-M04-BACKGROUND](prototype.html#scene=P-M04-BACKGROUND) | 改为后台继续：顶栏保留运行 pill 入口，任务在后台不丢 |
 
 变体分支：
@@ -164,7 +167,7 @@
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
 | --- | --- | --- | --- |
-| [P-M02-SWITCHER](prototype.html#scene=P-M02-SWITCHER) | 空间切换器（下拉） | 集成候选已实现 | 集成候选真实组件：无活动直切，有活动进入确认；切换只影响本机。 |
+| [P-M02-SWITCHER](prototype.html#scene=P-M02-SWITCHER) | 头像菜单内的空间列表 | 入口调整待复看 | 顶栏只显示当前空间；头像 →「切换空间」进入列表，无活动直切，有活动进入确认；切换只影响本机。 |
 | [P-M02-CONFIRM](prototype.html#scene=P-M02-CONFIRM) | 切换确认 · 终止 3 项 | 集成候选已实现 | 展示将终止的 App 与助手任务；取消留在原空间（C-R04）。 |
 | [P-M02-CONFIRM-PERSONAL](prototype.html#scene=P-M02-CONFIRM-PERSONAL) | 切换确认 · 从我的空间到企业 | 调整关键页 | 个人空间有活动时先确认终止；取消留在我的空间，确认后才进入企业（D-PC-08 / C-R04）。 |
 | [P-M02-STOPPING](prototype.html#scene=P-M02-STOPPING) | 终止进度 | 集成候选已实现 | 逐项展示已终止/停止中；全部停止后才提交切换（PC-F06）。 |
@@ -173,7 +176,7 @@
 | [P-M02-TARGET-LOADING](prototype.html#scene=P-M02-TARGET-LOADING) | 目标空间加载中 | 集成候选已实现 | 目录、权限、计量与助手集合一起切换；不展示混合内容。 |
 | [P-M02-TARGET-FAILED](prototype.html#scene=P-M02-TARGET-FAILED) | 目标空间加载失败 | 集成候选已实现 | 重试加载或留在原空间；已停止任务保持停止。 |
 | [P-M02-ACCESS-LOST](prototype.html#scene=P-M02-ACCESS-LOST) | 目标无权访问 | 集成候选已实现 | 已从切换器移除并说明原因；联系管理员恢复（C-R05）。 |
-| [P-M02-SWITCHER-PERSONAL](prototype.html#scene=P-M02-SWITCHER-PERSONAL) | 空间切换器 · 从我的空间打开 | 新增 / 构想 | 个人方向切换：无权目标保留原因说明（C-R05）；有活动切企业先确认（PC-F06）。 |
+| [P-M02-SWITCHER-PERSONAL](prototype.html#scene=P-M02-SWITCHER-PERSONAL) | 空间列表 · 从我的空间打开 | 入口调整待复看 | 头像菜单进入；无权目标保留原因说明（C-R05）；有活动切企业先确认（PC-F06）。 |
 ### M03 首页与全部 Apps（14 屏）
 
 | 屏 ID | 标题 | 分类 | 说明与依据 |
@@ -377,3 +380,53 @@ POO-70 已冻结的 8 条「共同恢复契约」逐一映射到原型屏幕：
 ### 语义评审修复轮（2026-09-19）
 
 - 独立语义评审发现漏网演示控件：P-M11-OFFLINE-RUNNING 的「（演示）网络已恢复」（T-P-M11-OFFLINE-RUNNING-014-P-M04-APP-VIEW），已按同约定移除（该场景保留真实「重试连接」；目标场景 P-M04-APP-VIEW 另有 41 处真实入口）。复验通过。
+
+## 2026-09-20 · 桌面容器与本地 Skill 交互优化（进行中）
+
+输入依据：本轮用户要求；保留现有登录页与配色；Polo 是 macOS Electron 容器，应用通过 SDK 使用文件和 AI 能力；Polo 助手是内置应用，参考 Craft Agents；Skill 仅供助手使用，在本地管理；企业空间共享内部应用与 Skill，圈子为个人空间补充内容。
+
+操作分类：增量修改现有原型，非重建。应用打开/关闭、空间切换、Skill 安装/启停/更新/卸载为真实产品操作；加载/网络/授权失败为系统状态，由评审控制台进入；竞品依据与推荐决策放在本记录和评审说明，不进入产品界面。用户已授权根据调研推荐并直接优化；新推荐的行为/布局待用户复看，不自动视为产品验收或新视觉冻结。
+
+### r6 推荐决策与复看入口
+
+- 应用：点击即打开；普通标签直接关闭；有未结束的后台能力调用时才询问取消/后台继续/停止并关闭。文件访问按实际请求提示，加载失败原地重试。
+- 助手：沿用三栏，保留输入与文件位置。建议任务只填入草稿，不替用户发送；空白输入不触发任务。
+- Skill：本机列表 → 来源库 → 详情 → 安装（默认停用）→ 启用 → 助手可选；更新保持原启停，返回/取消保留版本与副本。内置以资料研究示范可停用不可卸载。启用偏好沿用账号＋空间同步规则，安装副本属于本机。
+- 企业：企业应用目录保持当前企业；同事共享 Skill 可安装，自己的 Skill 可提交审核。提交不等于已发布。
+- 圈子：个人空间获取应用和 Skill；同一创作者两圈的同一作品去重。一来源失效不影响其他有效来源；最后来源失效保留本机副本但不能调用。
+- 保留：登录页 HTML、G4 色彩/布局令牌、空间安全切换、付费与手动续费、历史确认记录。
+
+材料版本：`poo70-desktop-ux-r6-v3-14`。行为、布局和视觉状态均为**修改待复看**，不继承旧页面“confirmed”作为本轮确认。
+
+统一入口：[review.html](review.html#story=S-DESKTOP&step=S-DESKTOP-01)。主要故事：企业员工打开工作应用 / 个人获取与管理 Skill / 企业复用同事 Skill / 共享工作方法 / 按需授权与后台任务。调研与产品判断详见 [本轮输入及推荐](sources/desktop-container-brief-r6.md)。
+
+检查证据在 `build/ux-r6/`，独立审查初轮失败与后续修复记录均保留。原版 manifest 自身有 `P-M04-PERM-DENIED` 不可达的历史缺陷，因此 `--previous` 会先在旧材料上失败；本轮当前结构及直接 incremental compare 分别验证，不修改历史文件掩盖缺陷。浏览器 DOM 派发检查和实际指针点击分开计数，不把隐藏控件的派发当作真实用户操作证据。
+
+### r6 最终验证结果
+
+- 当前 v3 结构检查通过；187 场景 × 2 视口共 374 次渲染无横向溢出、无页面脚本错误。
+- 4,701 条声明跳转完成 DOM 派发核对；新增主流程 26 次真实指针点击通过，9 个评审故事可遍历。
+- 独立复查发现的 13 项问题已解决；29 项额外实际点击验证通过。
+- 评审面板、缩放与窗口调整保留输入草稿及 iframe；Reset 和带冲突 scene 的有效 step 深链接正确。
+- 登录页在 1440×900 和 1024×768 的修改前后截图逐像素一致。
+- **完整质量门禁仍为 incomplete**：未把所有继承页面的隐藏控件、非跳转操作和产品语义逐项重新认证。已检查的本轮关键路径通过；不将 DOM 派发量或局部复核视为完整验收。`quality-report.json` 绑定最终产物与真实证据，替换旧版本失效的报告。
+
+## 2026-09-21 · Mac 窗口红黄绿按钮
+
+用户要求：给原型 Mac App 左上角增加红、黄、绿三个点。增量视觉调整：桌面顶栏加入原生窗口控制外观；登录/系统态放在窗口左上角，浏览器交接页不添加。仅绘制窗口装饰，不改变原型场景跳转或模拟关闭浏览器。
+
+## 2026-09-21 · 标签关闭图标对齐
+
+用户指出「关闭标签」的 × 对不齐。此次只调整顶栏标签关闭按钮：用居中的 CSS 线条绘制 ×，并给按钮固定 24×24 点击区；按钮本来的 aria-label 和场景动作保持不变。
+
+## 2026-09-21 · 空间切换入口调整
+
+输入依据：用户明确要求按刚讨论的方案更新原型，并同步必要文档。操作分类：头像打开账号菜单、账号菜单进入切换空间、切换列表选择目标为空间切换操作；运行项确认/停止/失败/取消仍沿用既有 M02 状态。此次只调整入口和顶栏当前空间指示，不改空间隔离与切换事务。飞书项目公开说明中的“头像 → 切换工作区”是入口参考，Polo 保留当前空间常驻提示。调整后行为、布局和视觉均待用户复看。
+
+修订：`poo70-desktop-ux-r9-account-space-entry`。158 个桌面场景统一将顶栏控件改为只读当前空间标识；账号菜单增加「切换空间」，两种空间方向的列表可从头像菜单抵达，也可返回账号菜单。故事 S1/S2 补齐头像菜单与空间列表步骤。权威规则已写入 `docs/client-journey-review/spec.md` 的 D-PC-10，设计组件说明同步更新；历史来源快照保持原样。
+
+增量核对：v3 结构校验通过；187 场景在 1440×900、1024×768 下均无横向溢出，两档各 158 个桌面场景均无旧顶栏切换按钮、无缺失菜单入口或弹层裁切；企业/个人两条真实点击链均到达运行中切换确认。证据见 `build/space-entry-r9/browser-check.json` 与同目录截图。旧 design Skill 哈希不能同时满足当前与历史 manifest 的增量校验，因此保留 `manifest-before.json` 原快照，并用只更新设计绑定的 `manifest-before-current-design.json` 核对场景差异；完整质量状态仍为 incomplete。
+
+### 失权空间列表 · r10 推荐待复看
+
+用户追问成员资格已被移除的空间是否还要保留菜单项。本轮推荐从「切换空间」列表移除失权的「北方贸易」，因为列表应只含可进入的目标；同时在通知中保留「北方贸易已无法访问 → 查看原因」，进入原有失权说明页，避免静默消失。企业与个人两方向的列表和通知均已调整，未改已确认的安全切换事务。此取舍尚待用户复看，不记作 D-PC-11 已确认。修订 `poo70-desktop-ux-r10-revoked-space`；结构与两方向真实点击通过，截图和检查记录在 `build/revoked-space-r10/`。
