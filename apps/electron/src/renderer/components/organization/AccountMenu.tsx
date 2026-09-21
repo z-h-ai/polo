@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Building2, Check, ChevronRight, LogOut, Package, Settings2, Sparkles } from 'lucide-react'
+import { ArrowLeftRight, Building2, Check, ChevronRight, CreditCard, LogOut, Package, Settings2, Sparkles, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DropdownMenu,
@@ -18,12 +18,31 @@ export interface AccountMenuUser {
   displayName?: string | null
 }
 
+/**
+ * Management entries shown only to qualified accounts (owner/manager,
+ * prototype P-M10-MENU). Unqualified accounts omit the whole section —
+ * nothing is greyed out (P-M10-MENU-NOPRIV).
+ */
+export interface AccountMenuAdminSection {
+  /** Enterprise admin console; subtitle shows the org + role. */
+  enterprise?: { organizationName: string }
+  /** Creator console; shown while the qualification is valid. */
+  creatorConsole?: boolean
+}
+
 interface AccountMenuProps {
   user: AccountMenuUser | null
   onLogout: () => void | Promise<void>
   onOpenSettings: () => void
   /** Render with the menu and its space submenu expanded (playground/preview). */
   defaultOpen?: boolean
+  /** 充值与账单 — completes in the system browser. */
+  billing?: { scope: 'personal' | 'enterprise' }
+  onOpenBilling?: () => void
+  /** 管理入口 section; rendered only for owner/manager accounts. */
+  admin?: AccountMenuAdminSection
+  onOpenEnterpriseAdmin?: () => void
+  onOpenCreatorConsole?: () => void
 }
 
 function isActiveOrganizationSummary(organization: {
@@ -42,7 +61,17 @@ function isActiveOrganizationSummary(organization: {
  * space and active enterprises only — revoked or suspended spaces are never
  * listed as switchable rows (R10).
  */
-export function AccountMenu({ user, onLogout, onOpenSettings, defaultOpen = false }: AccountMenuProps) {
+export function AccountMenu({
+  user,
+  onLogout,
+  onOpenSettings,
+  defaultOpen = false,
+  billing,
+  onOpenBilling,
+  admin,
+  onOpenEnterpriseAdmin,
+  onOpenCreatorConsole,
+}: AccountMenuProps) {
   const { t } = useTranslation()
   const organization = useOptionalOrganizationContext()
 
@@ -160,7 +189,72 @@ export function AccountMenu({ user, onLogout, onOpenSettings, defaultOpen = fals
             </span>
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           </StyledDropdownMenuItem>
+          {billing && (
+            <StyledDropdownMenuItem
+              data-testid="account-menu-billing"
+              onClick={onOpenBilling}
+            >
+              <CreditCard className="size-3.5" />
+              <span className="flex min-w-0 flex-1 flex-col items-start">
+                <span className="text-[13px] leading-tight">
+                  {t('accountSettings.menu.billing')}
+                </span>
+                <span className="text-[11px] leading-tight text-muted-foreground">
+                  {t('accountSettings.menu.billingSubtitle')}
+                </span>
+              </span>
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+            </StyledDropdownMenuItem>
+          )}
         </div>
+
+        {canManage && admin && (admin.enterprise || admin.creatorConsole) && (
+          <div className="border-t border-border p-1">
+            <p
+              data-testid="account-menu-admin-section"
+              className="px-2.5 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+            >
+              {t('accountSettings.menu.adminSection')}
+            </p>
+            {admin.enterprise && (
+              <StyledDropdownMenuItem
+                data-testid="account-menu-enterprise-admin"
+                onClick={onOpenEnterpriseAdmin}
+              >
+                <Building2 className="size-3.5" />
+                <span className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="text-[13px] leading-tight">
+                    {t('accountSettings.menu.enterpriseAdmin')}
+                  </span>
+                  <span className="text-[11px] leading-tight text-muted-foreground">
+                    {t('accountSettings.menu.enterpriseAdminSubtitle', {
+                      name: admin.enterprise.organizationName,
+                      role: t(`organization.role.${organization?.organizationMembershipRole ?? 'owner'}`),
+                    })}
+                  </span>
+                </span>
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </StyledDropdownMenuItem>
+            )}
+            {admin.creatorConsole && (
+              <StyledDropdownMenuItem
+                data-testid="account-menu-creator-console"
+                onClick={onOpenCreatorConsole}
+              >
+                <Wrench className="size-3.5" />
+                <span className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="text-[13px] leading-tight">
+                    {t('accountSettings.menu.creatorConsole')}
+                  </span>
+                  <span className="text-[11px] leading-tight text-muted-foreground">
+                    {t('accountSettings.menu.creatorConsoleSubtitle')}
+                  </span>
+                </span>
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </StyledDropdownMenuItem>
+            )}
+          </div>
+        )}
 
         <div className="border-t border-border p-1">
           <StyledDropdownMenuItem
