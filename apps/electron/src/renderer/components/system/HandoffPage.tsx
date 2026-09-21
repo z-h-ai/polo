@@ -58,7 +58,7 @@ export function HandoffPage({
           description={description}
           facts={facts}
           actions={actions}
-          icon={icon}
+          icon={icon ?? undefined}
           // g4 `.flow-state-page` proportions: 640px wide card, 26px title.
           className={cn('w-full max-w-[640px] [&_h1]:text-hifi-flow', className)}
         />
