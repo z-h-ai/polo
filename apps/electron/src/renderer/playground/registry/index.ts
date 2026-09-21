@@ -24,6 +24,8 @@ import { apiKeyInputComponents } from './api-key-input'
 import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
+import { skillsManagerComponents } from './skills-manager'
+import { assistantSessionComponents } from './assistant-session'
 
 export * from './types'
 
@@ -54,6 +56,8 @@ export const componentRegistry: ComponentEntry[] = [
   ...containerTransitionsComponents,
   ...messagingComponents,
   ...imageSupportComponents,
+  ...skillsManagerComponents,
+  ...assistantSessionComponents,
 ]
 
 export function getCategories(): CategoryGroup[] {
