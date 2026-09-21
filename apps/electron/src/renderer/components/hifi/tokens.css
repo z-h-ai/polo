@@ -1,0 +1,251 @@
+/* =============================================================================
+   POO-70 HiFi — G4 product design tokens (shared foundation, WS-F)
+
+   Extracted 1:1 from docs/mvp-complete-flow-hifi/sources/g4-product.css
+   (the PRODUCT tokens, not the review-shell tokens). Everything is prefixed
+   `--hifi-*` so it never collides with the app theme variables in index.css.
+
+   Value parity with the prototype source is enforced by
+   components/hifi/__tests__/tokens.test.ts — if you edit values here, the
+   test must stay green against g4-product.css.
+
+   Tailwind v4 wiring (also below): `@theme inline` exposes the tokens as
+   utilities, e.g. `bg-hifi-surface`, `text-hifi-fg-50`, `rounded-hifi-md`,
+   `text-hifi-md`. Shadows intentionally stay CSS variables only (the
+   craft-styles shadow whitelist governs which shadow utility classes may
+   be used in components).
+============================================================================= */
+
+:root {
+  /* === BASE COLORS (g4 :root) === */
+  --hifi-background: #fbfbfa;
+  --hifi-surface: #ffffff;
+  --hifi-foreground: #17181a;
+  --hifi-accent: #6e56cf;
+  --hifi-info: #3275d8;
+  --hifi-success: #2d8a5b;
+  --hifi-destructive: #c84646;
+  --hifi-on-accent: #ffffff;
+  --hifi-bg-elevated: var(--hifi-surface);
+  --hifi-surface-strong: #f3f4f5;
+  --hifi-border: #e6e7e9;
+
+  /* === FOREGROUND MIXES (toward background) === */
+  --hifi-fg-3: color-mix(in srgb, var(--hifi-foreground) 3%, var(--hifi-background));
+  --hifi-fg-5: color-mix(in srgb, var(--hifi-foreground) 5%, var(--hifi-background));
+  --hifi-fg-10: color-mix(in srgb, var(--hifi-foreground) 10%, var(--hifi-background));
+  --hifi-fg-20: color-mix(in srgb, var(--hifi-foreground) 20%, var(--hifi-background));
+  --hifi-fg-40: color-mix(in srgb, var(--hifi-foreground) 40%, var(--hifi-background));
+  --hifi-fg-50: color-mix(in srgb, var(--hifi-foreground) 50%, var(--hifi-background));
+  --hifi-fg-60: color-mix(in srgb, var(--hifi-foreground) 60%, var(--hifi-background));
+  --hifi-fg-70: color-mix(in srgb, var(--hifi-foreground) 70%, var(--hifi-background));
+  --hifi-fg-80: color-mix(in srgb, var(--hifi-foreground) 80%, var(--hifi-background));
+
+  /* === TINTED SOFTS + OVERLAY === */
+  --hifi-success-soft: color-mix(in srgb, var(--hifi-success) 10%, transparent);
+  --hifi-info-soft: color-mix(in srgb, var(--hifi-info) 10%, transparent);
+  --hifi-destructive-soft: color-mix(in srgb, var(--hifi-destructive) 10%, transparent);
+  --hifi-accent-soft: color-mix(in srgb, var(--hifi-accent) 12%, transparent);
+  --hifi-overlay: color-mix(in srgb, var(--hifi-foreground) 42%, transparent);
+
+  /* === SHADOWS (CSS vars only; components use the whitelisted shadow-* utilities) === */
+  --hifi-shadow-minimal: 0 1px 2px rgba(23, 24, 26, .06), 0 1px 4px rgba(23, 24, 26, .03);
+  --hifi-shadow-middle: 0 14px 34px rgba(23, 24, 26, .10), 0 2px 7px rgba(23, 24, 26, .04);
+  --hifi-shadow-panel: 0 20px 44px rgba(23, 24, 26, .14), 0 3px 9px rgba(23, 24, 26, .06);
+
+  /* === RADIUS === */
+  --hifi-radius-xs: 4px;
+  --hifi-radius-sm: 6px;
+  --hifi-radius-md: 8px;
+  --hifi-radius-inner: 10px;
+  --hifi-radius-lg: 12px;
+  --hifi-radius-edge: 14px;
+  --hifi-radius-card: 20px;
+  --hifi-radius-pill: 9999px;
+
+  /* === TRANSITIONS === */
+  --hifi-transition-fast: 0.14s ease-out;
+  --hifi-transition-state: 0.28s ease-out;
+
+  /* === TYPE LADDER (g4 font-size steps + the line-heights the prototype pairs with them) === */
+  --hifi-font-size-2xs: 9px;
+  --hifi-line-height-2xs: 1.35;
+  --hifi-font-size-xs: 10px;
+  --hifi-line-height-xs: 1.4;
+  --hifi-font-size-sm: 11px;
+  --hifi-line-height-sm: 1.45;
+  --hifi-font-size-base: 12px;
+  --hifi-line-height-base: 1.55;
+  --hifi-font-size-md: 13px;
+  --hifi-line-height-md: 1.58;
+  --hifi-font-size-lg: 14px;
+  --hifi-line-height-lg: 1.5;
+  --hifi-font-size-xl: 15px;
+  --hifi-line-height-xl: 1.6;
+  --hifi-font-size-2xl: 16px;
+  --hifi-line-height-2xl: 1.35;
+  --hifi-font-size-title: 18px;
+  --hifi-line-height-title: 1.3;
+  --hifi-font-size-heading: 20px;
+  --hifi-line-height-heading: 1.3;
+  --hifi-font-size-page: 22px;
+  --hifi-line-height-page: 1.25;
+  --hifi-font-size-state: 24px;
+  --hifi-font-size-flow: 26px;
+  --hifi-font-size-display: 36px;
+  --hifi-line-height-display: 1.12;
+}
+
+/* Dark theme (g4 [data-theme="dark"]; the app toggles `.dark` on <html>) */
+.dark {
+  --hifi-background: #18191b;
+  --hifi-surface: #222326;
+  --hifi-foreground: #f4f3f1;
+  --hifi-accent: #8c78df;
+  --hifi-info: #6da3ec;
+  --hifi-success: #5aae80;
+  --hifi-destructive: #e06a6a;
+  --hifi-surface-strong: #252629;
+  --hifi-border: #34363b;
+  --hifi-shadow-minimal: 0 1px 3px rgba(0, 0, 0, .24);
+  --hifi-shadow-middle: 0 20px 44px rgba(0, 0, 0, .34);
+  --hifi-shadow-panel: 0 24px 56px rgba(0, 0, 0, .42);
+}
+
+/* =============================================================================
+   Tailwind v4 wiring — utilities like bg-hifi-surface / text-hifi-fg-50 /
+   rounded-hifi-md / text-hifi-md resolve to the vars above (so they follow
+   .dark overrides).
+============================================================================= */
+@theme inline {
+  --color-hifi-background: var(--hifi-background);
+  --color-hifi-surface: var(--hifi-surface);
+  --color-hifi-foreground: var(--hifi-foreground);
+  --color-hifi-accent: var(--hifi-accent);
+  --color-hifi-info: var(--hifi-info);
+  --color-hifi-success: var(--hifi-success);
+  --color-hifi-destructive: var(--hifi-destructive);
+  --color-hifi-on-accent: var(--hifi-on-accent);
+  --color-hifi-bg-elevated: var(--hifi-bg-elevated);
+  --color-hifi-surface-strong: var(--hifi-surface-strong);
+  --color-hifi-border: var(--hifi-border);
+  --color-hifi-overlay: var(--hifi-overlay);
+
+  --color-hifi-fg-3: var(--hifi-fg-3);
+  --color-hifi-fg-5: var(--hifi-fg-5);
+  --color-hifi-fg-10: var(--hifi-fg-10);
+  --color-hifi-fg-20: var(--hifi-fg-20);
+  --color-hifi-fg-40: var(--hifi-fg-40);
+  --color-hifi-fg-50: var(--hifi-fg-50);
+  --color-hifi-fg-60: var(--hifi-fg-60);
+  --color-hifi-fg-70: var(--hifi-fg-70);
+  --color-hifi-fg-80: var(--hifi-fg-80);
+
+  --color-hifi-success-soft: var(--hifi-success-soft);
+  --color-hifi-info-soft: var(--hifi-info-soft);
+  --color-hifi-destructive-soft: var(--hifi-destructive-soft);
+  --color-hifi-accent-soft: var(--hifi-accent-soft);
+
+  --radius-hifi-xs: var(--hifi-radius-xs);
+  --radius-hifi-sm: var(--hifi-radius-sm);
+  --radius-hifi-md: var(--hifi-radius-md);
+  --radius-hifi-inner: var(--hifi-radius-inner);
+  --radius-hifi-lg: var(--hifi-radius-lg);
+  --radius-hifi-edge: var(--hifi-radius-edge);
+  --radius-hifi-card: var(--hifi-radius-card);
+  --radius-hifi-pill: var(--hifi-radius-pill);
+
+  --text-hifi-2xs: var(--hifi-font-size-2xs);
+  --text-hifi-2xs--line-height: var(--hifi-line-height-2xs);
+  --text-hifi-xs: var(--hifi-font-size-xs);
+  --text-hifi-xs--line-height: var(--hifi-line-height-xs);
+  --text-hifi-sm: var(--hifi-font-size-sm);
+  --text-hifi-sm--line-height: var(--hifi-line-height-sm);
+  --text-hifi-base: var(--hifi-font-size-base);
+  --text-hifi-base--line-height: var(--hifi-line-height-base);
+  --text-hifi-md: var(--hifi-font-size-md);
+  --text-hifi-md--line-height: var(--hifi-line-height-md);
+  --text-hifi-lg: var(--hifi-font-size-lg);
+  --text-hifi-lg--line-height: var(--hifi-line-height-lg);
+  --text-hifi-xl: var(--hifi-font-size-xl);
+  --text-hifi-xl--line-height: var(--hifi-line-height-xl);
+  --text-hifi-2xl: var(--hifi-font-size-2xl);
+  --text-hifi-2xl--line-height: var(--hifi-line-height-2xl);
+  --text-hifi-title: var(--hifi-font-size-title);
+  --text-hifi-title--line-height: var(--hifi-line-height-title);
+  --text-hifi-heading: var(--hifi-font-size-heading);
+  --text-hifi-heading--line-height: var(--hifi-line-height-heading);
+  --text-hifi-page: var(--hifi-font-size-page);
+  --text-hifi-page--line-height: var(--hifi-line-height-page);
+  --text-hifi-state: var(--hifi-font-size-state);
+  --text-hifi-flow: var(--hifi-font-size-flow);
+  --text-hifi-display: var(--hifi-font-size-display);
+  --text-hifi-display--line-height: var(--hifi-line-height-display);
+}
+
+/* =============================================================================
+   Semantic composition classes (g4 `.eyebrow` and `.status`).
+
+   Kept minimal on purpose — most composition happens with Tailwind
+   utilities + the vars above. Classes live in @layer components so
+   utilities can still override them.
+============================================================================= */
+@layer components {
+  /* g4 .eyebrow — small uppercase tracked label above titles */
+  .hifi-eyebrow {
+    margin: 0 0 7px;
+    color: var(--hifi-fg-50);
+    font-size: var(--hifi-font-size-sm);
+    font-weight: 500;
+    letter-spacing: 0.75px;
+    text-transform: uppercase;
+  }
+
+  /* g4 .status — compact status pill with a leading dot */
+  .hifi-state-pill {
+    display: inline-flex;
+    min-height: 20px;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    border-radius: var(--hifi-radius-xs);
+    font-size: var(--hifi-font-size-xs);
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  .hifi-state-pill::before {
+    width: 5px;
+    height: 5px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: currentColor;
+    content: '';
+  }
+
+  .hifi-state-pill--success {
+    background: var(--hifi-success-soft);
+    color: var(--hifi-success);
+  }
+
+  .hifi-state-pill--info {
+    background: var(--hifi-info-soft);
+    color: var(--hifi-info);
+  }
+
+  .hifi-state-pill--destructive {
+    background: var(--hifi-destructive-soft);
+    color: var(--hifi-destructive);
+  }
+
+  .hifi-state-pill--accent {
+    background: var(--hifi-accent-soft);
+    color: var(--hifi-accent);
+  }
+
+  .hifi-state-pill--neutral {
+    background: var(--hifi-fg-5);
+    color: var(--hifi-fg-60);
+  }
+}

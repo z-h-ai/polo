@@ -1,4 +1,6 @@
 @import "tailwindcss" source(none);
+/* POO-70 HiFi G4 product tokens (--hifi-* + @theme wiring). Additive only. */
+@import "./components/hifi/tokens.css";
 @plugin "@tailwindcss/typography";
 
 /* Tell Tailwind where to scan for utility classes */
