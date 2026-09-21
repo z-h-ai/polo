@@ -59,6 +59,7 @@ mock.module('@/components/ui/select', () => ({
 
 mock.module('@/components/ui/styled-dropdown', () => ({
   DropdownMenu: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  DropdownMenuSub: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   DropdownMenuTrigger: ({ children }: { children?: ReactNode }) =>
     createElement('div', null, children),
   StyledDropdownMenuContent: ({ children }: { children?: ReactNode }) =>
@@ -72,12 +73,20 @@ mock.module('@/components/ui/styled-dropdown', () => ({
     onClick?: () => void
   }) => createElement('button', { type: 'button', onClick, ...props }, children),
   StyledDropdownMenuSeparator: () => createElement('hr'),
+  StyledDropdownMenuSubTrigger: ({
+    children,
+    ...props
+  }: { children?: ReactNode }) =>
+    createElement('div', props, children),
+  StyledDropdownMenuSubContent: ({ children }: { children?: ReactNode }) =>
+    createElement('div', null, children),
 }))
 
 const { act, cleanup, render, screen, waitFor } = await import('@testing-library/react')
 const userEvent = (await import('@testing-library/user-event')).default
 const { OrganizationProvider } = await import('@/context/OrganizationContext')
-const { OrganizationSwitcher } = await import('../OrganizationSwitcher')
+const { AccountMenu } = await import('../AccountMenu')
+const { SpaceIndicator } = await import('../SpaceIndicator')
 const { OrganizationManagementDialog } = await import('../OrganizationManagementDialog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 
@@ -196,7 +205,11 @@ function ManagementEntryHarness({ role }: { role: OrganizationRole }) {
       value: contextValue(role, organizationAId, () => setOpen(true)),
       children: null,
     },
-    createElement(OrganizationSwitcher),
+    createElement(AccountMenu, {
+      user: { username: 'test-user', displayName: 'Test User' },
+      onLogout: async () => {},
+      onOpenSettings: () => {},
+    }),
     createElement(OrganizationManagementDialog, {
       open,
       onOpenChange: setOpen,
@@ -246,7 +259,7 @@ afterEach(() => {
   cleanup()
 })
 
-describe('OrganizationSwitcher management gate', () => {
+describe('AccountMenu space switch management gate', () => {
   for (const role of ['owner', 'manager'] as const) {
     it(`opens management and loads data for ${role}`, async () => {
       const user = userEvent.setup({ document: window.document })
@@ -269,7 +282,7 @@ describe('OrganizationSwitcher management gate', () => {
     expect(listInvitations).not.toHaveBeenCalled()
   })
 
-  it('shows a lost current organization only as a non-selectable tombstone', async () => {
+  it('shows a lost current organization only as a non-switchable context', async () => {
     const selectOrganization = mock(() => {})
     const tombstone = {
       ...organizationSummary(organizationAId, 'Unavailable Organization', 'owner'),
@@ -298,10 +311,17 @@ describe('OrganizationSwitcher management gate', () => {
         },
         children: null,
       },
-      createElement(OrganizationSwitcher),
+      // The passive top-bar indicator keeps the (unavailable) current space visible...
+      createElement(SpaceIndicator),
+      // ...while the account menu's space list offers only valid targets (R10).
+      createElement(AccountMenu, {
+        user: { username: 'test-user', displayName: 'Test User' },
+        onLogout: async () => {},
+        onOpenSettings: () => {},
+      }),
     ))
 
-    expect(screen.getByTestId('organization-switcher').textContent)
+    expect(screen.getByTestId('organization-space-indicator').textContent)
       .toContain('Unavailable Organization')
     expect(screen.queryByRole('button', { name: 'Manage organization' }))
       .toBeNull()

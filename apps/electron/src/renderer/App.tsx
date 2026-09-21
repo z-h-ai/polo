@@ -2599,6 +2599,10 @@ export default function App() {
               workspaceId={windowWorkspaceId}
             >
               <TabShell
+              account={{
+                user: currentAdminUser,
+                onLogout: handleAdminLogout,
+              }}
               renderPolo={() => (
                 <NavigationProvider
                   workspaceId={windowWorkspaceId}

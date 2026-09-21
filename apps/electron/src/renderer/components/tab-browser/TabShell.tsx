@@ -3,10 +3,15 @@ import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { AddAppDialog } from './AddAppDialog'
 import { useTabShell } from '@/context/TabShellContext'
+import type { AccountMenuUser } from '@/components/organization/AccountMenu'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
   renderPolo: () => ReactNode
+  account?: {
+    user: AccountMenuUser | null
+    onLogout: () => void | Promise<void>
+  } | null
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -16,7 +21,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
-export function TabShell({ renderPolo }: TabShellProps) {
+export function TabShell({ renderPolo, account }: TabShellProps) {
   const { activeTab, openTabs, activeTabId, activateHome, activateTab, closeTab } = useTabShell()
   const [addAppOpen, setAddAppOpen] = useState(false)
 
@@ -85,7 +90,7 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
   return (
     <div className="h-full min-h-0 bg-background">
-      <TabBar />
+      <TabBar account={account} />
       <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
       <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
     </div>

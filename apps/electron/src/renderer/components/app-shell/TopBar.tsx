@@ -29,7 +29,7 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
 import { getDocUrl } from "@polo-ai/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
-import { OrganizationSwitcher } from "@/components/organization/OrganizationSwitcher"
+import { SpaceIndicator } from "@/components/organization/SpaceIndicator"
 
 const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
 const RIGHT_SLOT_TWO_BADGES_THRESHOLD = 300
@@ -159,7 +159,7 @@ export function TopBar({
           onToggleSidebar={onToggleSidebar}
           onToggleFocusMode={onToggleFocusMode}
         />
-        <OrganizationSwitcher compact={isCompact} />
+        <SpaceIndicator compact={isCompact} />
         </div>
 
         {/* Back / Forward / Workspace selector (moved from center).
