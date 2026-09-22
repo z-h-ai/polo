@@ -204,6 +204,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const homeSlots = useHomeSurfaceSlots()
   const homeView = useHomeView()
   const view = homeView.view
+  const resetHomeView = homeView.reset
   const [recentApps, setRecentApps] = useState<HomeRecentAppPreference[]>([])
   const recentLoadGenerationRef = useRef(0)
   const recentMutationGenerationRef = useRef(0)
@@ -277,7 +278,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
     // 本设备常用/隐藏偏好与最近记录同一上下文键：切空间时整组重置。
     setPinnedRefs(loadHomePinnedApps(recentContextKey))
     setHiddenRefs(loadHiddenHomeApps(recentContextKey))
-    homeView.reset()
+    resetHomeView()
     void loadHomeRecentApps(recentContextKey)
       .then(apps => {
         // A local open in this same context fences the older hydration result:
@@ -292,7 +293,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
       .catch(() => {
         // Launcher history is non-critical; keep the current section usable.
       })
-  }, [recentContextKey, homeView])
+  }, [recentContextKey, resetHomeView])
 
   const pinnedIds = useMemo(
     () => new Set(pinnedRefs.map(ref => ref.id)),
