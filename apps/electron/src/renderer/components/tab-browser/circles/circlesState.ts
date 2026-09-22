@@ -112,14 +112,22 @@ export function isAppUsable(app: CircleSourcedApp): boolean {
   return app.sources.some(source => source.valid)
 }
 
+/** Why this circle's source is invalid — drives the row presentation. */
+export type InvalidSourceReason = 'left' | 'expired'
+
 function rowAvailability(
   sourceValid: boolean,
   anyValidSource: boolean,
   kind: 'app' | 'skill',
   installed: boolean,
+  invalidReason: InvalidSourceReason | undefined,
 ): CircleWorkAvailability {
   if (sourceValid) return kind === 'app' || installed ? 'usable' : 'installable'
-  return anyValidSource ? 'stillAuthorized' : kind === 'skill' ? 'installable' : 'unavailable'
+  if (anyValidSource) return 'stillAuthorized'
+  if (kind === 'skill') return 'installable'
+  // Only this circle provides the work: an expired subscription keeps the
+  // row actionable (已到期 + 打开 + 续费恢复); leaving makes it unavailable.
+  return invalidReason === 'expired' ? 'expired' : 'unavailable'
 }
 
 /** Presentation details the sourced-apps contract does not carry. */
@@ -132,13 +140,22 @@ export interface CircleWorkDetails {
 /**
  * Builds the detail-page work rows for one circle from the deduped
  * sourced-apps data: one row per app/skill with this circle's source line,
- * including the source-fallback presentation for shared works.
+ * including the source-fallback presentation for shared works. The
+ * membership state decides how invalid sources of this circle render
+ * ('expired' vs 'unavailable').
  */
 export function buildCircleWorkRows(
   input: CircleWorksInput,
   details: Record<string, CircleWorkDetails> = {},
 ): CircleWorkRow[] {
   const { circle, apps, skills, installedSkillIds = [] } = input
+  const today = input.now ?? new Date().toISOString().slice(0, 10)
+  const state = membershipState(
+    { membership: circle.membership ?? 'active', subscription: circle.subscription },
+    today,
+  )
+  const invalidReason: InvalidSourceReason | undefined =
+    state === 'expired' ? 'expired' : state === 'left' ? 'left' : undefined
   const build = (works: CircleSourcedApp[], kind: 'app' | 'skill'): CircleWorkRow[] => {
     const rows: CircleWorkRow[] = []
     for (const work of works) {
@@ -160,6 +177,7 @@ export function buildCircleWorkRows(
           work.sources.length > 1
             ? work.sources.map(item => item.circleName)
             : undefined,
+        installed,
         fallbackNote: !source.valid
           ? otherValid
             ? { kind: 'other-source', circleName: otherValid.circleName }
@@ -169,7 +187,13 @@ export function buildCircleWorkRows(
           : kind === 'skill' && !installed
             ? { kind: 'install-note' }
             : undefined,
-        availability: rowAvailability(source.valid, anyValidSource, kind, installed),
+        availability: rowAvailability(
+          source.valid,
+          anyValidSource,
+          kind,
+          installed,
+          invalidReason,
+        ),
       })
     }
     return rows

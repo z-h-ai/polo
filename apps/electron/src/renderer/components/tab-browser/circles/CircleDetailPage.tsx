@@ -96,15 +96,23 @@ function workRowActions(
           : []),
       ]
     case 'stillAuthorized':
-      return [
-        <FlowButton
-          key="open"
-          variant="primary"
-          onClick={() => handlers.onOpenWork(row)}
-        >
-          {t('circles.work.stillOpen')}
-        </FlowButton>,
-      ]
+      // Shared skills that are not installed locally keep the install
+      // action (prototype AFTER-LEAVE); shared apps offer 仍可打开.
+      return row.kind === 'skill' && !row.installed
+        ? [
+            <FlowButton key="install" onClick={() => handlers.onInstallWork(row)}>
+              {t('circles.work.install')}
+            </FlowButton>,
+          ]
+        : [
+            <FlowButton
+              key="open"
+              variant="primary"
+              onClick={() => handlers.onOpenWork(row)}
+            >
+              {t('circles.work.stillOpen')}
+            </FlowButton>,
+          ]
     default:
       return [
         <FlowButton key="open" onClick={() => handlers.onOpenWork(row)}>
@@ -118,6 +126,16 @@ function sourceLine(
   row: CircleWorkRow,
   t: (key: string, options?: Record<string, unknown>) => string,
 ) {
+  // AFTER-LEAVE: a row only this circle provided switches to the
+  // 仅此圈提供 source line once its source is gone.
+  if (row.availability === 'unavailable') {
+    return row.version
+      ? t('circles.work.sourceOnlyFromVersion', {
+          circle: row.source.circleName,
+          version: row.version,
+        })
+      : t('circles.work.sourceOnlyFrom', { circle: row.source.circleName })
+  }
   const fromCircle = row.version
     ? t('circles.work.sourceFromVersion', {
         circle: row.source.circleName,
@@ -209,7 +227,7 @@ export function CircleDetailPage({
   const today = now ?? new Date().toISOString().slice(0, 10)
   const state = membershipState(circle, today)
   const rows = buildCircleWorkRows(
-    { circle, apps, skills, installedSkillIds },
+    { circle, apps, skills, installedSkillIds, now: today },
     workDetails,
   )
   const appRows = rows.filter(row => row.kind === 'app')

@@ -60,8 +60,8 @@ export interface CircleSummary {
 export type CircleWorkAvailability =
   | 'usable'          // 可使用
   | 'installable'     // 可安装（skill not installed yet）
-  | 'unavailable'     // 不可用（only this circle provided it and the source is gone）
-  | 'expired'         // 已到期（this circle's source expired）
+  | 'unavailable'     // 不可用（only this circle provided it and the user left）
+  | 'expired'         // 已到期（only this circle provided it and its subscription expired）
   | 'stillAuthorized' // 仍由其他圈授权（this source invalid, another valid）
 
 /** A work row of the circle detail page (app or skill). */
@@ -76,6 +76,8 @@ export interface CircleWorkRow {
   source: CircleWorkSource
   /** All source names when the same work comes from several circles. */
   sourceNames?: string[]
+  /** Whether this skill is installed on this machine (apps: irrelevant). */
+  installed?: boolean
   /** Extra line for shared works, e.g. 仍由晨星增长圈授权. */
   fallbackNote?: {
     kind: 'other-source' | 'install-note' | 'expired-source'
@@ -86,10 +88,17 @@ export interface CircleWorkRow {
 
 /** Appraises the works of one circle against the sourced-apps data. */
 export interface CircleWorksInput {
-  /** The circle these rows belong to. */
-  circle: Pick<CircleSummary, 'id' | 'name'>
+  /**
+   * The circle these rows belong to. Membership/subscription drive the
+   * invalid-source reason: an expired paid circle renders its only-here
+   * apps as 'expired' (已到期 + 续费恢复), a left one as 'unavailable'.
+   */
+  circle: Pick<CircleSummary, 'id' | 'name'> &
+    Partial<Pick<CircleSummary, 'membership' | 'subscription'>>
   apps: CircleSourcedApp[]
   skills: CircleSourcedApp[]
   /** Skill ids already installed on this machine. */
   installedSkillIds?: string[]
+  /** ISO date used to evaluate paid expiry (defaults to "today" at render). */
+  now?: string
 }

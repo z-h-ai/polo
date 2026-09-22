@@ -151,8 +151,12 @@ interface CircleDetailDemoProps {
 }
 
 function CircleDetailDemo({ state = 'joined' }: CircleDetailDemoProps) {
-  const leftApps = revokeCircleSources(APPS, 'circle-design')
-  const leftSkills = revokeCircleSources(SKILLS, 'circle-design')
+  // Left and expired both render against this circle's revoked sources;
+  // the membership state (not the data) decides the row presentation:
+  // expired keeps only-here works actionable (已到期 + 打开 + 续费恢复).
+  const sourcesRevoked = state === 'left' || state === 'expired'
+  const revokedApps = revokeCircleSources(APPS, 'circle-design')
+  const revokedSkills = revokeCircleSources(SKILLS, 'circle-design')
   const circle =
     state === 'joined'
       ? GROWTH
@@ -166,8 +170,8 @@ function CircleDetailDemo({ state = 'joined' }: CircleDetailDemoProps) {
       <CircleDetailPage
         now={NOW}
         circle={circle}
-        apps={state === 'left' ? leftApps : APPS}
-        skills={state === 'left' ? leftSkills : SKILLS}
+        apps={sourcesRevoked ? revokedApps : APPS}
+        skills={sourcesRevoked ? revokedSkills : SKILLS}
         installedSkillIds={['skill-installed-elsewhere']}
         workDetails={WORK_DETAILS}
         onBack={NO_OP}
@@ -376,10 +380,10 @@ export const circlesComponents: ComponentEntry[] = [
     variants: [
       { name: 'P-M07-DETAIL-FOCUS · joined free', description: '免费 · 长期有效；App 与技能行', props: { state: 'joined' } },
       { name: 'P-M07-DETAIL-PAID · subscribed', description: '¥39/月 · 下次续费 2026-10-01；续费 + 退出按钮', props: { state: 'paid' } },
-      { name: 'P-M07-EXPIRED · expired', description: '到期态：独有作品已到期、共同授权仍可用（PC-F03 前置）', props: { state: 'expired' } },
+      { name: 'P-M07-EXPIRED · expired', description: '到期态：独有作品已到期+打开+续费恢复；共同授权作品仍可用', props: { state: 'expired' } },
       {
         name: 'P-M07-DETAIL-PAID-AFTER-LEAVE · left',
-        description: '已退出态：本圈来源撤销后的作品可用性（来源回退）',
+        description: '已退出态：仅此圈提供的作品不可用（仅晨星设计圈提供）；共同授权仍可用',
         props: { state: 'left' },
       },
     ],

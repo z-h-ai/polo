@@ -44,6 +44,19 @@ function sourcedApps(): CircleSourcedApp[] {
   ]
 }
 
+function sharedSkills(): CircleSourcedApp[] {
+  return [
+    {
+      appId: 'skill-case-search',
+      name: '增长案例检索',
+      sources: [
+        { circleId: 'circle-design', circleName: '晨星设计圈', creator: '晨星增长工作室', valid: true },
+        { circleId: 'circle-growth', circleName: '晨星增长圈', creator: '晨星增长工作室', valid: true },
+      ],
+    },
+  ]
+}
+
 describe('circle subscription state machine', () => {
   it('stays active before the expiry date', () => {
     expect(membershipState(paidCircle(), '2026-09-22')).toBe('active')
@@ -216,5 +229,106 @@ describe('detail work rows from sourced apps', () => {
     })
     expect(rows).toHaveLength(1)
     expect(rows[0]!.name).toBe('会议纪要整理')
+  })
+
+  it('carries the installed flag for the stillAuthorized install action', () => {
+    const after = revokeCircleSources(sourcedApps(), 'circle-design')
+    const skills = revokeCircleSources(sharedSkills(), 'circle-design')
+    const uninstalled = buildCircleWorkRows({
+      circle: { id: 'circle-design', name: '晨星设计圈' },
+      apps: after,
+      skills,
+    })
+    expect(uninstalled[2]!.kind).toBe('skill')
+    expect(uninstalled[2]!.availability).toBe('stillAuthorized')
+    expect(uninstalled[2]!.installed).toBe(false)
+
+    const installed = buildCircleWorkRows({
+      circle: { id: 'circle-design', name: '晨星设计圈' },
+      apps: after,
+      skills,
+      installedSkillIds: ['skill-case-search'],
+    })
+    expect(installed[2]!.installed).toBe(true)
+  })
+})
+
+describe('row availability by membership state (expired vs left)', () => {
+  const revokedApps = () => revokeCircleSources(sourcedApps(), 'circle-design')
+
+  it('an expired subscription keeps only-here works actionable as expired', () => {
+    const rows = buildCircleWorkRows({
+      circle: {
+        id: 'circle-design',
+        name: '晨星设计圈',
+        membership: 'active',
+        subscription: { price: '¥39 / 月', expiresAt: '2026-09-01' },
+      },
+      apps: revokedApps(),
+      skills: [],
+      now: '2026-09-22',
+    })
+    // 品牌语气分析 only comes from this circle → 已到期 (+ 打开/续费恢复).
+    expect(rows[0]!.name).toBe('品牌语气分析')
+    expect(rows[0]!.availability).toBe('expired')
+    // 会议纪要整理 is co-authorized → still usable via the other source.
+    expect(rows[1]!.availability).toBe('stillAuthorized')
+  })
+
+  it('a left circle renders its only-here works unavailable, not expired', () => {
+    const rows = buildCircleWorkRows({
+      circle: { id: 'circle-design', name: '晨星设计圈', membership: 'left' },
+      apps: revokedApps(),
+      skills: [],
+      now: '2026-09-22',
+    })
+    expect(rows[0]!.availability).toBe('unavailable')
+    expect(rows[1]!.availability).toBe('stillAuthorized')
+  })
+
+  it('revoked sources without an expired subscription stay unavailable', () => {
+    const rows = buildCircleWorkRows({
+      circle: { id: 'circle-design', name: '晨星设计圈' },
+      apps: revokedApps(),
+      skills: [],
+      now: '2026-09-22',
+    })
+    expect(rows[0]!.availability).toBe('unavailable')
+  })
+
+  it('the expiry date itself is still an active membership (usable rows)', () => {
+    const rows = buildCircleWorkRows({
+      circle: {
+        id: 'circle-design',
+        name: '晨星设计圈',
+        membership: 'active',
+        subscription: { price: '¥39 / 月', expiresAt: '2026-09-22' },
+      },
+      apps: sourcedApps(),
+      skills: [],
+      now: '2026-09-22',
+    })
+    expect(rows[0]!.availability).toBe('usable')
+    expect(rows[1]!.availability).toBe('usable')
+  })
+
+  it('expired shared skills stay authorized through the other source', () => {
+    const rows = buildCircleWorkRows({
+      circle: {
+        id: 'circle-design',
+        name: '晨星设计圈',
+        membership: 'active',
+        subscription: { price: '¥39 / 月', expiresAt: '2026-09-01' },
+      },
+      apps: [],
+      skills: revokeCircleSources(sharedSkills(), 'circle-design'),
+      now: '2026-09-22',
+    })
+    expect(rows[0]!.kind).toBe('skill')
+    expect(rows[0]!.availability).toBe('stillAuthorized')
+    expect(rows[0]!.fallbackNote).toEqual({
+      kind: 'other-source',
+      circleName: '晨星增长圈',
+    })
   })
 })
