@@ -27,6 +27,7 @@ import {
 import type { LoadedSkill } from '../../../shared/types'
 import { SourcesListPanel } from '@/components/app-shell/SourcesListPanel'
 import { PlaygroundAppShellProvider } from '../PlaygroundAppShellProvider'
+import { ActionRegistryProvider } from '@/actions/registry'
 import { ensureMockElectronAPI, mockSources } from '../mock-utils'
 import { DemoFixedContainer } from '../mocks/DemoFixedContainer'
 import { MockOrganizationProvider, makeOrganizationSummary } from '../mocks/MockOrganization'
@@ -290,6 +291,7 @@ function ToolsSurfacePreview({ spaceKind = 'enterprise' }: { spaceKind?: SkillSp
     ensureMockElectronAPI()
   }, [])
   return (
+    <ActionRegistryProvider>
     <DemoFixedContainer width={420} height={520}>
       <PlaygroundAppShellProvider>
         <div className="flex h-full flex-col bg-hifi-background">
@@ -314,6 +316,7 @@ function ToolsSurfacePreview({ spaceKind = 'enterprise' }: { spaceKind?: SkillSp
         </div>
       </PlaygroundAppShellProvider>
     </DemoFixedContainer>
+    </ActionRegistryProvider>
   )
 }
 
