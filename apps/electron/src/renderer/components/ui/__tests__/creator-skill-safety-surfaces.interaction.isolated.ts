@@ -13,6 +13,9 @@ mock.module('@/components/ui/skill-avatar', () => ({
 mock.module('@/context/OrganizationContext', () => ({
   useOptionalOrganizationContext: () => null,
 }))
+mock.module('@polo-ai/ui', () => ({
+  Spinner: () => createElement('span', { 'data-testid': 'spinner' }),
+}))
 
 const { cleanup, render, screen } = await import('@testing-library/react')
 // The legacy SkillsListPanel was replaced by the skills manager panel

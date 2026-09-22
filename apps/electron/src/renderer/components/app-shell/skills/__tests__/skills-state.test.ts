@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  canUninstallManagedSkill,
   decodeSkillSceneBits,
   discoverRowState,
   localSkillRowState,
   managedSkillFromLoaded,
+  type ManagedSkill,
 } from '../types'
 import type { LoadedSkill } from '../../../../../shared/types'
 
@@ -75,6 +77,16 @@ describe('decodeSkillSceneBits', () => {
   it('rejects malformed suffixes', () => {
     expect(() => decodeSkillSceneBits('100-0')).toThrow()
     expect(() => decodeSkillSceneBits('abcd-0-0')).toThrow()
+  })
+
+  it("derives the built-in row's on/off state from the THIRD bit (the second bit belongs to the distributed row)", () => {
+    // Demo mapping (registry builtinSkill): `enabled: bits.builtin`.
+    // P-M06-SKILLS default '100-0-1' renders enabled; P-M06-BUILTIN-OFF-ENT
+    // '100-0-0' renders disabled — regardless of the second bit.
+    expect(decodeSkillSceneBits('100-0-1').builtin).toBe(true)
+    expect(decodeSkillSceneBits('100-1-1').builtin).toBe(true)
+    expect(decodeSkillSceneBits('100-0-0').builtin).toBe(false)
+    expect(decodeSkillSceneBits('100-1-0').builtin).toBe(false)
   })
 })
 
@@ -163,6 +175,12 @@ describe('managedSkillFromLoaded (R6 lifecycle rules)', () => {
     expect(managed.enabled).toBe(true)
   })
 
+  it('real local skills (workspace / project) default to enabled', () => {
+    // Local copies were already active before the manager existed.
+    expect(managedSkillFromLoaded(loadedSkill({ source: 'workspace' })).enabled).toBe(true)
+    expect(managedSkillFromLoaded(loadedSkill({ source: 'project' })).enabled).toBe(true)
+  })
+
   it('R6-7: a revoked source keeps the copy, forces disabled and marks it restricted', () => {
     const managed = managedSkillFromLoaded(installedCreatorSkill({
       lastKnownStatus: 'revoked',
@@ -177,5 +195,35 @@ describe('managedSkillFromLoaded (R6 lifecycle rules)', () => {
     expect(managedSkillFromLoaded(installedCreatorSkill({
       lastKnownStatus: 'archived',
     })).restricted).toBe(true)
+  })
+})
+
+describe('canUninstallManagedSkill (uninstall channel gating)', () => {
+  const row = (overrides: Partial<ManagedSkill> = {}): ManagedSkill => ({
+    slug: 'x',
+    name: 'x',
+    description: '',
+    origin: 'personal',
+    originLabel: '',
+    enabled: true,
+    restricted: false,
+    ...overrides,
+  })
+
+  it('allows workspace-local copies (where creator-installed skills land)', () => {
+    expect(canUninstallManagedSkill(row({
+      skill: loadedSkill({ source: 'workspace' }),
+    }))).toBe(true)
+  })
+
+  it('rejects rows without a real channel: demo rows, builtin/global, project-managed', () => {
+    expect(canUninstallManagedSkill(row())).toBe(false)
+    expect(canUninstallManagedSkill(row({
+      origin: 'builtin',
+      skill: loadedSkill({ source: 'global' }),
+    }))).toBe(false)
+    expect(canUninstallManagedSkill(row({
+      skill: loadedSkill({ source: 'project' }),
+    }))).toBe(false)
   })
 })

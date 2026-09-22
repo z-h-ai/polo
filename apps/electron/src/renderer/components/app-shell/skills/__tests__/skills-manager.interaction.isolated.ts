@@ -13,13 +13,17 @@ mock.module('@/components/ui/skill-avatar', () => ({
 mock.module('@/context/OrganizationContext', () => ({
   useOptionalOrganizationContext: () => null,
 }))
+mock.module('@polo-ai/ui', () => ({
+  Spinner: () => createElement('span', { 'data-testid': 'spinner' }),
+}))
 
-const { cleanup, render, screen, fireEvent } = await import('@testing-library/react')
+const { cleanup, render, screen, fireEvent, waitFor } = await import('@testing-library/react')
 const { SkillsManagerPanel } = await import('../SkillsManagerPanel')
 const { SkillDetailSheet } = await import('../SkillDetailSheet')
 const { SkillInstallSheet } = await import('../SkillInstallSheet')
 const typeHelpers = await import('../types')
 
+import type { LoadedSkill } from '../../../../../shared/types'
 import type { ManagedSkill } from '../types'
 
 const builtinSkill: ManagedSkill = {
@@ -251,5 +255,235 @@ describe('scene-bit helper re-export sanity', () => {
       enabled: true,
       builtin: true,
     })
+  })
+})
+
+// ============================================================================
+// Prototype bit order + real-channel wiring (review fixes)
+// ============================================================================
+
+/** Workspace-backed copy so the row carries an executable uninstall channel. */
+const workspaceLoadedSkill: LoadedSkill = {
+  slug: 'growth-cases',
+  metadata: { name: '增长案例检索', description: '根据提问检索增长方法，整理可参考的案例。' },
+  content: '',
+  path: '/workspace/skills/growth-cases',
+  source: 'workspace',
+}
+
+describe('prototype bit order: builtin on/off rides the THIRD bit', () => {
+  // Mirrors the demo helper (registry builtinSkill): `enabled: bits.builtin`.
+  // The second bit belongs to the distributed skill row of the same scene.
+  const builtinRowFromBits = (suffix: string): ManagedSkill => ({
+    slug: 'research',
+    name: '资料研究',
+    description: '查找资料、梳理重点并保留来源。',
+    origin: 'builtin',
+    originLabel: 'builtin',
+    enabled: typeHelpers.decodeSkillSceneBits(suffix).builtin,
+    restricted: false,
+  })
+
+  it("P-M06-SKILLS default '100-0-1' renders the builtin row enabled", () => {
+    render(withI18n(createElement(SkillsManagerPanel, {
+      managedSkills: [builtinRowFromBits('100-0-1')],
+      spaceKind: 'enterprise',
+      spaceName: '晨星科技',
+      onSkillClick: noOp,
+      onDeleteSkill: noOp,
+    })))
+    expect(screen.getByText('Enabled')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disable' })).toBeTruthy()
+  })
+
+  it("P-M06-BUILTIN-OFF-ENT '100-0-0' renders the builtin row disabled", () => {
+    render(withI18n(createElement(SkillsManagerPanel, {
+      managedSkills: [builtinRowFromBits('100-0-0')],
+      spaceKind: 'enterprise',
+      spaceName: '晨星科技',
+      onSkillClick: noOp,
+      onDeleteSkill: noOp,
+    })))
+    expect(screen.getByText('Disabled')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Remove from this Mac' })).toBeNull()
+  })
+})
+
+describe('uninstall channel gating', () => {
+  const detailProps = {
+    spaceName: 'My space',
+    onToggleEnabled: noOp,
+    onUpdate: noOp,
+    onReauthorize: noOp,
+    onViewRestrictedReason: noOp,
+    onRequestUninstall: noOp,
+    onCancelUninstall: noOp,
+    onBack: noOp,
+  }
+
+  it('rows without a real channel render a disabled confirm that never fires', () => {
+    const onConfirmUninstall = mock(() => {})
+    render(withI18n(createElement(SkillDetailSheet, {
+      ...detailProps,
+      skill: distributedSkill,
+      mode: 'confirm-uninstall',
+      onConfirmUninstall,
+    })))
+    const confirm = screen.getByTestId('confirm-uninstall') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(confirm)
+    expect(onConfirmUninstall).not.toHaveBeenCalled()
+  })
+
+  it('the restricted list row disables uninstall when no channel backs it', () => {
+    render(withI18n(createElement(SkillsManagerPanel, {
+      managedSkills: [revokedSkill],
+      spaceKind: 'enterprise',
+      spaceName: '晨星科技',
+      onSkillClick: noOp,
+      onDeleteSkill: noOp,
+    })))
+    const uninstall = screen.getByRole('button', { name: 'Remove from this Mac' }) as HTMLButtonElement
+    expect(uninstall.disabled).toBe(true)
+    expect(uninstall.title).toBe(
+      "This skill's source is not managed on this Mac, so it cannot be removed here",
+    )
+  })
+
+  it('workspace-backed copies uninstall through onDeleteSkill (deleteSkill + creatorSkillUninstall)', () => {
+    const onDeleteSkill = mock(() => {})
+    render(withI18n(createElement(SkillsManagerPanel, {
+      managedSkills: [{ ...distributedSkill, skill: workspaceLoadedSkill }],
+      spaceKind: 'personal',
+      spaceName: 'My space',
+      onDeleteSkill,
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'Manage local version' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from this Mac' }))
+    fireEvent.click(screen.getByTestId('confirm-uninstall'))
+    expect(onDeleteSkill).toHaveBeenCalledTimes(1)
+    expect(onDeleteSkill).toHaveBeenCalledWith('growth-cases')
+  })
+})
+
+describe('install flow', () => {
+  afterEach(() => {
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: undefined })
+  })
+
+  it('without a channel the install stays self-consistent: new disabled row, discover flips to Manage', async () => {
+    render(withI18n(createElement(SkillsManagerPanel, {
+      managedSkills: [builtinSkill],
+      discoverItems: [{
+        slug: 'growth-cases',
+        name: '增长案例检索',
+        description: '根据提问检索增长方法，整理可参考的案例。',
+        provider: '晨星增长工作室',
+        version: '1.0.0',
+      }],
+      spaceKind: 'personal',
+      spaceName: 'My space',
+      initialTab: 'discover',
+      onSkillClick: noOp,
+      onDeleteSkill: noOp,
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'View & install' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install on this Mac' }))
+    // Lands on the local list with a new default-disabled row.
+    await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy()
+    // Back on the discover tab the entry manages an installed copy.
+    fireEvent.click(screen.getByRole('button', { name: 'From circles' }))
+    expect(screen.getByRole('button', { name: 'Manage local version' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'View & install' })).toBeNull()
+  })
+
+  it('wired entries install through the real grant + creatorSkillInstall channel', async () => {
+    const grant = mock(async () => ({
+      success: true as const,
+      artifactId: 'artifact-1',
+      organizationId: 'org-1',
+      slug: 'sales-weekly',
+      version: '1.0.0',
+      url: 'https://files.example.com/sales-weekly-1.0.0.tar',
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      archiveChecksum: 'a'.repeat(64),
+      contentDigest: 'b'.repeat(64),
+      manifest: [],
+      validationPolicy: 'strict',
+    }))
+    const install = mock(async () => ({ success: true as const, operationId: 'op-1' }))
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: { creatorSkillGetDownloadGrant: grant, creatorSkillInstall: install },
+    })
+    render(withI18n(createElement(SkillsManagerPanel, {
+      skills: [],
+      discoverItems: [{
+        slug: 'sales-weekly',
+        name: '销售周报',
+        description: '按团队格式汇总本周进展、风险和下周计划。',
+        provider: '晨星科技 · 林晓共享',
+        version: '1.0.0',
+        installSource: { organizationId: 'org-1', artifactId: 'artifact-1' },
+      }],
+      spaceKind: 'enterprise',
+      spaceName: '晨星科技',
+      workspaceId: 'ws-1',
+      initialTab: 'discover',
+      onSkillClick: noOp,
+      onDeleteSkill: noOp,
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'View & install' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install on this Mac' }))
+    await waitFor(() => expect(install).toHaveBeenCalledTimes(1))
+    expect(grant).toHaveBeenCalledWith({
+      organizationId: 'org-1',
+      artifactId: 'artifact-1',
+      version: '1.0.0',
+    })
+    expect((install.mock.calls[0] as unknown[])[0]).toMatchObject({
+      workspaceId: 'ws-1',
+      grant: { artifactId: 'artifact-1', organizationId: 'org-1', slug: 'sales-weekly' },
+    })
+    await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
+  })
+
+  it('a failed grant surfaces the install failure phase with retry', async () => {
+    const grant = mock(async () => ({
+      success: false,
+      errorCode: 'artifact_not_found',
+      diagnostic: '',
+      retryable: true,
+    }))
+    const install = mock(async () => ({ success: true as const, operationId: 'op-1' }))
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: { creatorSkillGetDownloadGrant: grant, creatorSkillInstall: install },
+    })
+    render(withI18n(createElement(SkillsManagerPanel, {
+      skills: [],
+      discoverItems: [{
+        slug: 'sales-weekly',
+        name: '销售周报',
+        description: '按团队格式汇总本周进展、风险和下周计划。',
+        provider: '晨星科技 · 林晓共享',
+        version: '1.0.0',
+        installSource: { organizationId: 'org-1', artifactId: 'artifact-1' },
+      }],
+      spaceKind: 'enterprise',
+      spaceName: '晨星科技',
+      workspaceId: 'ws-1',
+      initialTab: 'discover',
+      onSkillClick: noOp,
+      onDeleteSkill: noOp,
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'View & install' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install on this Mac' }))
+    await waitFor(() => expect(screen.getByText('Install not completed')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Retry install' })).toBeTruthy()
+    // The real channel never installed anything: no local row was added.
+    expect(screen.queryByText('Enabled')).toBeNull()
   })
 })
