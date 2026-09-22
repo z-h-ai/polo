@@ -4,8 +4,8 @@
  * Sits right above the composer: the drafted input stays fully preserved,
  * the send action stays unavailable, and the reason plus 去充值 are visible
  * on the same screen. Once a top-up arrives the gate switches to the resumed
- * variant which only re-enables sending — continuing stays the user's click
- * (「继续发送」), never automatic.
+ * banner (info tone) which only re-enables sending — continuing stays the
+ * user's own action in the composer, so the banner carries no CTA.
  */
 
 import { CircleCheck, Coins } from 'lucide-react'
@@ -24,7 +24,11 @@ export interface CreditsGateProps {
   variant?: 'blocked' | 'resumed'
   /** 去充值 — opens the browser topup handoff. */
   onTopup?: () => void
-  /** 继续发送 — explicit user action after arrival. */
+  /**
+   * 继续发送 — explicit user action after arrival. Kept for hosts that
+   * wire the composer send button; the resumed banner itself renders no
+   * CTA (arrival only lifts the block).
+   */
   onContinueSend?: () => void
   className?: string
 }
@@ -34,7 +38,6 @@ export function CreditsGate({
   balance,
   variant = 'blocked',
   onTopup,
-  onContinueSend,
   className,
 }: CreditsGateProps) {
   const { t } = useTranslation()
@@ -47,13 +50,13 @@ export function CreditsGate({
       className={cn(
         'flex flex-wrap items-center gap-2.5 rounded-hifi-md border px-3.5 py-2.5',
         resumed
-          ? 'border-hifi-border bg-hifi-success-soft'
+          ? 'border-[color-mix(in_srgb,var(--hifi-info)_35%,var(--hifi-border))] bg-hifi-info-soft'
           : 'border-hifi-border bg-hifi-destructive-soft',
         className,
       )}
     >
       {resumed ? (
-        <CircleCheck className="size-4 shrink-0 text-hifi-success" aria-hidden="true" />
+        <CircleCheck className="size-4 shrink-0 text-hifi-info" aria-hidden="true" />
       ) : (
         <Coins className="size-4 shrink-0 text-hifi-destructive" aria-hidden="true" />
       )}
@@ -79,15 +82,7 @@ export function CreditsGate({
           </>
         )}
       </span>
-      {resumed ? (
-        <button
-          type="button"
-          onClick={onContinueSend}
-          className="inline-flex min-h-[28px] cursor-pointer items-center rounded-hifi-sm bg-hifi-accent px-3 py-[5px] text-hifi-base font-medium text-hifi-on-accent transition-colors hover:bg-hifi-accent/90"
-        >
-          {t('credits.gate.continueSend')}
-        </button>
-      ) : (
+      {!resumed && (
         <button
           type="button"
           onClick={onTopup}
