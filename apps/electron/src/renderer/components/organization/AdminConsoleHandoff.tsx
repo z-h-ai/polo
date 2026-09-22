@@ -32,16 +32,16 @@ export function AdminConsoleHandoff({
         data-testid="admin-console-handoff"
         eyebrow={t('accountSettings.adminHandoff.eyebrow')}
         title={t('accountSettings.adminHandoff.title', { name: organizationName })}
-        description={t('accountSettings.adminHandoff.description')}
-        browserLabel={t('accountSettings.adminHandoff.browserLabel')}
-        desktopLabel={t('accountSettings.adminHandoff.desktopLabel')}
-        browserResponsibilities={[
-          t('accountSettings.adminHandoff.browserMembers'),
-          t('accountSettings.adminHandoff.browserBilling'),
-        ]}
-        desktopResponsibilities={[
-          t('accountSettings.adminHandoff.desktopRole', { role: roleLabel }),
-          t('accountSettings.adminHandoff.desktopRefresh'),
+        facts={[
+          { label: t('accountSettings.adminHandoff.fact.role'), value: roleLabel },
+          {
+            label: t('accountSettings.adminHandoff.fact.scope'),
+            value: t('accountSettings.adminHandoff.fact.scopeValue'),
+          },
+          {
+            label: t('accountSettings.adminHandoff.fact.done'),
+            value: t('accountSettings.adminHandoff.fact.doneValue'),
+          },
         ]}
         actions={
           <>

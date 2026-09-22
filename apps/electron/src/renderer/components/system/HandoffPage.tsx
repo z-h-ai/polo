@@ -15,7 +15,9 @@ export interface HandoffPageProps {
   icon?: { kind: StateCardIconKind } | null
   /**
    * `split` — the two-column browser/desktop responsibility card
-   * (shared `HandoffCard`), used when the other side owns the action.
+   * (shared `HandoffCard`), used when the other side owns the action;
+   *   passing `facts` here swaps the columns for a fact sheet (proto
+   *   handoff scenes carry key/value payloads).
    * `facts` — fact-sheet layout (shared `StateCard`) for mismatch/pending
    * states whose payload is account/space data.
    */
@@ -68,6 +70,7 @@ export function HandoffPage({
           title={title}
           description={description}
           icon={icon}
+          facts={facts}
           browserResponsibilities={browserResponsibilities ?? []}
           desktopResponsibilities={desktopResponsibilities ?? []}
           browserLabel={browserLabel}

@@ -218,15 +218,11 @@ export function LoginFlowsDemo({ scene }: { scene: string }) {
             eyebrow={t('login.invite.eyebrow')}
             title={t('login.invite.title', { circle: DEMO_CIRCLE })}
             description={t('login.invite.description')}
-            browserLabel={t('login.handoff.browserLabel')}
-            desktopLabel={t('login.handoff.desktopLabel')}
-            browserResponsibilities={[
-              t('login.invite.browser1'),
-              t('login.invite.browser2'),
-            ]}
-            desktopResponsibilities={[
-              t('login.invite.desktop1'),
-              t('login.invite.desktop2'),
+            facts={[
+              { label: t('login.invite.fact.creator'), value: t('login.invite.fact.creatorValue') },
+              { label: t('login.invite.fact.joinMethod'), value: t('login.invite.fact.joinMethodValue') },
+              { label: t('login.invite.fact.included'), value: t('login.invite.fact.includedValue') },
+              { label: t('login.invite.fact.afterJoin'), value: t('login.invite.fact.afterJoinValue') },
             ]}
             actions={
               <>
@@ -304,15 +300,10 @@ export function LoginFlowsDemo({ scene }: { scene: string }) {
             eyebrow={t('login.notInstalled.eyebrow')}
             title={t('login.notInstalled.title')}
             description={t('login.notInstalled.description')}
-            browserLabel={t('login.handoff.browserLabel')}
-            desktopLabel={t('login.handoff.desktopLabel')}
-            browserResponsibilities={[
-              t('login.notInstalled.browser1'),
-              t('login.notInstalled.browser2'),
-            ]}
-            desktopResponsibilities={[
-              t('login.notInstalled.desktop1'),
-              t('login.notInstalled.desktop2'),
+            facts={[
+              { label: t('login.notInstalled.fact.platform'), value: t('login.notInstalled.fact.platformValue') },
+              { label: t('login.notInstalled.fact.version'), value: t('login.notInstalled.fact.versionValue') },
+              { label: t('login.notInstalled.fact.install'), value: t('login.notInstalled.fact.installValue') },
             ]}
             actions={
               <HifiActionButton variant="primary">
@@ -328,16 +319,10 @@ export function LoginFlowsDemo({ scene }: { scene: string }) {
           <HandoffPage
             eyebrow={t('login.createEnt.eyebrow')}
             title={t('login.createEnt.title')}
-            description={t('login.createEnt.description')}
-            browserLabel={t('login.handoff.browserLabel')}
-            desktopLabel={t('login.handoff.desktopLabel')}
-            browserResponsibilities={[
-              t('login.createEnt.browser1'),
-              t('login.createEnt.browser2'),
-            ]}
-            desktopResponsibilities={[
-              t('login.createEnt.desktop1'),
-              t('login.createEnt.desktop2'),
+            facts={[
+              { label: t('login.createEnt.fact.account'), value: DEMO_ACCOUNT },
+              { label: t('login.createEnt.fact.where'), value: t('login.createEnt.fact.whereValue') },
+              { label: t('login.createEnt.fact.afterCreate'), value: t('login.createEnt.fact.afterCreateValue') },
             ]}
             actions={
               <>
