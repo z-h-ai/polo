@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "Nie udało się przełączyć przestrzeni",
   "spaceSwitch.stopping.cancel": "Anuluj przełączenie",
   "spaceSwitch.stopping.inProgress": "Zatrzymywanie…",
+  "spaceSwitch.stopping.stopAllNow": "Zatrzymaj wszystko i przełącz",
   "spaceSwitch.stopping.subtitle": "Chwilę poczekaj",
   "spaceSwitch.stopping.summary": "Zatrzymywanie {{total}} uruchomionych zadań…",
   "spaceSwitch.stopping.title": "Zatrzymywanie uruchomionych zadań",

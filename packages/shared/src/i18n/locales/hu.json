@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "Nem sikerült átváltani",
   "spaceSwitch.stopping.cancel": "Váltás megszakítása",
   "spaceSwitch.stopping.inProgress": "Leállítás…",
+  "spaceSwitch.stopping.stopAllNow": "Összes leállítása és váltás",
   "spaceSwitch.stopping.subtitle": "Kis türelem",
   "spaceSwitch.stopping.summary": "{{total}} futó feladat leállítása…",
   "spaceSwitch.stopping.title": "Futó feladatok leállítása",

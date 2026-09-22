@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "No se pudo cambiar de espacio",
   "spaceSwitch.stopping.cancel": "Cancelar cambio",
   "spaceSwitch.stopping.inProgress": "Deteniendo…",
+  "spaceSwitch.stopping.stopAllNow": "Detener todo y cambiar",
   "spaceSwitch.stopping.subtitle": "Espera un momento",
   "spaceSwitch.stopping.summary": "Deteniendo {{total}} tareas en ejecución…",
   "spaceSwitch.stopping.title": "Deteniendo tareas en ejecución",

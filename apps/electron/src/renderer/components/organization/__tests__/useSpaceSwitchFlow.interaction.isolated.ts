@@ -140,6 +140,68 @@ describe('useSpaceSwitchFlowMachine · confirm → stop → commit', () => {
   })
 })
 
+describe('useSpaceSwitchFlowMachine · 停止全部并切换 (stopAllNow)', () => {
+  it('supersedes the sequential pass: remaining items stop concurrently, then load + commit', async () => {
+    const firstStop = deferred<boolean>()
+    const inflight = new Map<string, Deferred<boolean>>()
+    const loaded: string[] = []
+    renderMachine({
+      getRunningActivities: () => ACTIVITIES,
+      stopActivity: (activity) => {
+        if (activity.id === 'act-report') return firstStop.promise
+        const gate = deferred<boolean>()
+        inflight.set(activity.id, gate)
+        return gate.promise
+      },
+      loadTargetSpace: async (target) => {
+        loaded.push(target.id)
+        return { ok: true }
+      },
+      commitSwitch: () => {},
+    })
+
+    act(() => api.requestSwitch(TARGET))
+    await act(async () => { api.confirmStop() })
+    // Sequential pass is mid-stop on the first item; the others are untouched.
+    expect(api.phase).toBe('stopping')
+    expect(api.activities.map((entry) => entry.status)).toEqual(['stopping', 'running', 'running'])
+
+    await act(async () => { api.stopAllNow() })
+    // stopAllNow fires the remaining stops concurrently without waiting for
+    // the gated sequential item.
+    expect([...inflight.keys()].sort()).toEqual(['act-crm', 'act-weekly'])
+    expect(api.activities.map((entry) => entry.status)).toEqual(['stopping', 'stopping', 'stopping'])
+
+    firstStop.resolve(true)
+    for (const gate of inflight.values()) gate.resolve(true)
+    await waitFor(() => expect(api.phase).toBe('done'))
+    expect(loaded).toEqual([TARGET.id])
+    expect(api.activities.every((entry) => entry.status === 'stopped')).toBe(true)
+  })
+
+  it('any concurrent failure lands on stopFailed (no load, no commit)', async () => {
+    const gates = new Map<string, Deferred<boolean>>()
+    renderMachine({
+      getRunningActivities: () => ACTIVITIES,
+      stopActivity: (activity) => {
+        const gate = deferred<boolean>()
+        gates.set(activity.id, gate)
+        return gate.promise
+      },
+      loadTargetSpace: async () => ({ ok: true }),
+      commitSwitch: () => {},
+    })
+    act(() => api.requestSwitch(TARGET))
+    await act(async () => { api.confirmStop() })
+    await act(async () => { api.stopAllNow() })
+    gates.get('act-report')!.resolve(true)
+    gates.get('act-crm')!.resolve(false)
+    gates.get('act-weekly')!.resolve(true)
+    await waitFor(() => expect(api.phase).toBe('stopFailed'))
+    expect(api.activities.find((entry) => entry.id === 'act-crm')?.status).toBe('failed')
+  })
+})
+
 describe('useSpaceSwitchFlowMachine · partial failure (C-R04)', () => {
   function renderPartialFailure(overrides: Partial<SpaceSwitchFlowDeps> = {}) {
     const stopCalls: string[] = []

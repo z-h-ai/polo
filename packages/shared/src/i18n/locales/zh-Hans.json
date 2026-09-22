@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "未能切换空间",
   "spaceSwitch.stopping.cancel": "取消切换",
   "spaceSwitch.stopping.inProgress": "正在停止…",
+  "spaceSwitch.stopping.stopAllNow": "停止全部并切换",
   "spaceSwitch.stopping.subtitle": "请稍候",
   "spaceSwitch.stopping.summary": "正在停止 {{total}} 项运行中的任务…",
   "spaceSwitch.stopping.title": "正在停止运行任务",

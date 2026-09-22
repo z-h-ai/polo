@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "Couldn't switch spaces",
   "spaceSwitch.stopping.cancel": "Cancel switch",
   "spaceSwitch.stopping.inProgress": "Stopping…",
+  "spaceSwitch.stopping.stopAllNow": "Stop all and switch",
   "spaceSwitch.stopping.subtitle": "Please wait",
   "spaceSwitch.stopping.summary": "Stopping {{total}} running tasks…",
   "spaceSwitch.stopping.title": "Stopping running tasks",

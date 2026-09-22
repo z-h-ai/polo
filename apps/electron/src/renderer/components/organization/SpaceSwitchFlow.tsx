@@ -224,6 +224,9 @@ export function SpaceSwitchFlow() {
             <FlowButton variant="primary" disabled spinning>
               {t('spaceSwitch.stopping.inProgress')}
             </FlowButton>
+            <FlowButton onClick={flow.stopAllNow}>
+              {t('spaceSwitch.stopping.stopAllNow')}
+            </FlowButton>
           </>
         }
       >

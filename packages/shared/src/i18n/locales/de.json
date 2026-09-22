@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "Wechsel nicht möglich",
   "spaceSwitch.stopping.cancel": "Wechsel abbrechen",
   "spaceSwitch.stopping.inProgress": "Wird gestoppt…",
+  "spaceSwitch.stopping.stopAllNow": "Alle stoppen und wechseln",
   "spaceSwitch.stopping.subtitle": "Bitte warten",
   "spaceSwitch.stopping.summary": "{{total}} laufende Aufgaben werden gestoppt…",
   "spaceSwitch.stopping.title": "Laufende Aufgaben werden gestoppt",

@@ -2440,6 +2440,7 @@
   "spaceSwitch.stopFailed.title": "スペースを切り替えできませんでした",
   "spaceSwitch.stopping.cancel": "切り替えをキャンセル",
   "spaceSwitch.stopping.inProgress": "停止中…",
+  "spaceSwitch.stopping.stopAllNow": "すべて停止して切り替える",
   "spaceSwitch.stopping.subtitle": "しばらくお待ちください",
   "spaceSwitch.stopping.summary": "実行中のタスク {{total}} 件を停止しています…",
   "spaceSwitch.stopping.title": "実行中タスクを停止しています",

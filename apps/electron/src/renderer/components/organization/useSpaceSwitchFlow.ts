@@ -82,6 +82,8 @@ export interface SpaceSwitchFlowApi extends SpaceSwitchFlowState {
   confirmStop: () => void
   /** Cancel the switch. Already-stopped items stay stopped (C-R04). */
   cancelSwitch: () => void
+  /** stopping tertiary: stop all remaining items concurrently, then switch. */
+  stopAllNow: () => void
   /** stopFailed primary: retry only the failed items. */
   retryFailedStops: () => void
   /** targetFailed primary: retry loading the target. */
@@ -114,6 +116,13 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
   const runIdRef = React.useRef(0)
   const stateRef = React.useRef(state)
   stateRef.current = state
+  /**
+   * Token of the active stop pass. `stopAllNow` supersedes an in-flight
+   * sequential pass: the old loop must stop writing ledger/phase state the
+   * moment a newer pass (parallel or retry) takes over, even though the
+   * transaction runId is unchanged.
+   */
+  const stopPassRef = React.useRef(0)
 
   const patch = React.useCallback((patched: Partial<SpaceSwitchFlowState>) => {
     setState((previous) => ({ ...previous, ...patched }))
@@ -159,6 +168,7 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
    *  (retry only acts on failed/unfinished items; stopped items never revive). */
   const runStopPass = React.useCallback(async (target: SpaceSwitchTarget, runId: number) => {
     patch({ phase: 'stopping' })
+    const passId = ++stopPassRef.current
     const ledger = stateRef.current.activities.map((entry) => ({ ...entry }))
     for (let index = 0; index < ledger.length; index += 1) {
       const entry = ledger[index]
@@ -189,10 +199,15 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
         }
         return
       }
+      if (stopPassRef.current !== passId) {
+        // Superseded by stopAllNow (or a retry pass): this pass must not touch
+        // the ledger anymore — the newer pass owns the remaining items.
+        return
+      }
       ledger[index] = { ...entry, status: stopped ? 'stopped' : 'failed' }
       setState((previous) => ({ ...previous, activities: ledger.slice() }))
     }
-    if (runIdRef.current !== runId) return
+    if (runIdRef.current !== runId || stopPassRef.current !== passId) return
     const unfinished = ledger.some((entry) => entry.status !== 'stopped')
     if (unfinished) {
       setState((previous) => ({ ...previous, phase: 'stopFailed' }))
@@ -200,6 +215,56 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
       await loadTarget(target, runId)
     }
   }, [deps, loadTarget, patch])
+
+  /**
+   * stopping tertiary (v3 停止全部并切换): stop every remaining item
+   * concurrently instead of waiting out the sequential pass, then run the
+   * same load + commit. The one item the sequential pass is mid-stop on may
+   * receive a duplicate stopActivity call — stops are expected idempotent.
+   */
+  const stopAllNow = React.useCallback(() => {
+    const { phase, target } = stateRef.current
+    if (phase !== 'stopping' || !target) return
+    const runId = runIdRef.current
+    const passId = ++stopPassRef.current
+    const ledger = stateRef.current.activities.map((entry) => ({ ...entry }))
+    if (ledger.every((entry) => entry.status === 'stopped')) {
+      void loadTarget(target, runId)
+      return
+    }
+    setState((previous) => ({
+      ...previous,
+      activities: previous.activities.map((entry) =>
+        entry.status === 'stopped' ? entry : { ...entry, status: 'stopping' },
+      ),
+    }))
+    void Promise.all(
+      ledger.map(async (entry) => {
+        if (entry.status === 'stopped') return true
+        let stopped = true
+        try {
+          stopped = deps.stopActivity ? await deps.stopActivity(entry) : true
+        } catch {
+          stopped = false
+        }
+        if (runIdRef.current !== runId || stopPassRef.current !== passId) return stopped
+        setState((previous) => ({
+          ...previous,
+          activities: previous.activities.map((item) =>
+            item.id === entry.id ? { ...item, status: stopped ? 'stopped' : 'failed' } : item,
+          ),
+        }))
+        return stopped
+      }),
+    ).then((results) => {
+      if (runIdRef.current !== runId || stopPassRef.current !== passId) return
+      if (results.every(Boolean)) {
+        void loadTarget(target, runId)
+      } else {
+        setState((previous) => ({ ...previous, phase: 'stopFailed' }))
+      }
+    })
+  }, [deps, loadTarget])
 
   const requestSwitch = React.useCallback((target: SpaceSwitchTarget) => {
     runIdRef.current += 1
@@ -277,6 +342,7 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
     requestSwitch,
     confirmStop,
     cancelSwitch,
+    stopAllNow,
     retryFailedStops,
     retryLoad,
     stayInCurrentSpace: reset,
