@@ -54,33 +54,43 @@ export function TopupHandoff({
               ? t('credits.topup.billingEntTitle')
               : t('credits.topup.billingTitle')
           }
-          description={
-            enterprise
-              ? t('credits.topup.billingEntDescription')
-              : t('credits.topup.billingDescription')
-          }
-          browserLabel={t('credits.topup.browserLabel')}
-          desktopLabel={t('credits.topup.desktopLabel')}
-          browserResponsibilities={
+          facts={
             enterprise
               ? [
-                  t('credits.topup.billingEntBrowserBilling'),
-                  t('credits.topup.billingEntBrowserAllocate'),
+                  {
+                    label: t('credits.topup.fact.entSource'),
+                    value: t('credits.topup.fact.entSourceValue'),
+                  },
+                  {
+                    label: t('credits.topup.fact.entRequest'),
+                    value: t('credits.topup.fact.entRequestValue'),
+                  },
+                  {
+                    label: t('credits.topup.fact.entBilling'),
+                    value: t('credits.topup.fact.entBillingValue'),
+                  },
+                  {
+                    label: t('credits.topup.fact.entEffect'),
+                    value: t('credits.topup.fact.entEffectValue'),
+                  },
                 ]
               : [
-                  t('credits.topup.billingBrowserPay'),
-                  t('credits.topup.billingBrowserInvoice'),
-                ]
-          }
-          desktopResponsibilities={
-            enterprise
-              ? [
-                  t('credits.topup.memberRequestValue'),
-                  t('credits.topup.billingEntDesktopNotify'),
-                ]
-              : [
-                  t('credits.topup.billingDesktopBalance', { balance }),
-                  t('credits.topup.billingDesktopUsage'),
+                  {
+                    label: t('credits.topup.fact.balance'),
+                    value: t('credits.topup.fact.balanceValue', { balance }),
+                  },
+                  {
+                    label: t('credits.topup.fact.usage'),
+                    value: t('credits.topup.fact.usageValue'),
+                  },
+                  {
+                    label: t('credits.topup.fact.method'),
+                    value: t('credits.topup.fact.methodValue'),
+                  },
+                  {
+                    label: t('credits.topup.fact.done'),
+                    value: t('credits.topup.fact.doneValue'),
+                  },
                 ]
           }
           actions={
@@ -106,17 +116,23 @@ export function TopupHandoff({
         data-testid={`topup-handoff-${variant}`}
         eyebrow={t('credits.topup.eyebrow')}
         title={t('credits.topup.title')}
-        description={t('credits.topup.description')}
-        browserLabel={t('credits.topup.browserLabel')}
-        desktopLabel={t('credits.topup.desktopLabel')}
-        browserResponsibilities={[
-          t('credits.topup.browserPay'),
-          t('credits.topup.browserOrder'),
-        ]}
-        desktopResponsibilities={[
-          t('credits.topup.desktopInitiate', { needed }),
-          t('credits.topup.desktopCheckOnce'),
-          t('credits.topup.desktopDraft', { balance }),
+        facts={[
+          {
+            label: t('credits.topup.fact.balance'),
+            value: t('credits.topup.fact.balanceValue', { balance }),
+          },
+          {
+            label: t('credits.topup.fact.needed'),
+            value: t('credits.topup.fact.neededValue', { needed }),
+          },
+          {
+            label: t('credits.topup.fact.method'),
+            value: t('credits.topup.fact.methodValue'),
+          },
+          {
+            label: t('credits.topup.fact.confirm'),
+            value: t('credits.topup.fact.confirmValue'),
+          },
         ]}
         actions={
           <>

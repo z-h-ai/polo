@@ -157,6 +157,11 @@ function CircleDetailDemo({ state = 'joined' }: CircleDetailDemoProps) {
   const sourcesRevoked = state === 'left' || state === 'expired'
   const revokedApps = revokeCircleSources(APPS, 'circle-design')
   const revokedSkills = revokeCircleSources(SKILLS, 'circle-design')
+  // The free circle (晨星增长圈) provides exactly 1 app (header "1 apps");
+  // 会议纪要整理's dual-source demo belongs to the revoked-source variants.
+  const growthApps = APPS.filter(
+    (app) => app.appId === 'app-growth-playbook',
+  )
   const circle =
     state === 'joined'
       ? GROWTH
@@ -170,7 +175,7 @@ function CircleDetailDemo({ state = 'joined' }: CircleDetailDemoProps) {
       <CircleDetailPage
         now={NOW}
         circle={circle}
-        apps={sourcesRevoked ? revokedApps : APPS}
+        apps={state === 'joined' ? growthApps : sourcesRevoked ? revokedApps : APPS}
         skills={sourcesRevoked ? revokedSkills : SKILLS}
         installedSkillIds={['skill-installed-elsewhere']}
         workDetails={WORK_DETAILS}

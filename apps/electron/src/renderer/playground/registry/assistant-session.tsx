@@ -110,6 +110,10 @@ interface SessionPreviewProps {
 
 function SessionPreview({ variant = 'generating' }: SessionPreviewProps) {
   const [permissionMode] = React.useState<PermissionMode>('ask')
+  // P-M05-QUESTION-REOPEN：重开时 composer 恢复上次保留的草稿（受控 inputValue）。
+  const [reopenedDraft, setReopenedDraft] = React.useState(
+    '把 Q2 报价按客户分组汇总，标出与上季度的差异。',
+  )
   React.useEffect(() => {
     ensureMockElectronAPI()
   }, [])
@@ -198,6 +202,8 @@ function SessionPreview({ variant = 'generating' }: SessionPreviewProps) {
             placeholder={variant === 'question-reopen'
               ? '上次未回答的问题已恢复，可直接输入…'
               : 'Message Polo AI...'}
+            inputValue={variant === 'question-reopen' ? reopenedDraft : undefined}
+            onInputChange={variant === 'question-reopen' ? setReopenedDraft : mockInputCallbacks.onInputChange}
             disabled={false}
             isProcessing={variant === 'generating'}
             currentModel="claude-sonnet-4-6"
@@ -209,7 +215,6 @@ function SessionPreview({ variant = 'generating' }: SessionPreviewProps) {
             sessionId="playground-session"
             onSubmit={mockInputCallbacks.onSubmit}
             onModelChange={mockInputCallbacks.onModelChange}
-            onInputChange={mockInputCallbacks.onInputChange}
             onHeightChange={mockInputCallbacks.onHeightChange}
             onFocusChange={mockInputCallbacks.onFocusChange}
             onSourcesChange={mockInputCallbacks.onSourcesChange}

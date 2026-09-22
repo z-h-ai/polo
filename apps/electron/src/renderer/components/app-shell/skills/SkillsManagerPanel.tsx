@@ -435,7 +435,10 @@ export function SkillsManagerPanel({
             onClick={() => setView(tab === 'local' ? { kind: 'local' } : { kind: 'discover' })}
             aria-current={activeTab === tab}
             className={cn(
-              'h-7 rounded-hifi-sm px-2.5 text-hifi-sm font-medium transition-colors',
+              // nowrap keeps the two tab labels on one line in narrow/dark
+              // panels (dark rendering widens glyphs → wrap overlapped the
+              // header below).
+              'h-7 shrink-0 whitespace-nowrap rounded-hifi-sm px-2.5 text-hifi-sm font-medium transition-colors',
               activeTab === tab
                 ? 'bg-hifi-accent-soft text-hifi-accent'
                 : 'text-hifi-fg-60 hover:bg-hifi-fg-5',

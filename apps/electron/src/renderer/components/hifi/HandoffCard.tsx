@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Globe, Monitor } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StateIconTile, type HifiStateIconKind } from './StateIconTile'
+import type { StateCardFact } from './StateCard'
 
 export type HandoffCardIconKind = HifiStateIconKind
 
@@ -10,10 +11,16 @@ export interface HandoffCardProps {
   /** Small uppercase label above the title (g4 `.eyebrow`). */
   eyebrow?: React.ReactNode
   description?: React.ReactNode
+  /**
+   * Fact sheet rendered as g4 `.state-facts` (same markup as StateCard).
+   * When present it replaces the two-column responsibility grid — the
+   * prototype handoff scenes carry their payload as key/value facts.
+   */
+  facts?: StateCardFact[]
   /** What the browser side takes care of (first column). */
-  browserResponsibilities: React.ReactNode[]
+  browserResponsibilities?: React.ReactNode[]
   /** What the desktop app keeps responsibility for (second column). */
-  desktopResponsibilities: React.ReactNode[]
+  desktopResponsibilities?: React.ReactNode[]
   /** Optional column headers; when omitted the column icon stands alone. */
   browserLabel?: React.ReactNode
   desktopLabel?: React.ReactNode
@@ -55,16 +62,18 @@ function ResponsibilityList({
 
 /**
  * HandoffCard — browser handoff card skeleton (g4 `.flow-state-page` variant).
- * Shared by the cross-device handoff scenes: title + two-column
- * responsibilities (browser vs desktop) + primary action. Callers provide
+ * Shared by the cross-device handoff scenes: title + a key/value fact sheet
+ * (`facts`, g4 `.state-facts`) or, when no facts are given, a two-column
+ * browser vs desktop responsibility split + primary action. Callers provide
  * translated copy and the action buttons.
  */
 export function HandoffCard({
   title,
   eyebrow,
   description,
-  browserResponsibilities,
-  desktopResponsibilities,
+  facts,
+  browserResponsibilities = [],
+  desktopResponsibilities = [],
   browserLabel,
   desktopLabel,
   actions,
@@ -87,21 +96,35 @@ export function HandoffCard({
       {description != null && (
         <p className="mt-[9px] text-hifi-md text-hifi-fg-60">{description}</p>
       )}
-      <div className="mt-[22px] grid w-full overflow-hidden rounded-hifi-md border border-hifi-border bg-hifi-surface text-left sm:grid-cols-2">
-        <ResponsibilityList
-          icon={Globe}
-          label={browserLabel}
-          labelFallback="browser"
-          items={browserResponsibilities}
-        />
-        <ResponsibilityList
-          icon={Monitor}
-          label={desktopLabel}
-          labelFallback="desktop"
-          items={desktopResponsibilities}
-          className="border-t border-hifi-border sm:border-t-0 sm:border-l"
-        />
-      </div>
+      {facts && facts.length > 0 ? (
+        <dl className="mt-[22px] grid w-full overflow-hidden rounded-hifi-md border border-hifi-border bg-hifi-surface text-left">
+          {facts.map((fact, index) => (
+            <div
+              key={index}
+              className="grid grid-cols-[116px_minmax(0,1fr)] gap-3 border-b border-hifi-border px-[13px] py-[11px] text-hifi-base last:border-b-0"
+            >
+              <dt className="text-hifi-fg-50">{fact.label}</dt>
+              <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <div className="mt-[22px] grid w-full overflow-hidden rounded-hifi-md border border-hifi-border bg-hifi-surface text-left sm:grid-cols-2">
+          <ResponsibilityList
+            icon={Globe}
+            label={browserLabel}
+            labelFallback="browser"
+            items={browserResponsibilities}
+          />
+          <ResponsibilityList
+            icon={Monitor}
+            label={desktopLabel}
+            labelFallback="desktop"
+            items={desktopResponsibilities}
+            className="border-t border-hifi-border sm:border-t-0 sm:border-l"
+          />
+        </div>
+      )}
       {actions != null && (
         <div className="mt-[22px] flex flex-wrap justify-center gap-2">{actions}</div>
       )}
