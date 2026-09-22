@@ -114,8 +114,8 @@ describe('reduceAuthFlow legal transitions', () => {
 describe('reduceAuthFlow rejects illegal transitions', () => {
   const cases: Array<[AuthFlowState['step'], Parameters<typeof reduceAuthFlow>[1]]> = [
     ['password', { type: 'started' }],
-    ['password', { type: 'codeSent', resendAfterSeconds: 59, expiresInSeconds: 300 }],
-    ['code', { type: 'codeSent', resendAfterSeconds: 59, expiresInSeconds: 300 }],
+    ['password', { type: 'codeSent', resendAfterSeconds: 59, expiresInSeconds: 300, now: NOW }],
+    ['code', { type: 'codeSent', resendAfterSeconds: 59, expiresInSeconds: 300, now: NOW }],
     ['idle', { type: 'loginSucceeded' }],
     ['prepping', { type: 'loginSucceeded' }],
     ['ready', { type: 'loginSucceeded' }],

@@ -835,6 +835,7 @@
   "login.invite.eyebrow": "System browser · Circle invitation",
   "login.invite.title": "{{circle}} invites you to join",
   "login.mismatch.action.switchAccount": "Switch account",
+  "login.mismatch.description": "Invitations are tied to a specific account — switch to the invited account",
   "login.mismatch.eyebrow": "System browser · Enterprise invitation",
   "login.mismatch.fact.currentAccount": "Current account",
   "login.mismatch.fact.invitedAccount": "Invited account",

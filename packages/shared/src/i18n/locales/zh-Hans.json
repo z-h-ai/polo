@@ -835,6 +835,7 @@
   "login.invite.eyebrow": "系统浏览器 · 圈子邀请",
   "login.invite.title": "{{circle}}邀请你加入",
   "login.mismatch.action.switchAccount": "切换账号",
+  "login.mismatch.description": "邀请与账号绑定，请切换到受邀账号",
   "login.mismatch.eyebrow": "系统浏览器 · 企业邀请",
   "login.mismatch.fact.currentAccount": "当前账号",
   "login.mismatch.fact.invitedAccount": "受邀账号",

@@ -835,6 +835,7 @@
   "login.invite.eyebrow": "システムブラウザー・サークル招待",
   "login.invite.title": "{{circle}}からの招待",
   "login.mismatch.action.switchAccount": "アカウントを切り替える",
+  "login.mismatch.description": "招待はアカウントに紐づいています。招待されたアカウントに切り替えてください",
   "login.mismatch.eyebrow": "システムブラウザー・企業からの招待",
   "login.mismatch.fact.currentAccount": "現在のアカウント",
   "login.mismatch.fact.invitedAccount": "招待されたアカウント",

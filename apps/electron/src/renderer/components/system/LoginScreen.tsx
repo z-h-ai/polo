@@ -130,6 +130,11 @@ function LoginNotice({ notice }: { notice: 'cancelled' | 'expired' | null }) {
  * brand story column + password / phone-code entry column over the ambient
  * system screen. Cancelled and expired sessions render as inline alerts
  * (never dialogs); the code step delegates to `PhoneCodeForm`.
+ *
+ * Seam: this component owns only the login steps. Once the flow advances
+ * (prepping / prepFailed / ready) it renders nothing — the parent surface
+ * (App.tsx wiring, or the playground demo) swaps in `SystemStatePage` /
+ * the product shell and is responsible for unmounting this screen.
  */
 export function LoginScreen({ flow, className }: LoginScreenProps) {
   const { t } = useTranslation()
@@ -142,8 +147,11 @@ export function LoginScreen({ flow, className }: LoginScreenProps) {
     if (state.step === 'idle') current.start()
   }, [state.step, current])
 
+  if (!current.isLoginStep && state.step !== 'idle') return null
+
   const step = state.step === 'idle' ? 'password' : state.step
   const canSubmitEntry = state.consented && state.phone.length === 11
+  const canSubmitPassword = canSubmitEntry && password.length > 0
 
   const heading =
     step === 'phone'
@@ -197,7 +205,7 @@ export function LoginScreen({ flow, className }: LoginScreenProps) {
               className="mt-5 grid gap-[15px]"
               onSubmit={(event) => {
                 event.preventDefault()
-                if (canSubmitEntry) current.submitPassword(state.phone, password)
+                if (canSubmitPassword) current.submitPassword(state.phone, password)
               }}
             >
               <label className="grid gap-[7px] text-hifi-sm font-semibold text-hifi-fg-60">
@@ -224,7 +232,7 @@ export function LoginScreen({ flow, className }: LoginScreenProps) {
                 variant="primary"
                 type="submit"
                 className="min-h-10"
-                disabled={!canSubmitEntry}
+                disabled={!canSubmitPassword}
               >
                 {t('common.continue')}
               </HifiActionButton>

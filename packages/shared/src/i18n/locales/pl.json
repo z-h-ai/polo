@@ -835,6 +835,7 @@
   "login.invite.eyebrow": "Przeglądarka systemowa · Zaproszenie do kręgu",
   "login.invite.title": "{{circle}} zaprasza Cię do dołączenia",
   "login.mismatch.action.switchAccount": "Przełącz konto",
+  "login.mismatch.description": "Zaproszenia są powiązane z konkretnym kontem — przełącz się na zaproszone konto",
   "login.mismatch.eyebrow": "Przeglądarka systemowa · Zaproszenie przedsiębiorstwa",
   "login.mismatch.fact.currentAccount": "Bieżące konto",
   "login.mismatch.fact.invitedAccount": "Zaproszone konto",

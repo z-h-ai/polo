@@ -60,7 +60,8 @@ export type AuthFlowAction =
       type: 'codeSent'
       resendAfterSeconds: number
       expiresInSeconds: number
-      now?: number
+      /** Dispatch-site clock; the reducer itself never reads Date.now(). */
+      now: number
     }
   | { type: 'loginSucceeded' }
   | { type: 'submitFailed' }
@@ -124,7 +125,7 @@ export function reduceAuthFlow(
       return { ...state, consented: action.value }
     case 'codeSent': {
       if (state.step !== 'phone') return state
-      const now = action.now ?? Date.now()
+      const now = action.now
       return {
         ...state,
         step: 'code',
@@ -258,13 +259,20 @@ export function useAuthFlow({ adapter = DEMO_AUTH_FLOW_ADAPTER }: UseAuthFlowOpt
 
   const sendCode = useCallback(
     async (phone: string) => {
-      const result = await submitRunner.run(() => adapter.sendLoginCode(phone))
-      if (!result) return
-      dispatch({
-        type: 'codeSent',
-        resendAfterSeconds: result.resendAfterSeconds,
-        expiresInSeconds: result.expiresInSeconds,
-      })
+      try {
+        const result = await submitRunner.run(() => adapter.sendLoginCode(phone))
+        if (!result) return
+        dispatch({
+          type: 'codeSent',
+          resendAfterSeconds: result.resendAfterSeconds,
+          expiresInSeconds: result.expiresInSeconds,
+          now: Date.now(),
+        })
+      } catch {
+        // Sending failed (network / provider): surface it inline instead of
+        // letting the rejection escape as unhandled.
+        dispatch({ type: 'submitFailed' })
+      }
     },
     [adapter, submitRunner],
   )
@@ -281,28 +289,36 @@ export function useAuthFlow({ adapter = DEMO_AUTH_FLOW_ADAPTER }: UseAuthFlowOpt
 
   const submitPassword = useCallback(
     async (phone: string, password: string) => {
-      await submitRunner.run(async () => {
-        const result = await adapter.loginWithPassword(phone, password)
-        if (!result.ok) {
-          dispatch({ type: 'submitFailed' })
-          return
-        }
-        await prepareAfterLogin()
-      })
+      try {
+        await submitRunner.run(async () => {
+          const result = await adapter.loginWithPassword(phone, password)
+          if (!result.ok) {
+            dispatch({ type: 'submitFailed' })
+            return
+          }
+          await prepareAfterLogin()
+        })
+      } catch {
+        dispatch({ type: 'submitFailed' })
+      }
     },
     [adapter, prepareAfterLogin, submitRunner],
   )
 
   const submitCode = useCallback(
     async (phone: string, code: string) => {
-      await submitRunner.run(async () => {
-        const result = await adapter.verifyLoginCode(phone, code)
-        if (!result.ok) {
-          dispatch({ type: 'submitFailed' })
-          return
-        }
-        await prepareAfterLogin()
-      })
+      try {
+        await submitRunner.run(async () => {
+          const result = await adapter.verifyLoginCode(phone, code)
+          if (!result.ok) {
+            dispatch({ type: 'submitFailed' })
+            return
+          }
+          await prepareAfterLogin()
+        })
+      } catch {
+        dispatch({ type: 'submitFailed' })
+      }
     },
     [adapter, prepareAfterLogin, submitRunner],
   )

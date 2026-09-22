@@ -835,6 +835,7 @@
   "login.invite.eyebrow": "Navegador del sistema · Invitación a un círculo",
   "login.invite.title": "{{circle}} te invita a unirte",
   "login.mismatch.action.switchAccount": "Cambiar de cuenta",
+  "login.mismatch.description": "Las invitaciones están vinculadas a una cuenta concreta: cambia a la cuenta invitada",
   "login.mismatch.eyebrow": "Navegador del sistema · Invitación de empresa",
   "login.mismatch.fact.currentAccount": "Cuenta actual",
   "login.mismatch.fact.invitedAccount": "Cuenta invitada",

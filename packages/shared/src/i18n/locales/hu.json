@@ -835,6 +835,7 @@
   "login.invite.eyebrow": "Rendszerböngésző · Kör meghívó",
   "login.invite.title": "A(z) {{circle}} meghív, hogy csatlakozz",
   "login.mismatch.action.switchAccount": "Fiókváltás",
+  "login.mismatch.description": "A meghívók egy adott fiókhoz kötődnek – válts a meghívott fiókra",
   "login.mismatch.eyebrow": "Rendszerböngésző · Vállalati meghívó",
   "login.mismatch.fact.currentAccount": "Jelenlegi fiók",
   "login.mismatch.fact.invitedAccount": "Meghívott fiók",

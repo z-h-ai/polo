@@ -247,7 +247,7 @@ export function LoginFlowsDemo({ scene }: { scene: string }) {
             icon={{ kind: 'destructive' }}
             eyebrow={t('login.mismatch.eyebrow')}
             title={t('login.mismatch.title')}
-            description={t('login.invite.description')}
+            description={t('login.mismatch.description')}
             facts={[
               { label: t('login.mismatch.fact.currentAccount'), value: '+86 138 •••• 8000' },
               { label: t('login.mismatch.fact.invitedAccount'), value: 'xiaowang@chenxing.com' },
