@@ -1196,10 +1196,23 @@ export function HomePage({ onAddApp }: HomePageProps) {
               />
             )
             : (
-              <EmptyDirectoryState
-                title={t('homeApps.inspector.unavailableTitle')}
-                description={t('homeApps.inspector.unavailableDescription')}
-              />
+              <div className="space-y-4">
+                <div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={homeView.goHome}
+                  >
+                    <Icons.ArrowLeft className="size-4" strokeWidth={1.5} />
+                    {t('homeApps.allApps.back')}
+                  </Button>
+                </div>
+                <EmptyDirectoryState
+                  title={t('homeApps.inspector.unavailableTitle')}
+                  description={t('homeApps.inspector.unavailableDescription')}
+                />
+              </div>
             )
         )}
 
