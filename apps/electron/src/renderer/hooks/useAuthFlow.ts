@@ -323,6 +323,20 @@ export function useAuthFlow({ adapter = DEMO_AUTH_FLOW_ADAPTER }: UseAuthFlowOpt
     [adapter, prepareAfterLogin, submitRunner],
   )
 
+  // Real wiring (P-M01-PERSONAL-PREP-FAIL): retry re-enters the preparing
+  // screen and actually re-runs the adapter, unlike `retryPrep` which only
+  // moves the state machine (playground variants stay renderable).
+  const retryPreparation = useCallback(async () => {
+    if (state.step !== 'prepFailed') return
+    dispatch({ type: 'prepRetried' })
+    try {
+      await adapter.prepareWorkspace()
+      dispatch({ type: 'prepSucceeded' })
+    } catch {
+      dispatch({ type: 'prepFailed' })
+    }
+  }, [adapter, state.step])
+
   return {
     state,
     /** Convenience view for surfaces that only render the login steps. */
@@ -339,6 +353,7 @@ export function useAuthFlow({ adapter = DEMO_AUTH_FLOW_ADAPTER }: UseAuthFlowOpt
     markSessionExpired,
     dismissNotice,
     retryPrep,
+    retryPreparation,
     relogin,
   }
 }

@@ -50,6 +50,7 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.method).toBe('POST');
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
+      'x-client': 'polo-webui',
       'Content-Type': 'application/json',
     });
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
@@ -287,6 +288,7 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/password');
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
+      'x-client': 'polo-webui',
       Authorization: 'Bearer access-token',
       'Content-Type': 'application/json',
     });
@@ -346,6 +348,7 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.method).toBe('POST');
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
+      'x-client': 'polo-webui',
       'Content-Type': 'application/json',
     });
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
@@ -404,6 +407,7 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.method).toBe('POST');
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
+      'x-client': 'polo-webui',
       Authorization: 'Bearer access-token',
     });
     expect(fetchCalls[0]!.init.body).toBeUndefined();
@@ -443,6 +447,7 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.method).toBe('POST');
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
+      'x-client': 'polo-webui',
       Authorization: 'Bearer access-token',
     });
     expect(fetchCalls[0]!.init.body).toBeUndefined();

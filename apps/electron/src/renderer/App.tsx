@@ -13,6 +13,7 @@ import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
 import type { AppShellContextType, ChatAccessIssue, ChatAccessStatus } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
+import { AdminLoginGate } from '@/components/system/AdminLoginGate'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
 import { SplashScreen } from '@/components/SplashScreen'
@@ -2474,6 +2475,27 @@ export default function App() {
   // ModalProvider + WindowCloseHandler ensures X button works on Windows
   // (without this, the close IPC message has no listener and window stays open)
   if (appState === 'onboarding') {
+    // POO-70: the admin login entry uses the g4 login-split (M01) backed by
+    // the real admin auth RPC; the legacy wizard keeps the non-login setup
+    // steps (billing / credentials / provider setup).
+    if (setupNeeds?.needsAdminLogin) {
+      return (
+        <DismissibleLayerProvider>
+          <ModalProvider>
+            <WindowCloseHandler />
+            <AdminLoginGate
+              onComplete={handleOnboardingComplete}
+              onLoginAccepted={refreshLlmConnections}
+            />
+            <ResetConfirmationDialog
+              open={showResetDialog}
+              onConfirm={executeReset}
+              onCancel={() => setShowResetDialog(false)}
+            />
+          </ModalProvider>
+        </DismissibleLayerProvider>
+      )
+    }
     return (
       <DismissibleLayerProvider>
         <ModalProvider>
