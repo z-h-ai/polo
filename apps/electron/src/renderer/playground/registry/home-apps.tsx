@@ -73,7 +73,7 @@ const CIRCLE_APPS: CircleSourcedApp[] = [
   {
     appId: 'brand-tone',
     name: '品牌语气分析',
-    iconUrl: 'https://example.com/brand.png',
+    // 无 iconUrl —— 走字母头像兜底（原 example.com 占位 URL 为裂图）
     sources: [
       { circleId: 'design', circleName: '晨星设计圈', creator: '阿琳', valid: false },
     ],
