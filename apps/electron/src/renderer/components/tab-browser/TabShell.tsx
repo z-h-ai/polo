@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { AddAppDialog } from './AddAppDialog'
@@ -42,23 +42,27 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function SpaceSwitchBridge({ children }: { children: ReactNode }) {
   const flow = useSpaceSwitchFlow()
   const organization = useOptionalOrganizationContext()!
-  const bridged = {
+  // Memoized: phase changes rebuild the flow api, and a fresh context value
+  // here would re-render every OrganizationContext consumer under the shell.
+  const bridged = useMemo(() => ({
     ...organization,
     onSelectOrganization: (id: string) => {
       const target = organization.organizationSummaries.find(item => item.id === id)
       flow.requestSwitch({ id, name: target?.name ?? id })
     },
-  }
+  }), [organization, flow])
   return <OrganizationProvider value={bridged}>{children}</OrganizationProvider>
 }
 
 function SpaceSwitchIntegration({ children }: { children: ReactNode }) {
   const organization = useOptionalOrganizationContext()
+  const deps = useMemo(
+    () => ({ commitSwitch: (target: { id: string }) => organization?.onSelectOrganization(target.id) }),
+    [organization],
+  )
   if (!organization) return <>{children}</>
   return (
-    <SpaceSwitchFlowProvider
-      deps={{ commitSwitch: target => organization.onSelectOrganization(target.id) }}
-    >
+    <SpaceSwitchFlowProvider deps={deps}>
       <SpaceSwitchBridge>{children}</SpaceSwitchBridge>
       <SpaceSwitchFlow />
     </SpaceSwitchFlowProvider>

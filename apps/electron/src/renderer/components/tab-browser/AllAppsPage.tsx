@@ -19,20 +19,11 @@ import {
  * 展示（D-PC-09）；全部来源失效时卡片标为 blocked，走 inspector 查看原因。
  */
 
-export interface CircleAppSource {
-  circleId: string
-  circleName: string
-  creator: string
-  /** 授权是否仍有效（来源方可撤下）。 */
-  valid: boolean
-}
-
-export interface CircleSourcedApp {
-  appId: string
-  name: string
-  iconUrl?: string
-  sources: CircleAppSource[]
-}
+// 跨 WS 契约类型统一定义在 circles/types（ws-circles-account 所有）；
+// 这里保留旧名别名，供 HomePage/测试继续引用。
+import type { CircleSourcedApp, CircleWorkSource as CircleAppSource } from './circles/types'
+export type { CircleSourcedApp }
+export type { CircleWorkSource as CircleAppSource } from './circles/types'
 
 export interface DedupedCircleApp {
   appId: string
