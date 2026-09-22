@@ -928,6 +928,14 @@ export class AdminClient {
   }): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      // Polo client identity per the admin contract (docs/pol88-admin-entry-migration.md):
+      // "Polo 客户端 | 无 cookie（Bearer） | polo-webui". Without it the admin defaults
+      // the surface to admin-console (staff-only) and consumer logins get 403.
+      // POLO_ADMIN_CLIENT overrides the surface for local manual testing only —
+      // e.g. `enterprise-admin` unlocks /api/me/organizations on admin builds
+      // that gated it behind the enterprise session (POL-88) while the client
+      // repo has not yet migrated to the new org-listing contract.
+      'x-client': process.env.POLO_ADMIN_CLIENT || 'polo-webui',
       ...options.headers,
     };
     if (options.accessToken) {
