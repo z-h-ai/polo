@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { addMonths, renewalBaseDate } from './circlesState'
+import { applyRenewal, membershipState, renewalBaseDate } from './circlesState'
 import { FlowButton } from './flowButtons'
 import type { CircleSummary } from './types'
 
@@ -51,9 +51,13 @@ export function RenewFlow({
   const { t } = useTranslation()
   const today = now ?? new Date().toISOString().slice(0, 10)
   const subscription = circle.subscription
-  const expired = subscription ? renewalBaseDate(subscription, today) === today : false
+  // membershipState keeps the expiry-date boundary consistent with the rest
+  // of the module: expiresAt = today is still an active membership.
+  const expired = membershipState(circle, today) === 'expired'
   const baseDate = subscription ? renewalBaseDate(subscription, today) : today
-  const newExpiry = addMonths(baseDate, months)
+  // The displayed renewal reuses applyRenewal, so the 12-month prepaid cap
+  // shown here matches the state machine exactly.
+  const { expiresAt: newExpiry } = applyRenewal(baseDate, months)
   const price = subscription?.price ?? ''
 
   return (
