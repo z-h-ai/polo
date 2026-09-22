@@ -100,7 +100,7 @@ export function LocalSkillsList({
         <div
           role="status"
           data-testid="skills-restricted-banner"
-          className="mb-2 flex items-start gap-2 rounded-hifi-md border border-hifi-destructive/20 bg-hifi-destructive-soft px-3 py-2 text-hifi-sm text-hifi-destructive"
+          className="mb-2 flex items-start gap-2 rounded-hifi-md border border-hifi-success/20 bg-hifi-success-soft px-3 py-2 text-hifi-sm text-hifi-success"
         >
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
           <span>{t('skillsManager.restricted.banner')}</span>
@@ -213,15 +213,16 @@ export function LocalSkillsList({
                     </SkillActionButton>
                   ) : (
                     <>
+                      <SkillActionButton onClick={() => onManage(skill)}>
+                        {t('skillsManager.action.manage')}
+                      </SkillActionButton>
                       <SkillActionButton
+                        variant="primary"
                         onClick={() => onToggleEnabled(skill, !skill.enabled)}
                       >
                         {t(skill.enabled
                           ? 'skillsManager.action.disable'
                           : 'skillsManager.action.enable')}
-                      </SkillActionButton>
-                      <SkillActionButton variant="primary" onClick={() => onManage(skill)}>
-                        {t('skillsManager.action.manage')}
                       </SkillActionButton>
                     </>
                   )}

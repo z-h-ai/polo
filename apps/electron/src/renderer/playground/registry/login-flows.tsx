@@ -84,7 +84,7 @@ function DemoLoginFrame({ prepare }: { prepare?: (flow: UseAuthFlowReturn) => vo
   )
 }
 
-export function LoginFlowsDemo({ scene }: { scene: string }) {
+function LoginSceneRouter({ scene }: { scene: string }) {
   const { t } = useTranslation()
 
   switch (scene) {
@@ -689,6 +689,11 @@ export function LoginFlowsDemo({ scene }: { scene: string }) {
         </div>
       )
   }
+}
+
+/** Variant switches must remount — the demo adapters mutate flow state once on mount. */
+export function LoginFlowsDemo({ scene }: { scene: string }) {
+  return <LoginSceneRouter key={scene} scene={scene} />
 }
 
 const SCENES = [
