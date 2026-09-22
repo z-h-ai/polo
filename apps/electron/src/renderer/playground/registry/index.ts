@@ -28,12 +28,20 @@ import { loginFlowsComponents } from './login-flows'
 import { spaceSwitchComponents } from './space-switch'
 import { skillsManagerComponents } from './skills-manager'
 import { assistantSessionComponents } from './assistant-session'
+import { circlesComponents } from './circles'
+import { sessionFilesComponents } from './session-files'
+import { creditsFlowsComponents } from './credits-flows'
+import { accountSettingsComponents } from './account-settings'
 
 export * from './types'
 
 export const componentRegistry: ComponentEntry[] = [
   ...mobileWebUIComponents,
   ...spaceSwitchComponents,
+  ...circlesComponents,
+  ...sessionFilesComponents,
+  ...creditsFlowsComponents,
+  ...accountSettingsComponents,
   ...apiKeyInputComponents,
   ...onboardingComponents,
   ...chatComponents,
