@@ -1,7 +1,14 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { ComponentEntry } from './types'
 import { useTranslation } from 'react-i18next'
+import * as Icons from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { StatusPill } from '@/components/hifi'
+import { TabBar } from '@/components/tab-browser/TabBar'
+import {
+  AppRuntimeTasksProvider,
+  type RuntimeTask,
+} from '@/components/tab-browser/AppRuntimeTasksContext'
 import { AppIcon } from '@/components/tab-browser/AppIcon'
 import { OrganizationAppCard } from '@/components/tab-browser/OrganizationAppCard'
 import {
@@ -22,7 +29,16 @@ import {
 } from '@/components/tab-browser/HomeStates'
 import type { CatalogApp } from '@polo-ai/shared/admin'
 import type { LocalAppRuntimeStatus } from '@polo-ai/shared/protocol'
-import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
+import {
+  DemoFixedContainer,
+  MockOrganizationProvider,
+  MockTabShellProvider,
+  makeOrganizationSummary,
+} from '../mocks'
+import {
+  POLO_APP_DEFINITION,
+  POLO_APP_ID,
+} from '../../../shared/tab-browser-types'
 
 // =============================================================================
 // WS-HOME-APPS Playground（POO-70 M03 首页与目录）
@@ -137,6 +153,77 @@ const ORG_DIRECTORY_ENTRIES: OrganizationDirectoryEntry[] = [
   directoryEntry(ORG_STOPPED, STOPPED_STATUS, false),
 ]
 
+// =============================================================================
+// P-M03-HOME-ENT-AFTER-CANCEL / -AFTER-CLOSE：切换取消 / 标签关闭后的
+// 企业首页落态。账目式 mock：顶栏运行 pill 计数与卡片状态一致
+// （AFTER-CANCEL：2 App 已终止可重开、1 助手项停止失败仍在运行；
+//   AFTER-CLOSE：报价整理已关闭，助手项 + 合同审查后台运行）。
+// =============================================================================
+
+const ENTERPRISE_SPACE_SUMMARY = makeOrganizationSummary({
+  id: 'space-morningstar',
+  name: '晨星科技',
+  purpose: '晨星科技 demo purpose',
+  type: 'enterprise_workspace',
+  membership: { role: 'member', status: 'active' },
+  memberCount: 6,
+})
+
+function entRuntimeTask(overrides: Partial<RuntimeTask>): RuntimeTask {
+  return {
+    id: 'task-q2-summary',
+    appId: POLO_APP_ID,
+    tabId: undefined,
+    spaceId: 'space-morningstar',
+    spaceName: '晨星科技',
+    kind: 'assistant',
+    title: 'Q2 报价汇总',
+    appName: 'Polo 助手',
+    startedAt: Date.now(),
+    state: 'running',
+    ...overrides,
+  }
+}
+
+const AFTER_CANCEL_TASKS: RuntimeTask[] = [
+  entRuntimeTask({}),
+]
+
+const AFTER_CLOSE_TASKS: RuntimeTask[] = [
+  entRuntimeTask({}),
+  entRuntimeTask({
+    id: 'task-contract',
+    appId: 'app-contract',
+    kind: 'app',
+    title: '合同后台核对',
+    appName: '合同审查',
+  }),
+]
+
+const ENT_QUOTE = orgApp({})
+const ENT_CONTRACT = orgApp({
+  id: 'contract',
+  name: '合同审查',
+  sortOrder: 1,
+})
+
+const ENT_QUOTE_STOPPED: LocalAppRuntimeStatus = {
+  appId: 'quote',
+  status: 'stopped',
+  currentVersion: '1.4.0',
+}
+const ENT_CONTRACT_STOPPED: LocalAppRuntimeStatus = {
+  appId: 'contract',
+  status: 'stopped',
+  currentVersion: '2.1.0',
+}
+const ENT_CONTRACT_RUNNING: LocalAppRuntimeStatus = {
+  appId: 'contract',
+  status: 'running',
+  currentVersion: '2.1.0',
+  runningVersion: '2.1.0',
+}
+
 function DemoPage({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-background p-6 text-foreground">
@@ -212,6 +299,115 @@ function CirclesEntrySlot() {
 }
 
 const PINNED_APPS = ['minutes', 'growth-playbook', 'brand-tone']
+
+/** 企业首页落态完整壳 demo（P-M03-HOME-ENT-AFTER-*）：顶栏运行 pill、
+ * 运行状态中心与首页卡片账目一致；助手入口照常可打开（D-PC-08）。 */
+function HomeEntAfterDemo({
+  variant,
+}: {
+  variant: 'P-M03-HOME-ENT-AFTER-CANCEL' | 'P-M03-HOME-ENT-AFTER-CLOSE'
+}) {
+  const { t } = useTranslation()
+  const cancel = variant === 'P-M03-HOME-ENT-AFTER-CANCEL'
+  const [tasks, setTasks] = useState<RuntimeTask[]>(
+    () => (cancel ? AFTER_CANCEL_TASKS : AFTER_CLOSE_TASKS),
+  )
+  // 取消切换落态：助手项的停止会失败一次（「停止失败 · 仍在运行」）。
+  const [assistantStopFailedOnce, setAssistantStopFailedOnce] = useState(false)
+
+  const stopTask = useCallback(async (taskId: string) => {
+    await new Promise(resolve => setTimeout(resolve, 200))
+    if (cancel && taskId === 'task-q2-summary' && !assistantStopFailedOnce) {
+      setAssistantStopFailedOnce(true)
+      throw new Error('STOP_FAILED')
+    }
+    setTasks(list => list.filter(task => task.id !== taskId))
+  }, [assistantStopFailedOnce, cancel])
+
+  const contractStatus = cancel ? ENT_CONTRACT_STOPPED : ENT_CONTRACT_RUNNING
+
+  return (
+    <MockOrganizationProvider
+      organizations={[ENTERPRISE_SPACE_SUMMARY]}
+      activeId={ENTERPRISE_SPACE_SUMMARY.id}
+    >
+      <AppRuntimeTasksProvider
+        tasks={tasks}
+        onStopTask={async task => stopTask(task.id)}
+        initialCenterOpen={false}
+      >
+        <MockTabShellProvider tabs={[]}>
+          <DemoFixedContainer height={430}>
+            <TabBar account={{ user: { username: 'wang', displayName: '小王' }, onLogout: () => {} }} />
+            <div
+              className="overflow-y-auto bg-foreground/2 p-6"
+              style={{ height: 390, marginTop: 'var(--tabbar-height)' }}
+            >
+              <section data-testid="home-assistant-entry" className="mb-6">
+                <div className="flex items-center gap-4 rounded-xl border border-foreground/10 bg-background p-4">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+                    <Icons.Sparkles className="size-5" strokeWidth={1.5} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h1 className="text-base font-semibold">
+                      {POLO_APP_DEFINITION.name}
+                    </h1>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t('homeApps.assistant.entrySubtitle')}
+                    </p>
+                    <p className="mt-1 flex items-center gap-2 text-sm text-foreground/80">
+                      <StatusPill tone="info">
+                        {t('homeApps.status.running')}
+                      </StatusPill>
+                      {cancel ? '停止失败 · 仍在运行' : '正在生成回答 · Q2 报价汇总'}
+                    </p>
+                  </div>
+                  <Button type="button" size="sm">
+                    {t('homeApps.assistant.openAction')}
+                  </Button>
+                </div>
+              </section>
+              <section>
+                <h2 className="mb-3 text-base font-semibold">晨星科技的应用</h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <OrganizationAppCard
+                    app={ENT_QUOTE}
+                    status={ENT_QUOTE_STOPPED}
+                    statusLoading={false}
+                    statusUnavailable={false}
+                    compatible
+                    offline={false}
+                    onPrimaryAction={() => {}}
+                    onStop={() => {}}
+                    onUninstall={() => {}}
+                    onViewLogs={() => {}}
+                  />
+                  <OrganizationAppCard
+                    app={ENT_CONTRACT}
+                    status={contractStatus}
+                    statusLoading={false}
+                    statusUnavailable={false}
+                    compatible
+                    offline={false}
+                    onPrimaryAction={() => {}}
+                    onStop={() => {}}
+                    onUninstall={() => {}}
+                    onViewLogs={() => {}}
+                  />
+                </div>
+                <p className="mt-4 text-xs text-muted-foreground">
+                  顶栏「{t('appContainer.runtime.pill', { count: tasks.length })}」与卡片账目一致；
+                  点击运行 pill 打开运行状态中心
+                  {cancel ? '；助手项的停止会失败一次（停止失败 · 仍在运行）' : ''}。
+                </p>
+              </section>
+            </div>
+          </DemoFixedContainer>
+        </MockTabShellProvider>
+      </AppRuntimeTasksProvider>
+    </MockOrganizationProvider>
+  )
+}
 
 interface HomeAppsDemoProps {
   scenario: string
@@ -464,6 +660,9 @@ function HomeAppsDemo({ scenario }: HomeAppsDemoProps) {
           />
         </DemoPage>
       )
+    case 'P-M03-HOME-ENT-AFTER-CANCEL':
+    case 'P-M03-HOME-ENT-AFTER-CLOSE':
+      return <HomeEntAfterDemo variant={scenario as 'P-M03-HOME-ENT-AFTER-CANCEL' | 'P-M03-HOME-ENT-AFTER-CLOSE'} />
     case 'P-M03-HOME-PERSONAL':
     default:
       return (
@@ -511,6 +710,8 @@ const SCENARIOS = [
   'P-M03-HOME-EMPTY-DIR',
   'P-M03-HOME-LOAD-FAIL',
   'P-M03-HOME-OFFLINE',
+  'P-M03-HOME-ENT-AFTER-CANCEL',
+  'P-M03-HOME-ENT-AFTER-CLOSE',
   'P-M03-ALL-APPS',
   'P-M03-ALL-APPS-ZERO',
   'P-M03-ALL-APPS-ENT-EMPTY',
@@ -527,7 +728,7 @@ export const homeAppsComponents: ComponentEntry[] = [
     name: 'Home Apps Surface',
     category: 'Browser',
     description:
-      'POO-70 M03 首页与目录：固定助手卡 + ≤5 常用、我的圈子/全部应用入口、首页四态（零常用/真空目录/加载失败/离线缓存）、目录去重（D-PC-09 多圈子来源并列、全失效 blocked）、inspector、管理常用（上限5）、个人隐藏/恢复',
+      'POO-70 M03 首页与目录：固定助手卡 + ≤5 常用、我的圈子/全部应用入口、首页四态（零常用/真空目录/加载失败/离线缓存）、企业首页落态（取消切换/关闭标签后顶栏与卡片账目一致）、目录去重（D-PC-09 多圈子来源并列、全失效 blocked）、inspector、管理常用（上限5）、个人隐藏/恢复',
     component: HomeAppsDemo,
     layout: 'top',
     previewOverflow: 'visible',
