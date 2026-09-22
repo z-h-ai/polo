@@ -304,7 +304,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
     [hiddenRefs],
   )
 
-  const recordRecent = (
+  const recordRecent = useCallback((
     id: string,
     kind: HomeRecentAppKind,
   ) => {
@@ -319,14 +319,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
       })
       return next
     })
-  }
+  }, [recentContextKey])
 
-  const openPersonalApp = (app: AppDefinition) => {
+  const openPersonalApp = useCallback((app: AppDefinition) => {
     openApp(app)
     recordRecent(app.id, BUILTIN_APP_IDS.has(app.id) ? 'builtin' : 'external')
-  }
+  }, [openApp, recordRecent])
 
-  const openCatalogApp = async (app: CatalogApp) => {
+  const openCatalogApp = useCallback(async (app: CatalogApp) => {
     if (app.availability !== 'available') {
       toast.error(t('homeApps.errors.unavailable'))
       return
@@ -346,7 +346,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         description: homeAppOperationErrorText(t, error, 'open'),
       })
     }
-  }
+  }, [catalog, openApp, recordRecent, t])
 
   const handlePrimaryAction = async (
     app: CatalogApp,
@@ -466,13 +466,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
       && (!release.arch || release.arch === host.arch)
   }, [catalog.state.host])
 
+  const scopeKeyForApp = catalog.scopeKeyForApp
   const scopeKeyFor = useCallback((app: CatalogApp): string | null => {
     try {
-      return catalog.scopeKeyForApp(app)
+      return scopeKeyForApp(app)
     } catch {
       return null
     }
-  }, [catalog.scopeKeyForApp])
+  }, [scopeKeyForApp])
 
   // ----- 常用（固定）应用：解析 + 偏好操作 -----
 
@@ -485,63 +486,60 @@ export function HomePage({ onAddApp }: HomePageProps) {
     return map
   }, [organizationApps, scopeKeyFor])
 
+  // 偏好变更走渲染快照 + 纯 set：localStorage 写与 toast 都在 updater 外
+  //（updater 必须保持纯净，React 可能重复调用）。
   const togglePinnedTarget = (
     target: DirectoryPreferenceTarget,
     pinned: boolean,
   ) => {
-    setPinnedRefs(current => {
-      if (pinned) {
-        const next = current.filter(ref => !(
+    if (pinned) {
+      setPinnedRefs(saveHomePinnedApps(
+        recentContextKey,
+        pinnedRefs.filter(ref => !(
           ref.kind === target.kind && ref.id === target.id
-        ))
-        return saveHomePinnedApps(recentContextKey, next)
-      }
-      if (current.length >= HOME_FREQUENT_APP_LIMIT) {
-        toast.error(t('homeApps.manage.full'))
-        return current
-      }
-      if (current.some(ref => ref.kind === target.kind && ref.id === target.id)) {
-        return current
-      }
-      return saveHomePinnedApps(recentContextKey, [
-        ...current,
-        {
-          id: target.id,
-          kind: target.kind,
-          name: target.name,
-          iconUrl: target.iconUrl,
-        },
-      ])
-    })
+        )),
+      ))
+      return
+    }
+    if (pinnedRefs.length >= HOME_FREQUENT_APP_LIMIT) {
+      toast.error(t('homeApps.manage.full'))
+      return
+    }
+    if (pinnedRefs.some(ref => ref.kind === target.kind && ref.id === target.id)) {
+      return
+    }
+    setPinnedRefs(saveHomePinnedApps(recentContextKey, [
+      ...pinnedRefs,
+      {
+        id: target.id,
+        kind: target.kind,
+        name: target.name,
+        iconUrl: target.iconUrl,
+      },
+    ]))
   }
 
   const removePinnedById = (id: string) => {
-    setPinnedRefs(current => (
-      saveHomePinnedApps(
-        recentContextKey,
-        current.filter(ref => ref.id !== id),
-      )
+    setPinnedRefs(saveHomePinnedApps(
+      recentContextKey,
+      pinnedRefs.filter(ref => ref.id !== id),
     ))
   }
 
   const hideDirectoryTarget = (target: HidePreferenceTarget) => {
-    setHiddenRefs(current => {
-      if (current.some(ref => ref.kind === target.kind && ref.id === target.id)) {
-        return current
-      }
-      return saveHiddenHomeApps(recentContextKey, [
-        ...current,
-        { id: target.id, kind: target.kind, name: target.name },
-      ])
-    })
+    if (hiddenRefs.some(ref => ref.kind === target.kind && ref.id === target.id)) {
+      return
+    }
+    setHiddenRefs(saveHiddenHomeApps(recentContextKey, [
+      ...hiddenRefs,
+      { id: target.id, kind: target.kind, name: target.name },
+    ]))
   }
 
   const restoreHiddenById = (id: string) => {
-    setHiddenRefs(current => (
-      saveHiddenHomeApps(
-        recentContextKey,
-        current.filter(ref => ref.id !== id),
-      )
+    setHiddenRefs(saveHiddenHomeApps(
+      recentContextKey,
+      hiddenRefs.filter(ref => ref.id !== id),
     ))
   }
 
@@ -585,6 +583,8 @@ export function HomePage({ onAddApp }: HomePageProps) {
   }, [
     getStatus,
     installedApps,
+    openCatalogApp,
+    openPersonalApp,
     organizationAppByScopeKey,
     pinnedRefs,
   ])
@@ -745,10 +745,36 @@ export function HomePage({ onAddApp }: HomePageProps) {
     return items
   }, [externalApps, pinnedRefs, scopeKeyFor, visibleOrganizationApps])
 
-  const managePinned = useMemo<ManageHomeAppItem[]>(
-    () => resolvedPinned.map(entry => entry.item),
-    [resolvedPinned],
-  )
+  // 管理页已固定列表来自原始偏好（不是首页可解析子集）：被撤下/卸载的
+  // 固定项也占名额，必须可见、可移除——否则配额会被幽灵项占死。
+  const managePinned = useMemo<ManageHomeAppItem[]>(() => (
+    pinnedRefs.map(ref => {
+      if (ref.kind === 'external') {
+        const app = installedApps.find(candidate => candidate.id === ref.id)
+        return {
+          id: ref.id,
+          name: app?.name ?? ref.name ?? ref.id,
+          iconUrl: app?.iconUrl ?? ref.iconUrl,
+          kind: ref.kind,
+        }
+      }
+      if (ref.kind === 'organization') {
+        const app = organizationAppByScopeKey.get(ref.id)
+        return {
+          id: ref.id,
+          name: app?.name ?? ref.name ?? ref.id,
+          iconUrl: app?.iconUrl ?? ref.iconUrl,
+          kind: ref.kind,
+        }
+      }
+      return {
+        id: ref.id,
+        name: ref.name ?? ref.id,
+        iconUrl: ref.iconUrl,
+        kind: ref.kind,
+      }
+    })
+  ), [installedApps, organizationAppByScopeKey, pinnedRefs])
 
   const hiddenListItems = useMemo<HiddenAppItem[]>(() => (
     hiddenRefs.map(ref => {
@@ -1006,6 +1032,42 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
   const homeSurface = (
     <>
+      {/* 企业空间首页的助手入口（P-M03-HOME-ENT「打开助手」）：除助手外
+          仍只展示企业作品（D-PC-08）。 */}
+      {!isPersonalSpace && (
+        <section
+          aria-labelledby="enterprise-assistant-heading"
+          data-testid="home-assistant-entry"
+        >
+          <div className="flex items-center gap-4 rounded-xl border border-foreground/10 bg-background p-4">
+            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+              <Icons.Sparkles className="size-5" strokeWidth={1.5} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h1
+                id="enterprise-assistant-heading"
+                className="text-base font-semibold"
+              >
+                {POLO_APP_DEFINITION.name}
+              </h1>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t('homeApps.assistant.entrySubtitle')}
+              </p>
+              <p className="mt-1 text-sm text-foreground/80">
+                {t('homeApps.assistant.entryDescription')}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => openPersonalApp(POLO_APP_DEFINITION)}
+            >
+              {t('homeApps.assistant.openAction')}
+            </Button>
+          </div>
+        </section>
+      )}
+
       {isPersonalSpace && (
         <section aria-labelledby="frequent-apps-heading" data-testid="home-frequent-section">
           <div className="mb-4 flex items-end justify-between gap-4">

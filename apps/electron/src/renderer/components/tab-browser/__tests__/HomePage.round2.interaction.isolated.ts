@@ -14,9 +14,11 @@ import {
 } from '../../../../shared/tab-browser-types'
 import {
   KEYS,
+  get as getLocalStorage,
   set as setLocalStorage,
 } from '@/lib/local-storage'
 import { createOrganizationContextKey } from '@/lib/organization-storage'
+import { createHomeRecentContextKey } from '@/lib/home-recent-apps'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -1093,5 +1095,49 @@ describe('HomePage round-two regressions', () => {
     expect(document.querySelectorAll(
       'article[data-testid^="organization-app-"]',
     )).toHaveLength(120)
+  })
+
+  // POO-70 review P1：被撤下/卸载的固定项仍占常用名额，但首页各列表
+  // 都不解析它（幽灵固定项死胡同）。管理页已固定列表必须包含未解析
+  // ref（兜底名显示、可移除），配额才能被看见和释放。
+  it('lists unresolved pinned refs in the manage view with fallback names and removal', async () => {
+    const contextKey = createHomeRecentContextKey(null)
+    installedApps = [...BUILTIN_APP_DEFINITIONS]
+    setLocalStorage(KEYS.homePinnedApps, [
+      { id: 'uninstalled-external', kind: 'external', name: 'Uninstalled External' },
+      { id: 'scope-withdrawn-org', kind: 'organization', name: 'Withdrawn Org App' },
+    ], contextKey)
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    // 首页常用区只渲染可解析项：两个幽灵项不可见。
+    expect(screen.queryByText('Uninstalled External')).toBeNull()
+    expect(screen.queryByText('Withdrawn Org App')).toBeNull()
+    fireEvent.click(screen.getByText('Manage frequent'))
+
+    // 管理页以固定时捕获的兜底名列出幽灵项，配额 2/5 可见。
+    const ghostRow = screen.getByTestId('manage-app-uninstalled-external')
+    expect(within(ghostRow).getByText('Uninstalled External')).toBeTruthy()
+    expect(within(screen.getByTestId('manage-app-scope-withdrawn-org'))
+      .getByText('Withdrawn Org App')).toBeTruthy()
+    expect(screen.getByText('2/5')).toBeTruthy()
+
+    // 移除幽灵项：列表与本设备偏好同步收缩，名额释放。
+    fireEvent.click(within(ghostRow).getByText('Remove from home'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('manage-app-uninstalled-external')).toBeNull()
+    })
+    expect(getLocalStorage(
+      KEYS.homePinnedApps,
+      [] as Array<{ id: string; kind: string; name: string }>,
+      contextKey,
+    )).toEqual([
+      { id: 'scope-withdrawn-org', kind: 'organization', name: 'Withdrawn Org App' },
+    ])
+    expect(screen.getByText('1/5')).toBeTruthy()
   })
 })
