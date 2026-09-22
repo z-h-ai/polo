@@ -152,10 +152,14 @@ function PanelPreview({
 }: PanelPreviewProps) {
   const isEnterprise = spaceKind === 'enterprise'
   const skills: ManagedSkill[] = [
-    builtinSkill(builtinBits ?? '100-0-1'),
+    // The built-in row's on/off rides the scene's third bit unless the
+    // variant pins it explicitly (e.g. BUILTIN-OFF-ENT).
+    builtinSkill(builtinBits ?? sceneBits ?? '100-0-1'),
   ]
-  if (sceneBits) skills.push(distributedSkill(sceneBits, spaceKind))
+  // Restricted rows replace the installed distributed row (P-M06-RESTRICTED-*):
+  // the revoked copy IS the installed copy in the prototype matrix.
   if (restricted) skills.push(restrictedSkill(spaceKind))
+  else if (sceneBits) skills.push(distributedSkill(sceneBits, spaceKind))
 
   return (
     <DemoFixedContainer width={420} height={520}>
@@ -392,32 +396,32 @@ export const skillsManagerComponents: ComponentEntry[] = [
       {
         name: 'P-M06-SKILLS local · enterprise · builtin enabled',
         description: '企业空间本机列表：内置已启用 + 空态卡（查看并安装）',
-        props: { spaceKind: 'enterprise', sceneBits: '' },
+        props: { spaceKind: 'enterprise', sceneBits: '', builtinBits: '100-0-1' },
       },
       {
         name: 'P-M06-SKILLS-PERSONAL local · personal',
         description: '个人空间本机列表（圈子文案空态卡）',
-        props: { spaceKind: 'personal', sceneBits: '' },
+        props: { spaceKind: 'personal', sceneBits: '', builtinBits: '100-0-1' },
       },
       {
         name: 'P-M06-LOCAL-PERSONAL-100-0-0 installed·disabled',
-        description: '安装后默认停用，行操作=启用',
-        props: { spaceKind: 'personal', sceneBits: '100-0-0' },
+        description: '安装后默认停用，行操作=启用（内置第三位=0 已停用）',
+        props: { spaceKind: 'personal', sceneBits: '100-0-0', builtinBits: '100-0-0' },
       },
       {
         name: 'P-M06-LOCAL-PERSONAL-100-1-0 enabled',
-        description: '已启用，行操作=停用',
-        props: { spaceKind: 'personal', sceneBits: '100-1-0' },
+        description: '已启用，行操作=停用（内置第三位=0 已停用）',
+        props: { spaceKind: 'personal', sceneBits: '100-1-0', builtinBits: '100-0-0' },
       },
       {
         name: 'P-M06-LOCAL-ENT-110-0-0 update available·disabled',
-        description: '可更新徽标 + 停用态',
-        props: { spaceKind: 'enterprise', sceneBits: '110-0-0' },
+        description: '可更新徽标 + 停用态（内置第三位=0 已停用）',
+        props: { spaceKind: 'enterprise', sceneBits: '110-0-0', builtinBits: '100-0-0' },
       },
       {
         name: 'P-M06-LOCAL-ENT-110-1-0 updated·enabled',
-        description: '已更新徽标 + 启用态',
-        props: { spaceKind: 'enterprise', sceneBits: '110-1-0' },
+        description: '已更新徽标 + 启用态（内置第三位=0 已停用）',
+        props: { spaceKind: 'enterprise', sceneBits: '110-1-0', builtinBits: '100-0-0' },
       },
       {
         name: 'P-M06-BUILTIN-OFF-ENT builtin disabled',
@@ -426,8 +430,8 @@ export const skillsManagerComponents: ComponentEntry[] = [
       },
       {
         name: 'P-M06-RESTRICTED-PERSONAL source revoked',
-        description: '来源失效：副本保留 + 停用 + 重新验证/查看原因/卸载',
-        props: { spaceKind: 'personal', sceneBits: '100-0-0', restricted: true },
+        description: '来源失效：副本保留 + 停用 + 重新验证/查看原因/卸载（两行结构）',
+        props: { spaceKind: 'personal', restricted: true, builtinBits: '100-0-1' },
       },
       {
         name: 'P-M06-DISCOVER-ENT shared library',

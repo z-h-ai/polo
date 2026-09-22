@@ -36,11 +36,14 @@ export interface LocalSkillsListProps {
  * LocalSkillsList — the right-hand list of the 本机已安装 tab
  * (P-M06-SKILLS(-PERSONAL) and the LOCAL-* state-bit scenes).
  *
- * Row actions follow the R6 lifecycle: built-in skills can only be
- * toggled (never uninstalled), distributed skills enable/disable per user
- * choice, restricted rows keep their copy with re-verify / uninstall
- * paths. Toggling only affects future messages — the footnote states this
- * and no task-control callback exists on this surface.
+ * Row actions follow the R6 lifecycle: built-in skills can only be toggled
+ * (never uninstalled, no version to manage), distributed skills enable/
+ * disable per user choice, restricted rows keep their copy with re-verify /
+ * uninstall paths. When a distributed copy is installed, a success status
+ * bar summarizes its state above the toolbar; when none is installed the
+ * list ends with the 获取 CTA card instead. Toggling only affects future
+ * messages — the footnote states this and no task-control callback exists
+ * on this surface.
  */
 export function LocalSkillsList({
   skills,
@@ -69,6 +72,11 @@ export function LocalSkillsList({
       )
     : skills
   const hasRestricted = skills.some((skill) => skill.restricted)
+  /** The installed distributed copy the status bar summarizes (g4 `.local-success`). */
+  const installedDistributed = skills.find(
+    (skill) => skill.origin !== 'builtin' && !skill.restricted && skill.installedVersion,
+  )
+  const hasDistributed = skills.some((skill) => skill.origin !== 'builtin')
 
   const sourceLine = (skill: ManagedSkill) => {
     if (skill.origin === 'builtin') {
@@ -96,6 +104,21 @@ export function LocalSkillsList({
         >
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
           <span>{t('skillsManager.restricted.banner')}</span>
+        </div>
+      )}
+
+      {installedDistributed && (
+        <div
+          role="status"
+          data-testid="skills-local-status"
+          className="mb-2 rounded-hifi-md bg-hifi-success-soft px-4 py-3 text-hifi-sm text-hifi-success"
+        >
+          {t('skillsManager.local.statusBar.installed')}
+          {' · '}
+          {t(installedDistributed.enabled
+            ? 'skillsManager.local.statusBar.enabled'
+            : 'skillsManager.local.statusBar.disabled')}
+          {` · v${installedDistributed.installedVersion}`}
         </div>
       )}
 
@@ -145,7 +168,7 @@ export function LocalSkillsList({
                   {sourceLine(skill)}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
+              <div className="flex max-w-[180px] shrink-0 flex-col items-end gap-1.5">
                 <div className="flex items-center gap-1.5">
                   {staleSafety && (
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-hifi-fg-10 px-1.5 py-0.5 text-hifi-xs text-hifi-fg-70">
@@ -155,7 +178,9 @@ export function LocalSkillsList({
                   )}
                   <SkillStateBadge state={rowState} version={skill.availableVersion} />
                 </div>
-                <div className="flex items-center gap-1.5">
+                {/* Actions wrap within the row (g4 `.skill-row-actions` max-width)
+                    so restricted rows keep 查看原因/重新验证/卸载 on the skill row. */}
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {skill.restricted ? (
                     <>
                       <SkillActionButton
@@ -177,6 +202,15 @@ export function LocalSkillsList({
                         {t('skillsManager.action.uninstall')}
                       </SkillActionButton>
                     </>
+                  ) : skill.origin === 'builtin' ? (
+                    /* Built-in skills ship with the client — no local version to manage. */
+                    <SkillActionButton
+                      onClick={() => onToggleEnabled(skill, !skill.enabled)}
+                    >
+                      {t(skill.enabled
+                        ? 'skillsManager.action.disable'
+                        : 'skillsManager.action.enable')}
+                    </SkillActionButton>
                   ) : (
                     <>
                       <SkillActionButton
@@ -203,21 +237,21 @@ export function LocalSkillsList({
           </p>
         )}
 
-        {skills.length === 0 && (
-          <div className="px-3 py-6 text-center">
-            <h3 className="text-hifi-lg font-semibold text-hifi-foreground">
+        {/* Bottom CTA card when no distributed copy is installed
+            (g4 `.skill-empty`): 把好用的方法交给助手 + 查看并安装. */}
+        {!hasDistributed && (
+          <div className="m-3 rounded-hifi-lg border border-hifi-border bg-hifi-surface p-6 text-left">
+            <h3 className="m-0 text-hifi-md font-semibold text-hifi-foreground">
               {t('skillsManager.local.empty.title')}
             </h3>
-            <p className="mt-1 text-hifi-sm text-hifi-fg-60">
+            <p className="m-0 mb-4 mt-2 text-hifi-sm leading-relaxed text-hifi-fg-60">
               {t(spaceKind === 'enterprise'
                 ? 'skillsManager.local.empty.desc.ent'
                 : 'skillsManager.local.empty.desc.personal')}
             </p>
-            <div className="mt-3 flex justify-center">
-              <SkillActionButton variant="primary" onClick={onGetSkills}>
-                {t('skillsManager.action.viewInstall')}
-              </SkillActionButton>
-            </div>
+            <SkillActionButton variant="primary" onClick={onGetSkills}>
+              {t('skillsManager.action.viewInstall')}
+            </SkillActionButton>
           </div>
         )}
       </div>
