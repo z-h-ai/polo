@@ -38,6 +38,8 @@ export const KEYS = {
   // Tabs (workspace-scoped)
   tabs: 'tabs', // Used as: tabs-${workspaceId}
   homeRecentApps: 'home-recent-apps',
+  homePinnedApps: 'home-pinned-apps', // Used as: home-pinned-apps:${homeContextKey}
+  homeHiddenApps: 'home-hidden-apps', // Used as: home-hidden-apps:${homeContextKey}
 
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',

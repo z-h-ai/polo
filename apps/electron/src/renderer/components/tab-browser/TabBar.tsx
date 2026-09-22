@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import * as Icons from 'lucide-react'
 import poloAppIcon from '../../../../resources/icon.png'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { isMac, isWebUI } from '@/lib/platform'
@@ -7,7 +9,20 @@ import { useTabShell } from '@/context/TabShellContext'
 import { navigate, routes } from '@/lib/navigate'
 import { AccountMenu, type AccountMenuUser } from '@/components/organization/AccountMenu'
 import { SpaceIndicator } from '@/components/organization/SpaceIndicator'
-import { HOME_TAB_ID, POLO_TAB_ID, type TabInstance } from '../../../shared/tab-browser-types'
+import {
+  HOME_TAB_ID,
+  POLO_TAB_ID,
+  type TabInstance,
+} from '../../../shared/tab-browser-types'
+import {
+  runningTasksForTab,
+  useAppRuntimeTasks,
+  type RuntimeTask,
+} from './AppRuntimeTasksContext'
+import { useAppNotifications } from './AppNotificationsContext'
+import { AppCloseDialog } from './AppCloseDialog'
+import { RuntimeCenter } from './RuntimeCenter'
+import { NotificationCenter } from './NotificationCenter'
 
 function TabIcon({ tab }: { tab: TabInstance }) {
   if (tab.isLoading) {
@@ -49,7 +64,14 @@ interface TabBarProps {
 }
 
 export function TabBar({ account }: TabBarProps) {
+  const { t } = useTranslation()
   const { activeTab, activeTabId, activeWebAppNavigation, openTabs, activateHome, activateTab, closeTab, reorderTabs } = useTabShell()
+  const runtime = useAppRuntimeTasks()
+  const notifications = useAppNotifications()
+  const [closeGuard, setCloseGuard] = useState<{
+    tab: TabInstance
+    tasks: RuntimeTask[]
+  } | null>(null)
   const trafficLightPadding = isMac && !isWebUI ? 86 : 8
   const showNavigation = activeTab.type === 'webapp'
 
@@ -57,6 +79,29 @@ export function TabBar({ account }: TabBarProps) {
     const poloTab = openTabs.find(tab => tab.type === 'polo')
     if (poloTab) activateTab(poloTab.id)
     navigate(routes.view.settings())
+  }
+
+  // D-PC-07 M04 收口：SDK 有未结束后台任务时，关闭先走三选项确认
+  //（取消 / 后台继续 / 停止并关闭）；普通标签仍直接关闭。
+  const requestCloseTab = (tab: TabInstance) => {
+    const blockingTasks = runningTasksForTab(runtime.tasks, tab)
+    if (blockingTasks.length === 0) {
+      closeTab(tab.id)
+      return
+    }
+    setCloseGuard({ tab, tasks: blockingTasks })
+  }
+
+  const stopGuardedTasks = async (tasks: RuntimeTask[]) => {
+    const failed: RuntimeTask[] = []
+    for (const task of tasks) {
+      try {
+        await runtime.stopTask(task.id)
+      } catch {
+        failed.push(task)
+      }
+    }
+    return failed
   }
 
   return (
@@ -109,7 +154,7 @@ export function TabBar({ account }: TabBarProps) {
                 aria-label={`Close ${tab.title}`}
                 onClick={(event) => {
                   event.stopPropagation()
-                  closeTab(tab.id)
+                  requestCloseTab(tab)
                 }}
               >
                 <TabCloseIcon />
@@ -118,6 +163,88 @@ export function TabBar({ account }: TabBarProps) {
           )
         })}
       </div>
+
+      {/* 运行 pill（P-M04-BACKGROUND）：后台任务的持续入口，点击打开运行
+          状态中心。数据由 AppRuntimeTasksProvider 提供（接线点，见台单）。 */}
+      {runtime.runningCount > 0 && (
+        <button
+          type="button"
+          data-testid="runtime-pill"
+          className={cn(
+            'titlebar-no-drag ml-2 flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors',
+            runtime.runtimeCenterOpen
+              ? 'border-accent/40 bg-accent/10 text-accent'
+              : 'border-foreground/10 bg-foreground/5 text-foreground/70 hover:bg-foreground/10 hover:text-foreground',
+          )}
+          onClick={() => {
+            runtime.toggleRuntimeCenter()
+            notifications.closeCenter()
+          }}
+        >
+          <Icons.LoaderCircle
+            className="size-3.5 animate-spin"
+            strokeWidth={1.5}
+            aria-hidden="true"
+          />
+          {t('appContainer.runtime.pill', { count: runtime.runningCount })}
+        </button>
+      )}
+      {runtime.runtimeCenterOpen && (
+        <div
+          className="fixed z-panel"
+          style={{ top: 'calc(var(--tabbar-height) + 6px)', right: 8 }}
+          data-testid="runtime-center-popover"
+        >
+          <RuntimeCenter
+            tasks={runtime.tasks}
+            onStopTask={runtime.stopTask}
+            onOpenTask={runtime.openTask ?? undefined}
+            onClose={runtime.closeRuntimeCenter}
+          />
+        </div>
+      )}
+
+      {/* 通知铃铛（P-M04-NOTIFY-*）：有通知时出现，未读显示圆点；点击打开
+          通知中心弹层。数据由 AppNotificationsProvider 提供（接线点，见台单）。 */}
+      {notifications.notifications.length > 0 && (
+        <button
+          type="button"
+          data-testid="notification-bell"
+          aria-label={t('appContainer.notify.title')}
+          aria-expanded={notifications.centerOpen}
+          className={cn(
+            'titlebar-no-drag relative ml-1 grid size-7 shrink-0 place-items-center rounded-md text-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground',
+            notifications.centerOpen && 'bg-foreground/10 text-foreground',
+          )}
+          onClick={() => {
+            notifications.toggleCenter()
+            runtime.closeRuntimeCenter()
+          }}
+        >
+          <Icons.Bell className="size-4" strokeWidth={1.5} />
+          {notifications.unreadCount > 0 && (
+            <span
+              aria-hidden="true"
+              className="absolute right-1 top-1 size-[6px] rounded-full bg-accent"
+            />
+          )}
+        </button>
+      )}
+      {notifications.centerOpen && (
+        <div
+          className="fixed z-panel"
+          style={{ top: 'calc(var(--tabbar-height) + 6px)', right: 8 }}
+          data-testid="notification-center-popover"
+        >
+          <NotificationCenter
+            notifications={notifications.notifications}
+            onStopAllAndSwitchSpace={
+              notifications.onStopAllAndSwitchSpace ?? undefined
+            }
+            onClose={notifications.closeCenter}
+          />
+        </div>
+      )}
 
       {showNavigation && (
         <div className="titlebar-no-drag ml-2 flex shrink-0 items-center gap-0.5 rounded-md border border-foreground/8 bg-foreground/3 p-0.5">
@@ -169,6 +296,23 @@ export function TabBar({ account }: TabBarProps) {
           />
         )}
       </div>
+
+      {/* 关闭三选项（P-M04-CLOSE-ACTIVE）：有未结束后台任务时拦截 closeTab。 */}
+      <AppCloseDialog
+        open={closeGuard !== null}
+        appName={closeGuard?.tab.title ?? ''}
+        tasks={closeGuard?.tasks ?? []}
+        onCancel={() => setCloseGuard(null)}
+        onBackgroundContinue={() => {
+          if (closeGuard) closeTab(closeGuard.tab.id)
+          setCloseGuard(null)
+        }}
+        onStopTasks={stopGuardedTasks}
+        onTerminateSucceeded={() => {
+          if (closeGuard) closeTab(closeGuard.tab.id)
+          setCloseGuard(null)
+        }}
+      />
     </div>
   )
 }

@@ -14,9 +14,11 @@ import {
 } from '../../../../shared/tab-browser-types'
 import {
   KEYS,
+  get as getLocalStorage,
   set as setLocalStorage,
 } from '@/lib/local-storage'
 import { createOrganizationContextKey } from '@/lib/organization-storage'
+import { createHomeRecentContextKey } from '@/lib/home-recent-apps'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -131,7 +133,9 @@ afterEach(() => {
 })
 
 describe('HomePage round-two regressions', () => {
-  it('shows a labeled built-in launcher for a signed-out fresh or cleared profile', () => {
+  // POO-70 WS-HOME-APPS 迁移：Polo 助手不再走「内置应用」启动器，
+  // 而是固定在常用区首卡（home-assistant-card，D-PC-07）。
+  it('shows the fixed Polo assistant card for a signed-out fresh or cleared profile', () => {
     localStorage.setItem('polo-home-recent-apps', JSON.stringify([{
       id: 'old-app',
       kind: 'external',
@@ -145,13 +149,14 @@ describe('HomePage round-two regressions', () => {
       createElement(HomePage, { onAddApp: () => {} }),
     ))
 
-    expect(screen.getByTestId('builtin-app-launcher')).toBeTruthy()
-    expect(screen.getByText('Built-in apps')).toBeTruthy()
-    expect(screen.getByText('Polo 助手')).toBeTruthy()
+    expect(screen.getByTestId('home-frequent-section')).toBeTruthy()
+    const assistantCard = screen.getByTestId('home-assistant-card')
+    expect(within(assistantCard).getByText('Polo 助手')).toBeTruthy()
+    expect(screen.queryByTestId('builtin-app-launcher')).toBeNull()
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(screen.getByText('Polo 助手'))
+    fireEvent.click(within(assistantCard).getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
@@ -185,12 +190,15 @@ describe('HomePage round-two regressions', () => {
       expect(setHomeRecentApps).toHaveBeenCalledTimes(1)
     })
     expect(localStorage.getItem('craft-home-recent-apps')).toBeNull()
-    const launcher = screen.getByTestId('builtin-app-launcher')
-    expect(within(launcher).getByText('Polo 助手')).toBeTruthy()
+    const assistantCard = screen.getByTestId('home-assistant-card')
+    expect(within(assistantCard).getByText('Polo 助手')).toBeTruthy()
+    // 最近使用区与外部应用区都会列出该快捷方式。
+    expect(screen.getAllByText('External Recent').length)
+      .toBeGreaterThanOrEqual(2)
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(within(launcher).getByText('Polo 助手'))
+    fireEvent.click(within(assistantCard).getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
@@ -1087,5 +1095,49 @@ describe('HomePage round-two regressions', () => {
     expect(document.querySelectorAll(
       'article[data-testid^="organization-app-"]',
     )).toHaveLength(120)
+  })
+
+  // POO-70 review P1：被撤下/卸载的固定项仍占常用名额，但首页各列表
+  // 都不解析它（幽灵固定项死胡同）。管理页已固定列表必须包含未解析
+  // ref（兜底名显示、可移除），配额才能被看见和释放。
+  it('lists unresolved pinned refs in the manage view with fallback names and removal', async () => {
+    const contextKey = createHomeRecentContextKey(null)
+    installedApps = [...BUILTIN_APP_DEFINITIONS]
+    setLocalStorage(KEYS.homePinnedApps, [
+      { id: 'uninstalled-external', kind: 'external', name: 'Uninstalled External' },
+      { id: 'scope-withdrawn-org', kind: 'organization', name: 'Withdrawn Org App' },
+    ], contextKey)
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    // 首页常用区只渲染可解析项：两个幽灵项不可见。
+    expect(screen.queryByText('Uninstalled External')).toBeNull()
+    expect(screen.queryByText('Withdrawn Org App')).toBeNull()
+    fireEvent.click(screen.getByText('Manage frequent'))
+
+    // 管理页以固定时捕获的兜底名列出幽灵项，配额 2/5 可见。
+    const ghostRow = screen.getByTestId('manage-app-uninstalled-external')
+    expect(within(ghostRow).getByText('Uninstalled External')).toBeTruthy()
+    expect(within(screen.getByTestId('manage-app-scope-withdrawn-org'))
+      .getByText('Withdrawn Org App')).toBeTruthy()
+    expect(screen.getByText('2/5')).toBeTruthy()
+
+    // 移除幽灵项：列表与本设备偏好同步收缩，名额释放。
+    fireEvent.click(within(ghostRow).getByText('Remove from home'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('manage-app-uninstalled-external')).toBeNull()
+    })
+    expect(getLocalStorage(
+      KEYS.homePinnedApps,
+      [] as Array<{ id: string; kind: string; name: string }>,
+      contextKey,
+    )).toEqual([
+      { id: 'scope-withdrawn-org', kind: 'organization', name: 'Withdrawn Org App' },
+    ])
+    expect(screen.getByText('1/5')).toBeTruthy()
   })
 })

@@ -32,6 +32,8 @@ import { circlesComponents } from './circles'
 import { sessionFilesComponents } from './session-files'
 import { creditsFlowsComponents } from './credits-flows'
 import { accountSettingsComponents } from './account-settings'
+import { homeAppsComponents } from './home-apps'
+import { appContainerComponents } from './app-container'
 
 export * from './types'
 
@@ -70,6 +72,8 @@ export const componentRegistry: ComponentEntry[] = [
   ...loginFlowsComponents,
   ...skillsManagerComponents,
   ...assistantSessionComponents,
+  ...homeAppsComponents,
+  ...appContainerComponents,
 ]
 
 export function getCategories(): CategoryGroup[] {
