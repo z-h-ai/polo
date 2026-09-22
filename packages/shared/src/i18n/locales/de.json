@@ -1782,7 +1782,7 @@
   "spaceSwitch.targetFailed.title": "{{name}} konnte nicht geladen werden",
   "spaceSwitch.targetLoading.loading": "Wird geladen…",
   "spaceSwitch.targetLoading.preparing": "Wird vorbereitet…",
-  "spaceSwitch.targetLoading.subtitle": "Katalog, Berechtigungen und Assistent werden geladen",
+  "spaceSwitch.targetLoading.subtitle": "Katalog, Berechtigungen, Verbrauchsmessung und Assistent werden geladen",
   "spaceSwitch.targetLoading.summary": "Zielbereich wird vorbereitet {{stopped}} / {{total}}",
   "spaceSwitch.targetLoading.title": "Wechsel zu {{name}} läuft",
   "spreadsheet.colCount_one": "{{count}} Spalte",

@@ -134,12 +134,12 @@ function SwitchDialogShell({ title, subtitle, onClose, children, footer }: Switc
   return (
     <DialogPrimitive.Content
       data-testid="space-switch-dialog"
-      className="fixed left-1/2 top-1/2 z-modal grid w-[min(620px,calc(100%-2.5rem))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-hifi-edge border border-hifi-border bg-hifi-surface shadow-modal-small outline-none duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+      className="fixed left-1/2 top-1/2 z-modal grid w-[min(620px,calc(100%-2.5rem))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-hifi-edge border border-hifi-border bg-hifi-surface shadow-modal-small outline-none duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
     >
       <div className="flex items-start justify-between gap-4 px-5 pb-[14px] pt-5">
         <div>
           <DialogPrimitive.Title asChild>
-            <h2 className="m-0 text-hifi-2xl leading-[1.35] font-semibold tracking-[-0.035em] text-hifi-foreground">
+            <h2 className="m-0 text-hifi-2xl leading-[1.35] font-semibold text-hifi-foreground">
               {title}
             </h2>
           </DialogPrimitive.Title>
@@ -227,7 +227,7 @@ export function SpaceSwitchFlow() {
           </>
         }
       >
-        <StopProgress label={t('spaceSwitch.stopping.summary', { total })} />
+        <StopProgress label={t('spaceSwitch.stopping.summary', { total })} percent={percent ?? undefined} />
         <RunningActivitiesPanel items={activities} />
       </SwitchDialogShell>
     )
@@ -262,8 +262,8 @@ export function SpaceSwitchFlow() {
         onClose={requestClose}
         footer={
           <>
-            <FlowButton onClick={flow.dismiss}>{t('spaceSwitch.stopCancel.backHome')}</FlowButton>
-            <FlowButton variant="primary" onClick={flow.dismiss}>
+            <FlowButton onClick={flow.backHome}>{t('spaceSwitch.stopCancel.backHome')}</FlowButton>
+            <FlowButton variant="primary" onClick={flow.reselectSpace}>
               {t('spaceSwitch.stopCancel.reselect')}
             </FlowButton>
           </>

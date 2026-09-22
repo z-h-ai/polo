@@ -58,6 +58,10 @@ export interface SpaceSwitchFlowDeps {
   loadTargetSpace?: (target: SpaceSwitchTarget) => Promise<TargetLoadOutcome>
   /** Commit the switch — only called after all stops and the load succeeded. */
   commitSwitch?: (target: SpaceSwitchTarget) => void | Promise<void>
+  /** stopCancel 「返回首页」 — navigation side effect, optional. */
+  onBackHome?: () => void
+  /** stopCancel 「重新选择空间」 — navigation side effect, optional. */
+  onReselect?: () => void
 }
 
 export interface SpaceSwitchFlowState {
@@ -65,9 +69,11 @@ export interface SpaceSwitchFlowState {
   target: SpaceSwitchTarget | null
   /** Stop-ledger locked at request time (C-R03: progress reflects this set only). */
   activities: RunningActivityEntry[]
+  /** Run token this state belongs to; late async writes must match it. */
+  runId: number
 }
 
-const IDLE_STATE: SpaceSwitchFlowState = { phase: 'idle', target: null, activities: [] }
+const IDLE_STATE: SpaceSwitchFlowState = { phase: 'idle', target: null, activities: [], runId: 0 }
 
 export interface SpaceSwitchFlowApi extends SpaceSwitchFlowState {
   /** Entry point — AccountMenu 「切换空间」 row (direct switch when idle ledger is empty). */
@@ -84,6 +90,10 @@ export interface SpaceSwitchFlowApi extends SpaceSwitchFlowState {
   stayInCurrentSpace: () => void
   /** Close the flow after stopCancel / accessLost / done. */
   dismiss: () => void
+  /** stopCancel 「返回首页」: dismiss + optional navigation side effect. */
+  backHome: () => void
+  /** stopCancel 「重新选择空间」: dismiss + optional navigation side effect. */
+  reselectSpace: () => void
   /** Active space display name (read-only from the organization context). */
   currentSpaceName: string
   /** Ledger accounting: successfully stopped item count. */
@@ -124,13 +134,19 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
     }
     if (runIdRef.current !== runId) return
     if (outcome.ok) {
+      let committed = true
       try {
         await deps.commitSwitch?.(target)
       } catch {
-        // Commit failures are surfaced by the app shell (organization context);
-        // the transaction itself is complete at this point.
+        committed = false
       }
       if (runIdRef.current !== runId) return
+      if (!committed) {
+        // A failed commit leaves the user in the current space — same surface
+        // as a failed load (retry or stay).
+        setState((previous) => ({ ...previous, phase: 'targetFailed' }))
+        return
+      }
       setState((previous) => ({ ...previous, phase: 'done' }))
     } else if (outcome.cause === 'access-lost') {
       setState((previous) => ({ ...previous, phase: 'accessLost' }))
@@ -155,7 +171,24 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
       } catch {
         stopped = false
       }
-      if (runIdRef.current !== runId) return
+      if (runIdRef.current !== runId) {
+        // Transaction abandoned (cancelled). A late SUCCESS still happened in
+        // the world — record it on this transaction's ledger, but never touch
+        // the phase (C-R04: finished stops are not undone). Guarded on the
+        // state's runId so a newer requestSwitch's ledger is never touched.
+        if (stopped) {
+          setState((previous) => {
+            if (previous.runId !== runId) return previous
+            return {
+              ...previous,
+              activities: previous.activities.map((item) =>
+                item.id === entry.id ? { ...item, status: 'stopped' } : item,
+              ),
+            }
+          })
+        }
+        return
+      }
       ledger[index] = { ...entry, status: stopped ? 'stopped' : 'failed' }
       setState((previous) => ({ ...previous, activities: ledger.slice() }))
     }
@@ -174,7 +207,7 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
     const activities: RunningActivityEntry[] = (deps.getRunningActivities?.() ?? []).map(
       (activity) => ({ ...activity, status: 'running' }),
     )
-    setState({ phase: 'confirm', target, activities })
+    setState({ phase: 'confirm', target, activities, runId })
     // No running items → direct switch (R9): skip the stop transaction entirely.
     if (activities.length === 0) {
       void loadTarget(target, runId)
@@ -218,6 +251,16 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
     void loadTarget(target, runIdRef.current)
   }, [loadTarget])
 
+  const backHome = React.useCallback(() => {
+    reset()
+    deps.onBackHome?.()
+  }, [deps, reset])
+
+  const reselectSpace = React.useCallback(() => {
+    reset()
+    deps.onReselect?.()
+  }, [deps, reset])
+
   // Read-only: the flow never mutates the organization context, it only needs
   // the active space name for the "当前仍在 …" copy.
   const organization = useOptionalOrganizationContext()
@@ -238,6 +281,8 @@ export function useSpaceSwitchFlowMachine(deps: SpaceSwitchFlowDeps = {}): Space
     retryLoad,
     stayInCurrentSpace: reset,
     dismiss: reset,
+    backHome,
+    reselectSpace,
     currentSpaceName,
     stoppedCount,
     remainingRunningCount: total - stoppedCount,

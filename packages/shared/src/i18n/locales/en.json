@@ -1782,7 +1782,7 @@
   "spaceSwitch.targetFailed.title": "Couldn't load {{name}}",
   "spaceSwitch.targetLoading.loading": "Loading…",
   "spaceSwitch.targetLoading.preparing": "Preparing…",
-  "spaceSwitch.targetLoading.subtitle": "Loading catalog, permissions and assistant",
+  "spaceSwitch.targetLoading.subtitle": "Loading catalog, permissions, metering and assistant",
   "spaceSwitch.targetLoading.summary": "Preparing target space {{stopped}} / {{total}}",
   "spaceSwitch.targetLoading.title": "Switching to {{name}}",
   "spreadsheet.colCount_one": "{{count}} col",

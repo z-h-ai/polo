@@ -128,6 +128,36 @@ describe('SpaceSwitchFlow dialog', () => {
     expect(screen.queryByTestId('space-switch-dialog')).toBeNull()
   })
 
+  it('stopCancel buttons invoke the navigation callbacks and close', async () => {
+    const actions: string[] = []
+    renderFlow({
+      getRunningActivities: () => ACTIVITIES,
+      stopActivity: async (activity) => activity.id !== 'act-crm',
+      loadTargetSpace: async () => ({ ok: true }),
+      onBackHome: () => { actions.push('back-home') },
+      onReselect: () => { actions.push('reselect') },
+    })
+    fireEvent.click(screen.getByTestId('demo-trigger'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('停止全部并切换'))
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('space-switch-dialog').textContent).toContain('未能切换空间'),
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByText('取消切换'))
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('space-switch-dialog').textContent).toContain('已取消切换'),
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('返回首页'))
+    })
+    expect(actions).toEqual(['back-home'])
+    expect(screen.queryByTestId('space-switch-dialog')).toBeNull()
+  })
+
   it('access-lost shows the revoked-space explanation (C-R05)', async () => {
     renderFlow({
       getRunningActivities: () => [],
@@ -160,7 +190,7 @@ describe('SpaceSwitchFlow dialog', () => {
     await waitFor(() =>
       expect(screen.getByTestId('space-switch-dialog').textContent).toContain('正在切换到 我的空间'),
     )
-    expect(screen.getByTestId('space-switch-dialog').textContent).toContain('正在加载目录、权限与助手')
+    expect(screen.getByTestId('space-switch-dialog').textContent).toContain('正在加载目录、权限、计量与助手')
 
     await act(async () => { releaseLoad({ ok: true }) })
     await waitFor(() => expect(screen.queryByTestId('space-switch-dialog')).toBeNull())

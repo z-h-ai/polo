@@ -1782,7 +1782,7 @@
   "spaceSwitch.targetFailed.title": "Nem sikerült betölteni: {{name}}",
   "spaceSwitch.targetLoading.loading": "Betöltés…",
   "spaceSwitch.targetLoading.preparing": "Előkészítés…",
-  "spaceSwitch.targetLoading.subtitle": "Katalógus, jogosultságok és asszisztens betöltése",
+  "spaceSwitch.targetLoading.subtitle": "Katalógus, jogosultságok, mérés és asszisztens betöltése",
   "spaceSwitch.targetLoading.summary": "Cél-munkaterület előkészítése {{stopped}} / {{total}}",
   "spaceSwitch.targetLoading.title": "Átváltás: {{name}}",
   "spreadsheet.colCount_one": "{{count}} oszlop",

@@ -144,20 +144,27 @@ describe('useSpaceSwitchFlowMachine · partial failure (C-R04)', () => {
   function renderPartialFailure(overrides: Partial<SpaceSwitchFlowDeps> = {}) {
     const stopCalls: string[] = []
     let failSecond = true
+    const loadCalls: string[] = []
+    const commitCalls: string[] = []
     const deps: SpaceSwitchFlowDeps = {
       getRunningActivities: () => ACTIVITIES,
       stopActivity: async (activity) => {
         stopCalls.push(activity.id)
         return !(failSecond && activity.id === 'act-crm')
       },
-      loadTargetSpace: async () => ({ ok: true }),
-      commitSwitch: () => {},
+      loadTargetSpace: async (target) => {
+        loadCalls.push(target.id)
+        return { ok: true }
+      },
+      commitSwitch: (target) => { commitCalls.push(target.id) },
       ...overrides,
     }
     renderMachine(deps)
     act(() => api.requestSwitch(TARGET))
     return {
       stopCalls,
+      loadCalls,
+      commitCalls,
       allowRetrySuccess: () => { failSecond = false },
     }
   }
@@ -170,6 +177,15 @@ describe('useSpaceSwitchFlowMachine · partial failure (C-R04)', () => {
     expect(api.stoppedCount).toBe(2)
     expect(api.remainingRunningCount).toBe(1)
     expect(stopCalls).toEqual(['act-report', 'act-crm', 'act-weekly'])
+  })
+
+  it('never loads or commits while stopped at stopFailed', async () => {
+    const { loadCalls, commitCalls } = renderPartialFailure()
+    await act(async () => { api.confirmStop() })
+    await waitFor(() => expect(api.phase).toBe('stopFailed'))
+    await settle()
+    expect(loadCalls).toEqual([])
+    expect(commitCalls).toEqual([])
   })
 
   it('retries only the failed item and commits once it stops', async () => {
@@ -227,7 +243,7 @@ describe('useSpaceSwitchFlowMachine · cancel semantics', () => {
     expect(stopCalls).toEqual([])
   })
 
-  it('cancel during stopping abandons the in-flight stop which never writes state', async () => {
+  it('cancel during stopping records a late stop success without advancing', async () => {
     const gate = deferred<boolean>()
     renderMachine({
       getRunningActivities: () => [ACTIVITIES[0], ACTIVITIES[1]],
@@ -245,12 +261,44 @@ describe('useSpaceSwitchFlowMachine · cancel semantics', () => {
     expect(api.activities[0].status).toBe('stopped')
     expect(api.activities[1].status).toBe('running')
 
-    // The abandoned stop resolves later — it must not resurrect or advance anything.
+    // The in-flight stop succeeds after the cancel — C-R04: the finished stop
+    // is recorded on the ledger, but the flow stays in the cancelled state.
     await act(async () => { gate.resolve(true) })
     await settle()
     expect(api.phase).toBe('stopCancel')
-    expect(api.activities[1].status).toBe('running')
-    expect(api.stoppedCount).toBe(1)
+    expect(api.activities[1].status).toBe('stopped')
+    expect(api.stoppedCount).toBe(2)
+  })
+
+  it('a newer requestSwitch supersedes an in-flight run — late writes never touch the new ledger', async () => {
+    const gate = deferred<boolean>()
+    const SECOND_TARGET: SpaceSwitchTarget = { id: 'org-other', name: '其他空间' }
+    renderMachine({
+      getRunningActivities: () => [ACTIVITIES[0]],
+      stopActivity: () => gate.promise,
+      loadTargetSpace: async () => ({ ok: true }),
+      commitSwitch: () => {},
+    })
+    act(() => api.requestSwitch(TARGET))
+    await act(async () => { api.confirmStop() })
+    expect(api.activities[0].status).toBe('stopping')
+
+    // A new request while the first stop is still in flight.
+    act(() => api.requestSwitch(SECOND_TARGET))
+    expect(api.phase).toBe('confirm')
+    expect(api.activities[0].status).toBe('running')
+
+    await act(async () => { gate.resolve(true) })
+    await settle()
+    // The superseded run's late success does not leak into the new transaction.
+    expect(api.phase).toBe('confirm')
+    expect(api.activities[0].status).toBe('running')
+    expect(api.target?.id).toBe('org-other')
+
+    // The new transaction proceeds on its own.
+    await act(async () => { api.confirmStop() })
+    await waitFor(() => expect(api.phase).toBe('done'))
+    expect(api.activities[0].status).toBe('stopped')
   })
 
   it('cancel during target loading falls back to the current space', async () => {
@@ -293,6 +341,19 @@ describe('useSpaceSwitchFlowMachine · target load failures', () => {
     await act(async () => { api.retryLoad() })
     await waitFor(() => expect(api.phase).toBe('done'))
     expect(attempts).toBe(2)
+  })
+
+  it('a throwing commit falls back to targetFailed, not done', async () => {
+    renderMachine({
+      getRunningActivities: () => [],
+      loadTargetSpace: async () => ({ ok: true }),
+      commitSwitch: () => { throw new Error('commit channel down') },
+    })
+    act(() => api.requestSwitch(TARGET))
+    await waitFor(() => expect(api.phase).toBe('targetFailed'))
+    // The targetFailed surface offers retry / stay — retry hits the same path.
+    await act(async () => { api.retryLoad() })
+    await waitFor(() => expect(api.phase).toBe('targetFailed'))
   })
 
   it('stayInCurrentSpace resets to idle', async () => {

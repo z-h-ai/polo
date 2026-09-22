@@ -1782,7 +1782,7 @@
   "spaceSwitch.targetFailed.title": "{{name}} を読み込めませんでした",
   "spaceSwitch.targetLoading.loading": "読み込み中…",
   "spaceSwitch.targetLoading.preparing": "準備中…",
-  "spaceSwitch.targetLoading.subtitle": "カタログ・権限・アシスタントを読み込み中",
+  "spaceSwitch.targetLoading.subtitle": "カタログ・権限・計量・アシスタントを読み込み中",
   "spaceSwitch.targetLoading.summary": "切り替え先を準備中 {{stopped}} / {{total}}",
   "spaceSwitch.targetLoading.title": "{{name}} に切り替え中",
   "spreadsheet.colCount_one": "{{count}}列",

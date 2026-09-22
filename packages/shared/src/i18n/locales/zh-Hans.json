@@ -1782,7 +1782,7 @@
   "spaceSwitch.targetFailed.title": "未能加载 {{name}}",
   "spaceSwitch.targetLoading.loading": "正在加载…",
   "spaceSwitch.targetLoading.preparing": "正在准备…",
-  "spaceSwitch.targetLoading.subtitle": "正在加载目录、权限与助手",
+  "spaceSwitch.targetLoading.subtitle": "正在加载目录、权限、计量与助手",
   "spaceSwitch.targetLoading.summary": "准备目标空间 {{stopped}} / {{total}}",
   "spaceSwitch.targetLoading.title": "正在切换到 {{name}}",
   "spreadsheet.colCount_one": "{{count}} 列",

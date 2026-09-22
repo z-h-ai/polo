@@ -1782,7 +1782,7 @@
   "spaceSwitch.targetFailed.title": "Nie udało się załadować {{name}}",
   "spaceSwitch.targetLoading.loading": "Ładowanie…",
   "spaceSwitch.targetLoading.preparing": "Przygotowywanie…",
-  "spaceSwitch.targetLoading.subtitle": "Ładowanie katalogu, uprawnień i asystenta",
+  "spaceSwitch.targetLoading.subtitle": "Ładowanie katalogu, uprawnień, pomiaru i asystenta",
   "spaceSwitch.targetLoading.summary": "Przygotowywanie przestrzeni docelowej {{stopped}} / {{total}}",
   "spaceSwitch.targetLoading.title": "Przełączanie na {{name}}",
   "spreadsheet.colCount_one": "{{count}} kol",

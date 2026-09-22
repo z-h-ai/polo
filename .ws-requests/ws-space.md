@@ -31,7 +31,13 @@ C-R04 核心规则「取消的是切换，不撤销停止；顶栏运行数=未�
 flow api 暴露 `stoppedCount` / `remainingRunningCount` / `stopProgress`。
 在 stopCancel / targetFailed(留在原空间) 落态后，TabBar 的运行 pill 应读取
 实际运行中心状态（已停止项已在运行中心移除，失败项保留）——需要 ws-home-apps
-确认停止动作与运行中心账目联动；本流程层只保证不复活已停止项。
+确认停止动作与运行中心账目联动；本流程层只保证不复活已停止项
+（取消后迟到的停止成功也会记账为已停止、但不推进流程）。
+
+stopCancel 落态的两个出口已暴露为可选回调（集成时接线）：
+- deps `onBackHome?: () => void` → 「返回首页」（api `backHome()`，dismiss 后触发）
+- deps `onReselect?: () => void` → 「重新选择空间」（api `reselectSpace()`，
+  dismiss 后触发，典型接线：重新打开 AccountMenu 的切换空间子菜单）
 
 ## 3. → 集成：失权通知「查看原因」（R10/C-R05）
 
@@ -54,3 +60,5 @@ flow api 暴露 `stoppedCount` / `remainingRunningCount` / `stopProgress`。
   原型第三个「停止全部并切换」按钮是评审壳跳转注入，非产品控件。
 - i18n：`spaceSwitch.*` 47 键 × 7 locale；计数插值用 `{{total}}`/`{{stopped}}`/`{{failed}}`
   （避开 i18next 的 `count` 复数语义）；场景级按钮文案未复用 `common.retry`（按 ws-shared 决策记录）。
+- `commitSwitch` 抛错不吞：与目标加载失败同面（targetFailed：重试或留在当前空间），
+  不置 done——用户不会被告知已切换而实际停在原空间。

@@ -198,7 +198,13 @@ function SpaceSwitchDemo({ script = 'confirm-ent' }: SpaceSwitchDemoProps) {
     script === 'confirm-personal' || script === 'access-lost'
       ? PERSONAL_SPACE.id
       : ENTERPRISE_SPACE.id
-  const deps = React.useMemo(() => buildDeps(script), [script])
+  const [lastCancelAction, setLastCancelAction] = React.useState('')
+  const deps = React.useMemo<SpaceSwitchFlowDeps>(() => ({
+    ...buildDeps(script),
+    // stopCancel 落态的两个出口接真实行为：返回首页 / 重新选择空间。
+    onBackHome: () => { setLastCancelAction('已返回首页（onBackHome）') },
+    onReselect: () => { setLastCancelAction('已返回空间列表（onReselect）') },
+  }), [script])
 
   return (
     <MockOrganizationProvider
@@ -220,6 +226,11 @@ function SpaceSwitchDemo({ script = 'confirm-ent' }: SpaceSwitchDemoProps) {
               <p className="m-0 text-hifi-sm text-hifi-fg-50">
                 变体脚本注入停止/加载结果；顶栏头像菜单内是「切换空间」列表（见 tab-browser-shell demo）
               </p>
+              {lastCancelAction && (
+                <p className="m-0 text-hifi-sm text-hifi-info" data-testid="demo-cancel-action">
+                  {lastCancelAction}
+                </p>
+              )}
             </div>
             <SpaceSwitchFlow />
           </DemoFixedContainer>
