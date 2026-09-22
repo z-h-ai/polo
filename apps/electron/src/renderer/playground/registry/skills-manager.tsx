@@ -24,6 +24,10 @@ import {
   type ManagedSkill,
   type SkillSpaceKind,
 } from '@/components/app-shell/skills/types'
+import type { LoadedSkill } from '../../../shared/types'
+import { SourcesListPanel } from '@/components/app-shell/SourcesListPanel'
+import { PlaygroundAppShellProvider } from '../PlaygroundAppShellProvider'
+import { ensureMockElectronAPI, mockSources } from '../mock-utils'
 import { DemoFixedContainer } from '../mocks/DemoFixedContainer'
 import { MockOrganizationProvider, makeOrganizationSummary } from '../mocks/MockOrganization'
 
@@ -31,7 +35,11 @@ import { MockOrganizationProvider, makeOrganizationSummary } from '../mocks/Mock
 // Scene-matrix sample data
 // ============================================================================
 
-/** Builtin 资料研究 row; `suffix` drives the state bits (e.g. '100-0-1'). */
+/**
+ * Builtin 资料研究 row. In the prototype state bits (`version|enabled|builtin`)
+ * the built-in row's own on/off state rides the THIRD bit — the second bit
+ * belongs to the distributed skill row — so `enabled` maps to `bits.builtin`.
+ */
 function builtinSkill(suffix: string): ManagedSkill {
   const bits = decodeSkillSceneBits(suffix)
   return {
@@ -40,8 +48,19 @@ function builtinSkill(suffix: string): ManagedSkill {
     description: '查找资料、梳理重点并保留来源。',
     origin: 'builtin',
     originLabel: 'builtin',
-    enabled: bits.enabled,
+    enabled: bits.builtin,
     restricted: false,
+  }
+}
+
+/** Minimal workspace-backed LoadedSkill so demo rows carry a real uninstall channel. */
+function demoLoadedSkill(slug: string, name: string, description: string): LoadedSkill {
+  return {
+    slug,
+    metadata: { name, description },
+    content: '',
+    path: `/mock/workspaces/skills/${slug}`,
+    source: 'workspace',
   }
 }
 
@@ -52,12 +71,15 @@ function distributedSkill(
   overrides: Partial<ManagedSkill> = {},
 ): ManagedSkill {
   const bits = decodeSkillSceneBits(suffix)
+  const slug = space === 'personal' ? 'growth-cases' : 'sales-weekly'
+  const name = space === 'personal' ? '增长案例检索' : '销售周报'
+  const description = space === 'personal'
+    ? '根据提问检索增长方法，整理可参考的案例。'
+    : '按团队格式汇总本周进展、风险和下周计划。'
   return {
-    slug: space === 'personal' ? 'growth-cases' : 'sales-weekly',
-    name: space === 'personal' ? '增长案例检索' : '销售周报',
-    description: space === 'personal'
-      ? '根据提问检索增长方法，整理可参考的案例。'
-      : '按团队格式汇总本周进展、风险和下周计划。',
+    slug,
+    name,
+    description,
     origin: space === 'personal' ? 'circle' : 'org',
     originLabel: suffix,
     provider: space === 'personal'
@@ -70,6 +92,8 @@ function distributedSkill(
     enabled: bits.enabled,
     restricted: bits.version === 'revoked',
     restrictedReason: bits.version === 'revoked' ? 'revoked' : undefined,
+    // Workspace backing keeps the uninstall path executable in demos.
+    skill: demoLoadedSkill(slug, name, description),
     ...overrides,
   }
 }
@@ -253,6 +277,45 @@ function DeniedDialogPreview() {
   )
 }
 
+/**
+ * P-M06-TOOLS(-PERSONAL): the 资料来源 · 自动任务 surface. The
+ * implementation is the existing SourcesListPanel (frozen surface — no new
+ * product code); this demo only frames it with the assistant-sidebar foot
+ * context for both spaces.
+ */
+function ToolsSurfacePreview({ spaceKind = 'enterprise' }: { spaceKind?: SkillSpaceKind }) {
+  const isEnterprise = spaceKind === 'enterprise'
+  React.useEffect(() => {
+    ensureMockElectronAPI()
+  }, [])
+  return (
+    <DemoFixedContainer width={420} height={520}>
+      <PlaygroundAppShellProvider>
+        <div className="flex h-full flex-col bg-hifi-background">
+          <div className="flex shrink-0 items-center justify-between border-b border-hifi-border px-3 py-2">
+            <div className="min-w-0">
+              <h1 className="truncate text-hifi-md font-semibold text-hifi-foreground">
+                {isEnterprise ? '数据源 / 自动化 / Browser' : '数据源 / 自动化'}
+              </h1>
+              <p className="mt-0.5 truncate text-hifi-xs text-hifi-fg-50">
+                {isEnterprise ? '晨星科技' : '我的空间'} · 使用当前空间内容
+              </p>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 p-3">
+            <SourcesListPanel
+              sources={mockSources}
+              onDeleteSource={() => {}}
+              onSourceClick={() => {}}
+              className="h-full"
+            />
+          </div>
+        </div>
+      </PlaygroundAppShellProvider>
+    </DemoFixedContainer>
+  )
+}
+
 // ============================================================================
 // Registry entries
 // ============================================================================
@@ -308,12 +371,12 @@ export const skillsManagerComponents: ComponentEntry[] = [
       },
       {
         name: 'builtinBits',
-        description: 'Built-in 资料研究 state bits',
+        description: 'Built-in 资料研究 state bits (third bit = built-in on/off)',
         control: {
           type: 'select',
           options: [
-            { label: 'Enabled', value: '100-0-1' },
-            { label: 'Disabled', value: '100-1-1' },
+            { label: 'Enabled (third bit 1)', value: '100-0-1' },
+            { label: 'Disabled (third bit 0)', value: '100-0-0' },
           ],
         },
         defaultValue: '100-0-1',
@@ -354,8 +417,8 @@ export const skillsManagerComponents: ComponentEntry[] = [
       },
       {
         name: 'P-M06-BUILTIN-OFF-ENT builtin disabled',
-        description: '内置已停用，仅可重新启用，无卸载入口',
-        props: { spaceKind: 'enterprise', sceneBits: '', builtinBits: '100-1-1' },
+        description: '内置已停用（第三位=0），仅可重新启用，无卸载入口',
+        props: { spaceKind: 'enterprise', sceneBits: '', builtinBits: '100-0-0' },
       },
       {
         name: 'P-M06-RESTRICTED-PERSONAL source revoked',
@@ -536,6 +599,42 @@ export const skillsManagerComponents: ComponentEntry[] = [
         name: 'P-M06-SKILL-DENIED',
         description: '无法开启：授权不足 + 先用已开启的 / 查看企业共享',
         props: {},
+      },
+    ],
+  },
+
+  {
+    id: 'skills-tools-surface',
+    name: 'Tools Surface (Sources / Automations)',
+    category: 'Entity Lists',
+    description:
+      '资料来源 · 自动任务表面（复用既有 SourcesListPanel 实现呈现，不新建产品代码）— P-M06-TOOLS / P-M06-TOOLS-PERSONAL',
+    component: ToolsSurfacePreview,
+    layout: 'centered',
+    props: [
+      {
+        name: 'spaceKind',
+        description: 'Space context',
+        control: {
+          type: 'select',
+          options: [
+            { label: 'Enterprise', value: 'enterprise' },
+            { label: 'Personal', value: 'personal' },
+          ],
+        },
+        defaultValue: 'enterprise',
+      },
+    ],
+    variants: [
+      {
+        name: 'P-M06-TOOLS',
+        description: '企业空间：数据源 / 自动化 / Browser，使用当前空间内容',
+        props: { spaceKind: 'enterprise' },
+      },
+      {
+        name: 'P-M06-TOOLS-PERSONAL',
+        description: '个人空间：数据源 / 自动化，使用当前空间内容',
+        props: { spaceKind: 'personal' },
       },
     ],
   },
