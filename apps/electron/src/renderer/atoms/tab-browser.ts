@@ -78,7 +78,7 @@ export const openAppTabAtom = atom(
 export const closeTabAtom = atom(
   null,
   (get, set, tabId: string) => {
-    if (tabId === HOME_TAB_ID || tabId === POLO_TAB_ID) {
+    if (tabId === HOME_TAB_ID) {
       set(activeTabIdAtom, HOME_TAB_ID)
       return
     }
@@ -102,7 +102,13 @@ export const activateTabAtom = atom(null, (_get, set, tabId: string) => {
 })
 
 export const reorderTabsAtom = atom(null, (_get, set, tabs: TabInstance[]) => {
-  const polo = tabs.find((tab) => tab.id === POLO_TAB_ID) ?? POLO_TAB
+  // Prototype R6+: the assistant tab is a normal tab. Keep it first while it
+  // is open, but never resurrect it after the user closed it.
+  const polo = tabs.find((tab) => tab.id === POLO_TAB_ID)
+  if (!polo) {
+    set(openTabsAtom, tabs)
+    return
+  }
   const webTabs = tabs.filter((tab) => tab.id !== POLO_TAB_ID)
   set(openTabsAtom, [polo, ...webTabs])
 })

@@ -67,8 +67,12 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
     return appIds.has(tab.appId)
   })
 
-  const hasPolo = restored.some((tab) => tab.id === POLO_TAB_ID || tab.type === 'polo')
-  return hasPolo ? restored : [POLO_TAB, ...restored]
+  // Prototype R6+: the assistant tab is NOT pinned — it appears only after
+  // the user opens the assistant from the home card and closes like any app
+  // tab. A persisted lone polo tab is stale pinning from older builds.
+  const hasWebApp = restored.some((tab) => tab.type === 'webapp')
+  if (!hasWebApp) return []
+  return restored
 }
 
 export function TabShellProvider({ workspaceId, children }: TabShellProviderProps) {
@@ -95,7 +99,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
       if (cancelled) return
 
       const apps = normalizeInstalledApps(persistedApps)
-      const rawTabs = getLocalStorage<TabInstance[]>(KEYS.tabs, [POLO_TAB], workspaceSuffix)
+      const rawTabs = getLocalStorage<TabInstance[]>(KEYS.tabs, [], workspaceSuffix)
       const tabs = restoreTabs(rawTabs, apps)
       setInstalledApps(apps)
       setOpenTabs(tabs)
