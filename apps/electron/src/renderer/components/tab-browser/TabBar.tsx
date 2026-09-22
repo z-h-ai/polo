@@ -19,8 +19,10 @@ import {
   useAppRuntimeTasks,
   type RuntimeTask,
 } from './AppRuntimeTasksContext'
+import { useAppNotifications } from './AppNotificationsContext'
 import { AppCloseDialog } from './AppCloseDialog'
 import { RuntimeCenter } from './RuntimeCenter'
+import { NotificationCenter } from './NotificationCenter'
 
 function TabIcon({ tab }: { tab: TabInstance }) {
   if (tab.isLoading) {
@@ -65,6 +67,7 @@ export function TabBar({ account }: TabBarProps) {
   const { t } = useTranslation()
   const { activeTab, activeTabId, activeWebAppNavigation, openTabs, activateHome, activateTab, closeTab, reorderTabs } = useTabShell()
   const runtime = useAppRuntimeTasks()
+  const notifications = useAppNotifications()
   const [closeGuard, setCloseGuard] = useState<{
     tab: TabInstance
     tasks: RuntimeTask[]
@@ -173,7 +176,10 @@ export function TabBar({ account }: TabBarProps) {
               ? 'border-accent/40 bg-accent/10 text-accent'
               : 'border-foreground/10 bg-foreground/5 text-foreground/70 hover:bg-foreground/10 hover:text-foreground',
           )}
-          onClick={runtime.toggleRuntimeCenter}
+          onClick={() => {
+            runtime.toggleRuntimeCenter()
+            notifications.closeCenter()
+          }}
         >
           <Icons.LoaderCircle
             className="size-3.5 animate-spin"
@@ -194,6 +200,48 @@ export function TabBar({ account }: TabBarProps) {
             onStopTask={runtime.stopTask}
             onOpenTask={runtime.openTask ?? undefined}
             onClose={runtime.closeRuntimeCenter}
+          />
+        </div>
+      )}
+
+      {/* 通知铃铛（P-M04-NOTIFY-*）：有通知时出现，未读显示圆点；点击打开
+          通知中心弹层。数据由 AppNotificationsProvider 提供（接线点，见台单）。 */}
+      {notifications.notifications.length > 0 && (
+        <button
+          type="button"
+          data-testid="notification-bell"
+          aria-label={t('appContainer.notify.title')}
+          aria-expanded={notifications.centerOpen}
+          className={cn(
+            'titlebar-no-drag relative ml-1 grid size-7 shrink-0 place-items-center rounded-md text-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground',
+            notifications.centerOpen && 'bg-foreground/10 text-foreground',
+          )}
+          onClick={() => {
+            notifications.toggleCenter()
+            runtime.closeRuntimeCenter()
+          }}
+        >
+          <Icons.Bell className="size-4" strokeWidth={1.5} />
+          {notifications.unreadCount > 0 && (
+            <span
+              aria-hidden="true"
+              className="absolute right-1 top-1 size-[6px] rounded-full bg-accent"
+            />
+          )}
+        </button>
+      )}
+      {notifications.centerOpen && (
+        <div
+          className="fixed z-panel"
+          style={{ top: 'calc(var(--tabbar-height) + 6px)', right: 8 }}
+          data-testid="notification-center-popover"
+        >
+          <NotificationCenter
+            notifications={notifications.notifications}
+            onStopAllAndSwitchSpace={
+              notifications.onStopAllAndSwitchSpace ?? undefined
+            }
+            onClose={notifications.closeCenter}
           />
         </div>
       )}

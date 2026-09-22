@@ -12,6 +12,11 @@ import {
   type RuntimeTask,
 } from '@/components/tab-browser/AppRuntimeTasksContext'
 import {
+  AppNotificationsProvider,
+  type AppNotification,
+} from '@/components/tab-browser/AppNotificationsContext'
+import { useTranslation } from 'react-i18next'
+import {
   DemoFixedContainer,
   MockOrganizationProvider,
   MockTabShellProvider,
@@ -283,6 +288,102 @@ function TabBarRuntimeDemo({ personal }: { personal: boolean }) {
   )
 }
 
+/** 通知中心完整壳 demo（P-M04-NOTIFY-ENT / -PERSONAL）：铃铛入口 + 弹层。 */
+function NotificationCenterTabDemo({ personal }: { personal: boolean }) {
+  const { t } = useTranslation()
+  const [tasks, setTasks] = useState<RuntimeTask[]>(
+    personal ? PERSONAL_RUNTIME_TASKS : RUNTIME_TASKS,
+  )
+  const stopTask = useCallback(async (taskId: string) => {
+    await new Promise(resolve => setTimeout(resolve, 200))
+    setTasks(list => list.filter(task => task.id !== taskId))
+  }, [])
+
+  const notifications: AppNotification[] = personal
+    ? [
+        {
+          id: 'version-brand',
+          kind: 'version',
+          title: '晨星设计圈有新版本',
+          description: '品牌语气分析 v1.4.0 · 下次使用生效',
+          unread: true,
+          onOpen: () => {},
+        },
+        {
+          id: 'report-done',
+          kind: 'background',
+          title: '数据报表生成器已在后台完成',
+          timeLabel: t('appContainer.runtime.pill', { count: 1 }),
+          unread: true,
+          onOpen: () => {},
+        },
+      ]
+    : [
+        {
+          id: 'access-north',
+          kind: 'access',
+          title: '北方贸易已无法访问',
+          description: '成员资格已被移除 · 查看原因',
+          unread: true,
+          onOpen: () => {},
+        },
+        {
+          id: 'report-done',
+          kind: 'background',
+          title: '数据报表生成器已在后台完成',
+          timeLabel: `今天 10:32 · ${t('appContainer.runtime.pill', { count: 3 })}`,
+          unread: true,
+          onOpen: () => {},
+        },
+      ]
+
+  const organizations = personal
+    ? [PERSONAL_SPACE, ENTERPRISE_SPACE]
+    : [ENTERPRISE_SPACE, PERSONAL_SPACE]
+
+  // 企业变体提供弹层尾部「全部停止并切换空间」（NOTIFY-ENT transition）：
+  // 这里以「清空运行任务」演示，产品内由空间切换流程接线。
+  const stopAllAndSwitch = personal ? undefined : () => {
+    setTasks([])
+  }
+
+  return (
+    <MockOrganizationProvider
+      organizations={organizations}
+      activeId={personal ? PERSONAL_SPACE.id : ENTERPRISE_SPACE.id}
+    >
+      <AppNotificationsProvider
+        notifications={notifications}
+        onStopAllAndSwitchSpace={stopAllAndSwitch}
+        initialCenterOpen
+      >
+        <AppRuntimeTasksProvider
+          tasks={tasks}
+          onStopTask={async task => stopTask(task.id)}
+          initialCenterOpen={false}
+        >
+          <MockTabShellProvider tabs={DEMO_TABS} activeTabId={QUOTE_TAB.id}>
+            <DemoFixedContainer height={300}>
+              <TabBar account={{ user: { username: 'wang', displayName: '小王' }, onLogout: () => {} }} />
+              <div
+                className="flex flex-col items-center justify-center gap-2 bg-foreground/2 text-xs text-muted-foreground"
+                style={{ height: 240, marginTop: 'var(--tabbar-height)' }}
+              >
+                <Icons.LayoutGrid className="size-5" strokeWidth={1.5} />
+                <span>（{personal ? '我的空间' : '晨星科技'}首页占位）</span>
+                <span>
+                  点击铃铛开合通知中心；未读项带圆点；失权通知提供「查看原因」；
+                  {personal ? '新版本通知进圈子详情' : '尾部可「全部停止并切换空间」'}
+                </span>
+              </div>
+            </DemoFixedContainer>
+          </MockTabShellProvider>
+        </AppRuntimeTasksProvider>
+      </AppNotificationsProvider>
+    </MockOrganizationProvider>
+  )
+}
+
 function TermFailedToastDemo() {
   const [visible, setVisible] = useState(true)
   return (
@@ -329,6 +430,10 @@ function AppContainerDemo({ scenario }: AppContainerDemoProps) {
       return <RuntimeCenterDemo tasks={PERSONAL_RUNTIME_TASKS} />
     case 'P-M04-BACKGROUND-PERSONAL':
       return <TabBarRuntimeDemo personal />
+    case 'P-M04-NOTIFY-ENT':
+      return <NotificationCenterTabDemo personal={false} />
+    case 'P-M04-NOTIFY-PERSONAL':
+      return <NotificationCenterTabDemo personal />
     case 'P-M04-CLOSE-ACTIVE':
     default:
       return <CloseDialogDemo injectFailure={false} />
@@ -345,6 +450,8 @@ const SCENARIOS = [
   'P-M04-RUNTIME',
   'P-M04-RUNTIME-PERSONAL',
   'P-M04-BACKGROUND-PERSONAL',
+  'P-M04-NOTIFY-ENT',
+  'P-M04-NOTIFY-PERSONAL',
 ]
 
 export const appContainerComponents: ComponentEntry[] = [
@@ -353,7 +460,7 @@ export const appContainerComponents: ComponentEntry[] = [
     name: 'App Container Runtime',
     category: 'Browser',
     description:
-      'POO-70 M04 应用容器：关闭三选项（取消/后台继续/停止并关闭，D-PC-07）、终止失败标签保留（C-R03）、准备/权限确认/加载失败（C-R02）、OS 权限被拒走系统设置（C-R06）、运行状态中心（按空间列 App 任务 + 助手生成、逐项停止，C-R03）、顶栏运行 pill + 关闭拦截完整壳',
+      'POO-70 M04 应用容器：关闭三选项（取消/后台继续/停止并关闭，D-PC-07）、终止失败标签保留（C-R03）、准备/权限确认/加载失败（C-R02）、OS 权限被拒走系统设置（C-R06）、运行状态中心（按空间列 App 任务 + 助手生成、逐项停止，C-R03）、顶栏运行 pill + 关闭拦截完整壳、通知中心（铃铛 + 失权「查看原因」+ 后台完成进运行中心）',
     component: AppContainerDemo,
     layout: 'top',
     previewOverflow: 'visible',

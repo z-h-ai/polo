@@ -39,3 +39,13 @@
 ## 7. 终止失败语义（主 agent，接入 #1 时对齐）
 
 - `AppCloseDialog.onStopTasks(tasks) => Promise<RuntimeTask[]>`：resolve 值为停止失败的子集；空数组 = 全部成功 → 关闭标签。取消/返回不复活已停止任务（C-R03）。
+
+## 8. 通知中心数据源（主 agent，P-M04-NOTIFY-*）
+
+- 组件：`components/tab-browser/AppNotificationsContext.tsx` 的 `AppNotificationsProvider` + `components/tab-browser/NotificationCenter.tsx`。
+- 现状：Provider 未在产品内挂载（默认 context 为空），TabBar 不出现铃铛，行为与接入前完全一致；demo（`registry/app-container.tsx` P-M04-NOTIFY-ENT/-PERSONAL）与组件单测已覆盖。
+- 诉求：把真实通知事件接入 Provider：
+  - `notifications: AppNotification[]`（受控；新通知在前；`{ id, kind: access|background|version|assistant|app, title, description?, timeLabel?, unread?, onOpen }`）
+  - `onOpen` 为整行点击的主操作：失权「查看原因」→ inspector/失权说明；后台完成 → 打开运行中心；圈子新版本 → 圈子详情（ws-circles 路由）。
+  - `onStopAllAndSwitchSpace`（可选）：企业空间弹层尾部「全部停止并切换空间」；应先走安全切换确认（与 #1 的停止通道共用），再进入空间切换流程。
+  - 建议挂载点：与 #1 同层（TabShell 根）；已读状态（打开弹层/点击行清圆点）由调用方在 `notifications` 中维护。
