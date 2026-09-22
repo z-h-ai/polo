@@ -110,14 +110,23 @@ function AccountHandoffDemo({ variant = 'billing' }: AccountHandoffDemoProps) {
 function AdminReturnDemo() {
   const { t } = useTranslation()
   React.useEffect(() => {
-    toast.success(t('accountSettings.adminReturnToast'))
+    // 原型 P-M10-ADMIN-RETURN：toast 固定右下角、深色底浅字（.toast 覆写仅限本 demo）
+    toast.success(t('accountSettings.adminReturnToast'), {
+      position: 'bottom-right',
+      style: {
+        '--normal-bg': 'var(--foreground)',
+        '--normal-text': 'var(--background)',
+        '--normal-border': 'transparent',
+        borderLeft: '3px solid var(--accent)',
+      } as React.CSSProperties,
+    })
   }, [t])
   return (
     <div className="w-[560px] rounded-lg border border-border bg-background p-6">
       <p className="m-0 text-[15px] font-semibold text-foreground">下午好，小王</p>
       <p className="m-0 mt-1 text-[13px] text-muted-foreground">继续 晨星科技 的工作</p>
       <p className="m-0 mt-4 text-[11px] text-muted-foreground">
-        从企业管理后台返回后，右上角出现「已重新核对管理资格」toast
+        从企业管理后台返回后，右下角出现「已重新核对管理资格」toast
       </p>
     </div>
   )
