@@ -4,6 +4,15 @@ import { TabContent } from './TabContent'
 import { AddAppDialog } from './AddAppDialog'
 import { useTabShell } from '@/context/TabShellContext'
 import type { AccountMenuUser } from '@/components/organization/AccountMenu'
+import { SpaceSwitchFlow } from '@/components/organization/SpaceSwitchFlow'
+import {
+  SpaceSwitchFlowProvider,
+  useSpaceSwitchFlow,
+} from '@/components/organization/useSpaceSwitchFlow'
+import {
+  OrganizationProvider,
+  useOptionalOrganizationContext,
+} from '@/context/OrganizationContext'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
@@ -19,6 +28,41 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true
   const tag = target.tagName.toLowerCase()
   return tag === 'input' || tag === 'textarea' || tag === 'select'
+}
+
+/**
+ * Space-switch integration (prototype R9/D-PC-10): the AccountMenu space rows
+ * call `onSelectOrganization`; this bridge routes that selection through the
+ * switch transaction so the confirm/stop/load dialog machinery is live.
+ *
+ * There is no renderer-visible running-activity source yet (see
+ * `.ws-requests/WS-HOME-APPS.md` #1), so `getRunningActivities` stays empty and
+ * requestSwitch degrades to a direct switch — the pre-integration behavior.
+ */
+function SpaceSwitchBridge({ children }: { children: ReactNode }) {
+  const flow = useSpaceSwitchFlow()
+  const organization = useOptionalOrganizationContext()!
+  const bridged = {
+    ...organization,
+    onSelectOrganization: (id: string) => {
+      const target = organization.organizationSummaries.find(item => item.id === id)
+      flow.requestSwitch({ id, name: target?.name ?? id })
+    },
+  }
+  return <OrganizationProvider value={bridged}>{children}</OrganizationProvider>
+}
+
+function SpaceSwitchIntegration({ children }: { children: ReactNode }) {
+  const organization = useOptionalOrganizationContext()
+  if (!organization) return <>{children}</>
+  return (
+    <SpaceSwitchFlowProvider
+      deps={{ commitSwitch: target => organization.onSelectOrganization(target.id) }}
+    >
+      <SpaceSwitchBridge>{children}</SpaceSwitchBridge>
+      <SpaceSwitchFlow />
+    </SpaceSwitchFlowProvider>
+  )
 }
 
 export function TabShell({ renderPolo, account }: TabShellProps) {
@@ -89,10 +133,12 @@ export function TabShell({ renderPolo, account }: TabShellProps) {
   }, [activateHome, activateTab, activeTabId, closeTab, openTabs])
 
   return (
-    <div className="h-full min-h-0 bg-background">
-      <TabBar account={account} />
-      <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
-      <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
-    </div>
+    <SpaceSwitchIntegration>
+      <div className="h-full min-h-0 bg-background">
+        <TabBar account={account} />
+        <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
+        <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
+      </div>
+    </SpaceSwitchIntegration>
   )
 }
