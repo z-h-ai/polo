@@ -65,41 +65,40 @@ function prepareExpired(flow: UseAuthFlowReturn) {
   flow.markSessionExpired()
 }
 
+/**
+ * Login-split frame: the card needs ~920×690 (split 872×570 + screen
+ * padding) — the preview box defaults to 800×600, so the content layer is
+ * rendered at 920×690 and scaled to 0.85 (≈782×586): the card stays fully
+ * visible with breathing room on all sides.
+ */
+function DemoLoginFrame({ prepare }: { prepare?: (flow: UseAuthFlowReturn) => void }) {
+  return (
+    <DemoFixedContainer
+      width={800}
+      height={600}
+      scale={0.85}
+      contentClassName="h-[690px] w-[920px]"
+    >
+      <DemoLoginFlow prepare={prepare} />
+    </DemoFixedContainer>
+  )
+}
+
 export function LoginFlowsDemo({ scene }: { scene: string }) {
   const { t } = useTranslation()
 
   switch (scene) {
     // ---- M01 · login split -------------------------------------------------
     case 'P-M01-LOGIN-PASSWORD':
-      return (
-        <DemoFixedContainer width={1040} height={680}>
-          <DemoLoginFlow />
-        </DemoFixedContainer>
-      )
+      return <DemoLoginFrame />
     case 'P-M01-LOGIN-PHONE':
-      return (
-        <DemoFixedContainer width={1040} height={680}>
-          <DemoLoginFlow prepare={preparePhoneEntry} />
-        </DemoFixedContainer>
-      )
+      return <DemoLoginFrame prepare={preparePhoneEntry} />
     case 'P-M01-LOGIN-CODE':
-      return (
-        <DemoFixedContainer width={1040} height={680}>
-          <DemoLoginFlow prepare={prepareCodeEntry} />
-        </DemoFixedContainer>
-      )
+      return <DemoLoginFrame prepare={prepareCodeEntry} />
     case 'P-M01-LOGIN-CANCEL':
-      return (
-        <DemoFixedContainer width={1040} height={680}>
-          <DemoLoginFlow prepare={prepareCancelled} />
-        </DemoFixedContainer>
-      )
+      return <DemoLoginFrame prepare={prepareCancelled} />
     case 'P-M01-REOPEN':
-      return (
-        <DemoFixedContainer width={1040} height={680}>
-          <DemoLoginFlow prepare={prepareExpired} />
-        </DemoFixedContainer>
-      )
+      return <DemoLoginFrame prepare={prepareExpired} />
 
     // ---- M01 · personal space bootstrap ------------------------------------
     case 'P-M01-PERSONAL-PREP':
@@ -338,26 +337,8 @@ export function LoginFlowsDemo({ scene }: { scene: string }) {
 
     // ---- M11 · system states -----------------------------------------------
     case 'P-M11-REAUTH':
-      return (
-        <DemoFixedContainer width={720} height={540}>
-          <SystemStatePage
-            icon={{ kind: 'spinning' }}
-            eyebrow={t('recovery.reauth.eyebrow')}
-            title={t('recovery.reauth.title')}
-            description={t('recovery.reauth.description')}
-            facts={[
-              { label: t('recovery.reauth.fact.lastSpace'), value: t('login.refreshFail.fact.pageValue') },
-              {
-                label: t('recovery.reauth.fact.lastTabs'),
-                value: t('recovery.reauth.fact.lastTabsValue'),
-              },
-            ]}
-            actions={
-              <HifiActionButton variant="primary">{t('common.continue')}</HifiActionButton>
-            }
-          />
-        </DemoFixedContainer>
-      )
+      // 原型该屏 = login-split + 红色过期提示（会话恢复摘要语义在 REOPEN-RECOVERY）
+      return <DemoLoginFrame prepare={prepareExpired} />
     case 'P-M11-REVOKE':
       return (
         <DemoFixedContainer width={720} height={560}>
