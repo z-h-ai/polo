@@ -215,7 +215,6 @@ function SessionPreview({ variant = 'generating' }: SessionPreviewProps) {
             sessionId="playground-session"
             onSubmit={mockInputCallbacks.onSubmit}
             onModelChange={mockInputCallbacks.onModelChange}
-            onInputChange={mockInputCallbacks.onInputChange}
             onHeightChange={mockInputCallbacks.onHeightChange}
             onFocusChange={mockInputCallbacks.onFocusChange}
             onSourcesChange={mockInputCallbacks.onSourcesChange}
