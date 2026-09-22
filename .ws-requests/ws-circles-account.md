@@ -47,6 +47,16 @@
 `继续发送` 保持用户动作。浏览器打开动作走 `TopupHandoff`（SystemScreen
 全屏态）或容器内嵌 HandoffCard，由集成决定呈现层级。
 
+STREAM-CUT 的消息内行内标注：生成中断的消息在消息流内保留，已生成部分
+尾部渲染行内说明，文案键 `credits.streamCut.inlineNote`
+（zh-Hans「（生成中断，以上为已生成部分）」，7 locale 已备）。渲染位置在
+assistant 消息气泡内（消息/turn 组件归 app-shell 所有方），本 WS 的
+`StreamCutNotice` 只负责 composer 上方横幅；示意呈现见 playground
+`registry/credits-flows.tsx`（credits-stream-cut demo）。另：
+`TopupCheckFlow` 的 `phase` prop 已直接复用 `creditsRules` 的
+`TopupCheckPhase`，arrived→resumed 的展示映射收在 `checkViewPhase`
+（单一出处，app-shell 挂载时直接传规则机 phase 即可）。
+
 ## 5. → 集成（主 agent）备注，无需动作
 
 - `AdminConsoleHandoff`（components/organization/，P-M10-ADMIN-BROWSER

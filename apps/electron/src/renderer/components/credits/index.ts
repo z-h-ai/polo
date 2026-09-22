@@ -15,7 +15,6 @@ export {
   stopReasonIsCreditsShortage,
 } from './creditsRules'
 export type {
-  TopupCheckPhase as TopupCheckRulePhase,
   TopupCheckState,
   GenerationStopReason,
 } from './creditsRules'
@@ -35,8 +34,12 @@ export type { EntCreditsNotifyProps } from './EntCreditsNotify'
 export { TopupHandoff } from './TopupHandoff'
 export type { TopupHandoffProps, TopupHandoffVariant } from './TopupHandoff'
 
-export { TopupCheckFlow } from './TopupCheckFlow'
-export type { TopupCheckFlowProps, TopupCheckPhase } from './TopupCheckFlow'
+export { TopupCheckFlow, checkViewPhase } from './TopupCheckFlow'
+export type {
+  TopupCheckFlowProps,
+  TopupCheckPhase,
+  TopupCheckViewPhase,
+} from './TopupCheckFlow'
 
 export { UserStopNotice } from './UserStopNotice'
 export type { UserStopNoticeProps } from './UserStopNotice'

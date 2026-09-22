@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Paperclip, Send, Sparkles } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { ComponentEntry } from './types'
 import {
   AppCreditsBanner,
@@ -117,8 +118,21 @@ function GateSlotConsumer({ variant }: { variant: 'blocked' | 'resumed' }) {
 }
 
 function StreamCutDemo() {
+  const { t } = useTranslation()
   return (
     <ComposerFrame
+      notice={
+        // 示意呈现：中断的消息仍在消息流内，行内标注渲染在已生成部分尾部
+        //（真实挂载在消息组件内，归 app-shell 所有方，见 .ws-requests §4）。
+        <div className="mb-2 rounded-md border border-border bg-background p-3">
+          <p className="m-0 text-[13px] leading-6 text-foreground">
+            已完成「华东区」分组……
+          </p>
+          <p className="m-0 mt-1 text-[11px] text-muted-foreground">
+            {t('credits.streamCut.inlineNote')}
+          </p>
+        </div>
+      }
       banner={<StreamCutNotice onTopup={NO_OP} />}
       sendDisabled
       placeholder="想让助手做什么？例如：把这份报价按客户分组汇总"
@@ -175,7 +189,7 @@ function TopupBrowserDemo({ variant = 'topup' }: TopupBrowserDemoProps) {
 }
 
 interface CheckDemoProps {
-  phase?: 'checking' | 'not-arrived'
+  phase?: 'checking' | 'not-arrived' | 'arrived'
 }
 
 function CheckDemo({ phase = 'checking' }: CheckDemoProps) {
@@ -189,7 +203,14 @@ function CheckDemo({ phase = 'checking' }: CheckDemoProps) {
       >
         重新打开对话框
       </button>
-      <TopupCheckFlow phase={phase} open={open} onOpenChange={setOpen} onCheck={NO_OP} />
+      <TopupCheckFlow
+        phase={phase}
+        balance={112}
+        open={open}
+        onOpenChange={setOpen}
+        onCheck={NO_OP}
+        onContinueSend={NO_OP}
+      />
     </div>
   )
 }
@@ -229,7 +250,8 @@ export const creditsFlowsComponents: ComponentEntry[] = [
     id: 'credits-stream-cut',
     name: 'Credits · Stream Cut',
     category: 'Chat',
-    description: '生成中不足（P-M09-STREAM-CUT）：已生成部分保留并如实标注，去充值入口',
+    description:
+      '生成中不足（P-M09-STREAM-CUT）：已生成部分保留、消息内行内标注（credits.streamCut.inlineNote，渲染交接 app-shell）+ 去充值入口',
     component: StreamCutDemo,
     props: [],
     variants: [{ name: 'P-M09-STREAM-CUT · partial output', description: '本次生成已暂停横幅', props: {} }],
@@ -315,17 +337,18 @@ export const creditsFlowsComponents: ComponentEntry[] = [
     name: 'Credits · Topup Check',
     category: 'Chat',
     description:
-      '返回后核对（P-M09-CHECKING / NOT-YET）：每次查询由用户发起；未到账保持阻断可再查；RESUMED 见 pre-block demo 的 resumed 变体',
+      '返回后核对（P-M09-CHECKING / NOT-YET / RESUMED）：每次查询由用户发起；未到账保持阻断可再查；phase 直接取规则机类型，arrived 经 checkViewPhase 映射为 resumed 横幅',
     component: CheckDemo,
     props: [
       {
         name: 'phase',
-        description: '核对阶段',
+        description: '核对阶段（规则机 phase；arrived 由 checkViewPhase 映射为 resumed 横幅）',
         control: {
           type: 'select',
           options: [
             { label: 'checking', value: 'checking' },
             { label: 'not-arrived', value: 'not-arrived' },
+            { label: 'arrived (resumed)', value: 'arrived' },
           ],
         },
         defaultValue: 'checking',
@@ -334,6 +357,7 @@ export const creditsFlowsComponents: ComponentEntry[] = [
     variants: [
       { name: 'P-M09-CHECKING · querying', description: '正在确认到账状态，对话草稿已保留', props: { phase: 'checking' } },
       { name: 'P-M09-NOT-YET · not arrived', description: '未查到新余额，可再查一次（错误态）', props: { phase: 'not-arrived' } },
+      { name: 'P-M09-RESUMED · arrived', description: '到账只解除阻断；继续发送是用户动作', props: { phase: 'arrived' } },
     ],
   },
 ]

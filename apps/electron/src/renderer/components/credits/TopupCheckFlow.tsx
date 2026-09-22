@@ -17,11 +17,27 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { FlowButton } from '@/components/tab-browser/circles/flowButtons'
+import type { TopupCheckPhase } from './creditsRules'
 import { CreditsGate } from './CreditsGate'
 
-export type TopupCheckPhase = 'checking' | 'not-arrived' | 'resumed'
+export type { TopupCheckPhase }
+
+/** Presentation phases of the check flow (dialog) plus the resumed banner. */
+export type TopupCheckViewPhase = 'checking' | 'not-arrived' | 'resumed'
+
+/**
+ * The single place rules-machine phases map onto check-flow presentations:
+ * 'arrived' lifts into the resumed banner (CreditsGate variant), 'blocked'
+ * (no query started yet) shares the checking presentation — the host's
+ * beginCheck turns it into 'checking'.
+ */
+export function checkViewPhase(phase: TopupCheckPhase): TopupCheckViewPhase {
+  if (phase === 'arrived') return 'resumed'
+  return phase === 'blocked' ? 'checking' : phase
+}
 
 export interface TopupCheckFlowProps {
+  /** Rules-machine phase of the topup check (creditsRules.ts). */
   phase: TopupCheckPhase
   /** Balance snapshot for the resumed banner. */
   balance?: number
@@ -42,8 +58,9 @@ export function TopupCheckFlow({
   onContinueSend,
 }: TopupCheckFlowProps) {
   const { t } = useTranslation()
+  const view = checkViewPhase(phase)
 
-  if (phase === 'resumed') {
+  if (view === 'resumed') {
     return (
       <div data-testid="topup-check-resumed" className="w-full max-w-[720px] p-4">
         <CreditsGate
@@ -60,9 +77,9 @@ export function TopupCheckFlow({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-[440px]"
-        data-testid={`topup-check-${phase}`}
+        data-testid={`topup-check-${view}`}
       >
-        {phase === 'checking' ? (
+        {view === 'checking' ? (
           <>
             <DialogHeader>
               <DialogTitle>{t('credits.check.checkingTitle')}</DialogTitle>
