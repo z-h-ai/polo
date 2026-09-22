@@ -2,8 +2,11 @@
  * SkillMenu - Shared menu content for skill actions
  *
  * Used by:
- * - SkillsListPanel (dropdown via "..." button, context menu via right-click)
  * - SkillInfoPage (title dropdown menu)
+ *
+ * The skills manager panel (components/app-shell/skills/) replaced the old
+ * SkillsListPanel surface and carries its own lifecycle actions; this menu
+ * remains the info page's utility menu.
  *
  * Uses MenuComponents context to render with either DropdownMenu or ContextMenu
  * primitives, allowing the same component to work in both scenarios.

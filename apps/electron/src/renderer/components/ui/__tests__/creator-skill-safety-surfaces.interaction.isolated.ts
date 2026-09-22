@@ -7,46 +7,20 @@ import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 GlobalRegistrator.register()
 setupI18n()
 
-mock.module('@/components/ui/entity-panel', () => ({
-  EntityPanel: ({ items, mapItem }: {
-    items: unknown[]
-    mapItem: (item: unknown) => { title: ReactNode; badges?: ReactNode }
-  }) => createElement(
-    'div',
-    null,
-    ...items.map((item, index) => {
-      const mapped = mapItem(item)
-      return createElement('div', { key: index }, mapped.title, mapped.badges)
-    }),
-  ),
-}))
-mock.module('@/components/ui/entity-list-empty', () => ({
-  EntityListEmptyScreen: ({ children }: { children?: ReactNode }) =>
-    createElement('div', null, children),
-}))
 mock.module('@/components/ui/skill-avatar', () => ({
   SkillAvatar: () => createElement('span'),
 }))
-mock.module('@/components/app-shell/SkillMenu', () => ({
-  SkillMenu: () => createElement('span'),
+mock.module('@/context/OrganizationContext', () => ({
+  useOptionalOrganizationContext: () => null,
 }))
-mock.module('@/components/app-shell/SendResourceToWorkspaceDialog', () => ({
-  SendResourceToWorkspaceDialog: () => null,
-}))
-mock.module('@/components/ui/EditPopover', () => ({
-  EditPopover: () => null,
-  getEditConfig: () => ({}),
-}))
-mock.module('@/context/AppShellContext', () => ({
-  useActiveWorkspace: () => ({ remoteServer: false }),
-  useAppShellContext: () => ({
-    workspaces: [{ id: 'workspace-one' }],
-    activeWorkspaceId: 'workspace-one',
-  }),
+mock.module('@polo-ai/ui', () => ({
+  Spinner: () => createElement('span', { 'data-testid': 'spinner' }),
 }))
 
 const { cleanup, render, screen } = await import('@testing-library/react')
-const { SkillsListPanel } = await import('../../app-shell/SkillsListPanel')
+// The legacy SkillsListPanel was replaced by the skills manager panel
+// (POO-70 HiFi WS-ASSISTANT-SKILLS); the stale-safety badge moved with it.
+const { SkillsManagerPanel } = await import('../../app-shell/skills/SkillsManagerPanel')
 const { InlineSkillMention } = await import('../skill-mention-menu')
 
 const skill = {
@@ -83,7 +57,7 @@ function withI18n(node: ReactNode) {
 
 describe('Creator Skill failed safety surfaces', () => {
   it('renders the failed current check in the Skill list and @ candidate', () => {
-    render(withI18n(createElement(SkillsListPanel, {
+    render(withI18n(createElement(SkillsManagerPanel, {
       skills: [skill],
       onDeleteSkill: () => {},
       onSkillClick: () => {},

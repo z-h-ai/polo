@@ -26,6 +26,8 @@ import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
 import { loginFlowsComponents } from './login-flows'
 import { spaceSwitchComponents } from './space-switch'
+import { skillsManagerComponents } from './skills-manager'
+import { assistantSessionComponents } from './assistant-session'
 
 export * from './types'
 
@@ -58,6 +60,8 @@ export const componentRegistry: ComponentEntry[] = [
   ...messagingComponents,
   ...imageSupportComponents,
   ...loginFlowsComponents,
+  ...skillsManagerComponents,
+  ...assistantSessionComponents,
 ]
 
 export function getCategories(): CategoryGroup[] {
