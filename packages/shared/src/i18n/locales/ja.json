@@ -2351,6 +2351,7 @@
   "skillsManager.state.enabled": "有効",
   "skillsManager.state.installable": "インストール可能",
   "skillsManager.state.installed": "インストール済み",
+  "skillsManager.state.installedNotEnabled": "インストール済み · 無効",
   "skillsManager.state.restricted": "認可失効 · 無効",
   "skillsManager.state.updateAvailable": "更新あり v{{version}}",
   "skillsManager.toast.disabled": "「{{name}}」を無効にしました",

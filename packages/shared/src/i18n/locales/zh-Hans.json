@@ -2351,6 +2351,7 @@
   "skillsManager.state.enabled": "已启用",
   "skillsManager.state.installable": "可安装",
   "skillsManager.state.installed": "已安装",
+  "skillsManager.state.installedNotEnabled": "已安装 · 未启用",
   "skillsManager.state.restricted": "授权已失效 · 已停用",
   "skillsManager.state.updateAvailable": "可更新 v{{version}}",
   "skillsManager.toast.disabled": "已停用「{{name}}」",

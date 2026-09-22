@@ -31,7 +31,13 @@ const DEMO_CIRCLE = '晨星增长圈'
 const DEMO_APP = '客户资料核验'
 
 /** Mounts LoginScreen with its own flow, pre-walked by `prepare`. */
-function DemoLoginFlow({ prepare }: { prepare?: (flow: UseAuthFlowReturn) => void }) {
+function DemoLoginFlow({
+  prepare,
+  initialPassword,
+}: {
+  prepare?: (flow: UseAuthFlowReturn) => void
+  initialPassword?: string
+}) {
   const flow = useAuthFlow()
   const initialized = React.useRef(false)
   React.useEffect(() => {
@@ -40,7 +46,7 @@ function DemoLoginFlow({ prepare }: { prepare?: (flow: UseAuthFlowReturn) => voi
     flow.start()
     prepare?.(flow)
   }, [flow, prepare])
-  return <LoginScreen flow={flow} />
+  return <LoginScreen flow={flow} initialPassword={initialPassword} />
 }
 
 function preparePhoneEntry(flow: UseAuthFlowReturn) {
@@ -49,19 +55,22 @@ function preparePhoneEntry(flow: UseAuthFlowReturn) {
 
 function prepareCodeEntry(flow: UseAuthFlowReturn) {
   flow.switchMode('phone')
-  flow.setPhone('13800138000')
+  flow.setPhone('13800008000')
   flow.setConsented(true)
-  // The demo adapter resolves immediately; the code entry arms its countdown.
-  void flow.sendCode('13800138000')
+  // The demo adapter resolves immediately; the code entry arms its countdown
+  // and arrives pre-filled (prototype shows 824193 with Continue enabled).
+  void flow.sendCode('13800008000').then(() => flow.setCode('824193'))
 }
 
 function prepareCancelled(flow: UseAuthFlowReturn) {
-  flow.setPhone('13800138000')
+  flow.setPhone('13800008000')
+  flow.setConsented(true)
   flow.cancel()
 }
 
 function prepareExpired(flow: UseAuthFlowReturn) {
-  flow.setPhone('13800138000')
+  flow.setPhone('13800008000')
+  flow.setConsented(true)
   flow.markSessionExpired()
 }
 
@@ -71,7 +80,13 @@ function prepareExpired(flow: UseAuthFlowReturn) {
  * rendered at 920×690 and scaled to 0.85 (≈782×586): the card stays fully
  * visible with breathing room on all sides.
  */
-function DemoLoginFrame({ prepare }: { prepare?: (flow: UseAuthFlowReturn) => void }) {
+function DemoLoginFrame({
+  prepare,
+  initialPassword,
+}: {
+  prepare?: (flow: UseAuthFlowReturn) => void
+  initialPassword?: string
+}) {
   return (
     <DemoFixedContainer
       width={800}
@@ -79,7 +94,7 @@ function DemoLoginFrame({ prepare }: { prepare?: (flow: UseAuthFlowReturn) => vo
       scale={0.85}
       contentClassName="h-[690px] w-[920px]"
     >
-      <DemoLoginFlow prepare={prepare} />
+      <DemoLoginFlow prepare={prepare} initialPassword={initialPassword} />
     </DemoFixedContainer>
   )
 }
@@ -96,9 +111,9 @@ function LoginSceneRouter({ scene }: { scene: string }) {
     case 'P-M01-LOGIN-CODE':
       return <DemoLoginFrame prepare={prepareCodeEntry} />
     case 'P-M01-LOGIN-CANCEL':
-      return <DemoLoginFrame prepare={prepareCancelled} />
+      return <DemoLoginFrame prepare={prepareCancelled} initialPassword="demo-pass-123" />
     case 'P-M01-REOPEN':
-      return <DemoLoginFrame prepare={prepareExpired} />
+      return <DemoLoginFrame prepare={prepareExpired} initialPassword="demo-pass-123" />
 
     // ---- M01 · personal space bootstrap ------------------------------------
     case 'P-M01-PERSONAL-PREP':
@@ -338,7 +353,7 @@ function LoginSceneRouter({ scene }: { scene: string }) {
     // ---- M11 · system states -----------------------------------------------
     case 'P-M11-REAUTH':
       // 原型该屏 = login-split + 红色过期提示（会话恢复摘要语义在 REOPEN-RECOVERY）
-      return <DemoLoginFrame prepare={prepareExpired} />
+      return <DemoLoginFrame prepare={prepareExpired} initialPassword="demo-pass-123" />
     case 'P-M11-REVOKE':
       return (
         <DemoFixedContainer width={720} height={560}>

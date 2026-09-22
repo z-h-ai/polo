@@ -104,15 +104,17 @@ describe('localSkillRowState (state-bit combinations)', () => {
     })
 
   it('covers the sampled scene combinations', () => {
-    // 100-0-0: installed, disabled
-    expect(row({ installedVersion: '1.0.0', enabled: false })).toBe('disabled')
+    // 100-0-0: installed, not enabled — distributed copies read "installed · not enabled"
+    expect(row({ installedVersion: '1.0.0', enabled: false })).toBe('installed-not-enabled')
+    // built-in turned off stays "disabled"
+    expect(row({ origin: 'builtin', installedVersion: undefined, enabled: false })).toBe('disabled')
     // 100-1-0: installed, enabled
     expect(row({ installedVersion: '1.0.0', enabled: true })).toBe('enabled')
-    // 110-0-0: 1.1.0 installed, disabled, no newer version
-    expect(row({ installedVersion: '1.1.0', enabled: false })).toBe('disabled')
+    // 110-0-0: 1.1.0 installed, not enabled
+    expect(row({ installedVersion: '1.1.0', enabled: false })).toBe('installed-not-enabled')
     // 110-1-0: 1.1.0 installed, enabled
     expect(row({ installedVersion: '1.1.0', enabled: true })).toBe('enabled')
-    // update available beats the enabled bit
+    // update available shows on enabled rows
     expect(row({
       installedVersion: '1.0.0',
       availableVersion: '1.1.0',
@@ -132,7 +134,7 @@ describe('localSkillRowState (state-bit combinations)', () => {
       installedVersion: '1.1.0',
       availableVersion: '1.1.0',
       enabled: false,
-    })).toBe('disabled')
+    })).toBe('installed-not-enabled')
   })
 })
 

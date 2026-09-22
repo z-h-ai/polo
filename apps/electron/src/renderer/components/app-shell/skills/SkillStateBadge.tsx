@@ -18,6 +18,7 @@ export interface SkillStateBadgeProps {
 const TONE_BY_STATE: Record<SkillBadgeState, 'success' | 'neutral' | 'accent' | 'destructive'> = {
   enabled: 'success',
   disabled: 'neutral',
+  'installed-not-enabled': 'neutral',
   installed: 'neutral',
   'update-available': 'accent',
   installable: 'neutral',
@@ -27,6 +28,7 @@ const TONE_BY_STATE: Record<SkillBadgeState, 'success' | 'neutral' | 'accent' | 
 const KEY_BY_STATE: Record<SkillBadgeState, string> = {
   enabled: 'skillsManager.state.enabled',
   disabled: 'skillsManager.state.disabled',
+  'installed-not-enabled': 'skillsManager.state.installedNotEnabled',
   installed: 'skillsManager.state.installed',
   'update-available': 'skillsManager.state.updateAvailable',
   installable: 'skillsManager.state.installable',

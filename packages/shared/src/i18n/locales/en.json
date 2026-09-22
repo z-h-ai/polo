@@ -2351,6 +2351,7 @@
   "skillsManager.state.enabled": "Enabled",
   "skillsManager.state.installable": "Installable",
   "skillsManager.state.installed": "Installed",
+  "skillsManager.state.installedNotEnabled": "Installed · not enabled",
   "skillsManager.state.restricted": "Authorization lost · disabled",
   "skillsManager.state.updateAvailable": "Updatable v{{version}}",
   "skillsManager.toast.disabled": "Disabled \"{{name}}\"",

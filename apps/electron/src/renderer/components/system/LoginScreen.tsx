@@ -17,6 +17,8 @@ export interface LoginScreenProps {
    * playground demos.
    */
   flow?: UseAuthFlowReturn
+  /** Demo prefill for the masked password (prototype screenshots show it filled). */
+  initialPassword?: string
   className?: string
 }
 
@@ -136,12 +138,12 @@ function LoginNotice({ notice }: { notice: 'cancelled' | 'expired' | null }) {
  * (App.tsx wiring, or the playground demo) swaps in `SystemStatePage` /
  * the product shell and is responsible for unmounting this screen.
  */
-export function LoginScreen({ flow, className }: LoginScreenProps) {
+export function LoginScreen({ flow, initialPassword, className }: LoginScreenProps) {
   const { t } = useTranslation()
   const internal = useAuthFlow()
   const current = flow ?? internal
   const { state } = current
-  const [password, setPassword] = React.useState('')
+  const [password, setPassword] = React.useState(initialPassword ?? '')
 
   React.useEffect(() => {
     if (state.step === 'idle') current.start()

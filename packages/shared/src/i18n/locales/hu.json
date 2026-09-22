@@ -2351,6 +2351,7 @@
   "skillsManager.state.enabled": "Bekapcsolva",
   "skillsManager.state.installable": "Telepíthető",
   "skillsManager.state.installed": "Telepítve",
+  "skillsManager.state.installedNotEnabled": "Telepítve · nincs engedélyezve",
   "skillsManager.state.restricted": "Engedély elveszett · kikapcsolva",
   "skillsManager.state.updateAvailable": "Frissíthető v{{version}}",
   "skillsManager.toast.disabled": "„{{name}}” kikapcsolva",

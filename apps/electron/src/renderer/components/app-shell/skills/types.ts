@@ -51,6 +51,7 @@ export function decodeSkillSceneBits(suffix: string): SkillSceneBits {
 export type LocalSkillRowState =
   | 'enabled'
   | 'disabled'
+  | 'installed-not-enabled'
   | 'update-available'
   | 'restricted'
 
@@ -118,10 +119,15 @@ export type DiscoverRowState = 'installable' | 'update-available' | 'installed' 
 /** Row state for a managed local skill (restricted wins over the rest). */
 export function localSkillRowState(skill: ManagedSkill): LocalSkillRowState {
   if (skill.restricted) return 'restricted'
+  // Distributed copies distinguish "installed · not enabled" (R6: installs land
+  // disabled until the user enables them) from a built-in the user turned off.
+  if (!skill.enabled) {
+    return skill.origin === 'builtin' ? 'disabled' : 'installed-not-enabled'
+  }
   if (skill.availableVersion && skill.availableVersion !== skill.installedVersion) {
     return 'update-available'
   }
-  return skill.enabled ? 'enabled' : 'disabled'
+  return 'enabled'
 }
 
 /** Row state for a discover entry, taking any installed copy into account. */

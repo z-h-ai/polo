@@ -95,7 +95,7 @@ describe('SkillsManagerPanel R6 rules', () => {
       onSkillClick: noOp,
       onDeleteSkill: noOp,
     })))
-    expect(screen.getByText('Disabled')).toBeTruthy()
+    expect(screen.getByText('Installed · not enabled')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy()
   })
 
@@ -391,7 +391,7 @@ describe('install flow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View & install' }))
     fireEvent.click(screen.getByRole('button', { name: 'Install on this Mac' }))
     // Lands on the local list with a new default-disabled row.
-    await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Installed · not enabled')).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy()
     // Back on the discover tab the entry manages an installed copy.
     fireEvent.click(screen.getByRole('button', { name: 'From circles' }))
@@ -447,7 +447,7 @@ describe('install flow', () => {
       workspaceId: 'ws-1',
       grant: { artifactId: 'artifact-1', organizationId: 'org-1', slug: 'sales-weekly' },
     })
-    await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Installed · not enabled')).toBeTruthy())
   })
 
   it('a failed grant surfaces the install failure phase with retry', async () => {

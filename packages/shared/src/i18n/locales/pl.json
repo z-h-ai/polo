@@ -2351,6 +2351,7 @@
   "skillsManager.state.enabled": "Włączona",
   "skillsManager.state.installable": "Do zainstalowania",
   "skillsManager.state.installed": "Zainstalowana",
+  "skillsManager.state.installedNotEnabled": "Zainstalowano · nieaktywne",
   "skillsManager.state.restricted": "Utracono uprawnienie · wyłączona",
   "skillsManager.state.updateAvailable": "Aktualizacja v{{version}}",
   "skillsManager.toast.disabled": "Wyłączono „{{name}}”",
