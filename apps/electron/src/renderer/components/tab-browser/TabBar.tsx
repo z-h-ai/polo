@@ -109,15 +109,32 @@ export function TabBar({ account }: TabBarProps) {
       className="fixed left-0 right-0 top-0 z-panel flex items-center border-b border-foreground/10 bg-background/95 titlebar-drag-region"
       style={{ height: 'var(--tabbar-height)', paddingLeft: trafficLightPadding, paddingRight: 8 }}
     >
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn('titlebar-no-drag mr-1 h-7 w-7 rounded-md', activeTabId === HOME_TAB_ID && 'bg-foreground/8')}
+      {/* 品牌锁钮（原型 workbench-bar brand-lockup）：点击回首页 */}
+      <button
+        type="button"
+        onClick={activateHome}
+        aria-label="返回 Polo 首页"
+        className="titlebar-no-drag mr-1.5 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-foreground/5"
+      >
+        <span aria-hidden="true" className="grid size-[18px] place-items-center rounded-[5px] bg-hifi-accent text-[11px] font-bold text-hifi-on-accent">P</span>
+        <span>Polo</span>
+      </button>
+
+      {/* 首页 tab（原型 home-tab：房子图标 + 「首页」） */}
+      <button
+        type="button"
         onClick={activateHome}
         aria-label="Home"
+        className={cn(
+          'titlebar-no-drag flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md px-3 text-xs transition-colors',
+          activeTabId === HOME_TAB_ID
+            ? 'relative z-[1] -mb-px border border-foreground/10 border-b-transparent bg-foreground/8 text-foreground'
+            : 'text-foreground/65 hover:bg-foreground/5',
+        )}
       >
         <Icons.House className="h-4 w-4" strokeWidth={1.5} />
-      </Button>
+        <span>首页</span>
+      </button>
 
       {/* Fill the titlebar so tabs align to its bottom edge instead of being
           vertically centered with a visible gap above the TopBar. */}

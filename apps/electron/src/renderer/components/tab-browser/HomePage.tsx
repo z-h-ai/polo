@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import {
   type LocalAppRuntimeStatus,
 } from '@polo-ai/shared/protocol'
 import { AppIcon } from './AppIcon'
+import { useAppRuntimeTasks } from './AppRuntimeTasksContext'
 import {
   OrganizationAppCard,
   statusText,
@@ -75,6 +76,8 @@ import {
 
 interface HomePageProps {
   onAddApp: () => void
+  /** 已登录账号的展示名（原型 P-M03 home-hero 问候语）。 */
+  userName?: string
 }
 
 const MAX_RECENT_APPS = 6
@@ -177,8 +180,130 @@ function catalogRecentId(scopeKey: string): string {
   return scopeKey
 }
 
-function AddExternalAppTile({ onClick }: { onClick: () => void }) {
+/**
+ * 首页问候区（原型 P-M03 home-hero）：时间段问候 + 展示名，副行「继续
+ * {空间} 的工作」；个人空间的右侧挂「我的圈子」入口（ws-circles-account）。
+ */
+function HomeHero({
+  userName,
+  spaceName,
+  circlesSlot,
+}: {
+  userName?: string
+  spaceName: string
+  circlesSlot?: () => ReactNode
+}) {
   const { t } = useTranslation()
+  const hour = new Date().getHours()
+  const greeting = hour < 12
+    ? t('home.hero.morning')
+    : hour < 18
+      ? t('home.hero.afternoon')
+      : t('home.hero.evening')
+  return (
+    <section className="flex items-end justify-between gap-7" data-testid="home-hero">
+      <div className="min-w-0">
+        <h1 className="m-0 text-[clamp(30px,3vw,38px)] font-bold leading-[1.08] tracking-[-0.055em] text-foreground">
+          {t('home.hero.greeting', { greeting, name: userName || t('home.hero.personalSpace') })}
+        </h1>
+        <p className="m-0 mt-3 text-[15px] leading-[1.65] text-muted-foreground">
+          {t('home.hero.continueWork', { space: spaceName })}
+        </p>
+      </div>
+      {circlesSlot && <div className="shrink-0">{circlesSlot()}</div>}
+    </section>
+  )
+}
+
+/**
+ * 助手大卡（原型 P-M03 常用 Apps 栅格首卡，assistant-card）：企业/个人空间
+ * 都固定展示、不占常用名额（D-PC-07）。技能管理在助手侧栏内进行。
+ */
+function HomeAssistantCard({ onOpenAssistant }: { onOpenAssistant: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <article
+      className="relative flex min-h-[176px] flex-col rounded-xl border border-foreground/10 bg-[var(--background-elevated)] p-4 shadow-xs transition-shadow hover:shadow-minimal"
+      data-testid="home-assistant-entry-card"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
+          <Icons.Sparkles className="size-5" strokeWidth={1.5} />
+        </span>
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {POLO_APP_DEFINITION.name}
+          </h3>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {t('homeApps.assistant.cardMeta')}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 line-clamp-2 min-h-9 text-xs leading-[18px] text-foreground/65">
+        {t('homeApps.assistant.cardDescription')}
+      </p>
+      <div className="mt-auto flex items-center justify-end gap-2 pt-3">
+        <Button type="button" size="sm" variant="secondary" onClick={onOpenAssistant}>
+          {t('homeApps.assistant.manageSkills')}
+        </Button>
+        <Button type="button" size="sm" onClick={onOpenAssistant}>
+          {t('homeApps.assistant.openAction')}
+        </Button>
+      </div>
+    </article>
+  )
+}
+
+/** 系统工具（原型 P-M03 utility-grid）：文件 / 任务与结果两张工具卡。 */
+function HomeUtilitySection({ onOpenFiles }: { onOpenFiles: () => void }) {
+  const { t } = useTranslation()
+  const runtime = useAppRuntimeTasks()
+  const cards = [
+    {
+      id: 'files',
+      icon: <Icons.FileText className="size-5" strokeWidth={1.5} />,
+      title: t('home.tools.files'),
+      description: t('home.tools.filesDescription'),
+      onClick: onOpenFiles,
+    },
+    {
+      id: 'tasks',
+      icon: <Icons.ListChecks className="size-5" strokeWidth={1.5} />,
+      title: t('home.tools.tasks'),
+      description: t('home.tools.tasksDescription'),
+      onClick: runtime.toggleRuntimeCenter,
+    },
+  ]
+  return (
+    <section aria-labelledby="home-utility-heading" data-testid="home-utility-section">
+      <h2 id="home-utility-heading" className="m-0 text-xl font-bold tracking-tight text-foreground">
+        {t('home.tools.title')}
+      </h2>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        {cards.map(card => (
+          <button
+            key={card.id}
+            type="button"
+            data-testid={`home-utility-${card.id}`}
+            onClick={card.onClick}
+            className="flex min-h-[82px] items-center gap-3 rounded-[13px] border border-foreground/10 bg-[var(--background-elevated)] p-4 text-left shadow-xs transition-all hover:-translate-y-px hover:shadow-minimal"
+          >
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+              {card.icon}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-foreground">{card.title}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">{card.description}</span>
+            </span>
+            <Icons.ChevronRight className="size-4 shrink-0 text-foreground/35" strokeWidth={1.5} />
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function AddExternalAppTile({ onClick }: { onClick: () => void }) {  const { t } = useTranslation()
   return (
     <button
       type="button"
@@ -196,7 +321,7 @@ function AddExternalAppTile({ onClick }: { onClick: () => void }) {
   )
 }
 
-export function HomePage({ onAddApp }: HomePageProps) {
+export function HomePage({ onAddApp, userName }: HomePageProps) {
   const { t, i18n } = useTranslation()
   const { installedApps, openApp, removeApp } = useTabShell()
   const catalog = useAppCatalog()
@@ -874,14 +999,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
       <div className="mb-4 flex items-center justify-between gap-4">
         <div>
           <h2 id="organization-apps-heading" className="text-base font-semibold">
-            {t('homeApps.organization.title', {
-              name: activeOrganization?.name || t('homeApps.organization.current'),
-            })}
+            {t('homeApps.frequent.appsTitle')}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {activeOrganization?.type === 'creator_space'
-              ? t('homeApps.organization.creatorDescription')
-              : t('homeApps.organization.enterpriseDescription')}
+            {t('homeApps.frequent.appsSubtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -952,18 +1073,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
           retryLabel={t('homeApps.actions.tryAgain')}
           onRetry={() => { void catalog.sync(true) }}
         />
-      ) : visibleOrganizationApps.length === 0 ? (
-        <EmptyDirectoryState
-          title={t('homeApps.organization.empty')}
-          description={
-            activeOrganization?.type === 'creator_space'
-              ? t('homeApps.organization.emptyCreator')
-              : t('homeApps.organization.emptyEnterprise')
-          }
-        />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <HomeAssistantCard onOpenAssistant={() => openPersonalApp(POLO_APP_DEFINITION)} />
             {displayedOrganizationApps.map(app => {
               const scopeKey = scopeKeyFor(app)
               if (scopeKey === null) return null
@@ -1010,6 +1123,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
               )
             })}
           </div>
+          {visibleOrganizationApps.length === 0 && (
+            <div className="mt-4">
+              <EmptyDirectoryState
+                title={t('homeApps.organization.empty')}
+                description={t('homeApps.organization.emptyEnterprise')}
+              />
+            </div>
+          )}
           {displayedOrganizationApps.length < visibleOrganizationApps.length && (
             <div className="mt-5 flex justify-center">
               <Button
@@ -1032,51 +1153,27 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
   const homeSurface = (
     <>
-      {/* 企业空间首页的助手入口（P-M03-HOME-ENT「打开助手」）：除助手外
-          仍只展示企业作品（D-PC-08）。 */}
-      {!isPersonalSpace && (
-        <section
-          aria-labelledby="enterprise-assistant-heading"
-          data-testid="home-assistant-entry"
-        >
-          <div className="flex items-center gap-4 rounded-xl border border-foreground/10 bg-background p-4">
-            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-              <Icons.Sparkles className="size-5" strokeWidth={1.5} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h1
-                id="enterprise-assistant-heading"
-                className="text-base font-semibold"
-              >
-                {POLO_APP_DEFINITION.name}
-              </h1>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t('homeApps.assistant.entrySubtitle')}
-              </p>
-              <p className="mt-1 text-sm text-foreground/80">
-                {t('homeApps.assistant.entryDescription')}
-              </p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => openPersonalApp(POLO_APP_DEFINITION)}
-            >
-              {t('homeApps.assistant.openAction')}
-            </Button>
-          </div>
-        </section>
-      )}
+      {/* 原型 P-M03 home-hero：问候 + 「继续 {空间} 的工作」；个人空间右侧
+          挂「我的圈子」入口（ws-circles-account 插槽）。 */}
+      <HomeHero
+        userName={userName}
+        spaceName={
+          isPersonalSpace
+            ? t('home.hero.personalSpace')
+            : (activeOrganization?.name || t('home.hero.personalSpace'))
+        }
+        circlesSlot={isPersonalSpace ? homeSlots.circlesEntry : undefined}
+      />
 
       {isPersonalSpace && (
         <section aria-labelledby="frequent-apps-heading" data-testid="home-frequent-section">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
               <h1 id="frequent-apps-heading" className="text-lg font-semibold">
-                {t('homeApps.frequent.title')}
+                {t('homeApps.frequent.appsTitle')}
               </h1>
               <p className="mt-1 text-xs text-muted-foreground">
-                {t('homeApps.frequent.description')}
+                {t('homeApps.frequent.appsSubtitle')}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1125,10 +1222,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
         </section>
       )}
 
-      {/* 跨 WS 挂载点：我的圈子入口（ws-circles-account 提供；个人空间）。 */}
-      {isPersonalSpace && homeSlots.circlesEntry && (
-        <div data-testid="home-circles-slot">{homeSlots.circlesEntry()}</div>
-      )}
+      {/* 企业空间常用 Apps（P-M03-HOME-ENT）：助手大卡 + 企业作品统一栅格。 */}
+      {orgSection}
+
+      {/* 系统工具（原型 P-M03 utility-grid）：文件 / 任务与结果。 */}
+      <HomeUtilitySection onOpenFiles={() => openPersonalApp(POLO_APP_DEFINITION)} />
 
       {isPersonalSpace && (
         <section aria-labelledby="recent-apps-heading">
@@ -1173,8 +1271,6 @@ export function HomePage({ onAddApp }: HomePageProps) {
           )}
         </section>
       )}
-
-      {orgSection}
 
       {isPersonalSpace && (
         <section aria-labelledby="external-apps-heading">

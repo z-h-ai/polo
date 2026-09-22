@@ -2,11 +2,16 @@ import type { ReactNode } from 'react'
 import { HomePage } from './HomePage'
 import { WebAppView } from './WebAppView'
 import { useTabShell } from '@/context/TabShellContext'
+import type { AccountMenuUser } from '@/components/organization/AccountMenu'
 import type { TabInstance } from '../../../shared/tab-browser-types'
 
 interface TabContentProps {
   onAddApp: () => void
   renderPolo: () => ReactNode
+  account?: {
+    user: AccountMenuUser | null
+    onLogout: () => void | Promise<void>
+  } | null
 }
 
 function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
@@ -17,7 +22,7 @@ function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
   )
 }
 
-export function TabContent({ onAddApp, renderPolo }: TabContentProps) {
+export function TabContent({ onAddApp, renderPolo, account }: TabContentProps) {
   const { activeTab, openTabs } = useTabShell()
   const activeType = activeTab.type
 
@@ -27,7 +32,12 @@ export function TabContent({ onAddApp, renderPolo }: TabContentProps) {
         {renderPolo()}
       </div>
 
-      {activeType === 'home' && <HomePage onAddApp={onAddApp} />}
+      {activeType === 'home' && (
+        <HomePage
+          onAddApp={onAddApp}
+          userName={account?.user?.displayName || account?.user?.username || undefined}
+        />
+      )}
 
       {openTabs
         .filter((tab) => tab.type === 'webapp')
