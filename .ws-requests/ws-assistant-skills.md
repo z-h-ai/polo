@@ -25,14 +25,30 @@
   （props 兼容：skills/workspaceId/availableCreatorSkillVersions/onSkillClick/
   onDeleteSkill/selectedSkillSlug；`workspaceRootPath` 不再需要）。
   `SkillMenu.tsx` 保留：仅 SkillInfoPage 标题菜单在用（信息页工具菜单，非列表表面）。
+- **替换表面功能损失清单**（review 整改补披露，主 agent 集成时决定回补方式）：
+  1. 空态「添加 Skill」EditPopover 入口：旧面板空态有
+     `EditPopover + getEditConfig('add-skill', workspaceRootPath)` 快捷新建本地
+     Skill；新面板空态只有「获取 Skill」CTA（跳获取 tab）。回补需要
+     `workspaceRootPath` 重新流入 SkillsManagerPanel（AppShell 持有该值）。
+  2. 行级 SkillMenu 三操作：旧面板每行菜单有「新窗口打开」
+     （`poloai://skills/skill/{slug}?window=focused` deep link）、「在 Finder 中显示」
+     （`showInFolder(skill.path)`）、「发送到其他工作区」
+     （`SendResourceToWorkspaceDialog`）。新面板行内只有 启用/停用 + 管理 按钮，
+     这三操作仅保留在 SkillInfoPage 标题菜单（多一跳）。列表直达入口若需保留，
+     建议 SkillDetailSheet 加 `onOpenInNewWindow/onShowInFinder/onSendToWorkspace`
+     回调由 AppShell 接线。
+  3. 已在本次修复对齐的部分：project 来源「由项目管理」区分（sourceLine 新键
+     `skillsManager.source.project`）；不可卸载来源（builtin/project/无 backing 行）
+     卸载按钮禁用 + tooltip，不再假成功。
 - **测试迁移**：`components/ui/__tests__/creator-skill-safety-surfaces.interaction.isolated.ts`
   的渲染对象从 SkillsListPanel 迁到 SkillsManagerPanel（断言不变）。
 - **启停持久化缺口**：R6「启用偏好沿用既有账号＋空间＋Skill 同步规则」需要后端存储
   通道（当前 LoadedSkill 无 enablement 字段）。SkillsManagerPanel 现为面板本地态
   （useState）+ toast 反馈；主进程/contexts 若提供持久化表面，接线点在
   `SkillsManagerPanel.handleToggleEnabled`。
-- **安装动作**：企业共享「安装到本机」当前为面板内乐观流程（成功回本机列表 + 默认停用
-  toast）；真实安装走 `creatorSkillInstall`（SkillInfoPage 已有完整 grant/install 逻辑，
-  集成时可把 `handleInstall` 的 demo 流程替换为对该通道的调用）。
+- **安装动作**：企业共享安装已接真实通道（`creatorSkillGetDownloadGrant` +
+  `creatorSkillInstall`，含冲突确认与错误 toast，对齐 SkillInfoPage 参考实现）；
+  无接线语境（demo 数据 / 圈子目录未交付）走面板内自洽流程（本机新增停用行 +
+  获取行变「管理」），无定时器。
 - playground registry：`index.ts` 仅追加 2 行 import + 2 行 spread
   （skills-manager / assistant-session，均为本 WS 文件）。
