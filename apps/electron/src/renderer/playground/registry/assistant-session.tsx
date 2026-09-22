@@ -15,6 +15,7 @@ import type { ComponentEntry } from './types'
 import { TurnCard, UserMessageBubble, type ActivityItem, type ResponseContent } from '@polo-ai/ui'
 import { CircleStop, HelpCircle, Wallet } from 'lucide-react'
 import { InputContainer } from '@/components/app-shell/input'
+import { ModalProvider } from '@/context/ModalContext'
 import type { PermissionMode } from '../../../shared/types'
 import { DemoFixedContainer } from '../mocks/DemoFixedContainer'
 import {
@@ -114,6 +115,7 @@ function SessionPreview({ variant = 'generating' }: SessionPreviewProps) {
   }, [])
 
   return (
+    <ModalProvider>
     <DemoFixedContainer width={640} height={540}>
       <div className="flex h-full flex-col bg-background">
         <div className="flex-1 overflow-auto px-5 py-6">
@@ -217,6 +219,7 @@ function SessionPreview({ variant = 'generating' }: SessionPreviewProps) {
         </div>
       </div>
     </DemoFixedContainer>
+    </ModalProvider>
   )
 }
 

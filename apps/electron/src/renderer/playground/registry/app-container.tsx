@@ -238,7 +238,13 @@ function RuntimeCenterDemo({ tasks }: { tasks: RuntimeTask[] }) {
 /** 顶栏运行 pill + 关闭拦截的完整壳 demo（接线点验收用）。 */
 function TabBarRuntimeDemo({ personal }: { personal: boolean }) {
   const [tasks, setTasks] = useState<RuntimeTask[]>(
-    personal ? PERSONAL_RUNTIME_TASKS : RUNTIME_TASKS,
+    personal
+      ? [
+          // Give the quote tab an owned task so its × actually hits the close guard.
+          runningTask({ spaceId: 'space-personal', spaceName: '我的空间' }),
+          ...PERSONAL_RUNTIME_TASKS,
+        ]
+      : RUNTIME_TASKS,
   )
   const [quoteStopFailedOnce, setQuoteStopFailedOnce] = useState(false)
 

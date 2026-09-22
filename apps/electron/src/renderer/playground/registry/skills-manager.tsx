@@ -169,6 +169,7 @@ function PanelPreview({
         activeId={isEnterprise ? 'org-chenxing' : 'org-demo'}
       >
         <SkillsManagerPanel
+          key={initialTab}
           managedSkills={skills}
           discoverItems={isEnterprise ? entDiscoverItems : circleDiscoverItems}
           spaceKind={spaceKind}
