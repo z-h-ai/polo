@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
+import { creatorSkillConflictConfirmation } from '@/lib/creator-skill-conflicts'
+import { creatorSkillErrorDiagnostic, translateCreatorSkillError } from '@/lib/creator-skill-errors'
 import type { LoadedSkill } from '../../../../shared/types'
 import { DiscoverSkillsList } from './DiscoverSkillsList'
 import { LocalSkillsList } from './LocalSkillsList'
@@ -10,6 +12,7 @@ import { SkillActionButton } from './parts'
 import { SkillDetailSheet } from './SkillDetailSheet'
 import { SkillInstallSheet } from './SkillInstallSheet'
 import {
+  canUninstallManagedSkill,
   managedSkillFromLoaded,
   type DiscoverableSkill,
   type ManagedSkill,
@@ -104,87 +107,163 @@ export function SkillsManagerPanel({
   // copies start disabled (install never auto-enables) and flip only on
   // explicit user action.
   const [enabledOverrides, setEnabledOverrides] = React.useState<Record<string, boolean>>({})
+  // Versions installed through this panel (real channel or, when no channel
+  // is wired, the self-consistent local simulation). Keyed by slug.
+  const [installedFromDiscover, setInstalledFromDiscover] = React.useState<Record<string, string>>({})
+
+  // Enterprise shared library fetch state: loading / error / cursor paging.
+  const [orgDiscover, setOrgDiscover] = React.useState<{
+    status: 'idle' | 'loading' | 'ready' | 'error'
+    items: DiscoverableSkill[]
+    nextCursor?: string
+  }>({ status: 'idle', items: [] })
+  const orgDiscoverRequestId = React.useRef(0)
+
+  const [view, setView] = React.useState<ManagerView>(
+    initialTab === 'discover' ? { kind: 'discover' } : { kind: 'local' },
+  )
+  const activeTab = view.kind === 'discover' || view.kind === 'install' ? 'discover' : 'local'
+
+  /** Discover entries before installed-copy info is merged in. */
+  const discoverBase = React.useMemo<DiscoverableSkill[]>(() => {
+    if (discoverItems) return discoverItems
+    if (resolvedSpaceKind !== 'enterprise') return []
+    return orgDiscover.items
+  }, [discoverItems, resolvedSpaceKind, orgDiscover])
+
+  /** Installed copies keyed by discover slug (from data hooks or installs). */
+  const installedBySlug = React.useMemo(() => {
+    const map: Record<string, { version: string; enabled: boolean; restricted: boolean; updateVersion?: string }> = {}
+    for (const skill of skills) {
+      const installation = skill.creatorInstallation
+      if (!installation) continue
+      map[skill.slug] = {
+        version: installation.version,
+        enabled: enabledOverrides[skill.slug] ?? false,
+        restricted: installation.lastKnownStatus === 'revoked'
+          || installation.lastKnownStatus === 'archived',
+        updateVersion: availableCreatorSkillVersions[skill.slug] || undefined,
+      }
+    }
+    for (const [slug, version] of Object.entries(installedFromDiscover)) {
+      if (map[slug]) continue
+      map[slug] = { version, enabled: enabledOverrides[slug] ?? false, restricted: false }
+    }
+    return map
+  }, [skills, availableCreatorSkillVersions, enabledOverrides, installedFromDiscover])
+
+  const effectiveDiscoverItems = React.useMemo(
+    () => discoverBase.map((entry) => {
+      const installed = entry.installed ?? installedBySlug[entry.slug]
+      return installed ? { ...entry, installed } : entry
+    }),
+    [discoverBase, installedBySlug],
+  )
+
   const localSkills = React.useMemo<ManagedSkill[]>(() => {
     const applyOverrides = (list: ManagedSkill[]) => list.map((item) => (
       enabledOverrides[item.slug] === undefined
         ? item
         : { ...item, enabled: enabledOverrides[item.slug] }
     ))
-    if (managedSkills) return applyOverrides(managedSkills)
-    return applyOverrides(skills.map((skill) => managedSkillFromLoaded(skill, {
-      availableVersion: availableCreatorSkillVersions[skill.slug] || undefined,
-    })))
-  }, [managedSkills, skills, availableCreatorSkillVersions, enabledOverrides])
+    const base = managedSkills
+      ? [...managedSkills]
+      : skills.map((skill) => managedSkillFromLoaded(skill, {
+        availableVersion: availableCreatorSkillVersions[skill.slug] || undefined,
+      }))
+    // Rows for copies installed via this panel that the data hooks have not
+    // surfaced yet (real installs refresh through onSkillsChanged; unwired
+    // contexts keep the list self-consistent here).
+    for (const [slug, version] of Object.entries(installedFromDiscover)) {
+      if (base.some((item) => item.slug === slug)) continue
+      const entry = discoverBase.find((item) => item.slug === slug)
+      base.push({
+        slug,
+        name: entry?.name ?? slug,
+        description: entry?.description ?? '',
+        origin: resolvedSpaceKind === 'enterprise' ? 'org' : 'circle',
+        originLabel: 'discover',
+        provider: entry?.provider,
+        installedVersion: version,
+        enabled: false,
+        restricted: false,
+      })
+    }
+    return applyOverrides(base)
+  }, [
+    managedSkills,
+    skills,
+    availableCreatorSkillVersions,
+    enabledOverrides,
+    installedFromDiscover,
+    discoverBase,
+    resolvedSpaceKind,
+  ])
 
-  const [orgDiscoverItems, setOrgDiscoverItems] = React.useState<DiscoverableSkill[] | null>(null)
-  const [view, setView] = React.useState<ManagerView>(
-    initialTab === 'discover' ? { kind: 'discover' } : { kind: 'local' },
-  )
-  const activeTab = view.kind === 'discover' || view.kind === 'install' ? 'discover' : 'local'
+  /** Fetch a page of the enterprise shared library (cursor-aware). */
+  const loadOrgDiscover = React.useCallback(async (cursor?: string) => {
+    const activeOrgId = organizationContext?.activeOrganizationId
+    if (!activeOrgId) {
+      setOrgDiscover({ status: 'ready', items: [] })
+      return
+    }
+    const requestId = ++orgDiscoverRequestId.current
+    setOrgDiscover((current) => ({
+      status: 'loading',
+      items: cursor ? current.items : [],
+      nextCursor: cursor ? current.nextCursor : undefined,
+    }))
+    try {
+      const result = await window.electronAPI.creatorArtifactList({
+        organizationId: activeOrgId,
+        type: 'skill',
+        cursor,
+      })
+      if (requestId !== orgDiscoverRequestId.current) return
+      if (!result.success) {
+        setOrgDiscover((current) => ({
+          status: 'error',
+          items: cursor ? current.items : [],
+          nextCursor: cursor ? current.nextCursor : undefined,
+        }))
+        return
+      }
+      const mapped: DiscoverableSkill[] = result.artifacts
+        .filter((artifact) => artifact.status === 'published')
+        .map((artifact) => ({
+          slug: artifact.slug,
+          name: artifact.name ?? artifact.slug,
+          description: artifact.summary ?? '',
+          provider: resolvedSpaceName,
+          version: artifact.latestPublishedVersion ?? '1.0.0',
+          glyph: artifact.displayIcon?.kind === 'emoji' ? artifact.displayIcon.value : '✧',
+          artifactId: artifact.id,
+          installSource: {
+            organizationId: artifact.organizationId,
+            artifactId: artifact.id,
+          },
+        }))
+      setOrgDiscover((current) => ({
+        status: 'ready',
+        items: cursor ? [...current.items, ...mapped] : mapped,
+        nextCursor: result.nextCursor,
+      }))
+    } catch {
+      if (requestId !== orgDiscoverRequestId.current) return
+      setOrgDiscover((current) => ({
+        status: 'error',
+        items: cursor ? current.items : [],
+        nextCursor: cursor ? current.nextCursor : undefined,
+      }))
+    }
+  }, [organizationContext, resolvedSpaceName])
 
   // Enterprise shared library: load lazily when the 获取 tab opens.
   React.useEffect(() => {
     if (discoverItems || resolvedSpaceKind !== 'enterprise' || activeTab !== 'discover') return
-    if (orgDiscoverItems) return
-    let cancelled = false
-    const activeOrgId = organizationContext?.activeOrganizationId
-    if (!activeOrgId) {
-      setOrgDiscoverItems([])
-      return
-    }
-    void window.electronAPI.creatorArtifactList({
-      organizationId: activeOrgId,
-      type: 'skill',
-    }).then((result) => {
-      if (cancelled) return
-      if (!result.success) {
-        setOrgDiscoverItems([])
-        return
-      }
-      setOrgDiscoverItems(
-        result.artifacts
-          .filter((artifact) => artifact.status === 'published')
-          .map((artifact) => {
-            const installed = localSkills.find(
-              (skill) => skill.skill?.creatorInstallation?.artifactId === artifact.id,
-            )
-            return {
-              slug: artifact.slug,
-              name: artifact.name ?? artifact.slug,
-              description: artifact.summary ?? '',
-              provider: resolvedSpaceName,
-              version: artifact.latestPublishedVersion ?? '1.0.0',
-              glyph: artifact.displayIcon?.kind === 'emoji' ? artifact.displayIcon.value : '✧',
-              installed: installed
-                ? {
-                  version: installed.installedVersion ?? '1.0.0',
-                  enabled: installed.enabled,
-                  restricted: installed.restricted,
-                  updateVersion: installed.availableVersion,
-                }
-                : undefined,
-            }
-          }),
-      )
-    }).catch(() => {
-      if (!cancelled) setOrgDiscoverItems([])
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [
-    discoverItems,
-    resolvedSpaceKind,
-    activeTab,
-    orgDiscoverItems,
-    organizationContext,
-    localSkills,
-    resolvedSpaceName,
-  ])
-
-  const effectiveDiscoverItems = discoverItems
-    ?? orgDiscoverItems
-    ?? []
+    if (orgDiscover.status !== 'idle') return
+    void loadOrgDiscover()
+  }, [discoverItems, resolvedSpaceKind, activeTab, orgDiscover.status, loadOrgDiscover])
 
   const handleToggleEnabled = (skill: ManagedSkill, enabled: boolean) => {
     setEnabledOverrides((current) => ({ ...current, [skill.slug]: enabled }))
@@ -213,27 +292,104 @@ export function SkillsManagerPanel({
     setView({ kind: 'detail', slug: entry.slug, mode: 'manage' })
   }
 
-  const handleInstall = (entry: DiscoverableSkill) => {
+  const notifyInstalled = (entry: DiscoverableSkill) => {
+    toast(t('skillsManager.toast.installed', { name: entry.name }), {
+      description: t('skillsManager.install.footnote'),
+    })
+  }
+
+  /**
+   * Install through the real creator channel when the entry carries the
+   * wiring (org shared library); otherwise fall back to a self-consistent
+   * local install: a new disabled row plus the discover entry flipping to
+   * 管理. No timers anywhere — nothing fires after unmount.
+   */
+  const handleInstall = async (entry: DiscoverableSkill) => {
     if (installFails) {
       setView({ kind: 'install', entry, phase: 'failed' })
       return
     }
-    setView({ kind: 'install', entry, phase: 'installing' })
-    window.setTimeout(() => {
+    const installSource = entry.installSource
+    if (!installSource || !workspaceId) {
+      setInstalledFromDiscover((current) => ({ ...current, [entry.slug]: entry.version }))
+      notifyInstalled(entry)
       setView({ kind: 'local' })
-      toast(t('skillsManager.toast.installed', { name: entry.name }), {
-        description: t('skillsManager.install.footnote'),
-      })
-    }, 600)
-  }
-
-  const handleUninstall = (skill: ManagedSkill) => {
-    const realSkill = skill.skill
-    if (realSkill && realSkill.source === 'workspace' && onDeleteSkill) {
-      onDeleteSkill(skill.slug)
       return
     }
-    toast(t('skillsManager.toast.uninstalled', { name: skill.name }))
+    setView({ kind: 'install', entry, phase: 'installing' })
+    try {
+      const grant = await window.electronAPI.creatorSkillGetDownloadGrant({
+        organizationId: installSource.organizationId,
+        artifactId: installSource.artifactId,
+        version: entry.version,
+      })
+      if (!grant.success) {
+        toast.error(translateCreatorSkillError(t, grant))
+        setView({ kind: 'install', entry, phase: 'failed' })
+        return
+      }
+      const install = (confirmations: {
+        replaceExisting?: boolean
+        confirmGlobalOverride?: boolean
+        backupLocalChanges?: boolean
+      } = {}) => window.electronAPI.creatorSkillInstall({
+          workspaceId,
+          operationId: crypto.randomUUID(),
+          grant: {
+            artifactId: grant.artifactId,
+            organizationId: grant.organizationId,
+            slug: grant.slug,
+            version: grant.version,
+            url: grant.url,
+            expiresAt: grant.expiresAt,
+            archiveChecksum: grant.archiveChecksum,
+            contentDigest: grant.contentDigest,
+            manifest: grant.manifest,
+            validationPolicy: grant.validationPolicy,
+          },
+          ...confirmations,
+        })
+      let result = await install()
+      if (!result.success && result.conflicts?.length) {
+        const accepted = window.confirm(creatorSkillConflictConfirmation(t, {
+          conflicts: result.conflicts,
+          conflictDetails: result.conflictDetails,
+        }))
+        if (!accepted) {
+          setView({ kind: 'discover' })
+          return
+        }
+        result = await install({
+          replaceExisting: true,
+          confirmGlobalOverride: true,
+          backupLocalChanges: true,
+        })
+      }
+      if (!result.success) {
+        toast.error(translateCreatorSkillError(t, result), {
+          description: creatorSkillErrorDiagnostic(result),
+        })
+        setView({ kind: 'install', entry, phase: 'failed' })
+        return
+      }
+      setInstalledFromDiscover((current) => ({ ...current, [entry.slug]: entry.version }))
+      notifyInstalled(entry)
+      setView({ kind: 'local' })
+    } catch (error) {
+      console.error('[SkillsManager] install failed:', error)
+      setView({ kind: 'install', entry, phase: 'failed' })
+    }
+  }
+
+  /**
+   * Uninstall only through the real channel (the AppShell delete handler
+   * wraps deleteSkill + creatorSkillUninstall with the modified-copy
+   * confirmation). Rows without an executable channel are disabled
+   * upstream — never report success without removing anything.
+   */
+  const handleUninstall = (skill: ManagedSkill) => {
+    if (!canUninstallManagedSkill(skill) || !onDeleteSkill) return
+    onDeleteSkill(skill.slug)
     setView({ kind: 'local' })
   }
 
@@ -345,6 +501,15 @@ export function SkillsManagerPanel({
             items={effectiveDiscoverItems}
             spaceKind={resolvedSpaceKind}
             spaceName={resolvedSpaceName}
+            loading={!discoverItems && orgDiscover.status === 'loading'}
+            error={!discoverItems && orgDiscover.status === 'error'}
+            onRetry={discoverItems || resolvedSpaceKind !== 'enterprise'
+              ? undefined
+              : () => { void loadOrgDiscover() }}
+            hasMore={!discoverItems && Boolean(orgDiscover.nextCursor)}
+            onLoadMore={discoverItems || !orgDiscover.nextCursor
+              ? undefined
+              : () => { void loadOrgDiscover(orgDiscover.nextCursor) }}
             onViewInstall={(entry) => setView({ kind: 'install', entry, phase: 'review' })}
             onManage={handleManageDiscover}
             onShareToOrg={resolvedSpaceKind === 'enterprise'

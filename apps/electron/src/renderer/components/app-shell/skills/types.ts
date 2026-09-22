@@ -90,6 +90,13 @@ export interface DiscoverableSkill {
   version: string
   /** Glyph shown in the tile when no real icon is available. */
   glyph?: string
+  /** Creator artifact id, when the entry came from the org shared library. */
+  artifactId?: string
+  /** Wiring for the real install channel (creator grant + install). */
+  installSource?: {
+    organizationId: string
+    artifactId: string
+  }
   /** Local copy state, when something is already installed. */
   installed?: {
     version: string
@@ -130,7 +137,8 @@ export function discoverRowState(entry: DiscoverableSkill): DiscoverRowState {
 
 /**
  * Adapt a `LoadedSkill` from the existing data hooks into the managed-row
- * model. Built-in/global skills default to enabled; distributed
+ * model. Local skills (global / workspace / project) are on by default —
+ * they were already active before the manager existed. Distributed
  * (creator-installed) skills default to disabled per the R6 rule that an
  * install never auto-enables. A revoked/archived source keeps the copy,
  * forces disabled, and marks the row restricted.
@@ -155,10 +163,21 @@ export function managedSkillFromLoaded(
     origin,
     originLabel: skill.source,
     installedVersion: installation?.version,
-    enabled: origin === 'builtin' && !restricted,
+    enabled: !installation && !restricted,
     restricted,
     restrictedReason: installation?.lastKnownStatus,
     skill,
     ...overrides,
   }
+}
+
+/**
+ * Whether a managed row can actually be uninstalled through a real
+ * channel: only workspace-local copies (which is where creator-installed
+ * skills land) have one. Built-in/client skills and project-managed skills
+ * are not removable from this machine, and rows without a backing
+ * LoadedSkill (demo data) cannot execute anything.
+ */
+export function canUninstallManagedSkill(skill: ManagedSkill): boolean {
+  return skill.skill?.source === 'workspace'
 }

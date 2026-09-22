@@ -1,5 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { Spinner } from '@polo-ai/ui'
 import { cn } from '@/lib/utils'
 import { SkillActionButton } from './parts'
 import { SkillGlyphTile } from './SkillGlyphTile'
@@ -15,6 +17,14 @@ export interface DiscoverSkillsListProps {
   items: DiscoverableSkill[]
   spaceKind: SkillSpaceKind
   spaceName: string
+  /** Shared library fetch in flight (first page still empty). */
+  loading?: boolean
+  /** Shared library fetch failed; show the error state with retry. */
+  error?: boolean
+  onRetry?: () => void
+  /** Another page is available behind the cursor. */
+  hasMore?: boolean
+  onLoadMore?: () => void
   /** Open the install sheet for a not-yet-installed entry. */
   onViewInstall: (entry: DiscoverableSkill) => void
   /** Manage the installed local copy of an entry. */
@@ -36,6 +46,11 @@ export function DiscoverSkillsList({
   items,
   spaceKind,
   spaceName,
+  loading = false,
+  error = false,
+  onRetry,
+  hasMore = false,
+  onLoadMore,
   onViewInstall,
   onManage,
   onShareToOrg,
@@ -48,7 +63,27 @@ export function DiscoverSkillsList({
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       <div className="min-h-0 flex-1 overflow-y-auto rounded-hifi-lg border border-hifi-border bg-hifi-surface">
-        {items.map((entry) => {
+        {loading && items.length === 0 && (
+          <div className="flex items-center justify-center gap-2 px-3 py-8 text-hifi-sm text-hifi-fg-50">
+            <Spinner className="size-3.5" />
+            {t('skillsManager.discover.loading')}
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+            <div className="flex items-center gap-1.5 text-hifi-sm text-hifi-destructive">
+              <AlertTriangle className="size-3.5" />
+              {t('skillsManager.discover.loadFailed')}
+            </div>
+            <SkillActionButton onClick={onRetry} disabled={!onRetry}>
+              <RefreshCw className="mr-1 size-3.5" />
+              {t('common.retry')}
+            </SkillActionButton>
+          </div>
+        )}
+
+        {!error && items.map((entry) => {
           const rowState = discoverRowState(entry)
           const installed = Boolean(entry.installed)
           return (
@@ -90,7 +125,17 @@ export function DiscoverSkillsList({
           )
         })}
 
-        {items.length === 0 && (
+        {!error && hasMore && onLoadMore && (
+          <div className="flex justify-center border-t border-hifi-border px-3 py-2">
+            <SkillActionButton disabled={loading} onClick={onLoadMore}>
+              {loading
+                ? t('skillsManager.discover.loadingMore')
+                : t('skillsManager.discover.loadMore')}
+            </SkillActionButton>
+          </div>
+        )}
+
+        {!error && !loading && items.length === 0 && (
           <p className="px-3 py-6 text-center text-hifi-sm text-hifi-fg-50">
             {t(isEnterprise
               ? 'skillsManager.discover.empty.ent'

@@ -5,7 +5,12 @@ import { cn } from '@/lib/utils'
 import { SkillActionButton, SkillFactsTable } from './parts'
 import { SkillGlyphTile } from './SkillGlyphTile'
 import { SkillStateBadge } from './SkillStateBadge'
-import { localSkillRowState, type ManagedSkill, type SkillDetailMode } from './types'
+import {
+  canUninstallManagedSkill,
+  localSkillRowState,
+  type ManagedSkill,
+  type SkillDetailMode,
+} from './types'
 
 export interface SkillDetailSheetProps {
   skill: ManagedSkill
@@ -49,6 +54,7 @@ export function SkillDetailSheet({
 }: SkillDetailSheetProps) {
   const { t } = useTranslation()
   const isBuiltin = skill.origin === 'builtin'
+  const canUninstall = canUninstallManagedSkill(skill)
 
   if (mode !== 'manage') {
     const restricted = mode === 'confirm-uninstall-restricted'
@@ -83,6 +89,8 @@ export function SkillDetailSheet({
             <SkillActionButton
               variant="danger"
               data-testid="confirm-uninstall"
+              disabled={!canUninstall}
+              title={canUninstall ? undefined : t('skillsManager.uninstall.unavailable')}
               onClick={() => onConfirmUninstall(skill)}
             >
               {t('skillsManager.uninstall.confirm')}
@@ -188,6 +196,8 @@ export function SkillDetailSheet({
           <SkillActionButton
             variant="danger"
             data-testid="request-uninstall"
+            disabled={!canUninstall}
+            title={canUninstall ? undefined : t('skillsManager.uninstall.unavailable')}
             onClick={() => onRequestUninstall(skill)}
           >
             {t('skillsManager.action.uninstall')}

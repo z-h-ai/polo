@@ -6,7 +6,12 @@ import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-dis
 import { SkillActionButton } from './parts'
 import { SkillGlyphTile } from './SkillGlyphTile'
 import { SkillStateBadge } from './SkillStateBadge'
-import { localSkillRowState, type ManagedSkill, type SkillSpaceKind } from './types'
+import {
+  canUninstallManagedSkill,
+  localSkillRowState,
+  type ManagedSkill,
+  type SkillSpaceKind,
+} from './types'
 
 export interface LocalSkillsListProps {
   skills: ManagedSkill[]
@@ -68,6 +73,9 @@ export function LocalSkillsList({
   const sourceLine = (skill: ManagedSkill) => {
     if (skill.origin === 'builtin') {
       return t('skillsManager.source.builtin')
+    }
+    if (skill.skill?.source === 'project') {
+      return t('skillsManager.source.project')
     }
     const provider = skill.provider ?? (
       skill.origin === 'org' ? spaceName : t('skillsManager.source.personal')
@@ -158,7 +166,14 @@ export function LocalSkillsList({
                       <SkillActionButton onClick={() => onReauthorize(skill)}>
                         {t('skillsManager.action.reauthorize')}
                       </SkillActionButton>
-                      <SkillActionButton variant="danger" onClick={() => onUninstall(skill)}>
+                      <SkillActionButton
+                        variant="danger"
+                        disabled={!canUninstallManagedSkill(skill)}
+                        title={canUninstallManagedSkill(skill)
+                          ? undefined
+                          : t('skillsManager.uninstall.unavailable')}
+                        onClick={() => onUninstall(skill)}
+                      >
                         {t('skillsManager.action.uninstall')}
                       </SkillActionButton>
                     </>
