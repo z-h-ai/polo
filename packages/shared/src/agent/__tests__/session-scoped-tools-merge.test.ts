@@ -49,10 +49,10 @@ describe('session-scoped tool callback merge', () => {
 
     registerSessionScopedToolCallbacks(sessionId, {
       browserPaneFns,
-    });
+    }, 'test-owner');
 
     const queryFn = async () => ({ text: 'ok', model: 'test' });
-    mergeSessionScopedToolCallbacks(sessionId, { queryFn });
+    mergeSessionScopedToolCallbacks(sessionId, { queryFn }, 'test-owner');
 
     const merged = getSessionScopedToolCallbacks(sessionId);
     expect(merged).toBeTruthy();

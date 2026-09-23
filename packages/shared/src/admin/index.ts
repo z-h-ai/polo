@@ -4,6 +4,7 @@ export * from './semver.ts';
 export * from './context-key.ts';
 export * from './authorization-failure.ts';
 export * from './creator-app-publishing.ts';
+export * from './product-spaces.ts';
 export { getAppCatalogApps } from './app-catalog-view.ts';
 export { AdminClient, getSafeAdminErrorMessage } from './client.ts';
 export {

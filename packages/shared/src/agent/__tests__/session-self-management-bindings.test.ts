@@ -74,7 +74,7 @@ describe('Pi session self-management regression (#511)', () => {
       listSessionsFn: () => ({ total: 1, returned: 1, sessions: [] }),
       resolveLabelsFn: (labels) => ({ resolved: labels, unknown: [], available: labels }),
       resolveStatusFn: (status) => ({ resolved: status, available: ['active', 'done'] }),
-    });
+    }, 'test-owner');
 
     // All 6 properties should now be defined
     expect(ctx.setSessionLabels).toBeDefined();
@@ -140,7 +140,7 @@ describe('attachSessionSelfManagementBindings', () => {
     // Late merge — simulates SessionManager registering after agent start
     registerSessionScopedToolCallbacks(sessionId, {
       setSessionLabelsFn: () => {},
-    });
+    }, 'test-owner');
 
     // Should now be defined without recreating ctx
     expect(ctx.setSessionLabels).toBeDefined();
@@ -156,7 +156,7 @@ describe('attachSessionSelfManagementBindings', () => {
     // Register callback A
     registerSessionScopedToolCallbacks(sessionId, {
       setSessionStatusFn: (_, status) => { callsA.push(status); },
-    });
+    }, 'test-owner');
 
     ctx.setSessionStatus!(undefined, 'from-A');
     expect(callsA).toEqual(['from-A']);
@@ -164,7 +164,7 @@ describe('attachSessionSelfManagementBindings', () => {
     // Replace with callback B via merge (full overwrite)
     mergeSessionScopedToolCallbacks(sessionId, {
       setSessionStatusFn: (_, status) => { callsB.push(status); },
-    });
+    }, 'test-owner');
 
     ctx.setSessionStatus!(undefined, 'from-B');
     expect(callsA).toEqual(['from-A']); // A not called again
@@ -181,7 +181,7 @@ describe('attachSessionSelfManagementBindings', () => {
         receivedId = sid;
         return makeSessionInfo({ id: sid ?? sessionId });
       },
-    });
+    }, 'test-owner');
 
     // Call without arg — should default to sessionId
     ctx.getSessionInfo!();
@@ -199,7 +199,7 @@ describe('attachSessionSelfManagementBindings', () => {
     let receivedSid: string | undefined;
     registerSessionScopedToolCallbacks(sessionId, {
       setSessionLabelsFn: (sid) => { receivedSid = sid; },
-    });
+    }, 'test-owner');
 
     await ctx.setSessionLabels!('explicit-session-123', ['test']);
     expect(receivedSid).toBe('explicit-session-123');
@@ -245,7 +245,7 @@ describe('Claude/Pi session self-management parity', () => {
       listSessionsFn: () => ({ total: 0, returned: 0, sessions: [] }),
       resolveLabelsFn: (l) => ({ resolved: l, unknown: [], available: l }),
       resolveStatusFn: (s) => ({ resolved: s, available: [] }),
-    });
+    }, 'test-owner');
 
     // Simulate Pi path: createClaudeContext + attachBindings
     const piCtx = createBaseContext(sessionId);

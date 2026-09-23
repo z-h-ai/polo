@@ -5,6 +5,7 @@ import type {
   CatalogApp,
   DeniedAppCatalogSnapshot,
 } from '@polo-ai/shared/admin'
+import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -20,8 +21,14 @@ import {
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
   type LocalAppStartResult,
+  type ProductSpaceAppIdentity,
+  type ProductSpaceAppInstallState,
 } from '@polo-ai/shared/protocol'
-import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import {
+  isProductSpaceContractUnsupported,
+  reportProductSpaceContractFailure,
+} from '@/lib/product-space-contract-failure'
 import {
   emitAdminCatalogSessionAuthFailure,
 } from '@/lib/admin-auth-failure'
@@ -38,10 +45,55 @@ export interface AppCatalogState {
   statusLoadingScopeKeys: Record<string, true>
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
+  /** Installation-only projection. Runtime lifecycle remains owned by POO-47. */
+  installStates: Record<string, ProductSpaceAppInstallState>
+  /**
+   * CreatorCircle relations visible in the active space's Catalog, derived
+   * from the entries' creator_circle sources (REQ-022: the "我的圈子"
+   * relation entry). Empty for enterprise spaces and when nothing was
+   * derived yet.
+   */
+  creatorCircles: CreatorCircleRelation[]
   host: {
     platform: 'darwin' | 'win32' | 'linux'
     arch: 'arm64' | 'x64'
   } | null
+}
+
+export interface CreatorCircleRelation {
+  circleId: string
+  name: string
+}
+
+/**
+ * Distinct creator_circle sources across the space's Catalog entries — the
+ * account's visible CreatorCircle relations (REQ-022). Deduplicated by
+ * circleId; entries without such sources contribute nothing.
+ */
+export function selectCreatorCircleRelations(
+  entries: ReadonlyArray<Record<string, unknown>>,
+): CreatorCircleRelation[] {
+  const byCircleId = new Map<string, CreatorCircleRelation>()
+  for (const rawEntry of entries) {
+    const sources = rawEntry.sources
+    if (!Array.isArray(sources)) continue
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue
+      const candidate = source as { kind?: unknown; circleId?: unknown; name?: unknown }
+      if (candidate.kind !== 'creator_circle') continue
+      const circleId = typeof candidate.circleId === 'string' && candidate.circleId
+        ? candidate.circleId
+        : (typeof candidate.name === 'string' ? candidate.name : '')
+      if (!circleId) continue
+      if (!byCircleId.has(circleId)) {
+        byCircleId.set(circleId, {
+          circleId,
+          name: typeof candidate.name === 'string' && candidate.name ? candidate.name : circleId,
+        })
+      }
+    }
+  }
+  return [...byCircleId.values()]
 }
 
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
@@ -223,6 +275,79 @@ function scopeForCatalogApp(
   }
 }
 
+/**
+ * Collision-free STABLE Catalog identity for install-state reconciliation
+ * and lookups: account + productSpace + catalogEntry + artifact instance.
+ * Deliberately different from the runtime scope (single catalogAppId slot):
+ * a legal cross-version reissue (entry-new live + entry-old withdrawn on the
+ * same artifact instance) must keep BOTH identities addressable.
+ */
+function productSpaceUiIdentityKey(
+  accountId: string,
+  productSpaceId: string,
+  catalogEntryId: string,
+  artifactInstanceId: string,
+): string {
+  return JSON.stringify([
+    'product-space-install',
+    accountId,
+    productSpaceId,
+    catalogEntryId,
+    artifactInstanceId,
+  ])
+}
+
+/**
+ * Collision-free STABLE operation identity for ProductSpace install/uninstall
+ * single-flight: a JSON tuple over account, productSpace, catalogEntry, and
+ * artifact instance. Opaque IDs may contain any delimiter, so delimiter
+ * concatenation could merge two distinct identities; versionId is
+ * deliberately excluded — the single-flight slot belongs to the STABLE
+ * artifact instance, and runExclusive scopes it by operation kind.
+ */
+function productSpaceOperationIdentityKey(identity: ProductSpaceAppIdentity): string {
+  return JSON.stringify([
+    'product-space-op',
+    identity.accountId,
+    identity.productSpaceId,
+    identity.catalogEntryId,
+    identity.artifactInstanceId,
+  ])
+}
+
+function identityForProductSpaceApp(
+  catalog: AppCatalogCacheEntry,
+  app: CatalogApp,
+): ProductSpaceAppIdentity {
+  if (
+    app.organizationId !== catalog.organizationId
+    || !app.catalogEntryId
+    || !app.artifactInstanceId
+    || !app.catalogVersion
+    // The RAW authoritative sources and availability are part of the sealed
+    // identity contract: an app projected without them (stale cache, foreign
+    // fixture) can never produce a provable identity.
+    || !app.catalogSources
+    || app.catalogSources.length === 0
+    || !app.rawAvailability
+  ) throw new Error(i18n.t('homeApps.errors.staleContext'))
+  return {
+    accountId: catalog.accountId,
+    productSpaceId: catalog.organizationId,
+    catalogRevision: catalog.appConfigVersion,
+    catalogEntryId: app.catalogEntryId,
+    artifactInstanceId: app.artifactInstanceId,
+    versionId: app.catalogVersion.versionId,
+    version: app.catalogVersion.version,
+    sources: app.catalogSources.map(source => ({
+      kind: source.kind,
+      name: source.name ?? null,
+      circleId: source.circleId ?? null,
+    })),
+    availability: app.rawAvailability,
+  }
+}
+
 interface ContextSnapshot {
   contextKey: string
   contextGeneration: number
@@ -230,12 +355,111 @@ interface ContextSnapshot {
   syncGeneration?: number
 }
 
+/**
+ * Projects a validated ProductSpace Catalog into the home App grid view
+ * model. Delivery data is deliberately absent: launching requires a fresh
+ * resolve-launch grant, so the projection never carries runnable URLs.
+ */
+function mapProductSpaceCatalogToCacheEntry(
+  productSpaceId: string,
+  accountId: string,
+  catalogResult: {
+    catalogRevision?: string
+    entries: ReadonlyArray<Record<string, unknown>>
+    withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+  },
+): AppCatalogCacheEntry {
+  const apps: CatalogApp[] = []
+  const withdrawnApps: CatalogApp[] = []
+  const mapEntry = (
+    rawEntry: Record<string, unknown>,
+    index: number,
+    availability: 'available' | 'withdrawn' | 'unavailable',
+  ): CatalogApp | null => {
+    const entry = rawEntry as {
+      kind?: string
+      catalogEntryId?: string
+      artifactInstanceId?: string
+      version?: {
+        versionId: string
+        version: string
+        checksum?: string
+      }
+      name?: string
+      description?: string
+      iconUrl?: string
+      availability?: string
+      sources?: ReadonlyArray<{ kind: string; name?: string }>
+      unavailableReason?: string
+      permissions?: string[]
+    }
+    if (entry.kind !== 'app' || !entry.catalogEntryId || !entry.name) return null
+    const effectiveAvailability = entry.availability === 'available'
+      ? 'available'
+      : availability === 'withdrawn'
+      ? 'withdrawn'
+      : 'unavailable'
+    const sourceNames = [...new Set(
+      (entry.sources ?? [])
+        .map(source => source.name?.trim())
+        .filter((name): name is string => Boolean(name)),
+    )]
+    return {
+      id: entry.catalogEntryId,
+      catalogEntryId: entry.catalogEntryId,
+      artifactInstanceId: entry.artifactInstanceId,
+      catalogVersion: entry.version,
+      sourceNames,
+      unavailableReason: entry.unavailableReason,
+      organizationId: productSpaceId,
+      name: entry.name,
+      description: entry.description ?? '',
+      iconUrl: entry.iconUrl,
+      creatorName: sourceNames.join(' · ') || undefined,
+      // ProductSpace delivery is intentionally unknown until resolve-launch.
+      // It must never be inferred from fixture-only Catalog fields.
+      deliveryMode: 'resolve_launch',
+      permissions: entry.permissions,
+      sortOrder: index,
+      availability: effectiveAvailability,
+      // RAW authoritative sources + availability, sealed into operation
+      // identities. The effective `availability` above is a lossy UI
+      // projection ('blocked' collapses into 'unavailable') and the
+      // `sourceNames` above is a deduped display projection — neither may be
+      // used to seal an identity.
+      catalogSources: (entry.sources ?? []).map(source => ({ ...source })),
+      rawAvailability: entry.availability === 'available' || entry.availability === 'unavailable' || entry.availability === 'blocked'
+        ? entry.availability
+        : availability === 'withdrawn' ? 'withdrawn' : 'unavailable',
+    }
+  }
+  for (const [index, rawEntry] of catalogResult.entries.entries()) {
+    const app = mapEntry(rawEntry, index, 'available')
+    if (app) apps.push(app)
+  }
+  for (const [index, rawEntry] of (catalogResult.withdrawnEntries ?? []).entries()) {
+    const app = mapEntry(rawEntry, apps.length + index, 'withdrawn')
+    if (app) withdrawnApps.push(app)
+  }
+  return {
+    accountId,
+    organizationId: productSpaceId,
+    appConfigVersion: catalogResult.catalogRevision ?? '',
+    authorizationStatus: 'authorized',
+    syncedAt: Date.now(),
+    apps,
+    trustedReleases: {},
+    warnings: [],
+    withdrawnApps,
+  }
+}
+
 export function useAppCatalog() {
-  const organization = useOptionalOrganizationContext()
-  const organizationContextKey = organization?.organizationContextKey ?? null
+  const productSpace = useOptionalProductSpaceContext()
+  const catalogContextKey = productSpace?.productSpaceContextKey ?? null
   const [state, setState] = useState<AppCatalogState>({
     catalog: null,
-    loading: Boolean(organization),
+    loading: Boolean(productSpace),
     refreshing: false,
     warningCode: null,
     errorCode: null,
@@ -244,11 +468,14 @@ export function useAppCatalog() {
     statusLoadingScopeKeys: {},
     accessMode: null,
     statuses: {},
+    installStates: {},
+    creatorCircles: [],
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
-  const contextKeyRef = useRef<string | null>(organizationContextKey)
-  contextKeyRef.current = organizationContextKey
+  const contextKeyRef = useRef<string | null>(catalogContextKey)
+  contextKeyRef.current = catalogContextKey
+  const knownCatalogRevisionRef = useRef<string | null>(null)
   // Context generation invalidates lifecycle results only when account/org
   // authorization changes. Sync generation is intentionally separate so an
   // ordinary same-context Catalog refresh cannot discard a successful start.
@@ -274,19 +501,19 @@ export function useAppCatalog() {
   const currentSnapshotForApp = useCallback((app: CatalogApp): ContextSnapshot => {
     const catalog = catalogRef.current
     if (
-      !organizationContextKey
+      !catalogContextKey
       || !catalog
-      || catalog.accountId !== organization?.accountId
+      || catalog.accountId !== productSpace?.accountId
       || app.organizationId !== catalog.organizationId
     ) {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
     return {
-      contextKey: organizationContextKey,
+      contextKey: catalogContextKey,
       contextGeneration: contextGenerationRef.current,
       catalog,
     }
-  }, [organization?.accountId, organizationContextKey])
+  }, [productSpace?.accountId, catalogContextKey])
 
   const scopeForApp = useCallback((app: CatalogApp): CatalogLocalAppScope => (
     scopeForCatalogApp(currentSnapshotForApp(app).catalog, app)
@@ -295,6 +522,120 @@ export function useAppCatalog() {
   const scopeKeyForApp = useCallback((app: CatalogApp): string => (
     createLocalAppScopeKey(scopeForApp(app))
   ), [scopeForApp])
+
+  /**
+   * Collision-free STABLE identity key for UI selection and home quick-entry
+   * persistence: account + productSpace + catalogEntryId + artifact
+   * instance. Deliberately SEPARATE from the runtime scope key above (which
+   * carries only one catalogAppId slot): a catalogEntryId reused across
+   * artifact instances must keep its live row, withdrawn row, inspector
+   * selection, and quick-entry slot independent.
+   */
+  const uiIdentityKeyForApp = useCallback((app: CatalogApp): string => {
+    const catalog = currentSnapshotForApp(app).catalog
+    if (!app.catalogEntryId || !app.artifactInstanceId) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
+    return JSON.stringify([
+      'product-space-ui',
+      catalog.accountId,
+      catalog.organizationId,
+      app.catalogEntryId,
+      app.artifactInstanceId,
+    ])
+  }, [currentSnapshotForApp])
+
+  const refreshProductSpaceInstallStates = useCallback(async (
+    apps: CatalogApp[],
+    suppliedSnapshot?: ContextSnapshot,
+  ) => {
+    const catalog = suppliedSnapshot?.catalog ?? catalogRef.current
+    const contextKey = suppliedSnapshot?.contextKey ?? contextKeyRef.current
+    if (!catalog || !contextKey) return
+    const snapshot = suppliedSnapshot ?? {
+      contextKey,
+      contextGeneration: contextGenerationRef.current,
+      catalog,
+    }
+    if (!isCurrentSnapshot(snapshot)) return
+    try {
+      // Installation state is secondary to Catalog visibility. A malformed
+      // or stale identity fails this cache read closed without turning a
+      // successfully loaded Catalog into a page-level failure.
+      const activeIdentities: ProductSpaceAppIdentity[] = []
+      const withdrawnIdentities: ProductSpaceAppIdentity[] = []
+      for (const app of apps) {
+        if (app.availability === 'withdrawn') {
+          // A withdrawn tombstone is no longer in the fresh Catalog, so the
+          // authoritative-tuple channel would fail the whole batch closed.
+          // Its retained local installation is read through the restricted
+          // withdrawn-management identity (artifact instance scope) instead;
+          // an identity that cannot be built is skipped, never fatal.
+          try {
+            withdrawnIdentities.push(identityForProductSpaceApp(catalog, app))
+          } catch {
+            continue
+          }
+          continue
+        }
+        activeIdentities.push(identityForProductSpaceApp(catalog, app))
+      }
+      if (activeIdentities.length === 0 && withdrawnIdentities.length === 0) {
+        setState(current => ({ ...current, installStates: {} }))
+        return
+      }
+      const [activeStates, withdrawnStates] = await Promise.all([
+        activeIdentities.length > 0
+          ? window.electronAPI.localApps.getProductSpaceInstallStates(activeIdentities)
+          : Promise.resolve([]),
+        withdrawnIdentities.length > 0
+          ? window.electronAPI.localApps.getProductSpaceWithdrawnInstallStates(withdrawnIdentities)
+          : Promise.resolve([]),
+      ])
+      if (!isCurrentSnapshot(snapshot)) return
+      const states = [...activeStates, ...withdrawnStates]
+      // Keyed by the STABLE Catalog UI identity (accountId + productSpaceId +
+      // catalogEntryId + artifactInstanceId): the runtime scope
+      // (artifactInstanceId alone) aliases two Catalog identities after a
+      // legal cross-version reissue (entry-new live + entry-old withdrawn
+      // sharing artifact-X), which would collide requested rows and fail the
+      // whole reconciliation.
+      const identityKey = (identity: ProductSpaceAppIdentity): string => (
+        productSpaceUiIdentityKey(
+          identity.accountId,
+          identity.productSpaceId,
+          identity.catalogEntryId,
+          identity.artifactInstanceId,
+        )
+      )
+      const requested = new Map<string, ProductSpaceAppIdentity>()
+      for (const identity of withdrawnIdentities) {
+        requested.set(identityKey(identity), identity)
+      }
+      // A live entry always wins its identity key over a withdrawn one.
+      for (const identity of activeIdentities) {
+        requested.set(identityKey(identity), identity)
+      }
+      const next: Record<string, ProductSpaceAppInstallState> = {}
+      for (const installState of states) {
+        const expected = requested.get(identityKey(installState.app))
+        if (!expected || JSON.stringify(expected) !== JSON.stringify(installState.app)) {
+          throw new Error(i18n.t('homeApps.errors.staleContext'))
+        }
+        next[identityKey(installState.app)] = installState
+      }
+      if (Object.keys(next).length !== requested.size) {
+        throw new Error(i18n.t('homeApps.errors.staleContext'))
+      }
+      setState(current => isCurrentSnapshot(snapshot)
+        ? { ...current, installStates: next }
+        : current)
+    } catch {
+      if (isCurrentSnapshot(snapshot)) {
+        setState(current => ({ ...current, installStates: {} }))
+      }
+    }
+  }, [isCurrentSnapshot])
 
   const refreshRuntimeStatuses = useCallback(async (
     apps?: CatalogApp[],
@@ -462,9 +803,9 @@ export function useAppCatalog() {
 
   const sync = useCallback(async (force = false) => {
     if (
-      !organization
-      || !organizationContextKey
-      || !organization.activeOrganizationId
+      !productSpace
+      || !catalogContextKey
+      || !productSpace.activeProductSpaceId
     ) {
       catalogRef.current = null
       setState(current => ({
@@ -479,12 +820,14 @@ export function useAppCatalog() {
         statusLoadingScopeKeys: {},
         accessMode: null,
         statuses: {},
+        installStates: {},
+        creatorCircles: [],
       }))
       return
     }
     const syncGeneration = ++syncGenerationRef.current
     const contextGeneration = contextGenerationRef.current
-    const contextKey = organizationContextKey
+    const contextKey = catalogContextKey
     setState(current => ({
       ...current,
       loading: !current.catalog,
@@ -492,14 +835,18 @@ export function useAppCatalog() {
       errorCode: null,
     }))
     try {
-      let result = await window.electronAPI.adminSyncAppCatalog(
-        organization.activeOrganizationId,
-        { force },
+      // Unified ProductSpace Catalog (S01). The response was already parsed
+      // against the shared ProductSpace schema at the server boundary; a
+      // catalog for another space is rejected there and never hydrated here.
+      // The legacy Organization Catalog is not consulted as a fallback.
+      let catalogResult = await window.electronAPI.productSpaceGetCatalog(
+        productSpace.activeProductSpaceId,
+        force ? undefined : knownCatalogRevisionRef.current ?? undefined,
       )
       for (
         let retry = 0;
-        !result.success
-          && result.errorCode === 'REQUEST_SUPERSEDED'
+        !catalogResult.success
+          && catalogResult.errorCode === 'REQUEST_SUPERSEDED'
           && retry < CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT;
         retry += 1
       ) {
@@ -508,9 +855,9 @@ export function useAppCatalog() {
           || contextGeneration !== contextGenerationRef.current
           || contextKeyRef.current !== contextKey
         ) return
-        result = await window.electronAPI.adminSyncAppCatalog(
-          organization.activeOrganizationId,
-          { force },
+        catalogResult = await window.electronAPI.productSpaceGetCatalog(
+          productSpace.activeProductSpaceId,
+          force ? undefined : knownCatalogRevisionRef.current ?? undefined,
         )
       }
       if (
@@ -518,33 +865,35 @@ export function useAppCatalog() {
         || contextGeneration !== contextGenerationRef.current
         || contextKeyRef.current !== contextKey
       ) return
-      if (!result.success) {
-        emitAdminCatalogSessionAuthFailure(result)
-        const returnedCatalog = result.catalog
-        const matchingReturnedCatalog = returnedCatalog
-          && returnedCatalog.accountId === organization.accountId
-          && returnedCatalog.organizationId
-            === organization.activeOrganizationId
-          ? returnedCatalog
-          : null
-        // A persisted denied snapshot can accompany a temporary network error
-        // during cold token refresh. Its trusted accessMode is authoritative
-        // for Catalog hydration even though NETWORK_ERROR is not itself an
-        // authorization error.
-        const hasDeniedCatalogSnapshot = (
-          result.accessMode === 'denied'
-          && matchingReturnedCatalog !== null
-        )
-        if (
-          hasDeniedCatalogSnapshot
-          || isCatalogAccessDenied(result.errorCode, result.status)
-        ) {
+      if (!catalogResult.success) {
+        // PC-F11: a contract-incompatible Catalog is never a local load
+        // error — it goes through the global contract channel.
+        if (isProductSpaceContractUnsupported(catalogResult)) {
+          reportProductSpaceContractFailure({
+            errorCode: 'product_space_contract_unsupported',
+            source: 'catalog',
+          })
+          return
+        }
+        emitAdminCatalogSessionAuthFailure(catalogResult)
+        const failureCode = catalogResult.errorCode || 'request_failed'
+        // Authorization loss keeps a denied catalog tombstone: visible for
+        // explanation, never launchable. A returned denied snapshot is
+        // authoritative even alongside a transient network error.
+        const hasDeniedSnapshot = catalogResult.accessMode === 'denied'
+          && 'catalog' in catalogResult
+          && Boolean(catalogResult.catalog)
+        if (hasDeniedSnapshot || isCatalogAccessDenied(failureCode, catalogResult.status)) {
           const deniedContextGeneration = ++contextGenerationRef.current
-          const deniedCatalog = matchingReturnedCatalog
-            ? markCatalogAccessDenied(matchingReturnedCatalog)
-            : catalogRef.current
-              ? markCatalogAccessDenied(catalogRef.current)
-              : null
+          const deniedSnapshot = catalogResult.accessMode === 'denied'
+            && 'catalog' in catalogResult
+            && catalogResult.catalog
+            ? catalogResult.catalog
+            : null
+          const deniedCatalog = deniedSnapshot
+            ?? (catalogRef.current
+              ? markAppCatalogAccessDenied(catalogRef.current)
+              : null)
           catalogRef.current = deniedCatalog
           setState(current => ({
             ...current,
@@ -552,9 +901,11 @@ export function useAppCatalog() {
             loading: false,
             refreshing: false,
             warningCode: null,
-            errorCode: result.errorCode || 'request_failed',
+            errorCode: failureCode,
             statusLoadingScopeKeys: {},
             accessMode: 'denied',
+            installStates: {},
+            creatorCircles: [],
           }))
           if (deniedCatalog) {
             await refreshRuntimeStatuses(
@@ -574,10 +925,41 @@ export function useAppCatalog() {
           ...current,
           loading: false,
           refreshing: false,
-          errorCode: result.errorCode || 'request_failed',
+          errorCode: failureCode,
+          // A failed refresh invalidates stale circle relations (fail-closed):
+          // the relation entry must not re-echo the previous Catalog.
+          creatorCircles: [],
         }))
         return
       }
+      if (catalogResult.notModified && catalogRef.current) {
+        setState(current => ({
+          ...current,
+          loading: false,
+          refreshing: false,
+          errorCode: null,
+          accessMode: catalogResult.accessMode ?? 'online',
+        }))
+        return
+      }
+      const result = {
+        catalog: mapProductSpaceCatalogToCacheEntry(
+          productSpace.activeProductSpaceId,
+          productSpace.accountId,
+          catalogResult,
+        ),
+        accessMode: catalogResult.accessMode ?? 'online',
+        warningCode: catalogResult.warningCode ?? null,
+      }
+      // Withdrawn tombstones are NOT diffed renderer-side: Main records the
+      // verified Catalog into its persisted authority and emits credential-
+      // stripped tombstones (catalogResult.withdrawnEntries) that survive
+      // renderer restarts. mapProductSpaceCatalogToCacheEntry has already
+      // projected them into withdrawnApps.
+      // REQ-022: creator_circle sources of the active space's Catalog are
+      // the account's visible CreatorCircle relations.
+      const creatorCircles = selectCreatorCircleRelations(catalogResult.entries)
+      knownCatalogRevisionRef.current = result.catalog.appConfigVersion
       catalogRef.current = result.catalog
       const snapshot: ContextSnapshot = {
         contextKey,
@@ -613,6 +995,7 @@ export function useAppCatalog() {
           errorCode: null,
           accessMode: result.accessMode,
           statusLoadingScopeKeys,
+          creatorCircles,
         }
       })
       await refreshRuntimeStatuses(
@@ -621,6 +1004,7 @@ export function useAppCatalog() {
         snapshot,
         'replace',
       )
+      await refreshProductSpaceInstallStates(getAppCatalogApps(result.catalog), snapshot)
     } catch (error) {
       if (
         syncGeneration !== syncGenerationRef.current
@@ -643,6 +1027,8 @@ export function useAppCatalog() {
           errorCode,
           statusLoadingScopeKeys: {},
           accessMode: 'denied',
+          installStates: {},
+          creatorCircles: [],
         }))
         if (deniedCatalog) {
           await refreshRuntimeStatuses(
@@ -662,12 +1048,14 @@ export function useAppCatalog() {
           loading: false,
           refreshing: false,
           errorCode,
+          creatorCircles: [],
         }))
       }
     }
   }, [
-    organization,
-    organizationContextKey,
+    productSpace,
+    catalogContextKey,
+    refreshProductSpaceInstallStates,
     refreshRuntimeStatuses,
   ])
 
@@ -691,10 +1079,11 @@ export function useAppCatalog() {
     lifecycleActionGenerationRef.current.clear()
     statusReadGenerationRef.current.clear()
     catalogRef.current = null
+    knownCatalogRevisionRef.current = null
     setState(current => ({
       ...current,
       catalog: null,
-      loading: Boolean(organizationContextKey),
+      loading: Boolean(catalogContextKey),
       refreshing: false,
       warningCode: null,
       errorCode: null,
@@ -703,13 +1092,15 @@ export function useAppCatalog() {
       statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
+      installStates: {},
+      creatorCircles: [],
     }))
     void sync()
     return () => {
       contextGenerationRef.current += 1
       syncGenerationRef.current += 1
     }
-  }, [organizationContextKey, sync])
+  }, [catalogContextKey, sync])
 
   const busyScopes = useMemo(() => Object.entries(state.statuses)
     .filter(([, status]) => (
@@ -918,6 +1309,9 @@ export function useAppCatalog() {
       if (app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
+      if (state.accessMode !== 'online') {
+        throw new Error(i18n.t('homeApps.errors.offlineInstall'))
+      }
       requireCurrent(snapshot)
       setState(current => ({
         ...current,
@@ -956,6 +1350,7 @@ export function useAppCatalog() {
     requireCurrent,
     requireCurrentLifecycleAction,
     runExclusive,
+    state.accessMode,
   ])
 
   const stop = useCallback((app: CatalogApp) => {
@@ -1058,17 +1453,137 @@ export function useAppCatalog() {
     return result.url
   }, [currentSnapshotForApp, requireCurrent])
 
-  const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
+  /**
+   * Resolves a fresh, fixed ProductSpace launch context for POO-47. No URL or
+   * bundle metadata from the Catalog projection is trusted here.
+   */
+  const resolveLaunch = useCallback(async (
+    app: CatalogApp,
+  ): Promise<ResolveLaunchResponse> => {
+    if (
+      app.availability !== 'available'
+      || !app.catalogEntryId
+      || !app.artifactInstanceId
+      || !app.catalogVersion
+      || state.accessMode !== 'online'
+    ) {
+      throw new Error(i18n.t('homeApps.errors.unavailable'))
+    }
+    const snapshot = currentSnapshotForApp(app)
+    requireCurrent(snapshot)
+    const result = await window.electronAPI.productSpaceResolveLaunch(
+      snapshot.catalog.organizationId,
+      app.catalogEntryId,
+    )
+    requireCurrent(snapshot)
+    if (!result.success) {
+      const error = new Error(result.message)
+      Object.assign(error, { code: result.errorCode, errorCode: result.errorCode })
+      throw error
+    }
+    const launch = result.launch
+    const currentApp = catalogRef.current?.apps.find(
+      candidate => candidate.catalogEntryId === app.catalogEntryId,
+    )
+    if (
+      !currentApp
+      || currentApp.availability !== 'available'
+      || currentApp.artifactInstanceId !== app.artifactInstanceId
+      || currentApp.catalogVersion?.versionId !== app.catalogVersion.versionId
+      || currentApp.catalogVersion?.version !== app.catalogVersion.version
+      || launch.productSpaceId !== snapshot.catalog.organizationId
+      || launch.catalogEntryId !== app.catalogEntryId
+      || launch.subject.kind !== 'artifact_instance'
+      || launch.subject.artifactType !== 'app'
+      || launch.subject.artifactInstanceId !== app.artifactInstanceId
+      || launch.subject.versionId !== app.catalogVersion.versionId
+      || launch.subject.version !== app.catalogVersion.version
+      || Date.parse(launch.expiresAt) <= Date.now()
+    ) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
+    return launch
+  }, [currentSnapshotForApp, requireCurrent, state.accessMode])
+
+  const installProductSpaceBundle = useCallback((app: CatalogApp) => {
+    const snapshot = currentSnapshotForApp(app)
+    const identity = identityForProductSpaceApp(snapshot.catalog, app)
+    const operationKey = productSpaceOperationIdentityKey(identity)
+    return runExclusive(operationKey, 'install', async () => {
+      if (state.accessMode !== 'online' || app.availability !== 'available') {
+        throw new Error(i18n.t('homeApps.errors.unavailable'))
+      }
+      requireCurrent(snapshot)
+      const installed = await window.electronAPI.localApps.installProductSpaceBundle({
+        app: identity,
+      })
+      requireCurrent(snapshot)
+      if (
+        installed.scope?.kind !== 'catalog'
+        || installed.scope.accountId !== identity.accountId
+        || installed.scope.organizationId !== identity.productSpaceId
+        || installed.scope.catalogAppId !== identity.artifactInstanceId
+        || installed.currentVersion !== identity.version
+      ) throw new Error(i18n.t('homeApps.errors.staleContext'))
+      await refreshProductSpaceInstallStates(getAppCatalogApps(snapshot.catalog), snapshot)
+      return installed
+    })
+  }, [
+    currentSnapshotForApp,
+    refreshProductSpaceInstallStates,
+    requireCurrent,
+    runExclusive,
+    state.accessMode,
+  ])
+
+  const uninstallProductSpaceBundle = useCallback((
+    app: CatalogApp,
+    preserveData = true,
+  ) => {
+    const snapshot = currentSnapshotForApp(app)
+    const identity = identityForProductSpaceApp(snapshot.catalog, app)
+    const operationKey = productSpaceOperationIdentityKey(identity)
+    return runExclusive(operationKey, 'uninstall', async () => {
+      requireCurrent(snapshot)
+      await window.electronAPI.localApps.uninstallProductSpaceBundle(
+        identity,
+        { preserveData },
+      )
+      requireCurrent(snapshot)
+      await refreshProductSpaceInstallStates(getAppCatalogApps(snapshot.catalog), snapshot)
+    })
+  }, [
+    currentSnapshotForApp,
+    refreshProductSpaceInstallStates,
+    requireCurrent,
+    runExclusive,
+  ])
+
+  const getInstallState = useCallback((app: CatalogApp): ProductSpaceAppInstallState | undefined => {
+    // Look up by the STABLE Catalog UI identity (accountId + productSpaceId
+    // + catalogEntryId + artifactInstanceId) — a live entry and a withdrawn
+    // tombstone that share either a catalogEntryId OR an artifactInstanceId
+    // keep separate install states.
+    const catalog = catalogRef.current
+    if (!catalog || !app.artifactInstanceId) return undefined
     try {
-      return state.statuses[scopeKeyForApp(app)]
+      const snapshot = currentSnapshotForApp(app)
+      const identityKey = productSpaceUiIdentityKey(
+        snapshot.catalog.accountId,
+        snapshot.catalog.organizationId,
+        app.catalogEntryId ?? app.id,
+        app.artifactInstanceId,
+      )
+      return state.installStates[identityKey]
     } catch {
       return undefined
     }
-  }, [scopeKeyForApp, state.statuses])
+  }, [currentSnapshotForApp, state.installStates])
 
   return {
-    organization,
+    productSpace,
     state,
+    creatorCircles: state.creatorCircles,
     sync,
     install,
     start,
@@ -1076,10 +1591,14 @@ export function useAppCatalog() {
     uninstall,
     cancelInstall,
     getLogs,
+    resolveLaunch,
+    installProductSpaceBundle,
+    uninstallProductSpaceBundle,
+    getInstallState,
     resolveRemoteUrl,
-    getStatus,
     scopeForApp,
     scopeKeyForApp,
+    uiIdentityKeyForApp,
     refreshRuntimeStatuses,
   }
 }

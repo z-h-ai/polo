@@ -2011,9 +2011,17 @@ export function shouldAllowToolInMode(
 
     // Handle session-scoped tools - derive safe-mode behavior from canonical session-tools-core metadata
     if (toolName.startsWith('mcp__session__')) {
+      // SAFE-MODE CLASSIFICATION IS PERMISSION, NOT VISIBILITY: the lookup
+      // must classify the CANONICAL allow set (allowRequestUserInput: true).
+      // Whether request_user_input is VISIBLE on this turn is already
+      // enforced by the toolset assembly + the host-side capability
+      // re-check; a tool that was invoked must be classified by its real
+      // safeMode metadata, or safe mode would block a tool the canonical
+      // metadata marks `allow`.
       const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
         prefix: 'mcp__session__',
         includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
+        allowRequestUserInput: true,
       });
 
       if (safeAllowedSessionTools.has(toolName)) {

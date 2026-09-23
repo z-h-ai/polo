@@ -79,6 +79,8 @@ const server: RpcServer = {
     return []
   },
 }
+const skillsBoundarySpace = 'skills-boundary-space'
+
 const deps = {
   sessionManager: {
     getWorkspaces: () => workspaceOrder,
@@ -88,15 +90,23 @@ const deps = {
             id: sessionId,
             workspaceId: sessionWorkspaceId,
             workingDirectory: sessionWorkingDirectory,
+            productSpaceId: skillsBoundarySpace,
+            accountId: trustedBoundaryAccountId,
           }
         : requestedSessionId === secondSessionId
           ? {
               id: secondSessionId,
               workspaceId: workspaceOne.id,
               workingDirectory: secondSessionWorkingDirectory,
+              productSpaceId: skillsBoundarySpace,
+              accountId: trustedBoundaryAccountId,
             }
         : null
     ),
+    getSessions: () => [
+      { id: sessionId, workspaceId: workspaceOne.id, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+      { id: secondSessionId, workspaceId: workspaceOne.id, productSpaceId: skillsBoundarySpace, accountId: trustedBoundaryAccountId, isProcessing: false },
+    ],
     setActiveViewingSession() {},
   },
   oauthFlowStore: {},
@@ -155,7 +165,18 @@ const installInput = {
   },
 }
 
+const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount, setRuntimeOfflineReadOnly } = await import('../../runtime/product-space-executions')
+const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } = await import('./trusted-product-space-account')
+
+const trustedBoundaryAccountId = 'boundary-account'
+
 beforeEach(async () => {
+  setTrustedProductSpaceAccountProvider(async () => trustedBoundaryAccountId)
+  // R32-2: the session fence reads the SYNCHRONOUS trusted account mirror.
+  setSyncTrustedProductSpaceAccountId(trustedBoundaryAccountId)
+  setRuntimeActiveProductSpaceAccount(trustedBoundaryAccountId)
+  setRuntimeActiveProductSpace(skillsBoundarySpace)
+  setRuntimeOfflineReadOnly(false)
   clearClientActiveSession(ctx.clientId)
   sessionWorkspaceId = workspaceOne.id
   sessionWorkingDirectory = undefined
@@ -479,5 +500,76 @@ describe('Creator Skill workspace RPC boundary', () => {
     })
     expect(await access(workspaceOne.rootPath).then(() => true, () => false)).toBe(true)
     expect(await access(sentinel).then(() => true, () => false)).toBe(true)
+  })
+})
+
+describe('Creator Skill ProductSpace scope gate', () => {
+  it('closes every Skills entry without a trusted Admin session', async () => {
+    setTrustedProductSpaceAccountProvider(async () => null)
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const getFiles = handlers.get(RPC_CHANNELS.skills.GET_FILES)!
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const refused = { code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+    await expect(getSkills(ctx, workspaceOne.id)).rejects.toMatchObject(refused)
+    await expect(getFiles(ctx, workspaceOne.id, 'safe-skill')).rejects.toMatchObject(refused)
+    await expect(install(ctx, installInput)).rejects.toMatchObject(refused)
+  })
+
+  it('rejects a Skills scope whose fence belongs to another account', async () => {
+    setTrustedProductSpaceAccountProvider(async () => 'account-other')
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const uninstall = handlers.get(RPC_CHANNELS.creatorSkills.UNINSTALL)!
+    const refused = { code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+    await expect(getSkills(ctx, workspaceOne.id)).rejects.toMatchObject(refused)
+    await expect(uninstall(ctx, {
+      workspaceId: workspaceOne.id,
+      operationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      slug: 'safe-skill',
+    })).rejects.toMatchObject(refused)
+  })
+
+  it('rejects Skills entry without a committed fence', async () => {
+    setRuntimeActiveProductSpace(null)
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const getTarget = handlers.get(RPC_CHANNELS.creatorSkills.GET_TARGET)!
+    const refused = { code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+    await expect(getSkills(ctx, workspaceOne.id)).rejects.toMatchObject(refused)
+    await expect(getTarget(ctx, { workspaceId: workspaceOne.id })).rejects.toMatchObject(refused)
+  })
+
+  it('keeps offline reads but refuses every offline skill mutation', async () => {
+    setRuntimeOfflineReadOnly(true)
+    const getSkills = handlers.get(RPC_CHANNELS.skills.GET)!
+    const deleteSkill = handlers.get(RPC_CHANNELS.skills.DELETE)!
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const uninstall = handlers.get(RPC_CHANNELS.creatorSkills.UNINSTALL)!
+    const deleteBackups = handlers.get(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS)!
+    const ignoreVersion = handlers.get(RPC_CHANNELS.creatorSkills.IGNORE_VERSION)!
+
+    // Reads stay available in the offline read-only view.
+    expect(Array.isArray(await getSkills(ctx, workspaceOne.id))).toBe(true)
+
+    const offlineRejected = { code: 'OFFLINE_READ_ONLY' }
+    await expect(deleteSkill(ctx, {
+      workspaceId: workspaceOne.id,
+      skillSlug: 'safe-skill',
+    })).rejects.toMatchObject(offlineRejected)
+    await expect(install(ctx, installInput)).rejects.toMatchObject(offlineRejected)
+    await expect(uninstall(ctx, {
+      workspaceId: workspaceOne.id,
+      operationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      slug: 'safe-skill',
+    })).rejects.toMatchObject(offlineRejected)
+    await expect(deleteBackups(ctx, {
+      workspaceId: workspaceOne.id,
+      backup: { slug: 'safe-skill', backupId: '2026-07-30T00-00-00-000Z' },
+    })).rejects.toMatchObject(offlineRejected)
+    await expect(ignoreVersion(ctx, {
+      workspaceId: workspaceOne.id,
+      artifactId: 'artifact-one',
+      version: '1.0.0',
+      archiveChecksum: 'a'.repeat(64),
+      ignoredVersion: '0.9.0',
+    })).rejects.toMatchObject(offlineRejected)
   })
 })

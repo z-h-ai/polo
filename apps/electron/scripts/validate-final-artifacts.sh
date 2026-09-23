@@ -268,13 +268,16 @@ validate_app_bundle() {
   fi
   if [ "$require_run_helpers" = "true" ]; then
     for required in \
-      "$app_root/resources/pi-agent-server/index.js" \
-      "$app_root/resources/session-mcp-server/index.js"; do
+      "$app_root/resources/pi-agent-server/index.js"; do
       if [ ! -e "$required" ]; then
         echo "$label is missing required run helper: $required" >&2
         return 1
       fi
     done
+  fi
+  if [ -e "$app_root/resources/session-mcp-server" ]; then
+    echo "$label still contains the removed session-mcp-server sidecar: $app_root/resources/session-mcp-server" >&2
+    return 1
   fi
 
   (

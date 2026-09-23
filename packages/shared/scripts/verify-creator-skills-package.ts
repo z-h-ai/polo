@@ -44,6 +44,16 @@ const requiredEntries = [
   'dist/creator-skills/schemas.d.ts',
   'dist/creator-skills/skill-content.d.ts',
   'dist/creator-skills/types.d.ts',
+  'dist/product-spaces/context-key.d.ts',
+  'dist/product-spaces/direct-switch.d.ts',
+  'dist/product-spaces/errors.d.ts',
+  'dist/product-spaces/ids.d.ts',
+  'dist/product-spaces/index.browser.mjs',
+  'dist/product-spaces/index.cjs',
+  'dist/product-spaces/index.d.ts',
+  'dist/product-spaces/paths.d.ts',
+  'dist/product-spaces/schemas.d.ts',
+  'dist/product-spaces/types.d.ts',
 ] as const
 
 type PackManifestEntry = {
@@ -279,9 +289,10 @@ async function inspectPackageDirectory(
   assert(exports['./creator-skills/fixtures'], 'creator-skills fixtures export is missing')
   assert(exports['./creator-skills/metadata'], 'creator-skills metadata export is missing')
   assert(exports['./creator-app-publishing'], 'creator-app-publishing export is missing')
+  assert(exports['./product-spaces'], 'product-spaces export is missing')
   assert(
-    Object.keys(exports).sort().join('\n') === '.\n./creator-app-publishing\n./creator-skills\n./creator-skills/fixtures\n./creator-skills/metadata',
-    'published package must expose only the package root and four supported public subpaths',
+    Object.keys(exports).sort().join('\n') === '.\n./creator-app-publishing\n./creator-skills\n./creator-skills/fixtures\n./creator-skills/metadata\n./product-spaces',
+    'published package must expose only the package root and five supported public subpaths',
   )
   const exportTargets = Object.values(exports).flatMap(value => (
     typeof value === 'string'
@@ -436,6 +447,12 @@ import {
   analyzeCreatorAppPayload,
   type CreatorAppPayloadEntry,
 } from '${packageName}/creator-app-publishing'
+import {
+  ListProductSpacesResponseSchema,
+  ProductSpaceIdSchema,
+  createProductSpaceCatalogPath,
+  type ProductSpaceId,
+} from '${packageName}/product-spaces'
 
 const metadata: SkillVersionMetadata = CREATOR_SKILL_FIXTURE_METADATA
 const uploadGrant: CreatorSkillUploadGrant = {
@@ -486,6 +503,18 @@ if (
   || payloadAnalysis.candidate.path !== CREATOR_APP_CANONICAL_ENTRIES.static
   || CREATOR_APP_PAYLOAD_MAX_BYTES !== 200 * 1024 * 1024
 ) throw new Error('Creator App publishing type contract failed')
+const productSpaceId: ProductSpaceId = ProductSpaceIdSchema.parse('product-space-proof')
+if (
+  !ListProductSpacesResponseSchema.safeParse({
+    contractVersion: 1,
+    personalProductSpaceId: 'product-space-proof',
+    productSpaces: [{
+      id: 'product-space-proof', kind: 'personal', name: '我的空间',
+      accessMode: 'active', payer: { kind: 'account' },
+    }],
+  }).success
+  || createProductSpaceCatalogPath(productSpaceId) !== '/api/product-spaces/product-space-proof/catalog'
+) throw new Error('ProductSpace v1 type contract failed')
 `)
   await writeFile(join(routeRoot, 'route.ts'), `import {
   calculateContentDigest,
@@ -601,16 +630,19 @@ async function proveNodeEntrypoints(consumerRoot: string): Promise<void> {
     const fixtures = require('${packageName}/creator-skills/fixtures');
     const publishing = require('${packageName}/creator-app-publishing');
     const browserMetadata = require('${packageName}/creator-skills/metadata');
+    const productSpaces = require('${packageName}/product-spaces');
     const rootPath = require.resolve('${packageName}');
     const mainPath = require.resolve('${packageName}/creator-skills');
     const fixturePath = require.resolve('${packageName}/creator-skills/fixtures');
     const publishingPath = require.resolve('${packageName}/creator-app-publishing');
     const browserMetadataPath = require.resolve('${packageName}/creator-skills/metadata');
+    const productSpacesPath = require.resolve('${packageName}/product-spaces');
     assert.match(rootPath, /\/dist\/creator-skills\/index\.cjs$/);
     assert.match(mainPath, /\/dist\/creator-skills\/index\.cjs$/);
     assert.match(fixturePath, /\/dist\/creator-skills\/fixtures\.cjs$/);
     assert.match(publishingPath, /\/dist\/admin\/creator-app-publishing\.cjs$/);
     assert.match(browserMetadataPath, /\/dist\/creator-skills\/metadata\.browser\.cjs$/);
+    assert.match(productSpacesPath, /\/dist\/product-spaces\/index\.cjs$/);
     assert.equal(root.validateCreatorSkillContent(fixtures.CREATOR_SKILL_FIXTURE_CONTENT, fixtures.CREATOR_SKILL_FIXTURE_SLUG).valid, true);
     assert.equal(shared.validateCreatorSkillContent(fixtures.CREATOR_SKILL_FIXTURE_CONTENT, fixtures.CREATOR_SKILL_FIXTURE_SLUG).valid, true);
     assert.deepEqual(fixtures.CREATOR_SKILL_FIXTURE_METADATA, shared.CREATOR_SKILL_FIXTURE_METADATA);
@@ -621,7 +653,8 @@ async function proveNodeEntrypoints(consumerRoot: string): Promise<void> {
     assert.deepEqual(publishing.analyzeCreatorAppPayload([{ path: 'index.html', content: '<!doctype html>' }]), {
       status: 'ready', candidate: { runtime: 'static', path: 'index.html' },
     });
-    console.log(JSON.stringify({ rootPath, mainPath, fixturePath, publishingPath, browserMetadataPath, digest: fixtures.CREATOR_SKILL_FIXTURE_CONTENT_DIGEST }));
+    assert.equal(productSpaces.ListProductSpacesResponseSchema.safeParse({ contractVersion: 1, personalProductSpaceId: 'product-space-proof', productSpaces: [{ id: 'product-space-proof', kind: 'personal', name: '我的空间', accessMode: 'active', payer: { kind: 'account' } }] }).success, true);
+    console.log(JSON.stringify({ rootPath, mainPath, fixturePath, publishingPath, browserMetadataPath, productSpacesPath, digest: fixtures.CREATOR_SKILL_FIXTURE_CONTENT_DIGEST }));
   `
   await runCommand('node', ['-e', commonJsProof], { cwd: consumerRoot })
 
@@ -632,11 +665,13 @@ async function proveNodeEntrypoints(consumerRoot: string): Promise<void> {
     import { CREATOR_SKILL_FIXTURE_CONTENT, CREATOR_SKILL_FIXTURE_SLUG } from '${packageName}/creator-skills/fixtures';
     import { parseCreatorSkillMetadata } from '${packageName}/creator-skills/metadata';
     import { CREATOR_APP_PAYLOAD_MAX_BYTES, analyzeCreatorAppPayload } from '${packageName}/creator-app-publishing';
+    import { ListProductSpacesResponseSchema } from '${packageName}/product-spaces';
     assert.equal(validateCreatorSkillContent(CREATOR_SKILL_FIXTURE_CONTENT, CREATOR_SKILL_FIXTURE_SLUG).valid, true);
     assert.equal(rootValidateCreatorSkillContent(CREATOR_SKILL_FIXTURE_CONTENT, CREATOR_SKILL_FIXTURE_SLUG).valid, true);
     assert.equal(CREATOR_APP_PAYLOAD_MAX_BYTES, 200 * 1024 * 1024);
     assert.equal(analyzeCreatorAppPayload([{ path: 'index.html', content: '<!doctype html>' }]).status, 'ready');
     assert.equal(parseCreatorSkillMetadata([{ path: 'review-helper/SKILL.md', content: CREATOR_SKILL_FIXTURE_CONTENT }]).slug, CREATOR_SKILL_FIXTURE_SLUG);
+    assert.equal(ListProductSpacesResponseSchema.safeParse({ contractVersion: 1, personalProductSpaceId: 'product-space-proof', productSpaces: [{ id: 'product-space-proof', kind: 'personal', name: '我的空间', accessMode: 'active', payer: { kind: 'account' } }] }).success, true);
   `
   await runCommand('node', ['--input-type=module', '-e', esmProof], { cwd: consumerRoot })
 }
@@ -752,6 +787,7 @@ async function writeEvidence(
       `${packageName}/creator-skills`,
       `${packageName}/creator-skills/fixtures`,
       `${packageName}/creator-skills/metadata`,
+      `${packageName}/product-spaces`,
     ],
     compatibility: {
       node: execFileSync('node', ['--version'], { encoding: 'utf8' }).trim(),
@@ -774,6 +810,7 @@ async function writeEvidence(
       browserMetadataContract: 'passed',
       strictUploadV2Contract: 'passed',
       creatorAppPayloadContract: 'passed',
+      productSpacesContract: 'passed',
       negativeTarballBoundary: 'passed',
     },
   }
@@ -855,6 +892,7 @@ async function writeRegistryEvidence(
       `${packageName}/creator-skills`,
       `${packageName}/creator-skills/fixtures`,
       `${packageName}/creator-skills/metadata`,
+      `${packageName}/product-spaces`,
     ],
     compatibility: {
       node: execFileSync('node', ['--version'], { encoding: 'utf8' }).trim(),

@@ -4,9 +4,6 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { isMac, isWebUI } from '@/lib/platform'
 import { useTabShell } from '@/context/TabShellContext'
-import { navigate, routes } from '@/lib/navigate'
-import { AccountMenu, type AccountMenuUser } from '@/components/organization/AccountMenu'
-import { SpaceIndicator } from '@/components/organization/SpaceIndicator'
 import { HOME_TAB_ID, POLO_TAB_ID, type TabInstance } from '../../../shared/tab-browser-types'
 
 function TabIcon({ tab }: { tab: TabInstance }) {
@@ -22,47 +19,16 @@ function TabIcon({ tab }: { tab: TabInstance }) {
   return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
 }
 
-/**
- * Close glyph drawn as two lines centered in a 24×24 hit area (prototype R8):
- * the × stays optically centered regardless of stroke rendering.
- */
-function TabCloseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" aria-hidden="true">
-      <path
-        d="M8.46 8.46 15.54 15.54M15.54 8.46 8.46 15.54"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
-interface TabBarProps {
-  account?: {
-    user: AccountMenuUser | null
-    onLogout: () => void | Promise<void>
-    /** Playground/preview: render with the account menu expanded. */
-    defaultOpen?: boolean
-  } | null
-}
-
-export function TabBar({ account }: TabBarProps) {
+export function TabBar() {
   const { activeTab, activeTabId, activeWebAppNavigation, openTabs, activateHome, activateTab, closeTab, reorderTabs } = useTabShell()
   const trafficLightPadding = isMac && !isWebUI ? 86 : 8
   const showNavigation = activeTab.type === 'webapp'
-
-  const openPoloSettings = () => {
-    const poloTab = openTabs.find(tab => tab.type === 'polo')
-    if (poloTab) activateTab(poloTab.id)
-    navigate(routes.view.settings())
-  }
 
   return (
     <div
       className="fixed left-0 right-0 top-0 z-panel flex items-center border-b border-foreground/10 bg-background/95 titlebar-drag-region"
       style={{ height: 'var(--tabbar-height)', paddingLeft: trafficLightPadding, paddingRight: 8 }}
+      data-testid="app-topbar"
     >
       <Button
         variant="ghost"
@@ -105,14 +71,14 @@ export function TabBar({ account }: TabBarProps) {
               <span className="min-w-0 flex-1 truncate">{tab.title}</span>
               <button
                 type="button"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
                 aria-label={`Close ${tab.title}`}
                 onClick={(event) => {
                   event.stopPropagation()
                   closeTab(tab.id)
                 }}
               >
-                <TabCloseIcon />
+                <Icons.X className="h-3.5 w-3.5" strokeWidth={1.5} />
               </button>
             </div>
           )
@@ -155,20 +121,6 @@ export function TabBar({ account }: TabBarProps) {
           </Button>
         </div>
       )}
-
-      {/* Current space (passive) + account menu: prototype R9 — the top bar
-          shows the active space and all switching happens in the avatar menu. */}
-      <div className="titlebar-no-drag ml-auto flex shrink-0 items-center gap-1 pl-2">
-        <SpaceIndicator />
-        {account && (
-          <AccountMenu
-            user={account.user}
-            onLogout={account.onLogout}
-            onOpenSettings={openPoloSettings}
-            defaultOpen={account.defaultOpen}
-          />
-        )}
-      </div>
     </div>
   )
 }

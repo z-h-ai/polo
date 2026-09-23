@@ -51,7 +51,7 @@ import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises'
 import { hostname, userInfo, homedir } from 'os';
 import { join } from 'path';
 
-import type { CredentialBackend, CredentialCompareAndSwapResult } from './types.ts';
+import type { CredentialBackend, CredentialCompareAndSwapResult, CredentialPresenceStatus } from './types.ts';
 import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
 import { CONFIG_DIR } from '../../config/paths.ts';
@@ -479,6 +479,24 @@ interface CredentialStore {
   };
 }
 
+/**
+ * Runtime schema validation for a decrypted store: exact version, a plain
+ * (non-array) credentials record and the metadata container. Decrypting to
+ * arbitrary JSON must never be asserted into a CredentialStore.
+ */
+export function isCredentialStoreShape(value: unknown): value is CredentialStore {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.version !== 1) return false;
+  const credentials = candidate.credentials;
+  if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) return false;
+  const metadata = candidate.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+  const meta = metadata as Record<string, unknown>;
+  if (typeof meta.createdAt !== 'number' || typeof meta.updatedAt !== 'number') return false;
+  return true;
+}
+
 function cloneCredentialStore(store: CredentialStore): CredentialStore {
   return {
     version: 1,
@@ -555,6 +573,100 @@ export class SecureStorageBackend implements CredentialBackend {
   async getFresh(id: CredentialId): Promise<StoredCredential | null> {
     this.cachedStore = null;
     return this.get(id);
+  }
+
+  /**
+   * Discriminative presence inspection for startup restore: distinguishes a
+   * confirmed-absent credential from one that exists but could not be read,
+   * decrypted, parsed or validated. Unlike `get`, failures are surfaced
+   * instead of collapsed into `null`.
+   */
+  async inspectCredentialPresence(
+    id: CredentialId,
+  ): Promise<CredentialPresenceStatus> {
+    const mainState = this.inspectCredentialsFilePath(this.credentialsFile);
+    const legacyState =
+      this.allowLegacyPathMigration && this.credentialsFile !== this.legacyCredentialsFile
+        ? this.inspectCredentialsFilePath(this.legacyCredentialsFile)
+        : ('absent' as const);
+    if (mainState === 'unreadable' || legacyState === 'unreadable') {
+      // existsSync/stat failures such as EACCES or ENOTDIR are NOT absence:
+      // the store may exist but be unreadable.
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'credential store path is not readable (permission or I/O error)',
+      };
+    }
+    if (mainState === 'absent' && legacyState === 'absent') {
+      return { status: 'absent' };
+    }
+    const filePath = mainState === 'present' ? this.credentialsFile : this.legacyCredentialsFile;
+    return this.inspectStoredCredential(
+      this.loadStoreFromFile(filePath),
+      id,
+      'credential store could not be decrypted, parsed or failed schema validation',
+    );
+  }
+
+  /**
+   * Path presence with error discrimination: only a definitive ENOENT is
+   * absence — permission, traversal or I/O errors are `unreadable`.
+   */
+  private inspectCredentialsFilePath(
+    filePath: string,
+  ): 'absent' | 'present' | 'unreadable' {
+    try {
+      statSync(filePath);
+      return 'present';
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+      return 'unreadable';
+    }
+  }
+
+  private inspectStoredCredential(
+    store: CredentialStore | null,
+    id: CredentialId,
+    unreadableReason: string,
+  ): CredentialPresenceStatus {
+    if (!store) {
+      return { status: 'unreadable_or_invalid', reason: unreadableReason };
+    }
+    const key = credentialIdToAccount(id);
+    // Absence means the key is genuinely not present. A key that EXISTS with
+    // a falsy or non-object value (null, false, 0, "", …) is a malformed
+    // entry — never "absent".
+    if (!Object.prototype.hasOwnProperty.call(store.credentials, key)) {
+      return { status: 'absent' };
+    }
+    const credential: unknown = (store.credentials as Record<string, unknown>)[key];
+    if (
+      !credential
+      || typeof credential !== 'object'
+      || Array.isArray(credential)
+    ) {
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'admin token entry is not a credential object',
+      };
+    }
+    const entry = credential as Record<string, unknown>;
+    // Mirror and tighten the structural validation getAdminTokens performs:
+    // field presence, types and non-emptiness — an entry that exists but
+    // cannot yield a usable admin session is invalid, not absent.
+    if (
+      typeof entry.value !== 'string' || !entry.value
+      || typeof entry.refreshToken !== 'string' || !entry.refreshToken
+      || typeof entry.expiresAt !== 'number' || !Number.isFinite(entry.expiresAt)
+      || typeof entry.userId !== 'string' || !entry.userId
+      || typeof entry.username !== 'string' || !entry.username
+    ) {
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'admin token entry field types are invalid',
+      };
+    }
+    return { status: 'found' };
   }
 
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
@@ -821,7 +933,11 @@ export class SecureStorageBackend implements CredentialBackend {
       const decipher = createDecipheriv('aes-256-gcm', key, iv);
       decipher.setAuthTag(authTag);
       const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      return JSON.parse(decrypted.toString('utf8'));
+      // Decryption alone does not make a store readable: the plaintext must
+      // pass runtime schema validation, otherwise the store is treated as
+      // unreadable (callers fail closed instead of degrading to absent).
+      const parsed: unknown = JSON.parse(decrypted.toString('utf8'));
+      return isCredentialStoreShape(parsed) ? parsed : null;
     } catch {
       return null;
     }

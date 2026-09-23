@@ -687,7 +687,8 @@ export async function waitForTurn(
   turnTimeout?.unref()
 
   try {
-    await client.invoke('sessions:sendMessage', sessionId, prompt)
+    // headless turns never register request_user_input (fail-closed contract)
+    await client.invoke('sessions:sendMessage', sessionId, prompt, undefined, undefined, { invocationSource: 'headless' })
     const failed = (error: Error): TurnResult => {
       void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
       return { status: 'failed', finalMessage: '', error }

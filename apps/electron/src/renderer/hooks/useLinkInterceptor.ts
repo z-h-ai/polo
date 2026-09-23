@@ -24,16 +24,22 @@ import { getLanguageFromPath } from '@/lib/file-utils'
 // while the file is being read, then gets populated.
 
 interface ImagePreview {
+  /** Immutable ProductSpace context key this preview was opened under. */
+  scopeKey?: string | null
   type: 'image'
   filePath: string
 }
 
 interface PDFPreview {
+  /** Immutable ProductSpace context key this preview was opened under. */
+  scopeKey?: string | null
   type: 'pdf'
   filePath: string
 }
 
 interface CodePreview {
+  /** Immutable ProductSpace context key this preview was opened under. */
+  scopeKey?: string | null
   type: 'code'
   filePath: string
   content: string | null
@@ -42,6 +48,8 @@ interface CodePreview {
 }
 
 interface MarkdownPreview {
+  /** Immutable ProductSpace context key this preview was opened under. */
+  scopeKey?: string | null
   type: 'markdown'
   filePath: string
   content: string | null
@@ -49,6 +57,8 @@ interface MarkdownPreview {
 }
 
 interface JSONPreview {
+  /** Immutable ProductSpace context key this preview was opened under. */
+  scopeKey?: string | null
   type: 'json'
   filePath: string
   content: string | null
@@ -56,6 +66,8 @@ interface JSONPreview {
 }
 
 interface TextPreview {
+  /** Immutable ProductSpace context key this preview was opened under. */
+  scopeKey?: string | null
   type: 'text'
   filePath: string
   content: string | null
@@ -86,6 +98,13 @@ interface LinkInterceptorOptions {
   readFileDataUrl: (path: string) => Promise<string>
   /** Read file as binary (Uint8Array) for PDF previews via react-pdf */
   readFileBinary: (path: string) => Promise<Uint8Array>
+  /**
+   * Immutable ProductSpace context key of the scope that owns this
+   * interceptor. Every opened preview is SEALED with this key so App can
+   * reject a retained previous-scope preview synchronously during render
+   * (Review R33/R34 scope-isolation boundary).
+   */
+  scopeKey?: () => string | null
 }
 
 // ── Hook return type ───────────────────────────────────────────────────────────
@@ -147,10 +166,12 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
     }
 
     const type = classification.type
+    // Seal the preview to the immutable scope that opened it (Review R33/R34).
+    const scopeKey = optionsRef.current.scopeKey?.() ?? null
 
     // For image/pdf: set state immediately — the overlay handles its own async loading
     if (type === 'image' || type === 'pdf') {
-      setPreviewState({ type, filePath: path })
+      setPreviewState({ type, filePath: path, scopeKey })
       return
     }
 
@@ -159,11 +180,11 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
     try {
       const content = await optionsRef.current.readFile(path)
       const state = buildInitialTextState(type, path)
-      setPreviewState({ ...state, content } as FilePreviewState)
+      setPreviewState({ ...state, content, scopeKey } as FilePreviewState)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to read file'
       const state = buildInitialTextState(type, path)
-      setPreviewState({ ...state, content: '', error: errorMsg } as FilePreviewState)
+      setPreviewState({ ...state, content: '', error: errorMsg, scopeKey } as FilePreviewState)
     }
   }, []) // Stable: uses optionsRef
 

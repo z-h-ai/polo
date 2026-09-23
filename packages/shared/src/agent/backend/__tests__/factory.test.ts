@@ -60,6 +60,8 @@ function createTestConfig(overrides: Partial<BackendConfig> = {}): BackendConfig
     workspace: createTestWorkspace(),
     session: createTestSession(),
     isHeadless: true, // Prevent config watchers from starting
+    // R53: the ClaudeAgent constructor fails closed without an owner token.
+    sessionCallbackOwnerToken: 'test-owner',
     ...overrides,
   };
 }

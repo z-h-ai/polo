@@ -39,6 +39,9 @@ export default defineConfig({
     outDir: resolve(__dirname, 'dist/renderer'),
     emptyDirBeforeWrite: true,
     sourcemap: true,  // Source maps generated for debugging. Not uploaded to Sentry (see CLAUDE.md).
+    // Emit .vite/manifest.json so tests can pin assertions to the exact
+    // manifest-selected renderer CSS asset (Review R32 minor finding).
+    manifest: true,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/renderer/index.html'),

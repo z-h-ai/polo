@@ -104,6 +104,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     coreSystem,
     coreWorkspace,
     onboarding,
+    productSpace,
     resources,
     transfer,
   ] = await Promise.all([
@@ -122,6 +123,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@polo-ai/server-core/handlers/rpc/system'),
     import('@polo-ai/server-core/handlers/rpc/workspace'),
     import('@polo-ai/server-core/handlers/rpc/onboarding'),
+    import('@polo-ai/server-core/handlers/rpc/product-space'),
     import('@polo-ai/server-core/handlers/rpc/resources'),
     import('@polo-ai/server-core/handlers/rpc/transfer'),
   ])
@@ -152,6 +154,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...coreSystem.CORE_HANDLED_CHANNELS,
     ...coreWorkspace.CORE_HANDLED_CHANNELS,
     ...onboarding.HANDLED_CHANNELS,
+    ...productSpace.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
     ...browser.HANDLED_CHANNELS,

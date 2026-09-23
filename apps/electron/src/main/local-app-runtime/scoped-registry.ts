@@ -16,8 +16,11 @@ import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
 import {
   LocalAppRuntimeManager,
+  type ExactVersionStartHooks,
+  type ExactVersionStartResult,
   type LocalAppRuntimeLogger,
   type LocalAppRuntimeManagerOptions,
+  type UnexpectedExitEvent,
 } from './manager'
 import { LocalAppRuntimeError } from './runtime-error'
 
@@ -42,6 +45,8 @@ export interface ScopedLocalAppRuntimeRegistryOptions {
   managerFactory?: (options: LocalAppRuntimeManagerOptions) => LocalAppRuntimeManager
   /** Test/embedding seam; production reads UTF-8 scope records from disk. */
   scopeRecordReader?: (path: string) => Promise<string>
+  /** Fired when an exact-version runtime process exits unexpectedly. */
+  onUnexpectedExit?: (event: UnexpectedExitEvent) => void
 }
 
 export interface ScopedCatalogInstallRequest {
@@ -106,6 +111,26 @@ export function createCatalogLocalAppScopeKey(scope: CatalogLocalAppScope): stri
 /** Filesystem/process-safe identity used exclusively inside POO-12. */
 export const createCatalogRuntimeAppId = createCatalogLocalAppScopeKey
 
+/**
+ * Process/lifecycle/log namespace for one exact runtime identity: the
+ * artifact-scoped installation id extended with the versionId, so different
+ * versions of one artifact run in disjoint process namespaces.
+ */
+export function createCatalogRuntimeProcessAppId(
+  scope: CatalogLocalAppScope,
+  versionId: string,
+): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([
+      scope.accountId,
+      scope.organizationId,
+      scope.catalogAppId,
+      versionId,
+    ]))
+    .digest('hex')
+  return `catalog-${digest}`
+}
+
 function scopesEqual(left: CatalogLocalAppScope, right: CatalogLocalAppScope): boolean {
   return left.accountId === right.accountId
     && left.organizationId === right.organizationId
@@ -139,6 +164,7 @@ export class ScopedLocalAppRuntimeRegistry {
     options: LocalAppRuntimeManagerOptions,
   ) => LocalAppRuntimeManager
   private readonly scopeRecordReader: (path: string) => Promise<string>
+  private readonly onUnexpectedExit?: (event: UnexpectedExitEvent) => void
   private readonly managers = new Map<string, LocalAppRuntimeManager>()
   private readonly managerScopes = new Map<string, CatalogLocalAppScope>()
   private readonly managerPromises = new Map<
@@ -166,6 +192,9 @@ export class ScopedLocalAppRuntimeRegistry {
   private readonly stopAccountPromises = new Map<string, Promise<void>>()
   private readonly stopOrganizationPromises = new Map<string, Promise<void>>()
   private readonly stopAppPromises = new Map<string, Promise<void>>()
+  private readonly scopeGenerations = new Map<string, number>()
+  /** scopeKey:runtimeGeneration → exact process namespace. */
+  private readonly activeProcessAppIds = new Map<string, string>()
   private readonly failedAppCleanups = new Set<string>()
   private stopCleanupSlotsInUse = 0
   private readonly stopCleanupSlotWaiters: Array<() => void> = []
@@ -181,6 +210,7 @@ export class ScopedLocalAppRuntimeRegistry {
       ?? (managerOptions => new LocalAppRuntimeManager(managerOptions))
     this.scopeRecordReader = options.scopeRecordReader
       ?? (path => readFile(path, 'utf8'))
+    this.onUnexpectedExit = options.onUnexpectedExit
   }
 
   async install(
@@ -272,6 +302,187 @@ export class ScopedLocalAppRuntimeRegistry {
     )
   }
 
+  /**
+   * Starts the EXACT runtime identity version. The per-scope generation
+   * advances on every exact start, and the capability hook receives it so the
+   * coordinator can bind one capability to one (runtime, scope) generation.
+   * No currentVersion fallback exists on this path.
+   */
+  async startExact(
+    scope: CatalogLocalAppScope,
+    version: string,
+    hooks: {
+      processEnvironment?(input: {
+        runtimeKind: 'python' | 'js'
+        runtimeGeneration: number
+        scopeGeneration: number
+      }): { env: NodeJS.ProcessEnv; sensitiveValues: string[] }
+      /** Echoed on unexpected-exit events for coordinator identity matching. */
+      runtimeKey?: string
+      /** versionId of the runtime identity; namespaces the process. */
+      versionId?: string
+    } = {},
+  ): Promise<ExactVersionStartResult & { scopeGeneration: number }> {
+    const safeScope = validateCatalogLocalAppScope(scope)
+    return this.runTrackedScopeOperation(
+      safeScope,
+      AUTHORIZED_APP_LIFECYCLE_OPERATION,
+      async safe => {
+        const manager = await this.getManager(safe)
+        this.assertAccountSessionActive(safe.accountId)
+        const scopeGeneration = this.nextScopeGeneration(safe)
+        // The process/lifecycle/log namespace is the FULL runtime identity
+        // (versionId included): different versions of one artifact are
+        // different runtimes and never share — or stop — each other's process.
+        const processAppId = createCatalogRuntimeProcessAppId(
+          safe,
+          hooks.versionId ?? version,
+        )
+        const scopeKey = createCatalogLocalAppScopeKey(safe)
+        const wrapped: ExactVersionStartHooks = {
+          ...(hooks.runtimeKey ? { runtimeKey: hooks.runtimeKey } : {}),
+          processAppId,
+          processEnvironment: input => hooks.processEnvironment?.({
+            ...input,
+            scopeGeneration,
+          }) ?? { env: {}, sensitiveValues: [] },
+        }
+        const result = await manager.startExactVersion(
+          createCatalogRuntimeAppId(safe),
+          version,
+          wrapped,
+        )
+        this.activeProcessAppIds.set(
+          `${scopeKey}:${result.runtimeGeneration}`,
+          processAppId,
+        )
+        return { ...attachScope(result, safe), scopeGeneration }
+      },
+    )
+  }
+
+  /** Generation-CAS stop through the owning manager (exact process id). */
+  async stopExact(
+    scope: CatalogLocalAppScope,
+    expectedRuntimeGeneration: number,
+  ): Promise<LocalAppRuntimeStatus> {
+    const safeScope = validateCatalogLocalAppScope(scope)
+    return this.runTrackedScopeOperation(
+      safeScope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safe => {
+        const manager = await this.getExistingManager(safe)
+        if (!manager) {
+          throw new LocalAppRuntimeError(
+            'STALE_RUNTIME_GENERATION',
+            `No runtime is active for ${safe.catalogAppId}`,
+          )
+        }
+        const scopeKey = createCatalogLocalAppScopeKey(safe)
+        const processAppId = this.activeProcessAppIds.get(
+          `${scopeKey}:${expectedRuntimeGeneration}`,
+        ) ?? createCatalogRuntimeAppId(safe)
+        const status = attachScope(
+          await manager.stopExact(processAppId, expectedRuntimeGeneration),
+          safe,
+        )
+        this.activeProcessAppIds.delete(
+          `${scopeKey}:${expectedRuntimeGeneration}`,
+        )
+        return status
+      },
+    )
+  }
+
+  /**
+   * SYNCHRONOUS deny/generation fence for account session ending: blocks all
+   * new account-scoped operations (including exact starts) BEFORE any slow
+   * cleanup is awaited. The fence itself is never released here.
+   */
+  fenceAccount(accountId: string): void {
+    const safeAccountId = validateScopeField(accountId, 'accountId')
+    this.sessionEndingAccounts.add(safeAccountId)
+    this.accountLifecycleGenerations.set(
+      safeAccountId,
+      this.getAccountLifecycleGeneration(safeAccountId) + 1,
+    )
+  }
+
+  /**
+   * SYNCHRONOUS deny/generation fence for an organization denial: blocks new
+   * authorized operations for the organization before slow cleanup runs.
+   */
+  fenceOrganization(accountId: string, organizationId: string): void {
+    const safeAccountId = validateScopeField(accountId, 'accountId')
+    const safeOrganizationId = validateScopeField(organizationId, 'organizationId')
+    const organizationKey = createOrganizationLifecycleKey(
+      safeAccountId,
+      safeOrganizationId,
+    )
+    this.deniedOrganizations.add(organizationKey)
+    this.organizationLifecycleGenerations.set(
+      organizationKey,
+      this.getOrganizationLifecycleGeneration(organizationKey) + 1,
+    )
+  }
+
+  /**
+   * SYNCHRONOUS deny/generation fence for withdrawn Apps: every exact App
+   * gate advances in this synchronous loop before any slow cleanup runs.
+   */
+  fenceApps(scopes: CatalogLocalAppScope[]): void {
+    for (const rawScope of scopes) {
+      const scope = validateCatalogLocalAppScope(rawScope)
+      const appKey = createCatalogLocalAppScopeKey(scope)
+      this.deniedApps.add(appKey)
+      this.appLifecycleGenerations.set(
+        appKey,
+        this.getAppLifecycleGeneration(appKey) + 1,
+      )
+    }
+  }
+
+  /**
+   * Shared scope-level runtime cleanup: cancels installs, stops every
+   * per-version exact process namespace and the legacy artifact-scoped
+   * namespace. Both cleanup workers reuse this to keep failure aggregation
+   * semantics in their callers.
+   */
+  private async stopScopeRuntimeNamespaces(
+    scope: CatalogLocalAppScope,
+    manager: LocalAppRuntimeManager,
+  ): Promise<void> {
+    manager.cancelInstall(createCatalogRuntimeAppId(scope))
+    // Per-version exact runtimes live in their own process namespaces.
+    for (const processAppId of this.trackedProcessAppIds(scope)) {
+      await manager.stop(processAppId).catch(() => {})
+    }
+    await manager.stop(createCatalogRuntimeAppId(scope))
+  }
+
+  /** Process ids of tracked exact-version runtimes for one scope. */
+  private trackedProcessAppIds(scope: CatalogLocalAppScope): string[] {
+    const prefix = `${createCatalogLocalAppScopeKey(scope)}:`
+    const ids: string[] = []
+    for (const [key, processAppId] of this.activeProcessAppIds) {
+      if (key.startsWith(prefix)) ids.push(processAppId)
+    }
+    return ids
+  }
+
+  private nextScopeGeneration(scope: CatalogLocalAppScope): number {
+    const key = createCatalogLocalAppScopeKey(scope)
+    const next = (this.scopeGenerations.get(key) ?? 0) + 1
+    this.scopeGenerations.set(key, next)
+    return next
+  }
+
+  getScopeGeneration(scope: CatalogLocalAppScope): number {
+    return this.scopeGenerations.get(
+      createCatalogLocalAppScopeKey(validateCatalogLocalAppScope(scope)),
+    ) ?? 0
+  }
+
   async uninstall(
     scope: CatalogLocalAppScope,
     options?: LocalAppUninstallOptions,
@@ -306,6 +517,15 @@ export class ScopedLocalAppRuntimeRegistry {
         )
       },
     )
+  }
+
+  /**
+   * Enumerates every persisted catalog scope on this device regardless of
+   * account. Used by the one-shot legacy direct-switch cleanup so stale
+   * installation/runtime state cannot survive it.
+   */
+  async listAllCatalogScopes(): Promise<CatalogLocalAppScope[]> {
+    return this.readPersistedScopes({})
   }
 
   async getInstalledApps(
@@ -460,6 +680,7 @@ export class ScopedLocalAppRuntimeRegistry {
       uvPath: this.uvPath,
       bunPath: this.bunPath,
       logger: this.logger,
+      ...(this.onUnexpectedExit ? { onUnexpectedExit: this.onUnexpectedExit } : {}),
     })
     this.managers.set(key, manager)
     this.managerScopes.set(key, scope)
@@ -799,8 +1020,7 @@ export class ScopedLocalAppRuntimeRegistry {
         const manager = await this.getExistingManager(scope)
           ?? this.managers.get(createCatalogLocalAppScopeKey(scope))
         if (!manager) return
-        manager.cancelInstall(createCatalogRuntimeAppId(scope))
-        await manager.stop(createCatalogRuntimeAppId(scope))
+        await this.stopScopeRuntimeNamespaces(scope, manager)
       },
       failures,
     )
@@ -933,8 +1153,7 @@ export class ScopedLocalAppRuntimeRegistry {
         const manager = await this.getExistingManager(scope)
           ?? this.managers.get(appKey)
         if (!manager) return
-        manager.cancelInstall(createCatalogRuntimeAppId(scope))
-        await manager.stop(createCatalogRuntimeAppId(scope))
+        await this.stopScopeRuntimeNamespaces(scope, manager)
       },
       (scope, error) => addFailure(createCatalogLocalAppScopeKey(scope), error),
     )
@@ -1300,6 +1519,7 @@ export class ScopedLocalAppRuntimeRegistry {
       uvPath: this.uvPath,
       bunPath: this.bunPath,
       logger: this.logger,
+      ...(this.onUnexpectedExit ? { onUnexpectedExit: this.onUnexpectedExit } : {}),
     })
     this.managers.set(key, manager)
     this.managerScopes.set(key, scope)

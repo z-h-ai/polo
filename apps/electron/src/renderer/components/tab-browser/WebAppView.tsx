@@ -33,7 +33,7 @@ function callWebviewMethod(webview: WebviewElement | null, method: 'goBack' | 'g
 
 export function WebAppView({ tab }: WebAppViewProps) {
   const webviewRef = useRef<WebviewElement | null>(null)
-  const { registerWebAppNavigation, updateTabInfo } = useTabShell()
+  const { registerWebAppNavigation, updateTabInfo, webAppPartition } = useTabShell()
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
 
@@ -130,7 +130,7 @@ export function WebAppView({ tab }: WebAppViewProps) {
       <webview
         ref={webviewRef as RefObject<any>}
         src={url}
-        partition="persist:browser-pane"
+        partition={webAppPartition || 'persist:browser-pane'}
         webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
         className="h-full w-full"
       />

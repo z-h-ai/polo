@@ -2,6 +2,7 @@ import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
+import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Archive,
@@ -82,12 +83,14 @@ import { getResizeGradientStyle } from "@/hooks/useResizeGradient"
 import { useAction, useActionLabel } from "@/actions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
+import { useTabShell } from "@/context/TabShellContext"
 import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
+import { reportTargetProjectionFailure } from '@/lib/target-projection'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
@@ -530,6 +533,7 @@ function AppShellContent({
     onSendMessage,
     openNewChat,
     pendingPermissions,
+    pendingQuestions,
     currentAdminUser,
     onAdminLogout,
   } = contextValue
@@ -919,6 +923,7 @@ function AppShellContent({
       setSources(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load sources:', err)
+      reportTargetProjectionFailure({ source: 'sources', message: String(err) })
     })
   }, [activeWorkspaceId])
 
@@ -1075,10 +1080,17 @@ function AppShellContent({
   useAction('nav.focusNavigator', () => focusZone('navigator', { intent: 'keyboard' }))
   useAction('nav.focusChat', () => focusZone('chat', { intent: 'keyboard' }))
 
-  // Tab navigation between zones
+  // Tab navigation between zones. The capture is keyboard-active ONLY while
+  // this workbench shell is the VISIBLE surface (the active tab is Polo):
+  // on the POO-43 Home/Catalog surfaces the shell layer is display-hidden,
+  // and plain Tab must fall through to native traversal so the launcher
+  // controls (management entry, All Apps, every App action) stay reachable
+  // and the dedicated launcher scroll owner advances with focus (R42).
+  const { activeTab: shellActiveTab } = useTabShell()
+  const isWorkbenchSurfaceActive = shellActiveTab.type === 'polo'
   useAction('nav.nextZone', () => {
     focusNextZone()
-  }, { enabled: () => !document.querySelector('[role="dialog"]') })
+  }, { enabled: () => !document.querySelector('[role="dialog"]') && isWorkbenchSurfaceActive })
 
   // Shift+Tab cycles permission mode through enabled modes (textarea handles its own, this handles when focus is elsewhere)
   // In multi-panel, targets the focused panel's session
@@ -1288,7 +1300,13 @@ function AppShellContent({
 
   const hasPendingPrompt = React.useCallback((sessionId: string) => {
     return (pendingPermissions.get(sessionId)?.length ?? 0) > 0
-  }, [pendingPermissions])
+      || pendingQuestions.has(sessionId)
+  }, [pendingPermissions, pendingQuestions])
+
+  // Session list "waiting for answer" marker (request_user_input)
+  const hasPendingQuestion = React.useCallback((sessionId: string) => {
+    return pendingQuestions.has(sessionId)
+  }, [pendingQuestions])
 
   // Workspace-level unread indicators (needed for workspace selectors across all workspaces)
   const [workspaceUnreadMap, setWorkspaceUnreadMap] = useState<Record<string, boolean>>({})
@@ -1320,6 +1338,7 @@ function AppShellContent({
       setSkills(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load skills:', err)
+      reportTargetProjectionFailure({ source: 'skills', message: String(err) })
     })
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 
@@ -2199,30 +2218,13 @@ function AppShellContent({
   return (
     <AppShellProvider value={appShellContextValue}>
         {/* === TOP BAR === */}
-        <TopBar
-          workspaces={workspaces}
-          activeWorkspaceId={activeWorkspaceId}
-          onSelectWorkspace={onSelectWorkspace}
-          workspaceUnreadMap={workspaceUnreadMap}
-          onWorkspaceCreated={() => onRefreshWorkspaces?.()}
-          onWorkspaceRemoved={() => onRefreshWorkspaces?.()}
-          activeSessionId={effectiveSessionId}
-          onNewChat={() => handleNewChat()}
-          onNewWindow={() => window.electronAPI.menuNewWindow()}
-          onOpenSettings={onOpenSettings}
-          onOpenSettingsSubpage={handleSettingsClick}
-          onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
-          onOpenStoredUserPreferences={onOpenStoredUserPreferences}
-          onBack={goBack}
-          onForward={goForward}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          onToggleSidebar={handleToggleSidebar}
-          onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          onAddSessionPanel={() => handleNewChat(true)}
-          onAddBrowserPanel={() => { void handleNewBrowserWindow() }}
-          isCompact={isAutoCompact}
-        />
+        {/* Portaled to document.body so the global workbench bar stays visible
+            on every shell surface (Home view included) — REQ-001. Context
+            still flows through AppShellProvider. */}
+        {createPortal(
+          <TopBar />,
+          document.body,
+        )}
 
       {/* === OUTER LAYOUT: Unified Panel Stack | Right Sidebar === */}
       <div
@@ -3259,6 +3261,7 @@ function AppShellContent({
                   focusedSessionId={panelCount === 0 ? null : panelCount > 1 ? focusedSessionId : undefined}
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
+                  hasPendingQuestion={hasPendingQuestion}
                   activeChatMatchInfo={chatMatchInfo}
                 />
               </>

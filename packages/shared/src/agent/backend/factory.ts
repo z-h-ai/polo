@@ -57,6 +57,10 @@ import {
   resolveBackendHostTooling as resolveHostToolingPaths,
   resolveBackendRuntimePaths,
 } from './internal/runtime-resolver.ts';
+
+// PRODUCTION re-export: the runtime path resolution is part of the backend's
+// public surface (host runtimes resolve packaged server + binary paths).
+export { resolveBackendRuntimePaths } from './internal/runtime-resolver.ts';
 import { anthropicDriver } from './internal/drivers/anthropic.ts';
 import { piDriver } from './internal/drivers/pi.ts';
 

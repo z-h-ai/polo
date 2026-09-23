@@ -25,6 +25,9 @@ import type {
   NewChatActionParams,
   LlmConnectionWithStatus,
   TestAutomationResult,
+  QuestionRequest,
+  QuestionResolution,
+  QuestionResolutionResult,
 } from '../../shared/types'
 import type { SessionStatus as SessionStatusConfig } from '@/config/session-status-config'
 import type { SessionOptions, SessionOptionUpdates } from '../hooks/useSessionOptions'
@@ -60,6 +63,8 @@ export interface AppShellContextType {
   refreshLlmConnections: () => Promise<void>
   pendingPermissions: Map<string, PermissionRequest[]>
   pendingCredentials: Map<string, CredentialRequest[]>
+  /** Pending agent questions per session (request_user_input) — at most one per session */
+  pendingQuestions: Map<string, QuestionRequest>
   /** Get draft input text for a session - reads from ref without triggering re-renders */
   getDraft: (sessionId: string) => string
   /** Get persisted attachment refs (path + name) for a session's draft - no file IO */
@@ -89,7 +94,24 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
+  /**
+   * Dedicated, trusted creation path for the Edit Popover session: the server
+   * stamps the 'edit-popover' origin + owner identity. The generic
+   * onCreateSession can never grant that origin.
+   */
+  onCreateEditPopoverSession: (
+    workspaceId: string,
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
+  ) => Promise<Session>
   onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[]) => void
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question for the given workspace + popover owner (hidden session, not
+   * reachable via the session list). Exact match only; seeded into the
+   * pendingQuestions map so the popover can re-adopt the same hidden session
+   * after a reopen, renderer reload, or app restart.
+   */
+  onGetEditPopoverPendingQuestion: (workspaceId: string, popoverOwner: string) => Promise<import('../components/ui/useEditPopoverSessionRestore').EditPopoverRestoreOutcome>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void
@@ -117,6 +139,14 @@ export interface AppShellContextType {
     requestId: string,
     response: CredentialResponse
   ) => void
+
+  // Question handling (request_user_input)
+  // Resolves the question; terminal results clear the card, transient failures
+  // reject the promise so the component can keep its state and allow retry.
+  onRespondToQuestion?: (
+    sessionId: string,
+    resolution: QuestionResolution,
+  ) => Promise<QuestionResolutionResult>
 
   // File/URL handlers - these can open in tabs or external apps
   onOpenFile: (path: string) => void
@@ -246,6 +276,14 @@ export function usePendingPermission(sessionId: string): PermissionRequest | und
 export function usePendingCredential(sessionId: string): CredentialRequest | undefined {
   const { pendingCredentials } = useAppShellContext()
   return pendingCredentials.get(sessionId)?.[0]
+}
+
+/**
+ * Get the pending agent question for a session (at most one per session)
+ */
+export function usePendingQuestion(sessionId: string): QuestionRequest | undefined {
+  const { pendingQuestions } = useAppShellContext()
+  return pendingQuestions.get(sessionId)
 }
 
 /**

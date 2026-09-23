@@ -93,7 +93,7 @@ export class Router {
           msg.text,
           fileAttachments,
           undefined, // storedAttachments (handled by session layer)
-          undefined, // SendMessageOptions
+          { invocationSource: 'messaging' }, // messaging turns never ask structured questions
         )
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error'

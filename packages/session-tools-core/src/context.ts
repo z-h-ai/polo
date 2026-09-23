@@ -1,8 +1,8 @@
 /**
  * Session Tools Core - Context Interface
  *
- * Defines the abstract context interface that both Claude (in-process)
- * and Codex (subprocess) implementations must provide.
+ * Defines the abstract context interface that the Claude (in-process SDK
+ * MCP server) and Pi (host-side proxy execution) backends must provide.
  *
  * This enables writing tool handlers once and running them in both environments.
  */
@@ -16,6 +16,7 @@ import type {
   MicrosoftService,
   McpSourceConfig,
 } from './types.ts';
+import type { RequestUserInputQuestionArgs } from './question-types.ts';
 
 // ============================================================
 // Source Credential Types
@@ -37,25 +38,41 @@ export interface LoadedSource {
 // ============================================================
 
 /**
- * Callbacks for session tool operations.
- * Both Claude and Codex implement this interface differently:
- * - Claude: Direct function calls via registry
- * - Codex: JSON messages over stderr
+ * Callbacks for session tool operations. Claude resolves them through the
+ * in-process callback registry; Pi resolves them through its host-side
+ * SessionToolContext.
  */
 export interface SessionToolCallbacks {
   /**
    * Called when a plan is submitted.
    * Claude: calls onPlanSubmitted callback
-   * Codex: sends __CALLBACK__ message to stderr
    */
   onPlanSubmitted(planPath: string): void;
 
   /**
    * Called when authentication is requested.
    * Claude: calls onAuthRequest callback + forceAbort
-   * Codex: sends __CALLBACK__ message to stderr
    */
   onAuthRequest(request: AuthRequest): void;
+
+  /**
+   * Called when the agent requests structured user input via request_user_input.
+   * Only invoked when the tool is registered (desktop interactive turns).
+   * Implementations pause the current turn and wait for the user's answers.
+   *
+   * `generationAtRequest` is the processing generation of the turn that
+   * issued the tool call — snapshotted by the tool handler AT TOOL-CALL
+   * INITIATION (via {@link SessionToolContext.getTurnGeneration}) and carried
+   * immutably through the chain, so the host can reject a late callback whose
+   * turn was stopped/superseded before it executed.
+   *
+   * MAY return a Promise: the handler awaits it so the tool only reports
+   * success ("waiting for user input") after the durable handoff has actually
+   * completed — a rejection surfaces as a tool error instead.
+   * Optional — backends without question support leave it undefined and the
+   * handler degrades to a plain-text error.
+   */
+  onQuestionRequested?(questions: RequestUserInputQuestionArgs[], generationAtRequest: number): void | Promise<void>;
 }
 
 // ============================================================
@@ -96,7 +113,7 @@ export interface FileSystemInterface {
 /**
  * Credential manager abstraction.
  * Claude has full access to credential stores.
- * Codex may have limited or no access (relies on main process).
+ * Other consumers (subprocesses) may have limited or no access (rely on the main process).
  */
 export interface CredentialManagerInterface {
   /**
@@ -122,7 +139,7 @@ export interface CredentialManagerInterface {
 /**
  * Config validation interface.
  * Claude uses full Zod validators from packages/shared.
- * Codex uses simplified validators from session-tools-core.
+ * Subprocess consumers use simplified validators from session-tools-core.
  */
 export interface ValidatorInterface {
   validateConfig(): import('./types.js').ValidationResult;
@@ -144,9 +161,9 @@ export interface ValidatorInterface {
 /**
  * Main context interface for session tools.
  *
- * Both Claude and Codex create their own implementation of this interface:
+ * Backends create their own implementation of this interface:
  * - Claude: createClaudeContext() with direct access to Electron internals
- * - Codex: createCodexContext() with callback IPC and limited capabilities
+ * - Pi: createClaudeContext() reused for host-side proxy execution
  */
 export interface SessionToolContext {
   // ============================================================
@@ -158,6 +175,14 @@ export interface SessionToolContext {
 
   /** Absolute path to workspace folder (~/.polo-ai/workspaces/{id}) */
   workspacePath: string;
+
+  /**
+   * The processing generation of the turn currently executing tools in this
+   * context. Read by tool handlers AT TOOL-CALL INITIATION (synchronously,
+   * before any await) so the value can be bound immutably into callbacks —
+   * never re-read from mutable state after a delay. Optional: hosts without generation tracking default to 0.
+   */
+  getTurnGeneration?: () => number;
 
   /** Path to sources folder within workspace */
   get sourcesPath(): string;
@@ -294,14 +319,13 @@ export interface SessionToolContext {
   /**
    * Submit developer feedback. Injected by each backend:
    * - Claude: writes JSON files to ~/.polo-ai/feedback/
-   * - Codex/Pi: could send over IPC or write directly
+   * - Pi: could send over IPC or write directly
    */
   submitFeedback?(feedback: import('./types.ts').DeveloperFeedback): void;
 
   /**
    * Update user preferences. Injected by each backend:
    * - Claude: calls updatePreferences() from config/preferences.ts
-   * - Codex/session-mcp-server: writes directly to preferences.json
    * - Pi: calls updatePreferences() from config/preferences.ts
    */
   updatePreferences?(updates: Record<string, unknown>): void;
@@ -340,7 +364,7 @@ export interface SessionToolContext {
    * build its MCP/API servers, apply to the agent.
    *
    * Only available in backends that run alongside SessionManager (Claude in-process, Pi subprocess).
-   * Codex and other backends leave this undefined — callers should degrade gracefully (restart required).
+   * Other consumers leave this undefined — callers should degrade gracefully (restart required).
    *
    * `availability` is always `'next-turn'` when activation succeeds: both Claude SDK
    * (frozen `mcpServers` at `query()` start) and Pi (subprocess reloads proxy tools

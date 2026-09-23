@@ -20,11 +20,13 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "include": [
-    "src/creator-skills/**/*.ts"
+    "src/creator-skills/**/*.ts",
+    "src/product-spaces/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "src/creator-skills/**/*.test.ts"
+    "src/creator-skills/**/*.test.ts",
+    "src/product-spaces/**/*.test.ts"
   ]
 }

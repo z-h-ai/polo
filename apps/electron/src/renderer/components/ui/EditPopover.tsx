@@ -17,9 +17,12 @@ import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
 import { cn } from '@/lib/utils'
 import { usePlatform } from '@polo-ai/ui'
+import { toast } from 'sonner'
 import type { ContentBadge, Session, CreateSessionOptions } from '../../../shared/types'
-import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential } from '@/context/AppShellContext'
+import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential, usePendingQuestion } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
+import { editorIdentityId } from '@/lib/editor-identity'
+import { EditPopoverRestoreUnavailableError, useEditPopoverSessionRestore } from './useEditPopoverSessionRestore'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 
 /** Rotating placeholder keys for compact mode input - short, action-oriented */
@@ -762,10 +765,50 @@ export function EditPopover({
   }
 
   // Use App context for session management (same code path as main chat)
-  const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential } = useAppShellContext()
+  const { onCreateSession, onCreateEditPopoverSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion, onGetEditPopoverPendingQuestion } = useAppShellContext()
 
-  // Session ID for inline execution (created on first message)
-  const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
+  // Stable owner identity for scoped pending-question recovery: a fixed-length collision-safe hash of the
+  // structured editor identity (label + filePath). The raw pair can exceed
+  // any sane field bound for deeply nested projects, so it is hashed —
+  // deterministic across reopen/reload/restart.
+  const popoverOwnerId = useMemo(
+    () => editorIdentityId(context.label, context.filePath),
+    [context.label, context.filePath],
+  )
+
+  const createPopoverSession = useCallback(async (): Promise<string> => {
+    if (!workspace?.id) {
+      throw new Error('[EditPopover] cannot create a session without a workspace')
+    }
+    // Trusted creation path: the server stamps the
+    // 'edit-popover' origin + owner identity here. The generic
+    // onCreateSession can never grant that origin, and no per-turn marker
+    // exists — ordinary hidden/mini turns and every non-desktop entry fail
+    // closed.
+    const newSession = await onCreateEditPopoverSession(workspace.id, {
+      model: model || 'fast',
+      systemPromptPreset: systemPromptPreset || 'mini',
+      permissionMode,
+      workingDirectory,
+      hidden: true, // Hidden sessions use same App code path but don't appear in list
+      popoverOwner: popoverOwnerId,
+    })
+    return newSession.id
+  }, [workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, popoverOwnerId, onCreateEditPopoverSession])
+
+  // Hidden inline session lifecycle (adopt on open / create on first send),
+  // with the restoring gate + CAS adoption that closes the "delayed restore
+  // vs quick send" race.
+  const { inlineSessionId, restoring, ensureSessionForSend } = useEditPopoverSessionRestore({
+    open,
+    workspaceId: workspace?.id,
+    popoverOwnerId,
+    restorePendingSession: useCallback(
+      () => onGetEditPopoverPendingQuestion(workspace?.id ?? '', popoverOwnerId),
+      [onGetEditPopoverPendingQuestion, workspace?.id, popoverOwnerId],
+    ),
+    createPopoverSession,
+  })
 
   // Get session data from Jotai atom (same as main chat - includes optimistic updates)
   // Pass empty string when no session yet - atom returns null for unknown IDs
@@ -774,6 +817,8 @@ export function EditPopover({
   // Pending permission/credential requests for inline session (same flow as main chat)
   const pendingPermission = usePendingPermission(inlineSessionId || '')
   const pendingCredential = usePendingCredential(inlineSessionId || '')
+  // Pending agent question for inline session (same flow as main chat)
+  const pendingQuestion = usePendingQuestion(inlineSessionId || '')
 
   // Model state for ChatDisplay (starts with prop value, can be changed by user)
   const [currentModel, setCurrentModel] = useState(model || 'haiku')
@@ -798,11 +843,6 @@ export function EditPopover({
   // Use existing escape interrupt context for double-ESC flow
   // This shows the "Press Esc again to interrupt" overlay in the input field
   const { handleEscapePress } = useEscapeInterrupt()
-
-  // Reset inline session when popover closes
-  const resetInlineSession = useCallback(() => {
-    setInlineSessionId(null)
-  }, [])
 
   // Stop/cancel generation for the inline session
   const handleStopGeneration = useCallback(() => {
@@ -946,32 +986,34 @@ export function EditPopover({
     }
   }, [isResizing])
 
-  // Reset state when popover opens
+  // Reset model when popover opens. The inline session lifecycle (reset +
+  // scoped adoption, restoring gate, CAS) is owned by
+  // useEditPopoverSessionRestore above — the reachability contract stays:
+  // reopening adopts the same hidden session that still owns an active
+  // pending question, and the association ends only with the lifecycle.
   useEffect(() => {
-    if (open) {
-      setCurrentModel(model || 'haiku')
-      resetInlineSession()
-    }
-  }, [open, model, resetInlineSession])
+    if (!open) return
+    setCurrentModel(model || 'haiku')
+  }, [open, model])
 
   // Handle sending message from ChatDisplay (inline mode)
-  // Creates hidden session on first message, then uses App context for sending
+  // Reuses the adopted inline session or creates one via the trusted path.
   const handleInlineSendMessage = useCallback(async (message: string) => {
     const { prompt, badges } = buildEditPrompt(context, message, displayLabel)
 
-    // Create session on first message
-    let sessionId = inlineSessionId
-    if (!sessionId && workspace?.id) {
-      const createOptions: CreateSessionOptions = {
-        model: model || 'fast',
-        systemPromptPreset: systemPromptPreset || 'mini',
-        permissionMode,
-        workingDirectory,
-        hidden: true, // Hidden sessions use same App code path but don't appear in list
+    let sessionId: string | null
+    try {
+      sessionId = await ensureSessionForSend()
+    } catch (error) {
+      // FAIL-CLOSED restore: an inconclusive scoped lookup must not create a
+      // fresh hidden session (a still-pending question would be orphaned —
+      // the popover session is unreachable through the session list). The
+      // send is surfaced as retryable; the draft stays in the input.
+      if (error instanceof EditPopoverRestoreUnavailableError) {
+        toast.error(t('editPopover.restoreUnavailable'), { duration: 5000 })
+        return
       }
-      const newSession = await onCreateSession(workspace.id, createOptions)
-      sessionId = newSession.id
-      setInlineSessionId(sessionId)
+      throw error
     }
 
     // Send message via App context (includes optimistic user message update)
@@ -979,7 +1021,7 @@ export function EditPopover({
     if (sessionId) {
       onSendMessage(sessionId, prompt, undefined, undefined, badges)
     }
-  }, [context, displayLabel, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
+  }, [context, displayLabel, ensureSessionForSend, onSendMessage])
 
   // Legacy mode: navigates to chat in the same window
   const handleLegacySendMessage = useCallback((message: string) => {
@@ -1034,6 +1076,7 @@ export function EditPopover({
             {/* Container */}
             <div
               ref={popoverRef}
+              data-testid="edit-popover-panel"
               className="relative bg-foreground-2 overflow-hidden w-full h-full shadow-modal-small"
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
@@ -1064,9 +1107,16 @@ export function EditPopover({
                   onRespondToPermission={onRespondToPermission}
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
+                  pendingQuestion={pendingQuestion}
+                  onRespondToQuestion={onRespondToQuestion}
                   compactMode={true}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
+                  // Restoring gate: the send entry
+                  // stays disabled while the adoption query is in flight, so
+                  // a quick send cannot create a throw-away session that a
+                  // late restore result would then strand.
+                  disabled={restoring}
                 />
               </div>
             </div>

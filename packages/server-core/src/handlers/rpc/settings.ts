@@ -4,14 +4,18 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import {
   getAllSessionDrafts,
   getDefaultThinkingLevel,
+  getHomeQuickAccess,
   getHomeRecentApps,
   getOrganizationContextStorage,
+  getProductSpaceContextStorage,
   getPreferencesPath,
   getSessionDraft,
   loadPreferences,
   setDefaultThinkingLevel,
+  setHomeQuickAccess,
   setHomeRecentApps,
   updateOrganizationContextStorage,
+  updateProductSpaceContextStorage,
   setSessionDraft,
   deleteSessionDraft,
   getWorkspaceByNameOrId,
@@ -20,8 +24,14 @@ import type {
   HomeRecentAppPreference,
 } from '@polo-ai/shared/config/home-recent'
 import type {
+  HomeQuickAccessApp,
+} from '@polo-ai/shared/config/home-quick-access'
+import type {
   OrganizationContextStoragePatch,
 } from '@polo-ai/shared/config/organization-context'
+import type {
+  ProductSpaceContextStoragePatch,
+} from '@polo-ai/shared/config/product-space-context'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
@@ -38,8 +48,12 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.preferences.WRITE,
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS,
+  RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS,
   RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
   RPC_CHANNELS.drafts.GET,
   RPC_CHANNELS.drafts.SET,
   RPC_CHANNELS.drafts.DELETE,
@@ -228,6 +242,12 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
         next.homeRecentApps = current.homeRecentApps
       }
       if (
+        next.homeQuickAccess === undefined
+        && current.homeQuickAccess !== undefined
+      ) {
+        next.homeQuickAccess = current.homeQuickAccess
+      }
+      if (
         next.organizationContextStorage === undefined
         && current.organizationContextStorage !== undefined
       ) {
@@ -257,6 +277,20 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   )
 
   server.handle(
+    RPC_CHANNELS.preferences.GET_HOME_QUICK_ACCESS,
+    async (_ctx, contextKey: string) => getHomeQuickAccess(contextKey),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.SET_HOME_QUICK_ACCESS,
+    async (
+      _ctx,
+      contextKey: string,
+      apps: HomeQuickAccessApp[],
+    ) => setHomeQuickAccess(contextKey, apps),
+  )
+
+  server.handle(
     RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
     async (_ctx, accountId: string) => getOrganizationContextStorage(accountId),
   )
@@ -268,6 +302,20 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
       accountId: string,
       patch: OrganizationContextStoragePatch,
     ) => updateOrganizationContextStorage(accountId, patch),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+    async (_ctx, accountId: string) => getProductSpaceContextStorage(accountId),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
+    async (
+      _ctx,
+      accountId: string,
+      patch: ProductSpaceContextStoragePatch,
+    ) => updateProductSpaceContextStorage(accountId, patch),
   )
 
   // ============================================================

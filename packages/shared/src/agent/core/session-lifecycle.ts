@@ -29,6 +29,9 @@ export enum AbortReason {
   /** Auth request triggered (OAuth, credential prompt) */
   AuthRequest = 'auth_request',
 
+  /** Agent requested structured user input (request_user_input) */
+  QuestionRequested = 'question_requested',
+
   /** New message sent while processing (silent redirect) */
   Redirect = 'redirect',
 

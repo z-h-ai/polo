@@ -9,7 +9,7 @@ import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/util
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
-import { installWebviewSecurityHandlers } from './webview-security'
+import { installWebviewSecurityHandlers, setWebviewScopeResolver } from './webview-security'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -185,6 +185,9 @@ export class WindowManager {
   private setupWebviewSecurity(): void {
     if (this.webviewSecurityInitialized) return
     this.webviewSecurityInitialized = true
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => this.getWorkspaceForWindow(webContentsId) ?? null,
+    })
     installWebviewSecurityHandlers()
   }
 
