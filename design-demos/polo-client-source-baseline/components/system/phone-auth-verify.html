@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>验证码登录 · 输入验证码 · Polo 组件画廊</title>
+<style>
+/* Translated from apps/electron/src/renderer/index.css :root/.dark plus the
+   shadow utility classes (index.css ~604-652). Values are the source ones;
+   --fg-* aliases kept for the existing prototype stylesheets. */
+
+:root {
+  --background: oklch(0.98 0.003 265);
+  --foreground: oklch(0.185 0.01 270);
+  --foreground-rgb: 38, 36, 42;
+  --accent: oklch(0.62 0.13 293);
+  --accent-rgb: 104, 78, 133;
+  --info: oklch(0.75 0.16 70);
+  --info-rgb: 180, 120, 40;
+  --success: oklch(0.55 0.17 145);
+  --success-rgb: 34, 120, 60;
+  --destructive: oklch(0.58 0.24 28);
+  --destructive-rgb: 180, 60, 50;
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+  --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  /* Source-named shadcn compatibility tokens (index.css:164-178). */
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--fg-50);
+  --foreground-2: var(--fg-2);
+  --amber-strong: #d97706;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--background));
+  --info-soft: color-mix(in srgb, var(--info) 12%, var(--background));
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--background));
+  --danger-soft: color-mix(in srgb, var(--destructive) 10%, var(--background));
+  --on-accent: #fff;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --panel-gap: 6px;
+  --panel-inset: 6px;
+  --tabbar-height: 36px;
+  --content-top-offset: 84px;
+  --radius-xs: 2px;
+  --radius-sm: 3.75px;
+  --radius-md: 5.625px;
+  --radius-lg: 11.25px;
+  --radius-edge: 14px;
+  --radius-pill: 999px;
+  --topbar-height: 48px;
+  /* Shadow opacity registry (index.css:113-115) and layered shadows
+     (index.css:118-139, 604-652). The 1px ring is always foreground 6%. */
+  --shadow-border-opacity: 0.08;
+  --shadow-blur-opacity: 0.06;
+  --shadow-minimal:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px;
+  --shadow-middle:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px;
+  --shadow-strong:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 12px 12px -6px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 24px 24px -12px;
+  /* Tinted shadow: set --shadow-color to an "r, g, b" triple before use
+     (index.css:619-628). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-border-opacity) * 1.5)) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-border-opacity)) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-blur-opacity) * 0.67)) 0 6px 6px -3px;
+  --shadow-panel: 0 18px 52px rgba(0,0,0,.18);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .06) 0 0 0 1px,
+    rgba(0,0,0,.04) 0 1px 1px -.5px,
+    rgba(0,0,0,.04) 0 3px 3px 0,
+    rgba(0,0,0,.02) 0 6px 6px 0,
+    rgba(0,0,0,.02) 0 12px 12px 0,
+    rgba(0,0,0,.02) 0 24px 24px 0;
+}
+
+html[data-theme="dark"] {
+  --background: oklch(0.145 0.015 270);
+  --foreground: oklch(0.95 0.01 270);
+  --foreground-rgb: 237, 236, 240;
+  --accent: oklch(0.65 0.22 293);
+  --accent-rgb: 130, 75, 185;
+  --info: oklch(0.78 0.14 70);
+  --info-rgb: 210, 155, 55;
+  --success: oklch(0.60 0.17 145);
+  --success-rgb: 50, 140, 80;
+  --destructive: oklch(0.65 0.22 28);
+  --destructive-rgb: 200, 70, 60;
+  --background-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --border: oklch(from var(--foreground) l c h / 0.09);
+  /* Dark mode uses stronger blur opacity; the ring stays foreground 6%
+     exactly as in the source (index.css:267-269 and utility classes). */
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+  /* Dark tinted shadows are outline-only at uniform lightness 0.425
+     (index.css:632-640). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    oklch(from rgb(var(--shadow-color, 0, 0, 0)) 0.425 c h / 0.6) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 6px 6px -3px;
+  --amber-strong: #fbbf24;
+  --shadow-panel: 0 20px 70px rgba(0,0,0,.48);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .12) 0 0 0 1px,
+    rgba(0,0,0,.08) 0 1px 1px -.5px,
+    rgba(0,0,0,.08) 0 3px 3px 0,
+    rgba(0,0,0,.04) 0 6px 6px 0,
+    rgba(0,0,0,.04) 0 12px 12px 0,
+    rgba(0,0,0,.04) 0 24px 24px 0;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html { font-size: 15px; font-optical-sizing: auto; background: var(--background); }
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: color .2s ease, background .2s ease;
+}
+button, input, textarea, select { color: inherit; font: inherit; }
+button { border: 0; cursor: pointer; }
+/* Source buttons use disabled:pointer-events-none disabled:opacity-50. */
+button:disabled { pointer-events: none; opacity: .5; }
+/* Source inputs/buttons focus with a 1px foreground/30 ring, not an accent
+   outline (input.tsx, button.tsx). */
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+*:hover::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: var(--fg-20); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* SpinKit grid spinner keyframes from packages/ui/src/styles/index.css,
+   used by the source Spinner component (LoadingIndicator.tsx). */
+@keyframes spinner-grid {
+  0%, 70%, 100% { transform: scale3d(0.5, 0.5, 1); }
+  35% { transform: scale3d(0, 0, 1); }
+}
+.icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; flex: 0 0 auto; }
+.icon svg { width: 100%; height: 100%; }
+.muted { color: var(--fg-50); }
+.eyebrow { margin: 0 0 7px; color: var(--fg-50); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; font-size: 12px; }
+.button:hover { background: var(--fg-5); }
+.button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.button.danger { border-color: var(--destructive); background: var(--destructive); color: var(--on-accent); }
+
+/* Translated from AdminLoginStep.tsx + OnboardingWizard.tsx + input.tsx.
+   The wizard page is p-4 sm:p-8, so the review viewport (>=640px) gets 30px
+   (p-8 = 2rem = 30px at the 15px root). Root font-size is 15px. */
+.source-admin-login{width:100%;height:100%;overflow-y:auto;background:var(--fg-2);color:var(--foreground)}
+.source-admin-login__titlebar{position:fixed;inset:0 0 auto;height:50px;z-index:40}
+.source-admin-login main{display:flex;min-height:100%;align-items:center;justify-content:center;padding:30px}
+/* Card: max-w-96 = 24rem = 360px, p-7 = 26.25px, rounded-[20px] is exact. */
+.source-admin-login__card{width:100%;max-width:360px;padding:26.25px;border:1px solid color-mix(in srgb,#fff 20%,transparent);border-radius:20px;background:color-mix(in srgb,var(--background) 72%,transparent);box-shadow:var(--shadow-modal-small);backdrop-filter:blur(24px)}
+.source-admin-login__identity{display:flex;flex-direction:column;align-items:center;text-align:center}
+/* Logo mark: shadow-tinted with --shadow-color: var(--accent-rgb)
+   (AdminLoginStep.tsx:70-75 + index.css .shadow-tinted). size-12 = 45px,
+   rounded-2xl = 15px, symbol size-7 = 26.25px. */
+.source-admin-login__mark{display:flex;width:45px;height:45px;align-items:center;justify-content:center;border-radius:15px;background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 58%,var(--foreground)));color:var(--background);--shadow-color:var(--accent-rgb);box-shadow:var(--shadow-tinted)}
+.source-admin-login__mark svg{width:26.25px;height:26.25px}
+/* h1: mt-5 text-xl = 18.75px/1.4 semibold; p: mt-2 text-sm. */
+.source-admin-login h1{margin:18.75px 0 0;font-size:18.75px;line-height:1.4;font-weight:600}
+.source-admin-login__identity p{margin:7.5px 0 0;color:var(--fg-50);font-size:13.125px;line-height:1.4286}
+/* Form rhythm: mt-6 space-y-4 groups (22.5px / 15px), space-y-2 inside
+   groups (7.5px). */
+.source-admin-login form{display:flex;flex-direction:column;gap:15px;margin-top:22.5px}
+.source-admin-login label{color:color-mix(in srgb,var(--foreground) 70%,transparent);font-size:11.25px;line-height:1;font-weight:500}
+.source-admin-login__field{display:grid;gap:7.5px}
+/* Input: h-11 = 41.25px px-3 py-1 rounded-[10px] exact, bg-foreground-2,
+   md:text-sm = 13.125px, ring 1px fg/30 on focus. */
+.source-admin-login input{width:100%;height:41.25px;box-sizing:border-box;padding:3.75px 11.25px;border:1px solid color-mix(in srgb,var(--foreground) 15%,transparent);border-radius:10px;background:var(--fg-2);color:var(--foreground);font-size:13.125px}
+.source-admin-login input:focus{outline:none;box-shadow:0 0 0 1px color-mix(in srgb,var(--foreground) 30%,transparent)}
+.source-admin-login input::placeholder{color:var(--fg-50)}
+/* Eye toggle: right-1.5 (5.625px) size-8 (30px) rounded-[8px] exact;
+   input pr-11 = 41.25px. */
+.source-admin-login__password{position:relative}
+.source-admin-login__password input{padding-right:41.25px}
+.source-admin-login__password button{position:absolute;top:50%;right:5.625px;display:flex;width:30px;height:30px;align-items:center;justify-content:center;transform:translateY(-50%);border:0;border-radius:8px;background:transparent;color:var(--fg-50)}
+.source-admin-login__password button:hover{background:color-mix(in srgb,var(--foreground) 5%,transparent);color:var(--foreground)}
+.source-admin-login__password button svg{width:15px;height:15px}
+/* Error alert: mt-6 px-3 py-2.5 rounded-[10px] border destructive/20 bg
+   destructive/10 text-sm with a size-4 (15px) AlertTriangle at mt-0.5
+   (AdminLoginStep.tsx:87-102). */
+.source-admin-login__error{display:flex;align-items:flex-start;gap:7.5px;margin-top:0;padding:9.375px 11.25px;border:1px solid color-mix(in srgb,var(--destructive) 20%,transparent);border-radius:10px;background:color-mix(in srgb,var(--destructive) 10%,transparent);color:var(--destructive);font-size:13.125px;line-height:1.4286;text-align:left}
+.source-admin-login__error svg{flex:none;margin-top:1.875px}
+/* Submit: h-11 rounded-[10px] bg-accent text-background with the button
+   base gap-2 and text-sm font-medium; hover accent/90. */
+.source-admin-login form>button[type=submit]{height:41.25px;margin-top:0;border:0;border-radius:10px;background:var(--accent);color:var(--background);font-size:13.125px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7.5px}
+.source-admin-login form>button[type=submit]:hover{background:color-mix(in srgb,var(--accent) 90%,transparent)}
+.source-admin-login form>button:disabled{opacity:.5}
+
+</style>
+<style>
+/* Gallery chrome only — not part of the translated component. */
+html, body { overflow: auto; height: auto; }
+#root { min-height: 100%; }
+.gallery-body { position: relative; min-height: 100vh; background: var(--background); }
+.gallery-note { position: fixed; left: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; background: color-mix(in srgb, var(--foreground) 4%, var(--background)); box-shadow: var(--shadow-minimal); color: var(--fg-50); font-size: 11px; user-select: none; }
+.gallery-dark-toggle { position: fixed; right: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); background: var(--background); color: var(--foreground); font-size: 11px; box-shadow: var(--shadow-minimal); }
+/* Canvas-embed mode (?embed=1): the gallery index frames components in iframes
+   and provides its own chrome, so hide the per-page note and theme toggle. */
+.gallery-embed .gallery-note, .gallery-embed .gallery-dark-toggle { display: none; }
+</style>
+</head>
+<body>
+<script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
+<div id="root"><div class="gallery-body"><div class="source-admin-login" style="height:100%"><div class="source-admin-login__titlebar"></div><main><section class="source-admin-login__card" aria-label="Admin 登录"><div class="source-admin-login__identity"><div class="source-admin-login__mark"><svg viewBox="0 0 100 100" fill="none" aria-hidden="true"><path d="M 22 85 V 10 H 44 A 19 19 0 0 1 44 48 H 34" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="42" cy="76" r="9" fill="currentColor"></circle><path d="M 60 65 V 85 H 68" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="84" cy="76" r="9" fill="currentColor"></circle></svg></div><h1>Polo AI</h1><p>验证手机号即可登录或注册</p></div><div role="tablist" aria-label="登录方式" style="margin-top:18.75px;display:grid;grid-template-columns:1fr 1fr;padding:3.75px;border-radius:10px;background:color-mix(in srgb, var(--foreground) 5%, transparent)"><button type="button" role="tab" aria-selected="true" style="border-radius:8px;padding:7.5px 11.25px;font-size:13.125px;font-weight:500;color:var(--foreground);background:var(--background);box-shadow:var(--shadow-minimal);border:0;cursor:pointer">验证码登录</button><button type="button" role="tab" aria-selected="false" style="border-radius:8px;padding:7.5px 11.25px;font-size:13.125px;color:var(--fg-50);background:transparent;border:0;cursor:pointer;transition:color 150ms">密码登录</button></div><form data-testid="phone-auth-verify" style="display:grid;gap:15px;margin-top:18.75px"><div style="display:flex;align-items:center;justify-content:space-between;padding:9.375px 11.25px;border-radius:10px;background:color-mix(in srgb, var(--foreground) 5%, transparent);font-size:13.125px;line-height:1.4"><strong style="font-weight:500;color:var(--foreground)">+86 138 •••• 8000</strong><button type="button" style="color:var(--accent);background:transparent;border:0;padding:0;font-size:13.125px;cursor:pointer">修改</button></div><div style="display:grid;gap:7.5px"><label for="phone-auth-code" style="display:block;color:color-mix(in srgb, var(--foreground) 70%, transparent);font-size:11.25px;line-height:1;font-weight:500">验证码</label><div style="display:flex;gap:7.5px"><input id="phone-auth-code" inputMode="numeric" autoComplete="one-time-code" placeholder="6 位验证码" autofocus="" style="flex:1;min-width:0;height:41.25px;padding:3.75px 11.25px;border:0;border-radius:10px;background:var(--fg-2);color:var(--foreground);font-size:13.125px;letter-spacing:0.25em;outline:none" value=""/><button type="button" disabled="" style="flex-shrink:0;height:41.25px;padding:3.75px 11.25px;border:1px solid color-mix(in srgb, var(--foreground) 15%, transparent);border-radius:10px;background:var(--background);color:var(--foreground);font-size:13.125px;font-weight:500;opacity:0.5;cursor:not-allowed">43 秒后重发</button></div><p style="margin:0;color:var(--fg-50);font-size:11.25px;line-height:1.4286">验证码 5 分钟内有效。</p></div><button data-testid="phone-auth-continue" type="submit" disabled="" style="height:41.25px;border:0;border-radius:10px;background:var(--accent);color:var(--background);font-size:13.125px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7.5px;opacity:0.5;cursor:not-allowed">继续</button></form></section></main></div></div></div>
+<div class="gallery-note">系统 / 验证码登录 · 输入验证码 — 静态翻译自 Renderer 源码</div>
+<button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
+</body>
+</html>

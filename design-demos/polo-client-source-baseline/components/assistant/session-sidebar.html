@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>会话侧栏 · Polo 组件画廊</title>
+<style>
+/* Translated from apps/electron/src/renderer/index.css :root/.dark plus the
+   shadow utility classes (index.css ~604-652). Values are the source ones;
+   --fg-* aliases kept for the existing prototype stylesheets. */
+
+:root {
+  --background: oklch(0.98 0.003 265);
+  --foreground: oklch(0.185 0.01 270);
+  --foreground-rgb: 38, 36, 42;
+  --accent: oklch(0.62 0.13 293);
+  --accent-rgb: 104, 78, 133;
+  --info: oklch(0.75 0.16 70);
+  --info-rgb: 180, 120, 40;
+  --success: oklch(0.55 0.17 145);
+  --success-rgb: 34, 120, 60;
+  --destructive: oklch(0.58 0.24 28);
+  --destructive-rgb: 180, 60, 50;
+  --background-elevated: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --user-bubble: oklch(from var(--foreground) l c h / 0.05);
+  --border: oklch(from var(--foreground) l c h / 0.05);
+  --input: oklch(from var(--foreground) l c h / 0.1);
+  --ring: oklch(from var(--foreground) l c h / 0.25);
+  --fg-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --fg-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  /* Source-named shadcn compatibility tokens (index.css:164-178). */
+  --muted: oklch(from var(--foreground) l c h / 0.05);
+  --muted-foreground: var(--fg-50);
+  --foreground-2: var(--fg-2);
+  --amber-strong: #d97706;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--background));
+  --info-soft: color-mix(in srgb, var(--info) 12%, var(--background));
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--background));
+  --danger-soft: color-mix(in srgb, var(--destructive) 10%, var(--background));
+  --on-accent: #fff;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --panel-gap: 6px;
+  --panel-inset: 6px;
+  --tabbar-height: 36px;
+  --content-top-offset: 84px;
+  --radius-xs: 2px;
+  --radius-sm: 3.75px;
+  --radius-md: 5.625px;
+  --radius-lg: 11.25px;
+  --radius-edge: 14px;
+  --radius-pill: 999px;
+  --topbar-height: 48px;
+  /* Shadow opacity registry (index.css:113-115) and layered shadows
+     (index.css:118-139, 604-652). The 1px ring is always foreground 6%. */
+  --shadow-border-opacity: 0.08;
+  --shadow-blur-opacity: 0.06;
+  --shadow-minimal:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px;
+  --shadow-middle:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px;
+  --shadow-strong:
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(0, 0, 0, 0) 0 0 0 0,
+    rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0 6px 6px -3px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 12px 12px -6px,
+    rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0 24px 24px -12px;
+  /* Tinted shadow: set --shadow-color to an "r, g, b" triple before use
+     (index.css:619-628). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-border-opacity) * 1.5)) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-border-opacity)) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), calc(var(--shadow-blur-opacity) * 0.67)) 0 6px 6px -3px;
+  --shadow-panel: 0 18px 52px rgba(0,0,0,.18);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .06) 0 0 0 1px,
+    rgba(0,0,0,.04) 0 1px 1px -.5px,
+    rgba(0,0,0,.04) 0 3px 3px 0,
+    rgba(0,0,0,.02) 0 6px 6px 0,
+    rgba(0,0,0,.02) 0 12px 12px 0,
+    rgba(0,0,0,.02) 0 24px 24px 0;
+}
+
+html[data-theme="dark"] {
+  --background: oklch(0.145 0.015 270);
+  --foreground: oklch(0.95 0.01 270);
+  --foreground-rgb: 237, 236, 240;
+  --accent: oklch(0.65 0.22 293);
+  --accent-rgb: 130, 75, 185;
+  --info: oklch(0.78 0.14 70);
+  --info-rgb: 210, 155, 55;
+  --success: oklch(0.60 0.17 145);
+  --success-rgb: 50, 140, 80;
+  --destructive: oklch(0.65 0.22 28);
+  --destructive-rgb: 200, 70, 60;
+  --background-elevated: color-mix(in srgb, var(--foreground) 2.5%, var(--background));
+  --foreground-dimmed: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --border: oklch(from var(--foreground) l c h / 0.09);
+  /* Dark mode uses stronger blur opacity; the ring stays foreground 6%
+     exactly as in the source (index.css:267-269 and utility classes). */
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+  /* Dark tinted shadows are outline-only at uniform lightness 0.425
+     (index.css:632-640). */
+  --shadow-tinted:
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 0 0 0,
+    oklch(from rgb(var(--shadow-color, 0, 0, 0)) 0.425 c h / 0.6) 0 0 0 1px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 1px 1px -0.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 3px 3px -1.5px,
+    rgba(var(--shadow-color, 0, 0, 0), 0) 0 6px 6px -3px;
+  --amber-strong: #fbbf24;
+  --shadow-panel: 0 20px 70px rgba(0,0,0,.48);
+  --shadow-modal-small:
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(0,0,0,0) 0 0 0 0,
+    rgba(var(--foreground-rgb), .12) 0 0 0 1px,
+    rgba(0,0,0,.08) 0 1px 1px -.5px,
+    rgba(0,0,0,.08) 0 3px 3px 0,
+    rgba(0,0,0,.04) 0 6px 6px 0,
+    rgba(0,0,0,.04) 0 12px 12px 0,
+    rgba(0,0,0,.04) 0 24px 24px 0;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html { font-size: 15px; font-optical-sizing: auto; background: var(--background); }
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: color .2s ease, background .2s ease;
+}
+button, input, textarea, select { color: inherit; font: inherit; }
+button { border: 0; cursor: pointer; }
+/* Source buttons use disabled:pointer-events-none disabled:opacity-50. */
+button:disabled { pointer-events: none; opacity: .5; }
+/* Source inputs/buttons focus with a 1px foreground/30 ring, not an accent
+   outline (input.tsx, button.tsx). */
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+*:hover::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: var(--fg-20); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* SpinKit grid spinner keyframes from packages/ui/src/styles/index.css,
+   used by the source Spinner component (LoadingIndicator.tsx). */
+@keyframes spinner-grid {
+  0%, 70%, 100% { transform: scale3d(0.5, 0.5, 1); }
+  35% { transform: scale3d(0, 0, 1); }
+}
+.icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; flex: 0 0 auto; }
+.icon svg { width: 100%; height: 100%; }
+.muted { color: var(--fg-50); }
+.eyebrow { margin: 0 0 7px; color: var(--fg-50); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; font-size: 12px; }
+.button:hover { background: var(--fg-5); }
+.button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.button.danger { border-color: var(--destructive); background: var(--destructive); color: var(--on-accent); }
+
+</style>
+<style>
+/* Gallery chrome only — not part of the translated component. */
+html, body { overflow: auto; height: auto; }
+#root { min-height: 100%; }
+.gallery-body { position: relative; min-height: 100vh; background: var(--background); }
+.gallery-note { position: fixed; left: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; background: color-mix(in srgb, var(--foreground) 4%, var(--background)); box-shadow: var(--shadow-minimal); color: var(--fg-50); font-size: 11px; user-select: none; }
+.gallery-dark-toggle { position: fixed; right: 12px; bottom: 10px; z-index: 999; padding: 4px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); background: var(--background); color: var(--foreground); font-size: 11px; box-shadow: var(--shadow-minimal); }
+/* Canvas-embed mode (?embed=1): the gallery index frames components in iframes
+   and provides its own chrome, so hide the per-page note and theme toggle. */
+.gallery-embed .gallery-note, .gallery-embed .gallery-dark-toggle { display: none; }
+</style>
+</head>
+<body>
+<script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
+<div id="root"><div class="gallery-body"><div data-route="conversations-navigator/date-grouped" style="display:flex;flex-direction:column;height:100%;min-height:0;box-sizing:border-box"><div class="source-navigator__header"><span class="source-navigator__header-title">所有会话</span><button type="button" class="source-navigator__header-button" aria-label="筛选聊天"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-list-filter" aria-hidden="true"><path d="M2 5h20"></path><path d="M6 12h12"></path><path d="M9 19h6"></path></svg></button></div><div role="listbox" aria-label="Sessions" style="flex:1;min-height:0;overflow-y:auto"><div><button type="button" style="position:relative;display:flex;width:100%;align-items:center;gap:5.625px;padding:7.5px 15px;border:0;background:none;color:var(--foreground);cursor:pointer"><span style="position:absolute;top:1.875px;bottom:1.875px;left:7.5px;right:7.5px;border-radius:6px;background:transparent;pointer-events:none"></span><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right" aria-hidden="true" style="flex-shrink:0;color:color-mix(in srgb, var(--foreground) 60%, transparent);transform:rotate(90deg);transition:transform 180ms"><path d="m9 18 6-6-6-6"></path></svg><span style="display:block;max-width:100%;font-size:11px;font-weight:500;letter-spacing:0.05em;text-transform:uppercase;color:var(--fg-50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">今天</span></button><div class="session-item" style="position:relative" data-session-id="s-1"><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><span style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)"></span><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:color-mix(in srgb, var(--foreground) 3%, transparent);color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--success)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M12 3a9 9 0 0 0 0 18" fill="currentColor" stroke="none"></path></svg></button><span style="display:flex;align-items:center;justify-content:center;overflow:hidden;gap:3.75px;opacity:1;margin-left:0;transition:all 200ms ease-out"><svg style="color:var(--accent);width:13.125px;height:13.125px;flex-shrink:0" viewBox="0 0 25 24" fill="currentColor" aria-hidden="true"><g transform="translate(1.748, 0.7832)"><path fill-rule="nonzero" d="M10.9952443,22 C8.89638276,22 7.01311428,21.5426195 5.34543882,20.6278586 C4.85718403,21.0547471 4.29283758,21.3901594 3.65239948,21.6340956 C3.01196138,21.8780319 2.3651823,22 1.71206226,22 C1.5028102,22 1.34111543,21.9466389 1.22697795,21.8399168 C1.11284047,21.7331947 1.05735697,21.6016979 1.06052745,21.4454262 C1.06369794,21.2891545 1.13820435,21.1347886 1.28404669,20.9823285 C1.5693904,20.6621622 1.77547197,20.3400901 1.9022914,20.0161123 C2.02911082,19.6921344 2.09252054,19.3090783 2.09252054,18.8669439 C2.09252054,18.4553015 2.02276985,18.0646223 1.88326848,17.6949064 C1.74376711,17.3251906 1.5693904,16.9383229 1.36013835,16.5343035 C1.15088629,16.1302841 0.941634241,15.6748094 0.732382188,15.1678794 C0.523130134,14.6609494 0.348753423,14.0682606 0.209252054,13.3898129 C0.0697506845,12.7113652 0,11.9147609 0,11 C0,9.40679141 0.271076524,7.93936244 0.813229572,6.5977131 C1.35538262,5.25606376 2.11946966,4.09164934 3.1054907,3.10446985 C4.09151175,2.11729037 5.25507998,1.35308385 6.59619542,0.811850312 C7.93731085,0.270616771 9.40366047,0 10.9952443,0 C12.5868281,0 14.0531777,0.270616771 15.3942931,0.811850312 C16.7354086,1.35308385 17.900562,2.11729037 18.8897536,3.10446985 C19.8789451,4.09164934 20.6446174,5.25606376 21.1867704,6.5977131 C21.7289235,7.93936244 22,9.40679141 22,11 C22,12.5932086 21.7289235,14.0606376 21.1867704,15.4022869 C20.6446174,16.7439362 19.8805303,17.9083507 18.8945093,18.8955301 C17.9084883,19.8827096 16.74492,20.6469161 15.4038046,21.1881497 C14.0626891,21.7293832 12.593169,22 10.9952443,22 Z"></path></g></svg><svg style="color:var(--success);width:13.125px;height:13.125px;flex-shrink:0" viewBox="0 0 25 24" fill="currentColor" aria-hidden="true"><path fill-rule="nonzero" d="M13.7207031,22.6523438 C13.264974,22.6523438 12.9361979,22.4895833 12.734375,22.1640625 C12.5325519,21.8385417 12.360026,21.4316406 12.2167969,20.9433594 L10.6640625,15.7871094 C10.5729167,15.4615885 10.5403646,15.1995443 10.5664062,15.0009766 C10.5924479,14.8024089 10.6998698,14.6022135 10.8886719,14.4003906 L20.859375,3.6484375 C20.9179688,3.58984375 20.9472656,3.52473958 20.9472656,3.453125 C20.9472656,3.38151042 20.921224,3.32291667 20.8691406,3.27734375 C20.8170573,3.23177083 20.7568359,3.20735677 20.6884766,3.20410156 C20.6201172,3.20084635 20.5566406,3.22851562 20.4980469,3.28710938 L9.78515625,13.296875 C9.5703125,13.4921875 9.36197917,13.601237 9.16015625,13.6240234 C8.95833333,13.6468099 8.70117188,13.609375 8.38867188,13.5117188 L3.11523438,11.9101562 C2.64648438,11.7669271 2.25911458,11.5960286 1.953125,11.3974609 C1.64713542,11.1988932 1.49414062,10.875 1.49414062,10.4257812 C1.49414062,10.0742188 1.63411458,9.77148438 1.9140625,9.51757812 C2.19401042,9.26367188 2.5390625,9.05859375 2.94921875,8.90234375 L19.7460938,2.46679688 C19.9739583,2.38216146 20.1871745,2.31542969 20.3857422,2.26660156 C20.5843099,2.21777344 20.764974,2.19335938 20.9277344,2.19335938 C21.2467448,2.19335938 21.4973958,2.28450521 21.6796875,2.46679688 C21.8619792,2.64908854 21.953125,2.89973958 21.953125,3.21875 C21.953125,3.38802083 21.9287109,3.5703125 21.8798828,3.765625 C21.8310547,3.9609375 21.7643229,4.17252604 21.6796875,4.40039062 L15.2832031,21.109375 C15.1009115,21.578125 14.8828125,21.952474 14.6289062,22.2324219 C14.375,22.5123698 14.0722656,22.6523438 13.7207031,22.6523438 Z"></path></svg></span></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">分析 Polo 架构设计</span><span style="display:flex;flex-shrink:0;align-items:center;gap:3.75px"><span style="display:inline-flex;align-items:center;flex-shrink:0;height:18px;padding:0 5.625px;border-radius:4px;background:color-mix(in srgb, #0ea5e9 10%, transparent);color:#0284c7;font-size:10px;font-weight:500;white-space:nowrap">Telegram</span></span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="font-size:11px;color:color-mix(in srgb, var(--foreground) 40%, transparent);white-space:nowrap">5分</span></span></span></span></button></div></div><div class="session-item" style="position:relative" data-session-id="s-2"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:color-mix(in srgb, var(--foreground) 50%, transparent)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle></svg></button></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">修复登录流程的认证 bug</span><span style="display:flex;flex-shrink:0;align-items:center;gap:3.75px"><span style="display:inline-flex;align-items:center;flex-shrink:0;height:18px;padding:0 5.625px;border-radius:4px;background:color-mix(in srgb, #10b981 10%, transparent);color:#059669;font-size:10px;font-weight:500;white-space:nowrap">WhatsApp</span></span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="display:inline-flex;align-items:center;justify-content:center;padding:3.75px"><svg xmlns="http://www.w3.org/2000/svg" width="13.125" height="13.125" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flag" aria-hidden="true" style="color:var(--info)"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"></path></svg></span></span></span></span></button></div></div><div class="session-item" style="position:relative" data-session-id="s-3"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--info)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"></circle></svg></button><span style="display:flex;align-items:center;justify-content:center;overflow:hidden;gap:3.75px;opacity:1;margin-left:0;transition:all 200ms ease-out"><span role="status" aria-label="加载中" style="display:inline-grid;grid-template-columns:repeat(3, 1fr);width:10px;height:10px;gap:0.08em;color:var(--foreground)"><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.2s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.3s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.4s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.1s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.2s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.3s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.1s"></span><span style="background-color:currentColor;animation:spinner-grid 1.3s infinite ease-in-out;transform:scale3d(0.5,0.5,1);animation-delay:0.2s"></span></span></span></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">实现搜索功能</span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="font-size:11px;color:color-mix(in srgb, var(--foreground) 40%, transparent);white-space:nowrap">2小时</span></span></span></span></button></div></div><div class="session-item" style="position:relative" data-session-id="s-4"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--accent)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"></circle><path d="M8 12l3 3 5-5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">审查 PR #42</span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="font-size:11px;color:color-mix(in srgb, var(--foreground) 40%, transparent);white-space:nowrap">9小时</span></span></span></span></button></div></div></div><div><button type="button" style="position:relative;display:flex;width:100%;align-items:center;gap:5.625px;padding:7.5px 15px;border:0;background:none;color:var(--foreground);cursor:pointer"><span style="position:absolute;top:1.875px;bottom:1.875px;left:7.5px;right:7.5px;border-radius:6px;background:transparent;pointer-events:none"></span><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right" aria-hidden="true" style="flex-shrink:0;color:color-mix(in srgb, var(--foreground) 60%, transparent);transform:rotate(90deg);transition:transform 180ms"><path d="m9 18 6-6-6-6"></path></svg><span style="display:block;max-width:100%;font-size:11px;font-weight:500;letter-spacing:0.05em;text-transform:uppercase;color:var(--fg-50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">昨天</span></button><div class="session-item" style="position:relative" data-session-id="s-5"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--accent)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"></circle><path d="M8 12l3 3 5-5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">调试 API 响应处理</span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="display:inline-flex;align-items:center;justify-content:center;padding:3.75px"><svg xmlns="http://www.w3.org/2000/svg" width="13.125" height="13.125" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flag" aria-hidden="true" style="color:var(--info)"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"></path></svg></span></span></span></span></button></div></div><div class="session-item" style="position:relative" data-session-id="s-6"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:color-mix(in srgb, var(--foreground) 50%, transparent)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle></svg></button></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">新聊天</span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="font-size:11px;color:color-mix(in srgb, var(--foreground) 40%, transparent);white-space:nowrap">2天</span></span></span></span></button></div></div></div><div><button type="button" style="position:relative;display:flex;width:100%;align-items:center;gap:5.625px;padding:7.5px 15px;border:0;background:none;color:var(--foreground);cursor:pointer"><span style="position:absolute;top:1.875px;bottom:1.875px;left:7.5px;right:7.5px;border-radius:6px;background:transparent;pointer-events:none"></span><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right" aria-hidden="true" style="flex-shrink:0;color:color-mix(in srgb, var(--foreground) 60%, transparent);transform:rotate(90deg);transition:transform 180ms"><path d="m9 18 6-6-6-6"></path></svg><span style="display:block;max-width:100%;font-size:11px;font-weight:500;letter-spacing:0.05em;text-transform:uppercase;color:var(--fg-50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">8月30日</span></button><div class="session-item" style="position:relative" data-session-id="s-7"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:color-mix(in srgb, var(--foreground) 50%, transparent)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"></circle><path d="M9 9l6 6M15 9l-6 6" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">部署监控告警配置</span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="font-size:11px;color:color-mix(in srgb, var(--foreground) 40%, transparent);white-space:nowrap">4天</span></span></span></span></button></div></div></div><div><button type="button" style="position:relative;display:flex;width:100%;align-items:center;gap:5.625px;padding:7.5px 15px;border:0;background:none;color:var(--foreground);cursor:pointer"><span style="position:absolute;top:1.875px;bottom:1.875px;left:7.5px;right:7.5px;border-radius:6px;background:transparent;pointer-events:none"></span><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right" aria-hidden="true" style="flex-shrink:0;color:color-mix(in srgb, var(--foreground) 60%, transparent);transform:none;transition:transform 180ms"><path d="m9 18 6-6-6-6"></path></svg><span style="display:block;max-width:100%;font-size:11px;font-weight:500;letter-spacing:0.05em;text-transform:uppercase;color:var(--fg-50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">8月28日<span style="color:color-mix(in srgb, var(--foreground) 50%, transparent)"> · 1</span></span></button><div class="session-item" style="position:relative" data-session-id="s-8"><div style="padding:0 15px 0 38px"><hr style="margin:0;border:0;height:1px;background:color-mix(in srgb, var(--foreground) 10%, transparent)"/></div><div style="position:relative;padding-left:7.5px;margin-right:7.5px"><button type="button" style="display:flex;width:100%;align-items:flex-start;gap:7.5px;padding:11.25px 15px 11.25px 7.5px;border-radius:8px;border:0;background:transparent;color:var(--foreground);text-align:left;font-size:13.125px;cursor:pointer;transition:background-color 75ms"><span style="display:flex;flex-direction:column;gap:5.625px;min-width:0;flex:1"><span style="display:flex;align-items:center;gap:10px;width:100%;min-width:0"><span style="display:flex;flex-shrink:0;align-items:center;gap:10px"><button type="button" aria-label="Change todo state" aria-haspopup="menu" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;color:color-mix(in srgb, var(--foreground) 50%, transparent)"><svg viewBox="0 0 24 24" style="width:100%;height:100%" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle></svg></button></span><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-sans);font-size:13px;color:var(--foreground)">数据源接入文档整理</span><span style="display:flex;flex-shrink:0;align-items:center;margin-left:auto;position:relative;margin-right:-3.75px"><span style="font-size:11px;color:color-mix(in srgb, var(--foreground) 40%, transparent);white-space:nowrap">6天</span></span></span></span></button></div></div></div></div></div></div></div>
+<div class="gallery-note">助手会话 / 会话侧栏 — 静态翻译自 Renderer 源码</div>
+<button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
+</body>
+</html>
