@@ -1,8 +1,8 @@
 # POO-70 · MVP 完整流程高保真 — 视觉验收
 
-> 以下是 2026-09-17 的 v2 历史截图与验收记录，不能作为当前 r10 原型的视觉验收。当前入口已按 D-PC-10 改为「顶栏显示当前空间、头像菜单 → 切换空间」；[r9 企业账号菜单](build/space-entry-r9/account-1440.png)、[r9 空间列表（1024）](build/space-entry-r9/switcher-1024.png)、[r10 失权通知](build/revoked-space-r10/notification-P-M04-NOTIFY-PERSONAL.png) 和 [r9 / r10 增量检查](build/revoked-space-r10/browser-check.json) 供本轮复看，完整质量状态仍见 [quality-report.json](quality-report.json)。
+> 以下是 2026-09-17 的 v2 历史截图与验收记录，不能作为当前 r10 原型的视觉验收。当前入口已按 D-PC-10 改为「顶栏显示当前空间、头像菜单 → 切换空间」。2026-09-23 起 `build/` 与 `screenshots/` 派生产物已移出仓库（v2 截图与 r9/r10 增量证据的历史版本见提交 7d04ffb7、6ba964f4），完整质量状态仍见 [quality-report.json](quality-report.json)。现行视觉验收基线：对 [prototype.html](prototype.html) 按场景深链 `#scene=<场景ID>` 在 1440×900 / 1024×768 现场截图，与运行中的实机逐屏比对；截图为当轮临时产物，不再提交。
 
-日期：2026-09-17 · 修订 `poo70-ux-r4-v2-7`（继承 D-PC-07/08/09，经四轮用户走查迭代收敛） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
+日期：2026-09-17 · 修订 `poo70-ux-r4-v2-7`（继承 D-PC-07/08/09，经四轮用户走查迭代收敛） · 评审壳：[review.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.html) · 产品表面：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json) · 逐步走查：[review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)
 
 截图均直接对 `surface.html`（纯产品表面，无任何评审 chrome）拍摄——v2 契约下产品表面与评审 chrome 分离于两个文件，不再需要 `?clean=1` 之类的隐藏开关。
 
@@ -23,62 +23,62 @@
 | 四条故事播放 | Playwright 实测：进入/自动同步/下一步到末尾/退出 | S1（12 步）/ S2（14 步）/ S3（7 步）/ S4（7 步） | **通过**：进入落首步、产品点击自动推进、末步禁用 next、可退出 |
 | 视口切换真实性 | Playwright 读 iframe `innerWidth`/`innerHeight`，并验证检查器开合不改变二者 | 1440×900 与 1024×768 | **通过**：两档均精确等于所选视口；检查器只改变显示缩放 |
 
-检查工具：Playwright（`chromium.launch()` headless，deviceScaleFactor=1）；审计明细见 `build/viewport-audit.json`（空对象即零问题）；构建工具链见 [feature-map.md §5](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)。
+检查工具：Playwright（`chromium.launch()` headless，deviceScaleFactor=1）；审计明细见 `build/viewport-audit.json`（空对象即零问题；已随派生产物移出仓库，历史见提交 6ba964f4）；构建工具链见 [feature-map.md §5](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)。
 
 ## 2. 截图索引 — 1440×900（30 张）
 
-文件位于 `screenshots/1440x900/`：
+截图文件已随派生产物移出仓库（历史版本见提交 7d04ffb7）；下表保留为 v2 验收索引，场景 ID 即 [prototype.html](prototype.html) 深链锚点（`#scene=P-…`）：
 
 | 屏 | 模块 | 说明 |
 | --- | --- | --- |
-| [P-M01-LOGIN-PASSWORD](screenshots/1440x900/P-M01-LOGIN-PASSWORD.png) | M01 | 现有登录卡（分段 tab + 协议勾选） |
-| [P-M01-PERSONAL-PREP](screenshots/1440x900/P-M01-PERSONAL-PREP.png) | M01 | 我的空间幂等准备 |
-| [P-M01-INVITE-BROWSER](screenshots/1440x900/P-M01-INVITE-BROWSER.png) | M01 | 浏览器邀请交接卡 |
-| [P-M02-SWITCHER](screenshots/1440x900/P-M02-SWITCHER.png) | M02 | 空间切换器（集成候选还原） |
-| [P-M02-CONFIRM](screenshots/1440x900/P-M02-CONFIRM.png) | M02 | 切换确认 · 终止 3 项 |
-| [P-M02-CONFIRM-PERSONAL](screenshots/1440x900/P-M02-CONFIRM-PERSONAL.png) | M02 | 我的空间有活动时切企业 · 先确认终止 |
-| [P-M02-STOP-FAILED](screenshots/1440x900/P-M02-STOP-FAILED.png) | M02 | 部分停止失败（重试/取消） |
-| [P-M03-HOME-PERSONAL](screenshots/1440x900/P-M03-HOME-PERSONAL.png) | M03 | 个人首页（助手固定 + 3/5 常用） |
-| [P-M03-HOME-ZERO](screenshots/1440x900/P-M03-HOME-ZERO.png) | M03 | 首登零常用引导（D-PC-01） |
-| [P-M03-ALL-APPS](screenshots/1440x900/P-M03-ALL-APPS.png) | M03 | 全部 Apps · 来源分组 |
-| [P-M03-HOME-ENT](screenshots/1440x900/P-M03-HOME-ENT.png) | M03 | 企业首页（无管理卡、无个人圈子通知，D-PC-07/08） |
-| [P-M04-APP-VIEW](screenshots/1440x900/P-M04-APP-VIEW.png) | M04 | App 容器 · FDE 中性占位 |
-| [P-M04-CLOSE-ACTIVE](screenshots/1440x900/P-M04-CLOSE-ACTIVE.png) | M04 | 关闭三选项 |
-| [P-M04-PERM-DENIED](screenshots/1440x900/P-M04-PERM-DENIED.png) | M04 | OS 权限被拒 → 系统设置路径 |
-| [P-M05-CHAT](screenshots/1440x900/P-M05-CHAT.png) | M05 | 助手会话（直接复用现有框架） |
-| [P-M05-QUESTION-REOPEN](screenshots/1440x900/P-M05-QUESTION-REOPEN.png) | M05 | 追问待回答与重开恢复（PC-N04） |
-| [P-M06-SKILLS](screenshots/1440x900/P-M06-SKILLS.png) | M06 | 技能列表（同名并列 + 授权态） |
-| [P-M07-LIST](screenshots/1440x900/P-M07-LIST.png) | M07 | 我的圈子列表（本轮新增） |
-| [P-M07-DETAIL-PAID](screenshots/1440x900/P-M07-DETAIL-PAID.png) | M07 | 付费订阅详情（虚构演示数据） |
-| [P-M07-EXPIRED](screenshots/1440x900/P-M07-EXPIRED.png) | M07 | 单一圈子来源到期，另有来源的作品仍可打开 |
-| [P-M07-SOURCE-FALLBACK](screenshots/1440x900/P-M07-SOURCE-FALLBACK.png) | M07 | 退出一个圈子后，同一作品经其他来源继续可用 |
-| [P-M08-FILES](screenshots/1440x900/P-M08-FILES.png) | M08 | 会话文件（留原对话，D-PC-03） |
-| [P-M09-PRE-BLOCK](screenshots/1440x900/P-M09-PRE-BLOCK.png) | M09 | 发送前积分不足（输入保留） |
-| [P-M09-BROWSER](screenshots/1440x900/P-M09-BROWSER.png) | M09 | 充值浏览器交接卡 |
-| [P-M09-RESUMED](screenshots/1440x900/P-M09-RESUMED.png) | M09 | 到账解除 · 由用户决定发送 |
-| [P-M10-MENU](screenshots/1440x900/P-M10-MENU.png) | M10 | 账号菜单（管理入口按资格出现） |
-| [P-M11-BLOCKED-EXPIRED](screenshots/1440x900/P-M11-BLOCKED-EXPIRED.png) | M11 | 最后一个有效来源失效才阻断 |
-| [P-M11-CONTRACT](screenshots/1440x900/P-M11-CONTRACT.png) | M11 | 需要升级 Polo（ContractGate 还原） |
-| [P-M11-REOPEN-RECOVERY](screenshots/1440x900/P-M11-REOPEN-RECOVERY.png) | M11 | 重开恢复（不猜成功） |
-| [P-M11-OFFLINE-HOME](screenshots/1440x900/P-M11-OFFLINE-HOME.png) | M11 | 离线打开（缓存范围如实标注） |
+| P-M01-LOGIN-PASSWORD | M01 | 现有登录卡（分段 tab + 协议勾选） |
+| P-M01-PERSONAL-PREP | M01 | 我的空间幂等准备 |
+| P-M01-INVITE-BROWSER | M01 | 浏览器邀请交接卡 |
+| P-M02-SWITCHER | M02 | 空间切换器（集成候选还原） |
+| P-M02-CONFIRM | M02 | 切换确认 · 终止 3 项 |
+| P-M02-CONFIRM-PERSONAL | M02 | 我的空间有活动时切企业 · 先确认终止 |
+| P-M02-STOP-FAILED | M02 | 部分停止失败（重试/取消） |
+| P-M03-HOME-PERSONAL | M03 | 个人首页（助手固定 + 3/5 常用） |
+| P-M03-HOME-ZERO | M03 | 首登零常用引导（D-PC-01） |
+| P-M03-ALL-APPS | M03 | 全部 Apps · 来源分组 |
+| P-M03-HOME-ENT | M03 | 企业首页（无管理卡、无个人圈子通知，D-PC-07/08） |
+| P-M04-APP-VIEW | M04 | App 容器 · FDE 中性占位 |
+| P-M04-CLOSE-ACTIVE | M04 | 关闭三选项 |
+| P-M04-PERM-DENIED | M04 | OS 权限被拒 → 系统设置路径 |
+| P-M05-CHAT | M05 | 助手会话（直接复用现有框架） |
+| P-M05-QUESTION-REOPEN | M05 | 追问待回答与重开恢复（PC-N04） |
+| P-M06-SKILLS | M06 | 技能列表（同名并列 + 授权态） |
+| P-M07-LIST | M07 | 我的圈子列表（本轮新增） |
+| P-M07-DETAIL-PAID | M07 | 付费订阅详情（虚构演示数据） |
+| P-M07-EXPIRED | M07 | 单一圈子来源到期，另有来源的作品仍可打开 |
+| P-M07-SOURCE-FALLBACK | M07 | 退出一个圈子后，同一作品经其他来源继续可用 |
+| P-M08-FILES | M08 | 会话文件（留原对话，D-PC-03） |
+| P-M09-PRE-BLOCK | M09 | 发送前积分不足（输入保留） |
+| P-M09-BROWSER | M09 | 充值浏览器交接卡 |
+| P-M09-RESUMED | M09 | 到账解除 · 由用户决定发送 |
+| P-M10-MENU | M10 | 账号菜单（管理入口按资格出现） |
+| P-M11-BLOCKED-EXPIRED | M11 | 最后一个有效来源失效才阻断 |
+| P-M11-CONTRACT | M11 | 需要升级 Polo（ContractGate 还原） |
+| P-M11-REOPEN-RECOVERY | M11 | 重开恢复（不猜成功） |
+| P-M11-OFFLINE-HOME | M11 | 离线打开（缓存范围如实标注） |
 
 ## 3. 截图索引 — 1024×768（11 张）
 
-文件位于 `screenshots/1024x768/`，验证 G4 布局在小视口下收敛（顶栏收纳、卡片栅格降列、助手三栏压缩）：
+截图文件已随派生产物移出仓库；下表保留为小视口（1024×768）v2 验收索引，验证 G4 布局在小视口下收敛（顶栏收纳、卡片栅格降列、助手三栏压缩）：
 
 | 屏 | 模块 |
 | --- | --- |
-| [P-M03-HOME-PERSONAL](screenshots/1024x768/P-M03-HOME-PERSONAL.png) | M03 |
-| [P-M03-HOME-ZERO](screenshots/1024x768/P-M03-HOME-ZERO.png) | M03 |
-| [P-M03-ALL-APPS](screenshots/1024x768/P-M03-ALL-APPS.png) | M03 |
-| [P-M04-APP-VIEW](screenshots/1024x768/P-M04-APP-VIEW.png) | M04 |
-| [P-M05-CHAT](screenshots/1024x768/P-M05-CHAT.png) | M05 |
-| [P-M07-LIST](screenshots/1024x768/P-M07-LIST.png) | M07 |
-| [P-M07-SOURCE-FALLBACK](screenshots/1024x768/P-M07-SOURCE-FALLBACK.png) | M07 |
-| [P-M08-FILES](screenshots/1024x768/P-M08-FILES.png) | M08 |
-| [P-M09-PRE-BLOCK](screenshots/1024x768/P-M09-PRE-BLOCK.png) | M09 |
-| [P-M10-MENU](screenshots/1024x768/P-M10-MENU.png) | M10 |
-| [P-M02-SWITCHER](screenshots/1024x768/P-M02-SWITCHER.png) | M02 |
+| P-M03-HOME-PERSONAL | M03 |
+| P-M03-HOME-ZERO | M03 |
+| P-M03-ALL-APPS | M03 |
+| P-M04-APP-VIEW | M04 |
+| P-M05-CHAT | M05 |
+| P-M07-LIST | M07 |
+| P-M07-SOURCE-FALLBACK | M07 |
+| P-M08-FILES | M08 |
+| P-M09-PRE-BLOCK | M09 |
+| P-M10-MENU | M10 |
+| P-M02-SWITCHER | M02 |
 
 ## 4. 任务验收标准对照
 
