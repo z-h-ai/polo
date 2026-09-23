@@ -54,8 +54,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;
@@ -196,8 +195,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    15px, so Tailwind rem values are written verbatim (1rem = 15px). */
 
 .source-shell{width:100%;height:100%;min-height:0;overflow:hidden;background:var(--background);color:var(--foreground)}
-/* TopBar: fixed under the tab bar, z-panel, h-(--topbar-height), px-3. */
-.source-topbar{position:fixed;top:36px;left:0;right:0;z-index:50;height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+/* Chat prototype top bar sits at the window edge. */
+.source-topbar{position:fixed;top:0;left:0;right:0;z-index:50;height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .source-topbar__left,.source-topbar__right,.source-topbar__workspace{display:flex;min-width:0;align-items:center;gap:2px}
 .source-topbar__left{flex:1;padding-left:11.25px}
 .source-topbar__right{padding-right:11.25px}
@@ -208,8 +207,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .source-icon-button:hover{background:color-mix(in srgb,var(--foreground) 3%,transparent)}
 .source-icon-button:disabled{opacity:.3}
 .source-icon-button svg{width:18px;height:18px}
-/* The Polo AI menu symbol button keeps its accent color at 16px. */
-.source-topbar__left>.source-icon-button:nth-child(2) svg{width:15px;height:15px;color:var(--accent)}
 /* Right cluster: Plus/Help are 26px rounded-lg buttons with 50% icons; the
    Plus button carries ml-1 (TopBar.tsx:224-247). */
 .source-topbar__right .source-icon-button{width:26px;height:26px;border-radius:7.5px;color:color-mix(in srgb,var(--foreground) 50%,transparent)}
@@ -221,15 +218,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .source-workspace-switcher>span:nth-child(2){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .source-workspace-switcher__avatar{width:16px;height:16px;flex:none;margin-right:5.625px;border-radius:50%;background:color-mix(in srgb,var(--foreground) 5%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 10%,transparent)}
 .source-workspace-switcher svg{opacity:.6}
-/* Panel stack: top 84px (36px tab bar + 48px top bar), 6px gap and inset
+/* Panel stack: top 48px below the top bar, 6px gap and inset
    (panel-constants.ts PANEL_GAP/INSET), sidebar 220px, navigator 300px,
    content min 440px (AppShell.tsx:546-550). */
-.source-panel-stack{position:absolute;inset:84px 0 0;display:flex;gap:6px;min-height:0;padding:0 6px 6px 0}
+.source-panel-stack{position:absolute;inset:var(--content-top-offset) 0 0;display:flex;gap:6px;min-height:0;padding:0 6px 6px 0}
 .source-panel-stack--without-sidebar{padding-left:6px}
 .source-sidebar{width:220px;flex:0 0 220px;min-height:0;display:flex;flex-direction:column}
 .source-new-session{width:calc(100% - 16px);display:flex;align-items:center;gap:8px;margin:0 8px 8px;padding:7px 8px;border:0;border-radius:6px;background:var(--background);color:var(--foreground);box-shadow:var(--shadow-minimal);font-size:13px;text-align:left}
 .source-new-session svg{width:14px;height:14px}
-.source-sidebar__nav{display:grid;align-content:start;gap:2px;min-height:0;overflow:auto;padding:4px 8px 16px}
+.source-sidebar__nav{display:grid;align-content:start;gap:2px;flex:1;min-height:0;overflow:auto;padding:4px 8px 16px}
 .source-sidebar__nav hr{width:calc(100% - 16px);height:1px;margin:4px 8px;border:0;background:color-mix(in srgb,var(--foreground) 5%,transparent)}
 .source-sidebar__nested{position:relative;display:grid;gap:2px;padding-left:20px}
 .source-sidebar__nested:before{content:'';position:absolute;top:4px;bottom:4px;left:13px;width:1px;background:color-mix(in srgb,var(--foreground) 10%,transparent)}
@@ -239,14 +236,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .source-nav-item:hover{background:color-mix(in srgb,var(--foreground) 2%,transparent)}
 .source-nav-item.is-active{background:color-mix(in srgb,var(--foreground) 7%,transparent)}
 .source-nav-item svg{width:14px;height:14px;flex:none;color:color-mix(in oklch,var(--foreground) 60%,transparent)}
-/* Sidebar footer user row: border-t + 32px gradient avatar + name + chevron
-   (LeftSidebar.tsx:324-392). */
-.source-sidebar__footer{display:flex;align-items:center;gap:8px;margin-top:auto;padding:12px 8px;border-top:1px solid color-mix(in srgb,var(--foreground) 5%,transparent)}
-.source-sidebar__user{display:flex;min-width:0;flex:1;align-items:center;gap:8px;padding:4px;border:0;border-radius:6px;background:transparent;text-align:left}
-.source-sidebar__user:hover{background:color-mix(in srgb,var(--foreground) 2%,transparent)}
-.source-sidebar__user-avatar{width:32px;height:32px;flex:none;border-radius:50%;background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 45%,var(--foreground)));color:var(--background);display:grid;place-items:center;font-size:13px;font-weight:600}
-.source-sidebar__user-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;color:var(--foreground)}
-.source-sidebar__user svg{width:12px;height:12px;flex:none;color:color-mix(in srgb,var(--foreground) 50%,transparent)}
 /* PanelHeader above navigator lists: h-[42px] pl-4 pr-2 gap-1.5 with a
    text-sm semibold title (PanelHeader.tsx) and a HeaderIconButton (h-7 w-7
    rounded-[4px], icon h-4 w-4 = 15px). */
@@ -262,6 +251,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .source-navigator{width:300px;flex:0 0 300px;background:var(--background);border-radius:10px;display:flex;flex-direction:column}
 .source-content-panel{min-width:440px;flex:1 1 0;background:var(--fg-2);border-radius:10px 14px 14px 10px}
 .source-panel-stack--without-sidebar .source-navigator{border-radius:10px 10px 14px 10px}
+@media (max-width:1000px){
+  .source-panel-stack{padding-left:6px}
+  .source-sidebar{position:absolute;z-index:60;top:0;bottom:6px;left:0;width:220px;flex:none;padding:0 0 6px;background:var(--background);box-shadow:var(--shadow-middle);border-radius:0 10px 10px 0}
+  .source-navigator{width:260px;flex-basis:260px}
+  .source-content-panel{min-width:0}
+}
 /* Empty session list: EntityListEmptyScreen — bare 40px Inbox at 50% color,
    14px/500 title, 12px description, p-6 pb-[20%] (empty.tsx). */
 .source-navigator__list{flex:1;min-height:0;overflow:auto}
@@ -288,7 +283,7 @@ html, body { overflow: auto; height: auto; }
 <body>
 <script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
 <div id="root"><div class="gallery-body"><div style="display:flex;height:100%;min-height:0;flex-direction:column"><div class="source-navigator__header" style="z-index:50"><span class="source-navigator__header-title">服务器</span><button type="button" aria-label="更多选项" class="source-navigator__header-button"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button></div><div style="flex:1;min-height:0;mask-image:linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);-webkit-mask-image:linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);overflow-y:auto"><div style="max-width:720px;margin:0 auto;padding:26.25px 18.75px"><div style="display:flex;flex-direction:column;gap:18.75px"><section style="display:flex;flex-direction:column;gap:11.25px"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding-left:3.75px"><div style="display:flex;flex-direction:column;gap:1.875px"><h3 style="margin:0;font-size:15px;font-weight:600;line-height:1.35;color:var(--foreground)">远程访问</h3></div></div><div style="overflow:hidden;border-radius:11.25px;background:var(--background);box-shadow:var(--shadow-minimal)"><div><div style="display:flex;align-items:center;justify-content:space-between;padding:13.125px 15px"><label style="flex:1;min-width:0;cursor:pointer;user-select:none"><div style="font-size:13.125px;font-weight:500;line-height:1.35">启用服务器模式</div><div style="font-size:13.125px;line-height:1.35;color:var(--fg-50)">允许网络上其他设备的连接。</div></label><div style="margin-left:15px;flex-shrink:0"><button type="button" role="switch" aria-checked="true" style="position:relative;display:inline-flex;flex-shrink:0;width:30px;height:17.25px;align-items:center;border:1px solid transparent;border-radius:9999px;background:var(--foreground);box-shadow:0 1px 2px 0 rgba(0,0,0,.05);outline:none;transition:all 150ms"><span style="display:block;width:16px;height:16px;border-radius:9999px;background:var(--background);transform:translateX(14px);transition:transform 150ms"></span></button></div></div></div></div></section><section style="display:flex;flex-direction:column;gap:11.25px"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding-left:3.75px"><div style="display:flex;flex-direction:column;gap:1.875px"><h3 style="margin:0;font-size:15px;font-weight:600;line-height:1.35;color:var(--foreground)">连接</h3></div></div><div style="overflow:hidden;border-radius:11.25px;background:var(--background);box-shadow:var(--shadow-minimal)"><div><div style="padding:13.125px 15px;display:flex;align-items:center;justify-content:space-between;gap:15px"><div style="flex:1;min-width:0"><div style="font-size:13.125px;font-weight:500;line-height:1.35">端口</div></div><div style="display:flex;gap:7.5px;margin-left:15px;flex-shrink:0;flex:1;max-width:260px"><div style="position:relative;flex:1;border-radius:5.625px;box-shadow:var(--shadow-minimal);background:var(--fg-2)"><input style="width:100%;height:33.75px;box-sizing:border-box;padding:0 11.25px;border:0;outline:0;border-radius:5.625px;color:var(--foreground);background:transparent;font:inherit;font-size:13.125px" value="9100"/></div></div></div></div><div><div aria-hidden="true" style="height:1px;margin-left:15px;margin-right:15px;background:color-mix(in srgb, var(--border) 50%, transparent)"></div><div style="display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;padding:13.125px 15px"><div style="flex:1;min-width:0"><div style="font-size:13.125px;font-weight:500;line-height:1.35">URL</div></div><div style="display:flex;align-items:center;gap:11.25px;margin-left:15px;flex-shrink:0"><code style="padding:1.875px 7.5px;border-radius:5.625px;background:var(--fg-5);color:var(--fg-50);font-family:var(--font-mono);font-size:12px">http://localhost:9100</code><button type="button" aria-label="复制 URL" style="display:inline-flex;width:22.5px;height:22.5px;align-items:center;justify-content:center;flex-shrink:0;border:0;border-radius:5.625px;background:transparent;color:var(--fg-50)"><svg xmlns="http://www.w3.org/2000/svg" width="11.25" height="11.25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div></div></div><div><div aria-hidden="true" style="height:1px;margin-left:15px;margin-right:15px;background:color-mix(in srgb, var(--border) 50%, transparent)"></div><div style="display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;padding:13.125px 15px"><div style="flex:1;min-width:0"><div style="font-size:13.125px;font-weight:500;line-height:1.35">令牌</div></div><div style="display:flex;align-items:center;gap:11.25px;margin-left:15px;flex-shrink:0"><code style="padding:1.875px 7.5px;border-radius:5.625px;background:var(--fg-5);color:var(--fg-50);font-family:var(--font-mono);font-size:12px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">••••••••••••••••</code><button type="button" aria-label="显示令牌" style="display:inline-flex;width:22.5px;height:22.5px;align-items:center;justify-content:center;flex-shrink:0;border:0;border-radius:5.625px;background:transparent;color:var(--fg-50)"><svg xmlns="http://www.w3.org/2000/svg" width="11.25" height="11.25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg></button><button type="button" aria-label="复制令牌" style="display:inline-flex;width:22.5px;height:22.5px;align-items:center;justify-content:center;flex-shrink:0;border:0;border-radius:5.625px;background:transparent;color:var(--fg-50)"><svg xmlns="http://www.w3.org/2000/svg" width="11.25" height="11.25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div></div></div><div><div aria-hidden="true" style="height:1px;margin-left:15px;margin-right:15px;background:color-mix(in srgb, var(--border) 50%, transparent)"></div><div style="display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;padding:13.125px 15px"><div style="flex:1;min-width:0"><div style="font-size:13.125px;font-weight:500;line-height:1.35">证书</div></div><div style="display:flex;align-items:center;gap:11.25px;margin-left:15px;flex-shrink:0"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;color:var(--fg-50);font-size:12px">Not configured</span><button type="button" style="display:inline-flex;height:26.25px;align-items:center;padding:0 7.5px;border:1px solid color-mix(in srgb, var(--foreground) 15%, transparent);border-radius:5.625px;background:transparent;color:var(--foreground);font-size:11.25px;font-weight:500;flex-shrink:0">Browse</button></div></div></div><div><div aria-hidden="true" style="height:1px;margin-left:15px;margin-right:15px;background:color-mix(in srgb, var(--border) 50%, transparent)"></div><div style="display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;padding:13.125px 15px"><div style="flex:1;min-width:0"><div style="font-size:13.125px;font-weight:500;line-height:1.35">私钥</div></div><div style="display:flex;align-items:center;gap:11.25px;margin-left:15px;flex-shrink:0"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;color:var(--fg-50);font-size:12px">Not configured</span><button type="button" style="display:inline-flex;height:26.25px;align-items:center;padding:0 7.5px;border:1px solid color-mix(in srgb, var(--foreground) 15%, transparent);border-radius:5.625px;background:transparent;color:var(--foreground);font-size:11.25px;font-weight:500;flex-shrink:0">Browse</button></div></div></div></div><div style="display:flex;align-items:flex-start;gap:7.5px;padding:7.5px 11.25px;border-radius:8px;background:color-mix(in srgb, var(--amber-strong) 10%, transparent);border:1px solid color-mix(in srgb, var(--amber-strong) 20%, transparent);color:var(--amber-strong);font-size:12px"><svg xmlns="http://www.w3.org/2000/svg" width="13.125" height="13.125" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-triangle-alert" aria-hidden="true" style="flex-shrink:0;margin-top:1.875px"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg><span>未启用 TLS，连接将不加密。</span></div></section></div></div></div></div></div></div>
-<div class="gallery-note">设置 / 设置 · 服务器 — 静态翻译自 Renderer 源码</div>
+<div class="gallery-note">设置 / 设置 · 服务器 — 基于固定 Renderer 来源；当前原型的壳层有设计删改</div>
 <button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
 </body>
 </html>

@@ -44,11 +44,9 @@ const groups = [
   {
     id: 'workbench',
     label: '工作台',
-    note: 'Home 启动器、组织应用卡、桌面应用菜单、Workspace 切换',
+    note: '组织应用卡与 Workspace 切换；首页启动器和桌面菜单不属于当前 Chat 原型',
     components: [
-      ['home-launcher', 'Home 启动器 (fresh profile)', '../src/source/HomeLauncher.jsx', 'SourceHomeLauncher({ poloIconSrc })', ['source-home.css'], 'viewport'],
       ['organization-app-card', '组织应用卡', '../src/source/HomeApps.jsx', 'SourceOrganizationAppsSection()', ['source-home.css'], 'panel'],
-      ['app-menu', '桌面应用菜单', '../src/source/AppMenu.jsx', 'SourceDesktopAppMenu()', 'viewport'],
       ['space-switcher-topbar', 'Workspace 切换 · Topbar', '../src/source/SpaceSwitcher.jsx', 'SourceSpaceSwitcher({ state: "topbar" })', 'viewport'],
       ['space-switcher-compact', 'Workspace 切换 · Compact 抽屉', '../src/source/SpaceSwitcher.jsx', 'SourceSpaceSwitcher({ state: "compact" })', 'viewport'],
     ],
@@ -286,7 +284,7 @@ for (const group of groups) {
       title,
       body,
       css: cssFor(extraCss),
-      note: `${group.label} / ${title} — 静态翻译自 Renderer 源码`,
+      note: `${group.label} / ${title} — 基于固定 Renderer 来源；当前原型的壳层有设计删改`,
       height: slug.includes('settings') ? '100vh' : '100vh',
     }))
     indexRows.push({ group: group.id, slug, title })

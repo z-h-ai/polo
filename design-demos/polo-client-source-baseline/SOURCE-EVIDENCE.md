@@ -1,9 +1,10 @@
 # Renderer source evidence
 
-This file is the fidelity contract for the replacement baseline. A static
-region may be implemented only after its source and a corresponding renderer
-or Playground reference have been recorded here. It deliberately does not
-promote the previous generic mock to a source-faithful result.
+This file records the original Renderer evidence captured for the 2026-08-10
+source baseline. The current deliverable is a Polo 助手 Chat design prototype:
+its tab bar, sidebar account footer, top-bar Polo AI menu button and Home app
+hub were intentionally removed on 2026-09-23. These historical captures do
+not establish fidelity of the current whole-page Chat shell.
 
 ## Captured renderer state
 
@@ -30,10 +31,10 @@ Chat reference capture.
 
 | Region | Exact source composition | Required capture state | Static-export boundary |
 | --- | --- | --- | --- |
-| Tab shell | `components/tab-browser/TabShell.tsx`, `TabBar.tsx`, `TabContent.tsx` | authenticated Home with one Polo tab | none |
-| Home launcher | `components/tab-browser/HomePage.tsx`, `AppIcon.tsx`, `OrganizationAppCard.tsx` | authenticated Home with deterministic installed/catalog apps | catalog is fixture data; its UI is not approximate |
-| Persistent top bar | `components/app-shell/TopBar.tsx`, `ui/TopBarButton.tsx`, `AppMenu.tsx` | authenticated desktop shell | none |
-| Panel layout / navigation | `components/app-shell/AppShell.tsx`, `PanelStackContainer.tsx`, `LeftSidebar.tsx`, `PanelSlot.tsx`, `panel-constants.ts` | authenticated desktop shell | none |
+| Tab shell (historical baseline only) | `components/tab-browser/TabShell.tsx`, `TabBar.tsx`, `TabContent.tsx` | authenticated Home with one Polo tab | removed from current Chat prototype |
+| Home launcher (historical baseline only) | `components/tab-browser/HomePage.tsx`, `AppIcon.tsx`, `OrganizationAppCard.tsx` | authenticated Home with deterministic installed/catalog apps | removed from current Chat prototype |
+| Persistent top bar | `components/app-shell/TopBar.tsx`, `ui/TopBarButton.tsx`, `AppMenu.tsx` | authenticated desktop shell | current Chat prototype omits the AppMenu trigger |
+| Panel layout / navigation | `components/app-shell/AppShell.tsx`, `PanelStackContainer.tsx`, `LeftSidebar.tsx`, `PanelSlot.tsx`, `panel-constants.ts` | authenticated desktop shell | current Chat prototype omits the sidebar account footer |
 | Chat | `pages/ChatPage.tsx`, `components/chat/ChatDisplay.tsx`, `components/app-shell/input/ChatInputZone.tsx` | authenticated session with a deterministic message fixture | live agent/network operations only |
 | Browser app | `components/browser/*`, `browser-empty-state.tsx` | authenticated browser empty state | BrowserView page surface is approximate; toolbar is not |
 
@@ -41,9 +42,8 @@ Chat reference capture.
 
 | Fixture | Static implementation | Source values | Reference status |
 | --- | --- | --- | --- |
-| Fresh-profile Home launcher | `src/source/HomeLauncher.jsx`, `src/styles/source-home.css` | `HomePage.tsx`, `AppIcon.tsx`, `HomePage.round2.interaction.isolated.ts`, `en.json` | source translation complete; renderer/Playground screenshot still required by the original evidence gate |
 | Empty Chat session | `src/source/EmptyChat.jsx` | `ChatPage.tsx`, `PanelHeader.tsx`, `ChatDisplay.tsx`, `EmptyStateHint.tsx`, `ChatInputZone.tsx`, `InputContainer.tsx`, `FreeFormInput.tsx`, `en.json` | source translation is integrated; `reference-playground-chat-empty-hint-1440x900.png` and `reference-playground-chat-input-1440x900.png` verify its key production components, while an overall Chat Renderer capture remains required |
-| Desktop Polo shell | `src/source/PoloShell.jsx`, `src/styles/source-shell.css` | `TabBar.tsx`, `TopBar.tsx`, `AppShell.tsx`, `PanelStackContainer.tsx`, `LeftSidebar.tsx`, `panel-constants.ts` | source translation complete for the default empty-session fixture; renderer/Playground screenshot still required by the original evidence gate |
+| Polo 助手 Chat shell | `src/source/PoloShell.jsx`, `src/styles/source-shell.css` | `TopBar.tsx`, `AppShell.tsx`, `PanelStackContainer.tsx`, `LeftSidebar.tsx`, `panel-constants.ts` | source-derived components with user-requested shell adaptation; no longer a source-faithful whole-page baseline |
 | Admin password login | `src/source/AdminLogin.jsx`, `src/styles/source-admin-login.css` | `OnboardingWizard.tsx`, `AdminLoginStep.tsx`, `PoloAiSymbol.tsx`, `input.tsx`, `button.tsx`, `zh-Hans.json` | source translation complete (invalid-credentials alert fixture + field groups) and compared against `reference-renderer-login-1440x900.png` |
 | Settings App default | `src/source/SettingsRegion.jsx` | `pages/settings/SettingsNavigator.tsx`, `pages/settings/AppSettingsPage.tsx`, `components/settings/{SettingsCard,SettingsSection,SettingsRow,SettingsToggle,SettingsInput}.tsx`, `components/settings/SettingsUIConstants.ts`, `components/icons/SettingsIcons.tsx`, `components/ui/switch.tsx`, `components/ui/HeaderMenu.tsx`, `components/ui/HeaderIconButton.tsx`, `components/app-shell/PanelHeader.tsx`, `shared/settings-registry.ts`, `zh-Hans.json` | source translation complete for the fresh-profile navigator (9 visible items) and the App page IPC-default fixture; a real Renderer/Playground reference screenshot is still required before it can be classified source-faithful |
 | Splash, reauthentication, and available onboarding steps | `src/source/LifecycleRegion.jsx` | `SplashScreen.tsx`, `onboarding/OnboardingWizard.tsx`, `ReauthScreen.tsx`, `WelcomeStep.tsx`, `AdminKickedStep.tsx`, `CompletionStep.tsx`, `primitives.tsx`, `PoloAiSymbol.tsx`, `en.json` | source translation is integrated; Playground Welcome/Wizard references are captured, while Splash, Reauth and Admin-kicked still require individual Renderer/Playground references |
@@ -53,12 +53,11 @@ Chat reference capture.
 | Thin-client workspace picker and creation choice | `src/source/WorkspacePicker.jsx` | `workspace/WorkspacePicker.tsx`, `WorkspaceCreationScreen.tsx`, `AddWorkspaceStep_Choice.tsx`, `workspace/primitives.tsx`, `packages/ui LoadingIndicator`, `zh-Hans.json` (`workspace.*`) | direct source translation is integrated for loading, empty-list, and choice fixtures on the AddWorkspaceContainer frame (28rem, rounded-[20px], shadow-strong) with the 50px titlebar close header; remote workspace rows and create/open/remote IPC results are intentionally not invented and require a real runtime reference |
 | Organization onboarding | `src/source/OrganizationOnboarding.jsx` | `organization/OrganizationOnboarding.tsx`, `button.tsx`, `input.tsx`, `label.tsx`, `packages/ui LoadingIndicator`, `zh-Hans.json` (`organization.*`) | direct source translation is integrated for loading, join/select card frames (IPC-preview spinner body), and the full create form; organization summaries, invitations, and join previews are IPC-only runtime data and are not invented |
 | Empty Sources, Skills, and Automations navigators | `src/source/ResourceEmptyPanels.jsx` | `app-shell/SourcesListPanel.tsx`, `app-shell/SkillsListPanel.tsx`, `automations/AutomationsListPanel.tsx`, `app-shell/MainContentPanel.tsx`, `ui/entity-list-empty.tsx`, `ui/empty.tsx`, `zh-Hans.json` | direct source translation is integrated for the actual empty-dataset fixture including the Learn-more + add CTA pair (workspace-root branch) and the muted unselected detail message; resource rows and their details are data-dependent and are not invented |
-| Desktop Polo AI menu | `src/source/AppMenu.jsx` | `AppMenu.tsx`, `app-menu/DesktopAppMenu.tsx`, `packages/ui/src/components/ui/StyledDropdown.tsx`, `shared/menu-schema.ts`, `icons/SquarePenRounded.tsx`, `zh-Hans.json` (`menu.*`) | direct source translation is integrated for the root menu with all submenus closed, using StyledDropdown content/item/sub-trigger/separator/shortcut metrics; Electron role/action handlers are IPC boundaries and are not simulated |
 
 ## Icon and asset rules
 
-- The launcher and Polo tab use `apps/electron/resources/icon.png`, as imported
-  by `AppIcon.tsx` and `TabBar.tsx`.
+- Historical launcher and Polo tab assets came from `apps/electron/resources/icon.png`;
+  neither surface appears in the current Chat prototype.
 - The login mark is `components/icons/PoloAiSymbol.tsx`; its SVG must be copied
   from the rendered source output, never redrawn.
 - Lucide icons must be emitted from the installed `lucide-react` source used by

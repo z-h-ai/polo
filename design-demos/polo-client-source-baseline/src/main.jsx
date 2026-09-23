@@ -6,7 +6,6 @@ import './styles/tokens.css'
 import './styles/base.css'
 import './styles/shell.css'
 import './styles/regions.css'
-import './styles/source-home.css'
 import './styles/source-shell.css'
 import './styles/source-admin-login.css'
 

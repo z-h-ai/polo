@@ -46,8 +46,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;

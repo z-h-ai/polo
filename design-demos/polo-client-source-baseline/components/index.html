@@ -53,8 +53,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;
@@ -345,30 +344,14 @@ const FRAMES = [
   {
     "type": "section",
     "label": "工作台",
-    "note": "Home 启动器、组织应用卡、桌面应用菜单、Workspace 切换"
-  },
-  {
-    "type": "frame",
-    "title": "Home 启动器 (fresh profile)",
-    "href": "./workbench/home-launcher.html",
-    "size": "viewport",
-    "x": 0,
-    "y": 92
-  },
-  {
-    "type": "frame",
-    "title": "桌面应用菜单",
-    "href": "./workbench/app-menu.html",
-    "size": "viewport",
-    "x": 784,
-    "y": 92
+    "note": "组织应用卡与 Workspace 切换；首页启动器和桌面菜单不属于当前 Chat 原型"
   },
   {
     "type": "frame",
     "title": "Workspace 切换 · Topbar",
     "href": "./workbench/space-switcher-topbar.html",
     "size": "viewport",
-    "x": 1568,
+    "x": 0,
     "y": 92
   },
   {
@@ -376,8 +359,8 @@ const FRAMES = [
     "title": "Workspace 切换 · Compact 抽屉",
     "href": "./workbench/space-switcher-compact.html",
     "size": "viewport",
-    "x": 0,
-    "y": 688
+    "x": 784,
+    "y": 92
   },
   {
     "type": "frame",
@@ -385,11 +368,11 @@ const FRAMES = [
     "href": "./workbench/organization-app-card.html",
     "size": "panel",
     "x": 0,
-    "y": 1284
+    "y": 688
   },
   {
     "type": "break",
-    "advance": 1750
+    "advance": 1154
   },
   {
     "type": "section",

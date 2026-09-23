@@ -54,8 +54,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;
@@ -207,7 +206,7 @@ html, body { overflow: auto; height: auto; }
 <body>
 <script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
 <div id="root"><div class="gallery-body"><div data-route="resources/sources/empty" style="display:flex;flex:1;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:11.25px;box-sizing:border-box;padding:22.5px 22.5px 20%;border-radius:7.5px;text-align:center"><div style="display:flex;flex-shrink:0;align-items:center;justify-content:center;margin-bottom:7.5px;color:var(--fg-50)"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-database-zap" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 15 21.84"></path><path d="M21 5V8"></path><path d="M21 12L18 17H22L19 22"></path><path d="M3 12A9 3 0 0 0 14.59 14.87"></path></svg></div><div style="display:flex;max-width:360px;flex-direction:column;align-items:center;gap:7.5px;text-align:center"><div style="font-size:13.125px;font-weight:500;letter-spacing:-.025em">未配置数据源。</div><div style="color:var(--fg-50);font-size:11.25px;line-height:1.375">数据源将智能体连接到外部数据——MCP 服务器、REST API 和本地文件夹。</div></div><div style="display:flex;width:100%;max-width:360px;min-width:0;align-items:center;justify-content:center;gap:11.25px;margin-top:11.25px;font-size:13.125px"><button type="button" style="display:inline-flex;height:26.25px;align-items:center;padding:0 11.25px;border:0;border-radius:8px;background:color-mix(in srgb, var(--foreground) 2%, transparent);box-shadow:var(--shadow-minimal);color:var(--foreground);font-size:11.25px;font-weight:500;transition:background-color 150ms">了解更多</button><button type="button" style="display:inline-flex;height:26.25px;align-items:center;padding:0 11.25px;border:0;border-radius:8px;background:var(--background);box-shadow:var(--shadow-minimal);color:var(--foreground);font-size:11.25px;font-weight:500;transition:background-color 150ms">添加数据源</button></div></div></div></div>
-<div class="gallery-note">资源面板 / 数据源空态 — 静态翻译自 Renderer 源码</div>
+<div class="gallery-note">资源面板 / 数据源空态 — 基于固定 Renderer 来源；当前原型的壳层有设计删改</div>
 <button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
 </body>
 </html>

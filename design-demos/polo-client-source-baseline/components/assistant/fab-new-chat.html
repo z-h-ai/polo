@@ -54,8 +54,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;
@@ -207,7 +206,7 @@ html, body { overflow: auto; height: auto; }
 <body>
 <script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
 <div id="root"><div class="gallery-body"><div data-route="chat/fab" style="position:relative;width:100%;height:100%;box-sizing:border-box;overflow:hidden;background:var(--fg-2)"><button type="button" aria-label="新建聊天" style="position:absolute;right:15px;bottom:15px;z-index:30;display:flex;width:52.5px;height:52.5px;align-items:center;justify-content:center;border:0;border-radius:9999px;background:var(--accent);color:#fff;--shadow-color:var(--accent-rgb);box-shadow:var(--shadow-tinted);cursor:pointer"><svg xmlns="http://www.w3.org/2000/svg" width="22.5" height="22.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-plus" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button></div></div></div>
-<div class="gallery-note">助手会话 / 新建聊天 FAB — 静态翻译自 Renderer 源码</div>
+<div class="gallery-note">助手会话 / 新建聊天 FAB — 基于固定 Renderer 来源；当前原型的壳层有设计删改</div>
 <button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
 </body>
 </html>

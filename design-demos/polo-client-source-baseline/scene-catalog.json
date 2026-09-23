@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1.0.0",
   "default": {
-    "scene": "home",
-    "state": "normal",
+    "scene": "chat",
+    "state": "empty",
     "theme": "light",
     "lang": "zh-Hans"
   },
@@ -39,22 +39,6 @@
       "states": ["loading", "list", "error", "create", "open-folder", "connect-remote", "connect-remote-create", "server-browser"],
       "regions": ["workspace-picker", "workspace-list"],
       "source": ["src/renderer/components/workspace"]
-    },
-    {
-      "id": "home",
-      "label": "我的空间首页",
-      "group": "workbench",
-      "states": ["normal", "empty", "loading", "failure", "restricted"],
-      "regions": ["workbench-bar", "space-switcher", "app-tabs", "home-content", "app-card-grid", "skills-grid", "result-grid"],
-      "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/app-shell/AppShell.tsx"]
-    },
-    {
-      "id": "enterprise-home",
-      "label": "企业空间首页",
-      "group": "workbench",
-      "states": ["normal", "organization-apps", "empty", "loading", "failure", "restricted"],
-      "regions": ["workbench-bar", "space-switcher", "app-tabs", "home-content", "app-card-grid"],
-      "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/tab-browser/OrganizationAppCard.tsx", "src/renderer/components/workspace"]
     },
     {
       "id": "space-switcher",
@@ -143,14 +127,6 @@
       "states": ["normal", "toolbar", "empty", "loading", "failure", "restricted"],
       "regions": ["browser-tab-strip", "browser-toolbar", "browser-content"],
       "source": ["src/renderer/components/browser", "packages/ui/src/components/ui/BrowserControls.tsx", "src/renderer/components/browser/BrowserTabBadge.tsx", "src/renderer/browser-empty-state.tsx"]
-    },
-    {
-      "id": "app-menu",
-      "label": "应用菜单",
-      "group": "apps",
-      "states": ["normal"],
-      "regions": ["app-menu", "app-menu-items"],
-      "source": ["src/renderer/components/AppMenu.tsx", "src/renderer/components/app-menu/DesktopAppMenu.tsx"]
     },
     {
       "id": "settings",

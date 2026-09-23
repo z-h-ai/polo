@@ -1,64 +1,29 @@
-# Polo Electron Source Baseline
+# Polo 助手 Chat · 高保真原型
 
-这是一个正在重建的 Electron Renderer 基线。旧的通用 Mock 已被否决，不能代表真实产品，也不能作为后续设计任务的依据。
+本目录沿用 `polo-client-source-baseline` 路径，当前交付物已调整为 Polo 助手聊天原型。默认打开 `chat/empty`；聊天、会话、技能、数据源等场景保留。浏览器式标签栏、侧栏账号页脚、Polo AI 菜单和 Home 应用入口已从当前原型移除。旧 `home`、`enterprise-home`、`app-menu` 深链接显示默认聊天页。
 
-所有目录场景均按真实 Renderer 源码直接翻译。真实 Electron 或明确标注的
-Playground 截图是可选的视觉核验依据，不是静态基线的前置条件。静态源码无法
-唯一推导的账户、组织、应用目录、会话与权限数据，必须使用显式命名的确定性
-fixture，不能虚构为真实运行时数据。
+原型沿用固定版本的 Electron Renderer 组件与视觉资产，但上述壳层删改是本轮产品设计，不代表当前 Renderer 的实际界面。登录、组织、Browser 等保留场景仍是辅助参考；历史截图只证明截图拍摄时的组件，不能当作当前聊天页的整页验收。
 
-## 使用
+当前聊天页的 [1440×900 截图](screenshots/chat-focus-r1/chat-empty-1440x900.png)、[800×600 截图](screenshots/chat-focus-r1/chat-empty-800x600.png) 和 [浏览器检查记录](screenshots/chat-focus-r1/browser-check.json) 对应本轮原型。窄窗默认收起侧栏，左上角按钮可将它以浮层打开。
 
-模块化版本需要通过本地 Vite 预览：
+## 打开与更新
+
+单文件 [prototype.html](prototype.html) 可直接通过 `file://` 打开，也可用本地 HTTP 预览。模块化源码在 `src/`，通过 Vite 预览时使用：
 
 ```sh
-cd /Users/wow/project/z-h-ai/polo-dir/POO-41/feat/polo-client-g4-ui/design-demos/polo-client-source-baseline
+cd design-demos/polo-client-source-baseline
 /Users/wow/project/z-h-ai/polo-dir/dev/node_modules/.bin/vite --config vite.config.mjs
 ```
 
-打开 `http://localhost:4183/`。可使用以下 URL 参数：
-
-```text
-?scene=home&state=normal&theme=light&lang=zh-Hans
-```
-
-单文件 `prototype.html` 不依赖生产源码，构建后可以直接通过 `file://` 打开。
-
-## 日常更新与验收
-
-不能把旧的通用 mock 或其截图用于设计改动。每个新区域先记录真实源码路径，直接翻译组件、CSS、文案和图标；需要额外视觉核验时再补充真实 Renderer 或 Playground 截图，并按以下顺序刷新产物：
+预览地址是 `http://localhost:4183/`；例如 `?scene=chat&state=conversation&theme=light&lang=zh-Hans`。无参数时显示空聊天。改动应先写入 `src/`，再从目录下执行：
 
 ```sh
 node tools/export-single-file.mjs
 node tools/validate-prototype.mjs
 ```
 
-`export-single-file.mjs` 会先用固定的 Electron 工具链构建，再把 CSS/JS 内联到 `prototype.html`。模块化 `src/` 仍然是可编辑真源。旧 `scene-matrix.mjs` 和 `browser-smoke.mjs` 针对已否决的通用 mock，不能作为本重建的验收或截图生成器。
+`prototype.html` 是自动导出产物，不直接编辑。`components/` 是独立组件画廊；其内容由 `node tools/export-component-gallery.mjs` 生成。场景索引由 `scene-catalog.json` 维护，来源和当前设计覆盖范围见 `SCENE-TRACEABILITY.md` 与 `prototype-manifest.json`。
 
-`validate-prototype.mjs` 的 `static: passed` 表示独立 HTML、来源清单和
-traceability 文件自洽。`verification.sourceFidelity: static-source-derived`
-表示每个目录场景已走静态源码派生路径；它不等同于任意真实账户数据下的运行时
-截图逐像素证明。
+## 来源边界
 
-场景协议保持稳定：`?scene=<id>&state=<state>&theme=light|dark&lang=<locale>`。设计任务优先复用现有场景和状态，只在确实新增产品可达状态时扩展 `scene-catalog.json`。
-
-## 来源与刷新
-
-当前基线固定来源：
-
-- Source root：`/Users/wow/project/z-h-ai/polo-dir/dev/apps/electron`
-- Git revision：`01f4447cf77612ca2c62d9c7155601a51bdb7b5b`
-
-普通设计任务只读取本目录的 `prototype-manifest.json`、`scene-catalog.json` 和目标场景模块，不重新扫描 `apps/electron`。生产源码变更不会自动刷新本基线；只有明确的 baseline refresh 任务才允许更新来源 revision、截图和产物。
-
-## 文件分工
-
-- `src/`：长期可编辑的模块化原型真源。
-- `prototype.html`：自动导出的单文件评审产物，不直接编辑。
-- `components/`：组件级产物，按 scene-catalog 分组导出的每组件自包含 HTML（`tools/export-component-gallery.mjs` 生成，不直接编辑；`components/index.html` 为分组目录）。
-- `scene-catalog.json`：稳定场景、状态、区域和源码路径。
-- `SCENE-TRACEABILITY.md`：逐场景源码、参考截图和未完成审计项。
-- `prototype-manifest.json`：来源、协议、覆盖、近似项和验收证据。
-- `tools/`：导出、静态合同检查、来源漂移检查和截图工具。
-
-现有 `design-demos/polo-client-g4-ui/` 是独立的 G4 新设计草稿，不属于本基线，禁止覆盖。
+原始组件来源固定为 `/Users/wow/project/z-h-ai/polo-dir/dev/apps/electron` 的 `01f4447cf77612ca2c62d9c7155601a51bdb7b5b`。旧基线记录保留在 `SOURCE-EVIDENCE.md` 和历史截图中；当前原型的壳层删改以本轮用户要求为依据。静态结构校验只检查产物、清单与当前删改自洽，不证明真实 Electron 运行时已采用这套布局。

@@ -1,15 +1,15 @@
 {
   "schemaVersion": "1.0.0",
-  "baselineVersion": "0.2.0-in-progress",
-  "name": "Polo Electron source baseline",
-  "status": "reconstruction_in_progress",
+  "baselineVersion": "0.3.0-chat-focused",
+  "name": "Polo 助手 Chat 高保真原型",
+  "status": "design_prototype",
   "source": {
     "root": "/Users/wow/project/z-h-ai/polo-dir/dev/apps/electron",
     "repositoryRoot": "/Users/wow/project/z-h-ai/polo-dir/dev",
     "gitRevision": "01f4447cf77612ca2c62d9c7155601a51bdb7b5b",
     "worktreeCleanAtCapture": true,
     "capturedAt": "2026-08-10",
-    "provenance": "Renderer reconstruction in progress. Earlier generic mock is rejected and must not be treated as source-faithful."
+    "provenance": "Renderer components and assets are derived from the pinned 2026-08-10 source snapshot; the shared Chat shell is adapted per the 2026-09-23 user request and is not a current Renderer capture."
   },
   "artifacts": {
     "moduleEntry": "index.html",
@@ -66,8 +66,8 @@
     ],
     "sceneCatalog": "scene-catalog.json",
     "screenshots": "screenshots/",
-    "singleFileBytes": 578424,
-    "singleFileSha256": "ea4a76e25bb85b04a56960609dc93b2347675141b03d82aaeee1d04b2a3b3eb0",
+    "singleFileBytes": 529111,
+    "singleFileSha256": "4342ae7aa4a91e889f4683040ef3175addfd13d0168b532014ce36d01cee7953",
     "moduleBuild": "dist/"
   },
   "protocol": {
@@ -107,7 +107,7 @@
     "sceneCatalog": "scene-catalog.json",
     "sourceEvidence": "SOURCE-EVIDENCE.md",
     "sceneTraceability": "SCENE-TRACEABILITY.md",
-    "regions": "All catalog scenes are reconstructed by static translation of the listed Renderer source. Runtime screenshots are optional validation evidence; account, organization, catalog, conversation and permission values use named deterministic fixtures where source code cannot uniquely derive a value.",
+    "regions": "Catalog scenes retain pinned Renderer component references. The shared Chat shell intentionally removes the Electron tab bar, sidebar account footer and Polo AI menu; the Home app hub is absent and chat/empty is the default.",
     "sourceClassification": [
       "runtime_exact",
       "playground_exact",
@@ -124,10 +124,11 @@
   },
   "verification": {
     "static": "passed",
-    "browser": "not_run_for_reconstruction",
-    "visual": "not_run_for_reconstruction",
-    "interactive": "not_run_for_reconstruction",
-    "sourceFidelity": "static-source-derived"
+    "browser": "sampled_pass_chat_shell",
+    "visual": "sampled_pass_chat_shell",
+    "interactive": "sampled_pass_chat_shell",
+    "sourceFidelity": "component-source-derived-chat-shell-adapted",
+    "browserScope": "1440x900 and 800x600: default chat, legacy Home/menu fallback, conversation, skills, space switcher; removed chrome absent, top alignment, no horizontal overflow, sidebar toggle, no page errors. file:// single-file at 1440x900: composer present and zero external requests."
   },
   "approximations": [
     {
@@ -147,6 +148,12 @@
       "surface": "Account, organization, app catalog, conversation and permission state",
       "reason": "These values are fetched or persisted at runtime and cannot be uniquely inferred from static Renderer source.",
       "representation": "Named deterministic fixtures that preserve the source component's empty, fresh-profile, loading or default branch."
+    },
+    {
+      "id": "chat-shell-adaptation",
+      "surface": "Polo assistant Chat shell",
+      "reason": "User requested a Chat-focused high-fidelity prototype on 2026-09-23",
+      "representation": "Remove browser-like tab bar, sidebar account footer, Polo AI menu and Home app hub; enter chat/empty by default."
     }
   ],
   "evidence": {
@@ -163,6 +170,12 @@
       "screenshots/reference-playground-browser-tab-strip-1440x900.png",
       "screenshots/reference-playground-onboarding-welcome-1440x900.png",
       "screenshots/reference-playground-onboarding-wizard-1440x900.png"
-    ]
+    ],
+    "screenshotsScope": "Historical Renderer/Playground component references from the pinned baseline; not current whole-page Chat acceptance.",
+    "currentScreenshots": [
+      "screenshots/chat-focus-r1/chat-empty-1440x900.png",
+      "screenshots/chat-focus-r1/chat-empty-800x600.png"
+    ],
+    "currentBrowserCheck": "screenshots/chat-focus-r1/browser-check.json"
   }
 }

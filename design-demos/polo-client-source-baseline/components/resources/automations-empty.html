@@ -54,8 +54,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;
@@ -207,7 +206,7 @@ html, body { overflow: auto; height: auto; }
 <body>
 <script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
 <div id="root"><div class="gallery-body"><div data-route="resources/automations/empty" style="display:flex;flex:1;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:11.25px;box-sizing:border-box;padding:22.5px 22.5px 20%;border-radius:7.5px;text-align:center"><div style="display:flex;flex-shrink:0;align-items:center;justify-content:center;margin-bottom:7.5px;color:var(--fg-50)"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-webhook" aria-hidden="true"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"></path><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"></path><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"></path></svg></div><div style="display:flex;max-width:360px;flex-direction:column;align-items:center;gap:7.5px;text-align:center"><div style="font-size:13.125px;font-weight:500;letter-spacing:-.025em">未配置自动化</div><div style="color:var(--fg-50);font-size:11.25px;line-height:1.375">自动化在事件发生时执行操作——按计划运行命令、响应标签变更或自动触发提示。</div></div><div style="display:flex;width:100%;max-width:360px;min-width:0;align-items:center;justify-content:center;gap:11.25px;margin-top:11.25px;font-size:13.125px"><button type="button" style="display:inline-flex;height:26.25px;align-items:center;padding:0 11.25px;border:0;border-radius:8px;background:color-mix(in srgb, var(--foreground) 2%, transparent);box-shadow:var(--shadow-minimal);color:var(--foreground);font-size:11.25px;font-weight:500;transition:background-color 150ms">了解更多</button><button type="button" style="display:inline-flex;height:26.25px;align-items:center;padding:0 11.25px;border:0;border-radius:8px;background:var(--background);box-shadow:var(--shadow-minimal);color:var(--foreground);font-size:11.25px;font-weight:500;transition:background-color 150ms">添加自动化</button></div></div></div></div>
-<div class="gallery-note">资源面板 / 自动化空态 — 静态翻译自 Renderer 源码</div>
+<div class="gallery-note">资源面板 / 自动化空态 — 基于固定 Renderer 来源；当前原型的壳层有设计删改</div>
 <button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
 </body>
 </html>

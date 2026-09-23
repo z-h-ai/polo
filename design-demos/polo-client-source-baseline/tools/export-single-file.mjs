@@ -37,14 +37,14 @@ html = html.replace(/<script([^>]+)src="([^"]+\.js)"([^>]*)><\/script>/g, (_matc
   return '<script' + before + after + '>\n' + js + '\n</script>'
 })
 html = html.replace(/\s+crossorigin(?:="[^"]*")?/g, '')
-html = html.replace('</head>', '<meta name="prototype-artifact" content="source-baseline-single-file"><meta name="prototype-size" content="' + Math.round(Buffer.byteLength(html) / 1024) + ' KiB"></head>')
+html = html.replace('</head>', '<meta name="prototype-artifact" content="polo-assistant-chat-single-file"><meta name="prototype-size" content="' + Math.round(Buffer.byteLength(html) / 1024) + ' KiB"></head>')
 writeFileSync(output, html)
 
 const manifestPath = resolve(root, 'prototype-manifest.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-// Exporting is mechanical; it must never promote an in-progress reconstruction
-// to a verified, source-faithful baseline.
-manifest.verification = { ...manifest.verification, static: 'pending_reexport', browser: 'not_run_for_reconstruction', visual: 'not_run_for_reconstruction', interactive: 'not_run_for_reconstruction' }
+// Exporting is mechanical; the Chat shell is a product-design adaptation and
+// must not be promoted to a source-faithful Renderer capture.
+manifest.verification = { ...manifest.verification, static: 'pending_reexport', browser: 'pending_after_export', visual: 'pending_after_export', interactive: 'pending_after_export' }
 manifest.artifacts.singleFileBytes = statSync(output).size
 manifest.artifacts.singleFileSha256 = createHash('sha256').update(readFileSync(output)).digest('hex')
 manifest.artifacts.moduleBuild = 'dist/'

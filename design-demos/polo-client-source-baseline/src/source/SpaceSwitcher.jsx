@@ -85,8 +85,7 @@ function SpaceTopBar({ open }) {
       <div style={{ flex: '0 0 48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7.5, paddingLeft: 11.25, paddingRight: 11.25, borderBottom: '1px solid color-mix(in srgb, var(--foreground) 5%, transparent)' }}>
         <div style={{ display: 'flex', minWidth: 0, flex: 1, alignItems: 'center', gap: 1.875 }}>
           <IconButton label="切换侧栏"><PanelLeftRounded /></IconButton>
-          <IconButton label="Polo AI 菜单"><PoloAiSymbol /></IconButton>
-          {/* OrganizationSwitcher mounts after AppMenu in TopBar.tsx. */}
+          {/* OrganizationSwitcher remains beside the sidebar toggle. */}
           <span style={{ position: 'relative', display: 'flex', minWidth: 0, flexShrink: 0 }}>
             <OrgTrigger open={open === 'organization'} />
             {open === 'organization' && <span style={{ position: 'absolute', left: 0, top: 'calc(100% + 4px)', zIndex: 60 }}><OrgMenu /></span>}
@@ -221,7 +220,6 @@ function SpaceCompact() {
       <div style={{ flex: '0 0 48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7.5, paddingLeft: 11.25, paddingRight: 11.25, borderBottom: '1px solid color-mix(in srgb, var(--foreground) 5%, transparent)' }}>
         <div style={{ display: 'flex', minWidth: 0, flex: 1, alignItems: 'center', gap: 1.875 }}>
           <IconButton label="切换侧栏"><PanelLeftRounded /></IconButton>
-          <IconButton label="Polo AI 菜单"><PoloAiSymbol /></IconButton>
           <OrgTrigger compact open={false} />
           <button type="button" aria-label="选择 Workspace" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 3.75, height: 33.75, padding: '0 11.25px', marginLeft: 3.75, border: '1px solid color-mix(in srgb, var(--foreground) 6%, transparent)', borderRadius: 8, background: 'var(--background)', color: 'color-mix(in srgb, var(--foreground) 55%, transparent)', fontSize: 13.125, textAlign: 'left', cursor: 'pointer' }}>
             <WorkspaceAvatar name={active.name} size={20} more={{ marginRight: 5.625 }} />
@@ -296,6 +294,5 @@ export function SourceSpaceSwitcher({ state }) {
 
 // ── icons (TopBar.tsx imports) ───────────────────────────────────────────────
 function PanelLeftRounded() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4V20M3.5 11.5L3.5 12.5C3.5 16.2712 3.5 18.1569 4.67157 19.3284C5.84315 20.5 7.72876 20.5 11.5 20.5L12.5 20.5C16.2712 20.5 18.1569 20.5 19.3284 19.3284C20.5 18.1569 20.5 16.2712 20.5 12.5L20.5 11.5C20.5 7.72876 20.5 5.84315 19.3284 4.67157C18.1569 3.5 16.2712 3.5 12.5 3.5L11.5 3.5C7.72876 3.5 5.84315 3.5 4.67157 4.67157C3.5 5.84315 3.5 7.72876 3.5 11.5Z" /></svg> }
-function PoloAiSymbol() { return <svg viewBox="0 0 100 100" fill="none" aria-hidden="true"><path d="M 22 85 V 10 H 44 A 19 19 0 0 1 44 48 H 34" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" /><circle cx="42" cy="76" r="9" fill="currentColor" /><path d="M 60 65 V 85 H 68" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /><circle cx="84" cy="76" r="9" fill="currentColor" /></svg> }
 function ChevronBack() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg> }
 function ChevronFwd() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg> }

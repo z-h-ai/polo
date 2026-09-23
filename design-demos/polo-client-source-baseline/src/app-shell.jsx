@@ -1,10 +1,8 @@
 import React, { useEffect, useSyncExternalStore } from 'react'
-import { getSnapshot, subscribe, navigate } from './runtime/state.js'
-import { SourceHomeLauncher } from './source/HomeLauncher.jsx'
+import { getSnapshot, subscribe } from './runtime/state.js'
 import { SourceFaithfulEmptyChat } from './source/EmptyChat.jsx'
 import { SourceChatConversation } from './source/ChatConversation.jsx'
 import { SourceChatStreaming, SourceChatError, SourceChatDetail } from './source/ChatStreaming.jsx'
-import { SourceHomeTabFrame } from './source/HomeTabFrame.jsx'
 import { SourcePoloShell } from './source/PoloShell.jsx'
 import { SourceAdminLogin } from './source/AdminLogin.jsx'
 import { SourceSettingsNavigator, SourceSettingsDetail } from './source/SettingsRegion.jsx'
@@ -20,8 +18,6 @@ import { SourceOrganizationManage } from './source/OrganizationManage.jsx'
 import { SourceResourceEmptyPanel, SourceUnselectedResourceDetail } from './source/ResourceEmptyPanels.jsx'
 import { SourceAutomationsList, SourceAutomationDetail } from './source/AutomationsRegion.jsx'
 import { SourceSkillsList, SourceSkillDetail, SourceSourcesList, SourceSourceDetail } from './source/ResourceListDetail.jsx'
-import { SourceOrganizationAppsSection } from './source/HomeApps.jsx'
-import { SourceDesktopAppMenu } from './source/AppMenu.jsx'
 import { SourceTelegramConnect, SourceTelegramReconfigure, SourceWhatsAppQr, SourceWhatsAppConnected, SourceLarkConnect, SourcePairingCode, SourceSupergroupPairing } from './source/MessagingDialogs.jsx'
 import { SourceSessionNavigator } from './source/SessionSidebar.jsx'
 import { SourceSpaceSwitcher } from './source/SpaceSwitcher.jsx'
@@ -29,8 +25,6 @@ import { SourcePhoneAuth, SourceApiSetup } from './source/OnboardingAuth.jsx'
 import { SourceActiveTasksBar, SourceMultiSelectPanel, SourceBatchSessionMenu, SourceSendToWorkspace, SourceFabNewChat } from './source/EdgePanels.jsx'
 import { SourceSessionInfoPopover, SourceFileViewer, SourceFileViewerEmpty } from './source/SessionInfoRegion.jsx'
 import { SourceAuthRequestCard, SourceAuthRequestCompleted, SourceAuthRequestCancelled, SourceAuthRequestBasic } from './source/AuthRequestRegion.jsx'
-
-const poloIconSrc = new URL('../assets/renderer/polo-app-icon.png', import.meta.url).href
 
 // Onboarding wizard states route through the OnboardingSteps translation; the
 // catalog's welcome/complete/admin states stay on LifecycleRegion.
@@ -64,10 +58,6 @@ function SceneRouter({ query }) {
     if (['normal', 'members', 'artifacts', 'invitations'].includes(query.state)) return <SourceOrganizationManage state={query.state}/>
     return <SourceOrganizationOnboarding state={query.state}/>
   }
-  if (query.scene === 'home' || query.scene === 'enterprise-home') {
-    if (query.scene === 'enterprise-home' && query.state === 'organization-apps') return <SourceOrganizationAppsSection/>
-    return <SourceHomeLauncher poloIconSrc={poloIconSrc} onOpenPolo={() => navigate({ scene: 'chat', state: 'empty' })}/>
-  }
   if (query.scene === 'chat') {
     if (query.state === 'conversation') return <SourceChatConversation/>
     if (query.state === 'streaming') return <SourceChatStreaming/>
@@ -93,12 +83,11 @@ function SceneRouter({ query }) {
   if (query.scene === 'send-remote') return <SourceSendToWorkspace state={query.state}/>
   if (query.scene === 'chat-permission') return <SourceFaithfulEmptyChat permission/>
   if (query.scene === 'browser') return <SourceBrowserRegion state={query.state}/>
-  if (query.scene === 'app-menu') return <SourceDesktopAppMenu/>
   if (query.scene === 'settings') return <SourceSettingsDetail subpage={query.state}/>
   if (query.scene === 'shortcuts') return <SourceKeyboardShortcutsDialog/>
   if (query.scene === 'reset') return <SourceResetConfirmation/>
   if (query.scene === 'space-switcher') return <SourceSpaceSwitcher state={query.state}/>
-  return <SourceHomeLauncher poloIconSrc={poloIconSrc} onOpenPolo={() => navigate({ scene: 'chat', state: 'empty' })}/>
+  return <SourceFaithfulEmptyChat/>
 }
 
 export function App() {
@@ -111,19 +100,18 @@ export function App() {
   if (query.scene === 'onboarding' && query.state === 'admin-login') return <div className="prototype-root"><SourceAdminLogin/></div>
   if (!ready) return <div className="prototype-root"><SceneRouter query={query}/></div>
   if (['browser', 'app-menu', 'organization', 'shortcuts', 'reset', 'space-switcher', 'session-info', 'multi-select', 'send-remote'].includes(query.scene)) return <div className="prototype-root"><SceneRouter query={query}/></div>
-  if (query.scene === 'home' || query.scene === 'enterprise-home') return <div className="prototype-root"><SourceHomeTabFrame iconSrc={poloIconSrc}><SceneRouter query={query}/></SourceHomeTabFrame></div>
-  if (query.scene === 'chat' || query.scene === 'chat-permission') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc}><SceneRouter query={query}/></SourcePoloShell></div>
-  if (query.scene === 'conversations') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSessionNavigator state={query.state}/>}><SourceFaithfulEmptyChat/></SourcePoloShell></div>
-  if (query.scene === 'automations' && query.state === 'detail') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceAutomationsList/>}><SourceAutomationDetail/></SourcePoloShell></div>
+  if (query.scene === 'chat' || query.scene === 'chat-permission') return <div className="prototype-root"><SourcePoloShell><SceneRouter query={query}/></SourcePoloShell></div>
+  if (query.scene === 'conversations') return <div className="prototype-root"><SourcePoloShell navigator={<SourceSessionNavigator state={query.state}/>}><SourceFaithfulEmptyChat/></SourcePoloShell></div>
+  if (query.scene === 'automations' && query.state === 'detail') return <div className="prototype-root"><SourcePoloShell navigator={<SourceAutomationsList/>}><SourceAutomationDetail/></SourcePoloShell></div>
   if (query.scene === 'skills' && (query.state === 'list' || query.state === 'detail' || query.state === 'detail-menu')) {
-    if (query.state === 'list') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSkillsList/>}><SourceUnselectedResourceDetail kind="skills"/></SourcePoloShell></div>
-    return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSkillsList/>}><SourceSkillDetail menuOpen={query.state === 'detail-menu'}/></SourcePoloShell></div>
+    if (query.state === 'list') return <div className="prototype-root"><SourcePoloShell navigator={<SourceSkillsList/>}><SourceUnselectedResourceDetail kind="skills"/></SourcePoloShell></div>
+    return <div className="prototype-root"><SourcePoloShell navigator={<SourceSkillsList/>}><SourceSkillDetail menuOpen={query.state === 'detail-menu'}/></SourcePoloShell></div>
   }
   if (query.scene === 'sources' && (query.state === 'list' || query.state === 'detail' || query.state === 'detail-menu')) {
-    if (query.state === 'list') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSourcesList/>}><SourceUnselectedResourceDetail kind="sources"/></SourcePoloShell></div>
-    return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSourcesList/>}><SourceSourceDetail menuOpen={query.state === 'detail-menu'}/></SourcePoloShell></div>
+    if (query.state === 'list') return <div className="prototype-root"><SourcePoloShell navigator={<SourceSourcesList/>}><SourceUnselectedResourceDetail kind="sources"/></SourcePoloShell></div>
+    return <div className="prototype-root"><SourcePoloShell navigator={<SourceSourcesList/>}><SourceSourceDetail menuOpen={query.state === 'detail-menu'}/></SourcePoloShell></div>
   }
-  if (['sources', 'skills', 'automations'].includes(query.scene)) return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceResourceEmptyPanel kind={query.scene}/>}><SourceUnselectedResourceDetail kind={query.scene}/></SourcePoloShell></div>
-  if (query.scene === 'settings') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSettingsNavigator selectedSubpage={query.state === 'list' ? 'app' : query.state}/>}><SourceSettingsDetail subpage={query.state}/></SourcePoloShell></div>
-  return <div className="prototype-root"><SourceHomeTabFrame iconSrc={poloIconSrc}><SceneRouter query={query}/></SourceHomeTabFrame></div>
+  if (['sources', 'skills', 'automations'].includes(query.scene)) return <div className="prototype-root"><SourcePoloShell navigator={<SourceResourceEmptyPanel kind={query.scene}/>}><SourceUnselectedResourceDetail kind={query.scene}/></SourcePoloShell></div>
+  if (query.scene === 'settings') return <div className="prototype-root"><SourcePoloShell navigator={<SourceSettingsNavigator selectedSubpage={query.state === 'list' ? 'app' : query.state}/>}><SourceSettingsDetail subpage={query.state}/></SourcePoloShell></div>
+  return <div className="prototype-root"><SourcePoloShell><SceneRouter query={query}/></SourcePoloShell></div>
 }

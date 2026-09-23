@@ -1,6 +1,6 @@
 import catalog from '../../scene-catalog.json'
 
-export const DEFAULT_QUERY = Object.freeze({ scene: 'home', state: 'normal', theme: 'light', lang: 'zh-Hans' })
+export const DEFAULT_QUERY = Object.freeze({ scene: 'chat', state: 'empty', theme: 'light', lang: 'zh-Hans' })
 const THEMES = new Set(['light', 'dark'])
 const LANGUAGES = new Set(['zh-Hans', 'en', 'es', 'ja', 'hu', 'de', 'pl'])
 const SCENES = new Map(catalog.scenes.map((scene) => [scene.id, scene]))

@@ -54,8 +54,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --panel-gap: 6px;
   --panel-inset: 6px;
-  --tabbar-height: 36px;
-  --content-top-offset: 84px;
+  --content-top-offset: 48px;
   --radius-xs: 2px;
   --radius-sm: 3.75px;
   --radius-md: 5.625px;
@@ -207,7 +206,7 @@ html, body { overflow: auto; height: auto; }
 <body>
 <script>if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('gallery-embed')</script>
 <div id="root"><div class="gallery-body"><div data-route="session-info/viewer-empty" style="width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7.5px;padding:30px;background:var(--background);color:var(--foreground)"><div style="display:flex;width:60px;height:60px;align-items:center;justify-content:center;border-radius:15px;background:var(--muted)"><svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file-text" aria-hidden="true" style="color:var(--fg-50)"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path><path d="M14 2v5a1 1 0 0 0 1 1h5"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></div><span style="font-size:13.125px;font-weight:500">未选择文件</span><span style="font-size:11.25px;color:var(--fg-50)">点击聊天中的文件路径在此查看</span></div></div></div>
-<div class="gallery-note">助手会话 / 文件查看器空态 — 静态翻译自 Renderer 源码</div>
+<div class="gallery-note">助手会话 / 文件查看器空态 — 基于固定 Renderer 来源；当前原型的壳层有设计删改</div>
 <button class="gallery-dark-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">切换主题</button>
 </body>
 </html>
