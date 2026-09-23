@@ -13,7 +13,6 @@ import {
   type LocalAppRuntimeStatus,
 } from '@polo-ai/shared/protocol'
 import { AppIcon } from './AppIcon'
-import { useAppRuntimeTasks } from './AppRuntimeTasksContext'
 import {
   OrganizationAppCard,
   statusText,
@@ -235,12 +234,12 @@ function HomeAssistantCard({ onOpenAssistant }: { onOpenAssistant: () => void })
             {POLO_APP_DEFINITION.name}
           </h3>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {t('homeApps.assistant.cardMeta')}
+            {t('homeApps.assistant.entrySubtitle')}
           </p>
         </div>
       </div>
       <p className="mt-3 line-clamp-2 min-h-9 text-xs leading-[18px] text-foreground/65">
-        {t('homeApps.assistant.cardDescription')}
+        {t('homeApps.assistant.entryDescription')}
       </p>
       <div className="mt-auto flex items-center justify-end gap-2 pt-3">
         <Button type="button" size="sm" variant="secondary" onClick={onOpenAssistant}>
@@ -254,54 +253,8 @@ function HomeAssistantCard({ onOpenAssistant }: { onOpenAssistant: () => void })
   )
 }
 
-/** 系统工具（原型 P-M03 utility-grid）：文件 / 任务与结果两张工具卡。 */
-function HomeUtilitySection({ onOpenFiles }: { onOpenFiles: () => void }) {
-  const { t } = useTranslation()
-  const runtime = useAppRuntimeTasks()
-  const cards = [
-    {
-      id: 'files',
-      icon: <Icons.FileText className="size-5" strokeWidth={1.5} />,
-      title: t('home.tools.files'),
-      description: t('home.tools.filesDescription'),
-      onClick: onOpenFiles,
-    },
-    {
-      id: 'tasks',
-      icon: <Icons.ListChecks className="size-5" strokeWidth={1.5} />,
-      title: t('home.tools.tasks'),
-      description: t('home.tools.tasksDescription'),
-      onClick: runtime.toggleRuntimeCenter,
-    },
-  ]
-  return (
-    <section aria-labelledby="home-utility-heading" data-testid="home-utility-section">
-      <h2 id="home-utility-heading" className="m-0 text-xl font-bold tracking-tight text-foreground">
-        {t('home.tools.title')}
-      </h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        {cards.map(card => (
-          <button
-            key={card.id}
-            type="button"
-            data-testid={`home-utility-${card.id}`}
-            onClick={card.onClick}
-            className="flex min-h-[82px] items-center gap-3 rounded-[13px] border border-foreground/10 bg-[var(--background-elevated)] p-4 text-left shadow-xs transition-all hover:-translate-y-px hover:shadow-minimal"
-          >
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-              {card.icon}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold text-foreground">{card.title}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">{card.description}</span>
-            </span>
-            <Icons.ChevronRight className="size-4 shrink-0 text-foreground/35" strokeWidth={1.5} />
-          </button>
-        ))}
-      </div>
-    </section>
-  )
-}
+/** 系统工具区已按最新原型（prototype.html R6-R10）移除：企业首页只有
+ * 问候 hero + 常用应用统一栅格；文件/任务入口留在助手与顶栏。 */
 
 function AddExternalAppTile({ onClick }: { onClick: () => void }) {  const { t } = useTranslation()
   return (
@@ -1222,11 +1175,8 @@ export function HomePage({ onAddApp, userName }: HomePageProps) {
         </section>
       )}
 
-      {/* 企业空间常用 Apps（P-M03-HOME-ENT）：助手大卡 + 企业作品统一栅格。 */}
+      {/* 企业空间常用应用（P-M03-HOME-ENT）：助手大卡 + 企业作品统一栅格。 */}
       {orgSection}
-
-      {/* 系统工具（原型 P-M03 utility-grid）：文件 / 任务与结果。 */}
-      <HomeUtilitySection onOpenFiles={() => openPersonalApp(POLO_APP_DEFINITION)} />
 
       {isPersonalSpace && (
         <section aria-labelledby="recent-apps-heading">

@@ -2,9 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { AddAppDialog } from './AddAppDialog'
-import {
-  AppRuntimeTasksProvider,
-} from './AppRuntimeTasksContext'
 import { useTabShell } from '@/context/TabShellContext'
 import type { AccountMenuUser } from '@/components/organization/AccountMenu'
 import { SpaceSwitchFlow } from '@/components/organization/SpaceSwitchFlow'
@@ -142,13 +139,8 @@ export function TabShell({ renderPolo, account }: TabShellProps) {
   return (
     <SpaceSwitchIntegration>
       <div className="h-full min-h-0 bg-background">
-        <AppRuntimeTasksProvider
-          tasks={[]}
-          onStopTask={async () => {}}
-        >
-          <TabBar account={account} />
-          <TabContent account={account} onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
-        </AppRuntimeTasksProvider>
+        <TabBar account={account} />
+        <TabContent account={account} onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
         <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
       </div>
     </SpaceSwitchIntegration>
