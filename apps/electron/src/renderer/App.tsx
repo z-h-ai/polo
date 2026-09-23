@@ -12,7 +12,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import type { AppShellContextType, ChatAccessIssue, ChatAccessStatus } from '@/context/AppShellContext'
+import { AppShellProvider, type AppShellContextType, type ChatAccessIssue, type ChatAccessStatus } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -3084,6 +3084,12 @@ export default function App() {
             />
           )}
 
+          {/* The workbench bar renders from TabShell (above the AppShell
+              subtree), so the SAME AppShell context value AppShell consumes
+              is provided here for the bar's account/workspace entries.
+              AppShell re-provides the identical object to its panels —
+              both layers read one memoized value. */}
+          <AppShellProvider value={appShellContextValue}>
           <MaybeProductSpaceProvider value={productSpaceContextValue}>
             <TabShellProvider
               key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
@@ -3191,6 +3197,7 @@ export default function App() {
             </TabShellProvider>
             <ProductSpaceSwitchDialog />
           </MaybeProductSpaceProvider>
+          </AppShellProvider>
         </TooltipProvider>
         </ModalProvider>
         </DismissibleLayerProvider>

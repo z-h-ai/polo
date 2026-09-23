@@ -76,6 +76,7 @@ const themeContextStub = {
 mock.module('@/context/ThemeContext', () => ({
   ThemeProvider: ({ children }: { children?: unknown }) => children ?? null,
   useTheme: () => themeContextStub,
+  useOptionalTheme: () => themeContextStub,
 }))
 mock.module('@/hooks/useTheme', () => ({
   useTheme: () => ({
@@ -359,8 +360,11 @@ window.addEventListener('polo:product-space-changed', (event) => {
 let openPreviewProbePath: string | null = null
 mock.module('@/components/app-shell/TopBar', () => ({
   TopBar: () => {
-    const { useAppShellContext } = require('../context/AppShellContext') as typeof import('../context/AppShellContext')
-    const { onOpenFile } = useAppShellContext()
+    // The bar now renders from TabShell (above AppShellProvider in the tree),
+    // matching the production TopBar's OPTIONAL AppShellContext read: probes
+    // no-op until the AppShell provider mounts in the wide workbench.
+    const { useOptionalAppShellContext } = require('../context/AppShellContext') as typeof import('../context/AppShellContext')
+    const onOpenFile = useOptionalAppShellContext()?.onOpenFile
     const productSpace = useProductSpaceContext()
     return createElement(
       'div',
@@ -368,7 +372,7 @@ mock.module('@/components/app-shell/TopBar', () => ({
       createElement('button', {
         'data-testid': 'r35-topbar-probe',
         onClick: () => {
-          if (openPreviewProbePath) onOpenFile(openPreviewProbePath)
+          if (openPreviewProbePath) onOpenFile?.(openPreviewProbePath)
         },
       }),
       createElement('button', {

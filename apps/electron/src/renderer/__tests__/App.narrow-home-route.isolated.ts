@@ -70,6 +70,7 @@ const themeContextStub = {
 mock.module('@/context/ThemeContext', () => ({
   ThemeProvider: ({ children }: { children?: unknown }) => children ?? null,
   useTheme: () => themeContextStub,
+  useOptionalTheme: () => themeContextStub,
 }))
 mock.module('@/hooks/useTheme', () => ({
   useTheme: () => ({

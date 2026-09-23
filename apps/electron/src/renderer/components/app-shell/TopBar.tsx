@@ -1,12 +1,13 @@
 /**
- * TopBar - Global workbench bar above every Polo shell surface (frozen
- * POO-41 `.workbench-bar` semantics).
+ * TopBar - The single global workbench bar (frozen POO-41 `.workbench-bar`
+ * semantics, unified with the tab strip per the POO-70 hifi prototype).
  *
- * Layout: [Brand lockup] [Home tab] ... [Runtime] [ProductSpace switcher] [Notifications] [Account]
+ * Layout: [traffic-light inset] [Brand lockup] [Home tab + web tabs] [web nav] ... [Runtime] [ProductSpace switcher] [Notifications] [Account]
  *
- * Fixed below the tab browser bar, 64px tall. Rendered once per shell via a
- * portal from AppShell so it stays visible on the Home view too — the single
- * ProductSpace switcher entry point lives here (REQ-001).
+ * Fixed to the top of the window, 64px tall, always visible across shell
+ * surfaces (Home view and web app tabs included). Rendered by TabShell inside
+ * the hydration gate so a stale previous-scope bar can never surface before
+ * the new scope's own tabs hydrate (Review R33 fail-closed boundary).
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -17,9 +18,10 @@ import { sessionMetaMapAtom } from "@/atoms/sessions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { useTabShell } from "@/context/TabShellContext"
-import { useTheme } from "@/context/ThemeContext"
-import { useNavigation } from "@/contexts/NavigationContext"
+import { useOptionalTheme } from "@/context/ThemeContext"
+import { navigate, routes } from "@/lib/navigate"
 import { cn } from "@/lib/utils"
+import { isMac, isWebUI } from "@/lib/platform"
 import { getSessionTitle } from "@/utils/session"
 import type { ExecutionSummary } from "@polo-ai/shared/product-spaces"
 import {
@@ -49,6 +51,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ProductSpaceSwitcher } from "@/components/product-space/ProductSpaceSwitcher"
+import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
+import poloAppIcon from "../../../../resources/icon.png"
 import {
   ACTIVE_EXECUTION_STATUSES,
   createRegistryExecutionPoller,
@@ -58,16 +62,39 @@ import {
 
 const MAX_NOTIFICATION_ITEMS = 6
 
+function TabIcon({ tab }: { tab: TabInstance }) {
+  if (tab.isLoading) {
+    return <Icons.Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/65" strokeWidth={1.5} />
+  }
+  if (tab.favicon) {
+    return <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0" />
+  }
+  if (tab.type === "polo") {
+    return <img src={poloAppIcon} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
+  }
+  return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
+}
+
 export function TopBar() {
   const { t } = useTranslation()
   const appShell = useOptionalAppShellContext()
   const productSpace = useOptionalProductSpaceContext()
-  const { activeTab, openTabs, activateHome, activateTab } = useTabShell()
-  const { resolvedMode, setMode } = useTheme()
-  const { navigateToSession } = useNavigation()
+  const {
+    activeTab,
+    activeTabId,
+    activeWebAppNavigation,
+    openTabs,
+    activateHome,
+    activateTab,
+    closeTab,
+    reorderTabs,
+  } = useTabShell()
+  const theme = useOptionalTheme()
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
 
   const isHome = activeTab.type === "home"
+  const showNavigation = activeTab.type === "webapp"
+  const trafficLightInset = isMac && !isWebUI ? 86 : 8
 
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
   const [ownedSnapshot, setOwnedSnapshot] = useState<OwnedExecutionSnapshot | null>(null)
@@ -140,17 +167,20 @@ export function TopBar() {
 
   const openSessionFromNotification = (sessionId: string) => {
     if (openPoloTab) activateTab(openPoloTab.id)
-    navigateToSession(sessionId)
+    // The bar lives above NavigationProvider (inside TabShell), so the click
+    // routes through the global navigate event the NavigationContext listens
+    // for instead of the hook.
+    navigate(routes.view.allSessions(sessionId))
   }
 
   return (
     <div
-      data-testid="workbench-topbar"
-      className="fixed left-0 right-0 z-panel flex items-center gap-[12px] border-b border-border/60 bg-background/92 px-[28px] backdrop-blur-[18px] titlebar-drag-region max-md:gap-1.5 max-md:px-3"
-      style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
+      data-testid="app-topbar"
+      className="fixed left-0 right-0 top-0 z-panel flex items-center gap-[12px] border-b border-border/60 bg-background/92 backdrop-blur-[18px] titlebar-drag-region max-md:gap-1.5"
+      style={{ height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
     >
-      {/* === LEFT: Brand lockup + Home tab === */}
-      <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-[12px] max-md:gap-1.5">
+      {/* === LEFT: Brand lockup === */}
+      <div className="pointer-events-auto flex flex-none items-center">
         <button
           type="button"
           data-testid="topbar-brand"
@@ -165,7 +195,13 @@ export function TopBar() {
             Polo
           </span>
         </button>
+      </div>
 
+      {/* === Tabs: Home tab + open web tabs === */}
+      <nav
+        aria-label={t("topbar.tabs.ariaLabel")}
+        className="pointer-events-auto flex h-full min-w-0 flex-1 items-center gap-[4px] overflow-x-auto [scrollbar-width:none] max-md:gap-1"
+      >
         <button
           type="button"
           data-testid="topbar-home-tab"
@@ -182,7 +218,83 @@ export function TopBar() {
           <Icons.House className="size-[17px] flex-none" strokeWidth={1.7} />
           <span className="max-md:hidden">{t("topbar.home")}</span>
         </button>
-      </div>
+
+        {openTabs.map((tab) => {
+          const active = tab.id === activeTabId
+          return (
+            <div
+              key={tab.id}
+              className={cn(
+                "titlebar-no-drag inline-flex h-[36px] min-w-[98px] max-w-[190px] flex-none items-center gap-[6px] rounded-[9px] px-[10px] text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring max-md:min-w-[96px] max-md:max-w-[140px]",
+                active
+                  ? "bg-background font-medium text-foreground shadow-minimal"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+              )}
+              draggable={tab.id !== POLO_TAB_ID}
+              onClick={() => activateTab(tab.id)}
+              onDragStart={(event) => {
+                if (tab.id === POLO_TAB_ID) return
+                event.dataTransfer.setData("text/plain", tab.id)
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault()
+                const draggedTabId = event.dataTransfer.getData("text/plain")
+                if (draggedTabId) reorderTabs(draggedTabId, tab.id)
+              }}
+            >
+              <TabIcon tab={tab} />
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{tab.title}</span>
+              <button
+                type="button"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
+                aria-label={t("topbar.tabs.close", { title: tab.title })}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  closeTab(tab.id)
+                }}
+              >
+                <Icons.X className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </button>
+            </div>
+          )
+        })}
+      </nav>
+
+      {/* === Web app navigation (only while a web app tab is active) === */}
+      {showNavigation && (
+        <div className="pointer-events-auto titlebar-no-drag flex flex-none items-center gap-0.5 rounded-md border border-foreground/8 bg-foreground/3 p-0.5">
+          <button
+            type="button"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            disabled={!activeWebAppNavigation?.canGoBack}
+            onClick={() => activeWebAppNavigation?.goBack()}
+            aria-label={t("topbar.nav.back")}
+          >
+            <Icons.ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            disabled={!activeWebAppNavigation?.canGoForward}
+            onClick={() => activeWebAppNavigation?.goForward()}
+            aria-label={t("topbar.nav.forward")}
+          >
+            <Icons.ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className="grid h-7 w-7 place-items-center rounded-md text-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            disabled={!activeWebAppNavigation}
+            onClick={() => activeWebAppNavigation?.reloadOrStop()}
+            aria-label={activeWebAppNavigation?.isLoading ? t("topbar.nav.stop") : t("topbar.nav.reload")}
+          >
+            {activeWebAppNavigation?.isLoading
+              ? <Icons.X className="h-4 w-4" strokeWidth={1.5} />
+              : <Icons.RefreshCw className="h-4 w-4" strokeWidth={1.5} />}
+          </button>
+        </div>
+      )}
 
       {/* === RIGHT: Runtime + Space control + Notifications + Account === */}
       <div className="pointer-events-auto flex flex-none items-center gap-[8px] max-md:gap-1">
@@ -370,12 +482,14 @@ export function TopBar() {
                 <StyledDropdownMenuSeparator />
               </>
             )}
-            <StyledDropdownMenuItem
-              onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
-            >
-              <SunMoon className="h-3.5 w-3.5" />
-              {t("topbar.account.toggleTheme")}
-            </StyledDropdownMenuItem>
+            {theme && (
+              <StyledDropdownMenuItem
+                onClick={() => theme.setMode(theme.resolvedMode === "dark" ? "light" : "dark")}
+              >
+                <SunMoon className="h-3.5 w-3.5" />
+                {t("topbar.account.toggleTheme")}
+              </StyledDropdownMenuItem>
+            )}
             {user && appShell?.onAdminLogout && (
               <>
                 <StyledDropdownMenuSeparator />

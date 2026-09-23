@@ -30,6 +30,18 @@ if (typeof window === 'undefined') {
 }
 setupI18n()
 
+// Vite-hosted theme singleton (`import.meta.glob` — unavailable under the
+// plain bun runner; shared-process pattern from App.narrow-home-route). The
+// workbench bar renders inside this reduced tree and reads the theme through
+// the OPTIONAL hook, so a null stub simply hides the theme toggle.
+mock.module('@/context/ThemeContext', () => ({
+  ThemeProvider: ({ children }: { children?: unknown }) => children ?? null,
+  useTheme: () => {
+    throw new Error('useTheme must be mocked in this file')
+  },
+  useOptionalTheme: () => undefined,
+}))
+
 // Fail-fast electronAPI for the reduced TabShell tree: subscriptions and the
 // localApps members the restored Home surface touches are enumerated; any
 // other access is a fixture gap and must throw.

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
-import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
+import { TopBar } from '@/components/app-shell/TopBar'
 import { useTabShell } from '@/context/TabShellContext'
 import { useNarrowViewport, WindowWidthGuard } from '@/components/product-space/WindowWidthGuard'
 import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
@@ -128,7 +128,10 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
   return (
     <div className="h-full min-h-0 bg-background">
-      <TabBar />
+      {/* The unified workbench bar (brand + tabs + space/account actions).
+          Rendered inside the hydration gate: pre-hydration the boundary above
+          returns first, so a stale previous-scope bar never surfaces. */}
+      <TopBar />
       <TabContent renderPolo={renderPolo} />
     </div>
   )

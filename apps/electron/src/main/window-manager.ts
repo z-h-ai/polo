@@ -14,10 +14,10 @@ import { installWebviewSecurityHandlers, setWebviewScopeResolver } from './webvi
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
-// Center the 14px macOS window controls in the 36px tab bar.
+// Center the 14px macOS window controls in the 64px unified workbench bar.
 // Keep this shared between window creation and visibility restoration because
 // setWindowButtonVisibility() may reset Electron's custom position.
-const MAC_TRAFFIC_LIGHT_POSITION = { x: 18, y: 11 }
+const MAC_TRAFFIC_LIGHT_POSITION = { x: 18, y: 25 }
 
 /**
  * Get the appropriate background material for Windows transparency effects
