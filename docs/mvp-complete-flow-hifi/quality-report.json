@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "revision": "poo70-desktop-ux-r10-revoked-space",
+  "revision": "poo70-desktop-ux-r11-zh-skill-terminology",
   "status": "incomplete",
-  "reason": "空间入口 r9 与失权空间列表 r10 的结构、浏览器增量检查通过；旧 r6 完整语义与交互证据未重新认证，完整质量校验的 Skill 指纹已失效。",
-  "previous_report": "docs/mvp-complete-flow-hifi/build/revoked-space-r10/quality-before.json",
-  "delta_evidence": "docs/mvp-complete-flow-hifi/build/revoked-space-r10/browser-check.json"
+  "reason": "中文术语 r11 的结构检查、静态可见文案扫描和两个视口的技能页/入口浏览器增量检查通过；旧 r6 完整语义与交互证据未重新认证，完整质量校验的 Skill 指纹已失效。",
+  "previous_report": "docs/mvp-complete-flow-hifi/build/skill-terminology-r11/quality-before.json",
+  "delta_evidence": "docs/mvp-complete-flow-hifi/build/skill-terminology-r11/browser-check.json"
 }

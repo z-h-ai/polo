@@ -1,10 +1,10 @@
 # POO-70 · MVP 完整流程高保真 — 一页功能地图
 
-日期：2026-09-21 · 分支 `POO-70/docs/client-journey-policy-interview` · 当前原型修订 `poo70-desktop-ux-r10-revoked-space` · [评审壳](review.html) · [产品表面](prototype.html)
+日期：2026-09-23 · 分支 `POO-70/docs/client-journey-policy-interview` · 当前原型修订 `poo70-desktop-ux-r11-zh-skill-terminology` · [评审壳](review.html) · [产品表面](prototype.html)
 
 **用途**：产品 owner 用一个浏览器标签完成 MVP 全流程视觉评审。本页回答“每个模块覆盖了什么、画的是什么、依据是什么”；逐步走查见 [review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)；机器可读追溯见 [prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)。
 
-**当前原型形态（v3 契约）**：`prototype.html` 是纯产品表面，`review.html` 是评审壳；187 场景、4,545 条声明跳转，以 `prototype-manifest.json` 为机器可读索引。旧截图与旧版验收只代表其生成时的修订，不作为 r10 当前视觉验收。
+**当前原型形态（v3 契约）**：`prototype.html` 是纯产品表面，`review.html` 是评审壳；187 场景、4,545 条声明跳转，以 `prototype-manifest.json` 为机器可读索引。中文界面的用户文案统一称「技能」；场景 ID 与技术文件名保留 `SKILL`。旧截图与旧版验收只代表其生成时的修订，不作为 r11 当前视觉验收。
 
 **输入基线（不可混称）**：
 - 产品结论权威：POO-70 `spec.md`（已接受，D-PC-04），快照存于本卡 `sources/poo70-spec.md`
@@ -112,7 +112,7 @@
 | M03 首页与全部 Apps | 16 |
 | 应用容器与按需能力 | 18 |
 | M05 助手 · 会话 | 7 |
-| 本机 Skill 与助手能力 | 67 |
+| 本机技能与助手能力 | 67 |
 | M07 我的圈子 | 16 |
 | M08 会话文件 | 3 |
 | M09 积分不足 | 12 |

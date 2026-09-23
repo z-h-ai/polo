@@ -1,8 +1,8 @@
 # POO-70 · MVP 完整流程高保真 — 评审指南
 
-日期：2026-09-17 · 修订 `poo70-ux-r4-v2-7`（继承 D-PC-07/08/09，经四轮用户走查迭代收敛） · 评审壳：[prototype.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype.html) · 产品表面：[surface.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsurface.html) · 功能地图：[feature-map.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md) · 机器可读追溯：[prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)
+当前修订：`poo70-desktop-ux-r11-zh-skill-terminology`（2026-09-23） · [评审壳](review.html) · [产品表面](prototype.html) · [功能地图](feature-map.md) · [机器可读追溯](prototype-manifest.json)。中文界面的当前术语是「技能」；下文 2026-09-17 的 v2 走查记录仅适用于当时版本，其中 `surface.html` 及「Skill 保留英文」均不是当前原型规则。
 
-**评审承诺**：产品 owner 打开 prototype.html 一个入口，即可完成四条代表故事走查 + 全部模块视觉确认 + 查看本轮修订与后续输入；全程无需账号、网络、支付或真实 AI。
+**当前评审入口**：[review.html](review.html) 可走查故事、场景和说明；[prototype.html](prototype.html) 是纯产品界面。全程无需账号、网络、支付或真实 AI。
 
 **本轮修订（D-PC-07 收口）**：2026-09-16 用户确认 D-PC-07 五项收口（M03 首页组合 / M04 关闭三选项 / M07 我的圈子入口 / M09 容器级积分提示 / M10 账号菜单管理入口，原文见 [user-decision-r8.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fsources%2Fuser-decision-r8.md)）。本轮：①11 个收口场景挂**锚定标注**（页面上直接圈出收口点，评审壳「页面说明」可逐条揭示）；②评审壳「本轮评审」绑定 D-PC-07 评审快照（现状→收口→依据→核对问题）；③清除与已确认结论冲突的旧残留——首页「系统工具」区（文件/任务与结果入口，违反 D-PC-03 与 POO-56/57 调整结论）、通知文案「结果在任务与结果查看」、「查看历史结果」更名为「查看运行记录」；④两个 HTML 按 product-ui-prototype 官方模板契约重建。**待核对直达**：[M03 首页组合](prototype.html#scene=P-M03-HOME-PERSONAL&annotation=a-m03-circle-entry) · [M04 关闭三选项](prototype.html#scene=P-M04-CLOSE-ACTIVE&annotation=a-m04-close-three) · [M07 圈子入口](prototype.html#scene=P-M07-LIST&annotation=a-m07-nav) · [M09 容器积分提示](prototype.html#scene=P-M09-APP-BANNER&annotation=a-m09-banner) · [M10 账号菜单管理入口](prototype.html#scene=P-M10-MENU&annotation=a-m10-admin-section)。
 
@@ -430,3 +430,9 @@ POO-70 已冻结的 8 条「共同恢复契约」逐一映射到原型屏幕：
 ### 失权空间列表 · r10 推荐待复看
 
 用户追问成员资格已被移除的空间是否还要保留菜单项。本轮推荐从「切换空间」列表移除失权的「北方贸易」，因为列表应只含可进入的目标；同时在通知中保留「北方贸易已无法访问 → 查看原因」，进入原有失权说明页，避免静默消失。企业与个人两方向的列表和通知均已调整，未改已确认的安全切换事务。此取舍尚待用户复看，不记作 D-PC-11 已确认。修订 `poo70-desktop-ux-r10-revoked-space`；结构与两方向真实点击通过，截图和检查记录在 `build/revoked-space-r10/`。
+
+## 2026-09-23 · 中文界面术语统一
+
+输入依据：用户明确要求更新 `prototype.html`，中文语言下把用户看到的「Skill」改为「技能」，并按需要同步文档。操作分类：现有 v3 原型的增量文案修改；不改变技能的授权、安装、启停、共享和助手调用行为。范围包括产品表面的可见文案与无障碍名称，以及当前评审标题、动作标签和反馈；场景 ID、CSS/JS 标识、`SKILL.md` 文件名及历史确认原文仍保留技术名称。此文案决定来自本轮用户指令，无须另开产品裁决。
+
+修订：`poo70-desktop-ux-r11-zh-skill-terminology`，132 个受影响场景；187 个场景和 4,545 条跳转保持不变。v3 增量结构校验通过；静态扫描确认产品表面的可见文字与无障碍名称无 `Skill` 残留。评审页绑定本轮 [中文术语复看问题](sources/skill-terminology-review-r11.json)，r6 来源快照保留原文。浏览器在 1440×900、1024×768 核对了企业/个人技能页及企业首页「管理技能」入口，无横向溢出；证据在 `build/skill-terminology-r11/browser-check.json`。完整质量状态仍为 incomplete，旧 r6 全量语义与交互证据未重新认证。
