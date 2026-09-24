@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
 import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
@@ -782,6 +782,25 @@ export function HomePage() {
       .join(' · ')
   }
 
+  // Runtime status for a quick-entry card (prototype status badge, e.g.
+  // 运行中): looked up through the runtime scope key, never the UI identity
+  // key. A failed scope derivation simply means "no badge".
+  const runtimeStatusFor = (app: CatalogApp) => {
+    try {
+      return catalog.state.statuses[catalog.scopeKeyForApp(app)] ?? null
+    } catch {
+      return null
+    }
+  }
+
+  // Prototype P-M03-HOME-ZERO: with a committed Catalog and nothing pinned,
+  // the assistant CTA becomes the low-threshold daily-task invitation and a
+  // dashed guide routes first-run members to All Apps.
+  const showZeroGuide = catalogCommitted
+    && !catalog.state.loading
+    && !catalog.state.errorCode
+    && homeWorkCards.length === 0
+
   return (
     // Frozen POO-41 `.main` mirror: the centered 1260px column with the
     // breakpoint paddings INSIDE it, content-sized exactly like the frozen
@@ -821,18 +840,27 @@ export function HomePage() {
           />
         ) : (
           <div data-testid="home-quick-access-section">
-            {/* Frozen launcher hero: row with bottom-aligned side action at
-            desktop/tablet; stacks under the text at the ≤760px breakpoint
-            exactly like the frozen ≤760px `.hero` column rule. */}
+            {/* Prototype `.home-hero`: time-of-day greeting + space lead at
+            left, the circles context link bottom-aligned at desktop and
+            stacked full-width under the text at ≤760px. */}
             <div className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end">
-              <div>
-                <h1 className="m-0 text-[36px] font-bold leading-[1.08] tracking-[-0.05em]">
-                  {t('homeApps.home.greeting')}
+              <div className="min-w-0">
+                <h1 className="m-0 text-[30px] font-bold leading-[1.08] tracking-[-0.055em] min-[761px]:text-[36px]">
+                  {t(new Date().getHours() < 12
+                    ? 'homeApps.home.greetingMorning'
+                    : new Date().getHours() < 18
+                      ? 'homeApps.home.greetingAfternoon'
+                      : 'homeApps.home.greetingEvening')}
                 </h1>
                 <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
-                  {t('homeApps.home.greetingLead', {
-                    space: activeProductSpace?.name ?? t('homeApps.organization.current'),
-                  })}
+                  <Trans
+                    i18nKey="homeApps.home.greetingLead"
+                    values={{
+                      space: activeProductSpace?.name
+                        ?? t('homeApps.organization.current'),
+                    }}
+                    components={{ strong: <strong className="font-semibold text-foreground" /> }}
+                  />
                 </p>
               </div>
               {catalog.productSpace && activeProductSpace?.kind === 'personal' && (
@@ -840,9 +868,16 @@ export function HomePage() {
                   type="button"
                   data-testid="home-circles-link"
                   onClick={() => setShowCirclesCard(value => !value)}
-                  className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[10px] rounded-[12px] px-[10px] py-[9px] text-left text-foreground-70 hover:bg-foreground-5 hover:text-foreground min-[761px]:w-auto min-[761px]:min-w-[210px]"
                 >
-                  {t('homeApps.home.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
+                  <Icons.UserRoundPlus className="size-4 text-accent" aria-hidden="true" />
+                  <span className="grid gap-[3px]">
+                    <strong className="text-[13px] font-semibold">{t('homeSpace.context.myCircles')}</strong>
+                    <small className="text-[11px] text-foreground-50">
+                      {t('homeSpace.context.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
+                    </small>
+                  </span>
+                  <Icons.ChevronRight className="size-3.5 text-foreground-40" aria-hidden="true" />
                 </button>
               )}
             </div>
@@ -888,7 +923,7 @@ export function HomePage() {
                       type="button"
                       data-testid="home-manage-quick-access"
                       onClick={() => setManageOpen(true)}
-                      className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      className="inline-flex min-h-[30px] items-center rounded-[6px] px-[8px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
                     >
                       {t('homeApps.quick.manage')}
                     </button>
@@ -896,7 +931,7 @@ export function HomePage() {
                       type="button"
                       data-testid="home-all-apps-open"
                       onClick={() => setView('all-apps')}
-                      className="inline-flex min-h-[32px] items-center rounded-[8px] px-[10px] text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      className="inline-flex min-h-[30px] items-center rounded-[6px] px-[8px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
                     >
                       {t('homeApps.quick.allApps')}
                     </button>
@@ -912,7 +947,9 @@ export function HomePage() {
                   onClick={openPoloAssistant}
                   className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
                 >
-                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent text-[17px]">✦</span>
+                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
+                    <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
+                  </span>
                   <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
                   <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
                   <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
@@ -922,13 +959,15 @@ export function HomePage() {
                     <Button
                       type="button"
                       size="sm"
-                      className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
+                      className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground shadow-minimal hover:bg-accent/90 hover:shadow-middle"
                       onClick={(event) => {
                         event.stopPropagation()
                         openPoloAssistant()
                       }}
                     >
-                      {t('homeApps.home.openAssistant')}
+                      {showZeroGuide
+                        ? t('homeApps.home.tryTask')
+                        : t('homeApps.home.openAssistant')}
                     </Button>
                   </div>
                 </article>
@@ -952,8 +991,8 @@ export function HomePage() {
                   </div>
                 ) : (
                   <>
-                    {homeWorkCards.map((app, index) => {
-                      const artGlyph = index % 2 === 0 ? '▣' : '▦'
+                    {homeWorkCards.map((app) => {
+                      const runtimeStatus = runtimeStatusFor(app)
                       return (
                         <article
                           key={uiKeyForApp(app)}
@@ -962,7 +1001,11 @@ export function HomePage() {
                           onClick={() => { void openCatalogApp(app) }}
                           className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
                         >
-                          <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success text-[17px]">{artGlyph}</span>
+                          <span className="mb-[26px] grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success">
+                            {app.iconUrl
+                              ? <img src={app.iconUrl} alt="" className="size-full object-cover" />
+                              : <span className="text-[17px] font-semibold">{app.name.slice(0, 1)}</span>}
+                          </span>
                           <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
                           <p className="mt-[4px] truncate text-[12px] leading-[normal] text-muted-foreground">
                             {renderQuickEntrySource(app)}
@@ -970,12 +1013,24 @@ export function HomePage() {
                           <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
                             {app.description || t('homeApps.noDescription')}
                           </p>
-                          <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                          <div
+                            className={
+                              runtimeStatus?.status === 'running'
+                                ? 'mt-auto flex items-center justify-between gap-[6px] pt-[14px]'
+                                : 'mt-auto flex items-center justify-end gap-[7px] pt-[14px]'
+                            }
+                          >
+                            {runtimeStatus?.status === 'running' && (
+                              <span className="inline-flex min-h-[20px] items-center gap-[5px] whitespace-nowrap rounded-[4px] bg-info/10 px-[7px] text-[10px] font-medium text-info">
+                                <span className="size-[5px] rounded-full bg-info" aria-hidden="true" />
+                                {t('homeApps.status.running')}
+                              </span>
+                            )}
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="min-h-[32px] rounded-[8px] border-0 px-[12px] text-[12px] text-muted-foreground hover:text-foreground"
+                              className="min-h-[30px] rounded-[6px] border-0 px-[9px] text-[12px] font-medium text-foreground-60 hover:text-foreground"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 void openCatalogApp(app)
@@ -990,6 +1045,31 @@ export function HomePage() {
                   </>
                 )}
               </div>
+
+              {showZeroGuide && (
+                <div
+                  data-testid="home-zero-guide"
+                  className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-border px-[20px] py-[34px] text-center"
+                >
+                  <span className="grid size-[52px] place-items-center rounded-[14px] bg-info/10 text-info">
+                    <Icons.LayoutGrid className="size-[25px]" aria-hidden="true" />
+                  </span>
+                  <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
+                    {t('homeApps.home.zeroTitle')}
+                  </h2>
+                  <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+                    {t('homeApps.home.zeroDescription', { max: MAX_HOME_QUICK_ACCESS_APPS })}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-[4px] min-h-[32px] rounded-[8px] bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
+                    onClick={() => setView('all-apps')}
+                  >
+                    {t('homeApps.home.zeroCta')}
+                  </Button>
+                </div>
+              )}
             </section>
             {catalog.productSpace && activeProductSpace?.kind === 'personal' && showCirclesCard && (
               <HomeSpaceContext

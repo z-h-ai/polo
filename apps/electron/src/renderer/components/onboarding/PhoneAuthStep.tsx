@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react"
-import type { FormEvent } from "react"
+import type { FormEvent, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Spinner } from "@polo-ai/ui"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { AdminLoginMethodTabs } from "./AdminLoginMethodTabs"
+import { AdminLoginMethodSwitch } from "./AdminLoginMethodSwitch"
+import { LoginTrustRow } from "./LoginTrustRow"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 import {
   canSendPhoneAuthCode,
@@ -25,6 +25,8 @@ interface PhoneAuthStepProps {
   onCodeSent: (phone: string, resendAfter: number) => void
   onVerify: (phone: string, code: string) => Promise<boolean>
   onUsePassword: () => void
+  /** Shared inline error surface, rendered below the panel heading. */
+  errorNode?: ReactNode
 }
 
 export function PhoneAuthStep({
@@ -35,6 +37,7 @@ export function PhoneAuthStep({
   onCodeSent,
   onVerify,
   onUsePassword,
+  errorNode = null,
 }: PhoneAuthStepProps) {
   const { t } = useTranslation()
   const [form, dispatch] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
@@ -99,24 +102,28 @@ export function PhoneAuthStep({
     onClearError()
   }
 
-  return (
-    <>
-      <AdminLoginMethodTabs
-        value="phone"
-        disabled={isBusy}
-        onChange={onUsePassword}
-      />
+  const primaryButtonClassName
+    = "h-10 w-full rounded-[8px] bg-accent text-[12px] font-medium text-primary-foreground hover:bg-accent/90"
 
-      {form.mode === "entry" ? (
-        <form data-testid="phone-auth-entry" onSubmit={handleSend} className="mt-5 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="phone-auth-phone" className="text-xs text-foreground/70">
-              {t("onboarding.adminLogin.phone")}
-            </Label>
-            <div className="flex h-11 overflow-hidden rounded-[10px] bg-foreground-2 ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
-              <span className="flex items-center border-r border-border/60 px-3 text-sm text-muted-foreground">+86</span>
+  if (form.mode === "entry") {
+    return (
+      <>
+        {/* Prototype `.login-panel` heading for the code-request scene. */}
+        <h2 className="m-0 text-[22px] font-semibold text-foreground">
+          {t("onboarding.adminLogin.phoneAuth")}
+        </h2>
+        <p className="mt-2 text-[12px] leading-[1.55] text-foreground-50">
+          {t("onboarding.adminLogin.phoneAuthSubtitle")}
+        </p>
+        {errorNode}
+        <form data-testid="phone-auth-entry" onSubmit={handleSend} className="mt-5 grid gap-[15px]">
+          <div className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+            <label htmlFor="phone-auth-phone">{t("onboarding.adminLogin.phone")}</label>
+            <span className="flex h-11 overflow-hidden rounded-[10px] border border-border bg-foreground-3 focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]">
+              <span className="flex items-center border-r border-border px-[12px] text-[12px] font-medium text-foreground-50">+86</span>
               <Input
                 id="phone-auth-phone"
+                aria-label={t("onboarding.adminLogin.phone")}
                 inputMode="numeric"
                 autoComplete="tel-national"
                 placeholder={t("onboarding.adminLogin.phonePlaceholder")}
@@ -128,31 +135,14 @@ export function PhoneAuthStep({
                 disabled={isBusy}
                 className="h-11 flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
-            </div>
-          </div>
-
-          <label className="flex cursor-pointer items-start gap-2 text-xs leading-5 text-muted-foreground">
-            <input
-              data-testid="phone-auth-consent"
-              type="checkbox"
-              checked={form.consented}
-              onChange={(event) => dispatch({ type: 'consentChanged', value: event.target.checked })}
-              disabled={isBusy}
-              className="mt-1 size-3.5 accent-[var(--accent)]"
-            />
-            <span>
-              {t("onboarding.adminLogin.legalPrefix")}{" "}
-              <span className="text-foreground/80 underline underline-offset-2">{t("onboarding.adminLogin.terms")}</span>
-              {" "}{t("onboarding.adminLogin.legalJoin")}{" "}
-              <span className="text-foreground/80 underline underline-offset-2">{t("onboarding.adminLogin.privacy")}</span>
             </span>
-          </label>
+          </div>
 
           <Button
             data-testid="phone-auth-send-code"
             type="submit"
             disabled={isBusy || !canSend}
-            className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"
+            className={primaryButtonClassName}
           >
             {isSending ? (
               <>
@@ -165,72 +155,118 @@ export function PhoneAuthStep({
               t("onboarding.adminLogin.sendCode")
             )}
           </Button>
+
+          <AdminLoginMethodSwitch
+            target="password"
+            disabled={isBusy}
+            onSwitch={onUsePassword}
+          />
         </form>
-      ) : (
-        <form data-testid="phone-auth-verify" onSubmit={handleVerify} className="mt-5 space-y-4">
-          <div className="flex items-center justify-between rounded-[10px] bg-foreground/5 px-3 py-2.5 text-sm">
-            <strong className="font-medium text-foreground">{maskedPhone}</strong>
-            <button
-              type="button"
-              onClick={handleEditPhone}
-              disabled={isBusy}
-              className="text-accent hover:underline disabled:opacity-50"
-            >
-              {t("onboarding.adminLogin.editPhone")}
-            </button>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="phone-auth-code" className="text-xs text-foreground/70">
-              {t("onboarding.adminLogin.code")}
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                id="phone-auth-code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder={t("onboarding.adminLogin.codePlaceholder")}
-                value={form.code}
-                onChange={(event) => {
-                  dispatch({ type: 'codeChanged', value: event.target.value })
-                  onClearError()
-                }}
-                disabled={isBusy}
-                autoFocus
-                className="h-11 min-w-0 flex-1 rounded-[10px] bg-foreground-2 tracking-[0.25em]"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isBusy || resendSeconds > 0}
-                onClick={sendCode}
-                className="h-11 shrink-0 rounded-[10px]"
-              >
-                {resendSeconds > 0
-                  ? t("onboarding.adminLogin.resendIn", { count: resendSeconds })
-                  : t("onboarding.adminLogin.resend")}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("onboarding.adminLogin.codeExpires")}</p>
-          </div>
+        <LoginTrustRow
+          checked={form.consented}
+          onCheckedChange={value => dispatch({ type: 'consentChanged', value })}
+          disabled={isBusy}
+        >
+          {t("onboarding.adminLogin.legalPrefix")}{" "}
+          <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.terms")}</span>
+          {" "}{t("onboarding.adminLogin.legalJoin")}{" "}
+          <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.privacy")}</span>
+        </LoginTrustRow>
+      </>
+    )
+  }
 
-          <Button
-            data-testid="phone-auth-continue"
-            type="submit"
-            disabled={isBusy || !canVerify}
-            className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"
+  return (
+    <>
+      {/* Prototype `.login-panel` heading for the code-entry scene. */}
+      <h2 className="m-0 text-[22px] font-semibold text-foreground">
+        {t("onboarding.adminLogin.code")}
+      </h2>
+      <p className="mt-2 text-[12px] leading-[1.55] text-foreground-50">
+        {t("onboarding.adminLogin.codeSubtitle", { phone: maskedPhone })}
+      </p>
+      {errorNode}
+      <form data-testid="phone-auth-verify" onSubmit={handleVerify} className="mt-5 grid gap-[15px]">
+        <div className="flex items-center justify-between rounded-[10px] bg-foreground-3 px-3 py-2.5 text-sm">
+          <strong className="font-medium text-foreground">{maskedPhone}</strong>
+          <button
+            type="button"
+            onClick={handleEditPhone}
+            disabled={isBusy}
+            className="text-accent hover:underline disabled:opacity-50"
           >
-            {isVerifying ? (
-              <>
-                <Spinner className="mr-1.5" />
-                {t("onboarding.adminLogin.verifying")}
-              </>
-            ) : (
-              t("onboarding.adminLogin.continue")
-            )}
-          </Button>
-        </form>
-      )}
+            {t("onboarding.adminLogin.editPhone")}
+          </button>
+        </div>
+
+        <label className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+          {t("onboarding.adminLogin.code")}
+          <Input
+            id="phone-auth-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder={t("onboarding.adminLogin.codePlaceholder")}
+            value={form.code}
+            onChange={(event) => {
+              dispatch({ type: 'codeChanged', value: event.target.value })
+              onClearError()
+            }}
+            disabled={isBusy}
+            autoFocus
+            className="h-11 min-w-0 rounded-[10px] border-border bg-foreground-3 tracking-[0.25em]"
+          />
+        </label>
+
+        <Button
+          data-testid="phone-auth-continue"
+          type="submit"
+          disabled={isBusy || !canVerify}
+          className={primaryButtonClassName}
+        >
+          {isVerifying ? (
+            <>
+              <Spinner className="mr-1.5" />
+              {t("onboarding.adminLogin.verifying")}
+            </>
+          ) : (
+            t("onboarding.adminLogin.continue")
+          )}
+        </Button>
+
+        <AdminLoginMethodSwitch
+          target="password"
+          disabled={isBusy}
+          onSwitch={onUsePassword}
+        />
+
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={isBusy || resendSeconds > 0}
+          onClick={sendCode}
+          className="min-h-[28px] w-full rounded-[8px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+        >
+          {resendSeconds > 0
+            ? t("onboarding.adminLogin.resendIn", { count: resendSeconds })
+            : t("onboarding.adminLogin.resend")}
+        </Button>
+      </form>
+
+      <p className="mt-[8px] text-[10px] leading-[1.4] text-foreground-50">
+        {t("onboarding.adminLogin.codeExpires")}
+      </p>
+
+      <LoginTrustRow
+        checked={form.consented}
+        onCheckedChange={value => dispatch({ type: 'consentChanged', value })}
+        disabled={isBusy}
+      >
+        {t("onboarding.adminLogin.legalPrefix")}{" "}
+        <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.terms")}</span>
+        {" "}{t("onboarding.adminLogin.legalJoin")}{" "}
+        <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.privacy")}</span>
+      </LoginTrustRow>
     </>
   )
 }

@@ -124,7 +124,7 @@ describe('PhoneAuthStep rendered interactions', () => {
     }))
 
     const phoneInput = screen.getByLabelText('Phone number')
-    const sendButton = screen.getByRole('button', { name: 'Send verification code' })
+    const sendButton = screen.getByRole('button', { name: 'Get verification code' })
     fireEvent.change(phoneInput, { target: { value: '+86 138 0013 8000' } })
     expect((phoneInput as HTMLInputElement).value).toBe('13800138000')
     expect((sendButton as HTMLButtonElement).disabled).toBe(true)
@@ -179,7 +179,7 @@ describe('PhoneAuthStep rendered interactions', () => {
       target: { value: '13800138000' },
     })
     await user.click(screen.getByRole('checkbox'))
-    await user.click(screen.getByRole('button', { name: 'Send verification code' }))
+    await user.click(screen.getByRole('button', { name: 'Get verification code' }))
 
     await waitFor(() => {
       const resend = screen.getByRole('button', { name: 'Resend in 47s' })
@@ -215,13 +215,15 @@ describe('AdminLoginStep rendered modes', () => {
     }))
 
     expect(screen.getByLabelText('Phone number')).toBeTruthy()
-    const tabs = screen.getAllByRole('tab')
-    expect(tabs).toHaveLength(2)
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+    // Prototype quiet switch: a single bordered button per mode flip — the
+    // current mode shows its own heading, so only the OTHER method renders.
+    expect(screen.getByTestId('admin-login-method-password')).toBeTruthy()
+    expect(screen.queryByTestId('admin-login-method-phone')).toBeNull()
 
-    await user.click(screen.getByRole('tab', { name: 'Password' }))
+    await user.click(screen.getByTestId('admin-login-method-password'))
     expect(screen.getByLabelText('Phone number or username')).toBeTruthy()
-    expect(screen.getAllByRole('tab')[1].getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('admin-login-method-phone')).toBeTruthy()
+    expect(screen.queryByTestId('admin-login-method-password')).toBeNull()
   })
 
   it('keeps per-phone resend deadlines across edit and login tab remounts', async () => {
@@ -244,7 +246,7 @@ describe('AdminLoginStep rendered modes', () => {
       target: { value: '13800138000' },
     })
     await user.click(screen.getByRole('checkbox'))
-    await user.click(screen.getByRole('button', { name: 'Send verification code' }))
+    await user.click(screen.getByRole('button', { name: 'Get verification code' }))
     await screen.findByLabelText('Verification code')
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))
@@ -262,8 +264,8 @@ describe('AdminLoginStep rendered modes', () => {
     })
     expect((samePhoneSend as HTMLButtonElement).disabled).toBe(true)
 
-    await user.click(screen.getByRole('tab', { name: 'Password' }))
-    await user.click(screen.getByRole('tab', { name: 'Verification code' }))
+    await user.click(screen.getByTestId('admin-login-method-password'))
+    await user.click(screen.getByTestId('admin-login-method-phone'))
     fireEvent.change(screen.getByLabelText('Phone number'), {
       target: { value: '13800138000' },
     })
@@ -289,10 +291,10 @@ describe('AdminLoginStep rendered modes', () => {
       onSubmit,
     }))
 
-    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.queryByTestId('admin-login-method-phone')).toBeNull()
     await user.type(screen.getByLabelText('Phone number or username'), ' legacy-user ')
     await user.type(screen.getByLabelText('Password'), 'password-123')
-    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onSubmit).toHaveBeenCalledWith('legacy-user', 'password-123')
   })
 })

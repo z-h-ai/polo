@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { FormEvent } from "react"
+import type { FormEvent, ReactNode } from "react"
 import { AlertTriangle, Check, Eye, EyeOff } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { useTranslation } from "react-i18next"
@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { PhoneAuthStep } from "./PhoneAuthStep"
-import { AdminLoginMethodTabs } from "./AdminLoginMethodTabs"
+import { AdminLoginMethodSwitch } from "./AdminLoginMethodSwitch"
+import { LoginTrustRow } from "./LoginTrustRow"
 import {
   createPhoneAuthResendDeadline,
   resolvePreferredAdminLoginMode,
@@ -45,6 +46,7 @@ export function AdminLoginStep({
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [consented, setConsented] = useState(true)
   const [loginMode, setLoginMode] = useState<"phone" | "password">(
     resolvePreferredAdminLoginMode(phoneAuthEnabled),
   )
@@ -60,9 +62,33 @@ export function AdminLoginStep({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (isLoading) return
+    if (isLoading || !consented) return
     onSubmit(identifier.trim(), password)
   }
+
+  const switchMode = (target: "phone" | "password") => {
+    setLoginMode(target)
+    onClearError()
+  }
+
+  const errorBlock: ReactNode = (
+    <AnimatePresence initial={false}>
+      {errorMessage ? (
+        <motion.div
+          key="admin-login-error"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 8 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+          className="mt-[15px] flex items-start gap-2 rounded-[10px] border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+          role="alert"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  )
 
   return (
     <div className="relative w-full max-w-[960px]" aria-label={t("onboarding.adminLogin.ariaLabel")}>
@@ -78,28 +104,28 @@ export function AdminLoginStep({
 
       <section className="relative grid min-h-[570px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[24px] border border-border bg-background shadow-modal-small max-lg:grid-cols-1 max-lg:min-h-0">
         {/* === LEFT: brand story (prototype `.login-story`) === */}
-        <div className="flex flex-col justify-between gap-10 bg-foreground/3 p-[54px] max-lg:p-8">
+        <div className="flex flex-col justify-between gap-10 bg-foreground-3 p-[54px] max-lg:p-8">
           <div>
-            <div className="flex items-center gap-[9px]">
-              <span className="grid size-[30px] place-items-center rounded-[9px] bg-foreground text-[15px] font-extrabold text-background">
+            <div className="flex items-center gap-[9px] pb-[16px] pl-[8px] pt-[4px]">
+              <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[13px] font-extrabold text-background">
                 P
               </span>
-              <span className="text-[15px] font-bold tracking-[-0.03em] text-foreground">
+              <span className="text-[14px] font-bold text-foreground">
                 Polo AI
               </span>
             </div>
-            <h1 className="mt-8 text-[28px] font-bold leading-[1.25] tracking-[-0.02em] text-foreground max-lg:mt-5 max-lg:text-[22px]">
+            <h1 className="mt-[24px] max-w-[460px] text-[36px] font-bold leading-[1.12] tracking-[-0.04em] text-foreground max-lg:mt-5 max-lg:text-[28px]">
               {t("onboarding.adminLogin.storyHeadline")}
             </h1>
-            <p className="mt-3 max-w-[38ch] text-[13px] leading-[1.7] text-muted-foreground">
+            <p className="mt-[14px] max-w-[430px] text-[14px] leading-[1.65] text-foreground-50">
               {t("onboarding.adminLogin.storySub")}
             </p>
           </div>
-          <div className="flex flex-col gap-[10px] max-lg:hidden">
+          <div className="flex flex-col gap-[12px] max-lg:hidden">
             {STORY_POINTS.map(({ key }) => (
-              <div key={key} className="flex items-center gap-[10px] text-[12px] text-foreground/75">
-                <span className="grid size-[18px] flex-none place-items-center rounded-full bg-success/15 text-success">
-                  <Check className="size-3" strokeWidth={2.2} />
+              <div key={key} className="flex items-center gap-[10px] text-[12px] text-foreground">
+                <span className="grid size-[21px] flex-none place-items-center rounded-full bg-success/10 text-success">
+                  <Check className="size-3" strokeWidth={2.4} />
                 </span>
                 {t(key)}
               </div>
@@ -109,34 +135,9 @@ export function AdminLoginStep({
 
         {/* === RIGHT: login panel (existing auth logic, prototype `.login-panel`) === */}
         <div className="flex flex-col justify-center p-[46px] max-lg:p-7">
-          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.75px] text-foreground/50">
+          <p className="m-0 text-[11px] font-medium tracking-[0.75px] text-foreground-50 uppercase">
             {t("onboarding.adminLogin.eyebrow")}
           </p>
-          <h2 className="mt-[7px] text-xl font-semibold text-foreground">
-            {t("onboarding.adminLogin.title")}
-          </h2>
-          <p className="mt-1.5 text-[13px] text-muted-foreground">
-            {loginMode === "phone" && phoneAuthEnabled
-              ? t("onboarding.adminLogin.phoneAuthSubtitle")
-              : t("onboarding.adminLogin.subtitle")}
-          </p>
-
-          <AnimatePresence initial={false}>
-            {errorMessage ? (
-              <motion.div
-                key="admin-login-error"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className="mt-5 flex items-start gap-2 rounded-[10px] border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-                role="alert"
-              >
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                <span>{errorMessage}</span>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
 
           {phoneAuthEnabled === undefined ? (
             <div className="flex items-center justify-center py-10 text-muted-foreground" aria-label={t("common.loading")}>
@@ -145,6 +146,7 @@ export function AdminLoginStep({
           ) : loginMode === "phone" && phoneAuthEnabled ? (
             <PhoneAuthStep
               isLoading={isLoading}
+              errorNode={errorBlock}
               onClearError={onClearError}
               resendDeadlines={phoneAuthResendDeadlines}
               onSendCode={onSendPhoneCode}
@@ -156,32 +158,26 @@ export function AdminLoginStep({
                 })
               }}
               onVerify={onVerifyPhoneCode}
-              onUsePassword={() => {
-                setLoginMode("password")
-                onClearError()
-              }}
+              onUsePassword={() => switchMode("password")}
             />
           ) : (
             <>
-              {phoneAuthEnabled ? (
-                <AdminLoginMethodTabs
-                  value="password"
-                  disabled={isLoading}
-                  onChange={() => {
-                    setLoginMode("phone")
-                    onClearError()
-                  }}
-                />
-              ) : null}
+              {/* Prototype password scene: mode title + short lead, fields,
+              the 继续 primary, the quiet mode switch, then the trust row. */}
+              <h2 className="m-0 text-[22px] font-semibold text-foreground">
+                {t("onboarding.adminLogin.passwordLogin")}
+              </h2>
+              <p className="mt-2 text-[12px] leading-[1.55] text-foreground-50">
+                {t("onboarding.adminLogin.subtitle")}
+              </p>
+              {errorBlock}
               <form
                 data-testid="admin-password-login-form"
                 onSubmit={handleSubmit}
-                className={cn("space-y-4", phoneAuthEnabled ? "mt-5" : "mt-6")}
+                className="mt-5 grid gap-[15px]"
               >
-                <div className="space-y-2">
-                  <Label htmlFor="admin-identifier" className="text-xs text-foreground/70">
-                    {t("onboarding.adminLogin.identifier")}
-                  </Label>
+                <label className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+                  {t("onboarding.adminLogin.identifier")}
                   <Input
                     id="admin-identifier"
                     autoComplete="username"
@@ -192,12 +188,12 @@ export function AdminLoginStep({
                       onClearError()
                     }}
                     disabled={isLoading}
-                    className="h-11 rounded-[10px] bg-foreground-2"
+                    className="h-11 rounded-[10px] border-border bg-foreground-3"
                   />
-                </div>
+                </label>
 
-                <div className="space-y-2">
-                  <Label htmlFor="admin-password" className="text-xs text-foreground/70">
+                <div className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
+                  <Label htmlFor="admin-password" className="text-[11px] font-semibold text-foreground-60">
                     {t("onboarding.adminLogin.password")}
                   </Label>
                   <div className="relative">
@@ -212,7 +208,7 @@ export function AdminLoginStep({
                         onClearError()
                       }}
                       disabled={isLoading}
-                      className="h-11 rounded-[10px] bg-foreground-2 pr-11"
+                      className="h-11 rounded-[10px] border-border bg-foreground-3 pr-11"
                     />
                     <button
                       type="button"
@@ -231,8 +227,8 @@ export function AdminLoginStep({
 
                 <Button
                   type="submit"
-                  disabled={isLoading || !identifier.trim() || !password}
-                  className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"
+                  disabled={isLoading || !identifier.trim() || !password || !consented}
+                  className="h-10 w-full rounded-[8px] bg-accent text-[12px] font-medium text-primary-foreground hover:bg-accent/90"
                 >
                   {isLoading ? (
                     <>
@@ -240,10 +236,26 @@ export function AdminLoginStep({
                       {t("onboarding.adminLogin.signingIn")}
                     </>
                   ) : (
-                    t("onboarding.adminLogin.signIn")
+                    t("onboarding.adminLogin.continue")
                   )}
                 </Button>
+
+                {phoneAuthEnabled ? (
+                  <AdminLoginMethodSwitch
+                    target="phone"
+                    disabled={isLoading}
+                    onSwitch={() => switchMode("phone")}
+                  />
+                ) : null}
               </form>
+
+              <LoginTrustRow
+                checked={consented}
+                onCheckedChange={setConsented}
+                disabled={isLoading}
+              >
+                {t("onboarding.adminLogin.agreement")}
+              </LoginTrustRow>
             </>
           )}
         </div>
