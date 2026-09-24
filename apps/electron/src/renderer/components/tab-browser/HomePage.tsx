@@ -956,10 +956,12 @@ export function HomePage() {
                     {t('homeApps.home.poloDescription')}
                   </p>
                   <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-                    <Button
+                    {/* Prototype `.home-app-grid .assistant-card
+                    .home-primary-action`: solid accent, weight 650, lifts
+                    with shadow-middle on hover. */}
+                    <button
                       type="button"
-                      size="sm"
-                      className="min-h-[32px] rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground shadow-minimal hover:bg-accent/90 hover:shadow-middle"
+                      className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
                       onClick={(event) => {
                         event.stopPropagation()
                         openPoloAssistant()
@@ -968,7 +970,7 @@ export function HomePage() {
                       {showZeroGuide
                         ? t('homeApps.home.tryTask')
                         : t('homeApps.home.openAssistant')}
-                    </Button>
+                    </button>
                   </div>
                 </article>
                 {catalog.state.loading && !catalog.state.catalog ? (
@@ -985,9 +987,13 @@ export function HomePage() {
                     <p className="mt-1 max-w-md text-xs text-muted-foreground">
                       {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
                     </p>
-                    <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => { void catalog.sync(true) }}>
+                    <button
+                      type="button"
+                      className="mt-3 inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                      onClick={() => { void catalog.sync(true) }}
+                    >
                       {t('homeApps.actions.tryAgain')}
-                    </Button>
+                    </button>
                   </div>
                 ) : (
                   <>
@@ -1026,18 +1032,18 @@ export function HomePage() {
                                 {t('homeApps.status.running')}
                               </span>
                             )}
-                            <Button
+                            {/* Prototype `.home-app-grid .card-action`:
+                            borderless quiet label, fg-5 hover fill. */}
+                            <button
                               type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="min-h-[30px] rounded-[6px] border-0 px-[9px] text-[12px] font-medium text-foreground-60 hover:text-foreground"
+                              className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 void openCatalogApp(app)
                               }}
                             >
                               {t('common.open')}
-                            </Button>
+                            </button>
                           </div>
                         </article>
                       )
@@ -1060,14 +1066,15 @@ export function HomePage() {
                   <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
                     {t('homeApps.home.zeroDescription', { max: MAX_HOME_QUICK_ACCESS_APPS })}
                   </p>
-                  <Button
+                  {/* Prototype `.button.primary`: accent fill, on-accent
+                  label, hover darkens to accent 86% + black. */}
+                  <button
                     type="button"
-                    size="sm"
-                    className="mt-[4px] min-h-[32px] rounded-[8px] bg-accent px-[12px] text-[12px] font-semibold text-primary-foreground hover:bg-accent/90"
+                    className="mt-[4px] inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)]"
                     onClick={() => setView('all-apps')}
                   >
                     {t('homeApps.home.zeroCta')}
-                  </Button>
+                  </button>
                 </div>
               )}
             </section>

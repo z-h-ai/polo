@@ -4,7 +4,6 @@ import { AlertTriangle, Check, Eye, EyeOff } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { useTranslation } from "react-i18next"
 import { Spinner } from "@polo-ai/ui"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
@@ -225,10 +224,12 @@ export function AdminLoginStep({
                   </div>
                 </div>
 
-                <Button
+                {/* Prototype `.button.primary.auth-primary`: accent fill,
+                on-accent 12px label, hover darkens to accent 86% + black. */}
+                <button
                   type="submit"
                   disabled={isLoading || !identifier.trim() || !password || !consented}
-                  className="h-10 w-full rounded-[8px] bg-accent text-[12px] font-medium text-primary-foreground hover:bg-accent/90"
+                  className="inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50"
                 >
                   {isLoading ? (
                     <>
@@ -238,7 +239,7 @@ export function AdminLoginStep({
                   ) : (
                     t("onboarding.adminLogin.continue")
                   )}
-                </Button>
+                </button>
 
                 {phoneAuthEnabled ? (
                   <AdminLoginMethodSwitch

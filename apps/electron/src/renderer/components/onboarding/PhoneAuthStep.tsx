@@ -2,7 +2,6 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 import type { FormEvent, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Spinner } from "@polo-ai/ui"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AdminLoginMethodSwitch } from "./AdminLoginMethodSwitch"
 import { LoginTrustRow } from "./LoginTrustRow"
@@ -102,8 +101,10 @@ export function PhoneAuthStep({
     onClearError()
   }
 
+  // Prototype `.button.primary.auth-primary`: accent fill, on-accent 12px
+  // label, hover darkens to accent 86% + black.
   const primaryButtonClassName
-    = "h-10 w-full rounded-[8px] bg-accent text-[12px] font-medium text-primary-foreground hover:bg-accent/90"
+    = "inline-flex min-h-[40px] w-full items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] disabled:pointer-events-none disabled:opacity-50"
 
   if (form.mode === "entry") {
     return (
@@ -138,7 +139,7 @@ export function PhoneAuthStep({
             </span>
           </div>
 
-          <Button
+          <button
             data-testid="phone-auth-send-code"
             type="submit"
             disabled={isBusy || !canSend}
@@ -154,7 +155,7 @@ export function PhoneAuthStep({
             ) : (
               t("onboarding.adminLogin.sendCode")
             )}
-          </Button>
+          </button>
 
           <AdminLoginMethodSwitch
             target="password"
@@ -218,7 +219,7 @@ export function PhoneAuthStep({
           />
         </label>
 
-        <Button
+        <button
           data-testid="phone-auth-continue"
           type="submit"
           disabled={isBusy || !canVerify}
@@ -232,7 +233,7 @@ export function PhoneAuthStep({
           ) : (
             t("onboarding.adminLogin.continue")
           )}
-        </Button>
+        </button>
 
         <AdminLoginMethodSwitch
           target="password"
@@ -240,17 +241,17 @@ export function PhoneAuthStep({
           onSwitch={onUsePassword}
         />
 
-        <Button
+        {/* Prototype `.button.quiet`: bordered quiet row under the primary. */}
+        <button
           type="button"
-          variant="ghost"
           disabled={isBusy || resendSeconds > 0}
           onClick={sendCode}
-          className="min-h-[28px] w-full rounded-[8px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+          className="inline-flex min-h-[28px] w-full items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground transition-colors hover:bg-foreground-5 disabled:pointer-events-none disabled:opacity-50"
         >
           {resendSeconds > 0
             ? t("onboarding.adminLogin.resendIn", { count: resendSeconds })
             : t("onboarding.adminLogin.resend")}
-        </Button>
+        </button>
       </form>
 
       <p className="mt-[8px] text-[10px] leading-[1.4] text-foreground-50">
