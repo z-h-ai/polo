@@ -1,0 +1,29 @@
+{
+  "passed": true,
+  "command": "python3 docs/mvp-complete-flow-hifi/tools/build_review.py (twice)",
+  "before": {
+    "docs/mvp-complete-flow-hifi/prototype.html": "cc6307c1fce59cf34a41ba51c46b4f28ebf0c65c7afff9b683942b4a8f08b818",
+    "docs/mvp-complete-flow-hifi/review.html": "3582dcd0074542c7946d6b98f3a42847277ad671051f65198dbfd49969d809e3",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "c4cef687662807b378cddbda8476e8f2ec41959934c3de7e9feaf97e8b529718",
+    "design-demos/polo-client-source-baseline/prototype.html": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
+    "design-demos/polo-client-source-baseline/prototype-manifest.json": "e0e95ca03a3c334b8aec624e56fc49f7921281319681e670fefb7f2f2248f4c8"
+  },
+  "first": {
+    "docs/mvp-complete-flow-hifi/prototype.html": "cc6307c1fce59cf34a41ba51c46b4f28ebf0c65c7afff9b683942b4a8f08b818",
+    "docs/mvp-complete-flow-hifi/review.html": "3582dcd0074542c7946d6b98f3a42847277ad671051f65198dbfd49969d809e3",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "c4cef687662807b378cddbda8476e8f2ec41959934c3de7e9feaf97e8b529718",
+    "design-demos/polo-client-source-baseline/prototype.html": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
+    "design-demos/polo-client-source-baseline/prototype-manifest.json": "e0e95ca03a3c334b8aec624e56fc49f7921281319681e670fefb7f2f2248f4c8"
+  },
+  "second": {
+    "docs/mvp-complete-flow-hifi/prototype.html": "cc6307c1fce59cf34a41ba51c46b4f28ebf0c65c7afff9b683942b4a8f08b818",
+    "docs/mvp-complete-flow-hifi/review.html": "3582dcd0074542c7946d6b98f3a42847277ad671051f65198dbfd49969d809e3",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "c4cef687662807b378cddbda8476e8f2ec41959934c3de7e9feaf97e8b529718",
+    "design-demos/polo-client-source-baseline/prototype.html": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
+    "design-demos/polo-client-source-baseline/prototype-manifest.json": "e0e95ca03a3c334b8aec624e56fc49f7921281319681e670fefb7f2f2248f4c8"
+  },
+  "exit_codes": [
+    0,
+    0
+  ]
+}

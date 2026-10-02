@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# HISTORICAL pre-r12: may restore retired assistant / review structure.
+# Current entry: python3 tools/build_review.py. Do not run on current artifacts.
 """POO-70 D-PC-07 收口重建 · surface 与 manifest 增量修订（poo71-hifi-v2-1 → poo70-dpc07-v2-2）。
 
 1. surface.html：移除首页「系统工具」区（文件/任务与结果入口，违反 D-PC-03 与 Spec §8 POO-56/57）；

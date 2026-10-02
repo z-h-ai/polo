@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self' file:; connect-src 'none'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Product UI Prototype Review</title>
+<style>
+/* ===== design tokens ===== */
+:root{color-scheme:light;--ink:#24313d;--muted:#64707d;--line:#d7dde3;--accent:#263746;--accent-hover:#31465a;--bg:#eef1f4;--surface:#fff;--stage:#dfe4e8;--focus:#607e9b;--field-line:#b8c1ca;--chip-bg:#eaf0f5;--row-hover:#f4f6f8;--hover-soft:#eef2f5;--warn:#8a4b2a;--ok:#2e6b46;--overlay:#243746;--card-line:#9baab7;--overlay-ink:#fff;--warn-strong:#8a4b2a;--shadow-s:0 1px 4px #0003;--shadow-l:0 5px 20px #0002;--radius:6px;--toolbar-h:48px;--panel-w:320px;--fs-3xs:9px;--fs-2xs:10px;--fs-xs:11px;--fs-s:12px;--fs-m:13px;--fs-r:14px;--fs-l:15px;font-family:system-ui,-apple-system,"PingFang SC",sans-serif;color:var(--ink);background:var(--bg)}
+/* The declared "dark" theme re-skins the shell tokens only; geometry and frozen overlay selectors are untouched. */
+body[data-theme="dark"]{color-scheme:dark;--ink:#dbe4ec;--muted:#93a1ae;--line:#39434e;--accent:#4a6b87;--accent-hover:#5a7b97;--bg:#141a20;--surface:#1e2630;--stage:#0f1419;--focus:#7fa3c0;--field-line:#46525d;--chip-bg:#2a3540;--row-hover:#253039;--hover-soft:#253039;--warn:#c98a5e;--ok:#5aa87c;--overlay:#3d5166;--card-line:#46525d;background:var(--bg);color:var(--ink)}
+/* ===== base ===== */
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}[hidden]{display:none!important}
+button,select,input{font:inherit;color:inherit;background:var(--surface);border:1px solid var(--field-line);border-radius:var(--radius);min-height:32px;padding:5px 8px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.review-console{height:100dvh;display:grid;grid-template-rows:var(--toolbar-h) minmax(0,1fr)}
+/* ===== toolbar ===== */
+.review-toolbar{display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--surface);border-bottom:1px solid var(--line);min-width:0;font-size:var(--fs-s);white-space:nowrap}
+.current-page{display:flex;align-items:center;gap:4px;min-width:30px;max-width:210px;font-size:var(--fs-m);background:transparent;border-color:transparent;padding:4px 6px}.current-page:hover{background:var(--hover-soft)}.current-page>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.current-page .page-entry{flex:none;font-size:var(--fs-xs);color:var(--muted)}
+.badge{font-size:var(--fs-2xs);color:var(--muted)}
+.panel-hint{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.question{display:flex;gap:4px;align-items:center;flex:1;min-width:64px}.question-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:1}.question-main{flex:1;min-width:0;display:block;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.question-main:hover,.question-main:focus-visible{text-decoration:underline;text-underline-offset:3px}.annotation-count{flex:none}
+/* ===== workspace & viewport ===== */
+.workspace{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;min-height:0}.workspace.inspector-open{grid-template-columns:minmax(0,1fr) var(--panel-w)}
+.viewport-column{grid-row:1;grid-column:1;display:grid;grid-template-rows:minmax(0,1fr);position:relative;min-width:0;min-height:0;overflow:hidden}.viewport-area{height:100%;width:100%;overflow:hidden;background:var(--stage);overscroll-behavior:contain;scrollbar-gutter:auto;position:relative}.viewport-area.zoomed{overflow:auto}.viewport-canvas{display:grid;place-items:center;min-width:100%;min-height:100%;padding:12px;width:max-content;height:max-content}.viewport-scale-box{flex:none}.viewport-frame{display:block;border:0;background:var(--surface);transform-origin:top left}
+/* ===== flow nav (the only playback controls) ===== */
+.flow-nav{grid-row:2;grid-column:1;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface);border-top:1px solid var(--line);font-size:var(--fs-s);min-height:40px;overflow:hidden}.flow-nav button{padding:5px 10px;white-space:nowrap}.flow-nav .flow-next:not(:disabled){background:var(--accent);border-color:var(--accent);color:var(--surface)}.flow-nav .flow-next:not(:disabled):hover{background:var(--accent-hover)}.flow-position{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}.flow-position .flow-pos-chip{flex:none;background:var(--chip-bg);border-radius:10px;padding:1px 8px;white-space:nowrap}.flow-position .flow-pos-no{font-weight:600}.flow-position .flow-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis}.flow-position .flow-off{color:var(--muted)}.flow-branch{color:var(--warn);font-weight:600}.flow-copy{flex:none}.flow-copy.copied{background:var(--ok);border-color:var(--ok);color:var(--surface)}.flow-copy-fallback{width:100%;margin-top:6px;font-size:var(--fs-xs)}.flow-copy-fallback textarea{width:100%;min-height:64px;resize:none;font-size:var(--fs-xs)}
+/* ===== inspector panel & tabs ===== */
+.inspector{grid-row:1 / span 2;grid-column:2;display:none;background:var(--surface);border-left:1px solid var(--line);min-height:0;overflow:auto;padding:10px;font-size:var(--fs-m);overflow-wrap:anywhere}.workspace.inspector-open .inspector{display:block}.panel-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.inspector-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:12px}.inspector-tabs button{padding:5px 2px;font-size:var(--fs-s)}.inspector-tab[aria-selected="true"],.page-link.active{background:var(--accent);color:var(--surface)}.module-group{border:1px solid var(--line);border-radius:var(--radius);padding:6px;margin:6px 0}.module-group summary{cursor:pointer;padding:6px}.module-count{float:right}.page-link,.annotation-entry{display:block;width:100%;text-align:left;margin:6px 0}.page-link small,.annotation-entry small{display:block;font-size:var(--fs-xs);margin-top:4px}.annotation-entry[aria-current="true"]{outline:2px solid var(--focus)}.annotation-body{white-space:pre-wrap;line-height:1.6}.annotation-detail{border-top:1px solid var(--line);padding:8px 0}.control{display:grid;gap:5px;margin:14px 0}.review-brief p{line-height:1.6}.muted{color:var(--muted)}.story-description{line-height:1.6}
+.flow-steps{margin:6px 0;border:1px solid var(--line);border-radius:var(--radius);max-height:260px;overflow:auto}.flow-steps:empty{display:none}.flow-step{display:block;width:100%;text-align:left;border:0;border-radius:0;background:transparent;padding:8px 8px;border-bottom:1px solid var(--line);cursor:pointer}.flow-step:last-child{border-bottom:0}.flow-step:hover{background:var(--row-hover)}.flow-step[aria-current="true"]{background:var(--chip-bg);border-left:3px solid var(--accent);padding-left:5px}.flow-step-head{display:flex;gap:6px;align-items:baseline}.flow-step-no{font-size:var(--fs-xs);color:var(--muted)}.flow-step-title{font-weight:600;font-size:var(--fs-m)}.flow-step-detail{font-size:var(--fs-s);color:var(--muted);margin-top:4px;line-height:1.6;white-space:pre-wrap}.flow-step-detail[hidden]{display:none}.page-search{width:100%;margin:6px 0}
+/* ===== annotation overlay: frozen whitelist; only these may overlay the stage ===== */
+[data-annotation-layer]{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2;font-size:var(--fs-r)}
+[data-annotation-layer] .annotation-pin{position:absolute;pointer-events:auto;min-height:26px;width:26px;height:26px;padding:0;border-radius:50%;background:var(--overlay);color:var(--overlay-ink);font-size:var(--fs-m);box-shadow:var(--shadow-s)}
+[data-annotation-layer] .annotation-highlight{position:absolute;pointer-events:none;border:2px solid var(--focus);border-radius:3px}
+[data-annotation-layer] .flow-hint-marker{position:absolute;pointer-events:none;border:2px dashed var(--warn);border-radius:var(--radius);z-index:1}
+[data-annotation-layer] .flow-hint-marker::after{content:'下一步';position:absolute;right:-2px;top:-22px;background:var(--warn-strong);color:var(--overlay-ink);font-size:var(--fs-xs);line-height:18px;padding:0 8px;border-radius:9px;white-space:nowrap}
+[data-annotation-layer] .annotation-invite{position:absolute;left:50%;top:8px;transform:translateX(-50%);pointer-events:auto;background:var(--overlay);color:var(--overlay-ink);border:0;border-radius:14px;font-size:var(--fs-s);min-height:24px;padding:2px 12px;box-shadow:var(--shadow-s)}
+[data-annotation-layer] .annotation-invite.engaged{left:auto;right:8px;transform:none;opacity:.7;font-size:var(--fs-xs);min-height:22px;padding:1px 8px}
+[data-annotation-layer] .annotation-card{position:absolute;pointer-events:auto;width:300px;max-height:280px;overflow:auto;padding:12px;background:var(--surface);border:1px solid var(--card-line);border-radius:8px;box-shadow:var(--shadow-l);line-height:1.5;font-size:var(--fs-r)}
+.annotation-card h2{font-size:var(--fs-l);margin:0 0 8px}.annotation-card p{white-space:pre-wrap;margin:8px 0}.annotation-card .annotation-card-context{margin:0 0 8px;font-size:var(--fs-s);color:var(--muted);white-space:normal}.card-actions{display:flex;gap:5px;flex-wrap:wrap}.panel-return{display:none}
+/* ===== responsive ===== */
+@media(max-width:1100px){.badge .long-label{display:none}.current-page{max-width:150px}}
+@media(max-width:860px){.review-toolbar{padding:0 6px;gap:4px}.current-page{max-width:90px}.badge{font-size:var(--fs-3xs)}.workspace.inspector-open{grid-template-columns:minmax(0,1fr)}.inspector{grid-row:1;grid-column:1}.inspector-open .viewport-column{visibility:hidden}.panel-return{display:inline}.panel-close{display:none}.question{min-width:42px}.panel-hint{max-width:90px;min-width:40px}.hint-tail{display:none}.badge{max-width:65px;overflow:hidden;text-overflow:ellipsis}.flow-nav{gap:4px;padding:4px 6px;min-height:40px;flex-wrap:wrap}.flow-nav button{padding:4px 8px;min-height:40px}.flow-position{flex:1 1 100%;order:-1;font-size:var(--fs-xs)}.flow-nav .flow-nav-name{display:none}.flow-position .flow-pos-scene{display:none}[data-annotation-layer] .annotation-pin{min-height:40px;width:40px;height:40px;font-size:var(--fs-r)}[data-annotation-layer] .annotation-invite{font-size:var(--fs-xs);padding:2px 8px}}
+iframe[hidden]{display:none!important}[data-assistant-viewport]{display:block;border:0;transform-origin:top left;background:white}
+</style>
+</head>
+<body data-prototype-mode="high_fidelity">
+<main class="review-console" data-review-chrome>
+ <header class="review-toolbar" data-review-controls>
+  <button type="button" class="current-page" data-panel-entry="index" title="打开页面面板"><strong data-current-scene></strong><span class="page-entry" aria-hidden="true">☰</span></button>
+  <span class="badge" title="产品构想，非真实实现 · 演示数据">原型<span class="long-label"> · 产品构想，非真实实现</span> · 演示数据</span>
+  <span class="question" role="group" aria-label="评审问题与本页说明"><button type="button" class="question-main" data-question-entry><span class="question-summary" data-question-summary></span></button><button type="button" class="annotation-count" data-panel-entry="annotation" title="查看说明列表"><span data-annotation-count></span></button></span>
+  <button type="button" class="panel-hint" data-panel-hint hidden>在面板阅读</button>
+ </header>
+ <section class="workspace" data-workspace>
+  <div class="viewport-column">
+   <div class="viewport-area" data-viewport-area>
+    <div class="viewport-canvas"><div class="viewport-scale-box" data-viewport-scale-box><iframe class="viewport-frame" data-prototype-viewport title="产品原型" src="prototype.html"></iframe></div></div>
+    <div data-annotation-layer aria-label="定位说明"></div>
+   </div>
+  </div>
+  <nav class="flow-nav" data-flow-nav aria-label="流程导航">
+   <button type="button" data-flow-prev data-story-prev disabled>‹ 上一步</button>
+   <span class="flow-position" data-flow-position></span>
+   <button type="button" class="flow-next" data-flow-next data-story-next disabled>下一步 ›</button>
+   <button type="button" data-flow-replay hidden>从头重看</button>
+   <button type="button" data-flow-exit data-story-exit hidden>退出流程</button>
+   <button type="button" data-branch-return hidden>返回当前流程</button>
+   <button type="button" class="flow-copy" data-copy-feedback aria-label="复制当前位置反馈" title="复制当前流程位置、页面、说明与定位链接，用于反馈修改">复制位置</button>
+   <div class="flow-copy-fallback" data-copy-fallback hidden><textarea data-copy-text aria-label="反馈位置文本"></textarea></div>
+  </nav>
+  <aside class="inspector" data-inspector aria-label="评审面板">
+   <div class="panel-heading"><strong data-review-title></strong><button type="button" data-inspector-toggle aria-label="关闭面板，返回原型"><span class="panel-return">返回原型</span><span class="panel-close">关闭</span></button></div>
+   <div class="inspector-tabs" role="tablist" aria-label="评审内容">
+    <button class="inspector-tab" role="tab" data-inspector-tab="index" aria-selected="true">页面</button>
+    <button class="inspector-tab" role="tab" data-inspector-tab="annotation" aria-selected="false">说明</button>
+    <button class="inspector-tab" role="tab" data-inspector-tab="review" aria-selected="false">本轮评审</button>
+    <button class="inspector-tab" role="tab" data-inspector-tab="settings" aria-selected="false">设置</button>
+   </div>
+   <section class="inspector-panel" data-panel="index">
+    <label class="control">流程<select data-story-select><option value="">普通浏览</option></select></label>
+    <section data-story-player>
+     <strong data-story-name>普通浏览</strong><p data-story-progress></p>
+     <details><summary>演示步骤说明</summary><p class="story-description" data-story-description></p></details>
+     <div class="flow-steps" data-flow-steps></div>
+    </section>
+    <input type="search" class="page-search" data-page-search placeholder="搜索页面名称" aria-label="搜索页面">
+    <div data-page-index></div>
+   </section>
+   <section class="inspector-panel" data-panel="annotation" data-page-annotation hidden></section>
+   <section class="inspector-panel review-brief" data-panel="review" data-review-brief hidden>
+    <h2>本轮评审</h2><p data-review-version></p>
+    <p><strong>现在怎样：</strong><span data-review-current></span></p>
+    <p><strong>改成怎样：</strong><span data-review-target></span></p>
+    <p><strong>为什么改：</strong><span data-review-reason></span></p>
+    <p><strong>本轮问题：</strong><span data-review-question></span></p>
+    <p data-change-summary></p>
+    <p>用自然语言反馈即可。行为、布局、视觉分别确认；浏览和演示步骤结束不代表批准。确认与同步结果以现有评审记录及 Spec／任务正文为准。</p>
+    <a data-return-flow hidden>返回流程</a>
+   </section>
+   <section class="inspector-panel" data-panel="settings" hidden>
+    <label class="control">视口<select data-viewport-select></select></label>
+    <label class="control">缩放<select data-zoom-select><option value="fit">适合窗口</option><option value="width">适合宽度</option><option value="actual">100%</option></select></label>
+    <p class="muted" data-viewport-size></p>
+    <label class="control" data-theme-control>主题<select data-theme-select></select></label>
+    <label class="control" data-language-control>语言<select data-language-select></select></label>
+    <label class="control" data-perspective-control>角色 / 视角<select data-perspective-select><option value="">默认</option></select></label>
+    <button type="button" data-reset>重置演示</button>
+    <p class="muted">重置流程进度与页面位置，不改变视口、缩放、主题等查看设置。</p>
+   </section>
+  </aside>
+ </section>
+</main>
+<script id="prototype-manifest" type="application/json">__MANIFEST__</script>
+<script>
+(()=>{
+'use strict';
+/* ============================== state ============================== */
+const manifest=JSON.parse(document.getElementById('prototype-manifest').textContent);
+const $=selector=>document.querySelector(selector), $$=selector=>[...document.querySelectorAll(selector)];
+const byScene=new Map(manifest.scenes.map(scene=>[scene.id,scene]));
+const byStory=new Map(manifest.stories.map(story=>[story.id,story]));
+const reviewEntryByScene=new Map((manifest.review_entries||[]).map(entry=>[entry.scene,entry]));
+let frame=$('[data-prototype-viewport]');
+const frames=new Map([['mvp',frame]]);
+const workspace=$('[data-workspace]'), area=$('[data-viewport-area]'), box=$('[data-viewport-scale-box]'), layer=$('[data-annotation-layer]');
+const session=Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-');
+// Invariant: when offFlow is null and activeStory is set, currentScene === activeStory.steps[storyStep].scene.
+// offFlow marks a temporary departure (product action that left the story, or browsing another page from the index).
+let currentScene=manifest.start_scene, activeStory=null, storyStep=0, offFlow=null;
+let viewport=pickBootViewport(), theme=manifest.target.themes[0], language=(manifest.target.languages||[])[0]||'', perspective='';
+// Set when a phone window had no fitting manifest viewport to boot into.
+const phoneViewportFallback=matchMedia('(max-width:860px)').matches&&!manifest.target.viewports.some(v=>v.width<=innerWidth);
+let scale=1, zoom='fit', panel=null, savedCenter=null, panelTrigger=null, viewCenter=null;
+let enabled=false, selected=null, card=null, trigger=null, positions=new Map(), epoch=0, sequence=-1, pendingReveal=null, hintRequest=null, hintPos=null;
+let flowNotice='';
+const brief=manifest.review;
+const annotations=()=>byScene.get(currentScene).annotations||[];
+const annotation=id=>annotations().find(item=>item.id===id);
+/* ====================== static options & brief ====================== */
+function option(selector,value,label){const item=document.createElement('option');item.value=value;item.textContent=label;$(selector).append(item)}
+manifest.target.viewports.forEach(v=>option('[data-viewport-select]',v.id,`${v.id} · ${v.width} × ${v.height}`));
+manifest.stories.forEach(s=>option('[data-story-select]',s.id,s.title));
+manifest.target.themes.forEach(t=>option('[data-theme-select]',t,t));
+(manifest.target.languages||[]).forEach(l=>option('[data-language-select]',l,l));
+const perspectives=[...new Set(manifest.scenes.map(s=>s.perspective).filter(Boolean))];
+perspectives.forEach(p=>option('[data-perspective-select]',p,p));
+$('[data-language-control]').hidden=!language;$('[data-perspective-control]').hidden=!perspectives.length;
+$('[data-review-title]').textContent=manifest.title;
+$('[data-review-version]').textContent=brief?`${brief.item} · 评审材料 ${brief.revision} · 原型 ${manifest.revision}`:`原型 ${manifest.revision} · 未绑定本轮评审材料`;
+for(const key of ['current','target','reason','question'])$(`[data-review-${key}]`).textContent=brief?brief[key]:'未绑定评审材料，请由 Agent 关联本轮问题。';
+$('[data-change-summary]').textContent=`本轮变化：${manifest.change.summary}`;
+if(manifest.flow){$('[data-return-flow]').hidden=false;$('[data-return-flow]').href=manifest.flow.html_path}
+/* ========================== message protocol ========================== */
+function selectSurface(){
+ const owner=byScene.get(currentScene).surface||'mvp';
+ if(!frames.has(owner)){
+  const next=document.createElement('iframe');next.title='Polo 助手';next.dataset.assistantViewport='';next.setAttribute('allow','clipboard-write');
+  next.addEventListener('load',()=>{if(frame===next)send('show-scene',{theme,language,perspective,hint:sendHint()})});
+  next.src=manifest.surfaces[owner];box.append(next);frames.set(owner,next);
+ }
+ const next=frames.get(owner);frames.forEach(f=>{f.hidden=f!==next});frame=next;
+ frame.width=viewport.width;frame.height=viewport.height;frame.style.width=`${viewport.width}px`;frame.style.height=`${viewport.height}px`;frame.style.transform=`scale(${scale})`;frame.style.transformOrigin='top left';
+}
+function send(type,extra={}){selectSurface();frame.contentWindow.postMessage({type:`product-ui-prototype:${type}`,version:1,session,epoch,scene:currentScene,...extra},'*')}
+/* ==================== geometry & annotation renderer ==================== */
+function stepContext(story,step){const cur=story.steps[step],next=story.steps[step+1],prev=story.steps[step-1];const entry=cur&&cur.arrival==='review'?reviewEntryByScene.get(cur.scene):null;return {cur,next,prev,entry}}
+function transitionTo(fromScene,toScene){const s=byScene.get(fromScene);return s?s.transitions.find(e=>e.to===toScene):null}
+// Human hint for how the next step is reached: the real product control label, or a review entry reason.
+function nextHint(story,step){const next=story.steps[step+1];if(!next)return '已到流程末尾';if(next.arrival==='review'){const entry=reviewEntryByScene.get(next.scene);return `评审进入${entry?`：${entry.reason}`:''}`}const tr=transitionTo(story.steps[step].scene,next.scene);return tr?`点击“${tr.label}”`:`查看${byScene.get(next.scene).title}`}
+// The declared transition the next product step needs, so the surface can report its control for the stage marker.
+function currentHint(){if(!activeStory||offFlow)return null;const next=activeStory.steps[storyStep+1];if(!next||next.arrival==='review')return null;const tr=transitionTo(activeStory.steps[storyStep].scene,next.scene);return tr?{transition:tr.id,scene:next.scene}:null}
+function sendHint(){const hint=currentHint();hintRequest=hint?hint.transition:null;hintPos=null;return hint}
+function status(text,tail){const hint=$('.panel-hint');text=text||'';hint.hidden=!text;hint.innerHTML=tail?`${text}<span class="hint-tail"> · ${tail}</span>`:text;hint.title=tail?`${text} · ${tail}`:text}
+// The declared theme drives the product surface via messages and also re-skins the shell tokens.
+function applyTheme(){if(theme==='dark')document.body.dataset.theme='dark';else delete document.body.dataset.theme}
+function pickInitialStory(){if(manifest.default_story&&byStory.has(manifest.default_story))return byStory.get(manifest.default_story);for(const story of manifest.stories){if(story.steps[0].scene===manifest.start_scene)return story}return manifest.stories[0]}
+// Phone-linked reviewers get a readable first screen: boot into the manifest viewport
+// closest to the window width (preferring one that fits) and start width-fit. Desktop boots unchanged.
+function pickBootViewport(){if(!matchMedia('(max-width:860px)').matches)return manifest.target.viewports[0];const w=innerWidth,fits=manifest.target.viewports.filter(v=>v.width<=w),pool=fits.length?fits:manifest.target.viewports;return pool.reduce((best,v)=>Math.abs(v.width-w)<Math.abs(best.width-w)?v:best,pool[0])}
+function center(){const r=frame.getBoundingClientRect(),a=area.getBoundingClientRect();return {x:(a.left+area.clientWidth/2-r.left)/scale,y:(a.top+area.clientHeight/2-r.top)/scale}}
+function centerOn(point){if(!point)return;const r=frame.getBoundingClientRect(),a=area.getBoundingClientRect();area.scrollLeft+=r.left+point.x*scale-a.left-area.clientWidth/2;area.scrollTop+=r.top+point.y*scale-a.top-area.clientHeight/2;viewCenter=center()}
+function fit(point){if(!area.clientWidth||!area.clientHeight)return;point=point||center();const w=Math.max(1,area.clientWidth-24),h=Math.max(1,area.clientHeight-24);scale=zoom==='actual'?1:Math.min(1,w/viewport.width,...(zoom==='fit'?[h/viewport.height]:[]));frame.width=viewport.width;frame.height=viewport.height;frame.style.width=`${viewport.width}px`;frame.style.height=`${viewport.height}px`;frame.style.transform=`scale(${scale})`;box.style.width=`${viewport.width*scale}px`;box.style.height=`${viewport.height*scale}px`;area.classList.toggle('zoomed',zoom!=='fit');centerOn(point);$('[data-viewport-size]').textContent=`${viewport.width} × ${viewport.height} · ${Math.round(scale*100)}%`;draw()}
+function openPanel(tab,from){if(!panel){savedCenter=center();panelTrigger=from||document.activeElement}panel=tab;workspace.classList.add('inspector-open');$$('[data-panel]').forEach(el=>el.hidden=el.dataset.panel!==tab);$$('[data-inspector-tab]').forEach(el=>{const active=el.dataset.inspectorTab===tab;el.setAttribute('aria-selected',String(active));el.tabIndex=active?0:-1});fit(savedCenter);$(`[data-inspector-tab="${tab}"]`).focus()}
+function focusFallback(){(layer.querySelector('.annotation-invite')||$('[data-question-entry]')).focus()}
+function closePanel(){panel=null;workspace.classList.remove('inspector-open');fit(savedCenter);savedCenter=null;if(pendingReveal)send('reveal',{annotation:pendingReveal});if(panelTrigger?.isConnected)panelTrigger.focus();else focusFallback()}
+function setZoom(value,point){zoom=value;$('[data-zoom-select]').value=value;fit(point);if(panel)savedCenter=point||center()}
+function targetCenter(id){const r=positions.get(id)?.rect;return r?{x:r.x+r.width/2,y:r.y+r.height/2}:null}
+function localRect(rect){const f=frame.getBoundingClientRect(),l=layer.getBoundingClientRect();return {x:f.left-l.left+rect.x*scale,y:f.top-l.top+rect.y*scale,width:rect.width*scale,height:rect.height*scale}}
+function intersects(a,b){return a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y}
+function inBounds(r){return r.x>=4&&r.y>=4&&r.x+r.width<=layer.clientWidth-4&&r.y+r.height<=layer.clientHeight-4}
+function place(el,r){Object.assign(el.style,{left:`${r.x}px`,top:`${r.y}px`})}
+// The next-step control marker stays independent of the explanation toggle: it is flow clarity, not an annotation.
+function renderHint(){let el=layer.querySelector('.flow-hint-marker');const p=hintPos,r=p&&p.state==='visible'&&hintRequest===p.id?localRect(p.clip):null;if(!r){el?.remove();return}if(!el){el=document.createElement('div');el.className='flow-hint-marker'}place(el,{x:Math.max(0,r.x-3),y:Math.max(0,r.y-3)});el.style.width=`${r.width+6}px`;el.style.height=`${r.height+6}px`;layer.append(el)}
+// The chip is the only stage toggle for explanations: solid invitation while hidden, a small
+// semi-transparent "hide" pill while engaged; aria-pressed carries the state.
+function renderInvite(){let el=layer.querySelector('.annotation-invite');const count=annotations().length;if(!count){el?.remove();return}if(!el){el=document.createElement('button');el.type='button';el.className='annotation-invite';el.dataset.annotationInvite=''}el.setAttribute('aria-pressed',String(enabled));el.classList.toggle('engaged',enabled);el.textContent=enabled?'隐藏说明':`本页有 ${count} 处说明 · 点击查看`;layer.append(el)}
+function renderIndex(){const root=$('[data-page-index]');const open=new Set($$('[data-module-group][open]').map(el=>el.dataset.moduleGroup));const query=($('[data-page-search]').value||'').trim().toLowerCase();root.textContent='';manifest.modules.forEach(module=>{const scenes=manifest.scenes.filter(s=>s.module===module.id);const group=document.createElement('details');group.className='module-group';group.dataset.moduleGroup=module.id;group.open=open.has(module.id)||byScene.get(currentScene).module===module.id;const summary=document.createElement('summary');summary.textContent=`${module.title} · ${scenes.length}`;group.append(summary);for(const scene of scenes){if(query&&!scene.title.toLowerCase().includes(query)&&!scene.id.toLowerCase().includes(query)&&!(scene.category||'').toLowerCase().includes(query))continue;const button=document.createElement('button');button.className=`page-link${scene.id===currentScene?' active':''}`;button.dataset.sceneLink=scene.id;button.textContent=scene.title;const small=document.createElement('small'),entry=reviewEntryByScene.get(scene.id);small.textContent=entry?`${scene.id} · ${scene.category} · 评审进入：${entry.reason}`:`${scene.id} · ${scene.category}`;button.append(small);group.append(button)}root.append(group)})}
+function renderAnnotations(){const root=$('[data-page-annotation]');root.textContent='';const title=document.createElement('h2');title.textContent=byScene.get(currentScene).title;const page=document.createElement('p');page.textContent=byScene.get(currentScene).annotation;root.append(title,page);annotations().forEach((a,i)=>{const button=document.createElement('button');button.className='annotation-entry';button.dataset.annotationEntry=a.id;button.setAttribute('aria-current',String(selected===a.id));button.textContent=`${i+1}. ${a.title}`;const state=document.createElement('small');state.dataset.annotationState=a.id;button.append(state);const detail=document.createElement('div');detail.className='annotation-detail';detail.dataset.annotationDetail=a.id;detail.hidden=selected!==a.id;const body=document.createElement('p');body.className='annotation-body';body.textContent=a.body;detail.append(body);if(a.anchor){const actual=document.createElement('button');actual.dataset.annotationActual=a.id;actual.textContent='以此控件为中心 · 100%';detail.append(actual)}root.append(button,detail)});updateStates()}
+function updateStates(){for(const a of annotations()){const el=$$('[data-annotation-state]').find(el=>el.dataset.annotationState===a.id);if(!el)continue;const p=positions.get(a.id);el.textContent=!a.anchor?'整页说明 · 在面板阅读':p?.state==='hidden'?'当前状态不可见':selected===a.id?'正在查看':p?.state==='offscreen'?'点击定位到控件':'点击查看说明'}}
+function renderStory(){const step=activeStory?.steps[storyStep];$('[data-story-name]').textContent=activeStory?.title||'普通浏览';$('[data-story-progress]').textContent=step?`演示步骤 ${storyStep+1} / ${activeStory.steps.length}`:'演示步骤不代表评审完成';const {entry}=activeStory?stepContext(activeStory,storyStep):{};$('[data-story-description]').textContent=step?`${activeStory.description}\n${step.description}${entry?`\n评审进入：${entry.reason}`:''}`:''}
+function renderFlowNav(){const pos=$('[data-flow-position]'),prev=$('[data-flow-prev]'),next=$('[data-flow-next]'),branch=$('[data-branch-return]'),replay=$('[data-flow-replay]'),exit=$('[data-flow-exit]');replay.hidden=true;exit.hidden=true;if(offFlow){const label=offFlow.reason==='browse'?'正在浏览其他页面':'已离开当前流程';pos.innerHTML=`<span class="flow-branch">${label}</span><span class="flow-pos-scene"> · ${byScene.get(currentScene).title}</span>`;prev.innerHTML='‹ 上一步';prev.disabled=true;next.textContent='下一步';next.disabled=true;branch.hidden=false;return}branch.hidden=true;if(!activeStory){pos.innerHTML=`<span class="flow-off">未在流程中</span><span class="flow-pos-scene"> · ${byScene.get(currentScene).title}</span>`+(flowNotice?`<span class="flow-branch"> · ${flowNotice}</span>`:'');prev.innerHTML='‹ 上一步';prev.disabled=true;next.textContent='下一步';next.disabled=true;return}const total=activeStory.steps.length,isLast=storyStep===total-1,{prev:p}=stepContext(activeStory,storyStep);pos.innerHTML=`<span class="flow-pos-chip">第 <span class="flow-pos-no">${storyStep+1}/${total}</span> 步</span><span class="flow-name"> · ${activeStory.title}</span><span class="flow-pos-scene"> · ${byScene.get(currentScene).title}</span>`;prev.disabled=storyStep===0;prev.innerHTML=p?`‹ 上一步<span class="flow-nav-name">：${byScene.get(p.scene).title}</span>`:'‹ 上一步';if(isLast){next.disabled=true;next.textContent='已到流程末尾';replay.hidden=false;exit.hidden=false}else{next.disabled=false;next.innerHTML=`下一步<span class="flow-nav-name">：${nextHint(activeStory,storyStep)}</span> ›`}}
+function renderFlowSteps(){const root=$('[data-flow-steps]');root.textContent='';if(!activeStory)return;activeStory.steps.forEach((step,i)=>{const {entry}=stepContext(activeStory,i);const btn=document.createElement('button');btn.className='flow-step';btn.dataset.flowStep=step.id;btn.setAttribute('aria-current',String(i===storyStep));const head=document.createElement('div');head.className='flow-step-head';const no=document.createElement('span');no.className='flow-step-no';no.textContent=`${i+1}/${activeStory.steps.length}`;const title=document.createElement('span');title.className='flow-step-title';title.textContent=byScene.get(step.scene).title;head.append(no,title);const detail=document.createElement('div');detail.className='flow-step-detail';detail.hidden=i!==storyStep;const arrival=step.arrival==='review'?'评审进入':i===0?'流程起点':'产品操作';const nextLine=i<activeStory.steps.length-1?`下一步：${nextHint(activeStory,i)}`:'已到流程末尾';detail.textContent=`${step.description}${step.perspective?`（角色：${step.perspective}）`:''}\n到达方式：${arrival}${entry?`\n评审进入：${entry.reason}`:''}\n${nextLine}`;btn.append(head,detail);root.append(btn)});const cur=root.querySelector('.flow-step[aria-current="true"]');cur?.scrollIntoView({block:'nearest'})}
+function renderScene(){document.body.dataset.currentScene=currentScene;const scene=byScene.get(currentScene);const title=$('[data-review-controls] [data-current-scene]');title.textContent=scene.title;title.title=`${scene.id} · ${scene.title}`;const q=$('[data-question-entry]'),n=annotations().length;$('[data-question-summary]').textContent=brief?.question?`问题：${brief.question}`:'本轮问题待关联';const count=$('[data-annotation-count]');count.textContent=`本页${n}处说明`;count.parentElement.title=`本页${n}处说明 · 查看说明列表`;q.title=brief?.question||'本轮问题待关联';renderIndex();renderAnnotations();renderStory();renderFlowNav();renderFlowSteps();hash()}
+function invalidate(){epoch++;sequence=-1;positions.clear();draw()}
+function commandScene(id){if(!byScene.has(id))return;if(id!==currentScene){closeCard();selected=null;pendingReveal=null;status()}currentScene=id;invalidate();send('show-scene',{theme,language,perspective,hint:sendHint()});renderScene()}
+function draw(){
+ const focused=document.activeElement?.dataset.annotationPin;
+ layer.querySelectorAll('.annotation-pin,.annotation-highlight').forEach(el=>el.remove());
+ renderHint();renderInvite();
+ if(!enabled){layer.querySelectorAll('.annotation-card').forEach(el=>el.remove());return}
+ const occupied=[];const visible=new Map();
+ annotations().forEach((a,i)=>{const p=positions.get(a.id);if(p?.state!=='visible')return;const r=localRect(p.clip);if(!intersects(r,{x:0,y:0,width:layer.clientWidth,height:layer.clientHeight}))return;visible.set(a.id,r);const P=matchMedia('(max-width:860px)').matches?32:26;const candidates=[{x:r.x+r.width+3,y:r.y-10},{x:r.x-(P+3),y:r.y-10},{x:r.x,y:r.y-(P+3)},{x:r.x,y:r.y+r.height+3}].map(v=>({...v,width:P,height:P}));const spot=candidates.find(v=>inBounds(v)&&!occupied.some(o=>intersects(o,v)));if(!spot)return;occupied.push(spot);const pin=document.createElement('button');pin.className='annotation-pin';pin.dataset.annotationPin=a.id;pin.textContent=i+1;pin.setAttribute('aria-label',`说明 ${i+1}：${a.title}`);place(pin,spot);layer.append(pin);if(focused===a.id)pin.focus({preventScroll:true})});
+ if(selected&&visible.has(selected)){const r=visible.get(selected),highlight=document.createElement('div');highlight.className='annotation-highlight';place(highlight,r);highlight.style.width=`${r.width}px`;highlight.style.height=`${r.height}px`;layer.append(highlight)}
+ const old=layer.querySelector('.annotation-card');
+ if(!card||!visible.has(card)){if(card&&!visible.has(card))card=null;old?.remove();return}
+ const a=annotation(card),r=visible.get(card);let el=old;
+ if(!el||el.dataset.card!==card){old?.remove();el=document.createElement('section');el.className='annotation-card';el.dataset.card=card;el.setAttribute('role','dialog');el.setAttribute('aria-label',a.title);const title=document.createElement('h2');title.textContent=a.title;const body=document.createElement('p');body.textContent=a.body;const actions=document.createElement('div');actions.className='card-actions';for(const [key,label] of [['close','关闭'],['read','在面板阅读'],['actual','100% 查看']]){const b=document.createElement('button');b.dataset.cardAction=key;b.textContent=label;actions.append(b)}const parts=[title];if(activeStory&&!offFlow){const context=document.createElement('p');context.className='annotation-card-context';context.textContent=`流程第 ${storyStep+1}/${activeStory.steps.length} 步 · ${activeStory.title}`;parts.push(context)}parts.push(body,actions);el.append(...parts);layer.append(el)}
+ const w=Math.min(300,layer.clientWidth-16);el.style.width=`${w}px`;const h=el.offsetHeight;
+ const candidates=[{x:r.x+(r.width-w)/2,y:r.y+r.height+10},{x:r.x+(r.width-w)/2,y:r.y-h-10},{x:r.x+r.width+10,y:r.y+(r.height-h)/2},{x:r.x-w-10,y:r.y+(r.height-h)/2}].map((p,i)=>({x:i<2?Math.max(4,Math.min(layer.clientWidth-w-4,p.x)):p.x,y:i>=2?Math.max(4,Math.min(layer.clientHeight-h-4,p.y)):p.y,width:w,height:h}));
+ const spot=candidates.find(p=>inBounds(p)&&!intersects(p,r));
+ if(!spot){el.remove();status('在面板阅读');return}place(el,spot);status();
+}
+function choose(id,from){const a=annotation(id);if(!a)return;enabled=true;selected=id;trigger=from;card=null;hash();renderAnnotations();if(!a.anchor){openPanel('annotation',from);return}pendingReveal=id;send('reveal',{annotation:id});if(panel&&matchMedia('(max-width:860px)').matches)closePanel();draw()}
+function toggleAnnotations(from){enabled=!enabled;if(!enabled){card=null;status()}draw();if(enabled&&!annotations().some(item=>item.anchor))openPanel('annotation',from)}
+function panelRead(){openPanel('annotation');renderAnnotations();const entry=$$('[data-annotation-entry]').find(el=>el.dataset.annotationEntry===selected);entry?.scrollIntoView({block:'nearest'});entry?.focus()}
+function openCard(el){selected=el.dataset.annotationPin;card=selected;trigger=el;hash();renderAnnotations();draw();layer.querySelector('[data-card-action="close"]')?.focus()}
+function closeCard(restore=false){card=null;draw();if(restore){const replacement=trigger?.dataset.annotationPin?$$('[data-annotation-pin]').find(el=>el.dataset.annotationPin===trigger.dataset.annotationPin):trigger?.dataset.annotationEntry?$$('[data-annotation-entry]').find(el=>el.dataset.annotationEntry===trigger.dataset.annotationEntry):trigger;const candidate=replacement?.isConnected&&replacement.getClientRects().length&&getComputedStyle(replacement).visibility!=='hidden'?replacement:null;(candidate||focusFallback()).focus()}}
+function cardAction(kind,el){
+ if(kind==='close'){closeCard(true);return}
+ if(kind==='read'){card=null;draw();panelRead();return}
+ if(kind==='actual'){const point=targetCenter(selected);setZoom('actual',point);if(panel){savedCenter=point;closePanel()}}
+}
+/* ============================ flow controller ============================ */
+function applyStep(story,step){activeStory=story;storyStep=step;offFlow=null;if(story)flowNotice='';$('[data-story-select]').value=story?story.id:'';const s=story?story.steps[step]:null;if(s&&s.perspective){perspective=s.perspective;$('[data-perspective-select]').value=perspective}}
+function storyAction(action){
+ if(!activeStory)return;
+ if(action==='exit'){flowNotice='已退出流程 · 可从『页面』重新进入';applyStep(null,0);send('show-scene',{theme,language,perspective,hint:sendHint()});renderStory();renderFlowNav();renderFlowSteps();hash();return}
+ if(action==='replay'){applyStep(activeStory,0);commandScene(activeStory.steps[0].scene);return}
+ if(action==='next'){if(storyStep>=activeStory.steps.length-1)return;applyStep(activeStory,storyStep+1);commandScene(activeStory.steps[storyStep].scene);return}
+ if(action==='prev'&&storyStep>0){applyStep(activeStory,storyStep-1);commandScene(activeStory.steps[storyStep].scene)}
+}
+function returnToFlow(){if(!offFlow)return;applyStep(offFlow.story,offFlow.step);commandScene(activeStory.steps[storyStep].scene)}
+function gotoStep(id){if(!activeStory)return;const idx=activeStory.steps.findIndex(s=>s.id===id);if(idx<0||idx===storyStep)return;applyStep(activeStory,idx);commandScene(activeStory.steps[storyStep].scene)}
+function browseTo(sceneId){if(activeStory&&!offFlow&&sceneId!==activeStory.steps[storyStep].scene)offFlow={story:activeStory,step:storyStep,reason:'browse'};commandScene(sceneId);if(matchMedia('(max-width:860px)').matches)closePanel()}
+function resetDemo(){
+ frames.forEach((f,owner)=>{const scene=manifest.scenes.find(s=>(s.surface||'mvp')===owner);f.contentWindow.postMessage({type:'product-ui-prototype:reset',version:1,session,epoch:epoch+1,scene:scene.id,theme,language,perspective},'*')});
+ const st=pickInitialStory();applyStep(st,0);selected=null;card=null;pendingReveal=null;status();const fallback=$('[data-copy-fallback]');fallback.hidden=true;$('[data-copy-text]').value='';commandScene(st.steps[0].scene);send('reset',{theme,language,perspective});area.scrollTo(0,0);viewCenter=center()}
+/* ============================== hash router ============================== */
+function hash(){const params=new URLSearchParams();if(activeStory){params.set('story',activeStory.id);params.set('step',activeStory.steps[storyStep].id)}params.set('scene',currentScene);if(selected)params.set('annotation',selected);history.replaceState(null,'',`#${params}`)}
+function readHash(){const params=new URLSearchParams(location.hash.slice(1)),storyId=params.get('story'),stepId=params.get('step'),sceneId=manifest.aliases?.[params.get('scene')]||params.get('scene'),aid=params.get('annotation');
+ const broken=(storyId&&!byStory.has(storyId))||(sceneId&&!byScene.has(sceneId))||(storyId&&byStory.has(storyId)&&stepId&&byStory.get(storyId).steps.findIndex(s=>s.id===stepId)<0)||(stepId&&!(storyId&&byStory.has(storyId)));
+ if(storyId&&byStory.has(storyId)){const story=byStory.get(storyId);let step=0;if(stepId){const idx=story.steps.findIndex(s=>s.id===stepId);if(idx>=0)step=idx}applyStep(story,step);commandScene(story.steps[step].scene)}
+ else if(sceneId&&byScene.has(sceneId)){applyStep(null,0);commandScene(sceneId)}
+ if(aid){if(annotation(aid))choose(aid,null);else{selected=null;pendingReveal=null;closeCard();status('说明不存在','查看当前页说明')}}
+ else if(broken)status('链接无效','已回到起点');else status()}
+window.addEventListener('hashchange',readHash);
+/* ============================ copy & feedback ============================ */
+function arrivalText(story,step){if(step===0)return '流程起点';const cur=story.steps[step];if(cur.arrival==='review'){const entry=reviewEntryByScene.get(cur.scene);return `评审进入${entry?`：${entry.reason}`:''}`}const tr=transitionTo(story.steps[step-1].scene,cur.scene);return tr?`点击“${tr.label}”`:'页面浏览'}
+function feedbackText(){const scene=byScene.get(currentScene);const lines=[];lines.push(`流程：${activeStory?activeStory.title:'未在流程中'}${offFlow?`（${offFlow.reason==='browse'?'正在浏览其他页面':'已离开当前流程'}）`:''}`);if(activeStory){const step=activeStory.steps[storyStep];lines.push(`流程位置：第 ${storyStep+1}/${activeStory.steps.length} 步 · ${step.id} · ${byScene.get(step.scene).title}`);lines.push(`到达方式：${arrivalText(activeStory,storyStep)}`);if(storyStep<activeStory.steps.length-1)lines.push(`下一步：${nextHint(activeStory,storyStep)}`)}lines.push(`当前页面：${scene.id} · ${scene.title}`);if(selected){const a=annotation(selected);lines.push(`选中说明：${a.title}`)}if(brief)lines.push(`材料版本：${brief.item} · ${brief.revision}`);lines.push(`原型版本：${manifest.revision}`);const params=new URLSearchParams();if(activeStory){params.set('story',activeStory.id);params.set('step',activeStory.steps[storyStep].id)}params.set('scene',currentScene);if(selected)params.set('annotation',selected);lines.push(`定位链接：${location.origin}${location.pathname}#${params}`);return lines.join('\n')}
+function copyFeedback(){const text=feedbackText();const btn=$('[data-copy-feedback]'),fallback=$('[data-copy-fallback]');const fail=()=>{fallback.hidden=false;const ta=$('[data-copy-text]');ta.value=text;ta.focus();ta.select()};const done=()=>{fallback.hidden=true;btn.classList.add('copied');btn.textContent='已复制 ✓';clearTimeout(copyFeedback.timer);copyFeedback.timer=setTimeout(()=>{btn.classList.remove('copied');btn.textContent='复制位置'},1800)};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(fail)}else{fail()}}
+/* ========================= event wiring (table-driven) =========================
+ One click resolves to exactly one action: the first matching data-* attribute in the
+ table wins. Dual-marked flow-nav buttons (data-flow-* + data-story-*) therefore fire
+ their single mapped action, never both. */
+const ACTIONS={
+ 'data-panel-entry':el=>openPanel(el.dataset.panelEntry,el),
+ 'data-inspector-tab':el=>openPanel(el.dataset.inspectorTab,el),
+ 'data-inspector-toggle':()=>closePanel(),
+ 'data-scene-link':el=>browseTo(el.dataset.sceneLink),
+ 'data-annotation-invite':el=>toggleAnnotations(el),
+ 'data-annotation-pin':el=>openCard(el),
+ 'data-annotation-entry':el=>choose(el.dataset.annotationEntry,el),
+ 'data-annotation-actual':el=>{const id=el.dataset.annotationActual;choose(id,el);setZoom('actual',targetCenter(id));if(panel)closePanel()},
+ 'data-panel-hint':()=>panelRead(),
+ 'data-card-action':el=>cardAction(el.dataset.cardAction,el),
+ 'data-flow-step':el=>gotoStep(el.dataset.flowStep),
+ 'data-question-entry':el=>openPanel('review',el),
+ 'data-story-prev':()=>storyAction('prev'),
+ 'data-story-next':()=>storyAction('next'),
+ 'data-story-exit':()=>storyAction('exit'),
+ 'data-flow-replay':()=>storyAction('replay'),
+ 'data-branch-return':()=>returnToFlow(),
+ 'data-copy-feedback':()=>copyFeedback(),
+ 'data-reset':()=>resetDemo(),
+};
+document.addEventListener('click',event=>{
+ const el=event.target.closest('button');if(!el)return;
+ const match=Object.entries(ACTIONS).find(([attr])=>el.hasAttribute(attr));
+ if(match)match[1](el);
+});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'){if(card){event.preventDefault();closeCard(true)}else if(panel){event.preventDefault();closePanel()}}const tab=event.target.closest('[data-inspector-tab]');if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const tabs=$$('[data-inspector-tab]'),i=tabs.indexOf(tab),index=event.key==='Home'?0:event.key==='End'?tabs.length-1:(i+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;openPanel(tabs[index].dataset.inspectorTab)}});
+$('[data-viewport-select]').addEventListener('change',event=>{viewport=manifest.target.viewports.find(v=>v.id===event.target.value);invalidate();fit({x:viewport.width/2,y:viewport.height/2});area.scrollTo(0,0);viewCenter=center();send('measure')});
+$('[data-zoom-select]').addEventListener('change',event=>setZoom(event.target.value,selected?targetCenter(selected):null));
+$('[data-story-select]').addEventListener('change',event=>{const story=byStory.get(event.target.value)||null;applyStep(story,0);if(story)commandScene(story.steps[0].scene);else{send('show-scene',{theme,language,perspective,hint:sendHint()});renderStory();renderFlowNav();renderFlowSteps();hash()}});
+$('[data-page-search]').addEventListener('input',renderIndex);
+for(const key of ['theme','language','perspective'])$(`[data-${key}-select]`).addEventListener('change',event=>{if(key==='theme'){theme=event.target.value;applyTheme()}if(key==='language')language=event.target.value;if(key==='perspective')perspective=event.target.value;send('settings',{theme,language,perspective})});
+area.addEventListener('scroll',()=>{viewCenter=center();draw()},{passive:true});
+new ResizeObserver(()=>fit(viewCenter)).observe(area);
+window.addEventListener('resize',()=>{fit(viewCenter);renderFlowNav()});
+/* ======================= surface message intake ======================= */
+const validRect=r=>r&&['x','y','width','height'].every(k=>typeof r[k]==='number'&&Number.isFinite(r[k])&&Math.abs(r[k])<1e7)&&r.width>=0&&r.height>=0;
+window.addEventListener('message',event=>{
+ if(event.source!==frame.contentWindow)return;const d=event.data;if(!d||d.version!==1||d.session!==session||d.epoch!==epoch||!byScene.has(d.scene))return;
+ if(d.type==='product-ui-prototype:scene-change'){
+  if(d.reason==='action'){if(d.from!==currentScene||!byScene.get(d.from).transitions.some(e=>e.id===d.transition&&e.to===d.scene))return;
+   if(activeStory){const next=activeStory.steps[storyStep+1];
+    if(!offFlow&&next&&next.scene===d.scene){applyStep(activeStory,storyStep+1);commandScene(d.scene);return}
+    if(!offFlow)offFlow={story:activeStory,step:storyStep,reason:'branch'};
+    currentScene=d.scene;invalidate();send('show-scene',{theme,language,perspective,hint:sendHint()});renderScene();return}
+   commandScene(d.scene);return}
+  if(d.scene!==currentScene||!['command','ready','reset'].includes(d.reason))return;return;
+ }
+ if(d.scene!==currentScene)return;
+ if(d.type==='product-ui-prototype:dismiss'){if(typeof d.keyboard!=='boolean')return;closeCard(d.keyboard);return}
+ if(d.type!=='product-ui-prototype:positions'||!Number.isSafeInteger(d.sequence)||d.sequence<=sequence||d.width!==viewport.width||d.height!==viewport.height||!Array.isArray(d.targets)||d.targets.length!==annotations().filter(a=>a.anchor).length)return;
+ const seen=new Set();for(const p of d.targets){const a=annotation(p.id);if(!a?.anchor||seen.has(p.id)||!['visible','offscreen','hidden'].includes(p.state)||!validRect(p.rect)||!validRect(p.clip))return;if(p.clip.x<0||p.clip.y<0||p.clip.x+p.clip.width>d.width+1||p.clip.y+p.clip.height>d.height+1)return;seen.add(p.id)}
+ let hint=null;
+ if(d.hint){if(typeof d.hint!=='object'||!['visible','offscreen','hidden'].includes(d.hint.state)||!validRect(d.hint.rect)||!validRect(d.hint.clip))return;hint=d.hint.id===hintRequest?d.hint:null}
+ hintPos=hint;
+ sequence=d.sequence;positions=new Map(d.targets.map(p=>[p.id,p]));updateStates();
+ if(pendingReveal&&d.revealed===pendingReveal){const id=pendingReveal,p=positions.get(id);pendingReveal=null;if(p?.state==='visible'){const point=targetCenter(id);centerOn(point);if(panel)savedCenter=point;card=id}else{card=null;if(p?.state==='hidden')status('当前状态不可见','在面板阅读');else status('在面板阅读')}}draw();
+});
+/* ============================== boot ============================== */
+const initial=new URLSearchParams(location.hash.slice(1));
+const initialStoryId=initial.get('story'),initialStepId=initial.get('step'),initialSceneId=manifest.aliases?.[initial.get('scene')]||initial.get('scene'),initialAnnotation=initial.get('annotation');
+let brokenLink=(initialStoryId&&!byStory.has(initialStoryId))||(initialSceneId&&!byScene.has(initialSceneId))||(initialStepId&&!(initialStoryId&&byStory.has(initialStoryId)));
+if(initialStoryId&&byStory.has(initialStoryId)){const st=byStory.get(initialStoryId);let step=0;if(initialStepId){const idx=st.steps.findIndex(s=>s.id===initialStepId);if(idx>=0)step=idx;else brokenLink=true}applyStep(st,step);currentScene=st.steps[step].scene}
+else if(initialSceneId&&byScene.has(initialSceneId)){currentScene=initialSceneId}
+else{const st=pickInitialStory();applyStep(st,0);currentScene=st.steps[0].scene}
+frames.get('mvp').addEventListener('load',()=>{commandScene(currentScene);if(initialAnnotation){if(annotation(initialAnnotation))choose(initialAnnotation,null);else status('说明不存在','查看当前页说明')}else if(brokenLink)status('链接无效','已回到起点');else if(phoneViewportFallback)status('手机屏幅较小','可在 设置→视口/缩放 调整阅读')});
+$('[data-viewport-select]').value=viewport.id;$('[data-theme-select]').value=theme;applyTheme();
+if(matchMedia('(max-width:860px)').matches){zoom='width';$('[data-zoom-select]').value='width'}
+commandScene(currentScene);fit({x:viewport.width/2,y:viewport.height/2});area.scrollTo(0,0);viewCenter=center();
+})();
+</script>
+</body>
+</html>

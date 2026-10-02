@@ -1,8 +1,186 @@
 {
   "schema_version": 1,
-  "revision": "poo70-desktop-ux-r11-zh-skill-terminology",
-  "status": "incomplete",
-  "reason": "中文术语 r11 的结构检查、静态可见文案扫描和两个视口的技能页/入口浏览器增量检查通过；旧 r6 完整语义与交互证据未重新认证，完整质量校验的 Skill 指纹已失效。",
-  "previous_report": "docs/mvp-complete-flow-hifi/build/skill-terminology-r11/quality-before.json",
-  "delta_evidence": "docs/mvp-complete-flow-hifi/build/skill-terminology-r11/browser-check.json"
+  "contract": "polo-unified-surfaces-v1",
+  "revision": "poo70-cross-end-closure-r13",
+  "status": "passed",
+  "scope": "R13 accepted cross-end closure: circle self-join and calendar subscriptions, enterprise return, original-object support recovery. Assistant retained. Offline file/local HTTP, Chinese light, three viewports. Layout/visual pending user re-review; not real product Acceptance.",
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "e0b0c7b92bd08fefa5dc7f3db36b231af8c39fa568a4043f446c24d12085d694",
+    "docs/mvp-complete-flow-hifi/prototype.html": "9750b2f238fb6aec87012ccde8990f601b0e90875519fc2da61552406d459ee9",
+    "docs/mvp-complete-flow-hifi/review.html": "f7bdddc508de64eb3cf0fe2e2772cb5b2bf86225ff24fb838555a692ce04f9c6",
+    "design-demos/polo-client-source-baseline/prototype.html": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
+    "docs/mvp-complete-flow-hifi/sources/poo70-spec.md": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871",
+    "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f",
+    "docs/mvp-complete-flow-hifi/sources/poo70-implementation-delta-review.md": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540",
+    "docs/mvp-complete-flow-hifi/sources/prototype-v1.html": "8986da95dd817cfb98e4d050e9e36b83e61a318bf0c9795604a7e756a6caa0e7",
+    "docs/mvp-complete-flow-hifi/sources/prototype-v1-manifest.json": "2b080798a7fb5942102f5ada26696472bc403e5baa4b4bad103355cda0d50b0d",
+    "docs/mvp-complete-flow-hifi/sources/g4-product.css": "fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218",
+    "docs/mvp-complete-flow-hifi/sources/g4-review-record.md": "56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843",
+    "docs/mvp-complete-flow-hifi/sources/renderer-index.css": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf",
+    "docs/mvp-complete-flow-hifi/sources/dpc07-review-snapshot.json": "1aebd54b40e6c4c0c8edba5a41746f4b801152499cd946035f9941573eaae82f",
+    "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46",
+    "docs/client-journey-review/sources/user-decision-r9.md": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668",
+    "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r9.json": "95505c4bba96dc748f88511dc91a5251922eb9353106ba642358e4ce63ad67e9",
+    "docs/mvp-complete-flow-hifi/sources/master-r9-review-snapshot.json": "e402721f1bbf3127ab9f35850a4e3741b346823ce0a47374bba7c59260b4cca6",
+    "docs/client-journey-review/sources/user-decision-r10.md": "6632e91ffc8bff40d2a877e41a939f843a1ffdc1197fea9083cf372877395e44",
+    "docs/mvp-complete-flow-hifi/sources/prototype-manifest-before-master-r10.json": "bab02de861a6fe804df8377255c92a4acd1c17c907147ccc80c32900dbbc38e5",
+    "docs/mvp-complete-flow-hifi/sources/master-r10-review-snapshot.json": "5f94d18060ef0d2e58a28c3006e90ae6f80ab82adbc444a7adc09bdbbac0a453",
+    "docs/mvp-complete-flow-hifi/sources/desktop-container-brief-r6.md": "c835871be3cde862ded03f91e1af3caf25ad075e626868a3d6fd19bef3f9b5d8",
+    "docs/mvp-complete-flow-hifi/sources/desktop-review-r6.json": "ff0edd10c3759f37c49241c38f2b90bdb2f714bf22d8f54bfc3427cfa987b058",
+    "docs/mvp-complete-flow-hifi/sources/mac-window-controls-r7.md": "38c62cdb288ad039d0cef9337645bba5fefcbc99b3d61971126dfceac21b5f8a",
+    "docs/mvp-complete-flow-hifi/sources/tab-close-alignment-r8.md": "46c93f40b2a7a8e185c574683c62e47d79f3a8a0af0455102aae9d50231f56d6",
+    "docs/mvp-complete-flow-hifi/sources/space-entry-in-account-r9.md": "31d4c45a1ea2923187167658b623330f839078a4a533b709acaa9948425bb09c",
+    "docs/mvp-complete-flow-hifi/sources/revoked-space-menu-r10.md": "6d427ab39e1ed22ddc97c40ecfa101aa9adeaf2f23446d4344ff5ba964a487e0",
+    "docs/client-journey-review/spec.md": "ccf9861aa56a1a685c27d50272039fd522dd8db96698ad4ffd550f4421b23324",
+    "docs/mvp-complete-flow-hifi/sources/skill-terminology-review-r11.json": "7bfab1304631554a1080e0583957869a888bedbb2e99cfee6eb241275ebf3c2d",
+    "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json": "c3034f48e94a64f04a4cb7937c5aff27c1dcaa2aa884cd45aefc4fa48b30965e",
+    "docs/mvp-complete-flow-hifi/sources/closure-r13-review.json": "dbb79eb7ddfd83f6e4cf7abb9e95cb336cdd8de1fa67ad1e0f586401a364d2c0",
+    "design-demos/polo-client-source-baseline/SOURCE-EVIDENCE.md": "07dafbc82271a2d2d54cc8313576eef23feed3dd6986a43254b653e9109faab6",
+    "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs": "5eedc0f722f4cc9b8b36c10ddb4e60d243eb6b6fbfba9d903504cdd176c096bd",
+    "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md": "fc8d04d58c93b4025f3c5ae1c2f5042b6f8bbf114c33fbc296ba3e91d15262ae",
+    "docs/mvp-complete-flow-hifi/sources/assistant-r12-review.json": "9512b059f27e49461ff6c49ae1606edea42d56c2f4e7e9d0d675461f71007da1",
+    ".agents/skills/polo-ai-design-system/SKILL.md": "668d8be4a5f0eb76a9fe7d6b82fa83d42639cd70bf13be31bbdbae973ff9a1de",
+    "design-demos/polo-client-source-baseline/src/app-shell.jsx": "da7176b9fc89f01d2f6530b7085ac27fe7317abb3bb3f59304dd721142b7b552",
+    "design-demos/polo-client-source-baseline/src/fixtures/data.js": "6efedec83250834a2c04ced8b7370f5d9fd83e7fa33559fc1c529bd999b61b55",
+    "design-demos/polo-client-source-baseline/src/main.jsx": "9e86eabac49ca2fb8f15cfa02f795a6e3cd7815596a1c4de3c3dac0d6fc2188e",
+    "design-demos/polo-client-source-baseline/src/mvp/Assistant.jsx": "970eab7efde83a4b44347690ca6bb5d8d1832991af42e1d69f461a872579f1cb",
+    "design-demos/polo-client-source-baseline/src/mvp/mvp.css": "2f8d334380bb640c27308ad422e5bc2355b052141b577e1ff7f67661acb0c6b6",
+    "design-demos/polo-client-source-baseline/src/mvp/runtime.js": "8bc761a8d2c8baad105db8a387ce4cfc5bd9104b057a63b7446ae5e9b55b45b3",
+    "design-demos/polo-client-source-baseline/src/regions/NavigationRail.jsx": "67104dbc5d2080f031b948f2f8128c6a67764025206acf34ebabfa1c52bab11d",
+    "design-demos/polo-client-source-baseline/src/regions/TopBar.jsx": "5cef7b0ec4350a06fe7c89c359814c0f30e203ff14e12f04760cd908f0749e4a",
+    "design-demos/polo-client-source-baseline/src/regions/icons.jsx": "bddbdc09b178832a2c20edd2e62e70cec9eb524d973bfe6c214d994d35d61272",
+    "design-demos/polo-client-source-baseline/src/runtime/interaction-primitives.jsx": "f74b9d4e0ee6d940e975bd6fd55ebb8a4a4884c56ecdaa957b8efb32ce69f906",
+    "design-demos/polo-client-source-baseline/src/runtime/prototype-runtime.js": "40388e38650d312b4d12ef41e921c4f6899264fbd3675f09486362d7276edced",
+    "design-demos/polo-client-source-baseline/src/runtime/query.js": "a9d3dfa66ec0f1b5e921b6a58356a155224e347b2a34244d48a0d359bccf2ec7",
+    "design-demos/polo-client-source-baseline/src/runtime/state.js": "2cff03717d1af4f7a3aa25c690974daf645b2d2ba4f8a6cb1b2ffbb8ff37f02a",
+    "design-demos/polo-client-source-baseline/src/scenes/Scenes.jsx": "b59409b6e5b862620dbb6a40756cddd7977913bfb53f9494b8598ebb4f37e883",
+    "design-demos/polo-client-source-baseline/src/source/AdminLogin.jsx": "19f99641d9f9d2a5f3c404d90a1b152d5fa6f3e949444e2964ae2b42347a3996",
+    "design-demos/polo-client-source-baseline/src/source/AuthRequestRegion.jsx": "409c3f5ead7a0f515596a735662cf75dcc901252519a43d3a9ec44e4f553a389",
+    "design-demos/polo-client-source-baseline/src/source/AutomationsRegion.jsx": "9f8d3f7130908f56c43caa77e1c9e130c45d0ff29f5e1379bedbafa9538d57d9",
+    "design-demos/polo-client-source-baseline/src/source/BrowserEmptyState.jsx": "4e782754a2e054798380f2e9ba9eb09af948506af1264a2c9be9236566a50dc3",
+    "design-demos/polo-client-source-baseline/src/source/BrowserRegion.jsx": "c86fc85ac8440c98b9d605ce00af97d7960618c16b5680859e483036642dd6a8",
+    "design-demos/polo-client-source-baseline/src/source/ChatConversation.jsx": "f6da7a712d2ba95059b3d74c291f7a69290de8f9f24b881daf714d7ccf3e71c7",
+    "design-demos/polo-client-source-baseline/src/source/ChatStreaming.jsx": "908777cee66c337558ab22706a79e3232662f399c3f5b9d98230c54cfde2582d",
+    "design-demos/polo-client-source-baseline/src/source/EdgePanels.jsx": "a139c58772172b1e149268de9819c4a993471536d3aa241366e20e2f87af5e0a",
+    "design-demos/polo-client-source-baseline/src/source/EmptyChat.jsx": "62925f3ee8d3de69297cad7a5775d0f1c166ad77a3311fe18e781046ad80c5d6",
+    "design-demos/polo-client-source-baseline/src/source/HomeApps.jsx": "2ddc26cb8c7c2cb4c9a3c9f2338afad71eb3055c057a1a92811f6853d8b14af1",
+    "design-demos/polo-client-source-baseline/src/source/KeyboardShortcutsDialog.jsx": "27f7d3125b518e9da032f03ee01846ad177498e2eedca5aa1d1ecdbff8ccc964",
+    "design-demos/polo-client-source-baseline/src/source/LifecycleRegion.jsx": "de9677a67f419a93c19f55fec7360752851566b82ddbec8868020828c4758150",
+    "design-demos/polo-client-source-baseline/src/source/MessagingDialogs.jsx": "872ca162a38802bfdafeb4059c7eab8c7eed6ce86176b247036ea2b20c50fd53",
+    "design-demos/polo-client-source-baseline/src/source/OnboardingAuth.jsx": "390e6aa0dff7acb7a1881523de385dd2adc05cf350569ab3c27e4a89800435d7",
+    "design-demos/polo-client-source-baseline/src/source/OnboardingSteps.jsx": "6597cad6a7620fb054c67b4266f86b3baf13ee4e3cf7cf1d7b76240a9abff0b5",
+    "design-demos/polo-client-source-baseline/src/source/OrganizationManage.jsx": "a4d91245c7fe75546174f66ddbe2b5cc79d588f7f2b0beea098a6729231d398e",
+    "design-demos/polo-client-source-baseline/src/source/OrganizationOnboarding.jsx": "ed738bd07fd0084938d82fb4d0cd12913900ea5c7c71df948542899d0c4d9187",
+    "design-demos/polo-client-source-baseline/src/source/PoloShell.jsx": "bf2b1205130661d3afa5423adbf1c1ea17246ba76289c2ccead19d9dc1500173",
+    "design-demos/polo-client-source-baseline/src/source/ResetDialog.jsx": "e29b7d97f6dee1256f7498c39d6a1138f676431978c80511a3e235aa6ed3c38b",
+    "design-demos/polo-client-source-baseline/src/source/ResourceEmptyPanels.jsx": "18ba4105125df0b5481bda8f6e68c5b40a6b40a08e48a12e706eab7fad905795",
+    "design-demos/polo-client-source-baseline/src/source/ResourceListDetail.jsx": "18d94f85a0cb6d97ebe1ee61caf96ce16f98a6c57caa70f78eadc962d0dded65",
+    "design-demos/polo-client-source-baseline/src/source/SessionInfoRegion.jsx": "39460bff45258a2eb55ee970a7adad40df05313d065ff20b6c348e7c95424910",
+    "design-demos/polo-client-source-baseline/src/source/SessionSidebar.jsx": "f6e46015a13eb4b03d58ed122d7803a043d4bdb14c4967686763103a18e562cd",
+    "design-demos/polo-client-source-baseline/src/source/SettingsRegion.jsx": "5a2232bdb5501e01a562548d1cd9798aefff17a22a350ce35bb15488b616783f",
+    "design-demos/polo-client-source-baseline/src/source/SpaceSwitcher.jsx": "498d196fa74bfb6e02c5278577868387ab2a3265aa8b73619ca7794d0076e9e5",
+    "design-demos/polo-client-source-baseline/src/source/WorkspacePicker.jsx": "36e45c3d516c9555cf6e48bffc71364ad674931b7d7d9c0b1c6f845d15fbbd46",
+    "design-demos/polo-client-source-baseline/src/source/WorkspaceSteps.jsx": "3684f23dc65c67c26289f57c07019cef515b3a027fcead33b61e11ea131ab387",
+    "design-demos/polo-client-source-baseline/src/styles/base.css": "5a3d83892fcfd08ee8586a6efc5ed2152b556e663a0b876cb07bc21b41f65380",
+    "design-demos/polo-client-source-baseline/src/styles/regions.css": "5dcb60873e1cd09694102d343b6101125343c7c512c09032bd1c200e9b421583",
+    "design-demos/polo-client-source-baseline/src/styles/shell.css": "c84aff413832ee06995af360725b840b3fe51afcf7a2bcc489053778b3b28392",
+    "design-demos/polo-client-source-baseline/src/styles/source-admin-login.css": "d07be719a8a4e91bd758b26232306eaf84a0315efac99cd41f699330a7526626",
+    "design-demos/polo-client-source-baseline/src/styles/source-home.css": "8db016a5fd31967abab8342e1b89dc101677547ff8de8e54a7eb47894a99a684",
+    "design-demos/polo-client-source-baseline/src/styles/source-shell.css": "f38fc82e4518c261045376c74bb1fae805dd87bd79e22b0a5b023af88fdf133c",
+    "design-demos/polo-client-source-baseline/src/styles/tokens.css": "fc65cb14f4e4d23caa3815f2fe38b85d054bfa6e43172fd4e827ddfb0620fb08",
+    "design-demos/polo-client-source-baseline/prototype-manifest.json": "e0e95ca03a3c334b8aec624e56fc49f7921281319681e670fefb7f2f2248f4c8",
+    "docs/mvp-complete-flow-hifi/tools/build_review.py": "fe613aad9e6a9f6c16de7811bd1fee4821f550c4efc7502c91d4714a4cebce7b",
+    "docs/mvp-complete-flow-hifi/tools/review-shell.html": "9c13ed1cee1ccd6051ab1f968ee1487dc1d355842891cdaeda5ac8c1fcbcca11",
+    "docs/mvp-complete-flow-hifi/tools/validate_unified.py": "7321ac6d84cea038343202826a785e6c2ac9d6cbf32680a9eb0792f8919aadf9",
+    "docs/mvp-complete-flow-hifi/tools/check_unified.py": "e325b6682739ff6eb5ad219a5c4229b9b8fcc9e309bca5690887825ab8cfd36e",
+    "docs/mvp-complete-flow-hifi/tools/check_invariants.py": "88edfd5570a1f83a10b841fa5b536ee81b7bf8b9c321d74f6f0b331b2aec2338",
+    "docs/mvp-complete-flow-hifi/tools/check_review_continuity.py": "c92b793d1379e742a8444b0a8ec1f7a9a6dec6a3a59e910d588ba737202e8cfa",
+    "design-demos/polo-client-source-baseline/tools/export-single-file.mjs": "127d6a7e65d8762dd0ea9e4160c78ae68a985f72c0f98c4af353dd7de39461a8",
+    "docs/mvp-complete-flow-hifi/tools/check_closure.py": "4db672087f9e85713c5e6ce049abfefe38259002ef249c0a06a50317427dc3f0"
+  },
+  "evidence": {
+    "structure": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/structure.json",
+      "sha256": "d15a1c43d1bef5b10ce8af3297a8e599b86112299100dc74cbe89b8963c013fb"
+    },
+    "browser": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/browser.json",
+      "sha256": "1f736b9c081f0a8cec866f8a9e98e78e68a4b326afabab37a92a25c122c00eb5"
+    },
+    "invariants": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/invariants.json",
+      "sha256": "49d673864082d32827a432e2f0f770510b01a615c17decd6a6e6460666bc0d3a"
+    },
+    "review-continuity": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/review-continuity.json",
+      "sha256": "663f8c057f134dd00d2ab68a71d51479a0a9395f58b2c07c9a787cfee750f786"
+    },
+    "semantic": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/semantic.json",
+      "sha256": "1beee8038c02e15896969f9ed1bd18025cf53456a447c9761e1793c2cf1281eb"
+    },
+    "reproducibility": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/reproducibility.json",
+      "sha256": "82d446b5a3564aa93da7bd9292de2274c959f36f28d5c0b8b0cd8186dec5c457"
+    },
+    "upstream-validator": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/upstream-validator.json",
+      "sha256": "30cfe3df3b48c1a5216c5ead48ccf1761ba5f8d3064e4159ff85058d8b910062"
+    },
+    "closure-browser": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/closure-browser.json",
+      "sha256": "0d4d3ddda0050be41308c2563deb363e3eae2ddbf158050534066b8a86928601"
+    }
+  },
+  "checks": {
+    "structure": {
+      "status": "passed",
+      "evidence": [
+        "structure"
+      ]
+    },
+    "browser": {
+      "status": "passed",
+      "evidence": [
+        "browser",
+        "invariants",
+        "review-continuity",
+        "closure-browser"
+      ]
+    },
+    "semantic": {
+      "status": "passed",
+      "evidence": [
+        "semantic"
+      ]
+    },
+    "reproducibility": {
+      "status": "passed",
+      "evidence": [
+        "reproducibility"
+      ]
+    }
+  },
+  "observed": {
+    "mvp_scenes": 127,
+    "assistant_scenes": 212,
+    "compatibility_links": 95,
+    "scene_viewport_protocol_observations": 2034,
+    "assistant_action_observations": 2284,
+    "disabled_action_observations": 108,
+    "invariants": 47,
+    "review_continuity_checks": 13,
+    "page_errors": [],
+    "external_requests": [],
+    "closure_actions": 216,
+    "closure_checks": 13,
+    "unexercised_inherited_controls": 21
+  },
+  "limitations": [
+    "Upstream single-surface v3 validator rejects surfaces/aliases extension; its actual failure is retained. This is a repository-specific multi-surface report, not an upstream clearance.",
+    "New layout/visual design remains pending user review. No real Electron, API, payment, AI generation or installation was executed.",
+    "Other themes/languages and auxiliary reference=1 scenes remain available but outside this acceptance scope.",
+    "No real support QR asset was supplied; only unconfigured/load-failed states and copy fallback were reviewed.",
+    "Payment fee/settlement ownership remains with POL-116; this prototype does not decide or validate the settlement formula."
+  ]
 }

@@ -1,0 +1,15 @@
+{
+  "command": [
+    "python3",
+    "/Users/wow/.agents/skills/product-ui-prototype/scripts/validate_prototype.py",
+    "docs/mvp-complete-flow-hifi",
+    "--root",
+    ".",
+    "--quality-report",
+    "docs/mvp-complete-flow-hifi/quality-report.json"
+  ],
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": "ERROR: manifest: invalid fields\n",
+  "interpretation": "Upstream v3 requires one static product surface and rejects the user-approved surfaces/aliases extension. Current structure is checked by tools/validate_unified.py; this result is not a pass."
+}

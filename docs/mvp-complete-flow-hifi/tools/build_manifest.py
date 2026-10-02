@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# HISTORICAL pre-r12: may restore retired assistant / review structure.
+# Current entry: python3 tools/build_review.py. Do not run on current artifacts.
 """POO-71 v2 重建 · 第 3 步：生成 prototype-manifest.json（v2 契约）。
 
 场景表来自 build/scenes.json（静态边表）与 build/v1-meta.json（v1 屏元数据）；

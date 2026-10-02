@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# HISTORICAL pre-r12: may restore retired assistant / review structure.
+# Current entry: python3 tools/build_review.py. Do not run on current artifacts.
 """POO-71 v2 重建 · 第 2 步：组装 surface.html 产品表面。
 
 输入 build/scenes.json（90 个静态场景）与 v1 的 G4 产品 CSS，完成：

@@ -76,3 +76,5 @@ function InfoButton() {
 function InputBadge({ icon, label, chevron = false }) {
   return <button type="button" aria-label={label} style={{height:28,minWidth:0,display:'inline-flex',alignItems:'center',gap:6,padding:'0 8px',border:0,borderRadius:6,background:'transparent',color:'var(--foreground)',fontSize:13}}><span style={{display:'inline-flex',flexShrink:0}}>{icon}</span><span style={{maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',opacity:.5}}>{label}</span>{chevron && <ChevronDown size={12} style={{flexShrink:0,opacity:.5}}/>}</button>
 }
+
+export { UserMessageBubble, AssistantMessageBubble }

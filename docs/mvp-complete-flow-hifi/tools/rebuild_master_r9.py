@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# HISTORICAL pre-r12: may restore retired assistant / review structure.
+# Current entry: python3 tools/build_review.py. Do not run on current artifacts.
 """POO-70 master-r9：把已明确的 D-PC-08 与空间切换规则同步到高保真评审材料。"""
 
 from __future__ import annotations

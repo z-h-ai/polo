@@ -1,0 +1,9 @@
+{
+  "source": "closure-r13-inputs",
+  "item": "cross-end-closure",
+  "revision": "poo70-cross-end-closure-r13",
+  "current": "原型有圈主审批、旧周期和自动创建支持请求；公开页与桌面承接未闭合。",
+  "target": "消费已确认自助加入、日历月/年和外部客服规则；保留企业审批与助手复用。",
+  "reason": "同步 POL-112/114/115 最新明确确认。",
+  "question": "只复看本轮接收/恢复页面，其他布局不重开。"
+}

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# HISTORICAL pre-r12: may restore retired assistant / review structure.
+# Current entry: python3 tools/build_review.py. Do not run on current artifacts.
 """POO-70 D-PC-07 重建 · 按官方模板重建 prototype.html 与 surface 运行时。
 
 - prototype.html ← review-shell-template.html（data-prototype-mode 改 high_fidelity，manifest 占位符由 sync_manifest.py 填充）

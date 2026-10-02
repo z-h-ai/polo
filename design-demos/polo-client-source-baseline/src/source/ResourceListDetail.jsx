@@ -117,10 +117,11 @@ function ListBadge({ tint, children }) {
 // entity-row.tsx EntityRow — same row button metrics as the automations list.
 function EntityRow({ icon, title, badges, selected, onClick }) {
   const [hovered, setHovered] = useState(false)
+  const Element = onClick ? 'button' : 'div'
   const background = selected ? 'color-mix(in srgb, var(--foreground) 3%, transparent)' : hovered ? 'color-mix(in srgb, var(--foreground) 2%, transparent)' : 'transparent'
   return (
-    <button
-      type="button" onClick={onClick}
+    <Element
+      type={onClick ? "button" : undefined} onClick={onClick}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex', width: '100%', alignItems: 'flex-start', gap: 7.5,
@@ -136,7 +137,7 @@ function EntityRow({ icon, title, badges, selected, onClick }) {
           {badges}
         </span>
       </span>
-    </button>
+    </Element>
   )
 }
 
@@ -613,3 +614,5 @@ export function SourceSourceDetail({ menuOpen = false }) {
     </div>
   )
 }
+// Shared source-derived primitives used by the MVP delta (one style owner).
+export { EntityRow, ListBadge, SkillIcon, HeroSkillIcon, Hero, InfoPageContent, InfoSection, InfoTable, InfoCard, SourceIcon, HeroSourceIcon }

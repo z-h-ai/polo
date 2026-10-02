@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
-  "baselineVersion": "0.3.0-chat-focused",
-  "name": "Polo 助手 Chat 高保真原型",
+  "baselineVersion": "0.4.0-unified-mvp-r12",
+  "name": "Polo 助手 MVP · 新基线场景",
   "status": "design_prototype",
   "source": {
     "root": "/Users/wow/project/z-h-ai/polo-dir/dev/apps/electron",
@@ -18,7 +18,7 @@
       "directory": "components/",
       "index": "components/index.html",
       "exporter": "tools/export-component-gallery.mjs",
-      "note": "Per-component self-contained HTML grouped by catalog group; static SSR of src/source components via react-dom/server. No scripts, no network; each page inlines tokens.css/base.css."
+      "note": "Historical auxiliary component gallery captured before r12. MVP deltas are reviewed only through the unified entry; this gallery is not current whole-page evidence."
     },
     "assets": "assets/",
     "sourceAssets": [
@@ -66,8 +66,8 @@
     ],
     "sceneCatalog": "scene-catalog.json",
     "screenshots": "screenshots/",
-    "singleFileBytes": 529111,
-    "singleFileSha256": "4342ae7aa4a91e889f4683040ef3175addfd13d0168b532014ce36d01cee7953",
+    "singleFileBytes": 572442,
+    "singleFileSha256": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
     "moduleBuild": "dist/"
   },
   "protocol": {
@@ -101,13 +101,16 @@
         "width": 800,
         "height": 600
       }
-    ]
+    ],
+    "defaultScene": "A-personal-new",
+    "reviewMessages": "product-ui-prototype:* v1; expected parent window, session, epoch, declared scene",
+    "auxiliaryReferences": "?reference=1&scene=chat&state=empty"
   },
   "coverage": {
     "sceneCatalog": "scene-catalog.json",
     "sourceEvidence": "SOURCE-EVIDENCE.md",
     "sceneTraceability": "SCENE-TRACEABILITY.md",
-    "regions": "Catalog scenes retain pinned Renderer component references. The shared Chat shell intentionally removes the Electron tab bar, sidebar account footer and Polo AI menu; the Home app hub is absent and chat/empty is the default.",
+    "regions": "Source-derived components plus explicit MVP design deltas; auxiliary scene-catalog remains historical component reference only.",
     "sourceClassification": [
       "runtime_exact",
       "playground_exact",
@@ -120,15 +123,18 @@
       "BrowserView",
       "OS dialogs",
       "real IPC"
-    ]
+    ],
+    "mvpSceneSource": "src/mvp/scenes.mjs",
+    "unifiedManifest": "../../docs/mvp-complete-flow-hifi/prototype-manifest.json"
   },
   "verification": {
-    "static": "passed",
-    "browser": "sampled_pass_chat_shell",
-    "visual": "sampled_pass_chat_shell",
-    "interactive": "sampled_pass_chat_shell",
-    "sourceFidelity": "component-source-derived-chat-shell-adapted",
-    "browserScope": "1440x900 and 800x600: default chat, legacy Home/menu fallback, conversation, skills, space switcher; removed chrome absent, top alignment, no horizontal overflow, sidebar toggle, no page errors. file:// single-file at 1440x900: composer present and zero external requests."
+    "static": "see-unified-quality-report",
+    "browser": "see-unified-quality-report",
+    "interactive": "see-unified-quality-report",
+    "visual": "pending-user-review",
+    "sourceFidelity": "component-source-derived-mvp-design-delta",
+    "report": "../../docs/mvp-complete-flow-hifi/quality-report.json",
+    "browserScope": "Chinese light; file and local HTTP; 1440x900, 1024x768, 800x600. Results are bound to artifact hashes in the unified report."
   },
   "approximations": [
     {
@@ -173,9 +179,18 @@
     ],
     "screenshotsScope": "Historical Renderer/Playground component references from the pinned baseline; not current whole-page Chat acceptance.",
     "currentScreenshots": [
-      "screenshots/chat-focus-r1/chat-empty-1440x900.png",
-      "screenshots/chat-focus-r1/chat-empty-800x600.png"
+      "../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-1440x900.png",
+      "../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-1024x768.png",
+      "../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-800x600.png"
     ],
-    "currentBrowserCheck": "screenshots/chat-focus-r1/browser-check.json"
+    "currentBrowserCheck": "../../docs/mvp-complete-flow-hifi/evidence/r12/browser.json",
+    "historicalChatFocus": {
+      "revision": "0.3.0-chat-focused",
+      "screenshots": [
+        "screenshots/chat-focus-r1/chat-empty-1440x900.png",
+        "screenshots/chat-focus-r1/chat-empty-800x600.png"
+      ],
+      "browser": "screenshots/chat-focus-r1/browser-check.json"
+    }
   }
 }

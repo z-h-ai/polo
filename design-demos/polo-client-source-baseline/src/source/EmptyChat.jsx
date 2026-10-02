@@ -55,7 +55,8 @@ function PermissionRequestCard() {
 // Source: ChatPage.tsx, PanelHeader.tsx, ChatDisplay.tsx, ChatInputZone.tsx,
 // InputContainer.tsx and FreeFormInput.tsx. Fixture is the no-message session:
 // the desktop message area renders an empty masked ScrollArea with no content.
-export function SourceFaithfulEmptyChat({ permission = false }) {
+export function SourceFaithfulEmptyChat({ permission = false, mvp = null }) {
+  if (mvp) return <SourceMvpChatFrame {...mvp}/>
   const [draft, setDraft] = React.useState('')
   return <section aria-label="会话" style={{height:'100%',minWidth:0,display:'flex',flexDirection:'column',background:'var(--background)',color:'var(--foreground)'}}>
     <header style={{height:42,minHeight:42,display:'flex',alignItems:'center',gap:6,paddingLeft:16,paddingRight:8,position:'relative',zIndex:1}}>
@@ -78,4 +79,14 @@ export function SourceFaithfulEmptyChat({ permission = false }) {
       </div>
     </div>
   </section>
+}
+
+// Same PanelHeader / masked transcript / InputContainer geometry; slots contain
+// the explicitly labelled MVP additions. Auxiliary reference controls stay above.
+export function SourceMvpChatFrame({title, transcript, badges, composer, notice}) {
+ return <section className="mvp-chat" aria-label="会话">
+  <header className="mvp-chat-header"><h1>{title}</h1></header>
+  <main className="mvp-transcript"><div className="mvp-chat-column">{transcript}</div></main>
+  <div className="mvp-input-zone">{badges}<div className="mvp-notice">{notice}</div>{composer}</div>
+ </section>
 }

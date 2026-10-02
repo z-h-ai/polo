@@ -4,7 +4,7 @@ import { useState } from 'react'
 // Chat-focused composition adapted from TopBar.tsx + AppShell.tsx +
 // PanelStackContainer.tsx + LeftSidebar.tsx. The Electron tab bar, app menu
 // button and account footer are intentionally omitted from this prototype.
-export function SourcePoloShell({ navigator, children }) {
+export function SourcePoloShell({ navigator, children, mvp = null }) {
   const [sidebarVisible, setSidebarVisible] = useState(() => typeof window === 'undefined' || window.innerWidth > 1000)
   return <div className="source-shell">
     <div className="source-topbar">
@@ -12,16 +12,17 @@ export function SourcePoloShell({ navigator, children }) {
         <button type="button" className="source-icon-button" aria-label="切换侧栏" onClick={() => setSidebarVisible(value => !value)}><PanelLeftRounded/></button>
         {/* OrganizationSwitcher renders null without an active organization
             (fresh-profile fixture), so no switcher is mounted here. */}
-        <div className="source-topbar__workspace">
+        {mvp ? <span className="mvp-context">{mvp.scope}</span> : <div className="source-topbar__workspace">
           <button type="button" className="source-icon-button" disabled aria-label="返回"><ChevronLeft size={18} strokeWidth={1.5}/></button>
           <button type="button" className="source-icon-button" disabled aria-label="前进"><ChevronRight size={18} strokeWidth={1.5}/></button>
           <button type="button" className="source-workspace-switcher" aria-label="选择 Workspace"><span className="source-workspace-switcher__avatar"/><span>Workspace</span><ChevronDown size={12}/></button>
-        </div>
+        </div>}
       </div>
-      <div className="source-topbar__right"><button type="button" className="source-icon-button" aria-label="添加面板"><Plus size={16} strokeWidth={1.5}/></button><button type="button" className="source-icon-button" aria-label="帮助和文档"><HelpCircle size={16} strokeWidth={1.5}/></button></div>
+      {!mvp && <div className="source-topbar__right"><button type="button" className="source-icon-button" aria-label="添加面板"><Plus size={16} strokeWidth={1.5}/></button><button type="button" className="source-icon-button" aria-label="帮助和文档"><HelpCircle size={16} strokeWidth={1.5}/></button></div>}
     </div>
     <main className={'source-panel-stack' + (sidebarVisible ? '' : ' source-panel-stack--without-sidebar') + (navigator === false ? ' source-panel-stack--direct' : '')}>
-      {sidebarVisible && <aside className="source-sidebar" aria-label="主导航"><button className="source-new-session" type="button"><SquarePenRounded/>新建会话</button><nav className="source-sidebar__nav"><Nav icon={Inbox} label="所有会话" active/><div className="source-sidebar__nested"><Nav label="已标记" icon={Flag}/><Nav label="已归档" icon={Archive}/></div><Nav icon={Tag} label="标签"/><hr/><Nav icon={DatabaseZap} label="数据源"/><div className="source-sidebar__nested"><Nav icon={Globe} label="API"/><Nav icon={McpGlyph} label="MCP"/><Nav icon={FolderOpen} label="本地文件夹"/></div><Nav icon={Zap} label="技能"/><Nav icon={ListTodo} label="自动化"/><div className="source-sidebar__nested"><Nav icon={Clock} label="定时任务"/><Nav icon={Radio} label="事件触发"/><Nav icon={Bot} label="智能体"/></div></nav></aside>}
+      {sidebarVisible && (mvp ? <aside className="source-sidebar" aria-label="主导航">{mvp.navigation}</aside> : <aside className="source-sidebar" aria-label="主导航"><button className="source-new-session" type="button"><SquarePenRounded/>新建会话</button><nav className="source-sidebar__nav"><Nav icon={Inbox} label="所有会话" active/><div className="source-sidebar__nested"><Nav label="已标记" icon={Flag}/><Nav label="已归档" icon={Archive}/></div><Nav icon={Tag} label="标签"/><hr/><Nav icon={DatabaseZap} label="数据源"/><div className="source-sidebar__nested"><Nav icon={Globe} label="API"/><Nav icon={McpGlyph} label="MCP"/><Nav icon={FolderOpen} label="本地文件夹"/></div><Nav icon={Zap} label="技能"/><Nav icon={ListTodo} label="自动化"/><div className="source-sidebar__nested"><Nav icon={Clock} label="定时任务"/><Nav icon={Radio} label="事件触发"/><Nav icon={Bot} label="智能体"/></div></nav></aside>)}
+
       {navigator === false ? children : <><section className="source-navigator" aria-label="会话">{navigator ?? <NavigatorSessions/>}</section><section className="source-content-panel">{children}</section></>}
     </main>
   </div>

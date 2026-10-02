@@ -1,3 +1,40 @@
+# 当前功能地图 · 跨端收口 r13
+
+当前唯一产品说明：[spec.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2F..%2Fclient-journey-review%2Fspec.md)（master-r13）；同一评审入口：[review.html](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.html)。本轮消费已确认规则；新增页面呈现待复看。
+
+| 模块 | 本轮状态 | 实际使用与恢复 |
+| --- | --- | --- |
+| M01 登录与空间承接 | 更新邀请返回 | 网页确认成员后，桌面主动刷新，再自行进入企业；指定身份与共享邀请审批仍保留 |
+| M02 空间切换 | 保留 | 无活动切换；有活动确认终止、失败/取消、目标失权恢复沿现有方案 |
+| M03 首页与全部 Apps | 保留 | 当前空间授权目录、去重来源、常用 App 与空状态沿现有方案 |
+| M04 App 容器 | 保留 | 全工作区 App 容器；内部交互/结果归 FDE；后台、关闭和权限恢复沿现有方案 |
+| M05 助手会话 | 直接复用 | 使用现有源码表面与框架，本轮不调整 |
+| M06 技能与数据源 | 直接复用 | 安装/启停/版本/来源与连接恢复沿现有源码 |
+| M07 我的圈子 | 更新 | 分享页自助加入；返回同账号核对；日历月/年续费与上限；失败查原单，登录后保留原目标 |
+| M08 原对话文件 | 直接复用 | 附件与生成文件留原对话；独立文件汇总页延后 |
+| M09 积分与恢复 | 保留 | 用户主动单次查询，恢复后不自动发送/续写/重试；不与圈子订阅混账 |
+| M10 账号与管理入口 | 保留 | 偏好、资格入口与另一端独立会话沿现有方案 |
+| M11 异常恢复与客服 | 更新 | 原异常打开客服，只复制有权可见信息；返回原对象；企业管理员/平台客服各守责任 |
+
+SDK/API 产品、跨 App 结果聚合、独立文件汇总页仍延后或移出容器责任。当前付费圈子范围消费 POL-114 r26 / POL-115 D-OPS-15，不能沿用旧“首发延期”作当前结论。
+
+本轮复看三条故事：`R13-circle-handoff`（加入与核对）、`R13-enterprise-handoff`（企业邀请与主动进入）、`R13-support`（原订单异常与恢复）。月/年续费、账号不一致、客服不可用等分支由页面索引进入。本轮验证覆盖与限制见 [review.md](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.md)；不以这三条故事代表其他模块重新完成产品或视觉验收。
+
+---
+
+## r12 维护分工（继续适用，历史轮次说明）
+
+
+打开 [review.html](review.html) 完成同一入口走查。M01/M02/M03/M04/M07/M10/M11 继续维护于 MVP；M05/M06/M08 和助手内 M09 由新助手源码维护。M09 浏览器与 App 提示仍属 MVP。下方“当前助手完整场景映射”由源码导出，覆盖每个场景、来源与补充差异；旧 r11 统计不代表本轮数量。
+
+评审控制台的页面索引按模块展示完整地图；故事覆盖个人与企业会话、技能获取与启用、设备准备、版本/卸载/来源变化、原对话文件、积分/预算恢复。异常结果可从页面索引进入，不添加模拟失败按钮。兼容场景只复用状态参数和组件，不重复维护界面。
+
+默认工作区由系统准备；助手仅静态显示空间归属。新布局待复看。验证入口与结果见 [review.md](review.md) 和 [quality-report.json](quality-report.json)。
+
+---
+
+## 历史 r11 功能地图（以下描述仅适用于当时版本）
+
 # POO-70 · MVP 完整流程高保真 — 一页功能地图
 
 日期：2026-09-23 · 分支 `POO-70/docs/client-journey-policy-interview` · 当前原型修订 `poo70-desktop-ux-r11-zh-skill-terminology` · [评审壳](review.html) · [产品表面](prototype.html)
@@ -143,3 +180,223 @@
 - 浏览器端邀请、支付、充值和管理后台仍以交接场景表示；App 内部业务界面仍由 App 负责。
 - 产品表面位于 `prototype.html`，故事导航、场景索引、分支状态注入和说明位于 `review.html`。没有产品可触发操作的异常态使用 `review_entries`，不放伪造按钮。
 - 当前 v3 结构检查通过；r9 空间入口与 r10 失权通知的真实点击、视口检查分别见 `build/space-entry-r9/browser-check.json`、`build/revoked-space-r10/browser-check.json`。完整质量状态仍为 `incomplete`，见 `quality-report.json`。
+<!-- assistant-r12-map -->
+
+## 当前助手完整场景映射（源码导出）
+
+以下覆盖唯一有效助手来源。上方 r11 模块描述是历史；新页面均待复看。验证见 `quality-report.json` 与 `evidence/r12/`。
+
+| 场景 | 归属 / 依据 | 基线与补充 | 验证 |
+|---|---|---|---|
+| [新会话 · 我的空间](review.html#scene=A-personal-new) `A-personal-new` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [原会话 · 我的空间](review.html#scene=A-personal-conversation) `A-personal-conversation` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在生成 · 我的空间](review.html#scene=A-personal-generating) `A-personal-generating` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已停止 · 我的空间](review.html#scene=A-personal-stopped) `A-personal-stopped` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [等待回答 · 我的空间](review.html#scene=A-personal-question) `A-personal-question` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [重开后恢复问题 · 我的空间](review.html#scene=A-personal-reopen) `A-personal-reopen` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已回答 · 我的空间](review.html#scene=A-personal-answered) `A-personal-answered` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [暂不回答 · 我的空间](review.html#scene=A-personal-deferred) `A-personal-deferred` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [问题已过期 · 我的空间](review.html#scene=A-personal-expired) `A-personal-expired` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [原会话不可访问 · 我的空间](review.html#scene=A-personal-deleted) `A-personal-deleted` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [回答未提交 · 我的空间](review.html#scene=A-personal-answerfailed) `A-personal-answerfailed` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [网络已断开 · 我的空间](review.html#scene=A-personal-offline) `A-personal-offline` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [服务暂时不可用 · 我的空间](review.html#scene=A-personal-service) `A-personal-service` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [重新验证完成 · 我的空间](review.html#scene=A-personal-restored) `A-personal-restored` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本次生成已完成 · 我的空间](review.html#scene=A-personal-completezero) `A-personal-completezero` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [原对话附件与生成文件 · 我的空间](review.html#scene=A-personal-files) `A-personal-files` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [查看生成文件 · 我的空间](review.html#scene=A-personal-viewer) `A-personal-viewer` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [查看原对话附件 · 我的空间](review.html#scene=A-personal-attachment) `A-personal-attachment` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [文件已移动或删除 · 我的空间](review.html#scene=A-personal-missing) `A-personal-missing` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已重新选择材料 · 我的空间](review.html#scene=A-personal-reselected) `A-personal-reselected` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源与工具 · 我的空间](review.html#scene=A-personal-sources) `A-personal-sources` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源需要认证 · 我的空间](review.html#scene=A-personal-sourceauth) `A-personal-sourceauth` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源连接失败 · 我的空间](review.html#scene=A-personal-sourcefailed) `A-personal-sourcefailed` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源权限被拒绝 · 我的空间](review.html#scene=A-personal-sourcedenied) `A-personal-sourcedenied` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [自动化 · 我的空间](review.html#scene=A-personal-automations) `A-personal-automations` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [助手浏览器 · 我的空间](review.html#scene=A-personal-browser) `A-personal-browser` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [返回后待查询 · 我的空间](review.html#scene=A-personal-return) `A-personal-return` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [发送前积分不足 · 我的空间](review.html#scene=A-personal-preblock) `A-personal-preblock` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [生成因积分不足停止 · 我的空间](review.html#scene=A-personal-cut) `A-personal-cut` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在查询 · 我的空间](review.html#scene=A-personal-checking) `A-personal-checking` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [尚未到账 · 我的空间](review.html#scene=A-personal-notyet) `A-personal-notyet` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [查询失败 · 我的空间](review.html#scene=A-personal-queryfailed) `A-personal-queryfailed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [积分可用 · 我的空间](review.html#scene=A-personal-resumed) `A-personal-resumed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能 · 我的空间](review.html#scene=A-personal-skills) `A-personal-skills` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [获取技能 · 我的空间](review.html#scene=A-personal-discover) `A-personal-discover` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能详情 · 我的空间](review.html#scene=A-personal-acquire) `A-personal-acquire` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已启用 · 设备待准备 · 我的空间](review.html#scene=A-personal-enabledpending) `A-personal-enabledpending` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在准备本机 · 我的空间](review.html#scene=A-personal-installing) `A-personal-installing` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [设备准备失败 · 我的空间](review.html#scene=A-personal-installfailed) `A-personal-installfailed` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已安装 · 我的空间](review.html#scene=A-personal-installed) `A-personal-installed` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已启用 · 我的空间](review.html#scene=A-personal-enabled) `A-personal-enabled` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-detail) `A-personal-detail` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [版本已更新 · 我的空间](review.html#scene=A-personal-updated) `A-personal-updated` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [更新失败 · 我的空间](review.html#scene=A-personal-updatefailed) `A-personal-updatefailed` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-remove) `A-personal-remove` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机已卸载 · 我的空间](review.html#scene=A-personal-uninstalled) `A-personal-uninstalled` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [未获授权 · 我的空间](review.html#scene=A-personal-denied) `A-personal-denied` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [最后来源失效 · 我的空间](review.html#scene=A-personal-restricted) `A-personal-restricted` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [部分来源失效 · 我的空间](review.html#scene=A-personal-fallback) `A-personal-fallback` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [来源恢复 · 我的空间](review.html#scene=A-personal-reauthorized) `A-personal-reauthorized` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [内置技能已停用 · 我的空间](review.html#scene=A-personal-builtinoff) `A-personal-builtinoff` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [内置技能已启用 · 我的空间](review.html#scene=A-personal-builtinon) `A-personal-builtinon` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [新会话 · 晨星科技](review.html#scene=A-enterprise-new) `A-enterprise-new` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [原会话 · 晨星科技](review.html#scene=A-enterprise-conversation) `A-enterprise-conversation` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在生成 · 晨星科技](review.html#scene=A-enterprise-generating) `A-enterprise-generating` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已停止 · 晨星科技](review.html#scene=A-enterprise-stopped) `A-enterprise-stopped` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [等待回答 · 晨星科技](review.html#scene=A-enterprise-question) `A-enterprise-question` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [重开后恢复问题 · 晨星科技](review.html#scene=A-enterprise-reopen) `A-enterprise-reopen` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已回答 · 晨星科技](review.html#scene=A-enterprise-answered) `A-enterprise-answered` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [暂不回答 · 晨星科技](review.html#scene=A-enterprise-deferred) `A-enterprise-deferred` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [问题已过期 · 晨星科技](review.html#scene=A-enterprise-expired) `A-enterprise-expired` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [原会话不可访问 · 晨星科技](review.html#scene=A-enterprise-deleted) `A-enterprise-deleted` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [回答未提交 · 晨星科技](review.html#scene=A-enterprise-answerfailed) `A-enterprise-answerfailed` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [网络已断开 · 晨星科技](review.html#scene=A-enterprise-offline) `A-enterprise-offline` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [服务暂时不可用 · 晨星科技](review.html#scene=A-enterprise-service) `A-enterprise-service` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [重新验证完成 · 晨星科技](review.html#scene=A-enterprise-restored) `A-enterprise-restored` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本次生成已完成 · 晨星科技](review.html#scene=A-enterprise-completezero) `A-enterprise-completezero` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [原对话附件与生成文件 · 晨星科技](review.html#scene=A-enterprise-files) `A-enterprise-files` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [查看生成文件 · 晨星科技](review.html#scene=A-enterprise-viewer) `A-enterprise-viewer` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [查看原对话附件 · 晨星科技](review.html#scene=A-enterprise-attachment) `A-enterprise-attachment` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [文件已移动或删除 · 晨星科技](review.html#scene=A-enterprise-missing) `A-enterprise-missing` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已重新选择材料 · 晨星科技](review.html#scene=A-enterprise-reselected) `A-enterprise-reselected` | 助手 / PC-F04 / D-PC-03 | SourcePoloShell + files 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源与工具 · 晨星科技](review.html#scene=A-enterprise-sources) `A-enterprise-sources` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源需要认证 · 晨星科技](review.html#scene=A-enterprise-sourceauth) `A-enterprise-sourceauth` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源连接失败 · 晨星科技](review.html#scene=A-enterprise-sourcefailed) `A-enterprise-sourcefailed` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源权限被拒绝 · 晨星科技](review.html#scene=A-enterprise-sourcedenied) `A-enterprise-sourcedenied` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [自动化 · 晨星科技](review.html#scene=A-enterprise-automations) `A-enterprise-automations` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [助手浏览器 · 晨星科技](review.html#scene=A-enterprise-browser) `A-enterprise-browser` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [返回后待查询 · 晨星科技](review.html#scene=A-enterprise-return) `A-enterprise-return` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业返回后待查询 · 晨星科技](review.html#scene=A-enterprise-ownerreturn) `A-enterprise-ownerreturn` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [发送前积分不足 · 晨星科技](review.html#scene=A-enterprise-preblock) `A-enterprise-preblock` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [生成因积分不足停止 · 晨星科技](review.html#scene=A-enterprise-cut) `A-enterprise-cut` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在查询 · 晨星科技](review.html#scene=A-enterprise-checking) `A-enterprise-checking` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [尚未到账 · 晨星科技](review.html#scene=A-enterprise-notyet) `A-enterprise-notyet` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [查询失败 · 晨星科技](review.html#scene=A-enterprise-queryfailed) `A-enterprise-queryfailed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [积分可用 · 晨星科技](review.html#scene=A-enterprise-resumed) `A-enterprise-resumed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业积分不足 · 晨星科技](review.html#scene=A-enterprise-notify) `A-enterprise-notify` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已通知所有者 · 晨星科技](review.html#scene=A-enterprise-notified) `A-enterprise-notified` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算已达上限 · 晨星科技](review.html#scene=A-enterprise-budget) `A-enterprise-budget` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [所有者处理企业预算 · 晨星科技](review.html#scene=A-enterprise-budgetowner) `A-enterprise-budgetowner` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [所有者处理企业积分 · 晨星科技](review.html#scene=A-enterprise-ownerblock) `A-enterprise-ownerblock` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业积分可用 · 晨星科技](review.html#scene=A-enterprise-ownerresumed) `A-enterprise-ownerresumed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能 · 晨星科技](review.html#scene=A-enterprise-skills) `A-enterprise-skills` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [获取技能 · 晨星科技](review.html#scene=A-enterprise-discover) `A-enterprise-discover` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能详情 · 晨星科技](review.html#scene=A-enterprise-acquire) `A-enterprise-acquire` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已启用 · 设备待准备 · 晨星科技](review.html#scene=A-enterprise-enabledpending) `A-enterprise-enabledpending` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在准备本机 · 晨星科技](review.html#scene=A-enterprise-installing) `A-enterprise-installing` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [设备准备失败 · 晨星科技](review.html#scene=A-enterprise-installfailed) `A-enterprise-installfailed` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已安装 · 晨星科技](review.html#scene=A-enterprise-installed) `A-enterprise-installed` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已启用 · 晨星科技](review.html#scene=A-enterprise-enabled) `A-enterprise-enabled` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-detail) `A-enterprise-detail` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [版本已更新 · 晨星科技](review.html#scene=A-enterprise-updated) `A-enterprise-updated` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [更新失败 · 晨星科技](review.html#scene=A-enterprise-updatefailed) `A-enterprise-updatefailed` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-remove) `A-enterprise-remove` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled) `A-enterprise-uninstalled` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [未获授权 · 晨星科技](review.html#scene=A-enterprise-denied) `A-enterprise-denied` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [最后来源失效 · 晨星科技](review.html#scene=A-enterprise-restricted) `A-enterprise-restricted` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [来源恢复 · 晨星科技](review.html#scene=A-enterprise-reauthorized) `A-enterprise-reauthorized` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [内置技能已停用 · 晨星科技](review.html#scene=A-enterprise-builtinoff) `A-enterprise-builtinoff` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [内置技能已启用 · 晨星科技](review.html#scene=A-enterprise-builtinon) `A-enterprise-builtinon` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-100-0-0) `A-personal-legacy-local-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-100-0-0) `A-personal-legacy-detail-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-100-0-0) `A-personal-legacy-remove-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-100-0-1) `A-personal-legacy-local-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-100-0-1) `A-personal-legacy-detail-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-100-0-1) `A-personal-legacy-remove-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-100-1-0) `A-personal-legacy-local-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-100-1-0) `A-personal-legacy-detail-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-100-1-0) `A-personal-legacy-remove-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-100-1-1) `A-personal-legacy-local-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-100-1-1) `A-personal-legacy-detail-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-100-1-1) `A-personal-legacy-remove-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-110-0-0) `A-personal-legacy-local-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-110-0-0) `A-personal-legacy-detail-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-110-0-0) `A-personal-legacy-remove-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-110-0-1) `A-personal-legacy-local-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-110-0-1) `A-personal-legacy-detail-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-110-0-1) `A-personal-legacy-remove-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-110-1-0) `A-personal-legacy-local-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-110-1-0) `A-personal-legacy-detail-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-110-1-0) `A-personal-legacy-remove-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-local-110-1-1) `A-personal-legacy-local-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 我的空间](review.html#scene=A-personal-legacy-detail-110-1-1) `A-personal-legacy-detail-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 我的空间](review.html#scene=A-personal-legacy-remove-110-1-1) `A-personal-legacy-remove-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-100-0-0) `A-enterprise-legacy-local-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-100-0-0) `A-enterprise-legacy-detail-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-100-0-0) `A-enterprise-legacy-remove-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-100-0-1) `A-enterprise-legacy-local-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-100-0-1) `A-enterprise-legacy-detail-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-100-0-1) `A-enterprise-legacy-remove-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-100-1-0) `A-enterprise-legacy-local-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-100-1-0) `A-enterprise-legacy-detail-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-100-1-0) `A-enterprise-legacy-remove-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-100-1-1) `A-enterprise-legacy-local-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-100-1-1) `A-enterprise-legacy-detail-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-100-1-1) `A-enterprise-legacy-remove-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-110-0-0) `A-enterprise-legacy-local-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-110-0-0) `A-enterprise-legacy-detail-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-110-0-0) `A-enterprise-legacy-remove-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-110-0-1) `A-enterprise-legacy-local-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-110-0-1) `A-enterprise-legacy-detail-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-110-0-1) `A-enterprise-legacy-remove-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-110-1-0) `A-enterprise-legacy-local-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-110-1-0) `A-enterprise-legacy-detail-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-110-1-0) `A-enterprise-legacy-remove-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-local-110-1-1) `A-enterprise-legacy-local-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [技能版本 · 晨星科技](review.html#scene=A-enterprise-legacy-detail-110-1-1) `A-enterprise-legacy-detail-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载确认 · 晨星科技](review.html#scene=A-enterprise-legacy-remove-110-1-1) `A-enterprise-legacy-remove-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载已失效副本 · 我的空间](review.html#scene=A-personal-restricted-remove) `A-personal-restricted-remove` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已失效副本已卸载 · 我的空间](review.html#scene=A-personal-restricted-uninstalled) `A-personal-restricted-uninstalled` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-100-0-0) `A-personal-uninstalled-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-100-0-1) `A-personal-uninstalled-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-100-1-0) `A-personal-uninstalled-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-100-1-1) `A-personal-uninstalled-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-110-0-0) `A-personal-uninstalled-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-110-0-1) `A-personal-uninstalled-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-110-1-0) `A-personal-uninstalled-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 我的空间](review.html#scene=A-personal-uninstalled-110-1-1) `A-personal-uninstalled-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [卸载已失效副本 · 晨星科技](review.html#scene=A-enterprise-restricted-remove) `A-enterprise-restricted-remove` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已失效副本已卸载 · 晨星科技](review.html#scene=A-enterprise-restricted-uninstalled) `A-enterprise-restricted-uninstalled` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-100-0-0) `A-enterprise-uninstalled-100-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-100-0-1) `A-enterprise-uninstalled-100-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-100-1-0) `A-enterprise-uninstalled-100-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-100-1-1) `A-enterprise-uninstalled-100-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-110-0-0) `A-enterprise-uninstalled-110-0-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-110-0-1) `A-enterprise-uninstalled-110-0-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-110-1-0) `A-enterprise-uninstalled-110-1-0` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [本机副本已卸载 · 晨星科技](review.html#scene=A-enterprise-uninstalled-110-1-1) `A-enterprise-uninstalled-110-1-1` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [暂无额外技能 · 我的空间](review.html#scene=A-personal-empty-skills) `A-personal-empty-skills` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [暂无数据源 · 我的空间](review.html#scene=A-personal-empty-sources) `A-personal-empty-sources` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源未连接 · 我的空间](review.html#scene=A-personal-sourcedisconnected) `A-personal-sourcedisconnected` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在连接数据源 · 我的空间](review.html#scene=A-personal-sourceconnecting) `A-personal-sourceconnecting` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [需要文件访问权限 · 我的空间](review.html#scene=A-personal-permission) `A-personal-permission` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [文件访问权限被拒绝 · 我的空间](review.html#scene=A-personal-permissiondenied) `A-personal-permissiondenied` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [访问权限已授予 · 我的空间](review.html#scene=A-personal-permissiongranted) `A-personal-permissiongranted` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [暂无额外技能 · 晨星科技](review.html#scene=A-enterprise-empty-skills) `A-enterprise-empty-skills` | 助手 / PC-F04 / PC-F07 / PC-F08 | SourcePoloShell + skills 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [暂无数据源 · 晨星科技](review.html#scene=A-enterprise-empty-sources) `A-enterprise-empty-sources` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [数据源未连接 · 晨星科技](review.html#scene=A-enterprise-sourcedisconnected) `A-enterprise-sourcedisconnected` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在连接数据源 · 晨星科技](review.html#scene=A-enterprise-sourceconnecting) `A-enterprise-sourceconnecting` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + sources 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [需要文件访问权限 · 晨星科技](review.html#scene=A-enterprise-permission) `A-enterprise-permission` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [文件访问权限被拒绝 · 晨星科技](review.html#scene=A-enterprise-permissiondenied) `A-enterprise-permissiondenied` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [访问权限已授予 · 晨星科技](review.html#scene=A-enterprise-permissiongranted) `A-enterprise-permissiongranted` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [生成中断后返回 · 我的空间](review.html#scene=A-personal-returnstream) `A-personal-returnstream` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在查询充值 · 我的空间](review.html#scene=A-personal-checkingstream) `A-personal-checkingstream` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [生成中断 · 未到账 · 我的空间](review.html#scene=A-personal-notyetstream) `A-personal-notyetstream` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [生成中断 · 查询失败 · 我的空间](review.html#scene=A-personal-failedstream) `A-personal-failedstream` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [生成中断 · 积分可用 · 我的空间](review.html#scene=A-personal-resumedstream) `A-personal-resumedstream` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业积分 · 正在查询 · 晨星科技](review.html#scene=A-enterprise-ownerchecking) `A-enterprise-ownerchecking` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业积分 · 尚未恢复 · 晨星科技](review.html#scene=A-enterprise-ownerpending) `A-enterprise-ownerpending` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业积分 · 查询失败 · 晨星科技](review.html#scene=A-enterprise-ownerfailed) `A-enterprise-ownerfailed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算 · 返回后待查询 · 晨星科技](review.html#scene=A-enterprise-budgetreturn) `A-enterprise-budgetreturn` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算 · 正在查询 · 晨星科技](review.html#scene=A-enterprise-budgetchecking) `A-enterprise-budgetchecking` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算 · 尚未恢复 · 晨星科技](review.html#scene=A-enterprise-budgetpending) `A-enterprise-budgetpending` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算 · 查询失败 · 晨星科技](review.html#scene=A-enterprise-budgetfailed) `A-enterprise-budgetfailed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算 · 已恢复可用 · 晨星科技](review.html#scene=A-enterprise-budgetresumed) `A-enterprise-budgetresumed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [恢复发送 · 我的空间](review.html#scene=A-personal-availability) `A-personal-availability` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [恢复发送 · 晨星科技](review.html#scene=A-enterprise-availability) `A-enterprise-availability` | 助手 / PC-F04 / PC-N04 / PC-F10 | SourcePoloShell + chat 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [已通知所有者调整预算 · 晨星科技](review.html#scene=A-enterprise-budgetnotified) `A-enterprise-budgetnotified` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [正在核对企业预算 · 晨星科技](review.html#scene=A-enterprise-budgetmemberchecking) `A-enterprise-budgetmemberchecking` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算仍受限 · 晨星科技](review.html#scene=A-enterprise-budgetmemberpending) `A-enterprise-budgetmemberpending` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [预算查询失败 · 晨星科技](review.html#scene=A-enterprise-budgetmemberfailed) `A-enterprise-budgetmemberfailed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |
+| [企业预算恢复 · 晨星科技](review.html#scene=A-enterprise-budgetmemberresumed) `A-enterprise-budgetmemberresumed` | 助手 / PC-N03 | SourcePoloShell + credits 共享组件；本轮状态补充 | 见 r12 浏览器证据 |

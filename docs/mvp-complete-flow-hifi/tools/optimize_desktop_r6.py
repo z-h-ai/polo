@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# HISTORICAL pre-r12: may restore retired assistant / review structure.
+# Current entry: python3 tools/build_review.py. Do not run on current artifacts.
 """Incremental desktop/container and local Skills proposal. Requires beautifulsoup4."""
 import copy, hashlib, json, re, sys
 from pathlib import Path

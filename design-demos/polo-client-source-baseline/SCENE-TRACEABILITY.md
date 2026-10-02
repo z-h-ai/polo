@@ -1,3 +1,22 @@
+# 当前 r12 来源与设计差异
+
+固定 Renderer 来源：`01f4447cf77612ca2c62d9c7155601a51bdb7b5b`（证据见 SOURCE-EVIDENCE.md）。用户指定 Chat 基线已经删除整端标签栏、账号页脚、首页；本轮不把这些删改当真实客户端现状。
+
+| 内容 | 唯一源码 | 来源级别 / 本轮差异 |
+|---|---|---|
+| 侧栏、会话导航、内容面板、窄窗抽屉 | `src/source/PoloShell.jsx` + `src/styles/source-shell.css` | 组件转译基线；MVP 参数只替换必要导航与静态空间标识，去除 Workspace 选择与无依据的辅助入口 |
+| 会话标题、消息列、输入容器 | `src/source/EmptyChat.jsx`、`ChatConversation.jsx` | 复用消息气泡和布局几何；新增发送/停止/问题回答/异常状态与会话内文件控件 |
+| 技能列表、详情 Hero、状态表 | `src/source/ResourceListDetail.jsx` 导出的 EntityRow / InfoPageContent / InfoSection / InfoTable | 基线组件直接复用；新增来源授权/本人启用/本机准备分列；版本、卸载与失效状态属于本轮设计 |
+| 数据源、自动化空态、浏览器空态 | `ResourceListDetail.jsx` / `ResourceEmptyPanels.jsx` / `BrowserEmptyState.jsx` | 复用各自组件，不将 MCP 状态表作为自动化或浏览器；仅 MVP 所需入口进入统一流程 |
+| 场景、兼容 ID、真实操作 | `src/mvp/scenes.mjs` | 本轮补充；依据当前 Spec PC-F04/07/08/10、PC-N03/04。旧分享/审核提案未作为已确认 MVP 迁移 |
+| 会话与阻断的连续性 | `src/mvp/runtime.js` | 离线演示状态；空间+会话隔离，费用/离线/权限限制不能因导航清除；没有业务 API |
+
+完整场景映射由源码导出到既有 [功能地图](../../docs/mvp-complete-flow-hifi/feature-map.md)。固定源码对应组件、用户指定 Chat 壳层调整、MVP 新增设计三个层级不能混称“当前真实客户端”。新增布局均待复看。当前验证证据见 `../../docs/mvp-complete-flow-hifi/evidence/r12/`，旧 screenshots/chat-focus-r1 仅适用于旧基线修订。
+
+---
+
+## 辅助参考目录的历史组件追溯（通过 reference=1 打开）
+
 # Scene traceability audit
 
 This is the per-catalog-scene audit for the current Polo 助手 Chat prototype.

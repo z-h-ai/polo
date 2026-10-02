@@ -44,7 +44,19 @@ const manifestPath = resolve(root, 'prototype-manifest.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 // Exporting is mechanical; the Chat shell is a product-design adaptation and
 // must not be promoted to a source-faithful Renderer capture.
-manifest.verification = { ...manifest.verification, static: 'pending_reexport', browser: 'pending_after_export', visual: 'pending_after_export', interactive: 'pending_after_export' }
+manifest.baselineVersion = '0.4.0-unified-mvp-r12'
+manifest.name = 'Polo 助手 MVP · 新基线场景'
+manifest.protocol.defaultScene = 'A-personal-new'
+manifest.protocol.reviewMessages = 'product-ui-prototype:* v1; expected parent window, session, epoch, declared scene'
+manifest.protocol.auxiliaryReferences = '?reference=1&scene=chat&state=empty'
+manifest.coverage.mvpSceneSource = 'src/mvp/scenes.mjs'
+manifest.coverage.unifiedManifest = '../../docs/mvp-complete-flow-hifi/prototype-manifest.json'
+manifest.coverage.regions = 'Source-derived components plus explicit MVP design deltas; auxiliary scene-catalog remains historical component reference only.'
+manifest.verification = { static: 'see-unified-quality-report', browser: 'see-unified-quality-report', interactive: 'see-unified-quality-report', visual: 'pending-user-review', sourceFidelity: 'component-source-derived-mvp-design-delta', report: '../../docs/mvp-complete-flow-hifi/quality-report.json', browserScope: 'Chinese light; file and local HTTP; 1440x900, 1024x768, 800x600. Results are bound to artifact hashes in the unified report.' }
+manifest.evidence.historicalChatFocus ||= { revision: '0.3.0-chat-focused', screenshots: manifest.evidence.currentScreenshots, browser: manifest.evidence.currentBrowserCheck }
+manifest.evidence.currentScreenshots = ['1440x900', '1024x768', '800x600'].map(size => '../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-' + size + '.png')
+manifest.evidence.currentBrowserCheck = '../../docs/mvp-complete-flow-hifi/evidence/r12/browser.json'
+manifest.artifacts.componentGallery.note = 'Historical auxiliary component gallery captured before r12. MVP deltas are reviewed only through the unified entry; this gallery is not current whole-page evidence.'
 manifest.artifacts.singleFileBytes = statSync(output).size
 manifest.artifacts.singleFileSha256 = createHash('sha256').update(readFileSync(output)).digest('hex')
 manifest.artifacts.moduleBuild = 'dist/'

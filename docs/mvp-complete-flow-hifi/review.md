@@ -1,3 +1,65 @@
+# 当前轮次：跨端已确认规则收口（closure-r13，修改待复看）
+
+- **唯一产品来源**：本端 master-r13 Spec；已确认跨端来源与版本固定在 `sources/closure-r13-inputs.json`。本轮差异是消费 POL-112 D-ID-21、POL-114 PRD r26、POL-115 D-OPS-17，未重开助手或 App 内部职责。
+- **圈子**：取消旧圈主审批；免费/付费自助加入后回桌面用同账号主动核对。密码和验证码登录均回原圈子，失败不重复加入或付款。圈主审批旧 ID 退役；企业共享邀请审批保留。
+- **续费**：日历月/年及各自提前购买上限；有效月付与年度样例各自闭合到可找回的权益，服务端决定实际起止。
+- **交接与客服**：企业主动刷新后才自行进入；客服不创建虚构工单，不自动发送资料，复制失败可手动复制；管理员与平台客服分开，按原账号/作品/订单返回。
+- **当前入口**：[统一评审](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Freview.html) · [完整功能地图](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Ffeature-map.md)
+
+### 本轮复看范围
+
+| 故事/分支 | 复看内容 | 保留结论 |
+| --- | --- | --- |
+| R13-circle-handoff + 登录/查询失败 | 公开页交接、同账号资格核对的页面与反馈 | 无圈主审批，不重复加入，不自动开 App |
+| R13-enterprise-handoff + 刷新失败 | 先核对企业，再主动进入的两个步骤 | 指定身份匹配、共享邀请审批不变 |
+| 月/年续费与提前购买上限 | 周期、日期和原订单/权益落点 | 不自动扣款、不改变固定周期 |
+| R13-support + 账号/版本受限 | 必要信息、复制回馈与原对象恢复 | 不自动发送、受理、退款或解除限制 |
+
+这是增量页面呈现复看，已确认行为不重新访谈；布局/视觉尚未获得本轮用户确认。历史 r12 助手呈现确认状态沿原记录，不因本轮通过检查自动升级。
+
+### 验证与限制
+
+最终检查：结构与证据绑定 290 项通过；339 个场景在三视口、file/HTTP 下共 2,034 次观察；本轮 216 次动作与 13 条恢复断言通过。独立复核覆盖 35 个变更场景，6 项发现已修复、0 项遗留；重建散列一致。助手产品 HTML 与本轮前快照字节一致。继承的关闭菜单内控件有 21 条观察未在补充检查中执行，未冒称全交互验收。
+
+最终证据集中在 `evidence/closure-r13/`，由 `quality-report.json` 绑定本轮文件散列；检查命令使用 `POLO_REVIEW_EVIDENCE=evidence/closure-r13`。新增恢复路径的实际点击与截图见 `closure-browser.json`，全场景结构/浏览器与独立语义结论分别保存。它们验证离线原型，不代表真实 Electron/API/支付或交付验收。
+
+真实客服二维码尚未由运营提供；本轮仅覆盖未配置、加载失败与手动复制，未验证真实扫码联系。POL-116 手续费承担/结算公式仍是外部待决，客户端不自行裁决。通用上游单表面校验器与本项目双表面契约不兼容，实际失败结果保留；本项目检查结果另行说明。
+
+复现顺序：现有 `build_review.py` → 专用结构检查 → 浏览器、恢复与评审连续性检查 → 独立语义复核 → 可重建散列校验 → `report_unified.py` 汇总。没有产品编码、提交、发布、Plan 或既有执行重绑。
+
+---
+
+# 历史 r12 轮次：统一入口与助手 MVP（r12，修改待复看）
+
+本轮为增量修改：维护现有 MVP 非助手部分，在用户指定的 `design-demos/polo-client-source-baseline/src/` 上补齐助手。产品依据是当前 `docs/client-journey-review/spec.md` 的 PC-F04/07/08/10、PC-N03/04、C-R05/07 及本轮已批准计划。组件依据固定为 Renderer `01f4447cf77612ca2c62d9c7155601a51bdb7b5b` 的源码转译基线；聊天壳层调整及本轮场景补充属于产品设计，不能声称已在真实客户端实现。
+
+操作分类：新建、发送、停止、回答、技能启停/安装/更新/卸载、文件查看/重选、主动查询是产品动作；额度/网络/权限失败、重开结果等是系统状态，经评审场景和故事浏览进入。前后步只浏览，不执行产品动作。个人/企业标识静态显示，默认工作区由系统准备，Workspace 管理只留辅助参考。
+
+来源维护：助手场景、动作及兼容映射由助手 `src/mvp/scenes.mjs` 导出；统一 manifest 消费该导出。旧助手仅用于历史 ID 兼容，不沿用其操作或数量作为要求。替换前 r11 HTML/manifest 保存在 `sources/pre-assistant-r12.tar.gz`，仅用于追溯。
+
+验收范围为中文、浅色、1440×900 / 1024×768 / 800×600、file 与本地 HTTP。业务已确认；新增布局仍待用户复看。验证记录随后附于本文与功能地图。
+
+### 生成与验证入口
+
+```sh
+python3 docs/mvp-complete-flow-hifi/tools/build_review.py
+python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py
+python3 docs/mvp-complete-flow-hifi/tools/check_unified.py
+python3 docs/mvp-complete-flow-hifi/tools/check_invariants.py
+python3 docs/mvp-complete-flow-hifi/tools/check_review_continuity.py
+python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py --quality-report docs/mvp-complete-flow-hifi/quality-report.json
+```
+
+`build_review.py` 是当前唯一统一生成入口。助手 HTML 从源码导出；非助手 MVP HTML 保留现有维护方式；评审 HTML 从 `tools/review-shell.html` 生成。所有旧 rebuild/build_surface/build_manifest/ux_round 工具已标为 pre-r12 历史工具，不得用于当前重建。
+
+本轮按用户已批准的“两份产品表面”扩展 v3：manifest 新增 `surface` / `surfaces` / `aliases`，评审按需创建并保留两个 iframe。上游技能的通用校验器只支持单一静态表面，实际返回 `manifest: invalid fields`；没有修改全局校验器或把这一结果记为通过。仓库专用 `validate_unified.py` 验证所有权、助手源码导出、两份嵌入 manifest、来源散列、故事与兼容路由；质量结论只适用于 `polo-unified-surfaces-v1`，详见最终质量报告。
+
+独立复核记录保留在 `evidence/r12/history/`，当前结果另行记录。页面浏览与测试不构成用户确认。辅助 `reference=1`、组件画廊和旧截图继续保留为注明修订的参考，不作为当前 MVP 完成证据；本轮没有真实 API、支付、安装或 Electron 运行时验收。
+
+---
+
+## 历史评审记录（以下各节只适用于其标明修订）
+
 # POO-70 · MVP 完整流程高保真 — 评审指南
 
 当前修订：`poo70-desktop-ux-r11-zh-skill-terminology`（2026-09-23） · [评审壳](review.html) · [产品表面](prototype.html) · [功能地图](feature-map.md) · [机器可读追溯](prototype-manifest.json)。中文界面的当前术语是「技能」；下文 2026-09-17 的 v2 走查记录仅适用于当时版本，其中 `surface.html` 及「Skill 保留英文」均不是当前原型规则。
