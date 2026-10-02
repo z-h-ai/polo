@@ -30137,7 +30137,7 @@
       "label": "当前唯一客户端产品说明",
       "path": "docs/client-journey-review/spec.md",
       "revision": "master-r13",
-      "sha256": "ccf9861aa56a1a685c27d50272039fd522dd8db96698ad4ffd550f4421b23324"
+      "sha256": "fb0100e312ec65e050b24d1d4f50be8a00c59b668f68db0fb1433a2412a41304"
     },
     {
       "id": "skill-terminology-review-r11",
@@ -30172,14 +30172,14 @@
       "path": "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs",
       "label": "助手源码场景映射",
       "revision": "poo70-assistant-unified-r12",
-      "sha256": "5eedc0f722f4cc9b8b36c10ddb4e60d243eb6b6fbfba9d903504cdd176c096bd"
+      "sha256": "d12d3cc93c6957094f95d58f9b4d8a7065f391aaadc67dd1ad863fb956993362"
     },
     {
       "id": "assistant-r12-design",
       "path": "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md",
       "label": "助手组件与本轮设计差异",
       "revision": "poo70-assistant-unified-r12",
-      "sha256": "fc8d04d58c93b4025f3c5ae1c2f5042b6f8bbf114c33fbc296ba3e91d15262ae"
+      "sha256": "8c9b11cfe7432029a8ce3261b10bae0842e8f49cf784eb062d68f2883edeed36"
     },
     {
       "id": "assistant-r12-review",

@@ -392,7 +392,7 @@
   {
     "id": "module-m02",
     "revision": "m02-r1",
-    "path": "module-m02.md",
+    "path": "sources/module-m02-r1.md",
     "sha256": "b64232d02f2ee4140d00ca2b76c9c56d9c9c2ee47a5b808972628cb251588ca4"
   },
   {
@@ -410,7 +410,9 @@
   {
     "id": "module-review-accepted",
     "revision": "accepted-v1",
-    "path": "module-review.md",
-    "sha256": "fe02a5187353865b7e3cfc728a0901c1931c1f57d354269ee6c944bbb830d1c1"
+    "path": "sources/module-review-accepted-v1.md",
+    "sha256": "cf905ef07eb2e88e70cafab78d53bce48534111040cae90043b168e5d14d724b",
+    "previous_recorded_sha256": "fe02a5187353865b7e3cfc728a0901c1931c1f57d354269ee6c944bbb830d1c1",
+    "snapshot_note": "Exact pre-cleanup historical reading copy; original decision source remains separately retained."
   }
 ]

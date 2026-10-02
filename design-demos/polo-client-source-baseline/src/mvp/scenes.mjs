@@ -1,5 +1,5 @@
 // Single authority for prototype routes, fixtures and real product operations.
-// Product rules: PC-F04/07/08/10, PC-N03/04, C-R05/07; see review.md r12.
+// Product rules: PC-F04/07/08/10, PC-N03/04, C-R05/07; see docs/client-journey-review/spec.md (the sole product SoT).
 export const revision = 'poo70-assistant-unified-r12'
 export const id = (scope, key) => `A-${scope}-${key}`
 export const scenes = []

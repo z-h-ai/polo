@@ -111,10 +111,6 @@ function show(id,reason='command',transition=null){id=manifest.aliases?.[id]||id
  }""")
   product=product.replace("const requested=hash.get('scene')||query.get('scene');", "const requested=manifest.aliases?.[hash.get('scene')||query.get('scene')]||hash.get('scene')||query.get('scene');")
  (BUNDLE/'prototype.html').write_text(product)
- # Derived traceability rows live in the existing map, not another requirement ledger.
- p=BUNDLE/'feature-map.md';s=p.read_text();marker='<!-- assistant-r12-map -->';s=s.split(marker)[0]
- s+=marker+'\n\n## 当前助手完整场景映射（源码导出）\n\n以下覆盖唯一有效助手来源。上方 r11 模块描述是历史；新页面均待复看。验证见 `quality-report.json` 与 `evidence/r12/`。\n\n| 场景 | 归属 / 依据 | 基线与补充 | 验证 |\n|---|---|---|---|\n'
- for sc in exported['scenes']:s+=f"| [{sc['title']}](review.html#scene={sc['id']}) `{sc['id']}` | 助手 / {sc['basis']} | SourcePoloShell + {sc['family']} 共享组件；本轮状态补充 | 见 r12 浏览器证据 |\n"
- p.write_text(s)
+ # The manifest and review page expose the generated scene map; Spec is the only product document.
  print(f"Unified: {len(kept)} MVP + {len(exported['scenes'])} assistant scenes; {len(aliases)} compatibility links")
 if __name__=='__main__':main()

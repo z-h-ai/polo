@@ -36,4 +36,10 @@ if 'closure-browser' in files:
  c=json.loads((E/'closure-browser.json').read_text());q['observed']['closure_actions']=len(c['actions']);q['observed']['closure_checks']=len(c['checks']);q['observed']['unexercised_inherited_controls']=len(c.get('unexercised_inherited_controls',[]))
  q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_closure.py']=h(B/'tools/check_closure.py')
  q['limitations'].extend(['No real support QR asset was supplied; only unconfigured/load-failed states and copy fallback were reviewed.','Payment fee/settlement ownership remains with POL-116; this prototype does not decide or validate the settlement formula.'])
+if (E/'documentation-equivalence.json').exists():
+ proof=E/'documentation-equivalence.json';assert json.loads(proof.read_text())['passed']
+ q['evidence']['documentation-equivalence']={'path':str(proof.relative_to(R)),'sha256':h(proof)}
+ q['checks']['documentation']={'status':'passed','evidence':['documentation-equivalence']}
+ for path in ['sources/document-history-20261002.json','sources/document-history-20261002.tar.gz']:
+  q['artifacts'][str((B/path).relative_to(R))]=h(B/path)
 (B/'quality-report.json').write_text(json.dumps(q,ensure_ascii=False,indent=2)+'\n');print(json.dumps({'status':q['status'],**q['observed']},ensure_ascii=False))

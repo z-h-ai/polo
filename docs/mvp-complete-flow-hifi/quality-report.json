@@ -3,11 +3,11 @@
   "contract": "polo-unified-surfaces-v1",
   "revision": "poo70-cross-end-closure-r13",
   "status": "passed",
-  "scope": "R13 accepted cross-end closure: circle self-join and calendar subscriptions, enterprise return, original-object support recovery. Assistant retained. Offline file/local HTTP, Chinese light, three viewports. Layout/visual pending user re-review; not real product Acceptance.",
+  "scope": "Single-SoT documentation consolidation; product rules/scenes/actions unchanged. Rebuilt source bindings and verified current artifacts in Chinese light, three viewports, file/local HTTP. Not real product Acceptance.",
   "artifacts": {
-    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "e0b0c7b92bd08fefa5dc7f3db36b231af8c39fa568a4043f446c24d12085d694",
-    "docs/mvp-complete-flow-hifi/prototype.html": "9750b2f238fb6aec87012ccde8990f601b0e90875519fc2da61552406d459ee9",
-    "docs/mvp-complete-flow-hifi/review.html": "f7bdddc508de64eb3cf0fe2e2772cb5b2bf86225ff24fb838555a692ce04f9c6",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "f74e35f4cf005edcdc637fc4ee2ff373b5f1705650b2ca1610e57bd12a312d0c",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a49d524776e98f8fd123f62175795391a2b62189c2f518c2545980a72e5e17ec",
+    "docs/mvp-complete-flow-hifi/review.html": "1347082ce96fccf9a0dd239756f361bf80e78b90184e6c63dfc17b85267ec309",
     "design-demos/polo-client-source-baseline/prototype.html": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
     "docs/mvp-complete-flow-hifi/sources/poo70-spec.md": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871",
     "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f",
@@ -31,13 +31,13 @@
     "docs/mvp-complete-flow-hifi/sources/tab-close-alignment-r8.md": "46c93f40b2a7a8e185c574683c62e47d79f3a8a0af0455102aae9d50231f56d6",
     "docs/mvp-complete-flow-hifi/sources/space-entry-in-account-r9.md": "31d4c45a1ea2923187167658b623330f839078a4a533b709acaa9948425bb09c",
     "docs/mvp-complete-flow-hifi/sources/revoked-space-menu-r10.md": "6d427ab39e1ed22ddc97c40ecfa101aa9adeaf2f23446d4344ff5ba964a487e0",
-    "docs/client-journey-review/spec.md": "ccf9861aa56a1a685c27d50272039fd522dd8db96698ad4ffd550f4421b23324",
+    "docs/client-journey-review/spec.md": "fb0100e312ec65e050b24d1d4f50be8a00c59b668f68db0fb1433a2412a41304",
     "docs/mvp-complete-flow-hifi/sources/skill-terminology-review-r11.json": "7bfab1304631554a1080e0583957869a888bedbb2e99cfee6eb241275ebf3c2d",
     "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json": "c3034f48e94a64f04a4cb7937c5aff27c1dcaa2aa884cd45aefc4fa48b30965e",
     "docs/mvp-complete-flow-hifi/sources/closure-r13-review.json": "dbb79eb7ddfd83f6e4cf7abb9e95cb336cdd8de1fa67ad1e0f586401a364d2c0",
     "design-demos/polo-client-source-baseline/SOURCE-EVIDENCE.md": "07dafbc82271a2d2d54cc8313576eef23feed3dd6986a43254b653e9109faab6",
-    "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs": "5eedc0f722f4cc9b8b36c10ddb4e60d243eb6b6fbfba9d903504cdd176c096bd",
-    "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md": "fc8d04d58c93b4025f3c5ae1c2f5042b6f8bbf114c33fbc296ba3e91d15262ae",
+    "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs": "d12d3cc93c6957094f95d58f9b4d8a7065f391aaadc67dd1ad863fb956993362",
+    "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md": "8c9b11cfe7432029a8ce3261b10bae0842e8f49cf784eb062d68f2883edeed36",
     "docs/mvp-complete-flow-hifi/sources/assistant-r12-review.json": "9512b059f27e49461ff6c49ae1606edea42d56c2f4e7e9d0d675461f71007da1",
     ".agents/skills/polo-ai-design-system/SKILL.md": "668d8be4a5f0eb76a9fe7d6b82fa83d42639cd70bf13be31bbdbae973ff9a1de",
     "design-demos/polo-client-source-baseline/src/app-shell.jsx": "da7176b9fc89f01d2f6530b7085ac27fe7317abb3bb3f59304dd721142b7b552",
@@ -89,47 +89,53 @@
     "design-demos/polo-client-source-baseline/src/styles/source-shell.css": "f38fc82e4518c261045376c74bb1fae805dd87bd79e22b0a5b023af88fdf133c",
     "design-demos/polo-client-source-baseline/src/styles/tokens.css": "fc65cb14f4e4d23caa3815f2fe38b85d054bfa6e43172fd4e827ddfb0620fb08",
     "design-demos/polo-client-source-baseline/prototype-manifest.json": "e0e95ca03a3c334b8aec624e56fc49f7921281319681e670fefb7f2f2248f4c8",
-    "docs/mvp-complete-flow-hifi/tools/build_review.py": "fe613aad9e6a9f6c16de7811bd1fee4821f550c4efc7502c91d4714a4cebce7b",
+    "docs/mvp-complete-flow-hifi/tools/build_review.py": "e20e5c2fcc041dc3866a877ee350c25dfbc6d858f25c905cc2c48506f46ed905",
     "docs/mvp-complete-flow-hifi/tools/review-shell.html": "9c13ed1cee1ccd6051ab1f968ee1487dc1d355842891cdaeda5ac8c1fcbcca11",
     "docs/mvp-complete-flow-hifi/tools/validate_unified.py": "7321ac6d84cea038343202826a785e6c2ac9d6cbf32680a9eb0792f8919aadf9",
     "docs/mvp-complete-flow-hifi/tools/check_unified.py": "e325b6682739ff6eb5ad219a5c4229b9b8fcc9e309bca5690887825ab8cfd36e",
     "docs/mvp-complete-flow-hifi/tools/check_invariants.py": "88edfd5570a1f83a10b841fa5b536ee81b7bf8b9c321d74f6f0b331b2aec2338",
     "docs/mvp-complete-flow-hifi/tools/check_review_continuity.py": "c92b793d1379e742a8444b0a8ec1f7a9a6dec6a3a59e910d588ba737202e8cfa",
     "design-demos/polo-client-source-baseline/tools/export-single-file.mjs": "127d6a7e65d8762dd0ea9e4160c78ae68a985f72c0f98c4af353dd7de39461a8",
-    "docs/mvp-complete-flow-hifi/tools/check_closure.py": "4db672087f9e85713c5e6ce049abfefe38259002ef249c0a06a50317427dc3f0"
+    "docs/mvp-complete-flow-hifi/tools/check_closure.py": "4db672087f9e85713c5e6ce049abfefe38259002ef249c0a06a50317427dc3f0",
+    "docs/mvp-complete-flow-hifi/sources/document-history-20261002.json": "90ae9804ae2e7f6f1bcf6cab9c575f45598353dc5f999fa70d8c1db704d86092",
+    "docs/mvp-complete-flow-hifi/sources/document-history-20261002.tar.gz": "600ef7e6f52acfe8e445799e18143fa8e1dab39fdff0bf6f3f352ac242ba18bb"
   },
   "evidence": {
     "structure": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/structure.json",
-      "sha256": "d15a1c43d1bef5b10ce8af3297a8e599b86112299100dc74cbe89b8963c013fb"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/structure.json",
+      "sha256": "da1fa1268415dd0f7210d1fbe6e2826bfe183e82ea799bd8f2b9b8a81e1e6205"
     },
     "browser": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/browser.json",
-      "sha256": "1f736b9c081f0a8cec866f8a9e98e78e68a4b326afabab37a92a25c122c00eb5"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/browser.json",
+      "sha256": "2c051e3c7b1ebcf6915a4135b90f5829c3a948f93e0f81b6b677398595ed2ba0"
     },
     "invariants": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/invariants.json",
-      "sha256": "49d673864082d32827a432e2f0f770510b01a615c17decd6a6e6460666bc0d3a"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/invariants.json",
+      "sha256": "d440146c3d55aa9861ba50aa1e9edb3332ac4ccfc9852e3801ecace3318ab8ae"
     },
     "review-continuity": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/review-continuity.json",
-      "sha256": "663f8c057f134dd00d2ab68a71d51479a0a9395f58b2c07c9a787cfee750f786"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/review-continuity.json",
+      "sha256": "e8bca0966fd6ae5e16db09bd8eabb69d0a911a29f6bc851af0deac67058bab3c"
     },
     "semantic": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/semantic.json",
-      "sha256": "1beee8038c02e15896969f9ed1bd18025cf53456a447c9761e1793c2cf1281eb"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/semantic.json",
+      "sha256": "79ab89ab0195d5d5b6793aff494a575b80f195c7660fa3fadc5ad1152d367cff"
     },
     "reproducibility": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/reproducibility.json",
-      "sha256": "82d446b5a3564aa93da7bd9292de2274c959f36f28d5c0b8b0cd8186dec5c457"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/reproducibility.json",
+      "sha256": "40306026210381c699875f00163a5f8bbd9c3144e55c803fb6d4e73a9332cace"
     },
     "upstream-validator": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/upstream-validator.json",
-      "sha256": "30cfe3df3b48c1a5216c5ead48ccf1761ba5f8d3064e4159ff85058d8b910062"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/upstream-validator.json",
+      "sha256": "235b54853528253f64379e0ba1ffcc5edf62e28d080620197fc031e52edc55d8"
     },
     "closure-browser": {
-      "path": "docs/mvp-complete-flow-hifi/evidence/closure-r13/closure-browser.json",
-      "sha256": "0d4d3ddda0050be41308c2563deb363e3eae2ddbf158050534066b8a86928601"
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/closure-browser.json",
+      "sha256": "326fef24fa4e0f1bb5192f451bb8f4c86ed0371c4adc8da7d834e47d4d93c524"
+    },
+    "documentation-equivalence": {
+      "path": "docs/mvp-complete-flow-hifi/evidence/sot-cleanup/documentation-equivalence.json",
+      "sha256": "c064c58b3d860894da0ae75bf758dafaf0ae36122e97badb257198cd37e789a6"
     }
   },
   "checks": {
@@ -158,6 +164,12 @@
       "status": "passed",
       "evidence": [
         "reproducibility"
+      ]
+    },
+    "documentation": {
+      "status": "passed",
+      "evidence": [
+        "documentation-equivalence"
       ]
     }
   },

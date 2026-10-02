@@ -11,7 +11,7 @@
 | 场景、兼容 ID、真实操作 | `src/mvp/scenes.mjs` | 本轮补充；依据当前 Spec PC-F04/07/08/10、PC-N03/04。旧分享/审核提案未作为已确认 MVP 迁移 |
 | 会话与阻断的连续性 | `src/mvp/runtime.js` | 离线演示状态；空间+会话隔离，费用/离线/权限限制不能因导航清除；没有业务 API |
 
-完整场景映射由源码导出到既有 [功能地图](../../docs/mvp-complete-flow-hifi/feature-map.md)。固定源码对应组件、用户指定 Chat 壳层调整、MVP 新增设计三个层级不能混称“当前真实客户端”。新增布局均待复看。当前验证证据见 `../../docs/mvp-complete-flow-hifi/evidence/r12/`，旧 screenshots/chat-focus-r1 仅适用于旧基线修订。
+产品规则只维护于 [客户端 SoT](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fclient-journey-review%2Fspec.md)；完整场景映射由源码导出到 [prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)，在统一原型的页面索引查看。固定源码对应组件、用户指定 Chat 壳层调整、MVP 新增设计三个层级不能混称“当前真实客户端”。新增布局均待复看。当前验证证据见 `../../docs/mvp-complete-flow-hifi/evidence/r12/`，旧 screenshots/chat-focus-r1 仅适用于旧基线修订。
 
 ---
 

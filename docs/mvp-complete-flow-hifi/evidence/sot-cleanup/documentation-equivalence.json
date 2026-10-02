@@ -1,0 +1,31 @@
+{
+  "passed": true,
+  "scope": "document consolidation only; manifest sources hashes updated; no scene/action/review UI changes",
+  "manifest_changed_keys": [
+    "sources"
+  ],
+  "manifest_unchanged_scene_ids": 339,
+  "checks": {
+    "prototype.html": true,
+    "review.html": true
+  },
+  "source_changes": [
+    {
+      "id": "poo70-current-spec-terminology",
+      "before": "ccf9861aa56a1a685c27d50272039fd522dd8db96698ad4ffd550f4421b23324",
+      "after": "fb0100e312ec65e050b24d1d4f50be8a00c59b668f68db0fb1433a2412a41304"
+    },
+    {
+      "id": "assistant-r12-routes",
+      "before": "5eedc0f722f4cc9b8b36c10ddb4e60d243eb6b6fbfba9d903504cdd176c096bd",
+      "after": "d12d3cc93c6957094f95d58f9b4d8a7065f391aaadc67dd1ad863fb956993362"
+    },
+    {
+      "id": "assistant-r12-design",
+      "before": "fc8d04d58c93b4025f3c5ae1c2f5042b6f8bbf114c33fbc296ba3e91d15262ae",
+      "after": "8c9b11cfe7432029a8ce3261b10bae0842e8f49cf784eb062d68f2883edeed36"
+    }
+  ],
+  "before_archive": ".pipeline/sdlc/POO-70/sot-cleanup-20261002/validation-before.tar.gz",
+  "before_archive_sha256": "ca80393dd895f4bc6a5c063727e7500439e1264a7830150894853ef2a1d48699"
+}
