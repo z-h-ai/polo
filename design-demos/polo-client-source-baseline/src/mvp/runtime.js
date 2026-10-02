@@ -3,10 +3,18 @@ let current = id('personal','new'), session=null, epoch=-1, sequence=0, hint=nul
 let settings={theme:'light',language:'zh-CN'}, resetVersion=0
 const listeners=new Set(), drafts=new Map(), submitted=new Map(), attachments=new Map(), attachmentContents=new Map()
 const sessions={personal:'draft',enterprise:'saved'}, counters={personal:0,enterprise:0}
-const contexts={personal:{blocks:new Set(),denied:new Set(),role:'member',creditOrigin:'preblock',skill:null,sourceStatus:null},enterprise:{blocks:new Set(),denied:new Set(),role:'member',creditOrigin:'preblock',skill:null,sourceStatus:null}}
+const contexts={personal:{blocks:new Set(),denied:new Set(),role:'member',creditOrigin:'preblock',skill:null,sourceStatus:null,running:false},enterprise:{blocks:new Set(),denied:new Set(),role:'member',creditOrigin:'preblock',skill:null,sourceStatus:null,running:false}}
+const preferenceDefaults={send:'enter',spell:true,name:'小王',answer:'',labels:'工作、资料整理',read:'ask',write:'ask',command:'ask'}
+const preferences={personal:{saved:{...preferenceDefaults},draft:{...preferenceDefaults}},enterprise:{saved:{...preferenceDefaults},draft:{...preferenceDefaults}}}
+export const getPreferences=scope=>({...preferences[scope].draft})
+export const changePreference=(scope,key,value)=>{preferences[scope].draft[key]=value}
+export const savePreferences=scope=>{preferences[scope].saved={...preferences[scope].draft}}
+export const preferencesDirty=scope=>JSON.stringify(preferences[scope].saved)!==JSON.stringify(preferences[scope].draft)
+export const discardPreferences=scope=>{preferences[scope].draft={...preferences[scope].saved}}
 let pending=null
 const storageKey=(scope,key='conversation')=>key==='source-auth'?`${scope}:source-auth`:`${scope}:${sessions[scope]}:${key}`
 export const getConversationId=scope=>sessions[scope]
+export const getActivity=scope=>({running:!!contexts[scope].running,session:contexts[scope].runningSession})
 export const isSavedConversation=scope=>sessions[scope]==='saved'
 export const getSourceStatus=scope=>contexts[scope].sourceStatus||'connected'
 export const canSend=scope=>!contexts[scope].blocks.size&&!contexts[scope].denied.has(sessions[scope])
@@ -14,6 +22,8 @@ export const canRead=scope=>!contexts[scope].denied.has(sessions[scope])
 export const blockingText=scope=>[...contexts[scope].blocks].map(k=>({credits:'积分不足',budget:'企业预算已达上限',offline:'网络未恢复',permission:'需要访问权限'}[k])).join('；')
 function fixture(scene){
  const c=contexts[scene.scope],k=scene.key
+ if(['generating','question','reopen','answered','close','closefailed'].includes(k)){c.running=true;c.runningSession=sessions[scene.scope]}
+ if(['stopped','cut','completezero','preblock'].includes(k))c.running=false
  const sourceState={sources:'connected',sourceauth:'auth',sourcefailed:'failed',sourcedenied:'denied',sourcedisconnected:'disconnected',sourceconnecting:'connecting'}[k];if(sourceState)c.sourceStatus=sourceState
  if(k.startsWith('owner')||k.startsWith('budget')&&k!=='budget'&&!k.startsWith('budgetmember')&&k!=='budgetnotified')c.role='owner'
  if(['notify','budget','budgetnotified'].includes(k)||k.startsWith('budgetmember'))c.role='member'
@@ -34,7 +44,7 @@ function fixture(scene){
 
 let snapshot={scene:byId.get(current),settings,resetVersion}
 const effectiveScene=()=>{const s=byId.get(current);return s.family==='skills'&&contexts[s.scope].skill?{...s,...contexts[s.scope].skill}:s}
-const notify=()=>{snapshot={scene:effectiveScene(),settings,resetVersion};listeners.forEach(f=>f());requestAnimationFrame(measure)}
+const notify=()=>{if(session)publishActivity();snapshot={scene:effectiveScene(),settings,resetVersion};listeners.forEach(f=>f());requestAnimationFrame(measure)}
 export const subscribe=f=>{listeners.add(f);return()=>listeners.delete(f)}
 export const getSnapshot=()=>snapshot
 export const getDraft=(scope,key='conversation')=>drafts.get(storageKey(scope,key))||''
@@ -45,6 +55,11 @@ export const getAttachmentContent=scope=>attachmentContents.get(storageKey(scope
 export const setAttachment=(scope,name,content=null)=>{attachments.set(storageKey(scope),name);attachmentContents.set(storageKey(scope),content);notify()}
 export function actionEnabled(scope,key){
  const c=contexts[scope],skill=c.skill||byId.get(current)
+ if(key==='enablebuiltin')return skill.builtin===false
+ if(key==='disablebuiltin')return skill.builtin!==false
+ if(['viewactivity','stopactivity'].includes(key))return !!c.running
+ if(key==='closeidle')return !c.running
+ if(key==='closeactive')return c.running
  if(['enable','disable','install','update','remove','confirmremove'].includes(key)&&byId.get(current).family==='skills'){
   const authorized=['有效','另一来源有效'].includes(skill.authorization)
   if(key==='enable')return authorized&&!skill.enabled
@@ -64,10 +79,14 @@ export function actionEnabled(scope,key){
  return true
 }
 const send=(type,extra={})=>{if(session)parent.postMessage({type:`product-ui-prototype:${type}`,version:1,session,epoch,scene:current,...extra},'*')}
+function publishActivity(request=null){if(session)parent.postMessage({type:'product-ui-prototype:peer',version:1,session,epoch,channel:'polo-workbench',payload:{kind:'assistant-activity',request,states:Object.fromEntries(Object.entries(contexts).map(([scope,c])=>[scope,{running:!!c.running}]))}},'*')}
 export function act(key){
  const scene=effectiveScene(),edge=scene.transitions.find(t=>t.key===key);if(!edge||!actionEnabled(scene.scope,key))return
  if(['send','answer'].includes(key)&&!canSend(scene.scope))return
  if(key==='files'&&!canRead(scene.scope))return
+ if(['send','answer'].includes(key)){contexts[scene.scope].running=true;contexts[scene.scope].runningSession=sessions[scene.scope]}
+ if(['viewactivity','stopactivity'].includes(key)&&contexts[scene.scope].runningSession)sessions[scene.scope]=contexts[scene.scope].runningSession
+ if(['stop','stopclose','stopactivity'].includes(key))contexts[scene.scope].running=false
  if(key==='network'||key==='retry'&&scene.key==='offline')contexts[scene.scope].blocks.delete('offline')
  if(key==='allow')contexts[scene.scope].blocks.delete('permission')
  if(key==='new')sessions[scene.scope]='new-'+(++counters[scene.scope])
@@ -92,6 +111,7 @@ export function act(key){
  }
  if(destination?.family==='skills'&&!context.skill&&destination.authorization)context.skill={authorization:destination.authorization,enabled:destination.enabled,device:destination.device,version:destination.version,builtin:destination.builtin!==false}
  pending=edge.to
+ publishActivity()
  send('scene-change',{scene:edge.to,from:current,transition:edge.id,reason:'action'})
  if(!session){
   if(byId.has(edge.to)){current=edge.to;const url=new URL(location.href);url.searchParams.set('scene',current);history.replaceState(null,'',url);notify()}
@@ -116,7 +136,11 @@ export function installReviewBridge(){
  const requested=resolveScene(new URLSearchParams(location.hash.slice(1)).get('scene')||new URLSearchParams(location.search).get('scene'))
  if(window===parent&&byId.has(requested)){current=requested;fixture(byId.get(current));notify()}
  window.addEventListener('message',e=>{
-  const d=e.data;if(e.source!==parent||!d||d.version!==1||typeof d.session!=='string'||d.session.length>200||!Number.isSafeInteger(d.epoch)||d.epoch<0||!byId.has(d.scene))return
+  const d=e.data;
+  if(e.source===parent&&d?.type==='product-ui-prototype:peer'&&d.version===1&&d.session===session&&d.channel==='polo-workbench'){
+   const p=d.payload;if(p?.kind==='activity-state-request'){publishActivity();return}if(p?.kind==='stop-assistant-scope'&&['personal','enterprise'].includes(p.scope)&&typeof p.request==='string'){contexts[p.scope].running=false;publishActivity(p.request);notify()}return
+  }
+  if(e.source!==parent||!d||d.version!==1||typeof d.session!=='string'||d.session.length>200||!Number.isSafeInteger(d.epoch)||d.epoch<0||!byId.has(d.scene))return
   if(!['show-scene','settings','reset','measure','reveal'].some(t=>d.type===`product-ui-prototype:${t}`)||session&&session!==d.session||d.epoch<epoch)return
   if(d.epoch>epoch&&!['show-scene','reset','measure'].some(t=>d.type===`product-ui-prototype:${t}`))return
   if(['settings','reveal','measure'].some(t=>d.type===`product-ui-prototype:${t}`)&&d.scene!==current)return
@@ -129,7 +153,7 @@ export function installReviewBridge(){
   }
   if(d.theme&&['light','dark'].includes(d.theme))settings={...settings,theme:d.theme}
   if(d.language&&['zh-CN','zh-Hans','en','es','ja','hu','de','pl'].includes(d.language))settings={...settings,language:d.language}
-  if(d.type==='product-ui-prototype:reset'){drafts.clear();submitted.clear();attachments.clear();attachmentContents.clear();pending=null;for(const scope of ['personal','enterprise']){sessions[scope]='saved';counters[scope]=0;contexts[scope].blocks.clear();contexts[scope].denied.clear();contexts[scope].role='member';contexts[scope].creditOrigin='preblock';contexts[scope].skill=null;contexts[scope].sourceStatus=null}fixture(byId.get(current));resetVersion++}
+  if(d.type==='product-ui-prototype:reset'){drafts.clear();submitted.clear();attachments.clear();attachmentContents.clear();pending=null;for(const scope of ['personal','enterprise']){sessions[scope]='saved';counters[scope]=0;contexts[scope].blocks.clear();contexts[scope].denied.clear();contexts[scope].role='member';contexts[scope].creditOrigin='preblock';contexts[scope].skill=null;contexts[scope].sourceStatus=null;contexts[scope].running=false;preferences[scope]={saved:{...preferenceDefaults},draft:{...preferenceDefaults}}}fixture(byId.get(current));resetVersion++}
   if(d.type==='product-ui-prototype:show-scene')hint=byId.get(current).transitions.some(t=>t.id===d.hint?.transition&&t.to===d.hint?.scene)?d.hint:null
   notify()
  })

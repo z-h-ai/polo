@@ -8,9 +8,10 @@ h=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 M=json.loads((B/'prototype-manifest.json').read_text())
 artifacts={str(p.relative_to(R)):h(p) for p in [B/'prototype-manifest.json',B/'prototype.html',B/'review.html',A/'prototype.html']}
 files={'structure':'structure.json','browser':'browser.json','invariants':'invariants.json','review-continuity':'review-continuity.json','semantic':'semantic.json','reproducibility':'reproducibility.json','upstream-validator':'upstream-validator.json'}
-if M['revision']=='poo70-cross-end-closure-r13':files['closure-browser']='closure-browser.json'
+if M['revision'] in ['poo70-cross-end-closure-r13','poo70-workbench-r14','poo70-workbench-r15']:files['closure-browser']='closure-browser.json'
+if M['revision'] in ['poo70-workbench-r14','poo70-workbench-r15']:files['workbench-browser']='workbench-browser.json'
 evidence={key:{'path':str((E/name).relative_to(R)),'sha256':h(E/name)} for key,name in files.items()}
-for key in ['structure','browser','invariants','review-continuity','semantic']+(['closure-browser'] if 'closure-browser' in files else []):
+for key in ['structure','browser','invariants','review-continuity','semantic']+(['closure-browser'] if 'closure-browser' in files else [])+(['workbench-browser'] if 'workbench-browser' in files else []):
  d=json.loads((E/files[key]).read_text())
  assert d.get('passed',d.get('status')=='passed'),f'{key} is not passed'
  observed=d['artifacts']
@@ -36,6 +37,11 @@ if 'closure-browser' in files:
  c=json.loads((E/'closure-browser.json').read_text());q['observed']['closure_actions']=len(c['actions']);q['observed']['closure_checks']=len(c['checks']);q['observed']['unexercised_inherited_controls']=len(c.get('unexercised_inherited_controls',[]))
  q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_closure.py']=h(B/'tools/check_closure.py')
  q['limitations'].extend(['No real support QR asset was supplied; only unconfigured/load-failed states and copy fallback were reviewed.','Payment fee/settlement ownership remains with POL-116; this prototype does not decide or validate the settlement formula.'])
+if 'workbench-browser' in files:
+ q['checks']['browser']['evidence'].append('workbench-browser')
+ w=json.loads((E/'workbench-browser.json').read_text());q['observed']['workbench_checks']=len(w['checks'])
+ q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_workbench.py']=h(B/'tools/check_workbench.py')
+ q['limitations'].extend(w.get('limitations',[]))
 if (E/'documentation-equivalence.json').exists():
  proof=E/'documentation-equivalence.json';assert json.loads(proof.read_text())['passed']
  q['evidence']['documentation-equivalence']={'path':str(proof.relative_to(R)),'sha256':h(proof)}

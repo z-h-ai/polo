@@ -14,7 +14,7 @@ def main():
  payload=subprocess.check_output(['node','--input-type=module','-e',f"import {{scenes,aliases,revision}} from {json.dumps((ASSISTANT/'src/mvp/scenes.mjs').as_uri())};console.log(JSON.stringify({{scenes,aliases,revision}}))"],text=True)
  exported=json.loads(payload);aliases=exported['aliases'];resolve=lambda s:aliases.get(s,s)
  manifest=json.loads((BUNDLE/'prototype-manifest.json').read_text())
- closure=manifest.get('review',{}) if manifest.get('review',{}).get('item')=='cross-end-closure' else None
+ closure=manifest.get('review',{}) if manifest.get('review',{}).get('item') in ['cross-end-closure','workbench-r14'] else None
  closure_change=manifest.get('change') if closure else None
  with tarfile.open(BUNDLE/'sources/pre-assistant-r12.tar.gz') as archive:
   historical=json.load(archive.extractfile('prototype-manifest.json'))
@@ -49,7 +49,7 @@ def main():
   manifest['stories'].append({'id':'AS-'+key,'title':title,'description':'新助手基线的 MVP 连续走查；前后步仅浏览状态。','steps':[{'id':f'AS-{key}-{i+1}','scene':k if k.startswith('P-') else f'A-{scope}-{k}','description':k} for i,k in enumerate(keys)]})
  story('personal','助手 · 个人会话与恢复','personal',['P-M03-HOME-PERSONAL','new','generating','stopped','question','reopen','answered','files','viewer','missing','reselected'])
  story('enterprise','助手 · 企业隔离与额度','enterprise',['P-M03-HOME-ENT','new','generating','question','deferred','notify','notified','budget','budgetowner','P-M09-BROWSER-MENU-ENT','ownerresumed'])
- for scope in ['personal','enterprise']:story('skills-'+scope,'助手 · 技能获取、启用与设备准备 · '+scope,scope,['discover','acquire','enabledpending','installing','enabled','detail','updated','updatefailed','remove','uninstalled','restricted','reauthorized','sources','sourceauth','sourcefailed','sourcedenied'])
+ for scope in ['personal','enterprise']:story('skills-'+scope,'Polo 技能 · 获取、启用与设备准备 · '+scope,scope,['discover','acquire','enabledpending','installing','enabled','detail','updated','updatefailed','remove','uninstalled','restricted','reauthorized','sources','sourceauth','sourcefailed','sourcedenied'])
  story('credits','助手 · 充值后主动恢复','personal',['preblock','P-M09-BROWSER','checking','notyet','queryfailed','resumed','generating','cut','P-M09-BROWSER-STREAM','checking','resumed'])
  byid={s['id']:s for s in manifest['scenes']}
  entries={resolve(e['scene']):e for e in manifest.get('review_entries',[]) if resolve(e['scene']) in ids}
@@ -59,6 +59,9 @@ def main():
   for i,step in enumerate(st['steps']):
    if i and not any(t['to']==step['scene'] for t in byid[st['steps'][i-1]['scene']]['transitions']):
     step['arrival']='review';entries.setdefault(step['scene'],{'scene':step['scene'],'reason':'浏览系统结果或跨端状态。'})
+ for st in manifest['stories']:
+  for step in st['steps']:
+   if step.get('arrival')=='review':entries.setdefault(step['scene'],{'scene':step['scene'],'reason':'查看本轮页面或系统结果，不触发业务动作。'})
  manifest['review_entries']=list(entries.values())
  # Bind current input sources; old prototype snapshots are history, not requirements.
  manifest['sources']=[s for s in manifest['sources'] if not s['id'].startswith('assistant-r12-')]
@@ -69,7 +72,7 @@ def main():
    source['path']='docs/mvp-complete-flow-hifi/sources/renderer-index.css';source['label']='固定 Renderer 01f4447c 样式快照（非当前工作树）'
  for source in manifest['design']['sources']:
   if source['path']=='apps/electron/src/renderer/index.css':source['path']='docs/mvp-complete-flow-hifi/sources/renderer-index.css'
- manifest['design']['sha256']=digest(ROOT/manifest['design']['skill_path']);manifest['design']['revision']='poo70-assistant-unified-r12：助手引用新基线；非助手沿用 G4'
+ manifest['design']['sha256']=digest(ROOT/manifest['design']['skill_path']);manifest['design']['revision']=exported['revision']+'：助手源组件与 G4 历史基线；当前共用 workbench-review 设计提案'
  manifest['change']={'summary':'统一入口选择 MVP 或新助手；旧助手退为历史，兼容链接仍可到达。新增布局与状态待复看。','changed_scenes':sorted(ids),'removed_scenes':sorted(set(before)-ids)}
  manifest['summary']=['统一入口，两份产品表面。','助手源码是助手的唯一维护来源。','业务规则沿用已接受 Spec；新增布局待复看。']
  brief={'source':'assistant-r12-review','item':'assistant-unified-entry','revision':exported['revision'],'current':'助手组件来自固定 Renderer 转译基线；现有 MVP 旧助手已退出当前参考。','target':'同一入口走查两份产品表面；新基线补齐会话、技能、数据源、文件与积分恢复。','reason':'消除两份助手参考并补齐已确认 MVP 状态。','question':'新助手布局、状态区分与失败恢复是否清晰？新增设计待复看。'}
@@ -79,6 +82,9 @@ def main():
   for t in s['transitions']:
    if t['to'] not in ids:raise ValueError((s['id'],t['to']))
  if closure:
+  if closure['item']=='workbench-r14':
+   review_path=BUNDLE/'sources/workbench-r14-review.json';review_path.write_text(json.dumps(closure,ensure_ascii=False,indent=2)+'\n')
+   manifest['sources']=[x for x in manifest['sources'] if x['id']!='workbench-r14-review']+[{'id':'workbench-r14-review','path':str(review_path.relative_to(ROOT)),'label':'工作台与全端 UI/UX 复看范围（派生摘要）','revision':closure['revision'],'sha256':digest(review_path)}]
   manifest['review']=closure;manifest['revision']=closure['revision'];manifest['change']=closure_change;manifest['summary']=[closure_change['summary']]
  for source in manifest['sources']:
   if source['path']=='docs/client-journey-review/spec.md':source['sha256']=digest(ROOT/source['path'])
@@ -86,6 +92,9 @@ def main():
  (BUNDLE/'prototype-manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
  (BUNDLE/'review.html').write_text((BUNDLE/'tools/review-shell.html').read_text().replace('__MANIFEST__',encoded))
  product=(BUNDLE/'prototype.html').read_text()
+ shared_style=ROOT/'.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css'
+ product=re.sub(r'<style id="workbench-review-style">[\s\S]*?</style>','',product)
+ product=product.replace('</head>','<style id="workbench-review-style">'+shared_style.read_text()+'</style></head>')
  for suffix,title in [('OWNER','企业充值'),('BUDGET','企业预算')]:
   sid='P-M09-BROWSER-'+suffix
   if 'data-prototype-scene="'+sid+'"' not in product:

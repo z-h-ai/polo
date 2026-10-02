@@ -1,0 +1,9 @@
+{
+  "source": "workbench-r14-review",
+  "item": "workbench-r14",
+  "revision": "poo70-workbench-r15",
+  "current": "r14 布局尚未接受；用户要求移除突兀的紫色导航并优化全部 UI/UX。",
+  "target": "统一客户端导航、密度、表单、列表、详情、弹窗和异常恢复；保留已确认业务规则。",
+  "reason": "本卡最新视觉反馈与完整客户端优化要求。",
+  "question": "全端层级、主次操作与反馈是否清晰一致？本轮页面待复看。"
+}

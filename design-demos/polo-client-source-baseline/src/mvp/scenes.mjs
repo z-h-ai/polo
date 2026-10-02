@@ -1,6 +1,6 @@
 // Single authority for prototype routes, fixtures and real product operations.
 // Product rules: PC-F04/07/08/10, PC-N03/04, C-R05/07; see docs/client-journey-review/spec.md (the sole product SoT).
-export const revision = 'poo70-assistant-unified-r12'
+export const revision = 'poo70-workbench-r15'
 export const id = (scope, key) => `A-${scope}-${key}`
 export const scenes = []
 const row = (scope, key, title, family, options = {}) => {
@@ -211,5 +211,37 @@ for(const s of scenes){
  if(s.key==='budget')for(const t of s.transitions)if(t.key==='notify')t.to=id('enterprise','budgetnotified')
  if(s.key==='ownerblock')for(const t of s.transitions)if(t.key==='query')t.to=id('enterprise','ownerchecking')
 }
+// r14: platform chrome and resource management are outside assistant chat.
+for(const scope of ['personal','enterprise']){
+ const home=scope==='personal'?'P-M03-HOME-PERSONAL':'P-M03-HOME-ENT'
+ const activity=row(scope,'activity','助手任务','activity');activity.module='M04';activity.journey='J-PC-07';edge(activity,'viewactivity','返回原会话',id(scope,'generating'));edge(activity,'stopactivity','停止任务',id(scope,'stopped'));
+ row(scope,'preferences','助手偏好','preferences')
+ row(scope,'preferences-savefailed','助手偏好保存失败','preferences')
+ for(const [key,title] of [['close','关闭 Polo 助手'],['closefailed','未能停止任务']]){
+  const c=row(scope,key,title,'close');c.module='M04';c.journey='J-PC-07'
+  edge(c,'background','后台继续',home);edge(c,'stopclose',key==='closefailed'?'重试停止并关闭':'停止并关闭',home);edge(c,'cancelclose','取消',id(scope,'generating'))
+ }
+}
+for(const s of scenes){
+ const home=s.scope==='personal'?'P-M03-HOME-PERSONAL':'P-M03-HOME-ENT'
+ if(!s.transitions.some(t=>t.key==='home'))edge(s,'home','首页',home,'host')
+ const host=(key,label,target)=>{if(!s.transitions.some(t=>t.key===key))edge(s,key,label,target,'chrome')}
+ host('account','打开账号菜单',s.scope==='personal'?'P-M10-MENU':'P-M10-MENU-ENT')
+ host('runtime','后台任务',id(s.scope,'activity'))
+ host('notification','通知',s.scope==='personal'?'P-M04-NOTIFY-PERSONAL':'P-M04-NOTIFY-ENT')
+ if(s.family!=='skills'&&s.family!=='close'){
+  host('closeidle','关闭助手标签',home);host('closeactive','关闭助手标签',id(s.scope,'close'))
+  host('preferences',s.family==='preferences'?'返回助手':'助手偏好',id(s.scope,s.family==='preferences'?'new':'preferences'))
+ }
+ if(s.family==='skills'){
+  for(const t of s.transitions)if(['enablebuiltin','disablebuiltin'].includes(t.key))t.area='builtin'
+  if(!s.transitions.some(t=>t.key==='enablebuiltin'))edge(s,'enablebuiltin','启用内置技能',id(s.scope,'builtinon'),'builtin')
+  if(!s.transitions.some(t=>t.key==='disablebuiltin'))edge(s,'disablebuiltin','停用内置技能',id(s.scope,'builtinoff'),'builtin')
+  s.title=s.title.replace('技能','技能')
+  host('assistant','打开 Polo 助手',id(s.scope,'conversation'))
+  if(s.scope==='personal')host('circles','圈子','P-M07-LIST')
+ }
+}
+
 export const byId = new Map(scenes.map(s=>[s.id,s]))
 export function resolveScene(value){return aliases[value]||value}

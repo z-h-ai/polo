@@ -1,7 +1,7 @@
 {
   "source": "assistant-r12-review",
   "item": "assistant-unified-entry",
-  "revision": "poo70-assistant-unified-r12",
+  "revision": "poo70-workbench-r15",
   "current": "助手组件来自固定 Renderer 转译基线；现有 MVP 旧助手已退出当前参考。",
   "target": "同一入口走查两份产品表面；新基线补齐会话、技能、数据源、文件与积分恢复。",
   "reason": "消除两份助手参考并补齐已确认 MVP 状态。",

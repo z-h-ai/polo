@@ -301,6 +301,12 @@ window.addEventListener('resize',()=>{fit(viewCenter);renderFlowNav()});
 /* ======================= surface message intake ======================= */
 const validRect=r=>r&&['x','y','width','height'].every(k=>typeof r[k]==='number'&&Number.isFinite(r[k])&&Math.abs(r[k])<1e7)&&r.width>=0&&r.height>=0;
 window.addEventListener('message',event=>{
+ // Transport only: each product surface owns its state and validates peer commands.
+ const peer=event.data;
+ if(peer?.type==='product-ui-prototype:peer'){
+  if(peer.version!==1||peer.session!==session||peer.channel!=='polo-workbench'||![...frames.values()].some(f=>f.contentWindow===event.source)||!Number.isSafeInteger(peer.epoch)||peer.epoch>epoch||!peer.payload||JSON.stringify(peer.payload).length>4096)return;
+  frames.forEach(f=>{if(f.contentWindow!==event.source)f.contentWindow.postMessage(peer,'*')});return;
+ }
  if(event.source!==frame.contentWindow)return;const d=event.data;if(!d||d.version!==1||d.session!==session||d.epoch!==epoch||!byScene.has(d.scene))return;
  if(d.type==='product-ui-prototype:scene-change'){
   if(d.reason==='action'){if(d.from!==currentScene||!byScene.get(d.from).transitions.some(e=>e.id===d.transition&&e.to===d.scene))return;

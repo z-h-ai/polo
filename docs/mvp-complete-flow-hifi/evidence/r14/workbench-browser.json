@@ -1,0 +1,208 @@
+{
+  "revision": "poo70-workbench-r14",
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "a5b78ef3994e3f26e2852ba29a049211a56bdb9c5326c954576455757dcd1c90",
+    "docs/mvp-complete-flow-hifi/prototype.html": "44e4302d617ab8f9f982fa4994eeed8f598dbffca2c5f253a6499b4a8d949fd9",
+    "docs/mvp-complete-flow-hifi/review.html": "64ae6f8dc156b1dc935001df29c0bde27d91aab592a364a593d79a39eea53268",
+    "design-demos/polo-client-source-baseline/prototype.html": "1d4dd957a5db933653d22cfcf5d5a48880a49222d31c5f7e02e604bb0c42d952"
+  },
+  "checks": [
+    {
+      "name": "assistant permanently first",
+      "passed": true
+    },
+    {
+      "name": "search empty feedback",
+      "passed": true
+    },
+    {
+      "name": "all owned apps discoverable",
+      "passed": true
+    },
+    {
+      "name": "source filter includes deduplicated shared app",
+      "passed": true
+    },
+    {
+      "name": "circle opening updates home recency",
+      "passed": true
+    },
+    {
+      "name": "P-M03-HOME-ZERO no manual favorites",
+      "passed": true
+    },
+    {
+      "name": "P-M03-HOME-EMPTY-DIR no manual favorites",
+      "passed": true
+    },
+    {
+      "name": "P-M03-HOME-LOAD-FAIL no manual favorites",
+      "passed": true
+    },
+    {
+      "name": "enterprise no circle entry",
+      "passed": true
+    },
+    {
+      "name": "enterprise no personal resources",
+      "passed": true
+    },
+    {
+      "name": "future expiry is not revoked",
+      "passed": true
+    },
+    {
+      "name": "valid circles filter",
+      "passed": true
+    },
+    {
+      "name": "paid circle exit keeps identity",
+      "passed": true
+    },
+    {
+      "name": "global device settings shared across spaces",
+      "passed": true
+    },
+    {
+      "name": "preference values survive category change",
+      "passed": true
+    },
+    {
+      "name": "assistant preferences isolated",
+      "passed": true
+    },
+    {
+      "name": "cancel dirty leave retains draft",
+      "passed": true
+    },
+    {
+      "name": "built-in has own details",
+      "passed": true
+    },
+    {
+      "name": "built-in toggle affects built-in",
+      "passed": true
+    },
+    {
+      "name": "failed update keeps verified version",
+      "passed": true
+    },
+    {
+      "name": "last source blocks invocation",
+      "passed": true
+    },
+    {
+      "name": "assistant retains host bar",
+      "passed": true
+    },
+    {
+      "name": "background task remains discoverable",
+      "passed": true
+    },
+    {
+      "name": "background returns original content",
+      "passed": true
+    },
+    {
+      "name": "stopped activity clears running state",
+      "passed": true
+    },
+    {
+      "name": "P-M03-HOME-PERSONAL 1440 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-new 1440 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-detail 1440 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M07-LIST 1440 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M10-SETTINGS 1440 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-preferences 1440 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M03-HOME-PERSONAL 1024 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-new 1024 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-detail 1024 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M07-LIST 1024 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M10-SETTINGS 1024 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-preferences 1024 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M03-HOME-PERSONAL 800 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-new 800 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-detail 800 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M07-LIST 800 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "P-M10-SETTINGS 800 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "A-personal-preferences 800 no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "narrow skill drilldown",
+      "passed": true
+    },
+    {
+      "name": "narrow list return preserves filter",
+      "passed": true
+    },
+    {
+      "name": "large app collection scrolls vertically",
+      "passed": true
+    },
+    {
+      "name": "many circles scroll vertically",
+      "passed": true
+    },
+    {
+      "name": "many skills scroll within list",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "limitations": [
+    "Prototype data only; scaled DOM fixtures verify layout, not product capacity or authorization."
+  ],
+  "passed": true
+}

@@ -1,4 +1,4 @@
-# 当前 r12 来源与设计差异
+# 当前 r15 来源与设计差异
 
 固定 Renderer 来源：`01f4447cf77612ca2c62d9c7155601a51bdb7b5b`（证据见 SOURCE-EVIDENCE.md）。用户指定 Chat 基线已经删除整端标签栏、账号页脚、首页；本轮不把这些删改当真实客户端现状。
 
@@ -11,7 +11,7 @@
 | 场景、兼容 ID、真实操作 | `src/mvp/scenes.mjs` | 本轮补充；依据当前 Spec PC-F04/07/08/10、PC-N03/04。旧分享/审核提案未作为已确认 MVP 迁移 |
 | 会话与阻断的连续性 | `src/mvp/runtime.js` | 离线演示状态；空间+会话隔离，费用/离线/权限限制不能因导航清除；没有业务 API |
 
-产品规则只维护于 [客户端 SoT](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fclient-journey-review%2Fspec.md)；完整场景映射由源码导出到 [prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)，在统一原型的页面索引查看。固定源码对应组件、用户指定 Chat 壳层调整、MVP 新增设计三个层级不能混称“当前真实客户端”。新增布局均待复看。当前验证证据见 `../../docs/mvp-complete-flow-hifi/evidence/r12/`，旧 screenshots/chat-focus-r1 仅适用于旧基线修订。
+产品规则只维护于 [客户端 SoT](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fclient-journey-review%2Fspec.md)；完整场景映射由源码导出到 [prototype-manifest.json](/__notma/open-file?path=%2FUsers%2Fwow%2Fproject%2Fz-h-ai%2Fpolo-dir%2FPOO-70%2Fdocs%2Fclient-journey-policy-interview%2Fdocs%2Fmvp-complete-flow-hifi%2Fprototype-manifest.json)，在统一原型的页面索引查看。固定源码对应组件、用户指定 Chat 壳层调整、MVP 新增设计三个层级不能混称“当前真实客户端”。新增布局均待复看。当前验证证据见 `../../docs/mvp-complete-flow-hifi/evidence/r15/`，旧 screenshots/chat-focus-r1 仅适用于旧基线修订。
 
 ---
 
@@ -70,3 +70,7 @@ in this mode; their absence does not downgrade a statically derived scene. Data
 that the source cannot uniquely determine (account, organization, catalog,
 conversation and permission state) is represented only by an explicitly named,
 deterministic source-compatible fixture.
+
+本轮 D-PC-11—14 与 SoT §13 由用户同意后更新：HostChrome 为外层容器，原会话/附件组件复用；技能列表和内置详情、偏好与后台活动均从 src/mvp 导出。页面呈现待复看，非实际 Electron 验收。
+
+r15 按本卡「所有 UI/UX 优化」反馈统一容器、列表、详情、表单和恢复呈现；共享样式仅用于当前提案。跨表面活动状态由产品 runtime 拥有，切空间等待停止反馈；review 壳只传递消息。原会话组件及已确认业务规则继承；视觉尚未接受。

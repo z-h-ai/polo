@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "baselineVersion": "0.4.0-unified-mvp-r12",
+  "baselineVersion": "0.5.0-workbench-r14",
   "name": "Polo 助手 MVP · 新基线场景",
   "status": "design_prototype",
   "source": {
@@ -66,8 +66,8 @@
     ],
     "sceneCatalog": "scene-catalog.json",
     "screenshots": "screenshots/",
-    "singleFileBytes": 572442,
-    "singleFileSha256": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102",
+    "singleFileBytes": 606831,
+    "singleFileSha256": "77a88a3c9eff60f436e72c06603bef3975c740ea54b9eaf37850c74b1fac8559",
     "moduleBuild": "dist/"
   },
   "protocol": {
@@ -179,11 +179,11 @@
     ],
     "screenshotsScope": "Historical Renderer/Playground component references from the pinned baseline; not current whole-page Chat acceptance.",
     "currentScreenshots": [
-      "../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-1440x900.png",
-      "../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-1024x768.png",
-      "../../docs/mvp-complete-flow-hifi/evidence/r12/A-personal-new-desktop-800x600.png"
+      "../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-1440x900.png",
+      "../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-1024x768.png",
+      "../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-800x600.png"
     ],
-    "currentBrowserCheck": "../../docs/mvp-complete-flow-hifi/evidence/r12/browser.json",
+    "currentBrowserCheck": "../../docs/mvp-complete-flow-hifi/evidence/r14/browser.json",
     "historicalChatFocus": {
       "revision": "0.3.0-chat-focused",
       "screenshots": [

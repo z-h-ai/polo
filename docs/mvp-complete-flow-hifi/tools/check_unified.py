@@ -43,7 +43,7 @@ with sync_playwright() as p:
    scenes=M['scenes'] if not args.quick else [BY[s] for s in ['P-M03-HOME-PERSONAL','A-personal-new','A-personal-question','A-personal-detail','A-personal-preblock','P-M09-BROWSER','A-enterprise-budgetowner']]
    for scene in scenes:
     sid=scene['id'];clear(page);f=goto(page,sid)
-    if scene['surface']=='assistant' and not f.locator('.source-sidebar').count():f.get_by_role('button',name='切换侧栏').click()
+    if scene['surface']=='assistant' and f.get_by_role('button',name='切换侧栏').count() and not f.locator('.source-sidebar').count():f.get_by_role('button',name='切换侧栏').click()
     result=f.evaluate('''sid=>{
      const el=document.querySelector('[data-prototype-scene="'+sid+'"]');
      return {present:!!el,viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth+1,controls:el?[...el.querySelectorAll('[data-transition]')].map(e=>({id:e.dataset.transition,to:e.dataset.go,label:e.textContent.trim(),disabled:e.disabled})):[]}
@@ -62,18 +62,20 @@ with sync_playwright() as p:
    if args.quick and scene['key'] not in ['new','preblock','return','question','detail','restricted']:continue
    for edge in scene['transitions']:
     clear(page);f=goto(page,scene['id'])
-    if not f.locator('.source-sidebar').count():f.get_by_role('button',name='切换侧栏').click()
+    if f.get_by_role('button',name='切换侧栏').count() and not f.locator('.source-sidebar').count():f.get_by_role('button',name='切换侧栏').click()
     if edge['key'] in ['send','answer']:
      f.get_by_role('textbox',name='消息' if edge['key']=='send' else '回答问题',exact=True).fill('验证主动提交')
     try:
      if scene['key']=='sourceauth' and edge['key']=='connect':f.get_by_label('访问凭证').fill('fixture')
-     control=f.locator('[data-transition="'+edge['id']+'"]')
+     if scene['family']=='skills' and edge.get('area')=='builtin' and f.get_by_role('button',name='查看内置技能').count():f.get_by_role('button',name='查看内置技能').click()
+     if scene['family']=='skills' and edge.get('area')=='body' and f.get_by_role('button',name='查看来源技能').count():f.get_by_role('button',name='查看来源技能').click()
+     control=f.locator('[data-transition="'+edge['id']+'"]').first
      if control.is_disabled():
       report['actions'].append({'protocol':protocol,'id':edge['id'],'passed':True,'observation':'disabled in this fixture; recovery availability separately tested'});continue
      if edge['key']=='reselect':f.locator('[data-transition="'+edge['id']+'"]').set_input_files({'name':'新材料.txt','mimeType':'text/plain','buffer':b'new attachment'})
      else:
       if scene['key']=='sourceauth' and edge['key']=='connect':f.get_by_label('访问凭证').fill('fixture')
-      f.locator('[data-transition="'+edge['id']+'"]').evaluate('(el)=>el.click()')
+      control.evaluate('(el)=>el.click()')
      page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=edge['to'],timeout=2500)
      target=active(page);target.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=edge['to'],timeout=2500)
      report['actions'].append({'protocol':protocol,'id':edge['id'],'to':edge['to'],'passed':True})
