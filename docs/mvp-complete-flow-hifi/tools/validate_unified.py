@@ -3,7 +3,7 @@
 The upstream v3 validator requires one static surface and rejects extra fields;
 this local contract checks actual ownership, source exports and browser evidence.
 """
-import argparse,hashlib,json,re,subprocess
+import argparse,hashlib,json,re,subprocess,tarfile
 from html.parser import HTMLParser
 from pathlib import Path
 import os
@@ -20,7 +20,12 @@ exported=json.loads(subprocess.check_output(['node','--input-type=module','-e',f
 ids={s['id'] for s in M['scenes']};byid={s['id']:s for s in M['scenes']};edges=[t for s in M['scenes'] for t in s['transitions']]
 check('unique scenes',len(ids)==len(M['scenes']));check('unique transitions',len({t['id'] for t in edges})==len(edges));check('known transition destinations',all(t['to'] in ids for t in edges));check('source exported assistant scenes exact',[s for s in M['scenes'] if s['surface']=='assistant']==exported['scenes']);check('source exported compatibility exact',M['aliases']==exported['aliases']);check('aliases point to active assistant',all(t in ids and byid[t]['surface']=='assistant' for t in M['aliases'].values()))
 check('embedded review matches manifest',embedded(B/'review.html')==M);check('embedded mvp matches manifest',embedded(B/'prototype.html')==M)
-for source in M['sources']:check('source '+source['id'],digest(R/source['path'])==source['sha256'])
+for source in M['sources']:
+ check('source '+source['id'],digest(R/source['path'])==source['sha256'])
+ if 'archive_member' in source:
+  with tarfile.open(R/source['path']) as archive:
+   member=archive.extractfile(source['archive_member'])
+   check('archived source '+source['id'],member is not None and hashlib.sha256(member.read()).hexdigest()==source['archive_member_sha256'])
 check('design skill binding',digest(R/M['design']['skill_path'])==M['design']['sha256'])
 for source in M['design']['sources']:check('design '+source['path'],digest(R/source['path'])==source['sha256'])
 class Inventory(HTMLParser):

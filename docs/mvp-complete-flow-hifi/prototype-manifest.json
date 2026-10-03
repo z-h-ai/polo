@@ -41287,24 +41287,30 @@
   "sources": [
     {
       "id": "poo70-spec",
-      "label": "历史追溯（非当前需求）：POO-70 客户端产品与用户流程说明",
-      "path": "docs/mvp-complete-flow-hifi/sources/poo70-spec.md",
+      "label": "历史归档（非当前需求）：POO-70 客户端产品与用户流程说明",
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
       "revision": "master-r10（2026-09-17）",
-      "sha256": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871"
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/poo70-spec.md",
+      "archive_member_sha256": "a761d200b1449acef9f71c928646c5d477cdc5bce6a6630e2ac97325a70cb871"
     },
     {
       "id": "poo70-module-review",
-      "label": "历史追溯（非当前需求）：POO-70 模块评审（M01—M11 当前源码与差异）",
-      "path": "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md",
+      "label": "历史归档（非当前需求）：POO-70 模块评审（M01—M11 当前源码与差异）",
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
       "revision": "poo70 已确认结论快照（2026-09，sources/poo70-spec.md）",
-      "sha256": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f"
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/poo70-module-review.md",
+      "archive_member_sha256": "69019a092944f5dc55feb26b7348563c041320711e85162785abbc123f3c616f"
     },
     {
       "id": "poo70-delta-review",
-      "label": "历史追溯（非当前需求）：POO-70 实现差异评审（集成候选 C-INT）",
-      "path": "docs/mvp-complete-flow-hifi/sources/poo70-implementation-delta-review.md",
+      "label": "历史归档（非当前需求）：POO-70 实现差异评审（集成候选 C-INT）",
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
       "revision": "poo70 已确认结论快照（2026-09，sources/poo70-spec.md）",
-      "sha256": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540"
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/poo70-implementation-delta-review.md",
+      "archive_member_sha256": "6d46787dccc2769bf2acd7625ad1aad8ce7509548e8042d12706dda2dc59b540"
     },
     {
       "id": "prototype-v1",
@@ -41350,17 +41356,21 @@
     },
     {
       "id": "dpc07-source",
-      "label": "D-PC-07 确认原话与边界（user-decision-r8）",
-      "path": "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md",
+      "label": "历史归档（非当前需求）：D-PC-07 确认原话与边界（user-decision-r8）",
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
       "revision": "user-decision-r8（2026-09-16）",
-      "sha256": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46"
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/user-decision-r8.md",
+      "archive_member_sha256": "8602918997cdee8488d463e9dc92a585ded3498a9ae5c1a9083f020d4d764a46"
     },
     {
       "id": "dpc08-source",
-      "label": "D-PC-08 主说明与共享边界整理依据",
-      "path": "docs/client-journey-review/sources/user-decision-r9.md",
+      "label": "历史归档（非当前需求）：D-PC-08 主说明与共享边界整理依据",
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
       "revision": "user-decision-r9（2026-09-17）",
-      "sha256": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668"
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/client-journey-review/sources/user-decision-r9.md",
+      "archive_member_sha256": "89f3fdad774948e12e15bd7f149e13b9bf0a9a707e711aae83c4ed9599c22668"
     },
     {
       "id": "prototype-before-master-r9",
@@ -41378,10 +41388,12 @@
     },
     {
       "id": "dpc09-source",
-      "label": "D-PC-09 多圈分发用户确认",
-      "path": "docs/client-journey-review/sources/user-decision-r10.md",
+      "label": "历史归档（非当前需求）：D-PC-09 多圈分发用户确认",
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
       "revision": "user-decision-r10（2026-09-16）",
-      "sha256": "6632e91ffc8bff40d2a877e41a939f843a1ffdc1197fea9083cf372877395e44"
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/client-journey-review/sources/user-decision-r10.md",
+      "archive_member_sha256": "6632e91ffc8bff40d2a877e41a939f843a1ffdc1197fea9083cf372877395e44"
     },
     {
       "id": "prototype-before-master-r10",
@@ -41399,10 +41411,12 @@
     },
     {
       "id": "desktop-brief-r6",
-      "label": "本轮用户输入、调研与推荐",
+      "label": "历史归档（非当前需求）：本轮用户输入、调研与推荐",
       "revision": "desktop-ux-r6",
-      "path": "docs/mvp-complete-flow-hifi/sources/desktop-container-brief-r6.md",
-      "sha256": "c835871be3cde862ded03f91e1af3caf25ad075e626868a3d6fd19bef3f9b5d8"
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/desktop-container-brief-r6.md",
+      "archive_member_sha256": "c835871be3cde862ded03f91e1af3caf25ad075e626868a3d6fd19bef3f9b5d8"
     },
     {
       "id": "desktop-review-r6",
@@ -41413,38 +41427,46 @@
     },
     {
       "id": "mac-window-controls-r7",
-      "label": "用户要求：Mac 窗口按钮",
+      "label": "历史归档（非当前需求）：用户要求：Mac 窗口按钮",
       "revision": "r7-2026-09-21",
-      "path": "docs/mvp-complete-flow-hifi/sources/mac-window-controls-r7.md",
-      "sha256": "38c62cdb288ad039d0cef9337645bba5fefcbc99b3d61971126dfceac21b5f8a"
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/mac-window-controls-r7.md",
+      "archive_member_sha256": "38c62cdb288ad039d0cef9337645bba5fefcbc99b3d61971126dfceac21b5f8a"
     },
     {
       "id": "tab-close-alignment-r8",
-      "label": "用户反馈：关闭标签对齐",
+      "label": "历史归档（非当前需求）：用户反馈：关闭标签对齐",
       "revision": "r8-2026-09-21",
-      "path": "docs/mvp-complete-flow-hifi/sources/tab-close-alignment-r8.md",
-      "sha256": "46c93f40b2a7a8e185c574683c62e47d79f3a8a0af0455102aae9d50231f56d6"
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/tab-close-alignment-r8.md",
+      "archive_member_sha256": "46c93f40b2a7a8e185c574683c62e47d79f3a8a0af0455102aae9d50231f56d6"
     },
     {
       "id": "space-entry-in-account-r9",
-      "label": "用户确认：切换空间移入头像菜单",
+      "label": "历史归档（非当前需求）：用户确认：切换空间移入头像菜单",
       "revision": "r9-2026-09-21",
-      "path": "docs/mvp-complete-flow-hifi/sources/space-entry-in-account-r9.md",
-      "sha256": "31d4c45a1ea2923187167658b623330f839078a4a533b709acaa9948425bb09c"
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/space-entry-in-account-r9.md",
+      "archive_member_sha256": "31d4c45a1ea2923187167658b623330f839078a4a533b709acaa9948425bb09c"
     },
     {
       "id": "revoked-space-menu-r10",
-      "label": "用户讨论：失权空间是否保留菜单项",
+      "label": "历史归档（非当前需求）：用户讨论：失权空间是否保留菜单项",
       "revision": "r10-2026-09-21",
-      "path": "docs/mvp-complete-flow-hifi/sources/revoked-space-menu-r10.md",
-      "sha256": "6d427ab39e1ed22ddc97c40ecfa101aa9adeaf2f23446d4344ff5ba964a487e0"
+      "path": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+      "sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+      "archive_member": "docs/mvp-complete-flow-hifi/sources/revoked-space-menu-r10.md",
+      "archive_member_sha256": "6d427ab39e1ed22ddc97c40ecfa101aa9adeaf2f23446d4344ff5ba964a487e0"
     },
     {
       "id": "poo70-current-spec-terminology",
       "label": "当前唯一客户端产品说明",
       "path": "docs/client-journey-review/spec.md",
-      "revision": "master-r15-prd-sync（2026-10-03）",
-      "sha256": "4853853621280894296359507ae8892cfbe730afd9692f5058a18bd087606a4a"
+      "revision": "master-r15-sot-cleanup（2026-10-03）",
+      "sha256": "4e74c849b07614550576db6b60aba098a5b54a7a3519f2202a975855dd2b6c94"
     },
     {
       "id": "skill-terminology-review-r11",

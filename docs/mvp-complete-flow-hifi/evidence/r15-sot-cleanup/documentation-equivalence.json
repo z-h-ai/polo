@@ -1,0 +1,35 @@
+{
+  "passed": true,
+  "scope": "Single product SoT cleanup; byte-preserved history relocation and source bindings, no new browser/semantic acceptance",
+  "archive": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.tar.gz",
+  "archive_sha256": "d3adbab63c99a37d794110f65cb685efa0e81144a965dd55a5612c3333a9af58",
+  "index": "docs/mvp-complete-flow-hifi/sources/document-history-20261003.json",
+  "prior_quality_sha256": "b0f4b4dc22a791eed9f76a310bcb4c2b3b133b24a244785b4557aad2477a626c",
+  "archived_member_count": 107,
+  "removed_file_count": 99,
+  "rebound_sources": [
+    "poo70-spec",
+    "poo70-module-review",
+    "poo70-delta-review",
+    "dpc07-source",
+    "dpc08-source",
+    "dpc09-source",
+    "desktop-brief-r6",
+    "mac-window-controls-r7",
+    "tab-close-alignment-r8",
+    "space-entry-in-account-r9",
+    "revoked-space-menu-r10"
+  ],
+  "checks": {
+    "all_archive_members_byte_verified": true,
+    "removed_files_absent": true,
+    "manifest_only_document_source_bindings_changed": true,
+    "docs/mvp-complete-flow-hifi/prototype.html_outside_manifest_byte_identical": true,
+    "docs/mvp-complete-flow-hifi/review.html_outside_manifest_byte_identical": true,
+    "validator_only_adds_archive_member_verification": true,
+    "all_other_bound_runtime_sources_unchanged": true,
+    "prior_raw_evidence_unchanged": true
+  },
+  "preserved_scene_count": 365,
+  "preserved_alias_count": 95
+}
