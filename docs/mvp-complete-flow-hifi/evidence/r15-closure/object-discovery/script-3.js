@@ -1,0 +1,2 @@
+
+document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy-support]');if(!button)return;const section=button.closest('[data-prototype-scene]'),field=section.querySelector('[data-support-info]'),status=section.querySelector('[data-copy-status]');try{await navigator.clipboard.writeText(field.value);status.textContent='问题信息已复制，请自行提供给客服。'}catch(error){field.focus();field.select();status.textContent='无法自动复制，已选中信息，请手动复制。'}});

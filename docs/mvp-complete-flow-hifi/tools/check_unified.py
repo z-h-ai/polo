@@ -72,15 +72,16 @@ with sync_playwright() as p:
      control=f.locator('[data-transition="'+edge['id']+'"]').first
      if control.is_disabled():
       report['actions'].append({'protocol':protocol,'id':edge['id'],'passed':True,'observation':'disabled in this fixture; recovery availability separately tested'});continue
-     if edge['key']=='reselect':f.locator('[data-transition="'+edge['id']+'"]').set_input_files({'name':'新材料.txt','mimeType':'text/plain','buffer':b'new attachment'})
+     if edge['key']=='select-import':f.locator('[data-transition="'+edge['id']+'"]').set_input_files({'name':'allowed.json','mimeType':'application/json','buffer':json.dumps({'format':'polo-conversation-content-v1','messages':[{'role':'user','text':'独立导入样例'}]}).encode()})
+     elif edge['key']=='reselect':f.locator('[data-transition="'+edge['id']+'"]').set_input_files({'name':'新材料.txt','mimeType':'text/plain','buffer':b'new attachment'})
      else:
       if scene['key']=='sourceauth' and edge['key']=='connect':f.get_by_label('访问凭证').fill('fixture')
       control.evaluate('(el)=>el.click()')
-     page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=edge['to'],timeout=2500)
-     target=active(page);target.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=edge['to'],timeout=2500)
+     page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=edge['to'],timeout=8000)
+     target=active(page);target.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=edge['to'],timeout=8000)
      report['actions'].append({'protocol':protocol,'id':edge['id'],'to':edge['to'],'passed':True})
     except Exception as e:
-     report['actions'].append({'protocol':protocol,'id':edge['id'],'passed':False,'error':str(e)[:200]});print('ACTION FAIL',edge['id'],flush=True)
+     report['actions'].append({'protocol':protocol,'id':edge['id'],'passed':False,'error':str(e)[:200]});print('ACTION FAIL',edge['id'],str(e)[:400],flush=True)
   # Story browsing never submits a draft or triggers a product operation.
   for story in M['stories']:
    page.evaluate('(id)=>location.hash="story="+id',story['id']);page.wait_for_timeout(25)

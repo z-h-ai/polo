@@ -1,0 +1,402 @@
+[
+  {
+    "step": "import-1-preview",
+    "text": "P\nPolo\n首页\nPolo 助手\n我的空间\n确认导入\n\n我的空间 · 原对话保持不变\n\n将导入 1 条消息，建立独立新对话；不会运行原任务或继承源空间权限。\n\n用户：独立对象1金色鹦鹉\n确认导入\n取消导入",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "确认导入",
+        "disabled": false,
+        "go": "A-personal-transfer-done"
+      },
+      {
+        "text": "取消导入",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      }
+    ]
+  },
+  {
+    "step": "import-1-result",
+    "text": "P\nPolo\n首页\nPolo 助手\n我的空间\n已建立导入对话\n\n我的空间 · 原对话保持不变\n\n已在当前空间建立「同名材料」，包含 1 条消息。 原数据源和工具尚未获得授权；没有自动执行任务。\n\n打开导入对话\n返回对话",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "打开导入对话",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      },
+      {
+        "text": "返回对话",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      }
+    ]
+  },
+  {
+    "step": "import-1-opened",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n独立对象1金色鹦鹉\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "×",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "后台任务",
+        "disabled": false,
+        "go": "A-personal-activity"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": "P-M04-NOTIFY-PERSONAL"
+      },
+      {
+        "text": "王",
+        "disabled": false,
+        "go": "P-M10-MENU"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": null
+      },
+      {
+        "text": "新建会话",
+        "disabled": false,
+        "go": "A-personal-new"
+      },
+      {
+        "text": "技能",
+        "disabled": false,
+        "go": "A-personal-skills"
+      },
+      {
+        "text": "数据源",
+        "disabled": false,
+        "go": "A-personal-sources"
+      },
+      {
+        "text": "个人资料整理",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      },
+      {
+        "text": "查看会话文件",
+        "disabled": false,
+        "go": "A-personal-files"
+      },
+      {
+        "text": "",
+        "disabled": true,
+        "go": "A-personal-generating"
+      },
+      {
+        "text": "助手偏好",
+        "disabled": false,
+        "go": "A-personal-preferences"
+      }
+    ]
+  },
+  {
+    "step": "import-1-all-sessions",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "×",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "后台任务",
+        "disabled": false,
+        "go": "A-personal-activity"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": "P-M04-NOTIFY-PERSONAL"
+      },
+      {
+        "text": "王",
+        "disabled": false,
+        "go": "P-M10-MENU"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": null
+      },
+      {
+        "text": "新建会话",
+        "disabled": false,
+        "go": "A-personal-new"
+      },
+      {
+        "text": "技能",
+        "disabled": false,
+        "go": "A-personal-skills"
+      },
+      {
+        "text": "数据源",
+        "disabled": false,
+        "go": "A-personal-sources"
+      },
+      {
+        "text": "个人资料整理",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      },
+      {
+        "text": "查看会话文件",
+        "disabled": false,
+        "go": "A-personal-files"
+      },
+      {
+        "text": "",
+        "disabled": true,
+        "go": "A-personal-generating"
+      },
+      {
+        "text": "助手偏好",
+        "disabled": false,
+        "go": "A-personal-preferences"
+      }
+    ]
+  },
+  {
+    "step": "import-1-return-import",
+    "text": "P\nPolo\n首页\nPolo 助手\n我的空间\n导入对话内容\n\n我的空间 · 原对话保持不变\n\n选择已导出的对话文件。先核对可导入内容，确认后才在当前空间建立新对话。\n\n选择导出文件\n返回原对话",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "返回原对话",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      }
+    ]
+  },
+  {
+    "step": "import-2-preview",
+    "text": "P\nPolo\n首页\nPolo 助手\n我的空间\n确认导入\n\n我的空间 · 原对话保持不变\n\n将导入 1 条消息，建立独立新对话；不会运行原任务或继承源空间权限。\n\n用户：独立对象2金色鹦鹉\n确认导入\n取消导入",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "确认导入",
+        "disabled": false,
+        "go": "A-personal-transfer-done"
+      },
+      {
+        "text": "取消导入",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      }
+    ]
+  },
+  {
+    "step": "import-2-result",
+    "text": "P\nPolo\n首页\nPolo 助手\n我的空间\n已建立导入对话\n\n我的空间 · 原对话保持不变\n\n已在当前空间建立「同名材料」，包含 1 条消息。 原数据源和工具尚未获得授权；没有自动执行任务。\n\n打开导入对话\n返回对话",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "打开导入对话",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      },
+      {
+        "text": "返回对话",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      }
+    ]
+  },
+  {
+    "step": "import-2-opened",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n独立对象2金色鹦鹉\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "×",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "后台任务",
+        "disabled": false,
+        "go": "A-personal-activity"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": "P-M04-NOTIFY-PERSONAL"
+      },
+      {
+        "text": "王",
+        "disabled": false,
+        "go": "P-M10-MENU"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": null
+      },
+      {
+        "text": "新建会话",
+        "disabled": false,
+        "go": "A-personal-new"
+      },
+      {
+        "text": "技能",
+        "disabled": false,
+        "go": "A-personal-skills"
+      },
+      {
+        "text": "数据源",
+        "disabled": false,
+        "go": "A-personal-sources"
+      },
+      {
+        "text": "个人资料整理",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      },
+      {
+        "text": "查看会话文件",
+        "disabled": false,
+        "go": "A-personal-files"
+      },
+      {
+        "text": "",
+        "disabled": true,
+        "go": "A-personal-generating"
+      },
+      {
+        "text": "助手偏好",
+        "disabled": false,
+        "go": "A-personal-preferences"
+      }
+    ]
+  },
+  {
+    "step": "import-2-all-sessions",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "×",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "后台任务",
+        "disabled": false,
+        "go": "A-personal-activity"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": "P-M04-NOTIFY-PERSONAL"
+      },
+      {
+        "text": "王",
+        "disabled": false,
+        "go": "P-M10-MENU"
+      },
+      {
+        "text": "",
+        "disabled": false,
+        "go": null
+      },
+      {
+        "text": "新建会话",
+        "disabled": false,
+        "go": "A-personal-new"
+      },
+      {
+        "text": "技能",
+        "disabled": false,
+        "go": "A-personal-skills"
+      },
+      {
+        "text": "数据源",
+        "disabled": false,
+        "go": "A-personal-sources"
+      },
+      {
+        "text": "个人资料整理",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      },
+      {
+        "text": "查看会话文件",
+        "disabled": false,
+        "go": "A-personal-files"
+      },
+      {
+        "text": "",
+        "disabled": true,
+        "go": "A-personal-generating"
+      },
+      {
+        "text": "助手偏好",
+        "disabled": false,
+        "go": "A-personal-preferences"
+      }
+    ]
+  },
+  {
+    "step": "import-2-return-import",
+    "text": "P\nPolo\n首页\nPolo 助手\n我的空间\n导入对话内容\n\n我的空间 · 原对话保持不变\n\n选择已导出的对话文件。先核对可导入内容，确认后才在当前空间建立新对话。\n\n选择导出文件\n返回原对话",
+    "controls": [
+      {
+        "text": "首页",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "返回原对话",
+        "disabled": false,
+        "go": "A-personal-conversation"
+      }
+    ]
+  }
+]

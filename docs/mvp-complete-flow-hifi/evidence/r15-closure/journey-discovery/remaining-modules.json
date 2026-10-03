@@ -1,0 +1,2599 @@
+[
+  {
+    "label": "entry A-personal-question",
+    "scene": "A-personal-question",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n\n需要汇总哪一个时间范围？\n\n提交回答\n暂不回答\n查看会话文件\n\n需要汇总哪一个时间范围？\n\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-question-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "A-personal-close",
+        "tr": "A-personal-question-closeactive",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-question-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-question-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-question-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-question-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-question-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-question-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-question-sessions",
+        "disabled": false
+      },
+      {
+        "text": "回答问题",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "提交回答",
+        "go": "A-personal-answered",
+        "tr": "A-personal-question-answer",
+        "disabled": true
+      },
+      {
+        "text": "暂不回答",
+        "go": "A-personal-deferred",
+        "tr": "A-personal-question-defer",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-question-files",
+        "disabled": false
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-question-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "answer draft",
+    "scene": "A-personal-question",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n\n需要汇总哪一个时间范围？\n\n提交回答\n暂不回答\n查看会话文件\n\n需要汇总哪一个时间范围？\n\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-question-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "A-personal-close",
+        "tr": "A-personal-question-closeactive",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-question-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-question-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-question-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-question-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-question-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-question-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-question-sessions",
+        "disabled": false
+      },
+      {
+        "text": "回答问题",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "提交回答",
+        "go": "A-personal-answered",
+        "tr": "A-personal-question-answer",
+        "disabled": false
+      },
+      {
+        "text": "暂不回答",
+        "go": "A-personal-deferred",
+        "tr": "A-personal-question-defer",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-question-files",
+        "disabled": false
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-question-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 提交回答",
+    "scene": "A-personal-answered",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n上周\n查看会话文件\n\n已收到你的回答，正在原会话中继续整理。\n\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-answered-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "A-personal-close",
+        "tr": "A-personal-answered-closeactive",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-answered-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-answered-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-answered-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-answered-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-answered-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-answered-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-answered-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-answered-files",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-answered-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-answered-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "answer submitted",
+    "scene": "A-personal-answered",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n上周\n查看会话文件\n\n已收到你的回答，正在原会话中继续整理。\n\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-answered-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "A-personal-close",
+        "tr": "A-personal-answered-closeactive",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-answered-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-answered-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-answered-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-answered-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-answered-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-answered-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-answered-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-answered-files",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-answered-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-answered-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 首页",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-PERSONAL-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 打开助手",
+    "scene": "A-personal-new",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n新聊天\n上周\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-new-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "A-personal-close",
+        "tr": "A-personal-new-closeactive",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-new-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-new-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-new-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-new-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-new-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-new-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-new-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-new-files",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-new-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-new-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "new session does not receive old answer",
+    "scene": "A-personal-new",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n新聊天\n上周\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-new-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "A-personal-close",
+        "tr": "A-personal-new-closeactive",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-new-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-new-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-new-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-new-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-new-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-new-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-new-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-new-files",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-new-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-new-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry A-personal-files",
+    "scene": "A-personal-files",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n会话文件\n\n附件：项目资料.pdf · 生成文件：资料汇总.md\n\n查看生成文件\n查看附件\n回到原对话\n导出允许内容\n导入对话内容\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-files-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-files-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-files-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-files-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-files-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-files-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-files-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-files-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-files-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看生成文件",
+        "go": "A-personal-viewer",
+        "tr": "A-personal-files-view",
+        "disabled": false
+      },
+      {
+        "text": "查看附件",
+        "go": "A-personal-attachment",
+        "tr": "A-personal-files-attachment",
+        "disabled": false
+      },
+      {
+        "text": "回到原对话",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-files-back",
+        "disabled": false
+      },
+      {
+        "text": "导出允许内容",
+        "go": "A-personal-transfer-export",
+        "tr": "A-personal-files-export",
+        "disabled": false
+      },
+      {
+        "text": "导入对话内容",
+        "go": "A-personal-transfer-import",
+        "tr": "A-personal-files-import",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-files-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-files-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 查看生成文件",
+    "scene": "A-personal-viewer",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n资料汇总.md\n\n本周主要进展\n一、已整理需求材料。\n二、待核对后提交总结。\n\n回到原对话\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-viewer-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-viewer-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-viewer-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-viewer-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-viewer-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-viewer-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-viewer-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-viewer-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-viewer-sessions",
+        "disabled": false
+      },
+      {
+        "text": "回到原对话",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-viewer-back",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-viewer-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-viewer-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 回到原对话",
+    "scene": "A-personal-conversation",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-conversation-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-conversation-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-conversation-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-conversation-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-conversation-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-conversation-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-conversation-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-conversation-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-conversation-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-conversation-files",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-conversation-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-conversation-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "file returns original conversation",
+    "scene": "A-personal-conversation",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n请整理这份资料，保留关键结论。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-conversation-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-conversation-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-conversation-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-conversation-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-conversation-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-conversation-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-conversation-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-conversation-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-conversation-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-conversation-files",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": "A-personal-generating",
+        "tr": "A-personal-conversation-send",
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-conversation-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry A-personal-preblock",
+    "scene": "A-personal-preblock",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n新聊天\n查看会话文件\n\n积分不足，请充值后查询结果。\n\n去充值\n已完成，查询结果\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-preblock-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-preblock-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-preblock-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-preblock-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-preblock-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-preblock-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-preblock-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-preblock-files",
+        "disabled": false
+      },
+      {
+        "text": "去充值",
+        "go": "P-M09-BROWSER",
+        "tr": "A-personal-preblock-recharge",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-personal-checking",
+        "tr": "A-personal-preblock-query",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-preblock-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "blocked draft",
+    "scene": "A-personal-preblock",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n新聊天\n查看会话文件\n\n积分不足，请充值后查询结果。\n\n去充值\n已完成，查询结果\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-preblock-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-preblock-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-preblock-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-preblock-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-preblock-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-preblock-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-preblock-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-preblock-files",
+        "disabled": false
+      },
+      {
+        "text": "去充值",
+        "go": "P-M09-BROWSER",
+        "tr": "A-personal-preblock-recharge",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-personal-checking",
+        "tr": "A-personal-preblock-query",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-preblock-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 去充值",
+    "scene": "P-M09-BROWSER",
+    "text": "系统浏览器 · 积分充值\n\n为我的空间充值积分\n当前余额\n12 积分\n本次需要\n60 积分\n充值方式\n系统浏览器完成\n到账确认\n回到 Polo 查一次结果\n取消\n返回 Polo",
+    "controls": [
+      {
+        "text": "取消",
+        "go": "A-personal-preblock",
+        "tr": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+        "disabled": false
+      },
+      {
+        "text": "返回 Polo",
+        "go": "A-personal-return",
+        "tr": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 返回 Polo",
+    "scene": "A-personal-return",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n\n已在浏览器完成充值？\n\n已完成，查询结果\n还没有\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-return-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-return-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-return-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-return-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-return-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-return-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-return-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-return-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-return-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-return-files",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-personal-checking",
+        "tr": "A-personal-return-query",
+        "disabled": false
+      },
+      {
+        "text": "还没有",
+        "go": "A-personal-preblock",
+        "tr": "A-personal-return-notnow",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-return-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "no auto query",
+    "scene": "A-personal-return",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n\n已在浏览器完成充值？\n\n已完成，查询结果\n还没有\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-return-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-return-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-return-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-return-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-return-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-return-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-return-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-return-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-return-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-return-files",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-personal-checking",
+        "tr": "A-personal-return-query",
+        "disabled": false
+      },
+      {
+        "text": "还没有",
+        "go": "A-personal-preblock",
+        "tr": "A-personal-return-notnow",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-return-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 还没有",
+    "scene": "A-personal-preblock",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n新聊天\n查看会话文件\n\n积分不足，请充值后查询结果。\n\n去充值\n已完成，查询结果\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-preblock-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-preblock-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-preblock-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-preblock-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-preblock-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-preblock-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-preblock-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-preblock-files",
+        "disabled": false
+      },
+      {
+        "text": "去充值",
+        "go": "P-M09-BROWSER",
+        "tr": "A-personal-preblock-recharge",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-personal-checking",
+        "tr": "A-personal-preblock-query",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-preblock-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "draft retained",
+    "scene": "A-personal-preblock",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n新聊天\n查看会话文件\n\n积分不足，请充值后查询结果。\n\n去充值\n已完成，查询结果\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-preblock-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-preblock-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-preblock-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-preblock-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-preblock-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-preblock-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-preblock-sources",
+        "disabled": false
+      },
+      {
+        "text": "个人资料整理",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-preblock-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-personal-files",
+        "tr": "A-personal-preblock-files",
+        "disabled": false
+      },
+      {
+        "text": "去充值",
+        "go": "P-M09-BROWSER",
+        "tr": "A-personal-preblock-recharge",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-personal-checking",
+        "tr": "A-personal-preblock-query",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-preblock-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M10-SETTINGS-DEVICE",
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "settings edited",
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置\n\n尚未保存",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 首页",
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置\n\n尚未保存",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "cancel navigation keeps settings draft",
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置\n\n尚未保存",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "tr": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M01-INVITE-PENDING",
+    "scene": "P-M01-INVITE-PENDING",
+    "text": "系统浏览器 · 共享邀请\n\n加入申请等待审批\n\n批准前，这个企业不会出现在你的空间列表\n\n申请状态\n等待企业所有者或管理员审批\n我的空间\n可以使用\n企业空间\n尚不可见\n进入我的空间",
+    "controls": [
+      {
+        "text": "进入我的空间",
+        "go": "P-M01-COLD-START",
+        "tr": "T-P-M01-INVITE-PENDING-001-P-M01-COLD-START",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 进入我的空间",
+    "scene": "P-M01-COLD-START",
+    "text": "重新连接\n\n正在检查账号与空间列表\n\n正在核对账号、邀请与空间列表\n\n账号\n有效\n邀请\n1 个待确认\n空间列表\n已获取 3 个\n进入 Polo",
+    "controls": [
+      {
+        "text": "进入 Polo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M01-COLD-START-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M01-RETURN",
+    "scene": "P-M01-RETURN",
+    "text": "POLO · 当前账号\n核对可进入的企业\n\n使用接受邀请的同一账号重取企业列表，不自动切换当前空间。\n\n刷新企业列表\n留在我的空间",
+    "controls": [
+      {
+        "text": "刷新企业列表",
+        "go": "P-M01-ENTERPRISE-READY",
+        "tr": "P-M01-RETURN-R13-1",
+        "disabled": false
+      },
+      {
+        "text": "留在我的空间",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M01-RETURN-R13-2",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "probe": "P-M01-RETURN",
+    "error": "Locator.click: Timeout 3500ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=\"查询企业资格\", exact=True).last\n"
+  },
+  {
+    "label": "entry P-M04-PERM-DENIED",
+    "scene": "P-M04-PERM-DENIED",
+    "text": "P\nPolo\n首页\n合同审查\n×\n后台任务\n晨\n晨星科技\n王\n合\n合同审查\n\n晨星科技\n\n需要「文件与文件夹」权限\n\n系统权限被拒后，需要你手动重试\n\n所需权限\n文件与文件夹（读取下载目录）\n当前状态\n已被拒绝\n设置路径\n系统设置 → 隐私与安全性 → 文件与文件夹\n\nPolo 不会反复弹窗要权限；在系统设置里允许后，回到这里点「重试请求」。\n\n稍后再说\n重试请求",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-PERM-DENIED-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-PERM-DENIED-001-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "合同审查",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M04-PERM-DENIED-002-P-M04-APP-VIEW",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-PERM-DENIED-003-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "T-P-M04-PERM-DENIED-004-P-M04-RUNTIME",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "T-P-M04-PERM-DENIED-007-P-M04-NOTIFY-ENT",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "T-P-M04-PERM-DENIED-008-P-M10-MENU-ENT",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M04-PERM-DENIED-016-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "稍后再说",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M04-PERM-DENIED-017-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "重试请求",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M04-PERM-DENIED-018-P-M04-APP-VIEW",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 稍后再说",
+    "scene": "P-M04-APP-CONTRACT",
+    "text": "P\nPolo\n首页\n合同审查\n×\n后台任务\n晨\n晨星科技\n王\n合\n合同审查\n\n晨星科技",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-001",
+        "disabled": false
+      },
+      {
+        "text": "合同审查",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-002",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M04-CLOSE-CONTRACT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-003",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "T-P-M04-APP-CONTRACT-R6-004",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-007",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-008",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M09-APP-BANNER",
+    "scene": "P-M09-APP-BANNER",
+    "text": "P\nPolo\n首页\n合同审查\n×\n后台任务\n晨\n晨星科技\n王\n企业 AI 额度即将用完；当前操作可继续。通知管理员\n合\n合同审查\n\n晨星科技",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M09-APP-BANNER-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M09-APP-BANNER-001-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "合同审查",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M09-APP-BANNER-002-P-M04-APP-VIEW",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M09-APP-BANNER-003-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "T-P-M09-APP-BANNER-004-P-M04-RUNTIME",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "T-P-M09-APP-BANNER-007-P-M04-NOTIFY-ENT",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "T-P-M09-APP-BANNER-008-P-M10-MENU-ENT",
+        "disabled": false
+      },
+      {
+        "text": "通知管理员",
+        "go": "A-enterprise-notify",
+        "tr": "T-P-M09-APP-BANNER-R6-014",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 通知管理员",
+    "scene": "A-enterprise-notify",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n晨星科技\n王\n晨星科技\n新建会话\n技能\n数据源\n所有会话\n企业周报\n企业周报\n请汇总本周企业项目进展。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n\n企业积分不足，请通知所有者处理。\n\n通知所有者\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "A-enterprise-notify-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-ENT",
+        "tr": "A-enterprise-notify-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "tr": "A-enterprise-notify-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "A-enterprise-notify-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "A-enterprise-notify-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-enterprise-new",
+        "tr": "A-enterprise-notify-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-enterprise-skills",
+        "tr": "A-enterprise-notify-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-enterprise-sources",
+        "tr": "A-enterprise-notify-sources",
+        "disabled": false
+      },
+      {
+        "text": "企业周报",
+        "go": "A-enterprise-conversation",
+        "tr": "A-enterprise-notify-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-enterprise-files",
+        "tr": "A-enterprise-notify-files",
+        "disabled": false
+      },
+      {
+        "text": "通知所有者",
+        "go": "A-enterprise-notified",
+        "tr": "A-enterprise-notify-notify",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-enterprise-preferences",
+        "tr": "A-enterprise-notify-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 通知所有者",
+    "scene": "A-enterprise-notified",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n晨星科技\n王\n晨星科技\n新建会话\n技能\n数据源\n所有会话\n企业周报\n企业周报\n请汇总本周企业项目进展。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n\n已通知所有者，等待处理。\n\n已完成，查询结果\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "A-enterprise-notified-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-ENT",
+        "tr": "A-enterprise-notified-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "tr": "A-enterprise-notified-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "A-enterprise-notified-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "A-enterprise-notified-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-enterprise-new",
+        "tr": "A-enterprise-notified-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-enterprise-skills",
+        "tr": "A-enterprise-notified-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-enterprise-sources",
+        "tr": "A-enterprise-notified-sources",
+        "disabled": false
+      },
+      {
+        "text": "企业周报",
+        "go": "A-enterprise-conversation",
+        "tr": "A-enterprise-notified-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-enterprise-files",
+        "tr": "A-enterprise-notified-files",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-enterprise-checking",
+        "tr": "A-enterprise-notified-query",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-enterprise-preferences",
+        "tr": "A-enterprise-notified-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "App insufficient credits recipient",
+    "scene": "A-enterprise-notified",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n晨星科技\n王\n晨星科技\n新建会话\n技能\n数据源\n所有会话\n企业周报\n企业周报\n请汇总本周企业项目进展。\n已整理第一部分：本周的主要进展与后续待办。\n查看会话文件\n\n已通知所有者，等待处理。\n\n已完成，查询结果\n附加文件\n当前空间\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "A-enterprise-notified-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-ENT",
+        "tr": "A-enterprise-notified-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "tr": "A-enterprise-notified-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "A-enterprise-notified-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "A-enterprise-notified-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-enterprise-new",
+        "tr": "A-enterprise-notified-new",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-enterprise-skills",
+        "tr": "A-enterprise-notified-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-enterprise-sources",
+        "tr": "A-enterprise-notified-sources",
+        "disabled": false
+      },
+      {
+        "text": "企业周报",
+        "go": "A-enterprise-conversation",
+        "tr": "A-enterprise-notified-sessions",
+        "disabled": false
+      },
+      {
+        "text": "查看会话文件",
+        "go": "A-enterprise-files",
+        "tr": "A-enterprise-notified-files",
+        "disabled": false
+      },
+      {
+        "text": "已完成，查询结果",
+        "go": "A-enterprise-checking",
+        "tr": "A-enterprise-notified-query",
+        "disabled": false
+      },
+      {
+        "text": "消息",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "附加文件",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "发送消息",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-enterprise-preferences",
+        "tr": "A-enterprise-notified-preferences",
+        "disabled": false
+      }
+    ]
+  }
+]

@@ -1,0 +1,1373 @@
+[
+  {
+    "label": "entry P-M11-REVOKE",
+    "scene": "P-M11-REVOKE",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n你已经不能访问晨星科技了\n\n停止这台电脑上的企业任务，然后选择返回位置\n\n停止中\n报价整理\n正在停止 · 结果保留在原空间\n停止中\n助手 · Q2 报价汇总\n正在停止下一段生成\n已停止\n数据报表生成器\n后台任务 · 已停止\n\n个人空间不受影响；企业内容会按公司规定保留。\n\n返回我的空间\n回到空间切换",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M11-REVOKE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M11-REVOKE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "P-M11-REVOKE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "P-M11-REVOKE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M11-REVOKE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "tr": "P-M11-REVOKE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "tr": "P-M11-REVOKE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "tr": "P-M11-REVOKE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "P-M11-REVOKE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "tr": "P-M11-REVOKE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "返回我的空间",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M11-REVOKE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "回到空间切换",
+        "go": "P-M02-SWITCHER",
+        "tr": "P-M11-REVOKE-R14-C-18",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 回到空间切换",
+    "scene": "P-M02-SWITCHER",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n‹ 账号菜单\n切换空间\n我\n我的空间\n个人空间 · 个人\n晨\n晨星科技\n企业空间 · 成员\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "P-M02-SWITCHER-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "‹ 账号菜单",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "我\n我的空间\n个人空间 · 个人",
+        "go": "P-M02-CONFIRM",
+        "tr": "P-M02-SWITCHER-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "晨\n晨星科技\n企业空间 · 成员",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-5",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-6",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "tr": "P-M02-SWITCHER-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "tr": "P-M02-SWITCHER-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "tr": "P-M02-SWITCHER-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "P-M02-SWITCHER-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "tr": "P-M02-SWITCHER-R14-C-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M01-LOGIN-PASSWORD",
+    "scene": "P-M01-LOGIN-PASSWORD",
+    "text": "P\nPolo AI\n不用懂技术，让 AI 帮你做日常工作\n\n整理会议纪要、写周报、汇总报价……说清楚要做的事，Polo 帮你完成\n\n✓\n整理会议纪要、汇总报价\n✓\n像跟同事交代任务一样简单\n✓\n任务在后台运行，进度随时看\n\n登录与注册\n\n密码登录\n\n输入账号密码\n\n手机号\n+86\n密码\n继续\n验证码登录\n同意协议与隐私政策\n✓ 首次登录创建我的空间",
+    "controls": [
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "继续",
+        "go": "P-M01-PERSONAL-PREP",
+        "tr": "T-P-M01-LOGIN-PASSWORD-001-P-M01-PERSONAL-PREP",
+        "disabled": false
+      },
+      {
+        "text": "验证码登录",
+        "go": "P-M01-LOGIN-PHONE",
+        "tr": "T-P-M01-LOGIN-PASSWORD-002-P-M01-LOGIN-PHONE",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 继续",
+    "scene": "P-M01-PERSONAL-PREP",
+    "text": "首次使用\n\n正在准备我的空间\n账号\n小王\n进度\n正在准备内容\n进入首页",
+    "controls": [
+      {
+        "text": "进入首页",
+        "go": "P-M03-HOME-ZERO",
+        "tr": "T-P-M01-PERSONAL-PREP-001-P-M03-HOME-ZERO",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 进入首页",
+    "scene": "P-M03-HOME-ZERO",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M03-HOME-ZERO-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M03-HOME-ZERO-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M03-HOME-ZERO-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M03-HOME-ZERO-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-ZERO-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-ZERO-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-ZERO-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-ZERO-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-ZERO-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-ZERO-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-ZERO-R14-C-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M07-LEAVE-DATA",
+    "scene": "P-M07-LEAVE-DATA",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n免费 · 长期有效\n内容\n订阅\n订阅与授权\n\n数据工坊圈 · 免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子\n退出数据工坊圈？\n\n退出前请确认授权影响\n\n退出后，数据报表生成器将失去最后一个有效来源，不能再启动。其他圈子的应用和技能不受影响。\n\n取消\n确认退出",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LEAVE-DATA-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LEAVE-DATA-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LEAVE-DATA-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LEAVE-DATA-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-LEAVE-DATA-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LEAVE-DATA-UI-12",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "tr": "P-M07-LEAVE-DATA-UI-13",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-DATA",
+        "tr": "P-M07-LEAVE-DATA-UI-14",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "tr": "P-M07-LEAVE-DATA-UI-15",
+        "disabled": false
+      },
+      {
+        "text": "确认退出",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-LEAVE-DATA-UI-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 取消",
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n内容\n订阅\n订阅权益\n\n免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-12",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-13",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-DATA",
+        "tr": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-14",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 退出圈子",
+    "scene": "P-M07-LEAVE-DATA",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n免费 · 长期有效\n内容\n订阅\n订阅与授权\n\n数据工坊圈 · 免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子\n退出数据工坊圈？\n\n退出前请确认授权影响\n\n退出后，数据报表生成器将失去最后一个有效来源，不能再启动。其他圈子的应用和技能不受影响。\n\n取消\n确认退出",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LEAVE-DATA-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LEAVE-DATA-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LEAVE-DATA-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LEAVE-DATA-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-LEAVE-DATA-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LEAVE-DATA-UI-12",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "tr": "P-M07-LEAVE-DATA-UI-13",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-DATA",
+        "tr": "P-M07-LEAVE-DATA-UI-14",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "tr": "P-M07-LEAVE-DATA-UI-15",
+        "disabled": false
+      },
+      {
+        "text": "确认退出",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-LEAVE-DATA-UI-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 确认退出",
+    "scene": "P-M07-LIST",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\n我的圈子\n\n查看圈子内容，管理订阅\n\n搜索圈子\n权益状态\n全部\n有效\n待恢复\n增\n晨星增长圈\n\n晨星增长工作室\n\n增长打法手册、会议纪要整理与资料研究技能\n\n免费 · 长期有效\n2 个 App · 1 项技能\n查看详情\n设\n晨星设计圈\n\n晨星增长工作室\n\n品牌语气分析 v1.4.0 已更新\n\n月度订阅 · 2026-11-02 到期\n2 个 App · 1 项技能\n查看详情\n星\n星河年度圈\n\n已购买下一年度权益\n\n年度订阅 · 有效至 2028-10-01\n查看详情",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LIST-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索圈子",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "P-M07-LIST-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "P-M07-LIST-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-YEAR-RESULT",
+        "tr": "P-M07-LIST-R14-C-19",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 首页",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M02-CONFIRM",
+    "scene": "P-M02-CONFIRM",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n切换到 我的空间\n\n停止 3 项任务后切换\n\n运行中\n报价整理\n运行中 · 前台\n运行中\n助手 · Q2 报价汇总\n正在生成回答\n运行中\n合同审查\n同空间后台运行\n\n当前仍在 晨星科技。切换只影响这台设备。\n\n取消切换\n停止全部并切换",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M02-CONFIRM-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M02-CONFIRM-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "P-M02-CONFIRM-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "P-M02-CONFIRM-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M02-CONFIRM-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "tr": "P-M02-CONFIRM-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "tr": "P-M02-CONFIRM-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "tr": "P-M02-CONFIRM-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "P-M02-CONFIRM-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "tr": "P-M02-CONFIRM-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M02-SWITCHER",
+        "tr": "P-M02-CONFIRM-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "取消切换",
+        "go": "P-M02-SWITCHER",
+        "tr": "P-M02-CONFIRM-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "停止全部并切换",
+        "go": "P-M02-STOPPING",
+        "tr": "P-M02-CONFIRM-R14-C-18",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 停止全部并切换",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-PERSONAL-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M11-OFFLINE-HOME",
+    "scene": "P-M11-OFFLINE-HOME",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n当前离线\n已保存的内容可继续看\n仅可查看已保存内容；联网并重新验证后才能开始任务\n重试连接\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M11-OFFLINE-HOME",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "重试连接",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-15",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-17",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-19",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-16",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-18",
+        "disabled": true
+      }
+    ]
+  },
+  {
+    "probe": "offline",
+    "error": "Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=\"重新连接\", exact=True).last\n"
+  },
+  {
+    "label": "entry P-M11-CONTRACT",
+    "scene": "P-M11-CONTRACT",
+    "text": "需要升级\n\n升级后继续使用 Polo\n\n当前版本无法安全读取服务端数据。升级并重新检查后才能继续。\n\n当前版本\nv0.16\n可用版本\nv0.17\n访问状态\n业务暂不可用\n升级帮助\n稍后处理\n下载并安装",
+    "controls": [
+      {
+        "text": "升级帮助",
+        "go": "P-M11-CONTRACT-HELP",
+        "tr": "P-M11-CONTRACT-help",
+        "disabled": false
+      },
+      {
+        "text": "稍后处理",
+        "go": "P-M11-CONTRACT",
+        "tr": "T-P-M11-CONTRACT-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "下载并安装",
+        "go": "P-M11-CONTRACT-DL",
+        "tr": "T-P-M11-CONTRACT-002-P-M11-CONTRACT-DL",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 稍后处理",
+    "scene": "P-M11-CONTRACT",
+    "text": "需要升级\n\n升级后继续使用 Polo\n\n当前版本无法安全读取服务端数据。升级并重新检查后才能继续。\n\n当前版本\nv0.16\n可用版本\nv0.17\n访问状态\n业务暂不可用\n升级帮助\n稍后处理\n下载并安装",
+    "controls": [
+      {
+        "text": "升级帮助",
+        "go": "P-M11-CONTRACT-HELP",
+        "tr": "P-M11-CONTRACT-help",
+        "disabled": false
+      },
+      {
+        "text": "稍后处理",
+        "go": "P-M11-CONTRACT",
+        "tr": "T-P-M11-CONTRACT-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "下载并安装",
+        "go": "P-M11-CONTRACT-DL",
+        "tr": "T-P-M11-CONTRACT-002-P-M11-CONTRACT-DL",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 下载并安装",
+    "scene": "P-M11-CONTRACT-DL",
+    "text": "正在升级\n\n正在下载新版本\n\n下载期间业务保持阻断；升级后重新检查\n\n下载更新包 · 68%\n\n返回升级提示\n正在下载…",
+    "controls": [
+      {
+        "text": "返回升级提示",
+        "go": "P-M11-CONTRACT",
+        "tr": "T-P-M11-CONTRACT-DL-003-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "正在下载…",
+        "go": null,
+        "tr": null,
+        "disabled": true
+      }
+    ]
+  },
+  {
+    "label": "entry P-M07-RENEW-RETURN",
+    "scene": "P-M07-RENEW-RETURN",
+    "text": "POLO · 当前账号\n返回后核对原续费订单\n\n浏览器支付状态与桌面资格分开核对；返回不代表到账或刷新成功。\n\n订单号\nSUB-20261002-0183\n下一步\n主动查询原订单与有效来源\n查询原订单和资格\n返回我的圈子",
+    "controls": [
+      {
+        "text": "查询原订单和资格",
+        "go": "P-M07-RENEW-RESULT",
+        "tr": "P-M07-RENEW-RETURN-R13-1",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-RENEW-RETURN-R13-2",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 查询原订单和资格",
+    "scene": "P-M07-RENEW-RESULT",
+    "text": "POLO · 当前账号\n月度续费已核对\n\n晨星设计圈 · 原续费订单 SUB-20261002-0183 已支付。\n\n有效至\n2026-12-02\n本次续期\n2026-11-02 至 2026-12-02\n返回我的圈子",
+    "controls": [
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST-RENEWED",
+        "tr": "P-M07-RENEW-RESULT-R13-1",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 返回我的圈子",
+    "scene": "P-M07-LIST-RENEWED",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\n我的圈子\n\n查看圈子内容，管理订阅\n\n搜索圈子\n权益状态\n全部\n有效\n待恢复\n增\n晨星增长圈\n\n晨星增长工作室\n\n增长打法手册、会议纪要整理与资料研究技能\n\n免费 · 长期有效\n2 个 App · 1 项技能\n查看详情\n设\n晨星设计圈\n\n晨星增长工作室\n\n品牌语气分析 v1.4.0 已更新\n\n月度订阅 · 2026-12-02 到期\n2 个 App · 1 项技能\n查看详情\n数\n数据工坊圈\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n免费 · 长期有效\n1 个 App\n查看详情\n星\n星河年度圈\n\n已购买下一年度权益\n\n年度订阅 · 有效至 2028-10-01\n查看详情",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-RENEWED-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-RENEWED-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LIST-RENEWED-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LIST-RENEWED-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-RENEWED-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索圈子",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "P-M07-LIST-RENEWED-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "P-M07-LIST-RENEWED-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LIST-RENEWED-R14-C-18",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-YEAR-RESULT",
+        "tr": "P-M07-LIST-RENEWED-R14-C-19",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 首页",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-PERSONAL-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 我的圈子",
+    "scene": "P-M07-LIST",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\n我的圈子\n\n查看圈子内容，管理订阅\n\n搜索圈子\n权益状态\n全部\n有效\n待恢复\n增\n晨星增长圈\n\n晨星增长工作室\n\n增长打法手册、会议纪要整理与资料研究技能\n\n免费 · 长期有效\n2 个 App · 1 项技能\n查看详情\n设\n晨星设计圈\n\n晨星增长工作室\n\n品牌语气分析 v1.4.0 已更新\n\n月度订阅 · 2026-12-02 到期\n2 个 App · 1 项技能\n查看详情\n数\n数据工坊圈\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n免费 · 长期有效\n1 个 App\n查看详情\n星\n星河年度圈\n\n已购买下一年度权益\n\n年度订阅 · 有效至 2028-10-01\n查看详情",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LIST-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索圈子",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "P-M07-LIST-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "P-M07-LIST-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LIST-R14-C-18",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-YEAR-RESULT",
+        "tr": "P-M07-LIST-R14-C-19",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry A-personal-sourceauth",
+    "scene": "A-personal-sourceauth",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n所有会话\n技能\n数据源\n数据源\n项目资料\n我的空间\n数据源与工具\n项目资料\n\n我的空间的数据源\n\n访问凭证\n保存并连接\n取消\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-sourceauth-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-sourceauth-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-sourceauth-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-sourceauth-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-sourceauth-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "新建会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-sourceauth-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-sourceauth-sessions",
+        "disabled": false
+      },
+      {
+        "text": "技能",
+        "go": "A-personal-skills",
+        "tr": "A-personal-sourceauth-skills",
+        "disabled": false
+      },
+      {
+        "text": "数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-sourceauth-sources",
+        "disabled": false
+      },
+      {
+        "text": "访问凭证",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "保存并连接",
+        "go": "A-personal-sourceconnecting",
+        "tr": "A-personal-sourceauth-connect",
+        "disabled": true
+      },
+      {
+        "text": "取消",
+        "go": "A-personal-sourcedisconnected",
+        "tr": "A-personal-sourceauth-cancel",
+        "disabled": false
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-sourceauth-preferences",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 取消",
+    "scene": "A-personal-sourcedisconnected",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n数据源\n项目资料\n我的空间\n数据源与工具\n项目资料\n\n我的空间的数据源\n\n连接与权限\n类型\nMCP\n连接\n未连接\nread_file\n允许\nwrite_file\n询问\nrun_command\n询问\n连接数据源\n助手偏好",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-sourcedisconnected-home",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-sourcedisconnected-closeidle",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-sourcedisconnected-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-sourcedisconnected-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-sourcedisconnected-account",
+        "disabled": false
+      },
+      {
+        "text": "切换侧栏",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "连接数据源",
+        "go": "A-personal-sourceauth",
+        "tr": "A-personal-sourcedisconnected-connect",
+        "disabled": false
+      },
+      {
+        "text": "助手偏好",
+        "go": "A-personal-preferences",
+        "tr": "A-personal-sourcedisconnected-preferences",
+        "disabled": false
+      }
+    ]
+  }
+]

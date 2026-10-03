@@ -1,0 +1,5 @@
+{
+  "before": "运行中\n数据报表生成器\n我的空间 · 后台运行\n运行中\nPolo 助手\n当前空间 · 正在执行",
+  "after": "已停止\n数据报表生成器\n任务已停止；重新打开不会自动执行",
+  "scene": "P-M02-STOP-FAILED-PERSONAL"
+}

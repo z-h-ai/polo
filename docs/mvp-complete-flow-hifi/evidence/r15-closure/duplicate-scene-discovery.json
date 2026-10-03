@@ -1,0 +1,7 @@
+{
+  "removed_duplicate_ids": [
+    "P-M02-TARGET-LOADING-ENT"
+  ],
+  "cause": "Temporary regex extraction included a following adjacent section. HTMLParser section-stack extraction replaced regex to identify exact scene boundaries.",
+  "unique_scenes": 154
+}

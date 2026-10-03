@@ -1,0 +1,9 @@
+{
+  "docs/client-journey-review/spec.md": "4e74c849b07614550576db6b60aba098a5b54a7a3519f2202a975855dd2b6c94",
+  "docs/mvp-complete-flow-hifi/prototype.html": "7b634e2815aa0d92290feaca6dc1d0022bc40de2760ff36964e65e47273ca5d5",
+  "docs/mvp-complete-flow-hifi/prototype-manifest.json": "20c95a67432301c752528afdfc32282cce29dd3993986df3e31f2ab9691b9754",
+  "docs/mvp-complete-flow-hifi/tools/review-shell.html": "7a3decbaaed6f2cc5e87ed810ad77fdb6c21aab43a73b4e0ebef7a83e4b4cade",
+  "design-demos/polo-client-source-baseline/src/mvp/Assistant.jsx": "bfc8a8ecab79626d1407e6fa650895fefffced3bea01643fbb672fa2ac33ab09",
+  "design-demos/polo-client-source-baseline/src/mvp/runtime.js": "231220e81b8c38c6f522dd97e09b17794194363a43d00e59e8b27aae54479874",
+  "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs": "19e21de90d13e62cf45a706853579d7ba81c8bdb98334c0e42c98f25d0d38bc0"
+}

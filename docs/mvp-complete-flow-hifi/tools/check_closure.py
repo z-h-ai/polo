@@ -11,6 +11,8 @@ with sync_playwright() as pw:
  page.on('request',lambda r:report['network'].append(r.url) if r.url.startswith(('http://','https://')) else None)
  page.goto((B/'review.html').as_uri());page.wait_for_timeout(300)
  def go(id):
+  # Each direct review fixture is an independent case; actual actions below remain sequential.
+  page.locator('[data-reset]').evaluate('(el)=>el.click()');page.wait_for_timeout(40)
   page.locator('[data-scene-link="'+id+'"]').evaluate('(el)=>el.click()');page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=id)
   f=page.locator('[data-prototype-viewport]').element_handle().content_frame();f.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=id);return f
  for vp in m['target']['viewports']:

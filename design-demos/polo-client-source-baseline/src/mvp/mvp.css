@@ -16,3 +16,6 @@
 
 /* Visual feedback: remove filled purple resource tabs. */
 .polo-resource-nav{gap:26px;min-height:42px;padding-bottom:0;border-bottom:1px solid var(--border)}.polo-resource-nav>.mvp-action,.polo-resource-nav>strong{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:32px;padding:10px 2px 13px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--fg-50);font-size:14px;font-weight:500}.polo-resource-nav>.mvp-action:hover{background:transparent;color:var(--foreground)}.polo-resource-nav>strong{background:transparent;color:var(--foreground);font-weight:650}.polo-resource-nav>strong::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;background:var(--foreground)}.polo-resource-nav>.mvp-action:last-child{font-size:12px;color:var(--fg-50);padding-right:4px}.polo-resource-heading{padding:20px 0 18px}.polo-resource-heading h1{font-size:25px}
+
+/* Content selected for transfer stays readable without displacing confirmation. */
+.polo-transfer ul{max-height:42vh;overflow:auto}.polo-transfer li{overflow-wrap:anywhere;white-space:pre-wrap}.polo-imported-session{display:flex;flex-direction:column;align-items:stretch;gap:4px;min-width:0;text-align:left;overflow-wrap:anywhere}.polo-imported-session small{font-size:11px;opacity:.7}

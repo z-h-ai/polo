@@ -1,0 +1,7 @@
+{
+  "path": "docs/mvp-complete-flow-hifi/evidence/r12/structure.json",
+  "reason": "Initial validation wrote its current result to the historical r12 default location. Preserved that result in this run and restored the historical working-tree evidence bytes from initial clean HEAD. Index left untouched.",
+  "head": "6d66263a0e72d1404f3d75875ff7ffbf61931e9c",
+  "restored_sha256": "c03ec4da8ce05ec781eee709d2dff51b69ed12fae76dff5582c822202f3fc8aa",
+  "retained_current_result": "initial-misdirected-structure.json"
+}

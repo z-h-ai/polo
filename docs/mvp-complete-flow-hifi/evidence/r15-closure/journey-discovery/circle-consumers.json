@@ -1,0 +1,945 @@
+[
+  {
+    "label": "entry P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n订阅周期\n月度订阅 · ¥39 / 月\n有效至\n2026-11-02\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n续费退出圈子",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-4",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-PAID",
+        "tr": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-19",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 退出圈子",
+    "scene": "P-M07-LEAVE-PAID",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 下次续费 2026-10-01\n续费\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n增长案例检索\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装\n退出「晨星设计圈」？\n\n退出前会先停止运行中的圈子任务\n\n当前没有运行中的圈子任务\n只撤销晨星设计圈这一来源；品牌语气分析仅此圈提供，退出后将不可用；会议纪要整理仍由晨星增长圈授权并可继续使用。\n取消\n确认退出",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-LEAVE-PAID-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-LEAVE-PAID-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-LEAVE-PAID-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-LEAVE-PAID-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-LEAVE-PAID-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-LEAVE-PAID-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "tr": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "T-P-M07-LEAVE-PAID-018-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-LEAVE-PAID-019-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-LEAVE-PAID-R6-030",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-LEAVE-PAID-022-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-LEAVE-PAID-023-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "确认退出",
+        "go": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+        "tr": "T-P-M07-LEAVE-PAID-024-P-M07-DETAIL-PAID-AFTER-LEAVE",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 确认退出",
+    "scene": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n已退出\n成员资格已结束 · 可重新加入\n重新加入圈子\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n增长案例检索\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n本圈来源无效；另一个有效来源仍可使用\n仍由晨星增长圈授权\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "重新加入圈子",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-014-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-016-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-017-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-029",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 重新加入圈子",
+    "scene": "P-M07-DETAIL-PAID",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 有效至 2026-11-02\n续费\n内容\n更新\n订阅\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n已失去授权\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-DETAIL-PAID-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-DETAIL-PAID-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "tr": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "P-M07-DETAIL-PAID-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "tr": "P-M07-DETAIL-PAID-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "tr": "P-M07-DETAIL-PAID-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "已失去授权",
+        "go": "P-M04-APP-BRAND",
+        "tr": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-DETAIL-PAID-R6-030",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "rejoin without purchase facts",
+    "scene": "P-M07-DETAIL-PAID",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 有效至 2026-11-02\n续费\n内容\n更新\n订阅\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n已失去授权\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-DETAIL-PAID-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-DETAIL-PAID-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "tr": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "P-M07-DETAIL-PAID-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "tr": "P-M07-DETAIL-PAID-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "tr": "P-M07-DETAIL-PAID-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "已失去授权",
+        "go": "P-M04-APP-BRAND",
+        "tr": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-DETAIL-PAID-R6-030",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 返回我的圈子",
+    "scene": "P-M07-LIST",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\n我的圈子\n\n查看圈子内容，管理订阅\n\n搜索圈子\n权益状态\n全部\n有效\n待恢复\n增\n晨星增长圈\n\n晨星增长工作室\n\n增长打法手册、会议纪要整理与资料研究技能\n\n免费 · 长期有效\n2 个 App · 1 项技能\n查看详情\n数\n数据工坊圈\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n免费 · 长期有效\n1 个 App\n查看详情\n星\n星河年度圈\n\n已购买下一年度权益\n\n年度订阅 · 有效至 2028-10-01\n查看详情",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LIST-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索圈子",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "P-M07-LIST-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LIST-R14-C-18",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-YEAR-RESULT",
+        "tr": "P-M07-LIST-R14-C-19",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "growth detail after design left",
+    "scene": "P-M07-DETAIL-FOCUS",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n免费 · 长期有效\n内容\n更新\n订阅\n应用\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索打法与案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-FOCUS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-FOCUS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-DETAIL-FOCUS-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-DETAIL-FOCUS-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-DETAIL-FOCUS-012-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "P-M07-DETAIL-FOCUS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "tr": "P-M07-DETAIL-FOCUS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "tr": "P-M07-DETAIL-FOCUS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "T-P-M07-DETAIL-FOCUS-015-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M07-DETAIL-FOCUS-UI-MEETING",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-DETAIL-FOCUS-R6-027",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 订阅",
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n周期\n免费 · 长期有效\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n退出圈子",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE",
+        "tr": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 退出圈子",
+    "scene": "P-M07-LEAVE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n免费 · 长期有效\n应用\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n技能\n增长案例检索\n\n检索打法与案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装\n退出「晨星增长圈」？\n\n退出前会先停止运行中的圈子任务\n\n当前没有运行中的圈子任务\n只撤销晨星增长圈这一来源；会议纪要整理仍由晨星设计圈授权并可继续使用。仅此圈提供的作品将不可用。\n取消\n确认退出",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-LEAVE-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-LEAVE-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-LEAVE-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-LEAVE-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-LEAVE-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-LEAVE-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "T-P-M07-LEAVE-016-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-LEAVE-R6-028",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "T-P-M07-LEAVE-019-P-M07-DETAIL-FOCUS",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "P-M07-DETAIL-FOCUS",
+        "tr": "T-P-M07-LEAVE-020-P-M07-DETAIL-FOCUS",
+        "disabled": false
+      },
+      {
+        "text": "确认退出",
+        "go": "P-M07-SOURCE-FALLBACK",
+        "tr": "T-P-M07-LEAVE-021-P-M07-SOURCE-FALLBACK",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 确认退出",
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\n已退出晨星增长圈；晨星设计圈的授权仍然有效。\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室 · 晨星设计圈授权\n\n把会议材料整理为清晰的纪要。\n\n已失去授权\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n已失去授权\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n晨星增长圈授权已撤销，重新加入后可恢复。\n\n重新加入",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-SOURCE-FALLBACK-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "已失去授权",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-4",
+        "disabled": true
+      },
+      {
+        "text": "已失去授权",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-6",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "重新加入",
+        "go": "P-M07-JOIN-FREE",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-5",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "last source exit feedback",
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\n已退出晨星增长圈；晨星设计圈的授权仍然有效。\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室 · 晨星设计圈授权\n\n把会议材料整理为清晰的纪要。\n\n已失去授权\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n已失去授权\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n晨星增长圈授权已撤销，重新加入后可恢复。\n\n重新加入",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-SOURCE-FALLBACK-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-SOURCE-FALLBACK-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "已失去授权",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-4",
+        "disabled": true
+      },
+      {
+        "text": "已失去授权",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-6",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "重新加入",
+        "go": "P-M07-JOIN-FREE",
+        "tr": "P-M07-SOURCE-FALLBACK-CLEANUP-5",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 我的圈子",
+    "scene": "P-M07-LIST",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\n我的圈子\n\n查看圈子内容，管理订阅\n\n搜索圈子\n权益状态\n全部\n有效\n待恢复\n数\n数据工坊圈\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n免费 · 长期有效\n1 个 App\n查看详情\n星\n星河年度圈\n\n已购买下一年度权益\n\n年度订阅 · 有效至 2028-10-01\n查看详情",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LIST-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索圈子",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LIST-R14-C-18",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-YEAR-RESULT",
+        "tr": "P-M07-LIST-R14-C-19",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "all remaining circles",
+    "scene": "P-M07-LIST",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\n我的圈子\n\n查看圈子内容，管理订阅\n\n搜索圈子\n权益状态\n全部\n有效\n待恢复\n数\n数据工坊圈\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n免费 · 长期有效\n1 个 App\n查看详情\n星\n星河年度圈\n\n已购买下一年度权益\n\n年度订阅 · 有效至 2028-10-01\n查看详情",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M07-LIST-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M07-LIST-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索圈子",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-DETAIL-DATA",
+        "tr": "P-M07-LIST-R14-C-18",
+        "disabled": false
+      },
+      {
+        "text": "查看详情",
+        "go": "P-M07-YEAR-RESULT",
+        "tr": "P-M07-LIST-R14-C-19",
+        "disabled": false
+      }
+    ]
+  }
+]

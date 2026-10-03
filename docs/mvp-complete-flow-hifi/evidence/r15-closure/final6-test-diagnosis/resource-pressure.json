@@ -1,0 +1,14 @@
+{
+  "observed_swap_used_mb": 22896.38,
+  "load_averages": [
+    22.73,
+    44.62,
+    52.17
+  ],
+  "owned_process_interrupted": {
+    "pid": 73492,
+    "command": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python docs/mvp-complete-flow-hifi/tools/check_unified.py",
+    "signal": "SIGINT"
+  },
+  "reason": "Full browser QA had action timeouts while concurrent browser work and machine swap pressure were high. Partial attempt is retained, not counted as final quality evidence. Finish independent reviews, then rerun serially with ordinary navigation timeout."
+}

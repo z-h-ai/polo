@@ -29,14 +29,15 @@ for source in M['sources']:
 check('design skill binding',digest(R/M['design']['skill_path'])==M['design']['sha256'])
 for source in M['design']['sources']:check('design '+source['path'],digest(R/source['path'])==source['sha256'])
 class Inventory(HTMLParser):
- def __init__(self):super().__init__();self.scenes=[];self.urls=[]
+ def __init__(self):super().__init__();self.scenes=[];self.transitions=[];self.urls=[]
  def handle_starttag(self,tag,attrs):
   a=dict(attrs)
   if 'data-prototype-scene' in a:self.scenes.append(a['data-prototype-scene'])
+  if 'data-transition' in a:self.transitions.append(a['data-transition'])
   if tag in ['script','link','img','iframe']:
    for k in ['src','href']:
     if a.get(k,'').startswith(('http:','https:','//')):self.urls.append(a[k])
-i=Inventory();i.feed((B/'prototype.html').read_text());check('MVP contains only its owned scenes',set(i.scenes)=={s['id'] for s in M['scenes'] if s['surface']=='mvp'});check('no remote MVP assets',not i.urls)
+i=Inventory();i.feed((B/'prototype.html').read_text());check('MVP contains only its owned scenes',set(i.scenes)=={s['id'] for s in M['scenes'] if s['surface']=='mvp'});check('no remote MVP assets',not i.urls);check('MVP scene DOM identity unique',len(i.scenes)==len(set(i.scenes)));check('MVP control DOM identity unique',len(i.transitions)==len(set(i.transitions)));check('MVP controls match owned manifest',set(i.transitions)=={t['id'] for s in M['scenes'] if s['surface']=='mvp' for t in s['transitions']})
 for name,p in [('review',B/'review.html'),('assistant',A/'prototype.html')]:
  i=Inventory();i.feed(p.read_text());check('no remote '+name+' assets',not i.urls)
 for owner,url in M['surfaces'].items():check('local surface '+owner,(B/url).resolve().is_file())

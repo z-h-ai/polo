@@ -1,6 +1,6 @@
 // Single authority for prototype routes, fixtures and real product operations.
 // Product rules: PC-F04/07/08/10, PC-N03/04, C-R05/07; see docs/client-journey-review/spec.md (the sole product SoT).
-export const revision = 'poo70-workbench-r15-copy-cleanup'
+export const revision = 'poo70-workbench-r15-closure'
 export const id = (scope, key) => `A-${scope}-${key}`
 export const scenes = []
 const row = (scope, key, title, family, options = {}) => {
@@ -242,12 +242,36 @@ for(const s of scenes){
  }
 }
 
+// The library entry consumes retained object state after returning from the host.
+for (const scope of ['personal','enterprise']) {
+ const s=scenes.find(s=>s.id===id(scope,'skills'))
+ for(const [key,label,target] of [['enable','为我启用','enabledpending'],['disable','为我停用','installed'],['install','准备本机','installing'],['update','更新到 1.1.0','updated'],['remove','卸载本机副本','remove'],['recheck','重新验证来源','skills']])
+  if(!s.transitions.some(t=>t.key===key))edge(s,key,label,id(scope,target))
+}
+
+// C-R07: only explicitly permitted conversation content crosses a space boundary.
+for(const scope of ['personal','enterprise']){
+ for(const [key,title] of [['transfer-export','导出允许的对话内容'],['transfer-exported','对话内容已导出'],['transfer-import','导入对话内容'],['transfer-preview','确认导入'],['transfer-done','已建立导入对话'],['transfer-invalid','无法导入此文件'],['legacy-isolation','旧数据归属待核验']]){
+  const s=row(scope,key,title,'transfer',{module:'M08',basis:'C-R07 / PC-F04 / D-PC-03',annotation:'已确认的显式允许内容转移与归属隔离；原型只演练被允许的消息文本，不定义生产 allowlist 或授予文件中声明的权限。'});
+  edge(s,'home','首页',scope==='personal'?'P-M03-HOME-PERSONAL':'P-M03-HOME-ENT','host');
+  if(key==='transfer-export')edge(s,'export-content','下载允许内容',id(scope,'transfer-exported'));
+  if(key==='transfer-import')edge(s,'select-import','选择导出文件',id(scope,'transfer-preview'));
+  if(key==='transfer-preview')edge(s,'confirm-import','确认导入',id(scope,'transfer-done'));
+  if(key==='transfer-done')edge(s,'view-imported','打开导入对话',id(scope,'conversation'));
+  if(key==='transfer-invalid')edge(s,'retry-import','重新选择文件',id(scope,'transfer-import'));
+  edge(s,'cancel-transfer',key==='legacy-isolation'?'返回当前空间':key==='transfer-preview'?'取消导入':key==='transfer-done'?'返回对话':'返回原对话',id(scope,'conversation'));
+ }
+ const files=scenes.find(s=>s.id===id(scope,'files'));edge(files,'export','导出允许内容',id(scope,'transfer-export'),'files');edge(files,'import','导入对话内容',id(scope,'transfer-import'),'files');
+}
+
+for(const s of scenes)if(['chat','files','credits'].includes(s.family))edge(s,'open-imported','打开导入对话',id(s.scope,'conversation'),'imported');
+
 export const byId = new Map(scenes.map(s=>[s.id,s]))
 export function resolveScene(value){return aliases[value]||value}
 
 // Spec §13.11: explicit design delta; existing chat UI is implementation-owned.
 for (const scene of scenes) {
- const skills=scene.family==='skills';
- scene.annotation=(skills?'本轮评审技能管理及其授权、启用、设备准备、来源与版本差异。':'既有助手行为衔接示意；不作为聊天、输入、附件和会话导航的 UI 重做依据。现有界面沿用 apps/electron/src/renderer/ 当前实现。')+' 画布与首页统一，其他未明确修改的 UI 不从本原型派生实现任务。'+scene.annotation;
- scene.annotations=[...(scene.annotations||[]),{id:'implementation-scope',anchor:null,title:skills?'本轮改造范围：技能管理':'沿用现有实现',body:scene.annotation}];
+ const skills=scene.family==='skills',transfer=scene.family==='transfer';
+ scene.annotation=(transfer?'本轮补齐已确认的内容转移与归属隔离行为；文件格式仅为交互样例。':skills?'本轮评审技能管理及其授权、启用、设备准备、来源与版本差异。':'既有助手行为衔接示意；不作为聊天、输入、附件和会话导航的 UI 重做依据。现有界面沿用 apps/electron/src/renderer/ 当前实现。')+' 画布与首页统一，其他未明确修改的 UI 不从本原型派生实现任务。'+scene.annotation;
+ scene.annotations=[...(scene.annotations||[]),{id:'implementation-scope',anchor:null,title:transfer?'已确认恢复规则':skills?'本轮改造范围：技能管理':'沿用现有实现',body:scene.annotation}];
 }

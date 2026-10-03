@@ -1,0 +1,1543 @@
+[
+  {
+    "label": "entry P-M11-REVOKE",
+    "scene": "P-M11-REVOKE",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n你已经不能访问晨星科技了\n\n停止这台电脑上的企业任务，然后选择返回位置\n\n停止中\n报价整理\n正在停止 · 结果保留在原空间\n停止中\n助手 · Q2 报价汇总\n正在停止下一段生成\n已停止\n数据报表生成器\n后台任务 · 已停止\n\n个人空间不受影响；企业内容会按公司规定保留。\n\n返回我的空间\n回到空间切换",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M11-REVOKE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M11-REVOKE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "P-M11-REVOKE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "P-M11-REVOKE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M11-REVOKE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "tr": "P-M11-REVOKE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "tr": "P-M11-REVOKE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "tr": "P-M11-REVOKE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "P-M11-REVOKE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "tr": "P-M11-REVOKE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "返回我的空间",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M11-REVOKE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "回到空间切换",
+        "go": "P-M02-SWITCHER",
+        "tr": "P-M11-REVOKE-R14-C-18",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 回到空间切换",
+    "scene": "P-M02-SWITCHER",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n‹ 账号菜单\n切换空间\n我\n我的空间\n个人空间 · 个人\n晨\n晨星科技\n企业空间 · 成员\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "P-M02-SWITCHER-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "‹ 账号菜单",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "我\n我的空间\n个人空间 · 个人",
+        "go": "P-M02-CONFIRM",
+        "tr": "P-M02-SWITCHER-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "晨\n晨星科技\n企业空间 · 成员",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-5",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "P-M02-SWITCHER-R14-C-6",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "tr": "P-M02-SWITCHER-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "tr": "P-M02-SWITCHER-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "tr": "P-M02-SWITCHER-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "P-M02-SWITCHER-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "tr": "P-M02-SWITCHER-R14-C-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "revoked enterprise selected",
+    "scene": "P-M03-HOME-ENT",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M03-HOME-ENT-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M03-HOME-ENT-001-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "T-P-M03-HOME-ENT-002-P-M04-RUNTIME",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "T-P-M03-HOME-ENT-005-P-M04-NOTIFY-ENT",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "T-P-M03-HOME-ENT-006-P-M10-MENU-ENT",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "tr": "P-M03-HOME-ENT-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "tr": "P-M03-HOME-ENT-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "tr": "P-M03-HOME-ENT-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "P-M03-HOME-ENT-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "tr": "P-M03-HOME-ENT-R14-16",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "revoked contract opened",
+    "scene": "P-M04-APP-CONTRACT",
+    "text": "P\nPolo\n首页\n合同审查\n×\n后台任务\n晨\n晨星科技\n王\n合\n合同审查\n\n晨星科技",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-001",
+        "disabled": false
+      },
+      {
+        "text": "合同审查",
+        "go": "P-M04-APP-CONTRACT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-002",
+        "disabled": false
+      },
+      {
+        "text": "×",
+        "go": "P-M04-CLOSE-CONTRACT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-003",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "tr": "T-P-M04-APP-CONTRACT-R6-004",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-007",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "tr": "T-P-M04-APP-CONTRACT-R6-008",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M07-EXPIRED",
+    "scene": "P-M07-EXPIRED",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n已到期\n¥39 / 月 · 2026-09-01 到期\n续费恢复\n应用\n\n本圈来源已失效；其他圈子仍有效的同一作品继续可用\n\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n增长案例检索\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n仍由晨星增长圈授权\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-EXPIRED-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-EXPIRED-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费恢复",
+        "go": "P-M07-RENEW-EXPIRED",
+        "tr": "T-P-M07-EXPIRED-014-P-M07-RENEW-EXPIRED",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M07-RENEW-EXPIRED",
+        "tr": "T-P-M07-EXPIRED-016-P-M07-RENEW-EXPIRED",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-017-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-EXPIRED-R6-029",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "expired fresh targets",
+    "scene": "P-M07-EXPIRED",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n已到期\n¥39 / 月 · 2026-09-01 到期\n续费恢复\n应用\n\n本圈来源已失效；其他圈子仍有效的同一作品继续可用\n\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n增长案例检索\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n仍由晨星增长圈授权\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-EXPIRED-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-EXPIRED-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费恢复",
+        "go": "P-M07-RENEW-EXPIRED",
+        "tr": "T-P-M07-EXPIRED-014-P-M07-RENEW-EXPIRED",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M07-RENEW-EXPIRED",
+        "tr": "T-P-M07-EXPIRED-016-P-M07-RENEW-EXPIRED",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-EXPIRED-017-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-EXPIRED-R6-029",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M07-DETAIL-PAID-AFTER-LEAVE",
+    "scene": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n已退出\n成员资格已结束 · 可重新加入\n重新加入圈子\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n增长案例检索\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n本圈来源无效；另一个有效来源仍可使用\n仍由晨星增长圈授权\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "重新加入圈子",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-014-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-016-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-017-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-029",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "paid left fresh targets",
+    "scene": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n已退出\n成员资格已结束 · 可重新加入\n重新加入圈子\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n增长案例检索\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n本圈来源无效；另一个有效来源仍可使用\n仍由晨星增长圈授权\n查看并安装",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "重新加入圈子",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-014-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M07-DETAIL-PAID",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-016-P-M07-DETAIL-PAID",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-017-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "tr": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-029",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry P-M11-OFFLINE-HOME",
+    "scene": "P-M11-OFFLINE-HOME",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n当前离线\n已保存的内容可继续看\n仅可查看已保存内容；联网并重新验证后才能开始任务\n重试连接\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M11-OFFLINE-HOME",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "重试连接",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-15",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-17",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-19",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-16",
+        "disabled": true
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M11-OFFLINE-HOME-R14-C-18",
+        "disabled": true
+      }
+    ]
+  },
+  {
+    "label": "click 重试连接",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-PERSONAL-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "offline reconnected",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-PERSONAL-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "entry A-personal-enabled",
+    "scene": "A-personal-enabled",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n获取技能\n管理版本\n为我停用\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-enabled-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-enabled-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-enabled-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-enabled-account",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-enabled-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 / 晨星设计圈\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "获取技能",
+        "go": "A-personal-discover",
+        "tr": "A-personal-enabled-discover",
+        "disabled": false
+      },
+      {
+        "text": "管理版本",
+        "go": "A-personal-legacy-detail-100-1-1",
+        "tr": "A-personal-enabled-detail",
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-personal-legacy-local-100-0-1",
+        "tr": "A-personal-enabled-disable",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-enabled-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-enabled-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-1-1",
+        "tr": "A-personal-enabled-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-enabled-sources",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 管理版本",
+    "scene": "A-personal-legacy-detail-100-1-1",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n返回完整技能列表",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-legacy-detail-100-1-1-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-legacy-detail-100-1-1-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-legacy-detail-100-1-1-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-legacy-detail-100-1-1-account",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-legacy-detail-100-1-1-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 / 晨星设计圈\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-personal-legacy-local-100-0-1",
+        "tr": "A-personal-legacy-detail-100-1-1-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-personal-legacy-detail-110-1-1",
+        "tr": "A-personal-legacy-detail-100-1-1-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-personal-legacy-remove-100-1-1",
+        "tr": "A-personal-legacy-detail-100-1-1-remove",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-1-1",
+        "tr": "A-personal-legacy-detail-100-1-1-skills",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 为我停用",
+    "scene": "A-personal-legacy-local-100-0-1",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我启用\n管理版本\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n返回完整技能列表",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-legacy-local-100-0-1-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-legacy-local-100-0-1-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-legacy-local-100-0-1-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-legacy-local-100-0-1-account",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-legacy-local-100-0-1-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 就绪 · 1.0.0",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "为我启用",
+        "go": "A-personal-legacy-local-100-1-1",
+        "tr": "A-personal-legacy-local-100-0-1-enable",
+        "disabled": false
+      },
+      {
+        "text": "管理版本",
+        "go": "A-personal-legacy-detail-100-0-1",
+        "tr": "A-personal-legacy-local-100-0-1-detail",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-0-1",
+        "tr": "A-personal-legacy-local-100-0-1-skills",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 首页",
+    "scene": "P-M03-HOME-PERSONAL",
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "tr": "P-M03-HOME-PERSONAL-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "tr": "P-M03-HOME-PERSONAL-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "tr": "P-M03-HOME-PERSONAL-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "tr": "P-M03-HOME-PERSONAL-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "tr": "P-M03-HOME-PERSONAL-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "tr": "P-M03-HOME-PERSONAL-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "tr": "P-M03-HOME-PERSONAL-R14-17",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "click 管理技能",
+    "scene": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n更新到 1.1.0\n卸载本机副本\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-skills-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-skills-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-skills-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-skills-account",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-skills-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 就绪 · 1.0.0",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "获取技能",
+        "go": "A-personal-discover",
+        "tr": "A-personal-skills-discover",
+        "disabled": false
+      },
+      {
+        "text": "管理版本",
+        "go": "A-personal-detail",
+        "tr": "A-personal-skills-detail",
+        "disabled": false
+      },
+      {
+        "text": "为我启用",
+        "go": "A-personal-enabledpending",
+        "tr": "A-personal-skills-enable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-personal-updated",
+        "tr": "A-personal-skills-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-personal-remove",
+        "tr": "A-personal-skills-remove",
+        "disabled": false
+      },
+      {
+        "text": "重新验证来源",
+        "go": "A-personal-skills",
+        "tr": "A-personal-skills-recheck",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-skills-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-skills-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-skills",
+        "tr": "A-personal-skills-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-skills-sources",
+        "disabled": false
+      }
+    ]
+  },
+  {
+    "label": "skill disabled return",
+    "scene": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n更新到 1.1.0\n卸载本机副本\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "tr": "A-personal-skills-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "tr": "A-personal-skills-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "tr": "A-personal-skills-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "tr": "A-personal-skills-account",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-skills-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 就绪 · 1.0.0",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "tr": null,
+        "disabled": false
+      },
+      {
+        "text": "获取技能",
+        "go": "A-personal-discover",
+        "tr": "A-personal-skills-discover",
+        "disabled": false
+      },
+      {
+        "text": "管理版本",
+        "go": "A-personal-detail",
+        "tr": "A-personal-skills-detail",
+        "disabled": false
+      },
+      {
+        "text": "为我启用",
+        "go": "A-personal-enabledpending",
+        "tr": "A-personal-skills-enable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-personal-updated",
+        "tr": "A-personal-skills-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-personal-remove",
+        "tr": "A-personal-skills-remove",
+        "disabled": false
+      },
+      {
+        "text": "重新验证来源",
+        "go": "A-personal-skills",
+        "tr": "A-personal-skills-recheck",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "tr": "A-personal-skills-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "tr": "A-personal-skills-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-skills",
+        "tr": "A-personal-skills-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "tr": "A-personal-skills-sources",
+        "disabled": false
+      }
+    ]
+  }
+]

@@ -11,7 +11,7 @@ cases=[('home','P-M03-HOME-PERSONAL',0,[('heading','.home-hero h1',props),('card
 # Spec 13.11 intentionally redesigns circle rows and unifies the assistant canvas.
 # Keep immutable b82 comparisons for unaffected components; dedicated refinement checks
 # verify circle consistency and the new cross-surface canvas, not false baseline equality.
-if M['revision'] in ['poo70-workbench-r15-ui-refinement','poo70-workbench-r15-circle-copy','poo70-workbench-r15-copy-cleanup']:
+if M['revision'] in ['poo70-workbench-r15-ui-refinement','poo70-workbench-r15-circle-copy','poo70-workbench-r15-copy-cleanup','poo70-workbench-r15-closure']:
  cases=[c for c in cases if c[0]!='circles']
  cases=[(label,sid,index,[(name,selector,[p for p in keys if not(label=='assistant' and p=='backgroundColor')]) for name,selector,keys in samples]) for label,sid,index,samples in cases]
 report={'revision':M['revision'],'baseline_commit':subprocess.check_output(['git','rev-parse','b82fa1e5'],text=True).strip(),'baseline_artifacts':{p:hashlib.sha256(v).hexdigest() for p,v in old.items()},'artifacts':{str(p.relative_to(R)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [B/'prototype-manifest.json',B/'prototype.html',B/'review.html',A/'prototype.html']},'checks':[],'errors':[],'limitations':['Computed-style parity covers named components; changed content, newer features, entry placement and scroll divider behavior intentionally differ from b82fa1e5. Not whole-page pixel equality or product Acceptance.']}

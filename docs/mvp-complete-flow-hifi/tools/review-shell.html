@@ -163,7 +163,8 @@ function selectSurface(){
  const next=frames.get(owner);if(frame&&frame!==next)frame.contentWindow.postMessage({type:'product-ui-prototype:suspend',version:1,session,epoch,scene:currentScene},'*');frames.forEach(f=>{f.hidden=f!==next});frame=next;
  frame.width=viewport.width;frame.height=viewport.height;frame.style.width=`${viewport.width}px`;frame.style.height=`${viewport.height}px`;frame.style.transform=`scale(${scale})`;frame.style.transformOrigin='top left';
 }
-function send(type,extra={}){selectSurface();frame.contentWindow.postMessage({type:`product-ui-prototype:${type}`,version:1,session,epoch,scene:currentScene,...extra},'*')}
+let productArrival="review";
+function send(type,extra={}){selectSurface();frame.contentWindow.postMessage({type:`product-ui-prototype:${type}`,version:1,session,epoch,scene:currentScene,arrival:productArrival,...extra},'*')}
 /* ==================== geometry & annotation renderer ==================== */
 function stepContext(story,step){const cur=story.steps[step],next=story.steps[step+1],prev=story.steps[step-1];const entry=cur&&cur.arrival==='review'?reviewEntryByScene.get(cur.scene):null;return {cur,next,prev,entry}}
 function transitionTo(fromScene,toScene){const s=byScene.get(fromScene);return s?s.transitions.find(e=>e.to===toScene):null}
@@ -204,7 +205,7 @@ function renderFlowNav(){const pos=$('[data-flow-position]'),prev=$('[data-flow-
 function renderFlowSteps(){const root=$('[data-flow-steps]');root.textContent='';if(!activeStory)return;activeStory.steps.forEach((step,i)=>{const {entry}=stepContext(activeStory,i);const btn=document.createElement('button');btn.className='flow-step';btn.dataset.flowStep=step.id;btn.setAttribute('aria-current',String(i===storyStep));const head=document.createElement('div');head.className='flow-step-head';const no=document.createElement('span');no.className='flow-step-no';no.textContent=`${i+1}/${activeStory.steps.length}`;const title=document.createElement('span');title.className='flow-step-title';title.textContent=byScene.get(step.scene).title;head.append(no,title);const detail=document.createElement('div');detail.className='flow-step-detail';detail.hidden=i!==storyStep;const arrival=step.arrival==='review'?'评审进入':i===0?'流程起点':'产品操作';const nextLine=i<activeStory.steps.length-1?`下一步：${nextHint(activeStory,i)}`:'已到流程末尾';detail.textContent=`${step.description}${step.perspective?`（角色：${step.perspective}）`:''}\n到达方式：${arrival}${entry?`\n评审进入：${entry.reason}`:''}\n${nextLine}`;btn.append(head,detail);root.append(btn)});const cur=root.querySelector('.flow-step[aria-current="true"]');cur?.scrollIntoView({block:'nearest'})}
 function renderScene(){const scopeNote=document.querySelector('[data-assistant-scope-note]');if(scopeNote){const sc=byScene.get(currentScene);scopeNote.hidden=sc.surface!=='assistant';scopeNote.textContent=sc.family==='skills'?'本轮评审：技能管理。既有助手聊天、输入和附件沿用真实代码。':'既有助手行为示意 · 本页不作为 UI 重做依据；现有界面沿用真实 Renderer，本轮重点为技能管理。';}document.body.dataset.currentScene=currentScene;const scene=byScene.get(currentScene);const title=$('[data-review-controls] [data-current-scene]');title.textContent=scene.title;title.title=`${scene.id} · ${scene.title}`;const q=$('[data-question-entry]'),n=annotations().length;$('[data-question-summary]').textContent=brief?.question?`问题：${brief.question}`:'本轮问题待关联';const count=$('[data-annotation-count]');count.textContent=`本页${n}处说明`;count.parentElement.title=`本页${n}处说明 · 查看说明列表`;q.title=brief?.question||'本轮问题待关联';renderIndex();renderAnnotations();renderStory();renderFlowNav();renderFlowSteps();hash()}
 function invalidate(){epoch++;sequence=-1;positions.clear();draw()}
-function commandScene(id){if(!byScene.has(id))return;if(id!==currentScene){closeCard();selected=null;pendingReveal=null;status()}currentScene=id;invalidate();send('show-scene',{theme,language,perspective,hint:sendHint()});renderScene()}
+function commandScene(id,arrival="review"){if(!byScene.has(id))return;productArrival=arrival;if(id!==currentScene){closeCard();selected=null;pendingReveal=null;status()}currentScene=id;invalidate();send('show-scene',{theme,language,perspective,hint:sendHint()});renderScene()}
 function draw(){
  const focused=document.activeElement?.dataset.annotationPin;
  layer.querySelectorAll('.annotation-pin,.annotation-highlight').forEach(el=>el.remove());
@@ -312,10 +313,10 @@ window.addEventListener('message',event=>{
  if(d.type==='product-ui-prototype:scene-change'){
   if(d.reason==='action'||d.reason==='system'){if(d.from!==currentScene)return;if(d.reason==='action'&&!byScene.get(d.from).transitions.some(e=>e.id===d.transition&&e.to===d.scene))return;if(d.reason==='system'&&!window.poloSpaceSwitchResults?.[d.from]?.includes(d.scene))return;
    if(activeStory){const next=activeStory.steps[storyStep+1];
-    if(!offFlow&&next&&next.scene===d.scene){applyStep(activeStory,storyStep+1);commandScene(d.scene);return}
+    if(!offFlow&&next&&next.scene===d.scene){applyStep(activeStory,storyStep+1);commandScene(d.scene,d.reason);return}
     if(!offFlow)offFlow={story:activeStory,step:storyStep,reason:'branch'};
-    currentScene=d.scene;invalidate();send('show-scene',{theme,language,perspective,hint:sendHint()});renderScene();return}
-   commandScene(d.scene);return}
+    productArrival=d.reason;currentScene=d.scene;invalidate();send('show-scene',{theme,language,perspective,hint:sendHint()});renderScene();return}
+   commandScene(d.scene,d.reason);return}
   if(d.scene!==currentScene||!['command','ready','reset'].includes(d.reason))return;return;
  }
  if(d.scene!==currentScene)return;
