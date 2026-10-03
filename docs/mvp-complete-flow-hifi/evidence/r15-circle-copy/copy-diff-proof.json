@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "scope": "Only approved wording and redundant section headings in two circle lists; embedded manifest rebinding excluded from HTML diff comparison.",
+  "before_product_sha256": "4b2be3cd45d0dd11fbb55b79417b2928992f6e2935a3dbbb3fb08c5ecc81e5f7",
+  "after_product_sha256": "a2c75eea2658b49d6f72699c4900565a2655a14569e5e59eb79687d876fad59b",
+  "assistant_unchanged": true,
+  "transitions_unchanged": true,
+  "stories_unchanged": true,
+  "before_report": "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/previous-quality-report.json"
+}

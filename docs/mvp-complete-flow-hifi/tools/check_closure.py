@@ -15,7 +15,7 @@ with sync_playwright() as pw:
   f=page.locator('[data-prototype-viewport]').element_handle().content_frame();f.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=id);return f
  for vp in m['target']['viewports']:
   page.locator('[data-viewport-select]').select_option(vp['id'],force=True)
-  for id in m['change']['changed_scenes']:
+  for id in by:  # Preserve inherited cross-end operations across narrower visual revisions.
    if id not in by or by[id]['surface']!='mvp':continue
    f=go(id)
    for edge in by[id]['transitions']:

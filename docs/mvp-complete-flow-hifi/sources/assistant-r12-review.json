@@ -1,9 +1,9 @@
 {
   "source": "assistant-r12-review",
   "item": "assistant-unified-entry",
-  "revision": "poo70-workbench-r15",
-  "current": "助手组件来自固定 Renderer 转译基线；现有 MVP 旧助手已退出当前参考。",
-  "target": "同一入口走查两份产品表面；新基线补齐会话、技能、数据源、文件与积分恢复。",
-  "reason": "消除两份助手参考并补齐已确认 MVP 状态。",
-  "question": "新助手布局、状态区分与失败恢复是否清晰？新增设计待复看。"
+  "revision": "poo70-workbench-r15-copy-cleanup",
+  "current": "既有助手页面是固定版本组件转译后的行为示意，并非当前真实 Renderer 的整页复刻。",
+  "target": "聚焦技能管理和明确新增差异；既有聊天、输入、附件与会话导航沿用真实代码，不从示意页面派生 UI 重写。",
+  "reason": "用户担心简化原型误导实现范围，Spec §13.11 明确增量边界。",
+  "question": "技能管理是否清晰，既有助手沿用真实实现的边界是否明确？"
 }

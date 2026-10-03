@@ -1,0 +1,58 @@
+[
+  {
+    "path": "docs/mvp-complete-flow-hifi/prototype.html",
+    "unit": "first style block",
+    "equal": true,
+    "baseline_sha256": "81a832802625fb2b618bace6c7efb6fa5e31c74c3802c64d8014cdbc44895a12",
+    "current_sha256": "81a832802625fb2b618bace6c7efb6fa5e31c74c3802c64d8014cdbc44895a12"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/source-home.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "8db016a5fd31967abab8342e1b89dc101677547ff8de8e54a7eb47894a99a684",
+    "current_sha256": "8db016a5fd31967abab8342e1b89dc101677547ff8de8e54a7eb47894a99a684"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/source-admin-login.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "d07be719a8a4e91bd758b26232306eaf84a0315efac99cd41f699330a7526626",
+    "current_sha256": "d07be719a8a4e91bd758b26232306eaf84a0315efac99cd41f699330a7526626"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/tokens.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "fc65cb14f4e4d23caa3815f2fe38b85d054bfa6e43172fd4e827ddfb0620fb08",
+    "current_sha256": "fc65cb14f4e4d23caa3815f2fe38b85d054bfa6e43172fd4e827ddfb0620fb08"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/shell.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "c84aff413832ee06995af360725b840b3fe51afcf7a2bcc489053778b3b28392",
+    "current_sha256": "c84aff413832ee06995af360725b840b3fe51afcf7a2bcc489053778b3b28392"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/regions.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "5dcb60873e1cd09694102d343b6101125343c7c512c09032bd1c200e9b421583",
+    "current_sha256": "5dcb60873e1cd09694102d343b6101125343c7c512c09032bd1c200e9b421583"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/source-shell.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "f38fc82e4518c261045376c74bb1fae805dd87bd79e22b0a5b023af88fdf133c",
+    "current_sha256": "f38fc82e4518c261045376c74bb1fae805dd87bd79e22b0a5b023af88fdf133c"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/src/styles/base.css",
+    "unit": "complete file",
+    "equal": true,
+    "baseline_sha256": "5a3d83892fcfd08ee8586a6efc5ed2152b556e663a0b876cb07bc21b41f65380",
+    "current_sha256": "5a3d83892fcfd08ee8586a6efc5ed2152b556e663a0b876cb07bc21b41f65380"
+  }
+]

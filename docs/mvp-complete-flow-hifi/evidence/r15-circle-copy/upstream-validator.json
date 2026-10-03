@@ -1,0 +1,13 @@
+{
+  "command": [
+    "python3",
+    "/Users/wow/.agents/skills/product-ui-prototype/scripts/validate_prototype.py",
+    "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi",
+    "--root",
+    "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview"
+  ],
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": "ERROR: manifest: invalid fields\n",
+  "limitation": "Existing two-surface extension is outside upstream single-surface schema."
+}

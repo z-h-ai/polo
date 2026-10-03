@@ -1,0 +1,1645 @@
+{
+  "revision": "poo70-workbench-r15-circle-copy",
+  "checks": [
+    {
+      "name": "file desktop-1440x900 P-M07-LIST one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST original controls intact",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST search",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST-RENEWED one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST-RENEWED original controls intact",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST-RENEWED no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST-RENEWED search",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST-RENEWED filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-LIST-RENEWED renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST original controls intact",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST search",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST-RENEWED one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST-RENEWED original controls intact",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST-RENEWED no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST-RENEWED search",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST-RENEWED filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-LIST-RENEWED renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST original controls intact",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST search",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST-RENEWED one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST-RENEWED original controls intact",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST-RENEWED no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST-RENEWED search",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST-RENEWED filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-LIST-RENEWED renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST original controls intact",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST search",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST-RENEWED one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST-RENEWED original controls intact",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST-RENEWED no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST-RENEWED search",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST-RENEWED filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-LIST-RENEWED renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST original controls intact",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST search",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST-RENEWED one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST-RENEWED original controls intact",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST-RENEWED no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST-RENEWED search",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST-RENEWED filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-LIST-RENEWED renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST original controls intact",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST search",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST renewal facts retained",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST-RENEWED one title and purposeful subtitle",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST-RENEWED original controls intact",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST-RENEWED no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST-RENEWED search",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST-RENEWED filter and empty feedback",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-LIST-RENEWED renewal facts retained",
+      "passed": true
+    }
+  ],
+  "scenes": [
+    {
+      "protocol": "file",
+      "scene": "P-M07-LIST",
+      "viewport_id": "desktop-1440x900",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "file",
+      "scene": "P-M07-LIST-RENEWED",
+      "viewport_id": "desktop-1440x900",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "file",
+      "scene": "P-M07-LIST",
+      "viewport_id": "desktop-1024x768",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "file",
+      "scene": "P-M07-LIST-RENEWED",
+      "viewport_id": "desktop-1024x768",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "file",
+      "scene": "P-M07-LIST",
+      "viewport_id": "desktop-800x600",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "file",
+      "scene": "P-M07-LIST-RENEWED",
+      "viewport_id": "desktop-800x600",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "http",
+      "scene": "P-M07-LIST",
+      "viewport_id": "desktop-1440x900",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "http",
+      "scene": "P-M07-LIST-RENEWED",
+      "viewport_id": "desktop-1440x900",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "http",
+      "scene": "P-M07-LIST",
+      "viewport_id": "desktop-1024x768",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "http",
+      "scene": "P-M07-LIST-RENEWED",
+      "viewport_id": "desktop-1024x768",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "http",
+      "scene": "P-M07-LIST",
+      "viewport_id": "desktop-800x600",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "protocol": "http",
+      "scene": "P-M07-LIST-RENEWED",
+      "viewport_id": "desktop-800x600",
+      "pass": true,
+      "controls": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "to": "P-M07-DETAIL-FOCUS",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "to": "P-M07-RENEW-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "查看详情",
+          "disabled": false
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "查看详情",
+          "disabled": false
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "protocol": "file",
+      "id": "P-M07-LIST-R14-C-16",
+      "from": "P-M07-LIST",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "P-M07-LIST-RENEWED-R14-C-16",
+      "from": "P-M07-LIST-RENEWED",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "P-M07-LIST-R14-C-16",
+      "from": "P-M07-LIST",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "P-M07-LIST-RENEWED-R14-C-16",
+      "from": "P-M07-LIST-RENEWED",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "P-M07-LIST-R14-C-16",
+      "from": "P-M07-LIST",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "P-M07-LIST-RENEWED-R14-C-16",
+      "from": "P-M07-LIST-RENEWED",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "P-M07-LIST-R14-C-16",
+      "from": "P-M07-LIST",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "P-M07-LIST-RENEWED-R14-C-16",
+      "from": "P-M07-LIST-RENEWED",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "P-M07-LIST-R14-C-16",
+      "from": "P-M07-LIST",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "P-M07-LIST-RENEWED-R14-C-16",
+      "from": "P-M07-LIST-RENEWED",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "P-M07-LIST-R14-C-16",
+      "from": "P-M07-LIST",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "P-M07-LIST-RENEWED-R14-C-16",
+      "from": "P-M07-LIST-RENEWED",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/P-M07-LIST-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/P-M07-LIST-RENEWED-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/P-M07-LIST-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/P-M07-LIST-RENEWED-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/P-M07-LIST-desktop-800x600.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-circle-copy/P-M07-LIST-RENEWED-desktop-800x600.png"
+  ],
+  "passed": true,
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9342037ca2d8bd70745b4ba6e713f0881e145799159bee2837606e5f8453df1e",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a2c75eea2658b49d6f72699c4900565a2655a14569e5e59eb79687d876fad59b",
+    "docs/mvp-complete-flow-hifi/review.html": "dcf1e3c70f6a215b1f0976f53048f4b1cb9e74d3fa7fda615b6df1b423f491be",
+    "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a"
+  }
+}

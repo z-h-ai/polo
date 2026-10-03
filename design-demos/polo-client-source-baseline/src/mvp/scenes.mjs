@@ -1,6 +1,6 @@
 // Single authority for prototype routes, fixtures and real product operations.
 // Product rules: PC-F04/07/08/10, PC-N03/04, C-R05/07; see docs/client-journey-review/spec.md (the sole product SoT).
-export const revision = 'poo70-workbench-r15'
+export const revision = 'poo70-workbench-r15-copy-cleanup'
 export const id = (scope, key) => `A-${scope}-${key}`
 export const scenes = []
 const row = (scope, key, title, family, options = {}) => {
@@ -239,9 +239,15 @@ for(const s of scenes){
   if(!s.transitions.some(t=>t.key==='disablebuiltin'))edge(s,'disablebuiltin','停用内置技能',id(s.scope,'builtinoff'),'builtin')
   s.title=s.title.replace('技能','技能')
   host('assistant','打开 Polo 助手',id(s.scope,'conversation'))
-  if(s.scope==='personal')host('circles','圈子','P-M07-LIST')
  }
 }
 
 export const byId = new Map(scenes.map(s=>[s.id,s]))
 export function resolveScene(value){return aliases[value]||value}
+
+// Spec §13.11: explicit design delta; existing chat UI is implementation-owned.
+for (const scene of scenes) {
+ const skills=scene.family==='skills';
+ scene.annotation=(skills?'本轮评审技能管理及其授权、启用、设备准备、来源与版本差异。':'既有助手行为衔接示意；不作为聊天、输入、附件和会话导航的 UI 重做依据。现有界面沿用 apps/electron/src/renderer/ 当前实现。')+' 画布与首页统一，其他未明确修改的 UI 不从本原型派生实现任务。'+scene.annotation;
+ scene.annotations=[...(scene.annotations||[]),{id:'implementation-scope',anchor:null,title:skills?'本轮改造范围：技能管理':'沿用现有实现',body:scene.annotation}];
+}

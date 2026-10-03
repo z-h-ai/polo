@@ -46,7 +46,7 @@ def main():
   for step in story['steps']:step['scene']=resolve(step['scene'])
  manifest['stories']=[s for s in manifest['stories'] if not s['id'].startswith('AS-') and s['id'] not in ['S-LOCAL-SKILLS','S-TEAM-SHARE']]
  def story(key,title,scope,keys):
-  manifest['stories'].append({'id':'AS-'+key,'title':title,'description':'新助手基线的 MVP 连续走查；前后步仅浏览状态。','steps':[{'id':f'AS-{key}-{i+1}','scene':k if k.startswith('P-') else f'A-{scope}-{k}','description':k} for i,k in enumerate(keys)]})
+  manifest['stories'].append({'id':'AS-'+key,'title':title,'description':'既有助手行为衔接示意；既有 UI 沿用真实 Renderer，只有明确新增差异参与本轮评审。前后步仅浏览状态。','steps':[{'id':f'AS-{key}-{i+1}','scene':k if k.startswith('P-') else f'A-{scope}-{k}','description':k} for i,k in enumerate(keys)]})
  story('personal','助手 · 个人会话与恢复','personal',['P-M03-HOME-PERSONAL','new','generating','stopped','question','reopen','answered','files','viewer','missing','reselected'])
  story('enterprise','助手 · 企业隔离与额度','enterprise',['P-M03-HOME-ENT','new','generating','question','deferred','notify','notified','budget','budgetowner','P-M09-BROWSER-MENU-ENT','ownerresumed'])
  for scope in ['personal','enterprise']:story('skills-'+scope,'Polo 技能 · 获取、启用与设备准备 · '+scope,scope,['discover','acquire','enabledpending','installing','enabled','detail','updated','updatefailed','remove','uninstalled','restricted','reauthorized','sources','sourceauth','sourcefailed','sourcedenied'])
@@ -72,10 +72,17 @@ def main():
    source['path']='docs/mvp-complete-flow-hifi/sources/renderer-index.css';source['label']='固定 Renderer 01f4447c 样式快照（非当前工作树）'
  for source in manifest['design']['sources']:
   if source['path']=='apps/electron/src/renderer/index.css':source['path']='docs/mvp-complete-flow-hifi/sources/renderer-index.css'
+ for source in manifest['design']['sources']:
+  if source['path']=='.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css':source['sha256']=digest(ROOT/source['path'])
+ header_source='.agents/skills/polo-ai-design-system/assets/components/workbench-header-scroll.js'
+ manifest['sources']=[x for x in manifest['sources'] if x['id']!='workbench-header-scroll']+[{'id':'workbench-header-scroll','path':header_source,'label':'顶部 Header 滚动分隔线共享行为','revision':exported['revision'],'sha256':digest(ROOT/header_source)}]
+ for key in ['space-switch-sequence','space-switch-progress','circle-membership-feedback']:
+  path=f'.agents/skills/polo-ai-design-system/assets/components/{key}.js'
+  manifest['sources']=[x for x in manifest['sources'] if x['id']!=key]+[{'id':key,'path':path,'label':'空间切换系统进度','revision':exported['revision'],'sha256':digest(ROOT/path)}]
  manifest['design']['sha256']=digest(ROOT/manifest['design']['skill_path']);manifest['design']['revision']=exported['revision']+'：助手源组件与 G4 历史基线；当前共用 workbench-review 设计提案'
  manifest['change']={'summary':'统一入口选择 MVP 或新助手；旧助手退为历史，兼容链接仍可到达。新增布局与状态待复看。','changed_scenes':sorted(ids),'removed_scenes':sorted(set(before)-ids)}
  manifest['summary']=['统一入口，两份产品表面。','助手源码是助手的唯一维护来源。','业务规则沿用已接受 Spec；新增布局待复看。']
- brief={'source':'assistant-r12-review','item':'assistant-unified-entry','revision':exported['revision'],'current':'助手组件来自固定 Renderer 转译基线；现有 MVP 旧助手已退出当前参考。','target':'同一入口走查两份产品表面；新基线补齐会话、技能、数据源、文件与积分恢复。','reason':'消除两份助手参考并补齐已确认 MVP 状态。','question':'新助手布局、状态区分与失败恢复是否清晰？新增设计待复看。'}
+ brief={'source':'assistant-r12-review','item':'assistant-unified-entry','revision':exported['revision'],'current':'既有助手页面是固定版本组件转译后的行为示意，并非当前真实 Renderer 的整页复刻。','target':'聚焦技能管理和明确新增差异；既有聊天、输入、附件与会话导航沿用真实代码，不从示意页面派生 UI 重写。','reason':'用户担心简化原型误导实现范围，Spec §13.11 明确增量边界。','question':'技能管理是否清晰，既有助手沿用真实实现的边界是否明确？'}
  bp=BUNDLE/'sources/assistant-r12-review.json';bp.write_text(json.dumps(brief,ensure_ascii=False,indent=2)+'\n')
  manifest['sources']=[s for s in manifest['sources'] if s['id']!='assistant-r12-review']+[{'id':'assistant-r12-review','label':'助手统一入口本轮复看','path':str(bp.relative_to(ROOT)),'revision':exported['revision'],'sha256':digest(bp)}];manifest['review']=brief
  for s in manifest['scenes']:
@@ -87,19 +94,29 @@ def main():
    manifest['sources']=[x for x in manifest['sources'] if x['id']!='workbench-r14-review']+[{'id':'workbench-r14-review','path':str(review_path.relative_to(ROOT)),'label':'工作台与全端 UI/UX 复看范围（派生摘要）','revision':closure['revision'],'sha256':digest(review_path)}]
   manifest['review']=closure;manifest['revision']=closure['revision'];manifest['change']=closure_change;manifest['summary']=[closure_change['summary']]
  for source in manifest['sources']:
-  if source['path']=='docs/client-journey-review/spec.md':source['sha256']=digest(ROOT/source['path'])
+  if source['path'] in ['docs/client-journey-review/spec.md','.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css']:source['sha256']=digest(ROOT/source['path'])
  encoded=json.dumps(manifest,ensure_ascii=False,separators=(',',':')).replace('</','<\\/')
  (BUNDLE/'prototype-manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
- (BUNDLE/'review.html').write_text((BUNDLE/'tools/review-shell.html').read_text().replace('__MANIFEST__',encoded))
+ sequence_path='.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js'
+ review=(BUNDLE/'tools/review-shell.html').read_text().replace('__MANIFEST__',encoded)
+ review=review.replace('__SPACE_SWITCH_SEQUENCE__',(ROOT/sequence_path).read_text())
+ (BUNDLE/'review.html').write_text(review)
  product=(BUNDLE/'prototype.html').read_text()
  shared_style=ROOT/'.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css'
  product=re.sub(r'<style id="workbench-review-style">[\s\S]*?</style>','',product)
  product=product.replace('</head>','<style id="workbench-review-style">'+shared_style.read_text()+'</style></head>')
+ product=re.sub(r'<script data-product-script="workbench-header-scroll">[\s\S]*?</script>','',product)
+ product=product.replace('</body>','<script data-product-script="workbench-header-scroll">'+(ROOT/header_source).read_text()+'</script></body>')
  for suffix,title in [('OWNER','企业充值'),('BUDGET','企业预算')]:
   sid='P-M09-BROWSER-'+suffix
   if 'data-prototype-scene="'+sid+'"' not in product:
    section='<section class="scene" data-prototype-scene="'+sid+'"><div class="flow-state-page"><div class="eyebrow">系统浏览器</div><h1>'+title+'</h1><p>晨星科技 · 请在平台处理企业额度。</p><button data-go="A-enterprise-ownerreturn" data-transition="'+sid+'-return">返回 Polo</button></div></section>\n'
    product=product.replace('\n</main>', '\n'+section+'</main>',1)
+
+ for script_name in ['space-switch-sequence','space-switch-progress','circle-membership-feedback']:
+  product=re.sub(r'<script data-product-script="'+script_name+r'">[\s\S]*?</script>','',product)
+  script=(ROOT/'.agents/skills/polo-ai-design-system/assets/components'/f'{script_name}.js').read_text()
+  product=product.replace('</body>','<script data-product-script="'+script_name+'">'+script+'</script></body>')
 
  # Scene roots are emitted on separate lines by the established MVP authoring path.
  pattern=r'<section class="scene[^\"]*"[^>]*data-prototype-scene="([^"]+)"[\s\S]*?(?=\n<section class="scene|\n</main>)'

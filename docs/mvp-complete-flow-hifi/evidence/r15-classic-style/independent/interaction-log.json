@@ -1,0 +1,285 @@
+[
+  {
+    "check": "home-layout",
+    "viewport": 1440,
+    "scene": "P-M03-HOME-PERSONAL",
+    "same_card_actions": true,
+    "circle_count": 1
+  },
+  {
+    "check": "home-skill-navigation",
+    "viewport": 1440,
+    "scene": "P-M03-HOME-PERSONAL",
+    "result": "A-personal-skills"
+  },
+  {
+    "check": "skills-return-home",
+    "viewport": 1440,
+    "scope": "personal",
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "check": "home-layout",
+    "viewport": 1440,
+    "scene": "P-M03-HOME-ENT",
+    "same_card_actions": true,
+    "circle_count": 0
+  },
+  {
+    "check": "home-skill-navigation",
+    "viewport": 1440,
+    "scene": "P-M03-HOME-ENT",
+    "result": "A-enterprise-skills"
+  },
+  {
+    "check": "skills-return-home",
+    "viewport": 1440,
+    "scope": "enterprise",
+    "result": "P-M03-HOME-ENT"
+  },
+  {
+    "check": "circle-round-trip",
+    "viewport": 1440,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 1440,
+    "scene": "P-M03-HOME-PERSONAL",
+    "initial": "false",
+    "after": "false",
+    "scrollTop": 0,
+    "sizes": [
+      836,
+      836
+    ]
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 1440,
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "initial": "false",
+    "after": "false",
+    "scrollTop": 0,
+    "sizes": [
+      836,
+      836
+    ]
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 1440,
+    "scene": "A-personal-preferences",
+    "initial": "false",
+    "after": "false",
+    "scrollTop": 0,
+    "sizes": [
+      836,
+      836
+    ]
+  },
+  {
+    "check": "skill-search-recovery",
+    "viewport": 1440
+  },
+  {
+    "check": "dialog-cancel",
+    "viewport": 1440,
+    "result": "P-M02-SWITCHER"
+  },
+  {
+    "check": "home-layout",
+    "viewport": 1024,
+    "scene": "P-M03-HOME-PERSONAL",
+    "same_card_actions": true,
+    "circle_count": 1
+  },
+  {
+    "check": "home-skill-navigation",
+    "viewport": 1024,
+    "scene": "P-M03-HOME-PERSONAL",
+    "result": "A-personal-skills"
+  },
+  {
+    "check": "skills-return-home",
+    "viewport": 1024,
+    "scope": "personal",
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "check": "home-layout",
+    "viewport": 1024,
+    "scene": "P-M03-HOME-ENT",
+    "same_card_actions": true,
+    "circle_count": 0
+  },
+  {
+    "check": "home-skill-navigation",
+    "viewport": 1024,
+    "scene": "P-M03-HOME-ENT",
+    "result": "A-enterprise-skills"
+  },
+  {
+    "check": "skills-return-home",
+    "viewport": 1024,
+    "scope": "enterprise",
+    "result": "P-M03-HOME-ENT"
+  },
+  {
+    "check": "circle-round-trip",
+    "viewport": 1024,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 1024,
+    "scene": "P-M03-HOME-PERSONAL",
+    "initial": "false",
+    "after": "true",
+    "scrollTop": 296,
+    "sizes": [
+      1000,
+      704
+    ]
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 1024,
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "initial": "false",
+    "after": "false",
+    "scrollTop": 0,
+    "sizes": [
+      704,
+      704
+    ]
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 1024,
+    "scene": "A-personal-preferences",
+    "initial": "false",
+    "after": "false",
+    "scrollTop": 0,
+    "sizes": [
+      704,
+      704
+    ]
+  },
+  {
+    "check": "skill-search-recovery",
+    "viewport": 1024
+  },
+  {
+    "check": "dialog-cancel",
+    "viewport": 1024,
+    "result": "P-M02-SWITCHER"
+  },
+  {
+    "check": "home-layout",
+    "viewport": 800,
+    "scene": "P-M03-HOME-PERSONAL",
+    "same_card_actions": true,
+    "circle_count": 1
+  },
+  {
+    "check": "home-skill-navigation",
+    "viewport": 800,
+    "scene": "P-M03-HOME-PERSONAL",
+    "result": "A-personal-skills"
+  },
+  {
+    "check": "narrow-skills-detail",
+    "scene": "A-personal-skills",
+    "visible_text": "返回技能列表\n资料研究\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。",
+    "header_scroll": "false"
+  },
+  {
+    "check": "skills-return-home",
+    "viewport": 800,
+    "scope": "personal",
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "check": "home-layout",
+    "viewport": 800,
+    "scene": "P-M03-HOME-ENT",
+    "same_card_actions": true,
+    "circle_count": 0
+  },
+  {
+    "check": "home-skill-navigation",
+    "viewport": 800,
+    "scene": "P-M03-HOME-ENT",
+    "result": "A-enterprise-skills"
+  },
+  {
+    "check": "narrow-skills-detail",
+    "scene": "A-enterprise-skills",
+    "visible_text": "返回技能列表\n销售周报\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。",
+    "header_scroll": "false"
+  },
+  {
+    "check": "skills-return-home",
+    "viewport": 800,
+    "scope": "enterprise",
+    "result": "P-M03-HOME-ENT"
+  },
+  {
+    "check": "circle-round-trip",
+    "viewport": 800,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 800,
+    "scene": "P-M03-HOME-PERSONAL",
+    "initial": "false",
+    "after": "true",
+    "scrollTop": 464,
+    "sizes": [
+      1000,
+      536
+    ]
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 800,
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "initial": "false",
+    "after": "true",
+    "scrollTop": 116,
+    "sizes": [
+      652,
+      536
+    ]
+  },
+  {
+    "check": "header-scroll",
+    "viewport": 800,
+    "scene": "A-personal-preferences",
+    "initial": "false",
+    "after": "false",
+    "scrollTop": 0,
+    "sizes": [
+      536,
+      536
+    ]
+  },
+  {
+    "check": "skill-search-recovery",
+    "viewport": 800
+  },
+  {
+    "check": "dialog-cancel",
+    "viewport": 800,
+    "result": "P-M02-SWITCHER"
+  },
+  {
+    "check": "review-shell-open",
+    "url": "file:///Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi/review.html#story=R15-all-ui&step=R15-all-ui-1&scene=P-M01-LOGIN-PASSWORD",
+    "title": "Product UI Prototype Review",
+    "iframes": 1,
+    "text": "登录 · 密码登录\n☰\n原型 · 演示数据\n问题：恢复旧版风格后，首页、助手、技能、圈子和设置的整体观感是否符合预期？\n本页1处说明\n本页有 1 处说明 · 点击查看\n‹ 上一步\n第 1/18 步\n· 全客户端 · 页面与交互复看\n下一步 ›\n复制位置"
+  }
+]

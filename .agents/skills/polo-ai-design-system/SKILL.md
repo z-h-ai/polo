@@ -5,9 +5,11 @@ description: Polo 桌面客户端（Electron 工作台）产品 UI 的视觉令�
 
 # Polo AI 设计系统（客户端）
 
-提取式设计 Skill。**助手范围现以 `design-demos/polo-client-source-baseline/src/` 为用户指定基线**：固定组件来源 `01f4447cf77612ca2c62d9c7155601a51bdb7b5b`，证据见该目录 `SOURCE-EVIDENCE.md` / `SCENE-TRACEABILITY.md`。聊天壳层调整与 `src/mvp/` 新增状态属于设计提案，非真实客户端现状。默认工作区由系统准备；当前个人/企业仅静态标识；不迁移旧助手 Workspace 创建/切换、远程工作区或组织管理入口。助手样式沿用基线 `src/styles/`，不要以旧 MVP 助手为生成参考。
+提取式设计 Skill。**当前助手实现约束（Spec §13.11）**：既有聊天/输入/附件/会话导航以真实 `apps/electron/src/renderer/` 实现为准；原型转译组件仅用于衔接示意，不得据此重写现有 UI。本轮只评审技能管理与明确记录的新增差异；画布颜色按用户要求与首页统一为 #fbfbfa。以下固定来源属于历史复刻证据，不代表当前实现或整页验收标准。
 
-**非助手范围**的权威来源是 POO-41 的 **G4 UI v1 冻结稿**（`POO-41/feat/polo-client-g4-ui@ef3528ef` 的 `docs/g4-polo-client-ui/`，2026-08-11 产品确认冻结，对应本卡快照 `docs/mvp-complete-flow-hifi/sources/g4-product.css`）；冻结范围是 PC-F01—F11 整端 UI v1（见 `sources/g4-review-record.md`）。G4 是历史基线；本卡 2026-10-02 用户明确要求重新优化全部 UI/UX，授权本轮原型修改。新增视觉以 `assets/tokens/workbench-review.css` 作为两份产品表面的共同维护来源（r15 设计提案，待复看）；不覆盖历史快照，也不据此改写已确认业务规则。
+**历史助手基线以 `design-demos/polo-client-source-baseline/src/` 为用户指定基线**：固定组件来源 `01f4447cf77612ca2c62d9c7155601a51bdb7b5b`，证据见该目录 `SOURCE-EVIDENCE.md` / `SCENE-TRACEABILITY.md`。聊天壳层调整与 `src/mvp/` 新增状态属于设计提案，非真实客户端现状。默认工作区由系统准备；当前个人/企业仅静态标识；不迁移旧助手 Workspace 创建/切换、远程工作区或组织管理入口。助手样式沿用基线 `src/styles/`，不要以旧 MVP 助手为生成参考。
+
+**非助手范围**的权威来源是 POO-41 的 **G4 UI v1 冻结稿**（`POO-41/feat/polo-client-g4-ui@ef3528ef` 的 `docs/g4-polo-client-ui/`，2026-08-11 产品确认冻结，对应本卡快照 `docs/mvp-complete-flow-hifi/sources/g4-product.css`）；冻结范围是 PC-F01—F11 整端 UI v1（见 `sources/g4-review-record.md`）。G4 是历史基线；本卡 2026-10-03 用户明确要求配色和风格恢复为 `b82fa1e5`。MVP 基础样式回到该提交的原有样式；助手保留该提交的 source 样式。`assets/tokens/workbench-review.css` 只适配后续新增功能与已确认入口/Header 行为，不再覆盖为 r15 灰蓝/黑按钮方案；不覆盖历史快照，也不据此改写已确认业务规则。
 
 ## 令牌权威与实现证据
 
@@ -21,9 +23,9 @@ description: Polo 桌面客户端（Electron 工作台）产品 UI 的视觉令�
 
 ## 结构组件（直接复用，不重画）
 
-- **workbench-bar 顶栏**：品牌、标签、运行状态 pill、当前空间静态标识、通知、账号菜单。头像菜单中的「切换空间」进入 M02 空间列表；顶栏始终显示已提交的当前空间，但不再提供独立切换下拉（D-PC-10）。企业/创作者管理及全局设置在账号菜单按资格出现；技能管理按 D-PC-13 上提为 Polo 一级入口。
+- **workbench-bar 顶栏**：品牌、标签、运行状态 pill、当前空间静态标识、通知、账号菜单。头像菜单中的「切换空间」进入 M02 空间列表；顶栏始终显示已提交的当前空间，但不再提供独立切换下拉（D-PC-10）。企业/创作者管理及全局设置在账号菜单按资格出现；技能管理依 Spec §13.9 置于首页助手卡片，与「打开助手」并列；圈子是个人首页普通入口。移除「应用 / 技能 / 圈子」第二排导航。Header 仅在页面主体滚动离开顶部时显示分隔线。
 - **app-shell + workspace-main**：主内容工作区。App 打开后占满工作区（D-PC-05），容器外不得加 App 内部 chrome。
-- **product-card / card-grid / app-art**：App 卡与完整应用目录，来源行 source-line 必须保留（同名靠来源辨识）。
+- **product-card / card-grid / app-art**：App 卡与完整应用目录，首页与圈子详情共用卡片结构；标题下保留创作者来源用于辨识，同作品跨圈子按作品 ID 去重。左下角常驻状态标签和来源数量不显示（Spec §13.11）。
 - **助手 SourcePoloShell + EmptyChat / ResourceListDetail**：输入区、会话和数据源复用新基线；依 master-r14 §13，外层补 Polo 顶栏，技能管理独立于助手导航，复用授权/准备/版本状态；MVP 业务状态由 `src/mvp/` 扩展，旧 `assistant-shell` 不再是当前来源。
 - **dialog / dialog-row / progress-track**：空间切换确认、关闭三选项、安装准备等模态。
 - **system-state-card / state-icon / state-facts**：登录承接、ContractGate、失败恢复等整页系统态，居中 + 最小操作集。

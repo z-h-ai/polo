@@ -1,0 +1,192 @@
+[
+  {
+    "scene": "P-M07-LIST",
+    "viewport": "1440x900",
+    "title_and_subtitle_once": true,
+    "old_copy_removed": true,
+    "row_count": 4,
+    "targets": [
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-FOCUS"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-PAID"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-DATA"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-YEAR-RESULT"
+      }
+    ],
+    "search_restore": true,
+    "status_filter_restore": true,
+    "detail_and_home_navigation": true,
+    "overflow": false
+  },
+  {
+    "scene": "P-M07-LIST-RENEWED",
+    "viewport": "1440x900",
+    "title_and_subtitle_once": true,
+    "old_copy_removed": true,
+    "row_count": 4,
+    "targets": [
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-FOCUS"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-RENEW-RESULT"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-DATA"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-YEAR-RESULT"
+      }
+    ],
+    "search_restore": true,
+    "status_filter_restore": true,
+    "detail_and_home_navigation": true,
+    "overflow": false
+  },
+  {
+    "scene": "P-M07-LIST",
+    "viewport": "1024x768",
+    "title_and_subtitle_once": true,
+    "old_copy_removed": true,
+    "row_count": 4,
+    "targets": [
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-FOCUS"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-PAID"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-DATA"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-YEAR-RESULT"
+      }
+    ],
+    "search_restore": true,
+    "status_filter_restore": true,
+    "detail_and_home_navigation": true,
+    "overflow": false
+  },
+  {
+    "scene": "P-M07-LIST-RENEWED",
+    "viewport": "1024x768",
+    "title_and_subtitle_once": true,
+    "old_copy_removed": true,
+    "row_count": 4,
+    "targets": [
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-FOCUS"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-RENEW-RESULT"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-DATA"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-YEAR-RESULT"
+      }
+    ],
+    "search_restore": true,
+    "status_filter_restore": true,
+    "detail_and_home_navigation": true,
+    "overflow": false
+  },
+  {
+    "scene": "P-M07-LIST",
+    "viewport": "800x600",
+    "title_and_subtitle_once": true,
+    "old_copy_removed": true,
+    "row_count": 4,
+    "targets": [
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-FOCUS"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-PAID"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-DATA"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-YEAR-RESULT"
+      }
+    ],
+    "search_restore": true,
+    "status_filter_restore": true,
+    "detail_and_home_navigation": true,
+    "overflow": false
+  },
+  {
+    "scene": "P-M07-LIST-RENEWED",
+    "viewport": "800x600",
+    "title_and_subtitle_once": true,
+    "old_copy_removed": true,
+    "row_count": 4,
+    "targets": [
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-FOCUS"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-RENEW-RESULT"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-DETAIL-DATA"
+      },
+      {
+        "label": "查看详情",
+        "to": "P-M07-YEAR-RESULT"
+      }
+    ],
+    "search_restore": true,
+    "status_filter_restore": true,
+    "detail_and_home_navigation": true,
+    "overflow": false
+  },
+  {
+    "review_only_example": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n免费 · 长期有效\n内容\n订阅\n订阅与授权\n\n数据工坊圈 · 免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子"
+  },
+  {
+    "review_only_example": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 有效至 2026-11-02\n续费\n内容\n更新\n订阅\n订阅与权益\n当前状态\n有效\n周期\n月付 · 2026-11-02 到期\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n查看续费与订单退出圈子"
+  },
+  {
+    "review_only_example": "P-M07-YEAR-RESULT",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n星河年度圈\n\n年度订阅 · 已核对权益\n\n年度订阅\n有效至 2028-10-01\n订阅权益\n\n已购买下一年度权益\n\n有效至\n2028-10-01\n再次提前续费\n进入下一年度周期后才可继续\n退出圈子"
+  },
+  {
+    "review_only_example": "P-M10-SETTINGS-DEVICE",
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置"
+  }
+]

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
-  "baselineVersion": "0.5.0-workbench-r14",
-  "name": "Polo 助手 MVP · 新基线场景",
+  "baselineVersion": "0.5.3-workbench-r15-ui-refinement",
+  "name": "Polo 技能管理增量 · 既有助手行为示意",
   "status": "design_prototype",
   "source": {
     "root": "/Users/wow/project/z-h-ai/polo-dir/dev/apps/electron",
@@ -66,8 +66,8 @@
     ],
     "sceneCatalog": "scene-catalog.json",
     "screenshots": "screenshots/",
-    "singleFileBytes": 606831,
-    "singleFileSha256": "77a88a3c9eff60f436e72c06603bef3975c740ea54b9eaf37850c74b1fac8559",
+    "singleFileBytes": 600714,
+    "singleFileSha256": "fc013de26e2f7e4ee6bbe4eb2bc835b693cdf7c601f84b956c2057782b3a6339",
     "moduleBuild": "dist/"
   },
   "protocol": {
@@ -110,7 +110,7 @@
     "sceneCatalog": "scene-catalog.json",
     "sourceEvidence": "SOURCE-EVIDENCE.md",
     "sceneTraceability": "SCENE-TRACEABILITY.md",
-    "regions": "Source-derived components plus explicit MVP design deltas; auxiliary scene-catalog remains historical component reference only.",
+    "regions": "Skills and explicit Spec 13.11 deltas are reviewed here. Existing assistant UI stays owned by apps/electron/src/renderer; illustrative chat layouts must not drive production UI rewrites. Auxiliary scene-catalog is historical reference only.",
     "sourceClassification": [
       "runtime_exact",
       "playground_exact",
@@ -132,7 +132,7 @@
     "browser": "see-unified-quality-report",
     "interactive": "see-unified-quality-report",
     "visual": "pending-user-review",
-    "sourceFidelity": "component-source-derived-mvp-design-delta",
+    "sourceFidelity": "existing-assistant-behavior-illustration-not-ui-authority",
     "report": "../../docs/mvp-complete-flow-hifi/quality-report.json",
     "browserScope": "Chinese light; file and local HTTP; 1440x900, 1024x768, 800x600. Results are bound to artifact hashes in the unified report."
   },
@@ -179,11 +179,11 @@
     ],
     "screenshotsScope": "Historical Renderer/Playground component references from the pinned baseline; not current whole-page Chat acceptance.",
     "currentScreenshots": [
-      "../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-1440x900.png",
-      "../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-1024x768.png",
-      "../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-800x600.png"
+      "../../docs/mvp-complete-flow-hifi/evidence/r15-ui-refinement/A-personal-new-desktop-1440x900.png",
+      "../../docs/mvp-complete-flow-hifi/evidence/r15-ui-refinement/A-personal-new-desktop-1024x768.png",
+      "../../docs/mvp-complete-flow-hifi/evidence/r15-ui-refinement/A-personal-new-desktop-800x600.png"
     ],
-    "currentBrowserCheck": "../../docs/mvp-complete-flow-hifi/evidence/r14/browser.json",
+    "currentBrowserCheck": "../../docs/mvp-complete-flow-hifi/evidence/r15-ui-refinement/browser.json",
     "historicalChatFocus": {
       "revision": "0.3.0-chat-focused",
       "screenshots": [

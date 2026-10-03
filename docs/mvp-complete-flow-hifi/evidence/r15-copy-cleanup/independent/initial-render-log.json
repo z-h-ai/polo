@@ -1,0 +1,5834 @@
+[
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\n已退出晨星增长圈；晨星设计圈的授权仍然有效。\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室 · 晨星设计圈授权\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n晨星增长圈授权已撤销，重新加入后可恢复。\n\n重新加入",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-SOURCE-FALLBACK-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-6",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "重新加入",
+        "go": "P-M07-JOIN-FREE",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-5",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n已隐藏的应用\n\n只影响这台电脑的显示，不改变使用授权。\n\n查看隐藏项",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-MANAGE-HOME-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-5",
+        "disabled": false
+      },
+      {
+        "text": "查看隐藏项",
+        "go": "P-M03-CONTROLS",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-6",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "数据报表生成器",
+      "增长打法手册",
+      "已隐藏的应用"
+    ],
+    "scene": "P-M03-MANAGE-HOME",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n已隐藏的应用\n\n只影响这台电脑的显示，不改变使用授权。\n\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n恢复显示",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-CONTROLS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-CONTROLS-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-CONTROLS-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-CONTROLS-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-CONTROLS-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-CONTROLS-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-CONTROLS-CLEANUP-5",
+        "disabled": false
+      },
+      {
+        "text": "恢复显示",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M03-CONTROLS-CLEANUP-6",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "数据报表生成器",
+      "增长打法手册",
+      "已隐藏的应用",
+      "品牌语气分析"
+    ],
+    "scene": "P-M03-CONTROLS",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-ALL-APPS-ZERO-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-6",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-5",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n\n企业尚未分发应用。管理员分发后会显示在这里。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-001-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-002-P-M04-RUNTIME",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-005-P-M04-NOTIFY-ENT",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-006-P-M10-MENU-ENT",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M03-ALL-APPS-ENT-EMPTY-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M03-ALL-APPS-ENT-EMPTY-CLEANUP-1",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手"
+    ],
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-ALL-APPS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-ALL-APPS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-ALL-APPS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-ALL-APPS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-ALL-APPS-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M03-ALL-APPS-R14-19",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-ALL-APPS-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-ALL-APPS-R14-18",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M03-ALL-APPS",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-001",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-002",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-005",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-006",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M03-ALL-APPS-ENT-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M03-ALL-APPS-ENT-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "transition": "P-M03-ALL-APPS-ENT-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "transition": "P-M03-ALL-APPS-ENT-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "transition": "P-M03-ALL-APPS-ENT-R14-16",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "报价整理",
+      "合同审查",
+      "客户资料核验"
+    ],
+    "scene": "P-M03-ALL-APPS-ENT",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n免费 · 长期有效\n内容\n更新\n订阅\n应用\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索打法与案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-DETAIL-FOCUS-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "T-P-M07-DETAIL-FOCUS-012-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "transition": "P-M07-DETAIL-FOCUS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "transition": "P-M07-DETAIL-FOCUS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-FOCUS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "T-P-M07-DETAIL-FOCUS-015-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-UI-MEETING",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "transition": "T-P-M07-DETAIL-FOCUS-R6-027",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星增长圈",
+      "应用",
+      "增长打法手册",
+      "会议纪要整理",
+      "技能",
+      "资料研究"
+    ],
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 有效至 2026-11-02\n续费\n内容\n更新\n订阅\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-DETAIL-PAID-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "T-P-M07-DETAIL-PAID-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "transition": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "transition": "P-M07-DETAIL-PAID-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "transition": "P-M07-DETAIL-PAID-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-PAID-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "transition": "T-P-M07-DETAIL-PAID-R6-030",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星设计圈",
+      "应用",
+      "品牌语气分析",
+      "会议纪要整理",
+      "技能",
+      "资料研究"
+    ],
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n周期\n免费 · 长期有效\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-16",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星增长圈",
+      "订阅与权益"
+    ],
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n订阅周期\n月度订阅 · ¥39 / 月\n有效至\n2026-11-02\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n续费退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-4",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-PAID",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-19",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星设计圈",
+      "订阅与权益"
+    ],
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n内容\n订阅\n订阅权益\n\n免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-DATA",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-12",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-13",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-DATA",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-14",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "数据工坊圈",
+      "订阅权益"
+    ],
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n星河年度圈\n有效\n订阅权益\n\n已购买下一年度权益\n\n订阅周期\n年度订阅\n有效至\n2028-10-01\n再次提前续费\n进入下一年度周期后才可继续\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-YEAR-RESULT-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-YEAR-RESULT-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-YEAR",
+        "transition": "P-M07-YEAR-RESULT-UI-12",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "星河年度圈",
+      "订阅权益"
+    ],
+    "scene": "P-M07-YEAR-RESULT",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n\n账号与客户端设置在这里管理。对话、输入和工具调用偏好在 Polo 助手中设置。\n\n账号概览\n账号\n小王 · 138••••8000\n账号状态\n正常\n身份摘要\n北方贸易所有者 · 有效创作者\n当前设备\n这台 Mac · 已验证\n客户端偏好\n外观与通知\n浅色主题 · 重要通知已开启\n前往设置\n本机存储\n文件保存在这台电脑上\n管理入口\n企业管理后台\n管理成员、名单和企业账单\n在浏览器打开\n创作者工作台\n作品、圈子和收入\n在浏览器打开\n账号操作\n\n退出只影响这台设备\n\n退出登录\n保留本机文件\n退出登录\n应用偏好\nPolo 助手\n发送习惯、回答偏好、会话标签与工具权限\n打开助手偏好",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M10-SETTINGS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-013-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "transition": "T-P-M10-SETTINGS-014-P-M10-SETTINGS",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "T-P-M10-SETTINGS-015-P-M10-SETTINGS-APPEARANCE",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "transition": "P-M10-SETTINGS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "transition": "P-M10-SETTINGS-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "transition": "P-M10-SETTINGS-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "前往设置",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "T-P-M10-SETTINGS-016-P-M10-SETTINGS-APPEARANCE",
+        "disabled": false
+      },
+      {
+        "text": "在浏览器打开",
+        "go": "P-M10-ADMIN-BROWSER",
+        "transition": "T-P-M10-SETTINGS-017-P-M10-ADMIN-BROWSER",
+        "disabled": false
+      },
+      {
+        "text": "在浏览器打开",
+        "go": "P-M10-ADMIN-BROWSER",
+        "transition": "T-P-M10-SETTINGS-018-P-M10-ADMIN-BROWSER",
+        "disabled": false
+      },
+      {
+        "text": "退出登录",
+        "go": "P-M01-LOGIN-PASSWORD",
+        "transition": "T-P-M10-SETTINGS-019-P-M01-LOGIN-PASSWORD",
+        "disabled": false
+      },
+      {
+        "text": "打开助手偏好",
+        "go": "A-personal-preferences",
+        "transition": "P-M10-SETTINGS-R14-22",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "Polo 设置",
+      "账号概览",
+      "客户端偏好",
+      "管理入口",
+      "账号操作",
+      "应用偏好"
+    ],
+    "scene": "P-M10-SETTINGS",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "跟随系统代理\n直接连接",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "检查更新时通知我\n手动检查",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "Polo 设置",
+      "设备与网络"
+    ],
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "P-M02-STOPPING-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "P-M02-STOPPING-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "P-M04-RUNTIME",
+        "transition": "P-M02-STOPPING-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "P-M02-STOPPING-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "P-M02-STOPPING-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M02-STOPPING-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M02-STOPPING-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "transition": "P-M02-STOPPING-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "transition": "P-M02-STOPPING-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "transition": "P-M02-STOPPING-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M02-STOP-CANCEL",
+        "transition": "P-M02-STOPPING-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "取消切换",
+        "go": "P-M02-STOP-CANCEL",
+        "transition": "P-M02-STOPPING-R14-C-17",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "报价整理",
+      "合同审查",
+      "客户资料核验",
+      "正在停止任务"
+    ],
+    "scene": "P-M02-STOPPING",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "A-personal-detail-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "transition": "A-personal-detail-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "A-personal-detail-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "A-personal-detail-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-detail-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-personal-legacy-local-100-0-1",
+        "transition": "A-personal-detail-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-personal-legacy-detail-110-1-1",
+        "transition": "A-personal-detail-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-personal-legacy-remove-100-1-1",
+        "transition": "A-personal-detail-remove",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "transition": "A-personal-detail-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-detail-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-1-1",
+        "transition": "A-personal-detail-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "transition": "A-personal-detail-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "资料研究",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-personal-detail",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n晨星科技\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星科技\n\n2 项技能\n\n销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "A-enterprise-detail-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "transition": "A-enterprise-detail-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "A-enterprise-detail-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "A-enterprise-detail-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-detail-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-enterprise-legacy-local-100-0-1",
+        "transition": "A-enterprise-detail-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-enterprise-legacy-detail-110-1-1",
+        "transition": "A-enterprise-detail-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-enterprise-legacy-remove-100-1-1",
+        "transition": "A-enterprise-detail-remove",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-enterprise-new",
+        "transition": "A-enterprise-detail-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-detail-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-enterprise-legacy-local-100-1-1",
+        "transition": "A-enterprise-detail-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-enterprise-sources",
+        "transition": "A-enterprise-detail-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "销售周报",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-enterprise-detail",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n卸载本机副本\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n\n将删除这台设备的技能副本。原对话及附件保留。\n\n确认卸载\n取消\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "A-personal-remove-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "transition": "A-personal-remove-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "A-personal-remove-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "A-personal-remove-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-remove-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "确认卸载",
+        "go": "A-personal-uninstalled",
+        "transition": "A-personal-remove-confirmremove",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "A-personal-legacy-detail-100-1-1",
+        "transition": "A-personal-remove-cancel",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "transition": "A-personal-remove-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-remove-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-1-1",
+        "transition": "A-personal-remove-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "transition": "A-personal-remove-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "资料研究",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-personal-remove",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n后台任务\n晨星科技\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星科技\n\n2 项技能\n\n销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n卸载本机副本\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n\n将删除这台设备的技能副本。原对话及附件保留。\n\n确认卸载\n取消\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "A-enterprise-remove-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "transition": "A-enterprise-remove-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "A-enterprise-remove-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "A-enterprise-remove-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-remove-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "确认卸载",
+        "go": "A-enterprise-uninstalled",
+        "transition": "A-enterprise-remove-confirmremove",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "A-enterprise-legacy-detail-100-1-1",
+        "transition": "A-enterprise-remove-cancel",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-enterprise-new",
+        "transition": "A-enterprise-remove-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-remove-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-enterprise-legacy-local-100-1-1",
+        "transition": "A-enterprise-remove-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-enterprise-sources",
+        "transition": "A-enterprise-remove-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "销售周报",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-enterprise-remove",
+    "viewport": "1440x900"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\n已退出晨星增长圈；晨星设计圈的授权仍然有效。\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室 · 晨星设计圈授权\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n晨星增长圈授权已撤销，重新加入后可恢复。\n\n重新加入",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-SOURCE-FALLBACK-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-6",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "重新加入",
+        "go": "P-M07-JOIN-FREE",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-5",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n已隐藏的应用\n\n只影响这台电脑的显示，不改变使用授权。\n\n查看隐藏项",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-MANAGE-HOME-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-5",
+        "disabled": false
+      },
+      {
+        "text": "查看隐藏项",
+        "go": "P-M03-CONTROLS",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-6",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "数据报表生成器",
+      "增长打法手册",
+      "已隐藏的应用"
+    ],
+    "scene": "P-M03-MANAGE-HOME",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n已隐藏的应用\n\n只影响这台电脑的显示，不改变使用授权。\n\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n恢复显示",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-CONTROLS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-CONTROLS-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-CONTROLS-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-CONTROLS-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-CONTROLS-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-CONTROLS-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-CONTROLS-CLEANUP-5",
+        "disabled": false
+      },
+      {
+        "text": "恢复显示",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M03-CONTROLS-CLEANUP-6",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "数据报表生成器",
+      "增长打法手册",
+      "已隐藏的应用",
+      "品牌语气分析"
+    ],
+    "scene": "P-M03-CONTROLS",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-ALL-APPS-ZERO-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-6",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-5",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n\n企业尚未分发应用。管理员分发后会显示在这里。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-001-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-002-P-M04-RUNTIME",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-005-P-M04-NOTIFY-ENT",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-006-P-M10-MENU-ENT",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M03-ALL-APPS-ENT-EMPTY-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M03-ALL-APPS-ENT-EMPTY-CLEANUP-1",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手"
+    ],
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-ALL-APPS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-ALL-APPS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-ALL-APPS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-ALL-APPS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-ALL-APPS-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M03-ALL-APPS-R14-19",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-ALL-APPS-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-ALL-APPS-R14-18",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M03-ALL-APPS",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-001",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-002",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-005",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-006",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M03-ALL-APPS-ENT-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M03-ALL-APPS-ENT-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "transition": "P-M03-ALL-APPS-ENT-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "transition": "P-M03-ALL-APPS-ENT-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "transition": "P-M03-ALL-APPS-ENT-R14-16",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "报价整理",
+      "合同审查",
+      "客户资料核验"
+    ],
+    "scene": "P-M03-ALL-APPS-ENT",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n免费 · 长期有效\n内容\n更新\n订阅\n应用\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索打法与案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-DETAIL-FOCUS-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "T-P-M07-DETAIL-FOCUS-012-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "transition": "P-M07-DETAIL-FOCUS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "transition": "P-M07-DETAIL-FOCUS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-FOCUS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "T-P-M07-DETAIL-FOCUS-015-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-UI-MEETING",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "transition": "T-P-M07-DETAIL-FOCUS-R6-027",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星增长圈",
+      "应用",
+      "增长打法手册",
+      "会议纪要整理",
+      "技能",
+      "资料研究"
+    ],
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 有效至 2026-11-02\n续费\n内容\n更新\n订阅\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-DETAIL-PAID-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "T-P-M07-DETAIL-PAID-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "transition": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "transition": "P-M07-DETAIL-PAID-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "transition": "P-M07-DETAIL-PAID-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-PAID-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "transition": "T-P-M07-DETAIL-PAID-R6-030",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星设计圈",
+      "应用",
+      "品牌语气分析",
+      "会议纪要整理",
+      "技能",
+      "资料研究"
+    ],
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n周期\n免费 · 长期有效\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-16",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星增长圈",
+      "订阅与权益"
+    ],
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n订阅周期\n月度订阅 · ¥39 / 月\n有效至\n2026-11-02\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n续费退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-4",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-PAID",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-19",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星设计圈",
+      "订阅与权益"
+    ],
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n内容\n订阅\n订阅权益\n\n免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-DATA",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-12",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-13",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-DATA",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-14",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "数据工坊圈",
+      "订阅权益"
+    ],
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n星河年度圈\n有效\n订阅权益\n\n已购买下一年度权益\n\n订阅周期\n年度订阅\n有效至\n2028-10-01\n再次提前续费\n进入下一年度周期后才可继续\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-YEAR-RESULT-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-YEAR-RESULT-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-YEAR",
+        "transition": "P-M07-YEAR-RESULT-UI-12",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "星河年度圈",
+      "订阅权益"
+    ],
+    "scene": "P-M07-YEAR-RESULT",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n\n账号与客户端设置在这里管理。对话、输入和工具调用偏好在 Polo 助手中设置。\n\n账号概览\n账号\n小王 · 138••••8000\n账号状态\n正常\n身份摘要\n北方贸易所有者 · 有效创作者\n当前设备\n这台 Mac · 已验证\n客户端偏好\n外观与通知\n浅色主题 · 重要通知已开启\n前往设置\n本机存储\n文件保存在这台电脑上\n管理入口\n企业管理后台\n管理成员、名单和企业账单\n在浏览器打开\n创作者工作台\n作品、圈子和收入\n在浏览器打开\n账号操作\n\n退出只影响这台设备\n\n退出登录\n保留本机文件\n退出登录\n应用偏好\nPolo 助手\n发送习惯、回答偏好、会话标签与工具权限\n打开助手偏好",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M10-SETTINGS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-013-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "transition": "T-P-M10-SETTINGS-014-P-M10-SETTINGS",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "T-P-M10-SETTINGS-015-P-M10-SETTINGS-APPEARANCE",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "transition": "P-M10-SETTINGS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "transition": "P-M10-SETTINGS-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "transition": "P-M10-SETTINGS-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "前往设置",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "T-P-M10-SETTINGS-016-P-M10-SETTINGS-APPEARANCE",
+        "disabled": false
+      },
+      {
+        "text": "在浏览器打开",
+        "go": "P-M10-ADMIN-BROWSER",
+        "transition": "T-P-M10-SETTINGS-017-P-M10-ADMIN-BROWSER",
+        "disabled": false
+      },
+      {
+        "text": "在浏览器打开",
+        "go": "P-M10-ADMIN-BROWSER",
+        "transition": "T-P-M10-SETTINGS-018-P-M10-ADMIN-BROWSER",
+        "disabled": false
+      },
+      {
+        "text": "退出登录",
+        "go": "P-M01-LOGIN-PASSWORD",
+        "transition": "T-P-M10-SETTINGS-019-P-M01-LOGIN-PASSWORD",
+        "disabled": false
+      },
+      {
+        "text": "打开助手偏好",
+        "go": "A-personal-preferences",
+        "transition": "P-M10-SETTINGS-R14-22",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "Polo 设置",
+      "账号概览",
+      "客户端偏好",
+      "管理入口",
+      "账号操作",
+      "应用偏好"
+    ],
+    "scene": "P-M10-SETTINGS",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "跟随系统代理\n直接连接",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "检查更新时通知我\n手动检查",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "Polo 设置",
+      "设备与网络"
+    ],
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "P-M02-STOPPING-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "P-M02-STOPPING-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME",
+        "transition": "P-M02-STOPPING-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "P-M02-STOPPING-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "P-M02-STOPPING-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M02-STOPPING-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M02-STOPPING-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "transition": "P-M02-STOPPING-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "transition": "P-M02-STOPPING-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "transition": "P-M02-STOPPING-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M02-STOP-CANCEL",
+        "transition": "P-M02-STOPPING-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "取消切换",
+        "go": "P-M02-STOP-CANCEL",
+        "transition": "P-M02-STOPPING-R14-C-17",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "报价整理",
+      "合同审查",
+      "客户资料核验",
+      "正在停止任务"
+    ],
+    "scene": "P-M02-STOPPING",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "A-personal-detail-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "transition": "A-personal-detail-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "A-personal-detail-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "A-personal-detail-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-detail-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-personal-legacy-local-100-0-1",
+        "transition": "A-personal-detail-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-personal-legacy-detail-110-1-1",
+        "transition": "A-personal-detail-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-personal-legacy-remove-100-1-1",
+        "transition": "A-personal-detail-remove",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "transition": "A-personal-detail-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-detail-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-1-1",
+        "transition": "A-personal-detail-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "transition": "A-personal-detail-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "资料研究",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-personal-detail",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\n首页\n后台任务\n晨星科技\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星科技\n\n2 项技能\n\n销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "A-enterprise-detail-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "transition": "A-enterprise-detail-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "A-enterprise-detail-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "A-enterprise-detail-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-detail-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-enterprise-legacy-local-100-0-1",
+        "transition": "A-enterprise-detail-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-enterprise-legacy-detail-110-1-1",
+        "transition": "A-enterprise-detail-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-enterprise-legacy-remove-100-1-1",
+        "transition": "A-enterprise-detail-remove",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-enterprise-new",
+        "transition": "A-enterprise-detail-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-detail-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-enterprise-legacy-local-100-1-1",
+        "transition": "A-enterprise-detail-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-enterprise-sources",
+        "transition": "A-enterprise-detail-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "销售周报",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-enterprise-detail",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n卸载本机副本\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n\n将删除这台设备的技能副本。原对话及附件保留。\n\n确认卸载\n取消\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "A-personal-remove-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "transition": "A-personal-remove-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "A-personal-remove-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "A-personal-remove-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-remove-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\n晨星增长圈 · 晨星设计圈\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "确认卸载",
+        "go": "A-personal-uninstalled",
+        "transition": "A-personal-remove-confirmremove",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "A-personal-legacy-detail-100-1-1",
+        "transition": "A-personal-remove-cancel",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-personal-new",
+        "transition": "A-personal-remove-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-remove-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-personal-legacy-local-100-1-1",
+        "transition": "A-personal-remove-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-personal-sources",
+        "transition": "A-personal-remove-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "资料研究",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-personal-remove",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\n首页\n后台任务\n晨星科技\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星科技\n\n2 项技能\n\n销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n卸载本机副本\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n\n将删除这台设备的技能副本。原对话及附件保留。\n\n确认卸载\n取消\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "A-enterprise-remove-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "transition": "A-enterprise-remove-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "A-enterprise-remove-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "A-enterprise-remove-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-remove-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "销售周报\n\n晨星科技\n\n已启用 · 就绪 · 1.0.0",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "资料研究\n\nPolo 内置\n\n已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "确认卸载",
+        "go": "A-enterprise-uninstalled",
+        "transition": "A-enterprise-remove-confirmremove",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "A-enterprise-legacy-detail-100-1-1",
+        "transition": "A-enterprise-remove-cancel",
+        "disabled": false
+      },
+      {
+        "text": "新建助手会话",
+        "go": "A-enterprise-new",
+        "transition": "A-enterprise-remove-new",
+        "disabled": false
+      },
+      {
+        "text": "所有会话",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-remove-sessions",
+        "disabled": false
+      },
+      {
+        "text": "返回完整技能列表",
+        "go": "A-enterprise-legacy-local-100-1-1",
+        "transition": "A-enterprise-remove-skills",
+        "disabled": false
+      },
+      {
+        "text": "助手数据源",
+        "go": "A-enterprise-sources",
+        "transition": "A-enterprise-remove-sources",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "销售周报",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-enterprise-remove",
+    "viewport": "1024x768"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\n已退出晨星增长圈；晨星设计圈的授权仍然有效。\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室 · 晨星设计圈授权\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n晨星增长圈授权已撤销，重新加入后可恢复。\n\n重新加入",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-SOURCE-FALLBACK-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-SOURCE-FALLBACK-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-6",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "重新加入",
+        "go": "P-M07-JOIN-FREE",
+        "transition": "P-M07-SOURCE-FALLBACK-CLEANUP-5",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n已隐藏的应用\n\n只影响这台电脑的显示，不改变使用授权。\n\n查看隐藏项",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-MANAGE-HOME-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-MANAGE-HOME-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-5",
+        "disabled": false
+      },
+      {
+        "text": "查看隐藏项",
+        "go": "P-M03-CONTROLS",
+        "transition": "P-M03-MANAGE-HOME-CLEANUP-6",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "数据报表生成器",
+      "增长打法手册",
+      "已隐藏的应用"
+    ],
+    "scene": "P-M03-MANAGE-HOME",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n已隐藏的应用\n\n只影响这台电脑的显示，不改变使用授权。\n\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n恢复显示",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-CONTROLS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-CONTROLS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-CONTROLS-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-CONTROLS-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-CONTROLS-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-CONTROLS-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-CONTROLS-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-CONTROLS-CLEANUP-5",
+        "disabled": false
+      },
+      {
+        "text": "恢复显示",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M03-CONTROLS-CLEANUP-6",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "数据报表生成器",
+      "增长打法手册",
+      "已隐藏的应用",
+      "品牌语气分析"
+    ],
+    "scene": "P-M03-CONTROLS",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-ZERO-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-ALL-APPS-ZERO-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-1",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-2",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-4",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-6",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-3",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-ALL-APPS-ZERO-CLEANUP-5",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n\n企业尚未分发应用。管理员分发后会显示在这里。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-001-P-M03-HOME-ENT",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-002-P-M04-RUNTIME",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-005-P-M04-NOTIFY-ENT",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-EMPTY-006-P-M10-MENU-ENT",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M03-ALL-APPS-ENT-EMPTY-CLEANUP-0",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M03-ALL-APPS-ENT-EMPTY-CLEANUP-1",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手"
+    ],
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M03-ALL-APPS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M03-ALL-APPS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M03-ALL-APPS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-personal-skills",
+        "transition": "P-M03-ALL-APPS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-personal-new",
+        "transition": "P-M03-ALL-APPS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M03-ALL-APPS-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "P-M03-ALL-APPS-R14-19",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-REPORT",
+        "transition": "P-M03-ALL-APPS-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "P-M03-ALL-APPS-R14-18",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "会议纪要整理",
+      "品牌语气分析",
+      "数据报表生成器",
+      "增长打法手册"
+    ],
+    "scene": "P-M03-ALL-APPS",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-001",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-002",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-005",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "T-P-M03-ALL-APPS-ENT-R6-006",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M03-ALL-APPS-ENT-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M03-ALL-APPS-ENT-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "transition": "P-M03-ALL-APPS-ENT-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "transition": "P-M03-ALL-APPS-ENT-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "transition": "P-M03-ALL-APPS-ENT-R14-16",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "报价整理",
+      "合同审查",
+      "客户资料核验"
+    ],
+    "scene": "P-M03-ALL-APPS-ENT",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n免费 · 长期有效\n内容\n更新\n订阅\n应用\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索打法与案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-DETAIL-FOCUS-004-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-DETAIL-FOCUS-005-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "T-P-M07-DETAIL-FOCUS-012-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "transition": "P-M07-DETAIL-FOCUS-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "transition": "P-M07-DETAIL-FOCUS-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-FOCUS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-GROWTH",
+        "transition": "T-P-M07-DETAIL-FOCUS-015-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-UI-MEETING",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "transition": "T-P-M07-DETAIL-FOCUS-R6-027",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星增长圈",
+      "应用",
+      "增长打法手册",
+      "会议纪要整理",
+      "技能",
+      "资料研究"
+    ],
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 有效至 2026-11-02\n续费\n内容\n更新\n订阅\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n安装到本机后，供 Polo 助手使用\n可安装\n查看并安装",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M07-DETAIL-PAID-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "T-P-M07-DETAIL-PAID-013-P-M07-LIST",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "transition": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "transition": "P-M07-DETAIL-PAID-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "transition": "P-M07-DETAIL-PAID-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-PAID-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-BRAND",
+        "transition": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW-PERSONAL",
+        "transition": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "查看并安装",
+        "go": "A-personal-acquire",
+        "transition": "T-P-M07-DETAIL-PAID-R6-030",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星设计圈",
+      "应用",
+      "品牌语气分析",
+      "会议纪要整理",
+      "技能",
+      "资料研究"
+    ],
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星增长圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n周期\n免费 · 长期有效\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-FOCUS",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-13",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-FOCUS-UPDATES",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-14",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE",
+        "transition": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-16",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星增长圈",
+      "订阅与权益"
+    ],
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n有效\n内容\n更新\n订阅\n订阅与权益\n订阅周期\n月度订阅 · ¥39 / 月\n有效至\n2026-11-02\n\n退出或到期只影响这个圈子提供的来源；其他有效来源仍可继续使用。\n\n续费退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-1",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-4",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-12",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-PAID",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "更新",
+        "go": "P-M07-DETAIL-PAID-UPDATES",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "续费",
+        "go": "P-M07-RENEW",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-PAID",
+        "transition": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-19",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "晨星设计圈",
+      "订阅与权益"
+    ],
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n数据工坊圈\n\n数据工坊 · 1 个 App\n\n有效\n内容\n订阅\n订阅权益\n\n免费 · 长期有效\n\n这个圈子提供数据报表生成器的使用权限。\n\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "内容",
+        "go": "P-M07-DETAIL-DATA",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-12",
+        "disabled": false
+      },
+      {
+        "text": "订阅",
+        "go": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-13",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-DATA",
+        "transition": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-14",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "数据工坊圈",
+      "订阅权益"
+    ],
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n星河年度圈\n有效\n订阅权益\n\n已购买下一年度权益\n\n订阅周期\n年度订阅\n有效至\n2028-10-01\n再次提前续费\n进入下一年度周期后才可继续\n退出圈子",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-1",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M07-YEAR-RESULT-UI-2",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M07-YEAR-RESULT-UI-3",
+        "disabled": false
+      },
+      {
+        "text": "返回我的圈子",
+        "go": "P-M07-LIST",
+        "transition": "P-M07-YEAR-RESULT-UI-11",
+        "disabled": false
+      },
+      {
+        "text": "退出圈子",
+        "go": "P-M07-LEAVE-YEAR",
+        "transition": "P-M07-YEAR-RESULT-UI-12",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "星河年度圈",
+      "订阅权益"
+    ],
+    "scene": "P-M07-YEAR-RESULT",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n\n账号与客户端设置在这里管理。对话、输入和工具调用偏好在 Polo 助手中设置。\n\n账号概览\n账号\n小王 · 138••••8000\n账号状态\n正常\n身份摘要\n北方贸易所有者 · 有效创作者\n当前设备\n这台 Mac · 已验证\n客户端偏好\n外观与通知\n浅色主题 · 重要通知已开启\n前往设置\n本机存储\n文件保存在这台电脑上\n管理入口\n企业管理后台\n管理成员、名单和企业账单\n在浏览器打开\n创作者工作台\n作品、圈子和收入\n在浏览器打开\n账号操作\n\n退出只影响这台设备\n\n退出登录\n保留本机文件\n退出登录\n应用偏好\nPolo 助手\n发送习惯、回答偏好、会话标签与工具权限\n打开助手偏好",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-R6-000",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-001-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-002-P-M04-RUNTIME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-005-P-M04-NOTIFY-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "T-P-M10-SETTINGS-006-P-M10-MENU",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "T-P-M10-SETTINGS-013-P-M03-HOME-PERSONAL",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "transition": "T-P-M10-SETTINGS-014-P-M10-SETTINGS",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "T-P-M10-SETTINGS-015-P-M10-SETTINGS-APPEARANCE",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "transition": "P-M10-SETTINGS-R14-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "transition": "P-M10-SETTINGS-R14-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "transition": "P-M10-SETTINGS-R14-17",
+        "disabled": false
+      },
+      {
+        "text": "前往设置",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "T-P-M10-SETTINGS-016-P-M10-SETTINGS-APPEARANCE",
+        "disabled": false
+      },
+      {
+        "text": "在浏览器打开",
+        "go": "P-M10-ADMIN-BROWSER",
+        "transition": "T-P-M10-SETTINGS-017-P-M10-ADMIN-BROWSER",
+        "disabled": false
+      },
+      {
+        "text": "在浏览器打开",
+        "go": "P-M10-ADMIN-BROWSER",
+        "transition": "T-P-M10-SETTINGS-018-P-M10-ADMIN-BROWSER",
+        "disabled": false
+      },
+      {
+        "text": "退出登录",
+        "go": "P-M01-LOGIN-PASSWORD",
+        "transition": "T-P-M10-SETTINGS-019-P-M01-LOGIN-PASSWORD",
+        "disabled": false
+      },
+      {
+        "text": "打开助手偏好",
+        "go": "A-personal-preferences",
+        "transition": "P-M10-SETTINGS-R14-22",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "Polo 设置",
+      "账号概览",
+      "客户端偏好",
+      "管理入口",
+      "账号操作",
+      "应用偏好"
+    ],
+    "scene": "P-M10-SETTINGS",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n我\n我的空间\n王\n返回首页\n\n我的空间\n\nPolo 设置\n\n管理账号与本机偏好\n\n账号正常\n账号概览\n外观与通知\n设备与网络\n系统权限\n全局快捷键\n设备与网络\n\n以下设置作用于这台 Mac。\n\n网络连接\n跟随系统代理\n直接连接\n应用更新\n检查更新时通知我\n手动检查\n本机存储\n已下载的应用与技能保存在这台设备；卸载技能请进入技能管理。\n保存设置",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "返回首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "账号概览",
+        "go": "P-M10-SETTINGS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "外观与通知",
+        "go": "P-M10-SETTINGS-APPEARANCE",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "设备与网络",
+        "go": "P-M10-SETTINGS-DEVICE",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "系统权限",
+        "go": "P-M10-SETTINGS-PERMISSIONS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "全局快捷键",
+        "go": "P-M10-SETTINGS-SHORTCUTS",
+        "transition": "P-M10-SETTINGS-DEVICE-R14-C-17",
+        "disabled": false
+      },
+      {
+        "text": "跟随系统代理\n直接连接",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "检查更新时通知我\n手动检查",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "保存设置",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "Polo 设置",
+      "设备与网络"
+    ],
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\nPolo\n首页\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n数据报表生成器\n同空间后台运行\n取消切换",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "go": "P-M03-HOME-ENT",
+        "transition": "P-M02-STOPPING-R14-C-0",
+        "disabled": false
+      },
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "P-M02-STOPPING-R14-C-1",
+        "disabled": false
+      },
+      {
+        "text": null,
+        "go": "P-M04-RUNTIME",
+        "transition": "P-M02-STOPPING-R14-C-2",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "P-M02-STOPPING-R14-C-3",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "P-M02-STOPPING-R14-C-4",
+        "disabled": false
+      },
+      {
+        "text": "搜索应用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "最近使用\n使用频率\n名称",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "管理技能",
+        "go": "A-enterprise-skills",
+        "transition": "P-M02-STOPPING-R14-C-11",
+        "disabled": false
+      },
+      {
+        "text": "打开助手",
+        "go": "A-enterprise-new",
+        "transition": "P-M02-STOPPING-R14-C-12",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-VIEW",
+        "transition": "P-M02-STOPPING-R14-C-13",
+        "disabled": false
+      },
+      {
+        "text": "打开",
+        "go": "P-M04-APP-CONTRACT",
+        "transition": "P-M02-STOPPING-R14-C-14",
+        "disabled": false
+      },
+      {
+        "text": "查看原因",
+        "go": "P-M11-BLOCKED-VERSION",
+        "transition": "P-M02-STOPPING-R14-C-15",
+        "disabled": false
+      },
+      {
+        "text": "关闭",
+        "go": "P-M02-STOP-CANCEL",
+        "transition": "P-M02-STOPPING-R14-C-16",
+        "disabled": false
+      },
+      {
+        "text": "取消切换",
+        "go": "P-M02-STOP-CANCEL",
+        "transition": "P-M02-STOPPING-R14-C-17",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "我的应用",
+      "Polo 助手",
+      "报价整理",
+      "合同审查",
+      "客户资料核验",
+      "正在停止任务"
+    ],
+    "scene": "P-M02-STOPPING",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n返回技能列表\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "A-personal-detail-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "transition": "A-personal-detail-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "A-personal-detail-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "A-personal-detail-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-detail-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "返回技能列表",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-personal-legacy-local-100-0-1",
+        "transition": "A-personal-detail-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-personal-legacy-detail-110-1-1",
+        "transition": "A-personal-detail-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-personal-legacy-remove-100-1-1",
+        "transition": "A-personal-detail-remove",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "资料研究",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-personal-detail",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\n首页\n后台任务\n晨星科技\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星科技\n返回技能列表\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "A-enterprise-detail-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "transition": "A-enterprise-detail-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "A-enterprise-detail-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "A-enterprise-detail-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-detail-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "返回技能列表",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "为我停用",
+        "go": "A-enterprise-legacy-local-100-0-1",
+        "transition": "A-enterprise-detail-disable",
+        "disabled": false
+      },
+      {
+        "text": "更新到 1.1.0",
+        "go": "A-enterprise-legacy-detail-110-1-1",
+        "transition": "A-enterprise-detail-update",
+        "disabled": false
+      },
+      {
+        "text": "卸载本机副本",
+        "go": "A-enterprise-legacy-remove-100-1-1",
+        "transition": "A-enterprise-detail-remove",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "销售周报",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-enterprise-detail",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n返回技能列表\n卸载本机副本\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n\n将删除这台设备的技能副本。原对话及附件保留。\n\n确认卸载\n取消\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-PERSONAL",
+        "transition": "A-personal-remove-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-personal-activity",
+        "transition": "A-personal-remove-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-PERSONAL",
+        "transition": "A-personal-remove-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU",
+        "transition": "A-personal-remove-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-personal-conversation",
+        "transition": "A-personal-remove-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "返回技能列表",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "确认卸载",
+        "go": "A-personal-uninstalled",
+        "transition": "A-personal-remove-confirmremove",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "A-personal-legacy-detail-100-1-1",
+        "transition": "A-personal-remove-cancel",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "资料研究",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-personal-remove",
+    "viewport": "800x600"
+  },
+  {
+    "text": "P\n首页\n后台任务\n晨星科技\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星科技\n返回技能列表\n卸载本机副本\n📋\n销售周报\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星科技 · 企业共享\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n\n将删除这台设备的技能副本。原对话及附件保留。\n\n确认卸载\n取消\n版本更新\n\n当前版本：1.0.0 · 最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。",
+    "overflow": false,
+    "controls": [
+      {
+        "text": "首页",
+        "go": "P-M03-HOME-ENT",
+        "transition": "A-enterprise-remove-home",
+        "disabled": false
+      },
+      {
+        "text": "后台任务",
+        "go": "A-enterprise-activity",
+        "transition": "A-enterprise-remove-runtime",
+        "disabled": false
+      },
+      {
+        "text": "通知",
+        "go": "P-M04-NOTIFY-ENT",
+        "transition": "A-enterprise-remove-notification",
+        "disabled": false
+      },
+      {
+        "text": "王",
+        "go": "P-M10-MENU-ENT",
+        "transition": "A-enterprise-remove-account",
+        "disabled": false
+      },
+      {
+        "text": "名称或用途",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "打开 Polo 助手",
+        "go": "A-enterprise-conversation",
+        "transition": "A-enterprise-remove-assistant",
+        "disabled": false
+      },
+      {
+        "text": "全部技能",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "已启用",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "待准备",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "有更新",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "受限",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "全部来源\nPolo 内置\n晨星科技",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "返回技能列表",
+        "go": null,
+        "transition": null,
+        "disabled": false
+      },
+      {
+        "text": "确认卸载",
+        "go": "A-enterprise-uninstalled",
+        "transition": "A-enterprise-remove-confirmremove",
+        "disabled": false
+      },
+      {
+        "text": "取消",
+        "go": "A-enterprise-legacy-detail-100-1-1",
+        "transition": "A-enterprise-remove-cancel",
+        "disabled": false
+      }
+    ],
+    "headings": [
+      "技能",
+      "销售周报",
+      "来源与使用状态",
+      "版本更新",
+      "说明"
+    ],
+    "scene": "A-enterprise-remove",
+    "viewport": "800x600"
+  }
+]

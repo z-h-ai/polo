@@ -1,0 +1,35 @@
+{
+  "passed": true,
+  "scope": "PRD consolidation and source binding only; no new browser or independent semantic acceptance",
+  "before_archive": "docs/mvp-complete-flow-hifi/evidence/r15-prd-sync/before-document-sync.tar.gz",
+  "before_archive_sha256": "23881904329be12d1e00e0e430f410c7c6ebb3b3e0f533d58d1e48938759deda",
+  "prior_quality_sha256": "a01c4c497f00ae5414e5e8df13497e4bd03e5123a420140fead0899a05a6e803",
+  "source_changes": [
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "before": {
+        "id": "poo70-current-spec-terminology",
+        "label": "当前唯一客户端产品说明",
+        "path": "docs/client-journey-review/spec.md",
+        "revision": "master-r13",
+        "sha256": "1a4752de76303c881022571f28091a38273e267bec760d6ebd005d8a3ddc22f3"
+      },
+      "after": {
+        "id": "poo70-current-spec-terminology",
+        "label": "当前唯一客户端产品说明",
+        "path": "docs/client-journey-review/spec.md",
+        "revision": "master-r15-prd-sync（2026-10-03）",
+        "sha256": "4853853621280894296359507ae8892cfbe730afd9692f5058a18bd087606a4a"
+      }
+    }
+  ],
+  "checks": {
+    "manifest_only_spec_binding_changed": true,
+    "docs/mvp-complete-flow-hifi/prototype.html_outside_manifest_byte_identical": true,
+    "docs/mvp-complete-flow-hifi/review.html_outside_manifest_byte_identical": true,
+    "all_other_bound_sources_and_assistant_unchanged": true,
+    "prior_raw_evidence_unchanged": true
+  },
+  "preserved_scene_count": 365,
+  "preserved_alias_count": 95
+}

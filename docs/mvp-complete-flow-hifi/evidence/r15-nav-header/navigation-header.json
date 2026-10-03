@@ -1,0 +1,381 @@
+{
+  "revision": "poo70-workbench-r15-nav-header",
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "e96107cd461358b714305c71899e28c4f1a0f1573a7f90c15deee4e3d87b661e",
+    "docs/mvp-complete-flow-hifi/prototype.html": "fb75b6e15a691bd9a93da09c8391eeb0dd85ddd9b9e8aaeaa09b1ebd297769d3",
+    "docs/mvp-complete-flow-hifi/review.html": "c0b6f5599a0021c3be90edb1896a3137cd44ae570f90c16b1876ea3d71ca72f2",
+    "design-demos/polo-client-source-baseline/prototype.html": "22a201feb45dd1eb90e6a2e45cebbef6b0129c672855910501f68fa17a76f3ef"
+  },
+  "checks": [
+    {
+      "name": "desktop-1440x900 personal two adjacent card actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal one navigation tier",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal no horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal circle entry ownership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal skill manager opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 personal open assistant remains available",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 circles open without extra tab row",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise two adjacent card actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise one navigation tier",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise no horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise circle entry ownership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise skill manager opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 enterprise open assistant remains available",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 long page initially borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 line appears only after scroll",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 header stays fixed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 line disappears on return to top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 assistant top is borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 assistant page scroll reveals line",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 assistant scroll back removes line",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 nested panel scroll does not mark page header",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal two adjacent card actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal one navigation tier",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal no horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal circle entry ownership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal skill manager opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 personal open assistant remains available",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 circles open without extra tab row",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise two adjacent card actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise one navigation tier",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise no horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise circle entry ownership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise skill manager opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 enterprise open assistant remains available",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 long page initially borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 line appears only after scroll",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 header stays fixed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 line disappears on return to top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 assistant top is borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 assistant page scroll reveals line",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 assistant scroll back removes line",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1024x768 nested panel scroll does not mark page header",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal two adjacent card actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal one navigation tier",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal no horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal circle entry ownership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal skill manager opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 personal open assistant remains available",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 circles open without extra tab row",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise two adjacent card actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise one navigation tier",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise header no line at top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise no horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise circle entry ownership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise skill manager opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 enterprise open assistant remains available",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 long page initially borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 line appears only after scroll",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 header stays fixed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 line disappears on return to top",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 assistant top is borderless",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 assistant page scroll reveals line",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 assistant scroll back removes line",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-800x600 nested panel scroll does not mark page header",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/personal-home-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/personal-skills-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/circles-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/enterprise-home-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/enterprise-skills-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/home-scrolled-desktop-1440x900.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/personal-home-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/personal-skills-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/circles-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/enterprise-home-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/enterprise-skills-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/home-scrolled-desktop-1024x768.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/personal-home-desktop-800x600.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/personal-skills-desktop-800x600.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/circles-desktop-800x600.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/enterprise-home-desktop-800x600.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/enterprise-skills-desktop-800x600.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-nav-header/home-scrolled-desktop-800x600.png"
+  ],
+  "limitations": [
+    "Long-home scroll checks extend existing cards as layout fixtures; no real product data or services."
+  ],
+  "passed": true
+}

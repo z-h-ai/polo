@@ -44,18 +44,18 @@ const manifestPath = resolve(root, 'prototype-manifest.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 // Exporting is mechanical; the Chat shell is a product-design adaptation and
 // must not be promoted to a source-faithful Renderer capture.
-manifest.baselineVersion = '0.5.0-workbench-r14'
-manifest.name = 'Polo 助手 MVP · 新基线场景'
+manifest.baselineVersion = '0.5.3-workbench-r15-ui-refinement'
+manifest.name = 'Polo 技能管理增量 · 既有助手行为示意'
 manifest.protocol.defaultScene = 'A-personal-new'
 manifest.protocol.reviewMessages = 'product-ui-prototype:* v1; expected parent window, session, epoch, declared scene'
 manifest.protocol.auxiliaryReferences = '?reference=1&scene=chat&state=empty'
 manifest.coverage.mvpSceneSource = 'src/mvp/scenes.mjs'
 manifest.coverage.unifiedManifest = '../../docs/mvp-complete-flow-hifi/prototype-manifest.json'
-manifest.coverage.regions = 'Source-derived components plus explicit MVP design deltas; auxiliary scene-catalog remains historical component reference only.'
-manifest.verification = { static: 'see-unified-quality-report', browser: 'see-unified-quality-report', interactive: 'see-unified-quality-report', visual: 'pending-user-review', sourceFidelity: 'component-source-derived-mvp-design-delta', report: '../../docs/mvp-complete-flow-hifi/quality-report.json', browserScope: 'Chinese light; file and local HTTP; 1440x900, 1024x768, 800x600. Results are bound to artifact hashes in the unified report.' }
+manifest.coverage.regions = 'Skills and explicit Spec 13.11 deltas are reviewed here. Existing assistant UI stays owned by apps/electron/src/renderer; illustrative chat layouts must not drive production UI rewrites. Auxiliary scene-catalog is historical reference only.'
+manifest.verification = { static: 'see-unified-quality-report', browser: 'see-unified-quality-report', interactive: 'see-unified-quality-report', visual: 'pending-user-review', sourceFidelity: 'existing-assistant-behavior-illustration-not-ui-authority', report: '../../docs/mvp-complete-flow-hifi/quality-report.json', browserScope: 'Chinese light; file and local HTTP; 1440x900, 1024x768, 800x600. Results are bound to artifact hashes in the unified report.' }
 manifest.evidence.historicalChatFocus ||= { revision: '0.3.0-chat-focused', screenshots: manifest.evidence.currentScreenshots, browser: manifest.evidence.currentBrowserCheck }
-manifest.evidence.currentScreenshots = ['1440x900', '1024x768', '800x600'].map(size => '../../docs/mvp-complete-flow-hifi/evidence/r14/A-personal-new-desktop-' + size + '.png')
-manifest.evidence.currentBrowserCheck = '../../docs/mvp-complete-flow-hifi/evidence/r14/browser.json'
+manifest.evidence.currentScreenshots = ['1440x900', '1024x768', '800x600'].map(size => '../../docs/mvp-complete-flow-hifi/evidence/r15-ui-refinement/A-personal-new-desktop-' + size + '.png')
+manifest.evidence.currentBrowserCheck = '../../docs/mvp-complete-flow-hifi/evidence/r15-ui-refinement/browser.json'
 manifest.artifacts.componentGallery.note = 'Historical auxiliary component gallery captured before r12. MVP deltas are reviewed only through the unified entry; this gallery is not current whole-page evidence.'
 manifest.artifacts.singleFileBytes = statSync(output).size
 manifest.artifacts.singleFileSha256 = createHash('sha256').update(readFileSync(output)).digest('hex')

@@ -1,0 +1,938 @@
+{
+  "contract": "polo-unified-surfaces-v1",
+  "revision": "poo70-workbench-r15-ui-refinement",
+  "passed": true,
+  "checks": [
+    {
+      "check": "unique scenes",
+      "passed": true
+    },
+    {
+      "check": "unique transitions",
+      "passed": true
+    },
+    {
+      "check": "known transition destinations",
+      "passed": true
+    },
+    {
+      "check": "source exported assistant scenes exact",
+      "passed": true
+    },
+    {
+      "check": "source exported compatibility exact",
+      "passed": true
+    },
+    {
+      "check": "aliases point to active assistant",
+      "passed": true
+    },
+    {
+      "check": "embedded review matches manifest",
+      "passed": true
+    },
+    {
+      "check": "embedded mvp matches manifest",
+      "passed": true
+    },
+    {
+      "check": "source poo70-spec",
+      "passed": true
+    },
+    {
+      "check": "source poo70-module-review",
+      "passed": true
+    },
+    {
+      "check": "source poo70-delta-review",
+      "passed": true
+    },
+    {
+      "check": "source prototype-v1",
+      "passed": true
+    },
+    {
+      "check": "source prototype-v1-manifest",
+      "passed": true
+    },
+    {
+      "check": "source g4-product-css",
+      "passed": true
+    },
+    {
+      "check": "source g4-review-record",
+      "passed": true
+    },
+    {
+      "check": "source renderer-index-css",
+      "passed": true
+    },
+    {
+      "check": "source dpc07-decision",
+      "passed": true
+    },
+    {
+      "check": "source dpc07-source",
+      "passed": true
+    },
+    {
+      "check": "source dpc08-source",
+      "passed": true
+    },
+    {
+      "check": "source prototype-before-master-r9",
+      "passed": true
+    },
+    {
+      "check": "source master-r9-review",
+      "passed": true
+    },
+    {
+      "check": "source dpc09-source",
+      "passed": true
+    },
+    {
+      "check": "source prototype-before-master-r10",
+      "passed": true
+    },
+    {
+      "check": "source master-r10-review",
+      "passed": true
+    },
+    {
+      "check": "source desktop-brief-r6",
+      "passed": true
+    },
+    {
+      "check": "source desktop-review-r6",
+      "passed": true
+    },
+    {
+      "check": "source mac-window-controls-r7",
+      "passed": true
+    },
+    {
+      "check": "source tab-close-alignment-r8",
+      "passed": true
+    },
+    {
+      "check": "source space-entry-in-account-r9",
+      "passed": true
+    },
+    {
+      "check": "source revoked-space-menu-r10",
+      "passed": true
+    },
+    {
+      "check": "source poo70-current-spec-terminology",
+      "passed": true
+    },
+    {
+      "check": "source skill-terminology-review-r11",
+      "passed": true
+    },
+    {
+      "check": "source closure-r13-inputs",
+      "passed": true
+    },
+    {
+      "check": "source closure-r13-review",
+      "passed": true
+    },
+    {
+      "check": "source workbench-shared-style",
+      "passed": true
+    },
+    {
+      "check": "source assistant-r12-source",
+      "passed": true
+    },
+    {
+      "check": "source assistant-r12-routes",
+      "passed": true
+    },
+    {
+      "check": "source assistant-r12-design",
+      "passed": true
+    },
+    {
+      "check": "source workbench-header-scroll",
+      "passed": true
+    },
+    {
+      "check": "source space-switch-sequence",
+      "passed": true
+    },
+    {
+      "check": "source space-switch-progress",
+      "passed": true
+    },
+    {
+      "check": "source circle-membership-feedback",
+      "passed": true
+    },
+    {
+      "check": "source assistant-r12-review",
+      "passed": true
+    },
+    {
+      "check": "source workbench-r14-review",
+      "passed": true
+    },
+    {
+      "check": "design skill binding",
+      "passed": true
+    },
+    {
+      "check": "design docs/mvp-complete-flow-hifi/sources/g4-product.css",
+      "passed": true
+    },
+    {
+      "check": "design docs/mvp-complete-flow-hifi/sources/g4-review-record.md",
+      "passed": true
+    },
+    {
+      "check": "design docs/DESIGN.md",
+      "passed": true
+    },
+    {
+      "check": "design docs/mvp-complete-flow-hifi/sources/renderer-index.css",
+      "passed": true
+    },
+    {
+      "check": "design .agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "passed": true
+    },
+    {
+      "check": "MVP contains only its owned scenes",
+      "passed": true
+    },
+    {
+      "check": "no remote MVP assets",
+      "passed": true
+    },
+    {
+      "check": "no remote review assets",
+      "passed": true
+    },
+    {
+      "check": "no remote assistant assets",
+      "passed": true
+    },
+    {
+      "check": "local surface mvp",
+      "passed": true
+    },
+    {
+      "check": "local surface assistant",
+      "passed": true
+    },
+    {
+      "check": "story destinations UI-refinement",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival UI-refinement-8",
+      "passed": true
+    },
+    {
+      "check": "story destinations R15-all-ui",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-9",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-11",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-12",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-13",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-14",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-15",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-16",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-17",
+      "passed": true
+    },
+    {
+      "check": "story arrival R15-all-ui-18",
+      "passed": true
+    },
+    {
+      "check": "story destinations R14-workbench",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-1",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival R14-9",
+      "passed": true
+    },
+    {
+      "check": "story destinations S-DESKTOP",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-DESKTOP-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-DESKTOP-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-DESKTOP-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-DESKTOP-05",
+      "passed": true
+    },
+    {
+      "check": "story destinations S-TEAM-SKILLS",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-TEAM-SKILLS-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-TEAM-SKILLS-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-TEAM-SKILLS-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-TEAM-SKILLS-05",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-TEAM-SKILLS-06",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-TEAM-SKILLS-07",
+      "passed": true
+    },
+    {
+      "check": "story destinations S-CAPABILITY",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-CAPABILITY-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-CAPABILITY-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-CAPABILITY-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-CAPABILITY-05",
+      "passed": true
+    },
+    {
+      "check": "story arrival S-CAPABILITY-06",
+      "passed": true
+    },
+    {
+      "check": "story destinations S1",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-05",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-05-ACCOUNT",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-05-SWITCH",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-05A",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-06",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-07",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-08",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-09",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival S1-11",
+      "passed": true
+    },
+    {
+      "check": "story destinations S2",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-02A",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-05",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-06",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-07",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-08",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-09",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-11",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-12",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-13",
+      "passed": true
+    },
+    {
+      "check": "story arrival S2-14",
+      "passed": true
+    },
+    {
+      "check": "story destinations S3",
+      "passed": true
+    },
+    {
+      "check": "story arrival S3-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S3-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S3-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S3-05",
+      "passed": true
+    },
+    {
+      "check": "story arrival S3-06",
+      "passed": true
+    },
+    {
+      "check": "story arrival S3-07",
+      "passed": true
+    },
+    {
+      "check": "story destinations S4",
+      "passed": true
+    },
+    {
+      "check": "story arrival S4-02",
+      "passed": true
+    },
+    {
+      "check": "story arrival S4-03",
+      "passed": true
+    },
+    {
+      "check": "story arrival S4-04",
+      "passed": true
+    },
+    {
+      "check": "story arrival S4-05",
+      "passed": true
+    },
+    {
+      "check": "story arrival S4-06",
+      "passed": true
+    },
+    {
+      "check": "story arrival S4-07",
+      "passed": true
+    },
+    {
+      "check": "story destinations R13-circle-handoff",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-circle-handoff-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-circle-handoff-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-circle-handoff-4",
+      "passed": true
+    },
+    {
+      "check": "story destinations R13-enterprise-handoff",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-enterprise-handoff-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-enterprise-handoff-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-enterprise-handoff-4",
+      "passed": true
+    },
+    {
+      "check": "story destinations R13-support",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-support-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-support-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival R13-support-4",
+      "passed": true
+    },
+    {
+      "check": "story destinations AS-personal",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-9",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-personal-11",
+      "passed": true
+    },
+    {
+      "check": "story destinations AS-enterprise",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-9",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-enterprise-11",
+      "passed": true
+    },
+    {
+      "check": "story destinations AS-skills-personal",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-9",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-11",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-12",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-13",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-14",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-15",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-personal-16",
+      "passed": true
+    },
+    {
+      "check": "story destinations AS-skills-enterprise",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-9",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-11",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-12",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-13",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-14",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-15",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-skills-enterprise-16",
+      "passed": true
+    },
+    {
+      "check": "story destinations AS-credits",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-2",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-3",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-4",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-5",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-6",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-7",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-8",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-9",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-10",
+      "passed": true
+    },
+    {
+      "check": "story arrival AS-credits-11",
+      "passed": true
+    },
+    {
+      "check": "review arrivals declared",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9c5381ff52821c786d030687e8dabffa67782e769ed4b27c42359b421c2bd052",
+    "docs/mvp-complete-flow-hifi/prototype.html": "4b2be3cd45d0dd11fbb55b79417b2928992f6e2935a3dbbb3fb08c5ecc81e5f7",
+    "docs/mvp-complete-flow-hifi/review.html": "88c92786394920d38212a7c5d22bd8a83ba90fb3bc9179344c8a647bd0ab6113",
+    "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a"
+  }
+}

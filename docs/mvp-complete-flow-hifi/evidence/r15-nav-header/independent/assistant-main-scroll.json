@@ -1,0 +1,41 @@
+[
+  {
+    "header": {
+      "state": "false",
+      "color": "rgba(0, 0, 0, 0)",
+      "top": 0
+    },
+    "page": {
+      "top": 0,
+      "height": 536,
+      "scrollHeight": 656
+    },
+    "position": "top"
+  },
+  {
+    "header": {
+      "state": "true",
+      "color": "rgb(230, 232, 237)",
+      "top": 0
+    },
+    "page": {
+      "top": 120,
+      "height": 536,
+      "scrollHeight": 656
+    },
+    "position": "bottom"
+  },
+  {
+    "header": {
+      "state": "false",
+      "color": "rgba(0, 0, 0, 0)",
+      "top": 0
+    },
+    "page": {
+      "top": 0,
+      "height": 536,
+      "scrollHeight": 656
+    },
+    "position": "top-again"
+  }
+]

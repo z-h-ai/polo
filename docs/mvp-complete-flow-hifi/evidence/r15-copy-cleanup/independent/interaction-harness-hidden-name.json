@@ -1,0 +1,52 @@
+[
+  {
+    "case": "fallback-dedup-and-authorization",
+    "viewport": 1440,
+    "shared_opens": true,
+    "revoked_only_rejoin": true
+  },
+  {
+    "case": "hidden-item-restoration",
+    "viewport": 1440,
+    "result": "P-M03-HOME-PERSONAL"
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1440,
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1440,
+    "scene": "P-M03-ALL-APPS",
+    "keys": [
+      "assistant",
+      "meeting",
+      "brand",
+      "report",
+      "growth"
+    ]
+  },
+  {
+    "case": "complete-directory-search-sort",
+    "viewport": 1440,
+    "scene": "P-M03-ALL-APPS-ENT",
+    "keys": [
+      "assistant",
+      "quote",
+      "contract",
+      "verify"
+    ]
+  },
+  {
+    "case": "enterprise-empty-preserves-assistant",
+    "viewport": 1440
+  }
+]

@@ -1,0 +1,33 @@
+[
+  {
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "visible_repetition": [
+      "顶部：免费 · 长期有效",
+      "正文：数据工坊圈 · 免费 · 长期有效"
+    ],
+    "recommendation": "正文删去重复的圈名与免费/有效期行，保留具体报表授权说明。",
+    "status": "suggestion_only_not_modified",
+    "evidence": "example-P-M07-DETAIL-DATA-SUBSCRIPTION.png"
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "visible_repetition": [
+      "顶部：¥39 / 月 · 有效至 2026-11-02",
+      "正文周期：月付 · 2026-11-02 到期"
+    ],
+    "recommendation": "订阅页将周期和到期日集中在权益表；页头保留圈名、订阅状态和续费操作。其他内容页仍可保留顶部摘要。",
+    "status": "suggestion_only_not_modified",
+    "evidence": "example-P-M07-DETAIL-PAID-SUBSCRIPTION.png"
+  },
+  {
+    "scene": "P-M07-YEAR-RESULT",
+    "visible_repetition": [
+      "副标题：年度订阅 · 已核对权益",
+      "顶部：年度订阅 / 有效至 2028-10-01",
+      "正文权益表：有效至 2028-10-01"
+    ],
+    "recommendation": "保留一个年度订阅标识，到期日只在权益表出现一次；保留下一年度提前续费规则。",
+    "status": "suggestion_only_not_modified",
+    "evidence": "example-P-M07-YEAR-RESULT.png"
+  }
+]

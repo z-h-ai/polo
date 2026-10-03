@@ -1,0 +1,70 @@
+{
+  "html": "<div aria-label=\"macOS 窗口控制：关闭、最小化、全屏\" class=\"mac-window-controls\" role=\"img\"><span class=\"mac-window-dot close\"></span><span class=\"mac-window-dot minimize\"></span><span class=\"mac-window-dot fullscreen\"></span></div>\n<button aria-label=\"返回 Polo 首页\" class=\"brand-lockup\" data-go=\"P-M03-HOME-ENT\" data-tab=\"home\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-R6-000\"><span aria-hidden=\"true\" class=\"brand-mark\">P</span><span>Polo</span></button>\n<nav aria-label=\"应用标签\" class=\"tabs\" id=\"tabs\"><button class=\"home-tab active\" data-go=\"P-M03-HOME-ENT\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-001-P-M03-HOME-ENT\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-8.5Z\"></path></svg><span class=\"home-tab-label\">首页</span></button></nav>\n<div class=\"bar-actions\">\n<button aria-expanded=\"false\" aria-haspopup=\"dialog\" class=\"bar-button\" data-go=\"P-M04-RUNTIME\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-002-P-M04-RUNTIME\" id=\"runtime-button\"><span class=\"status-dot running\" id=\"runtime-dot\"></span><span id=\"runtime-label\">后台任务</span></button>\n<div class=\"space-control\">\n<div aria-label=\"当前空间：晨星科技\" class=\"space-indicator\">\n<span aria-hidden=\"true\" class=\"space-avatar\" id=\"space-avatar\">晨</span>\n<span class=\"space-copy\"><strong id=\"space-name\">晨星科技</strong><small id=\"space-type\">企业空间 · 成员</small></span>\n</div>\n<button aria-expanded=\"false\" aria-haspopup=\"dialog\" aria-label=\"通知\" class=\"icon-button\" data-go=\"P-M04-NOTIFY-ENT\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-005-P-M04-NOTIFY-ENT\" id=\"notification-button\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9\"></path><path d=\"M10 21h4\"></path></svg><span aria-hidden=\"true\" class=\"notification-dot\"></span></button>\n<button aria-expanded=\"false\" aria-haspopup=\"menu\" aria-label=\"打开账号菜单\" class=\"avatar-button\" data-go=\"P-M10-MENU-ENT\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-006-P-M10-MENU-ENT\" id=\"account-button\">王</button>\n</div>\n<div class=\"popover account-menu\" hidden=\"\" id=\"account-menu\" role=\"menu\"><div class=\"menu-section-title\">小王 · 普通账号</div><button class=\"menu-row account-space-entry\" data-go=\"P-M02-SWITCHER\" data-review-anchor=\"account-space-entry\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-003-P-M02-SWITCHER\"><span class=\"menu-icon\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3-3m-3 3 3 3\"></path></svg></span><span class=\"menu-copy\"><b>切换空间</b><small>当前：晨星科技</small></span><svg aria-hidden=\"true\" class=\"icon menu-arrow\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"m9 18 6-6-6-6\"></path></svg></button><div class=\"menu-divider\"></div><button class=\"menu-row\" data-go=\"P-M10-SETTINGS-ENT\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-007-P-M10-SETTINGS-ENT\"><span class=\"menu-icon\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z\"></path><path d=\"M4.9 4.9 7 7\"></path><path d=\"M17 17l2.1 2.1\"></path><path d=\"M4 12H2\"></path><path d=\"M22 12h-2\"></path><path d=\"M12 4V2\"></path><path d=\"M12 22v-2\"></path></svg></span><span class=\"menu-copy\"><b>Polo 设置</b><small>管理 Polo 设置</small></span><svg aria-hidden=\"true\" class=\"icon menu-arrow\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"m9 18 6-6-6-6\"></path></svg></button><button class=\"menu-row\" data-go=\"P-M09-BROWSER-MENU-ENT\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-008-P-M09-BROWSER-MENU-ENT\"><span class=\"menu-icon\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M3 7h18v12H3z\"></path><path d=\"M16 13h3\"></path><path d=\"M3 7l3-3h12l3 3\"></path></svg></span><span class=\"menu-copy\"><b>充值与账单</b><small>在系统浏览器打开</small></span><svg aria-hidden=\"true\" class=\"icon menu-arrow\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M14 4h6v6\"></path><path d=\"m20 4-9 9\"></path><path d=\"M18 13v6H5V6h6\"></path></svg></button><div class=\"menu-divider\"></div><button class=\"menu-row\" data-go=\"P-M01-LOGIN-PASSWORD\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-009-P-M01-LOGIN-PASSWORD\"><span class=\"menu-icon\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M6 10h12v10H6z\"></path><path d=\"M8 10V7a4 4 0 0 1 8 0v3\"></path></svg></span><span class=\"menu-copy\"><b>退出登录</b><small>保留本机文件</small></span></button></div>\n<div class=\"popover runtime-popover\" hidden=\"\" id=\"runtime-menu\" role=\"dialog\"><div class=\"menu-label\">运行状态 · 晨星科技</div><div class=\"runtime-row\"><span class=\"app-art compact\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M4 5h16v14H4z\"></path><path d=\"M8 9h8M8 13h5\"></path></svg></span><span class=\"menu-copy\"><b>报价整理</b><small>正在汇总 3 个客户的报价</small></span><span class=\"status info\">运行中</span></div><div class=\"runtime-row\"><span class=\"app-art compact\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"m12 3-1.6 5.4L5 10l5.4 1.6L12 17l1.6-5.4L19 10l-5.4-1.6L12 3Z\"></path><path d=\"m19 16-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7L19 16Z\"></path></svg></span><span class=\"menu-copy\"><b>助手 · Q2 报价汇总</b><small>正在生成回答</small></span><span class=\"status info\">运行中</span></div><div class=\"runtime-row\"><span class=\"app-art compact\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M4 4h6v6H4z\"></path><path d=\"M14 4h6v6h-6z\"></path><path d=\"M4 14h6v6H4z\"></path><path d=\"M14 14h6v6h-6z\"></path></svg></span><span class=\"menu-copy\"><b>合同审查</b><small>同空间后台运行</small></span><span class=\"status info\">运行中</span></div></div>\n<div class=\"popover runtime-popover\" hidden=\"\" id=\"notification-menu\" role=\"dialog\"><div class=\"menu-label\">通知</div><button class=\"menu-row\" data-go=\"P-M07-DETAIL-PAID\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-010-P-M07-DETAIL-PAID\"><span class=\"menu-icon\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M16 11a4 4 0 1 0-8 0\"></path><path d=\"M4 21a8 8 0 0 1 16 0\"></path><path d=\"M18 4v4M16 6h4\"></path></svg></span><span class=\"menu-copy\"><b>晨星设计圈有新版本</b><small>品牌语气分析 v1.4.0 · 下次使用生效</small></span></button><button class=\"menu-row\" data-go=\"P-M04-RUNTIME\" data-transition=\"T-P-M03-ALL-APPS-ENT-EMPTY-011-P-M04-RUNTIME\"><span class=\"menu-icon\"><svg aria-hidden=\"true\" class=\"icon\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.7\" viewBox=\"0 0 24 24\"><path d=\"M5 4h14v16H5z\"></path><path d=\"m8 9 1.5 1.5L12 8\"></path><path d=\"M13 10h3\"></path><path d=\"m8 15 1.5 1.5L12 14\"></path><path d=\"M13 16h3\"></path></svg></span><span class=\"menu-copy\"><b>数据报表生成器已在后台完成</b><small>点顶栏「3 项运行中」查看</small></span></button></div>\n</div>",
+  "controls": [
+    {
+      "label": "P\nPolo",
+      "rect": {
+        "x": 100,
+        "y": 18.5,
+        "width": 82,
+        "height": 26,
+        "top": 18.5,
+        "right": 182,
+        "bottom": 44.5,
+        "left": 100
+      }
+    },
+    {
+      "label": "首页",
+      "rect": {
+        "x": 194,
+        "y": 13.5,
+        "width": 72,
+        "height": 36,
+        "top": 13.5,
+        "right": 266,
+        "bottom": 49.5,
+        "left": 194
+      }
+    },
+    {
+      "label": null,
+      "rect": {
+        "x": 651,
+        "y": 14.5,
+        "width": 25,
+        "height": 34,
+        "top": 14.5,
+        "right": 676,
+        "bottom": 48.5,
+        "left": 651
+      }
+    },
+    {
+      "label": "通知",
+      "rect": {
+        "x": 684,
+        "y": 19.5,
+        "width": 32,
+        "height": 32,
+        "top": 19.5,
+        "right": 716,
+        "bottom": 51.5,
+        "left": 684
+      }
+    },
+    {
+      "label": "王",
+      "rect": {
+        "x": 687,
+        "y": 51.5,
+        "width": 28,
+        "height": 28,
+        "top": 51.5,
+        "right": 715,
+        "bottom": 79.5,
+        "left": 687
+      }
+    }
+  ]
+}

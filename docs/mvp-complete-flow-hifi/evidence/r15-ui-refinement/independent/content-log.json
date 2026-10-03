@@ -1,0 +1,323 @@
+[
+  {
+    "check": "home-title-and-no-bottom-tags",
+    "scene": "P-M03-HOME-PERSONAL",
+    "viewport": 1440,
+    "card_style": {
+      "width": 380,
+      "radius": "20px",
+      "padding": "20px",
+      "font": "15px"
+    },
+    "creator_lines": [
+      "Polo 内置",
+      "晨星增长工作室",
+      "晨星增长工作室",
+      "数据工坊",
+      "晨星增长工作室"
+    ]
+  },
+  {
+    "check": "home-title-and-no-bottom-tags",
+    "scene": "P-M03-HOME-ENT",
+    "viewport": 1440,
+    "card_style": {
+      "width": 380,
+      "radius": "20px",
+      "padding": "20px",
+      "font": "15px"
+    },
+    "creator_lines": [
+      "Polo 内置",
+      "晨星科技",
+      "晨星科技",
+      "晨星科技"
+    ]
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-LIST",
+    "viewport": 1440
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-LIST-RENEWED",
+    "viewport": 1440
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-EMPTY",
+    "viewport": 1440
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": 1440,
+    "app_cards": 2,
+    "grid": 1,
+    "card_style": {
+      "width": 380,
+      "radius": "20px",
+      "padding": "20px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": 1440,
+    "app_cards": 2,
+    "grid": 1,
+    "card_style": {
+      "width": 380,
+      "radius": "20px",
+      "padding": "20px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-DATA",
+    "viewport": 1440,
+    "app_cards": 1,
+    "grid": 1,
+    "card_style": {
+      "width": 380,
+      "radius": "20px",
+      "padding": "20px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-personal-new",
+    "viewport": 1440,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-enterprise-new",
+    "viewport": 1440,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-personal-skills",
+    "viewport": 1440,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "home-title-and-no-bottom-tags",
+    "scene": "P-M03-HOME-PERSONAL",
+    "viewport": 1024,
+    "card_style": {
+      "width": 478,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    },
+    "creator_lines": [
+      "Polo 内置",
+      "晨星增长工作室",
+      "晨星增长工作室",
+      "数据工坊",
+      "晨星增长工作室"
+    ]
+  },
+  {
+    "check": "home-title-and-no-bottom-tags",
+    "scene": "P-M03-HOME-ENT",
+    "viewport": 1024,
+    "card_style": {
+      "width": 478,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    },
+    "creator_lines": [
+      "Polo 内置",
+      "晨星科技",
+      "晨星科技",
+      "晨星科技"
+    ]
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-LIST",
+    "viewport": 1024
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-LIST-RENEWED",
+    "viewport": 1024
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-EMPTY",
+    "viewport": 1024
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": 1024,
+    "app_cards": 2,
+    "grid": 1,
+    "card_style": {
+      "width": 478,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": 1024,
+    "app_cards": 2,
+    "grid": 1,
+    "card_style": {
+      "width": 478,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-DATA",
+    "viewport": 1024,
+    "app_cards": 1,
+    "grid": 1,
+    "card_style": {
+      "width": 478,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-personal-new",
+    "viewport": 1024,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-enterprise-new",
+    "viewport": 1024,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-personal-skills",
+    "viewport": 1024,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "home-title-and-no-bottom-tags",
+    "scene": "P-M03-HOME-PERSONAL",
+    "viewport": 800,
+    "card_style": {
+      "width": 366,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    },
+    "creator_lines": [
+      "Polo 内置",
+      "晨星增长工作室",
+      "晨星增长工作室",
+      "数据工坊",
+      "晨星增长工作室"
+    ]
+  },
+  {
+    "check": "home-title-and-no-bottom-tags",
+    "scene": "P-M03-HOME-ENT",
+    "viewport": 800,
+    "card_style": {
+      "width": 366,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    },
+    "creator_lines": [
+      "Polo 内置",
+      "晨星科技",
+      "晨星科技",
+      "晨星科技"
+    ]
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-LIST",
+    "viewport": 800
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-LIST-RENEWED",
+    "viewport": 800
+  },
+  {
+    "check": "circle-no-desktop-join-consistent-controls-search-recovery",
+    "scene": "P-M07-EMPTY",
+    "viewport": 800
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": 800,
+    "app_cards": 2,
+    "grid": 1,
+    "card_style": {
+      "width": 366,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": 800,
+    "app_cards": 2,
+    "grid": 1,
+    "card_style": {
+      "width": 366,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "circle-cards-and-no-top-exit",
+    "scene": "P-M07-DETAIL-DATA",
+    "viewport": 800,
+    "app_cards": 1,
+    "grid": 1,
+    "card_style": {
+      "width": 366,
+      "radius": "20px",
+      "padding": "18px",
+      "font": "15px"
+    }
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-personal-new",
+    "viewport": 800,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-enterprise-new",
+    "viewport": 800,
+    "background_token": "#fbfbfa"
+  },
+  {
+    "check": "assistant-canvas-and-clean-product-surface",
+    "scene": "A-personal-skills",
+    "viewport": 800,
+    "background_token": "#fbfbfa"
+  }
+]

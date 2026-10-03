@@ -8,10 +8,15 @@ h=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 M=json.loads((B/'prototype-manifest.json').read_text())
 artifacts={str(p.relative_to(R)):h(p) for p in [B/'prototype-manifest.json',B/'prototype.html',B/'review.html',A/'prototype.html']}
 files={'structure':'structure.json','browser':'browser.json','invariants':'invariants.json','review-continuity':'review-continuity.json','semantic':'semantic.json','reproducibility':'reproducibility.json','upstream-validator':'upstream-validator.json'}
-if M['revision'] in ['poo70-cross-end-closure-r13','poo70-workbench-r14','poo70-workbench-r15']:files['closure-browser']='closure-browser.json'
-if M['revision'] in ['poo70-workbench-r14','poo70-workbench-r15']:files['workbench-browser']='workbench-browser.json'
+if M['revision'] in ['poo70-cross-end-closure-r13','poo70-workbench-r14','poo70-workbench-r15','poo70-workbench-r15-nav-header','poo70-workbench-r15-classic-style','poo70-workbench-r15-ui-refinement','poo70-workbench-r15-copy-cleanup']:files['closure-browser']='closure-browser.json'
+if M['revision'] in ['poo70-workbench-r14','poo70-workbench-r15','poo70-workbench-r15-nav-header','poo70-workbench-r15-classic-style','poo70-workbench-r15-ui-refinement','poo70-workbench-r15-copy-cleanup']:files['workbench-browser']='workbench-browser.json'
+if M['revision'] in ['poo70-workbench-r15-nav-header','poo70-workbench-r15-classic-style','poo70-workbench-r15-ui-refinement','poo70-workbench-r15-copy-cleanup']:files['navigation-header']='navigation-header.json'
+if M['revision'] in ['poo70-workbench-r15-classic-style','poo70-workbench-r15-ui-refinement','poo70-workbench-r15-copy-cleanup']:files['classic-style']='classic-style.json'
+if M['revision'] in ['poo70-workbench-r15-ui-refinement','poo70-workbench-r15-copy-cleanup']:files['ui-refinement']='ui-refinement.json'
+if M['revision']=='poo70-workbench-r15-circle-copy':files.update({'browser':'browser-quick.json','circle-copy':'circle-copy.json','copy-diff-proof':'copy-diff-proof.json'})
+if M['revision']=='poo70-workbench-r15-copy-cleanup':files['copy-cleanup']='copy-cleanup.json'
 evidence={key:{'path':str((E/name).relative_to(R)),'sha256':h(E/name)} for key,name in files.items()}
-for key in ['structure','browser','invariants','review-continuity','semantic']+(['closure-browser'] if 'closure-browser' in files else [])+(['workbench-browser'] if 'workbench-browser' in files else []):
+for key in ['structure','browser','invariants','review-continuity','semantic']+(['closure-browser'] if 'closure-browser' in files else [])+(['workbench-browser'] if 'workbench-browser' in files else [])+(['navigation-header'] if 'navigation-header' in files else [])+(['classic-style'] if 'classic-style' in files else [])+(['ui-refinement'] if 'ui-refinement' in files else [])+(['circle-copy'] if 'circle-copy' in files else [])+(['copy-cleanup'] if 'copy-cleanup' in files else []):
  d=json.loads((E/files[key]).read_text())
  assert d.get('passed',d.get('status')=='passed'),f'{key} is not passed'
  observed=d['artifacts']
@@ -25,7 +30,7 @@ for p,sha in inputs.items():assert h(R/p)==sha,f'semantic input stale: {p}'
 assert not [f for f in s.get('findings',[]) if f.get('status') not in ['resolved']], 'unresolved semantic finding'
 r=json.loads((E/'reproducibility.json').read_text());assert r['passed']
 for p,sha in r['second'].items():assert h(R/p)==sha, 'reproducibility stale'
-browser=json.loads((E/'browser.json').read_text());invariants=json.loads((E/'invariants.json').read_text());review=json.loads((E/'review-continuity.json').read_text())
+browser=json.loads((E/files['browser']).read_text());invariants=json.loads((E/'invariants.json').read_text());review=json.loads((E/'review-continuity.json').read_text())
 for source in M['sources']:artifacts[source['path']]=h(R/source['path'])
 artifacts[M['design']['skill_path']]=h(R/M['design']['skill_path'])
 for p in sorted((A/'src').rglob('*')):
@@ -42,6 +47,34 @@ if 'workbench-browser' in files:
  w=json.loads((E/'workbench-browser.json').read_text());q['observed']['workbench_checks']=len(w['checks'])
  q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_workbench.py']=h(B/'tools/check_workbench.py')
  q['limitations'].extend(w.get('limitations',[]))
+if 'navigation-header' in files:
+ q['checks']['browser']['evidence'].append('navigation-header')
+ n=json.loads((E/'navigation-header.json').read_text());q['observed']['navigation_header_checks']=len(n['checks'])
+ q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_navigation_header.py']=h(B/'tools/check_navigation_header.py')
+ q['limitations'].extend(n.get('limitations',[]))
+if 'classic-style' in files:
+ q['checks']['browser']['evidence'].append('classic-style')
+ c=json.loads((E/'classic-style.json').read_text());q['observed']['classic_style_checks']=len(c['checks'])
+ q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_classic_style.py']=h(B/'tools/check_classic_style.py')
+ q['limitations'].extend(c.get('limitations',[]))
+if 'ui-refinement' in files:
+ q['checks']['browser']['evidence'].append('ui-refinement')
+ u=json.loads((E/'ui-refinement.json').read_text());q['observed']['ui_refinement_checks']=len(u['checks'])
+ q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_ui_refinement.py']=h(B/'tools/check_ui_refinement.py')
+ q['limitations'].extend(u.get('limitations',[]))
+if 'copy-cleanup' in files:
+ c=json.loads((E/'copy-cleanup.json').read_text())
+ q['checks']['browser']['evidence'].append('copy-cleanup')
+ q['observed']['copy_cleanup_checks']=len(c['checks'])
+ q['artifacts']['docs/mvp-complete-flow-hifi/tools/check_copy_cleanup.py']=h(B/'tools/check_copy_cleanup.py')
+if 'circle-copy' in files:
+ c=json.loads((E/'circle-copy.json').read_text());proof=json.loads((E/'copy-diff-proof.json').read_text())
+ assert all(proof[k] for k in ['passed','assistant_unchanged','transitions_unchanged','stories_unchanged'])
+ q['checks']['browser']['evidence'].append('circle-copy')
+ q['checks']['copy-scope']={'status':'passed','evidence':['copy-diff-proof']}
+ q['observed']['circle_copy_checks']=len(c['checks'])
+ q['observed']['circle_scene_viewport_protocol_observations']=len(c['scenes'])
+ q['limitations'].append('Copy-only revision: quick shared-surface regression plus both affected lists at all three viewports/file/HTTP; previous full action suite was not rerun. Exact diff proves scripts/styles/operations and assistant surface unchanged; old results are historical, not re-stamped.')
 if (E/'documentation-equivalence.json').exists():
  proof=E/'documentation-equivalence.json';assert json.loads(proof.read_text())['passed']
  q['evidence']['documentation-equivalence']={'path':str(proof.relative_to(R)),'sha256':h(proof)}

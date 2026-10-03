@@ -1,0 +1,191 @@
+{
+  "revision": "poo70-workbench-r15-copy-cleanup",
+  "baseline_commit": "b82fa1e5e04d466d553450acea3baac757339c1f",
+  "baseline_artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype.html": "a49d524776e98f8fd123f62175795391a2b62189c2f518c2545980a72e5e17ec",
+    "design-demos/polo-client-source-baseline/prototype.html": "42d22e393e3e4c13b20baf0d19fbf79fe1db760cb19225e7e07cc27d56477102"
+  },
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "35dab681265bdd5d49e9056d394389a14706f21915cc3792241b02f0392a2597",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a1d6d28d39414799d3f266a37cc25328a124581c5bc1f146e579a794d1ea9c87",
+    "docs/mvp-complete-flow-hifi/review.html": "6cf5cac8e865474f8ceea3edb84743af4e89693dd61c35f88fa1d8351f0aa468",
+    "design-demos/polo-client-source-baseline/prototype.html": "fc013de26e2f7e4ee6bbe4eb2bc835b693cdf7c601f84b956c2057782b3a6339"
+  },
+  "checks": [
+    {
+      "name": "MVP foundational CSS exactly equals b82fa1e5",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "desktop-1440x900 home heading",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 home card",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 home art",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 home card-title",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 home source",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 home open",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 settings selected-category",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 switch dialog",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 assistant composer",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 assistant input",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1440x900 assistant navigator",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 home heading",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 home card",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 home art",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 home card-title",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 home source",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 home open",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 settings selected-category",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 switch dialog",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 assistant composer",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 assistant input",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-1024x768 assistant navigator",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 home heading",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 home card",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 home art",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 home card-title",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 home source",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 home open",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 settings selected-category",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 switch dialog",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 assistant composer",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 assistant input",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "desktop-800x600 assistant navigator",
+      "passed": true,
+      "detail": {}
+    }
+  ],
+  "errors": [],
+  "limitations": [
+    "Computed-style parity covers named components; changed content, newer features, entry placement and scroll divider behavior intentionally differ from b82fa1e5. Not whole-page pixel equality or product Acceptance."
+  ],
+  "passed": true
+}
