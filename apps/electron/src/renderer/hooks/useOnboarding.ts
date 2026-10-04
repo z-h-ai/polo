@@ -125,21 +125,37 @@ export function mapAdminLoginError(error: unknown): string {
   if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
     return i18n.t('onboarding.adminLogin.genericError')
   }
-  // Suspended/withdrawn memberships and unavailable organizations are access
-  // denials, not transient failures: the server refused the account itself.
-  // Mapped to the existing "account disabled" copy so the login target keeps
-  // a stable, localized message instead of a raw server string.
+  // Business-coded denials are recognized BEFORE the bare-401 fallback: the
+  // real chain reports wrong-password logins as
+  // { errorCode: 'invalid_credentials', status: 401 } (the server login route
+  // answers 401 and AdminClient.createError keeps the status), so the bare
+  // status check must never shadow a known business code.
+  //
+  // Suspended/removed memberships and unavailable organizations are access
+  // denials, not transient failures: the server refused the account itself
+  // (all three are siblings in admin/authorization-failure.ts). Mapped to the
+  // existing "account disabled" copy so the login target keeps a stable,
+  // localized message instead of a raw server string.
   if (
     errorLike?.errorCode === 'MEMBERSHIP_SUSPENDED'
     || errorLike?.errorCode === 'membership_suspended'
+    || errorLike?.errorCode === 'MEMBERSHIP_REMOVED'
+    || errorLike?.errorCode === 'membership_removed'
     || errorLike?.errorCode === 'ORGANIZATION_UNAVAILABLE'
     || errorLike?.errorCode === 'organization_unavailable'
   ) {
     return i18n.t('onboarding.adminLogin.accountDisabled')
   }
-  // Revoked/expired/invalid sessions and bare 401s: the server rejected the
-  // authentication, so no local session may be established. Stable localized
-  // copy; the server message is never surfaced.
+  if (errorLike?.errorCode === 'INVALID_CREDENTIALS' || errorLike?.errorCode === 'invalid_credentials') {
+    return i18n.t('onboarding.adminLogin.invalidCredentials')
+  }
+  if (errorLike?.errorCode === 'ACCOUNT_DISABLED' || errorLike?.errorCode === 'account_disabled') {
+    return i18n.t('onboarding.adminLogin.accountDisabled')
+  }
+  // Revoked/expired/invalid sessions and bare 401s (no recognized business
+  // code reached this point): the server rejected the authentication, so no
+  // local session may be established. Stable localized copy; the server
+  // message is never surfaced.
   if (
     errorLike?.errorCode === 'UNAUTHORIZED'
     || errorLike?.errorCode === 'unauthorized'
@@ -152,12 +168,6 @@ export function mapAdminLoginError(error: unknown): string {
     || (typeof errorLike?.status === 'number' && errorLike.status === 401)
   ) {
     return i18n.t('onboarding.adminLogin.genericError')
-  }
-  if (errorLike?.errorCode === 'INVALID_CREDENTIALS' || errorLike?.errorCode === 'invalid_credentials') {
-    return i18n.t('onboarding.adminLogin.invalidCredentials')
-  }
-  if (errorLike?.errorCode === 'ACCOUNT_DISABLED' || errorLike?.errorCode === 'account_disabled') {
-    return i18n.t('onboarding.adminLogin.accountDisabled')
   }
   if (errorLike?.errorCode === 'NETWORK_ERROR') {
     return i18n.t('onboarding.adminLogin.networkError')
@@ -631,6 +641,9 @@ export function useOnboarding({
   // Go back to previous step. If at the initial step, call onDismiss instead.
   const handleBack = useCallback(() => {
     if (state.step === initialStep && onDismiss) {
+      // Leaving the login intent cancels it here too, same as the admin-login
+      // branch below: the in-flight receipt must not land after dismissal.
+      cancelInFlightAuth()
       onDismiss()
       return
     }

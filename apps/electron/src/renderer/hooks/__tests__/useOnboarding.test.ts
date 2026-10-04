@@ -400,11 +400,32 @@ describe('admin login rejection mapping', () => {
     const expected = i18n.t('onboarding.adminLogin.accountDisabled')
 
     expect(mapAdminLoginError({ errorCode: 'MEMBERSHIP_SUSPENDED' })).toBe(expected)
+    expect(mapAdminLoginError({ errorCode: 'MEMBERSHIP_REMOVED' })).toBe(expected)
     expect(mapAdminLoginError({
       errorCode: 'ORGANIZATION_UNAVAILABLE',
       message: 'internal organization detail',
     })).toBe(expected)
     expect(mapAdminLoginError({ errorCode: 'ACCOUNT_DISABLED' })).toBe(expected)
+  })
+
+  it('keeps wrong-password copy when the real chain reports 401 with a business code', () => {
+    // The server login route answers wrong passwords with 401 while keeping
+    // the business errorCode — the bare-401 fallback must not shadow it.
+    expect(mapAdminLoginError({
+      errorCode: 'invalid_credentials',
+      message: 'Invalid username or password',
+      status: 401,
+    })).toBe(i18n.t('onboarding.adminLogin.invalidCredentials'))
+
+    expect(mapAdminLoginError({
+      errorCode: 'account_disabled',
+      status: 401,
+    })).toBe(i18n.t('onboarding.adminLogin.accountDisabled'))
+
+    expect(mapAdminLoginError({
+      errorCode: 'membership_suspended',
+      status: 401,
+    })).toBe(i18n.t('onboarding.adminLogin.accountDisabled'))
   })
 })
 
@@ -491,11 +512,13 @@ function renderAdminLoginHooks(
     onDismiss?: () => void
     onConfigSaved?: () => void
     phoneAuthChallengeProvider?: () => Promise<string | null>
+    initialStep?: 'welcome' | 'admin-login'
   } = {},
 ) {
   return renderHook(() => useOnboarding({
     onComplete: handlers.onComplete ?? (() => {}),
     initialSetupNeeds: ADMIN_SETUP_NEEDS,
+    initialStep: handlers.initialStep,
     onDismiss: handlers.onDismiss,
     onConfigSaved: handlers.onConfigSaved,
     phoneAuthChallengeProvider: handlers.phoneAuthChallengeProvider,
@@ -558,6 +581,37 @@ describe('admin login session fencing (hook)', () => {
     expect(result.current.state.step).toBe('admin-login')
     expect(onConfigSaved).not.toHaveBeenCalled()
     expect(onComplete).not.toHaveBeenCalled()
+  })
+
+  it('fences the in-flight receipt when back dismisses from the initial step', async () => {
+    const deferred = makeDeferred<AdminLoginResult>()
+    const adminLogin = mock(() => deferred.promise)
+    installElectronApi({ adminLogin })
+    const onDismiss = mock(() => {})
+    const onConfigSaved = mock(() => {})
+    const { result } = renderAdminLoginHooks({
+      onDismiss,
+      onConfigSaved,
+      initialStep: 'admin-login',
+    })
+
+    await act(async () => {
+      void result.current.handleAdminLogin('user-a', 'pw')
+    })
+    // state.step === initialStep here: handleBack takes the early-return
+    // path, which must fence the intent exactly like the admin-login branch.
+    act(() => {
+      result.current.handleBack()
+    })
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      deferred.resolve({ success: true, user: adminUser('user-a') })
+      await deferred.promise
+    })
+
+    expect(result.current.state.step).toBe('admin-login')
+    expect(onConfigSaved).not.toHaveBeenCalled()
   })
 
   it('late receipt of a cancelled intent cannot overwrite the newer account', async () => {
