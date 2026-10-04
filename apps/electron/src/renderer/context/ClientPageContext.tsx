@@ -80,8 +80,22 @@ export interface ClientPageScope {
   epoch: number
 }
 
+/** Versioned like every persisted identity tuple (product-spaces/context-key). */
+export const CLIENT_PAGE_SCOPE_KEY_VERSION = 1 as const
+
+/**
+ * Collision-free JSON tuple (the repo-wide identity convention, review P3-1):
+ * JSON.stringify renders null/unset fields verbatim and cannot collide two
+ * distinct scopes the way hand-picked sentinel strings could.
+ */
 export function clientPageScopeKey(scope: ClientPageScope): string {
-  return `${scope.epoch}::${scope.accountId ?? 'no-account'}::${scope.productSpaceId ?? 'no-space'}`
+  return JSON.stringify([
+    'client-page',
+    CLIENT_PAGE_SCOPE_KEY_VERSION,
+    scope.epoch,
+    scope.accountId,
+    scope.productSpaceId,
+  ])
 }
 
 // ─── Route stack (pure, unit-testable state machine) ─────────────────────────

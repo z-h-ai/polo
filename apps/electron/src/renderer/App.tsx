@@ -2606,6 +2606,11 @@ export default function App() {
     // BEFORE credentials are invalidated — otherwise a stale fence survives
     // the logout. A failed revoke aborts the logout (fail-closed): credential
     // cleanup never completes against a live runtime scope.
+    // N1 note: on THIS early-return path the epoch bump above has no paired
+    // commitCurrentAdminUser setState, so the ClientPageProvider keyed remount
+    // is deferred to the next re-render — the direction stays fail-closed (the
+    // shell is left as-is, nothing of a NEXT scope can be observed), and the
+    // render-phase scope seal re-seals it anyway on any later scope change.
     try {
       const revoke = await window.electronAPI.productSpaceRevokeActiveContext()
       if (!revoke?.success) {
@@ -3243,7 +3248,13 @@ export default function App() {
                 with a commitCurrentAdminUser state change, so the remount
                 render observes the fresh value. Home/Circles tab content
                 assembly stays with POO-100; this provider only publishes the
-                typed route and the main-scroll registration. */}
+                typed route and the main-scroll registration.
+                Card step 4 deviation (adjudicated, review P2-1): H1's
+                MemberCatalogProvider stays mounted INSIDE HomePage for now —
+                lifting it here would either duplicate the catalog instance or
+                require editing HomePage (H2/H3-owned, read-only for N1).
+                H3/POO-91 owns the lift to THIS level; until then HomePage's
+                injected instance remains the single catalog holder. */}
             <ClientPageProvider
               key={clientPageScopeKey({
                 accountId: productSpaceContextValue?.accountId ?? null,

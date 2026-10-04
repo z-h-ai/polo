@@ -135,11 +135,17 @@ describe('clientPageScopeKey', () => {
     expect(key).not.toBe(clientPageScopeKey({ ...base, epoch: 4 }))
   })
 
-  it('distinguishes the scopeless state from any real scope', () => {
+  it('distinguishes the scopeless state from any real scope (collision-free JSON tuple)', () => {
     const scopeless = clientPageScopeKey({ accountId: null, productSpaceId: null, epoch: 0 })
-    expect(scopeless).toBe('0::no-account::no-space')
+    // Repo identity convention (product-spaces/context-key): a versioned JSON
+    // tuple — null fields render verbatim, no sentinel strings to collide.
+    expect(scopeless).toBe('["client-page",1,0,null,null]')
     expect(scopeless).not.toBe(
       clientPageScopeKey({ accountId: 'acct-a', productSpaceId: null, epoch: 0 }),
+    )
+    // Literal "null"/"null" strings stay distinct from the unset scope.
+    expect(scopeless).not.toBe(
+      clientPageScopeKey({ accountId: 'null', productSpaceId: 'null', epoch: 0 }),
     )
   })
 })
