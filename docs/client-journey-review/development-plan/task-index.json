@@ -1,0 +1,1196 @@
+{
+  "schema_version": 1,
+  "purpose": "derived conditional development plan index; Notma bodies are execution-plan authority",
+  "parent_task": "POO-70",
+  "status": "conditional_plan_published",
+  "dispatch_allowed": false,
+  "execution_started": false,
+  "baseline": {
+    "branch": "integration/poo70-client-entry-r15",
+    "head": "ac831ea71a798030806f4e0906bdc93292bc918b",
+    "integration_target": "integration/poo70-client-entry-r15",
+    "original_code_head": "5cf2f903fc4f773d91723360ca4eb9e011e2c700",
+    "integration_worktree": "/Users/wow/project/z-h-ai/polo-dir/integration/poo70-client-entry-r15"
+  },
+  "sources": {
+    "docs/client-journey-review/spec.md": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
+    "docs/mvp-complete-flow-hifi/prototype.html": "302c749194dd8f8f7fe574d33ba637d26241edcb7f4526ece49effeee02887bf",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
+    ".agents/skills/polo-ai-design-system/SKILL.md": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+    ".agents/skills/polo-ai-design-system/references/design-system.json": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
+    ".agents/skills/polo-ai-design-system/references/foundations.md": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+    ".agents/skills/polo-ai-design-system/references/client-workbench.template.html": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
+    ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+    ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+    ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332"
+  },
+  "tasks": {
+    "F0": {
+      "task_id": "POO-80",
+      "title": "锁定客户端集成基线、范围与设计继承",
+      "dependencies": [],
+      "milestone": null,
+      "branch": "POO-80/chore/client-entry-f0",
+      "status": "todo",
+      "body_rev": "2e3d3dc539a3be3a376463a5e68289e3f886dabebde0c6f266b4453f90cc7da5",
+      "body_sha256": "1016f33d84ddf53e5c548e7b8038f62f46fa259b78ff43a53e99cbfad59f38d6",
+      "acceptance": {
+        "version": 1,
+        "schedule": "none",
+        "checks": {
+          "api": false,
+          "browser": false,
+          "visual": "none"
+        },
+        "reason": "准备/合同文档通过来源核对和独立Review，不代表产品验收"
+      },
+      "scenarios": [
+        "P70-BASE-01",
+        "P70-BASE-02",
+        "P70-BASE-03"
+      ],
+      "prototype_scenes": [],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "F1": {
+      "task_id": "POO-81",
+      "title": "核对成员圈子接口与详情数据交接",
+      "dependencies": [
+        "POO-80"
+      ],
+      "milestone": null,
+      "branch": "POO-81/chore/client-entry-f1",
+      "status": "todo",
+      "body_rev": "bd10f7e591da0d15c6b2f19eed160f88c75b55f91a1ba8051e630e4ee5fd0efe",
+      "body_sha256": "a5a8ff9516837e0a959e03671a964ee1ec4e388d79f404c04595c8a2bd5ac769",
+      "acceptance": {
+        "version": 1,
+        "schedule": "none",
+        "checks": {
+          "api": false,
+          "browser": false,
+          "visual": "none"
+        },
+        "reason": "准备/合同文档通过来源核对和独立Review，不代表产品验收"
+      },
+      "scenarios": [
+        "P70-CONTRACT-01",
+        "P70-CONTRACT-02",
+        "P70-CONTRACT-03"
+      ],
+      "prototype_scenes": [],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "A1": {
+      "task_id": "POO-82",
+      "title": "登录认证会话与错误恢复接入",
+      "dependencies": [
+        "POO-80"
+      ],
+      "milestone": "POO-77",
+      "branch": "POO-82/feat/client-entry-a1",
+      "status": "todo",
+      "body_rev": "55d81bd03274ae87f68ad1dfdb862f7b5282c35aca6465e862c5471348f3c523",
+      "body_sha256": "a25994e4c489260d1e62d77765c79307812d4e31862a12e249246bc38f9318f2",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": false,
+          "visual": "none"
+        },
+        "scenarios": [
+          "P70-AUTH-01",
+          "P70-AUTH-02",
+          "P70-AUTH-03"
+        ],
+        "milestone": "POO-77"
+      },
+      "scenarios": [
+        "P70-AUTH-01",
+        "P70-AUTH-02",
+        "P70-AUTH-03"
+      ],
+      "prototype_scenes": [
+        "P-M01-LOGIN-PASSWORD",
+        "P-M01-LOGIN-PHONE",
+        "P-M01-LOGIN-CANCEL"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "A2": {
+      "task_id": "POO-83",
+      "title": "密码登录表单与登录方式切换",
+      "dependencies": [
+        "POO-80"
+      ],
+      "milestone": "POO-77",
+      "branch": "POO-83/feat/client-entry-a2",
+      "status": "todo",
+      "body_rev": "c4a254d8190c87a022d32e6b9bf0de756424174c714f02e5a42f007679d17e67",
+      "body_sha256": "d3072ac2fcd867dac8e2b8329ad66f871171524be5569d3d7b59b237a7ea80a3",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-PASSWORD-01",
+          "P70-PASSWORD-02",
+          "P70-PASSWORD-03"
+        ],
+        "milestone": "POO-77"
+      },
+      "scenarios": [
+        "P70-PASSWORD-01",
+        "P70-PASSWORD-02",
+        "P70-PASSWORD-03"
+      ],
+      "prototype_scenes": [
+        "P-M01-LOGIN-PASSWORD",
+        "P-M01-LOGIN-CANCEL"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "A3": {
+      "task_id": "POO-84",
+      "title": "验证码登录与首次自动注册交互",
+      "dependencies": [
+        "POO-80"
+      ],
+      "milestone": "POO-77",
+      "branch": "POO-84/feat/client-entry-a3",
+      "status": "todo",
+      "body_rev": "57ece92ab425bc650d38f2499a0938efe6627239c6ceed9219faa3d93bd486b1",
+      "body_sha256": "df978fd3dc0c553b58bd9a8d0c016198bdb0a2846ff06ab3ac04cf0a19d57cd8",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-PHONE-01",
+          "P70-PHONE-02",
+          "P70-PHONE-03"
+        ],
+        "milestone": "POO-77"
+      },
+      "scenarios": [
+        "P70-PHONE-01",
+        "P70-PHONE-02",
+        "P70-PHONE-03"
+      ],
+      "prototype_scenes": [
+        "P-M01-LOGIN-PHONE",
+        "P-M01-LOGIN-CODE"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "H1": {
+      "task_id": "POO-85",
+      "title": "完整应用目录与多圈授权去重投影",
+      "dependencies": [
+        "POO-80"
+      ],
+      "milestone": "POO-78",
+      "branch": "POO-85/feat/client-entry-h1",
+      "status": "todo",
+      "body_rev": "2a9a44c0f35fe299b2bb1ca36f7f4b39b8af17f88b82cc35ffa2ed8c1dd3c223",
+      "body_sha256": "528eca99590b85318a2fc93af492ab501dbfb4f6e42e754016221a363c2c61c7",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": false,
+          "visual": "none"
+        },
+        "scenarios": [
+          "P70-CATALOG-01",
+          "P70-CATALOG-02",
+          "P70-CATALOG-03"
+        ],
+        "milestone": "POO-78"
+      },
+      "scenarios": [
+        "P70-CATALOG-01",
+        "P70-CATALOG-02",
+        "P70-CATALOG-03"
+      ],
+      "prototype_scenes": [
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M03-HOME-OFFLINE",
+        "P-M03-ALL-APPS"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "A4": {
+      "task_id": "POO-86",
+      "title": "登录后我的空间准备与重开恢复",
+      "dependencies": [
+        "POO-82"
+      ],
+      "milestone": "POO-77",
+      "branch": "POO-86/feat/client-entry-a4",
+      "status": "todo",
+      "body_rev": "768bfb37f9ffd8c129037e41c48df82191738e94843f873d0ad6af02658d4698",
+      "body_sha256": "ce651ba953b18166e8b5c1641021a891bbb63236a22fcdf2db5b26f48b6427ce",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-BOOT-01",
+          "P70-BOOT-02",
+          "P70-BOOT-03"
+        ],
+        "milestone": "POO-77"
+      },
+      "scenarios": [
+        "P70-BOOT-01",
+        "P70-BOOT-02",
+        "P70-BOOT-03"
+      ],
+      "prototype_scenes": [
+        "P-M01-PERSONAL-PREP",
+        "P-M01-PERSONAL-PREP-FAIL",
+        "P-M01-REOPEN",
+        "P-M01-COLD-START"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "H2": {
+      "task_id": "POO-87",
+      "title": "首页与圈子共享应用卡及已有打开动作",
+      "dependencies": [
+        "POO-80",
+        "POO-85"
+      ],
+      "milestone": "POO-78",
+      "branch": "POO-87/feat/client-entry-h2",
+      "status": "todo",
+      "body_rev": "77fe4b4bdb964f89c7cbd67ae229cb4748e3f170a0332ada457fa99816065c72",
+      "body_sha256": "334bc2f7967334e1133a2fc5bef30513b6d4f58d524a00e6ff831ddf8946f171",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-CARD-01",
+          "P70-CARD-02",
+          "P70-CARD-03"
+        ],
+        "milestone": "POO-78"
+      },
+      "scenarios": [
+        "P70-CARD-01",
+        "P70-CARD-02",
+        "P70-CARD-03"
+      ],
+      "prototype_scenes": [
+        "P-M03-HOME-PERSONAL"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C1": {
+      "task_id": "POO-88",
+      "title": "成员圈子客户端 API 与受信 RPC 桥接",
+      "dependencies": [
+        "POO-81"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-88/feat/client-entry-c1",
+      "status": "todo",
+      "body_rev": "939f7578f737ba6701b8ab0e9bfec3fd4db8987c917fd7b474b129b31c0f97de",
+      "body_sha256": "933d312c0644298b5c84a098f5e2061c4cd6ea2cfe560c39bae5546e4b185c28",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": false,
+          "visual": "none"
+        },
+        "scenarios": [
+          "P70-CIRCLE-API-01",
+          "P70-CIRCLE-API-02",
+          "P70-CIRCLE-API-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-CIRCLE-API-01",
+        "P70-CIRCLE-API-02",
+        "P70-CIRCLE-API-03"
+      ],
+      "prototype_scenes": [],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "N1": {
+      "task_id": "POO-89",
+      "title": "外层导航与首页圈子路由基础",
+      "dependencies": [
+        "POO-86",
+        "POO-85"
+      ],
+      "milestone": "POO-78",
+      "branch": "POO-89/feat/client-entry-n1",
+      "status": "todo",
+      "body_rev": "2d442b64e9c29e12613bf2ca9552fa443703760c6f5d12bf60122b36045915b2",
+      "body_sha256": "e7b2d5cce2d33e03ac1dcd986c54473f08b51855cb6970f2085d71f3dad33065",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-NAV-01",
+          "P70-NAV-02",
+          "P70-NAV-03"
+        ],
+        "milestone": "POO-78"
+      },
+      "scenarios": [
+        "P70-NAV-01",
+        "P70-NAV-02",
+        "P70-NAV-03"
+      ],
+      "prototype_scenes": [
+        "P-M03-HOME-PERSONAL",
+        "P-M03-HOME-ENT"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C2": {
+      "task_id": "POO-90",
+      "title": "成员圈子读取状态与账号空间隔离",
+      "dependencies": [
+        "POO-88",
+        "POO-85"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-90/feat/client-entry-c2",
+      "status": "todo",
+      "body_rev": "6b3a5a37018a7879e3d858c9e76e5e0547ccaa29ac3a5e936b4a5e03d3a7c680",
+      "body_sha256": "337924893b154a78bc2702fe271044741f6b42518de598128db73c773dfc899f",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": false,
+          "visual": "none"
+        },
+        "scenarios": [
+          "P70-CIRCLE-STATE-01",
+          "P70-CIRCLE-STATE-02",
+          "P70-CIRCLE-STATE-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-CIRCLE-STATE-01",
+        "P70-CIRCLE-STATE-02",
+        "P70-CIRCLE-STATE-03"
+      ],
+      "prototype_scenes": [],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "V1": {
+      "task_id": "POO-77",
+      "title": "阶段一验收：登录、自动注册与我的空间恢复",
+      "dependencies": [
+        "POO-82",
+        "POO-83",
+        "POO-84",
+        "POO-86"
+      ],
+      "milestone": null,
+      "branch": "POO-77/chore/client-entry-v1",
+      "status": "todo",
+      "body_rev": "dd20c02d70849fcda8e386c3bd91a45e6db27c49b8c18763430f345fd70bef1e",
+      "body_sha256": "8e3d6e13fad7c52a29d61c76123504dd6ce4b96ebfc1e761852054c5e8f4171a",
+      "acceptance": {
+        "version": 1,
+        "schedule": "per_card",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-AUTH-01",
+          "P70-AUTH-02",
+          "P70-AUTH-03",
+          "P70-PASSWORD-01",
+          "P70-PASSWORD-02",
+          "P70-PASSWORD-03",
+          "P70-PHONE-01",
+          "P70-PHONE-02",
+          "P70-PHONE-03",
+          "P70-BOOT-01",
+          "P70-BOOT-02",
+          "P70-BOOT-03"
+        ]
+      },
+      "scenarios": [
+        "P70-AUTH-01",
+        "P70-AUTH-02",
+        "P70-AUTH-03",
+        "P70-PASSWORD-01",
+        "P70-PASSWORD-02",
+        "P70-PASSWORD-03",
+        "P70-PHONE-01",
+        "P70-PHONE-02",
+        "P70-PHONE-03",
+        "P70-BOOT-01",
+        "P70-BOOT-02",
+        "P70-BOOT-03"
+      ],
+      "prototype_scenes": [
+        "P-M01-LOGIN-PASSWORD",
+        "P-M01-LOGIN-PHONE",
+        "P-M01-LOGIN-CANCEL",
+        "P-M01-LOGIN-CODE",
+        "P-M01-PERSONAL-PREP",
+        "P-M01-PERSONAL-PREP-FAIL",
+        "P-M01-REOPEN",
+        "P-M01-COLD-START"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "H3": {
+      "task_id": "POO-91",
+      "title": "我的应用首页与搜索排序空失败态",
+      "dependencies": [
+        "POO-89",
+        "POO-85",
+        "POO-87"
+      ],
+      "milestone": "POO-78",
+      "branch": "POO-91/feat/client-entry-h3",
+      "status": "todo",
+      "body_rev": "b5b5c939de2f4d41824cf59cc3e1a63bf12b5086ab8361b95400aeb6be997108",
+      "body_sha256": "43039c127ee18792e56227433f2a8742f2d6df95dc6a1956e556d97819019386",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-HOME-01",
+          "P70-HOME-02",
+          "P70-HOME-03"
+        ],
+        "milestone": "POO-78"
+      },
+      "scenarios": [
+        "P70-HOME-01",
+        "P70-HOME-02",
+        "P70-HOME-03"
+      ],
+      "prototype_scenes": [
+        "P-M03-HOME-PERSONAL",
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M03-HOME-OFFLINE",
+        "P-M03-HOME-ENT",
+        "P-M03-MANAGE-HOME"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C3": {
+      "task_id": "POO-92",
+      "title": "我的圈子搜索筛选与统一列表",
+      "dependencies": [
+        "POO-89",
+        "POO-90"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-92/feat/client-entry-c3",
+      "status": "todo",
+      "body_rev": "5fdaca561c29d8f01b474053294b56e4e08b2c1073b35df6499714f6f0e84095",
+      "body_sha256": "39b6d8c291b9fb6f5840be5a9ec2d296f7ab7ed2aa2a8e9f0a43c0a0fbca5190",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-CIRCLE-LIST-01",
+          "P70-CIRCLE-LIST-02",
+          "P70-CIRCLE-LIST-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-CIRCLE-LIST-01",
+        "P70-CIRCLE-LIST-02",
+        "P70-CIRCLE-LIST-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-LIST",
+        "P-M07-EMPTY",
+        "P-M07-LIST-RENEWED"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C4": {
+      "task_id": "POO-93",
+      "title": "圈子应用内容区与技能只读边界",
+      "dependencies": [
+        "POO-87",
+        "POO-90"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-93/feat/client-entry-c4",
+      "status": "todo",
+      "body_rev": "b9cb446df4d3c43807d8cb1add9cd2f01e3907f7f1819c9829851137bb54221e",
+      "body_sha256": "bacbe6c0889ada5f02a5b94ebbebc36f22831fd47309e70cb60e0d7062435a78",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-CIRCLE-CONTENT-01",
+          "P70-CIRCLE-CONTENT-02",
+          "P70-CIRCLE-CONTENT-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-CIRCLE-CONTENT-01",
+        "P70-CIRCLE-CONTENT-02",
+        "P70-CIRCLE-CONTENT-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-DETAIL-PAID",
+        "P-M07-DETAIL-DATA"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C5": {
+      "task_id": "POO-94",
+      "title": "圈子更新页的可追溯展示",
+      "dependencies": [
+        "POO-90"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-94/feat/client-entry-c5",
+      "status": "todo",
+      "body_rev": "4f9fe2828c5d5b95fdb62148f5d4418e697dd75efe01cea40303390596e0b913",
+      "body_sha256": "0b3ed0b7a5a7e478fef8acebe2394e842205e17e0e97c6847d270bb9c354c62f",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-CIRCLE-UPDATES-01",
+          "P70-CIRCLE-UPDATES-02",
+          "P70-CIRCLE-UPDATES-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-CIRCLE-UPDATES-01",
+        "P70-CIRCLE-UPDATES-02",
+        "P70-CIRCLE-UPDATES-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-DETAIL-FOCUS-UPDATES",
+        "P-M07-DETAIL-PAID-UPDATES"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C6": {
+      "task_id": "POO-95",
+      "title": "订阅详情与浏览器手动续费交接",
+      "dependencies": [
+        "POO-90"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-95/feat/client-entry-c6",
+      "status": "todo",
+      "body_rev": "f315ba175cfd5f5bde77a77d54a09eda27f1aa82f86da1397363d0d9a58e1a54",
+      "body_sha256": "813a7a15550914d04a838304d7a9cae319fc4fe016f6b5fee0fbac46fb17dca8",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-SUBSCRIPTION-01",
+          "P70-SUBSCRIPTION-02",
+          "P70-SUBSCRIPTION-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-SUBSCRIPTION-01",
+        "P70-SUBSCRIPTION-02",
+        "P70-SUBSCRIPTION-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "P-M07-RENEW",
+        "P-M07-RENEW-EXPIRED",
+        "P-M07-RENEW-YEAR",
+        "P-M07-YEAR-RESULT",
+        "P-M07-RENEW-LIMIT"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C7": {
+      "task_id": "POO-96",
+      "title": "退出圈子确认与逐来源授权恢复",
+      "dependencies": [
+        "POO-90",
+        "POO-85"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-96/feat/client-entry-c7",
+      "status": "todo",
+      "body_rev": "b5829b2f03c6fb788f353817bbffcac8db4ae43edf55823f2e51a86094891e28",
+      "body_sha256": "9bf77637b4e3615bfb4a6707d95605ce7ee8afda456a20b0345fbf71ab44c3c2",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-LEAVE-01",
+          "P70-LEAVE-02",
+          "P70-LEAVE-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-LEAVE-01",
+        "P70-LEAVE-02",
+        "P70-LEAVE-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-LEAVE",
+        "P-M07-LEAVE-PAID",
+        "P-M07-LEAVE-DATA",
+        "P-M07-LEAVE-YEAR",
+        "P-M07-DETAIL-PAID-AFTER-LEAVE",
+        "P-M07-SOURCE-FALLBACK"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "B1": {
+      "task_id": "POO-97",
+      "title": "圈子网页返回协议与登录候选的主进程桥接",
+      "dependencies": [
+        "POO-88",
+        "POO-82",
+        "POO-89"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-97/feat/client-entry-b1",
+      "status": "todo",
+      "body_rev": "9b20ee177c6cc25d40ac9afdce27586bec10faf592d9b9c60d319799325adcef",
+      "body_sha256": "01a170db01f1e41f844bb14f7f4eb4e7f1f26c5d9ed1705dc97c097c308f8a2e",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": false,
+          "visual": "none"
+        },
+        "scenarios": [
+          "P70-RETURN-BRIDGE-01",
+          "P70-RETURN-BRIDGE-02",
+          "P70-RETURN-BRIDGE-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-RETURN-BRIDGE-01",
+        "P70-RETURN-BRIDGE-02",
+        "P70-RETURN-BRIDGE-03"
+      ],
+      "prototype_scenes": [],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "S1": {
+      "task_id": "POO-98",
+      "title": "圈子异常帮助入口与原对象返回",
+      "dependencies": [
+        "POO-90"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-98/feat/client-entry-s1",
+      "status": "todo",
+      "body_rev": "1434f3633791c195308821d8bc5c0cb835e3367d560325ac0e9513e854b5f26a",
+      "body_sha256": "3d40f64be64e0e4b694d8b33d497106ebe6222999584ed09e3151c168c177874",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-SUPPORT-01",
+          "P70-SUPPORT-02",
+          "P70-SUPPORT-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-SUPPORT-01",
+        "P70-SUPPORT-02",
+        "P70-SUPPORT-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-SUPPORT",
+        "P-M07-SUPPORT-LOAD-FAIL"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C8": {
+      "task_id": "POO-99",
+      "title": "网页返回原圈子和原订单的主动核对",
+      "dependencies": [
+        "POO-90",
+        "POO-82",
+        "POO-89",
+        "POO-97"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-99/feat/client-entry-c8",
+      "status": "todo",
+      "body_rev": "0d676ac4bd239a06a2dd5cdd58b608fe28fb7dfdd28f98e842c0ac1c4dc8b0d1",
+      "body_sha256": "f5710083f01c43451ce7a3018d1423e826b767f668e8776c328c657c2d18f79f",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-RETURN-01",
+          "P70-RETURN-02"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-RETURN-01",
+        "P70-RETURN-02"
+      ],
+      "prototype_scenes": [
+        "P-M07-RETURN",
+        "P-M07-RETURN-FAIL",
+        "P-M07-ACCOUNT-MISMATCH",
+        "P-M07-LOGIN",
+        "P-M07-LOGIN-PHONE",
+        "P-M07-PAY-RETURN",
+        "P-M07-PAY-RETURN-FAIL",
+        "P-M07-YEAR-RETURN",
+        "P-M07-RENEW-RETURN"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "V2": {
+      "task_id": "POO-78",
+      "title": "阶段二验收：首页完整目录与外层导航",
+      "dependencies": [
+        "POO-89",
+        "POO-85",
+        "POO-87",
+        "POO-91"
+      ],
+      "milestone": null,
+      "branch": "POO-78/chore/client-entry-v2",
+      "status": "todo",
+      "body_rev": "591d49077bd49ea17c204f497fd12a9dd14cdaafbe2621c53e1dc4d72753aba3",
+      "body_sha256": "4701b47cd315459ff03b4576c63f6c43f14797a4061ee4efb97b5c8876ff52fe",
+      "acceptance": {
+        "version": 1,
+        "schedule": "per_card",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-NAV-01",
+          "P70-NAV-02",
+          "P70-NAV-03",
+          "P70-CATALOG-01",
+          "P70-CATALOG-02",
+          "P70-CATALOG-03",
+          "P70-CARD-01",
+          "P70-CARD-02",
+          "P70-CARD-03",
+          "P70-HOME-01",
+          "P70-HOME-02",
+          "P70-HOME-03"
+        ]
+      },
+      "scenarios": [
+        "P70-NAV-01",
+        "P70-NAV-02",
+        "P70-NAV-03",
+        "P70-CATALOG-01",
+        "P70-CATALOG-02",
+        "P70-CATALOG-03",
+        "P70-CARD-01",
+        "P70-CARD-02",
+        "P70-CARD-03",
+        "P70-HOME-01",
+        "P70-HOME-02",
+        "P70-HOME-03"
+      ],
+      "prototype_scenes": [
+        "P-M03-HOME-PERSONAL",
+        "P-M03-HOME-ENT",
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL",
+        "P-M03-HOME-OFFLINE",
+        "P-M03-ALL-APPS",
+        "P-M03-MANAGE-HOME"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "C9": {
+      "task_id": "POO-100",
+      "title": "圈子详情三分区与外层路由组装",
+      "dependencies": [
+        "POO-92",
+        "POO-93",
+        "POO-94",
+        "POO-95",
+        "POO-96",
+        "POO-99",
+        "POO-91",
+        "POO-89",
+        "POO-90",
+        "POO-97",
+        "POO-98"
+      ],
+      "milestone": "POO-79",
+      "branch": "POO-100/feat/client-entry-c9",
+      "status": "todo",
+      "body_rev": "5ab3f19d3fe30608f2fe64cdbde1be4900f1310884d53f1fe6ef207a07d9680d",
+      "body_sha256": "f25d33b29233da8202e16418c191835e76eb017560bad01b88b93a85c4afece7",
+      "acceptance": {
+        "version": 1,
+        "schedule": "milestone",
+        "checks": {
+          "api": false,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-CIRCLE-DETAIL-01",
+          "P70-CIRCLE-DETAIL-02",
+          "P70-CIRCLE-DETAIL-03"
+        ],
+        "milestone": "POO-79"
+      },
+      "scenarios": [
+        "P70-CIRCLE-DETAIL-01",
+        "P70-CIRCLE-DETAIL-02",
+        "P70-CIRCLE-DETAIL-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-DETAIL-FOCUS-UPDATES",
+        "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "P-M07-DETAIL-PAID",
+        "P-M07-DETAIL-DATA",
+        "P-M07-EXPIRED",
+        "P-M07-REJOIN-BROWSER"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    },
+    "V3": {
+      "task_id": "POO-79",
+      "title": "阶段三验收：圈子列表详情闭环及全批回归",
+      "dependencies": [
+        "POO-88",
+        "POO-90",
+        "POO-92",
+        "POO-93",
+        "POO-94",
+        "POO-95",
+        "POO-96",
+        "POO-99",
+        "POO-100",
+        "POO-97",
+        "POO-98",
+        "POO-77",
+        "POO-78"
+      ],
+      "milestone": null,
+      "branch": "POO-79/chore/client-entry-v3",
+      "status": "todo",
+      "body_rev": "625b1167baa2c0342abeeed28d6a16eaf1850efeedc9850834421621fd1d25da",
+      "body_sha256": "c8946c4fcf190095db8960345644ef3a414cb48071a5be57db4fd8f94583cea2",
+      "acceptance": {
+        "version": 1,
+        "schedule": "per_card",
+        "checks": {
+          "api": true,
+          "browser": true,
+          "visual": "smoke"
+        },
+        "scenarios": [
+          "P70-CIRCLE-API-01",
+          "P70-CIRCLE-API-02",
+          "P70-CIRCLE-API-03",
+          "P70-CIRCLE-STATE-01",
+          "P70-CIRCLE-STATE-02",
+          "P70-CIRCLE-STATE-03",
+          "P70-CIRCLE-LIST-01",
+          "P70-CIRCLE-LIST-02",
+          "P70-CIRCLE-LIST-03",
+          "P70-CIRCLE-CONTENT-01",
+          "P70-CIRCLE-CONTENT-02",
+          "P70-CIRCLE-CONTENT-03",
+          "P70-CIRCLE-UPDATES-01",
+          "P70-CIRCLE-UPDATES-02",
+          "P70-CIRCLE-UPDATES-03",
+          "P70-SUBSCRIPTION-01",
+          "P70-SUBSCRIPTION-02",
+          "P70-SUBSCRIPTION-03",
+          "P70-LEAVE-01",
+          "P70-LEAVE-02",
+          "P70-LEAVE-03",
+          "P70-RETURN-01",
+          "P70-RETURN-02",
+          "P70-CIRCLE-DETAIL-01",
+          "P70-CIRCLE-DETAIL-02",
+          "P70-CIRCLE-DETAIL-03",
+          "P70-RETURN-BRIDGE-01",
+          "P70-RETURN-BRIDGE-02",
+          "P70-RETURN-BRIDGE-03",
+          "P70-SUPPORT-01",
+          "P70-SUPPORT-02",
+          "P70-SUPPORT-03",
+          "P70-AUTH-01",
+          "P70-AUTH-02",
+          "P70-AUTH-03",
+          "P70-PASSWORD-01",
+          "P70-PASSWORD-02",
+          "P70-PASSWORD-03",
+          "P70-PHONE-01",
+          "P70-PHONE-02",
+          "P70-PHONE-03",
+          "P70-BOOT-01",
+          "P70-BOOT-02",
+          "P70-BOOT-03",
+          "P70-NAV-01",
+          "P70-NAV-02",
+          "P70-NAV-03",
+          "P70-CATALOG-01",
+          "P70-CATALOG-02",
+          "P70-CATALOG-03",
+          "P70-CARD-01",
+          "P70-CARD-02",
+          "P70-CARD-03",
+          "P70-HOME-01",
+          "P70-HOME-02",
+          "P70-HOME-03"
+        ]
+      },
+      "scenarios": [
+        "P70-CIRCLE-API-01",
+        "P70-CIRCLE-API-02",
+        "P70-CIRCLE-API-03",
+        "P70-CIRCLE-STATE-01",
+        "P70-CIRCLE-STATE-02",
+        "P70-CIRCLE-STATE-03",
+        "P70-CIRCLE-LIST-01",
+        "P70-CIRCLE-LIST-02",
+        "P70-CIRCLE-LIST-03",
+        "P70-CIRCLE-CONTENT-01",
+        "P70-CIRCLE-CONTENT-02",
+        "P70-CIRCLE-CONTENT-03",
+        "P70-CIRCLE-UPDATES-01",
+        "P70-CIRCLE-UPDATES-02",
+        "P70-CIRCLE-UPDATES-03",
+        "P70-SUBSCRIPTION-01",
+        "P70-SUBSCRIPTION-02",
+        "P70-SUBSCRIPTION-03",
+        "P70-LEAVE-01",
+        "P70-LEAVE-02",
+        "P70-LEAVE-03",
+        "P70-RETURN-01",
+        "P70-RETURN-02",
+        "P70-CIRCLE-DETAIL-01",
+        "P70-CIRCLE-DETAIL-02",
+        "P70-CIRCLE-DETAIL-03",
+        "P70-RETURN-BRIDGE-01",
+        "P70-RETURN-BRIDGE-02",
+        "P70-RETURN-BRIDGE-03",
+        "P70-SUPPORT-01",
+        "P70-SUPPORT-02",
+        "P70-SUPPORT-03",
+        "P70-AUTH-01",
+        "P70-AUTH-02",
+        "P70-AUTH-03",
+        "P70-PASSWORD-01",
+        "P70-PASSWORD-02",
+        "P70-PASSWORD-03",
+        "P70-PHONE-01",
+        "P70-PHONE-02",
+        "P70-PHONE-03",
+        "P70-BOOT-01",
+        "P70-BOOT-02",
+        "P70-BOOT-03",
+        "P70-NAV-01",
+        "P70-NAV-02",
+        "P70-NAV-03",
+        "P70-CATALOG-01",
+        "P70-CATALOG-02",
+        "P70-CATALOG-03",
+        "P70-CARD-01",
+        "P70-CARD-02",
+        "P70-CARD-03",
+        "P70-HOME-01",
+        "P70-HOME-02",
+        "P70-HOME-03"
+      ],
+      "prototype_scenes": [
+        "P-M07-LIST",
+        "P-M07-EMPTY",
+        "P-M07-LIST-RENEWED",
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-DETAIL-PAID",
+        "P-M07-DETAIL-DATA",
+        "P-M07-DETAIL-FOCUS-UPDATES",
+        "P-M07-DETAIL-PAID-UPDATES",
+        "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "P-M07-DETAIL-DATA-SUBSCRIPTION",
+        "P-M07-RENEW",
+        "P-M07-RENEW-EXPIRED",
+        "P-M07-RENEW-YEAR",
+        "P-M07-YEAR-RESULT",
+        "P-M07-RENEW-LIMIT",
+        "P-M07-LEAVE",
+        "P-M07-LEAVE-PAID",
+        "P-M07-LEAVE-DATA",
+        "P-M07-LEAVE-YEAR",
+        "P-M07-DETAIL-PAID-AFTER-LEAVE",
+        "P-M07-SOURCE-FALLBACK",
+        "P-M07-RETURN",
+        "P-M07-RETURN-FAIL",
+        "P-M07-ACCOUNT-MISMATCH",
+        "P-M07-LOGIN",
+        "P-M07-LOGIN-PHONE",
+        "P-M07-PAY-RETURN",
+        "P-M07-PAY-RETURN-FAIL",
+        "P-M07-YEAR-RETURN",
+        "P-M07-RENEW-RETURN",
+        "P-M07-EXPIRED",
+        "P-M07-REJOIN-BROWSER",
+        "P-M07-SUPPORT",
+        "P-M07-SUPPORT-LOAD-FAIL"
+      ],
+      "design_revision": "poo70-client-design-r2-20261004",
+      "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b"
+    }
+  },
+  "design_source_preparation": {
+    "version": 1,
+    "status": "source_updated_awaiting_execution_repin",
+    "design_revision": "poo70-client-design-r2-20261004",
+    "integration_branch": "integration/poo70-client-entry-r15",
+    "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b",
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "model_path": ".agents/skills/polo-ai-design-system/references/design-system.json",
+    "prototype_path": "docs/mvp-complete-flow-hifi/prototype.html",
+    "prototype_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+    "sources": {
+      "docs/client-journey-review/spec.md": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
+      "docs/mvp-complete-flow-hifi/prototype.html": "302c749194dd8f8f7fe574d33ba637d26241edcb7f4526ece49effeee02887bf",
+      "docs/mvp-complete-flow-hifi/prototype-manifest.json": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
+      ".agents/skills/polo-ai-design-system/SKILL.md": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+      ".agents/skills/polo-ai-design-system/references/design-system.json": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
+      ".agents/skills/polo-ai-design-system/references/foundations.md": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+      ".agents/skills/polo-ai-design-system/references/client-workbench.template.html": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
+      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+      ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332"
+    },
+    "execution_authorized": false,
+    "parity_accepted": false
+  }
+}
