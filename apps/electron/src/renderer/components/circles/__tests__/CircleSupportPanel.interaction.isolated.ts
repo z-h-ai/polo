@@ -111,8 +111,15 @@ beforeEach(() => {
         getSupport: recorded('getSupport', () => {
           supportCalls += 1
           if (holdSupport) {
+            // Capture the CALLING account NOW: the resolver must settle with
+            // the payload issued for that account, never relabelled by the
+            // account that happens to be current when the queue is released —
+            // otherwise a rebind between call and release silently rewrites
+            // the in-flight receipt and the wrong-account assertion below
+            // could never fail.
+            const acct = currentAccount
             return new Promise(resolve => {
-              pendingSupportResolvers.push(() => resolve(supportResultByAccount[currentAccount]))
+              pendingSupportResolvers.push(() => resolve(supportResultByAccount[acct]))
             })
           }
           return Promise.resolve(supportResultByAccount[currentAccount])
