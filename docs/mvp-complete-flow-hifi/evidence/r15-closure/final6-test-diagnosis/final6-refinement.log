@@ -1,6 +1,0 @@
-FAIL 1440 consistent circle buttons None
-FAIL 1024 consistent circle buttons None
-FAIL 800 consistent circle buttons None
-FAIL last data source removed without touching shared apps None
-FAIL search cannot restore unauthorized app None
-{"passed": false, "checks": 66, "errors": []}
