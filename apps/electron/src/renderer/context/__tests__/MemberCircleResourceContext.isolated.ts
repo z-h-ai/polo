@@ -164,10 +164,15 @@ describe('MemberCircleResourceProvider (POO-70 C2 single instance holder)', () =
 
   it('wires the injected H1 catalog instance into invalidateAndRefresh', async () => {
     let syncCalls = 0
+    // Mirrors the real instance shape: sync() resolves (never rejects) and
+    // the settled state lives on the instance itself.
     const catalog = {
+      state: {
+        errorCode: null,
+        catalog: { accountId: 'account-a', organizationId: 'personal-space' },
+      },
       sync: async () => {
         syncCalls += 1
-        return { success: true, catalog: {}, source: 'network', refreshed: true, accessMode: 'online' }
       },
     } as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
     const recorder: ProbeRecorder = { current: null }
@@ -182,9 +187,37 @@ describe('MemberCircleResourceProvider (POO-70 C2 single instance holder)', () =
     const outcome = await act(async () => {
       return recorder.current!.invalidateAndRefresh({ circleId: 'circle-1' })
     })
-    // The SAME injected instance was refreshed together with the relations.
+    // The SAME injected instance was refreshed together with the relations;
+    // 'refreshed' is judged from the instance's settled state (live catalog,
+    // no errorCode), not merely from the call having been issued.
     expect(syncCalls).toBe(1)
     expect(outcome).toMatchObject({ relations: 'refreshed', catalog: 'refreshed', circleId: 'circle-1' })
     expect(listCalls).toBe(2)
+  })
+
+  it('reports catalog FAILED when the injected instance settled into an errorCode without rejecting', async () => {
+    let syncCalls = 0
+    const catalog = {
+      state: {
+        errorCode: 'ADMIN_UNAVAILABLE',
+        catalog: null,
+      },
+      sync: async () => {
+        syncCalls += 1
+      },
+    } as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
+    const recorder: ProbeRecorder = { current: null }
+    render(createElement(MemberCircleResourceProvider, {
+      catalog,
+      children: createElement(ProbeChild, { recorder }),
+    }))
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
+    const outcome = await act(async () => {
+      return recorder.current!.invalidateAndRefresh()
+    })
+    expect(syncCalls).toBe(1)
+    expect(outcome).toMatchObject({ relations: 'refreshed', catalog: 'failed' })
   })
 })

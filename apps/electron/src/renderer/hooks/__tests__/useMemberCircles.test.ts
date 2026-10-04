@@ -220,14 +220,37 @@ function installBridge() {
 }
 
 // -------------------------------------------------------------------------
-// Catalog double (H1 shared instance)
+// Catalog double (H1 shared instance) — mirrors the REAL sync() shape:
+// production sync never rejects, failures settle into the instance state.
 // -------------------------------------------------------------------------
 
+interface CatalogDoubleState {
+  errorCode: string | null
+  catalog: import('@polo-ai/shared/admin').AppCatalogCacheEntry | null
+}
+
+function minimalCatalog(): import('@polo-ai/shared/admin').AppCatalogCacheEntry {
+  return {
+    accountId: 'account-a',
+    organizationId: 'personal-space',
+    appConfigVersion: 'test-1',
+    authorizationStatus: 'authorized',
+    apps: [],
+    syncedAt: 1,
+  }
+}
+
+let catalogState: CatalogDoubleState = { errorCode: null, catalog: minimalCatalog() }
 let catalogSyncImpl: (force?: boolean) => Promise<void> = async () => {}
 const catalogSyncCalls: boolean[] = []
 
 function makeCatalog() {
   return {
+    // A getter so a test can mutate catalogState mid-flight and the hook's
+    // post-sync snapshot reads the settled instance state, like the real one.
+    get state() {
+      return catalogState
+    },
     sync: mock(async (force?: boolean) => {
       catalogSyncCalls.push(Boolean(force))
       await catalogSyncImpl(force)
@@ -236,6 +259,7 @@ function makeCatalog() {
 }
 
 function resetCatalog() {
+  catalogState = { errorCode: null, catalog: minimalCatalog() }
   catalogSyncImpl = async () => {}
   catalogSyncCalls.length = 0
 }
@@ -365,6 +389,30 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-01 (scope isolation)', (
     })
     await waitForPhase(hook, 'idle')
     expect(callCounts.list).toBe(0)
+  })
+
+  it('distinguishes a MISSING BRIDGE from a missing scope in refresh outcomes (P3)', async () => {
+    const hook = renderResource()
+    await waitForPhase(hook, 'ready')
+
+    // Remove the trusted bridge entirely (hardened renderer): the fence is
+    // fine, so the outcome must not claim 'no_scope'.
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {},
+    })
+    let outcome: unknown
+    await act(async () => {
+      outcome = await hook.result.current.refresh()
+    })
+    expect(outcome).toEqual({ skipped: true, reason: 'bridge_unavailable' })
+
+    // Restore the bridge; the same fence refreshes normally again.
+    installBridge()
+    await act(async () => {
+      outcome = await hook.result.current.refresh()
+    })
+    expect(outcome).toEqual({ skipped: false, circles: 'ok', memberships: 'ok' })
   })
 })
 
@@ -542,6 +590,34 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
     expect(hook.result.current.state.phase).toBe('ready')
   })
 
+  it('reports catalog FAILED when a sync settles WITHOUT rejecting but the instance reports an errorCode (P2)', async () => {
+    // The REAL H1 sync never rejects: offline/denied syncs settle into the
+    // instance's own errorCode. 'refreshed' must not be faked for that path.
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+
+    catalogState = { errorCode: 'ADMIN_UNAVAILABLE', catalog: null }
+    let outcome: unknown
+    await act(async () => {
+      outcome = await hook.result.current.invalidateAndRefresh()
+    })
+    expect(outcome).toEqual({ relations: 'refreshed', catalog: 'failed', circleId: null, orderId: null })
+  })
+
+  it('reports catalog PENDING when the sync settles with no catalog and no errorCode (P2)', async () => {
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+
+    catalogState = { errorCode: null, catalog: null }
+    let outcome: unknown
+    await act(async () => {
+      outcome = await hook.result.current.invalidateAndRefresh({ circleId: 'circle-a' })
+    })
+    expect(outcome).toEqual({ relations: 'refreshed', catalog: 'pending', circleId: 'circle-a', orderId: null })
+  })
+
   it('reports catalog unavailable when no H1 instance was injected', async () => {
     const hook = renderResource()
     await waitForPhase(hook, 'ready')
@@ -550,6 +626,24 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
       outcome = await hook.result.current.invalidateAndRefresh()
     })
     expect(outcome).toEqual({ relations: 'refreshed', catalog: 'unavailable', circleId: null, orderId: null })
+  })
+
+  it('a FAILED leave triggers NO relations refresh and NO catalog sync (P70-CIRCLE-STATE-03 negative)', async () => {
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+    const listCallsBefore = callCounts.list
+    expect(catalogSyncCalls).toHaveLength(0)
+
+    leaveImpl = async () => failure('conflict')
+    let result: unknown
+    await act(async () => {
+      result = await hook.result.current.leave('00000000-0000-4000-8000-000000000001')
+    })
+    expect(result).toMatchObject({ success: false, errorCode: 'conflict' })
+    expect(callCounts.list).toBe(listCallsBefore)
+    expect(callCounts.listMemberships).toBe(1)
+    expect(catalogSyncCalls).toHaveLength(0)
   })
 })
 
@@ -604,6 +698,47 @@ describe('useMemberCirclesResource — upstream_pending capabilities (G2/G3/G4)'
       phase: 'ready',
       state: { availability: 'upstream_pending', contractGap: 'G4' },
     })
+  })
+
+  it('clears the support state when the scope binding changes', async () => {
+    const hook = renderResource()
+    await waitForPhase(hook, 'ready')
+    await act(async () => {
+      await hook.result.current.getSupport()
+    })
+    expect(hook.result.current.supportState).toMatchObject({ phase: 'ready' })
+
+    productSpaceContextState = spaceContext({ accountId: 'account-b', contextVersion: 2 })
+    await act(async () => {
+      hook.rerender({ catalog: null })
+    })
+    await waitForPhase(hook, 'ready')
+    // The previous account's support config must not survive the rebind.
+    expect(hook.result.current.supportState).toBeNull()
+  })
+
+  it('does NOT strand loading states when there is no personal scope (P3)', async () => {
+    productSpaceContextState = spaceContext({ spaceKind: 'enterprise', contextVersion: 9 })
+    const hook = renderResource()
+    await waitForPhase(hook, 'denied')
+
+    let updates: unknown
+    await act(async () => {
+      updates = await hook.result.current.getUpdates('circle-a')
+    })
+    expect(updates).toMatchObject({ success: false, errorCode: 'session_unavailable' })
+    let support: unknown
+    await act(async () => {
+      support = await hook.result.current.getSupport()
+    })
+    expect(support).toMatchObject({ success: false, errorCode: 'session_unavailable' })
+    // No loading phase was written before the fence check, so nothing is
+    // stranded: the caches stay empty and no RPC was issued.
+    expect(hook.result.current.updateStates['circle-a']).toBeUndefined()
+    expect(hook.result.current.profileStates['circle-a']).toBeUndefined()
+    expect(hook.result.current.supportState).toBeNull()
+    expect(callCounts.getUpdates).toBe(0)
+    expect(callCounts.getSupport).toBe(0)
   })
 
   it('drops an upstream capability receipt whose scope died mid-flight', async () => {

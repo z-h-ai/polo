@@ -128,7 +128,7 @@ export type MemberCircleSupportReadState =
   | { phase: 'failed'; error: MemberCircleReadError }
 
 export type MemberCirclesRefreshOutcome =
-  | { skipped: true; reason: 'no_scope' | 'superseded' }
+  | { skipped: true; reason: 'no_scope' | 'bridge_unavailable' | 'superseded' }
   | { skipped: false; circles: 'ok' | 'failed'; memberships: 'ok' | 'failed' }
 
 /**
@@ -137,10 +137,22 @@ export type MemberCirclesRefreshOutcome =
  * (they were dropped at invalidate time) and the caller must surface
  * "relations changed, rows/catalog pending re-verification" rather than
  * treating the pre-invalidate view as current.
+ *
+ * `catalog` is judged from the injected H1 instance's OWN state after the
+ * sync settles (production `sync()` never rejects — every failure path
+ * settles into its instance state):
+ * - 'refreshed': the instance reports a live catalog with no errorCode;
+ * - 'pending': the sync settled but the instance has no catalog yet —
+ *   relations changed while the catalog awaits re-verification;
+ * - 'failed': the instance reports an errorCode (or, defensively, the sync
+ *   itself threw);
+ * - 'unavailable': no H1 instance was injected.
+ * Consumers must NOT treat any outcome as proof the catalog content is
+ * current — authoritative catalog state always lives on the H1 instance.
  */
 export type MemberCirclesInvalidationOutcome = {
   relations: 'refreshed' | 'partial' | 'failed' | 'skipped'
-  catalog: 'refreshed' | 'failed' | 'unavailable'
+  catalog: 'refreshed' | 'pending' | 'failed' | 'unavailable'
   circleId: string | null
   orderId: string | null
 }
@@ -360,7 +372,9 @@ export function useMemberCirclesResource(
   ): Promise<MemberCirclesRefreshOutcome> => {
     const api = getMemberCirclesBridgeApi()
     if (!api) {
-      return { skipped: true, reason: 'no_scope' }
+      // Distinct from 'no_scope': the scope fence is fine, the trusted
+      // bridge itself is missing (hardened renderer / broken preload).
+      return { skipped: true, reason: 'bridge_unavailable' }
     }
     setRelations(current => (
       current.scope === fence ? { ...current, refreshing: true } : current
@@ -504,19 +518,31 @@ export function useMemberCirclesResource(
         : relationsOutcome.circles === 'ok' || relationsOutcome.memberships === 'ok'
           ? 'partial'
           : 'failed'
-    // 3. Refresh the SAME injected catalog instance (H1). `sync` manages its
-    // own state and resolves without a result object — a settled call means
-    // the refresh was issued ('refreshed'), a throw means the catalog
-    // refresh failed ('failed'). A catalog failure is reported verbatim and
-    // never rolls the relations back.
+    // 3. Refresh the SAME injected catalog instance (H1). Production
+    // `sync()` NEVER rejects — every failure path settles into the
+    // instance's own state. So after the sync settles, read the LATEST
+    // instance snapshot through the ref and judge from its real fields:
+    // 'refreshed' means a live catalog with no errorCode, NOT merely an
+    // issued call. A throwing sync (defensive) and an errorCode snapshot
+    // both report 'failed'; a settled sync with no catalog yet reports
+    // 'pending'. A catalog failure never rolls the relations back.
     let catalogOutcome: MemberCirclesInvalidationOutcome['catalog'] = 'unavailable'
-    const activeCatalog = catalogRef.current
-    if (activeCatalog) {
+    const requestedCatalog = catalogRef.current
+    if (requestedCatalog) {
       try {
-        await activeCatalog.sync(true)
-        catalogOutcome = 'refreshed'
+        await requestedCatalog.sync(true)
       } catch {
+        // Defensive: production sync resolves; a throwing instance is
+        // reported as failed, never swallowed.
+        return { relations, catalog: 'failed', circleId, orderId }
+      }
+      const settledCatalog = catalogRef.current ?? requestedCatalog
+      if (settledCatalog.state.errorCode) {
         catalogOutcome = 'failed'
+      } else if (settledCatalog.state.catalog) {
+        catalogOutcome = 'refreshed'
+      } else {
+        catalogOutcome = 'pending'
       }
     }
     return { relations, catalog: catalogOutcome, circleId, orderId }
@@ -547,6 +573,9 @@ export function useMemberCirclesResource(
 
   const getUpdates = useCallback(async (circleId: string): Promise<MemberCircleRpcResult<{ updates: MemberCircleUpstreamPendingState }>> => {
     const fence = scopeFenceRef.current
+    // No personal scope (idle/enterprise): fail closed BEFORE writing any
+    // loading state, so no capability cache can be stranded in loading.
+    if (!fence) return commandFailure('session_unavailable')
     setUpdateStates(previous => ({ ...previous, [circleId]: { phase: 'loading' } }))
     const result = await runScopedCommand(api => api.getUpdates(circleId))
     if (!isScopeCurrent(fence)) return result
@@ -571,6 +600,7 @@ export function useMemberCirclesResource(
 
   const getProfile = useCallback(async (circleId: string): Promise<MemberCircleRpcResult<{ profile: MemberCircleUpstreamPendingState }>> => {
     const fence = scopeFenceRef.current
+    if (!fence) return commandFailure('session_unavailable')
     setProfileStates(previous => ({ ...previous, [circleId]: { phase: 'loading' } }))
     const result = await runScopedCommand(api => api.getProfile(circleId))
     if (!isScopeCurrent(fence)) return result
@@ -591,6 +621,7 @@ export function useMemberCirclesResource(
 
   const fetchSupport = useCallback(async (): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>> => {
     const fence = scopeFenceRef.current
+    if (!fence) return commandFailure('session_unavailable')
     setSupportState({ phase: 'loading' })
     const result = await runScopedCommand(api => api.getSupport())
     if (!isScopeCurrent(fence)) return result
