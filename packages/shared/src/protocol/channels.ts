@@ -241,6 +241,20 @@ export const RPC_CHANNELS = {
     GET_CREATOR_SKILL_SAFETY_STATUS: 'admin:getCreatorSkillSafetyStatus',
     PUBLISH_CREATOR_APP: 'admin:publishCreatorApp',
   },
+  memberCircles: {
+    // Member-side circle reads/writes (POO-70 C1). Trusted-session only:
+    // handlers derive identity from the Main-process Admin session and never
+    // accept a renderer-supplied userId. No purchase/createOrder channel.
+    LIST: 'memberCircles:list',
+    LIST_MEMBERSHIPS: 'memberCircles:listMemberships',
+    PREVIEW_RENEWAL: 'memberCircles:previewRenewal',
+    LEAVE: 'memberCircles:leave',
+    GET_ORDER: 'memberCircles:getOrder',
+    GET_CHECKOUT_RESULT: 'memberCircles:getCheckoutResult',
+    GET_UPDATES: 'memberCircles:getUpdates',
+    GET_PROFILE: 'memberCircles:getProfile',
+    GET_SUPPORT: 'memberCircles:getSupport',
+  },
   llmConnections: {
     LIST: 'LLM_Connection:list',
     LIST_WITH_STATUS: 'LLM_Connection:listWithStatus',

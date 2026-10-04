@@ -16,6 +16,15 @@ import {
   CREATOR_APP_PAYLOAD_LIMITS as realCreatorAppPayloadLimits,
   CREATOR_APP_PAYLOAD_MAX_BYTES as realCreatorAppPayloadMaxBytes,
 } from '../../../../shared/src/admin/creator-app-publishing'
+// Member-circle contract helpers: re-exported VERBATIM through the barrel
+// stub below (review P2-2, authorized by the integration owner) so modules
+// that consume '@polo-ai/shared/admin' in the same non-isolated bun process
+// keep the real contract behavior instead of undefined bindings.
+import {
+  mapMemberCircleApiError as realMapMemberCircleApiError,
+  resolveMemberCirclePurchaseUrl as realResolveMemberCirclePurchaseUrl,
+  MemberCircleUuidSchema as realMemberCircleUuidSchema,
+} from '../../../../shared/src/admin/member-circles'
 
 type StoredTokens = {
   accessToken: string
@@ -422,6 +431,11 @@ mock.module('@polo-ai/shared/admin', () => ({
   CREATOR_APP_CANONICAL_ENTRIES: realCreatorAppCanonicalEntries,
   CREATOR_APP_PAYLOAD_LIMITS: realCreatorAppPayloadLimits,
   CREATOR_APP_PAYLOAD_MAX_BYTES: realCreatorAppPayloadMaxBytes,
+  // Shared test stub authorization (reviewer P2-2, POO-70 orchestration):
+  // member-circle contract helpers pass through verbatim.
+  MemberCircleUuidSchema: realMemberCircleUuidSchema,
+  mapMemberCircleApiError: realMapMemberCircleApiError,
+  resolveMemberCirclePurchaseUrl: realResolveMemberCirclePurchaseUrl,
   AdminError: TestAdminError,
   analyzeCreatorAppPayload: realAnalyzeCreatorAppPayload,
   createCanonicalCreatorAppBundle: realCreateCanonicalCreatorAppBundle,

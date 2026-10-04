@@ -276,6 +276,18 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // credentials; it must never be proxied to a workspace server.
   RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
 
+  // memberCircles — member-side circle reads run on the device's trusted
+  // Admin session (same trust boundary as admin.*); never workspace-proxied.
+  RPC_CHANNELS.memberCircles.LIST,
+  RPC_CHANNELS.memberCircles.LIST_MEMBERSHIPS,
+  RPC_CHANNELS.memberCircles.PREVIEW_RENEWAL,
+  RPC_CHANNELS.memberCircles.LEAVE,
+  RPC_CHANNELS.memberCircles.GET_ORDER,
+  RPC_CHANNELS.memberCircles.GET_CHECKOUT_RESULT,
+  RPC_CHANNELS.memberCircles.GET_UPDATES,
+  RPC_CHANNELS.memberCircles.GET_PROFILE,
+  RPC_CHANNELS.memberCircles.GET_SUPPORT,
+
   // preferences — device-local launcher and verified Admin organization state
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
