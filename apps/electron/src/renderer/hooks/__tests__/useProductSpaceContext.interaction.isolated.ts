@@ -1903,9 +1903,10 @@ describe('useProductSpaceContextState boot entry & reopen recovery (P70-BOOT-01/
     let firstBoot: Promise<string | null> = Promise.resolve(null)
     await act(async () => {
       firstBoot = result.current.bootstrap(accountId)
-      for (let i = 0; i < 300 && listCalls < 1; i += 1) {
-        await new Promise(resolve => setTimeout(resolve, 10))
-      }
+    })
+    // Wait until the bootstrap is parked on its (gated) list fetch.
+    await waitFor(() => {
+      expect(listCalls).toBe(1)
     })
     // Preparing: loading, nothing published.
     expect(result.current.flowState).toBe('loading')
@@ -1954,9 +1955,10 @@ describe('useProductSpaceContextState superseded account receipts (P70-BOOT-03)'
       payer: { kind: 'account' },
     } as unknown as ProductSpaceSummary
     const spaceEvents: Array<{ accountId?: string; productSpaceId?: string }> = []
-    window.addEventListener('polo:product-space-changed', event => {
+    const onSpaceChanged = (event: Event) => {
       spaceEvents.push((event as CustomEvent).detail ?? {})
-    })
+    }
+    window.addEventListener('polo:product-space-changed', onSpaceChanged)
     let listCalls = 0
     let releaseA!: () => void
     const gatedListA = new Promise<ListResult>(resolve => {
@@ -1992,9 +1994,10 @@ describe('useProductSpaceContextState superseded account receipts (P70-BOOT-03)'
     let bootA: Promise<string | null> = Promise.resolve(null)
     await act(async () => {
       bootA = result.current.bootstrap('account-a')
-      for (let i = 0; i < 300 && listCalls < 1; i += 1) {
-        await new Promise(resolve => setTimeout(resolve, 10))
-      }
+    })
+    // Wait until A's bootstrap is parked on its (gated) list fetch.
+    await waitFor(() => {
+      expect(listCalls).toBe(1)
     })
     expect(result.current.flowState).toBe('loading')
 
@@ -2018,5 +2021,7 @@ describe('useProductSpaceContextState superseded account receipts (P70-BOOT-03)'
     expect(getStoredActiveProductSpaceId('account-b')).toBe('space-personal-b')
     // No commit event for the superseded account was ever emitted.
     expect(spaceEvents.map(event => event.accountId)).toEqual(['account-b'])
+    // P3-7 hygiene: the probe listener does not leak into later tests.
+    window.removeEventListener('polo:product-space-changed', onSpaceChanged)
   })
 })

@@ -556,10 +556,13 @@ export default function App() {
   /**
    * Clears every account-scoped renderer projection (P70-BOOT-03): session
    * atoms, the pending permission/credential/question prompts, per-session
-   * options and drafts, and the catalog-derived sources/skills projections.
-   * Old directory and circle page state must never survive an account switch
-   * into the next account's shell. The window workspace mapping and the
-   * ProductSpace hook state keep their own dedicated exits.
+   * options and drafts, the catalog-derived sources/skills projections, and
+   * the workspace/LLM connection projections read by the shell context. Old
+   * directory and circle page state must never survive an account switch
+   * into the next account's shell — all three account exits (auth failure,
+   * logout, reset) funnel through here so their teardown stays symmetric.
+   * The ProductSpace hook state keeps its own dedicated exit
+   * (clearProductSpaceAccount).
    */
   const resetAccountScopedClientState = useCallback(() => {
     initializeSessions([])
@@ -574,10 +577,27 @@ export default function App() {
     sessionDraftsRef.current.clear()
     setSession({ selected: null })
     setRuntimeChatAccessIssue(null)
+    setWorkspaces([])
+    setWindowWorkspaceId(null)
+    setLlmConnections([])
+    setLlmConnectionsLoaded(false)
+    setDefaultLlmConnectionSlug(undefined)
+    setWorkspaceDefaultLlmConnection(undefined)
     // A stale committed-switch record of the previous account must never
     // drive the next account's rollback window.
     lastCommittedSwitchRef.current = null
-  }, [applyPendingQuestions, initializeSessions, setSession, store])
+  }, [
+    applyPendingQuestions,
+    initializeSessions,
+    setDefaultLlmConnectionSlug,
+    setLlmConnections,
+    setLlmConnectionsLoaded,
+    setSession,
+    setWindowWorkspaceId,
+    setWorkspaces,
+    setWorkspaceDefaultLlmConnection,
+    store,
+  ])
 
   const applyPermissionModeState = useCallback((sessionId: string, state: PermissionModeState, source: 'event' | 'reconcile') => {
     setSessionOptions(prev => {
@@ -618,9 +638,13 @@ export default function App() {
     })
   }, [])
 
-  const reconcilePermissionModeState = useCallback(async (sessionId: string) => {
+  const reconcilePermissionModeState = useCallback(async (sessionId: string, isSessionCurrent?: () => boolean) => {
     try {
       const state = await window.electronAPI.getSessionPermissionModeState(sessionId)
+      // P3-1 (P70-BOOT-03): the optional session guard closes the tail after
+      // the await — a superseded account session's reconcile never writes the
+      // old session's options back into the cleared projections.
+      if (isSessionCurrent && !isSessionCurrent()) return
       if (!state) return
       applyPermissionModeState(sessionId, state, 'reconcile')
     } catch (error) {
@@ -751,9 +775,15 @@ export default function App() {
       setSessionOptions(optionsMap)
 
       await Promise.allSettled(
-        loadedSessions.map((s) => reconcilePermissionModeState(s.id))
+        loadedSessions.map((s) => reconcilePermissionModeState(
+          s.id,
+          () => accountSessionEpochRef.current === capturedEpoch,
+        ))
       )
 
+      // P3-1: the reconcile tail is fenced too — the superseded receipt never
+      // reaches the ready publication.
+      if (accountSessionEpochRef.current !== capturedEpoch) return
       setSessionsLoaded(true)
 
       if (initialSessionId && windowWorkspaceId) {
@@ -899,7 +929,12 @@ export default function App() {
           })
         },
       )
-      await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
+      await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(
+        s.id,
+        () => accountSessionEpochRef.current === capturedEpoch,
+      )))
+      // P3-1: the reconcile tail is fenced too.
+      if (accountSessionEpochRef.current !== capturedEpoch) return null
 
       return nextMetaMap
     } catch (err) {
@@ -945,6 +980,10 @@ export default function App() {
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
   const refreshAdminUser = useCallback(async () => {
+    // P3-5 (P70-BOOT-03): the status receipt is fenced to the account session
+    // that started it — when a logout/auth failure resolves first, the stale
+    // refresh returns nothing instead of re-committing the old user.
+    const capturedEpoch = accountSessionEpochRef.current
     try {
       const status = await window.electronAPI.adminGetStatus()
       const user = status.loggedIn && status.userId
@@ -957,9 +996,11 @@ export default function App() {
       if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
         invalidateProductSpaceDeepLinkRefresh()
       }
+      if (accountSessionEpochRef.current !== capturedEpoch) return null
       commitCurrentAdminUser(user)
       return user
     } catch {
+      if (accountSessionEpochRef.current !== capturedEpoch) return null
       if (currentAdminUserIdRef.current !== null) {
         invalidateProductSpaceDeepLinkRefresh()
       }
@@ -1028,6 +1069,10 @@ export default function App() {
       if (ws.length > 0) {
         // Switch to workspace in-place (no window close/reopen)
         await window.electronAPI.switchWorkspace(ws[0].id)
+        // P3-2: the workspace publication honors the same fence as the space
+        // route — the Main window→workspace mapping is not switched either
+        // once the login intent was invalidated mid-completion.
+        if (accountSessionEpochRef.current !== completionEpoch) return
         setWindowWorkspaceId(ws[0].id)
         setWorkspaces(ws)
         targetWorkspaceId = ws[0].id
@@ -2499,11 +2544,8 @@ export default function App() {
       if (!result.success || !isCurrentLogout()) return
       invalidateProductSpaceDeepLinkRefresh()
       // Reset all state
-      resetAccountScopedClientState()
-      setWorkspaces([])
-      setWindowWorkspaceId(null)
-      setLlmConnectionsLoaded(false)
       clearProductSpaceAccount(logoutSnapshot.accountId)
+      resetAccountScopedClientState()
       commitCurrentAdminUser(null)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
@@ -2527,7 +2569,6 @@ export default function App() {
     invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
     resetAccountScopedClientState,
-    setWindowWorkspaceId,
   ])
 
   const handleAdminLogout = useCallback(async () => {
@@ -2563,13 +2604,6 @@ export default function App() {
       invalidateProductSpaceDeepLinkRefresh()
       clearProductSpaceAccount(logoutSnapshot.accountId)
       resetAccountScopedClientState()
-      setWorkspaces([])
-      setWindowWorkspaceId(null)
-      setLlmConnections([])
-      setLlmConnectionsLoaded(false)
-      setDefaultLlmConnectionSlug(undefined)
-      setWorkspaceDefaultLlmConnection(undefined)
-      setRuntimeChatAccessIssue(null)
       commitCurrentAdminUser(null)
       setSetupNeeds({
         needsBillingConfig: false,
@@ -2589,7 +2623,6 @@ export default function App() {
     invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
     resetAccountScopedClientState,
-    setWindowWorkspaceId,
   ])
 
   // Handle workspace selection
