@@ -414,22 +414,15 @@ describe('App × frozen narrow-window guard at 390x844 (Review R38 restores the 
     )
     assertHomeRestored()
 
-    // ROUTE: Catalog — entered through the production All Apps control.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(
-      () => {
-        if (!screen.getByTestId('all-apps-view')) throw new Error('Catalog surface missing after widening')
-      },
-      { timeout: 10_000 },
-    )
-    // The narrow fixture's Catalog fails closed into its error tile —
-    // the route itself (the All Apps view) is the assertion target here.
+    // H3/POO-91 collapsed the old All-Apps entry into the home directory
+    // (the home IS the complete directory now), so the route matrix walks
+    // the guard round-trip on the HOME route itself before the Polo route.
     await act(async () => {
       resizeViewport(390)
     })
     await waitFor(
       () => {
-        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing over Catalog after re-narrowing')
+        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing after re-narrowing')
       },
       { timeout: 10_000 },
     )
@@ -437,9 +430,7 @@ describe('App × frozen narrow-window guard at 390x844 (Review R38 restores the 
 
     // Back to 641px+: the production Home surface returns. The launcher VIEW
     // state itself resets on the guarded remount (the Home component
-    // unmounted under the guard), which is the production remount behavior —
-    // the ROUTE coverage above (Catalog visible at 641px+) is what the route
-    // matrix pins.
+    // unmounted under the guard), which is the production remount behavior.
     await act(async () => {
       resizeViewport(1000)
     })

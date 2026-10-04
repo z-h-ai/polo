@@ -30,16 +30,6 @@ const adminGetStatus = jest.fn()
 const openUrl = jest.fn()
 let appCatalogHook: any
 let installedApps = [...BUILTIN_APP_DEFINITIONS]
-const quickAccessByContext = new Map<string, any[]>()
-function defaultGetHomeQuickAccess(contextKey: string) {
-  return Promise.resolve(quickAccessByContext.get(contextKey) ?? [])
-}
-const getHomeQuickAccess = jest.fn(defaultGetHomeQuickAccess)
-async function defaultSetHomeQuickAccess(contextKey: string, apps: any[]) {
-  quickAccessByContext.set(contextKey, apps)
-  return apps
-}
-const setHomeQuickAccess = jest.fn(defaultSetHomeQuickAccess)
 
 function signedOutCatalogHook() {
   return {
@@ -81,6 +71,10 @@ function signedOutCatalogHook() {
     scopeKeyForApp: () => 'unused',
     refreshRuntimeStatuses: async () => {},
     refreshProductSpaceInstallStates: async () => {},
+    // The REAL useAppCatalog returns the circles surface at the TOP level
+    // (mirroring state.creatorCircles); HomeSpaceContext consumes it from
+    // there.
+    creatorCircles: [],
   }
 }
 
@@ -127,7 +121,10 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { formatBytes, HomePage, selectAllAppsForDisplay, __resetHomeQuickWritersForTests, __homeQuickWritersCountForTests, __homeQuickWriterStatsForTests, __homeQuickWriterSettledForTests } = await import('../HomePage')
+const { formatBytes, HomePage } = await import('../HomePage')
+const { loadHomeAppUsage, __resetHomeAppUsageForTests } = await import('@/lib/home-app-usage')
+const { loadHomeHiddenApps, __resetHomeHiddenAppsForTests } = await import('@/lib/home-app-hidden')
+const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
 const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
   catalogStateMessage,
@@ -144,17 +141,11 @@ beforeEach(async () => {
   openUrl.mockReset()
   appCatalogHook = signedOutCatalogHook()
   installedApps = [...BUILTIN_APP_DEFINITIONS]
-  quickAccessByContext.clear()
-  __resetHomeQuickWritersForTests()
-  getHomeQuickAccess.mockClear()
-  getHomeQuickAccess.mockImplementation(defaultGetHomeQuickAccess)
-  setHomeQuickAccess.mockClear()
-  setHomeQuickAccess.mockImplementation(defaultSetHomeQuickAccess)
+  __resetHomeAppUsageForTests()
+  __resetHomeHiddenAppsForTests()
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      getHomeQuickAccess,
-      setHomeQuickAccess,
       adminGetStatus,
       openUrl,
     },
@@ -167,10 +158,11 @@ afterEach(() => {
 })
 
 function homeTree(hookOverride?: any) {
-  // HomePage publishes through the Provider-owned handoff store; the
-  // provider value mirrors the mocked catalog hook's committed context. A
-  // per-tree hook override binds THAT tree to a different context even when
-  // another mount keeps using the module-global hook.
+  // H3 mount contract: the App-level MemberCatalogProvider owns the single
+  // catalog instance and HomePage consumes it through useMemberCatalog. The
+  // provider here runs its OWN-instance branch over the SAME mocked
+  // useAppCatalog hook, so the page consumes the catalog exactly the way
+  // production does.
   const hookInstance = hookOverride ?? appCatalogHook
   const ps = hookInstance.productSpace
   const value = {
@@ -195,7 +187,11 @@ function homeTree(hookOverride?: any) {
   }
   const tree = createElement(ProductSpaceProvider, {
     value: value as never,
-    children: createElement(I18nextProvider, { i18n }, createElement(HomePage)),
+    children: createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(MemberCatalogProvider, null, createElement(HomePage)),
+    ),
   })
   if (!hookOverride) return tree
   return createElement(hookOverrideContext.Provider, { value: hookOverride }, tree)
@@ -209,15 +205,6 @@ function renderHome() {
 }
 function viewRerender() {
   homeRerender(homeTree())
-}
-
-async function renderAllApps() {
-  const view = renderHome()
-  fireEvent.click(screen.getByTestId('home-all-apps-open'))
-  await waitFor(() => {
-    expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-  })
-  return view
 }
 
 function enterpriseCatalogWith(
@@ -270,7 +257,20 @@ function resolvedBundleLaunch(app: CatalogApp) {
 
 const uiKeyFor = (app: CatalogApp) => JSON.stringify([
   'product-space-ui',
-  app.organizationId ? 'account-a' : 'account-a',
+  'account-a',
+  app.organizationId ?? 'organization-a',
+  app.catalogEntryId ?? app.id,
+  app.artifactInstanceId ?? null,
+])
+
+/**
+ * The DIRECTORY row identity comes from the H1 projection
+ * (`getCatalogAppIdentityKey`), NOT the mock hook's uiIdentityKeyForApp —
+ * the two tuples are intentionally distinct layers.
+ */
+const dirKeyFor = (app: CatalogApp) => JSON.stringify([
+  'catalog-app-identity',
+  'account-a',
   app.organizationId ?? 'organization-a',
   app.catalogEntryId ?? app.id,
   app.artifactInstanceId ?? null,
@@ -325,10 +325,55 @@ function hookWithCatalog(
   }
 }
 
-describe('HomePage quick access (POO-43)', () => {
+function workApp(
+  id: string,
+  name: string,
+  index: number,
+  overrides: Partial<CatalogApp> = {},
+): CatalogApp {
+  return {
+    id,
+    catalogEntryId: id,
+    artifactInstanceId: `artifact-${id}`,
+    organizationId: 'organization-a',
+    name,
+    description: `${name} description`,
+    deliveryMode: 'remote_url',
+    remoteUrl: `https://${id}.example.com`,
+    sortOrder: index,
+    availability: 'available',
+    catalogSources: [{ kind: 'enterprise_import', name: `${name} Source` }],
+    ...overrides,
+  }
+}
+
+/**
+ * One directory card by its stable UI identity. The shared MemberAppCard
+ * renders data-testid="home-directory-app" plus data-identity-key — the
+ * identity tuple is never folded into the test id.
+ */
+function directoryCard(identityKey: string): HTMLElement {
+  const card = screen.getAllByTestId('home-directory-app')
+    .find(candidate => candidate.getAttribute('data-identity-key') === identityKey)
+  if (!card) {
+    throw new Error(`directory card not found for identity: ${identityKey}`)
+  }
+  return card
+}
+
+/** The row-level uninstall entry of one directory card (page-level UI). */
+function directoryUninstallButton(identityKey: string): HTMLElement {
+  const wrapper = directoryCard(identityKey).parentElement
+  const button = wrapper?.querySelector('[data-testid^="home-directory-uninstall-"]')
+  if (!button) {
+    throw new Error(`directory uninstall entry not found for identity: ${identityKey}`)
+  }
+  return button as HTMLElement
+}
+
+describe('HomePage complete directory (POO-70 H3)', () => {
   it('always shows the fixed Polo assistant and opens the Polo tab', async () => {
     renderHome()
-    // Flush mount-triggered hydration settlements inside act.
     await act(async () => {})
 
     const poloEntry = screen.getByTestId('home-quick-entry-polo')
@@ -337,68 +382,341 @@ describe('HomePage quick access (POO-43)', () => {
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
   })
 
-  it('R31: an assistant-only Catalog keeps the fixed Polo on Home and shows the frozen empty work-App state in All Apps', async () => {
-    // A schema-valid Catalog always contains exactly one built-in Polo
-    // assistant. With ZERO work Apps the All Apps view must project the
-    // assistant out and render the frozen empty state — never the assistant
-    // as a work App row — while Home keeps its fixed Polo quick entry.
+  it('P70-HOME-01: renders the COMPLETE authorized directory with no pinning — more than five work Apps and same-named works all get their own card', async () => {
+    // No persisted home configuration exists anywhere anymore: every
+    // authorized App of the space is displayed, beyond the old five-slot cap,
+    // and two works sharing a NAME stay distinct rows (identity, not name).
+    const apps = [
+      workApp('dir-1', 'Alpha App', 0),
+      workApp('dir-2', 'Alpha App', 1, { artifactInstanceId: 'artifact-other' }),
+      workApp('dir-3', 'Beta App', 2),
+      workApp('dir-4', 'Gamma App', 3),
+      workApp('dir-5', 'Delta App', 4),
+      workApp('dir-6', 'Epsilon App', 5),
+      workApp('dir-7', 'Zeta App', 6),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(7)
+    })
+
+    // Same name, two identities: both render.
+    expect(screen.getAllByText('Alpha App')).toHaveLength(2)
+    // The authoritative order is the default display order.
+    const identities = screen.getAllByTestId('home-directory-app')
+      .map(card => card.getAttribute('data-identity-key'))
+    expect(identities).toEqual(apps.map(app => dirKeyFor(app)))
+    // The retired quick-access surface is gone from the page.
+    expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
+    expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
+  })
+
+  it('P70-HOME-01: search narrows the directory and the explicit clear restores it', async () => {
+    const apps = [
+      workApp('search-1', 'Report Builder', 0),
+      workApp('search-2', 'Contract Review', 1),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+
+    fireEvent.change(screen.getByTestId('home-directory-search'), {
+      target: { value: 'contract' },
+    })
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    })
+    expect(screen.getByText('Contract Review')).toBeTruthy()
+    expect(screen.queryByText('Report Builder')).toBeNull()
+
+    // The filter vacuum is its own state with the explicit clear action.
+    fireEvent.change(screen.getByTestId('home-directory-search'), {
+      target: { value: 'zzz-nothing' },
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-no-match')).toBeTruthy()
+    })
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    fireEvent.click(within(screen.getByTestId('home-directory-no-match')).getByText('Clear filters'))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect((screen.getByTestId('home-directory-search') as HTMLInputElement).value).toBe('')
+  })
+
+  it('P70-HOME-01: source filter offers exactly the directory sources and narrows by them', async () => {
+    const apps = [
+      workApp('src-1', 'Growth App', 0),
+      workApp('src-2', 'Design App', 1, {
+        catalogSources: [{ kind: 'enterprise_import', name: 'Design Circle' }],
+      }),
+      workApp('src-3', 'Studio App', 2, {
+        catalogSources: [{ kind: 'enterprise_import', name: 'Organization A' }],
+      }),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(3)
+    })
+
+    const sourceSelect = screen.getByTestId('home-directory-source') as HTMLSelectElement
+    const options = Array.from(sourceSelect.options).map(option => option.value)
+    // Options derive from the directory's ACTUAL sources — no fixed list.
+    expect(options).toEqual(['all', 'Growth App Source', 'Design Circle', 'Organization A'])
+
+    fireEvent.change(sourceSelect, { target: { value: 'Design Circle' } })
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    })
+    expect(screen.getByText('Design App')).toBeTruthy()
+  })
+
+  it('P70-HOME-01: recent sort ranks REAL opens first, name sort sorts by name, and a first run without history keeps the authoritative order', async () => {
+    const apps = [
+      workApp('sort-a', 'Charlie App', 0),
+      workApp('sort-b', 'alpha App', 1),
+      workApp('sort-c', 'Bravo App', 2),
+    ]
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(apps[2]!))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps), { resolveLaunch })
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(3)
+    })
+
+    // Default (recent) WITHOUT any history: authoritative Catalog order.
+    expect(screen.getAllByTestId('home-directory-app').map(card => card.textContent))
+      .toEqual([
+        expect.stringContaining('Charlie App'),
+        expect.stringContaining('alpha App'),
+        expect.stringContaining('Bravo App'),
+      ])
+
+    // Opening an App records a REAL usage fact: recent sort lifts it, the
+    // rest keep the authoritative order.
+    fireEvent.click(directoryCard(dirKeyFor(apps[2]!)))
+    await waitFor(() => {
+      expect(storePublish).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-directory-app')
+      if (!cards[0]?.textContent?.includes('Bravo App')) {
+        throw new Error('recent re-rank pending')
+      }
+    })
+
+    // Name sort is locale-ordered regardless of usage or Catalog order.
+    fireEvent.change(screen.getByTestId('home-directory-sort'), {
+      target: { value: 'name' },
+    })
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('home-directory-app')
+      if (!cards[0]?.textContent?.includes('alpha App')) throw new Error('name sort pending')
+    })
+    expect(screen.getAllByTestId('home-directory-app').map(card => card.textContent))
+      .toEqual([
+        expect.stringContaining('alpha App'),
+        expect.stringContaining('Bravo App'),
+        expect.stringContaining('Charlie App'),
+      ])
+
+    // The usage record is bound to the ProductSpace context key and
+    // persisted for the NEXT session's sort.
+    // The usage key derives from the MOCK hook's productSpaceContextKey —
+    // the same tuple format createHomeQuickAccessContextKey wraps.
     const contextKey = `v1:${
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
-    quickAccessByContext.set(contextKey, [])
+    const records = loadHomeAppUsage(contextKey)
+    expect(records.get(dirKeyFor(apps[2]!))?.openCount).toBe(1)
+  })
+
+  it('P70-HOME-02: the personal home shows the circles entry and the enterprise home never mixes it in', async () => {
+    // Enterprise (default harness space kind): no circles entry.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
+    const enterpriseView = renderHome()
+    await act(async () => {})
+    expect(screen.queryByTestId('home-circles-link')).toBeNull()
+    enterpriseView.unmount()
+
+    // Personal: the circles entry renders and navigates the client-page
+    // route (asserted with a probe provider in complete-directory tests —
+    // here without the provider it falls back to the local circles card
+    // instead of a silent no-op).
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+    renderHome()
+    await act(async () => {})
+    const circles = screen.getByTestId('home-circles-link')
+    fireEvent.click(circles)
+    await waitFor(() => {
+      expect(screen.getByTestId('home-space-context')).toBeTruthy()
+    })
+  })
+
+  it('P70-HOME-03: keeps Polo visible while the current Catalog is loading or failed, retry stays explicit', async () => {
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([]),
+      {},
+      { catalog: null, loading: true },
+    )
+    const loading = renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-directory-loading')).toBeTruthy()
+    loading.unmount()
+
+    const sync = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([]),
+      { sync },
+      { catalog: null, loading: false, errorCode: 'NETWORK_ERROR' },
+    )
+    renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getByTestId('home-directory-load-failed')).toBeTruthy()
+    expect(screen.getByText('Could not load the Apps of this space')).toBeTruthy()
+
+    // The retry is a click, never an auto-execution.
+    expect(sync).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByTestId('home-directory-load-failed')).getByText('Try again'))
+    expect(sync).toHaveBeenCalledWith(true)
+  })
+
+  it('P70-HOME-03: an honest personal vacuum and an explicit enterprise no-distribution vacuum', async () => {
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+    const personalView = renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-directory-empty-personal')).toBeTruthy()
+    expect(screen.queryByTestId('home-directory-empty-enterprise')).toBeNull()
+    personalView.unmount()
+
+    // Enterprise vacuum: "not distributed yet" — never the personal copy.
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
     renderHome()
     await act(async () => {})
-
-    // Home keeps the fixed Polo assistant entry.
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-
-    // All Apps projects zero work Apps and shows the frozen empty state.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-empty')).toBeTruthy()
-    })
-    expect(screen.getByTestId('all-apps-count').textContent).toContain('0 / 0')
-    expect(screen.queryByTestId('all-apps-row')).toBeNull()
+    expect(screen.getByTestId('home-directory-empty-enterprise')).toBeTruthy()
+    expect(screen.queryByTestId('home-directory-empty-personal')).toBeNull()
   })
 
-  it('dedicated wrapper owns viewport-bounded vertical scrolling while home-app-hub stays content-sized: max-five work Apps and full Catalog rows stay reachable (R39/R41 review)', async () => {
-    // MAXIMUM five work Apps pinned — the frozen launcher grid then holds the
-    // fixed Polo assistant plus five cards that overflow any realistic
-    // viewport, so the dedicated wrapper must own the vertical scroll
-    // (html/body/#root are overflow-hidden and no other ancestor may swallow
-    // it; the home-app-hub region itself stays content-sized).
-    const apps: CatalogApp[] = ['Work App A', 'Work App B', 'Work App C', 'Work App D', 'Work App E'].map((name, index) => ({
-      id: `scroll-app-${index}`,
-      organizationId: 'organization-a',
-      name,
-      description: `${name} description`,
-      deliveryMode: 'remote_url',
-      remoteUrl: `https://scroll-${index}.example.com`,
-      sortOrder: index,
-      availability: 'available',
-      catalogEntryId: `cat-scroll-${index}`,
-      artifactInstanceId: `arti-scroll-${index}`,
-      catalogSources: [{ kind: 'creator_circle', name: `Scroll Circle ${index}` }],
-    }))
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    quickAccessByContext.set(contextKey, apps.map((app, index) => ({
-      id: appCatalogHook.uiIdentityKeyForApp(app),
-      addedAt: 1 + index,
-    })))
+  it('P70-HOME-03: a fully-rejected directory is NOT a vacuum — the rejection feedback shows with an explicit retry', async () => {
+    // All rows refused consumer-side: a PERSONAL space whose only entry
+    // carries an enterprise_import source (space-kind mismatch) is refused
+    // wholesale — the entries stay empty while the rejection is recorded.
+    const refusedApp = workApp('rej-1', 'Refused App', 0, {
+      catalogSources: [{ kind: 'enterprise_import', name: 'Foreign Org' }],
+    })
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([refusedApp]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+    renderHome()
+    await act(async () => {})
+    expect(screen.getByTestId('home-directory-rejected')).toBeTruthy()
+    expect(screen.queryByTestId('home-directory-empty-personal')).toBeNull()
+    expect(screen.queryByTestId('home-directory-empty-enterprise')).toBeNull()
+    expect(screen.queryByText('Refused App')).toBeNull()
+  })
 
+  it('P70-HOME-03: offline keeps the cached rows visible but NOTHING launchable, with the offline banner', async () => {
+    const app = workApp('offline-1', 'Offline App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch },
+      { accessMode: 'offline' },
+    )
     renderHome()
     await waitFor(() => {
-      expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(5)
+      expect(screen.getByTestId('home-directory-offline-banner')).toBeTruthy()
+    })
+    // The cached row stays visible (facts preserved)...
+    expect(screen.getByText('Offline App')).toBeTruthy()
+    // ...but opening it fails closed BEFORE any launch authority is asked.
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('P70-HOME-03: a failed REFRESH keeps the cached directory visible under an explicit stale banner, with opens fail-closed and explicit retry', async () => {
+    // Regression guard (review P1-1): a NON-denied refresh failure keeps
+    // state.catalog and sets errorCode — phase 'error' OVER a retained
+    // cache. The directory must never silently blank: the cached rows stay
+    // visible (never launchable), the stale banner explains the state, and
+    // the retry is an explicit click.
+    const app = workApp('stale-1', 'Stale App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    const sync = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch, sync },
+      { errorCode: 'NETWORK_ERROR' },
+    )
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-stale-banner')).toBeTruthy()
+    })
+    // The cached directory is STILL rendered...
+    expect(screen.getByText('Stale App')).toBeTruthy()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    // ...but opening a cached row fails closed BEFORE any launch authority.
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+    // The retry is a click, never an auto-execution.
+    expect(sync).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('home-directory-stale-retry'))
+    expect(sync).toHaveBeenCalledWith(true)
+  })
+
+  it('R39/R41: the dedicated wrapper owns viewport-bounded scrolling and rows below the fold stay reachable in the full directory', async () => {
+    // More than a viewport of directory rows: every row renders inside the
+    // home-app-hub, the dedicated PARENT wrapper is the viewport-bounded
+    // scroll owner (h-full min-h-0 overflow-y-auto), and the hub region
+    // itself stays content-sized.
+    const apps = [
+      workApp('scroll-1', 'Scroll App A', 0),
+      workApp('scroll-2', 'Scroll App B', 1),
+      workApp('scroll-3', 'Scroll App C', 2),
+      workApp('scroll-4', 'Scroll App D', 3),
+      workApp('scroll-5', 'Scroll App E', 4),
+      workApp('scroll-6', 'Scroll App F', 5),
+      workApp('scroll-7', 'Scroll App G', 6),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(7)
     })
 
-    // The hub's dedicated PARENT wrapper is the viewport-bounded scroll
-    // owner (h-full min-h-0 overflow-y-auto); the home-app-hub region itself
-    // stays content-sized (the frozen `.main` geometry). Fail hard when the
-    // wrapper is missing — a null wrapper would mean no scroll owner at all.
     const hub = screen.getByTestId('home-app-hub')
     const scrollOwner = hub.parentElement
     if (!scrollOwner) {
@@ -409,41 +727,215 @@ describe('HomePage quick access (POO-43)', () => {
     expect(scrollOwner.className).toContain('overflow-y-auto')
     expect(hub.className).not.toContain('h-full')
 
-    // Every allowed entry renders inside the hub — including the LAST row.
-    expect(screen.getByText('Work App E')).toBeTruthy()
-    expect(within(hub).getAllByText(/Scroll Circle 4/).length).toBeGreaterThan(0)
-
-    // Full Catalog: every row renders in the same scroll owner.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    const rows = screen.getAllByTestId('all-apps-row')
-    expect(rows).toHaveLength(5)
-    expect(rows[rows.length - 1]!.textContent).toContain('Work App E')
+    // Every row — including the LAST, below any realistic fold — renders
+    // inside the hub.
+    expect(screen.getByText('Scroll App G')).toBeTruthy()
+    expect(within(hub).getAllByText(/Scroll App G Source/).length).toBeGreaterThan(0)
   })
 
-  it('A→B ProductSpace transition: the first committed target Home layout exposes no prior-scope Apps, sources, or Skill metadata (R39 review)', async () => {
-    const appA: CatalogApp = {
-      id: 'ctx-a-app',
-      organizationId: 'organization-a',
-      name: 'Scope A App',
-      description: 'Scope A description',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-      catalogSources: [{ kind: 'creator_circle', name: 'Scope A Circle' }],
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const keyA = `v1:${
+  it('P70-HOME-01 保留本机隐藏恢复: hide moves a work to the hidden section, restore brings it back, and the preference is device-local per context', async () => {
+    const appA = workApp('hide-a', 'Hideable App A', 0)
+    const appB = workApp('hide-b', 'Hideable App B', 1)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-directory-hidden-section')).toBeNull()
+
+    // Hide App A: it leaves the grid and appears in the hidden section with
+    // an explicit restore action.
+    fireEvent.click(screen.getByTestId(`home-directory-hide-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-hidden-section')).toBeTruthy()
+    })
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(1)
+    expect(screen.getByText('Hideable App B')).toBeTruthy()
+    // The hidden section lists A by name (with its restore action); A has no
+    // grid card anymore (the grid holds exactly B, asserted above).
+    const item = screen.getByTestId(`home-directory-hidden-item-${dirKeyFor(appA)}`)
+    expect(within(item).getByText('Hideable App A')).toBeTruthy()
+
+    // Restore: back into the grid, section gone.
+    fireEvent.click(screen.getByTestId(`home-directory-hidden-restore-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-directory-hidden-section')).toBeNull()
+
+    // The preference is device-local, bounded to the SAME account+space
+    // context — after a REAL remount it still holds (persisted), and the
+    // restored state is clean again.
+    fireEvent.click(screen.getByTestId(`home-directory-hide-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-hidden-section')).toBeTruthy()
+    })
+    const contextKey = `v1:${
       createProductSpaceContextKey('account-a', 'organization-a')
     }`
-    quickAccessByContext.set(keyA, [{ id: appCatalogHook.uiIdentityKeyForApp(appA), addedAt: 1 }])
+    expect(loadHomeHiddenApps(contextKey).size).toBe(1)
+    viewRerender()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('P70-HOME-03: a denied snapshot hides its refused rows behind the restricted banner with no open/install capability', async () => {
+    const app = workApp('denied-1', 'Denied App', 0)
+    const deniedSnapshot = markAppCatalogAccessDenied(enterpriseCatalogWith([app]))
+    expect(deniedSnapshot.apps[0]).toMatchObject({
+      catalogEntryId: 'denied-1',
+      availability: 'unavailable',
+    })
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    appCatalogHook = {
+      ...hookWithCatalog(deniedSnapshot as unknown as AppCatalogCacheEntry),
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog: deniedSnapshot as unknown as AppCatalogCacheEntry,
+        accessMode: 'denied' as const,
+        errorCode: 'FORBIDDEN',
+      },
+      resolveLaunch,
+    }
+    renderHome()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('home-restricted-banner')).toBeTruthy()
+    })
+    // H1 projection semantics: the denied tombstone STRIPS catalogSources,
+    // so the consumer-side projection refuses those rows fail-closed — the
+    // restricted banner explains the state and NO cached row renders as a
+    // pseudo-launchable card.
+    expect(screen.queryByText('Denied App')).toBeNull()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+    expect(screen.queryByTestId(/^home-directory-uninstall-/)).toBeNull()
+  })
+
+  it('opens directory Apps through the authorized catalog flow and publishes the resolved launch', async () => {
+    const app = workApp('open-1', 'Open App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]), { resolveLaunch })
+
+    renderHome()
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+
+    await waitFor(() => {
+      expect(resolveLaunch).toHaveBeenCalledWith(app)
+      expect(storePublish).toHaveBeenCalledWith(
+        { accountId: 'account-a', productSpaceId: 'organization-a' },
+        7,
+        'account-a',
+        resolvedLaunch(app),
+      )
+    })
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('prepares a resolved bundle through the install dialog and publishes the re-resolved launch', async () => {
+    const app = workApp('bundle-1', 'Bundle App', 0, { deliveryMode: 'resolve_launch' })
+    delete (app as Partial<CatalogApp>).remoteUrl
+    const launch = resolvedBundleLaunch(app)
+    const resolveLaunch = jest.fn(async () => launch)
+    const installProductSpaceBundle = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch, installProductSpaceBundle },
+    )
+
+    renderHome()
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => expect(screen.getByText('Install Bundle App')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => {
+      expect(installProductSpaceBundle).toHaveBeenCalledWith(app)
+      expect(resolveLaunch).toHaveBeenCalledTimes(2)
+      expect(storePublish).toHaveBeenCalledWith(
+        { accountId: 'account-a', productSpaceId: 'organization-a' },
+        7,
+        'account-a',
+        launch,
+      )
+    })
+    expect(openApp).not.toHaveBeenCalled()
+  })
+
+  it('keeps a withdrawn tombstone visible and non-launchable, with the uninstall entry while installed locally', async () => {
+    const live = workApp('tomb-live', 'Live App', 1)
+    const installedTombstone = workApp('tomb-gone', 'Removed App', 0, {
+      availability: 'withdrawn',
+    })
+    const uninstallProductSpaceBundle = jest.fn(async () => {})
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(live))
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([live, installedTombstone]),
+      {
+        resolveLaunch,
+        uninstallProductSpaceBundle,
+        getInstallState: (target: CatalogApp) => target.id === 'tomb-gone'
+          ? {
+              app: {
+                accountId: 'account-a',
+                productSpaceId: 'organization-a',
+                catalogRevision: 'rev-1',
+                catalogEntryId: installedTombstone.catalogEntryId!,
+                artifactInstanceId: installedTombstone.artifactInstanceId!,
+                versionId: installedTombstone.catalogVersion?.versionId ?? 'version-1',
+                version: installedTombstone.catalogVersion?.version ?? '1.0.0',
+              },
+              state: 'installed' as const,
+              currentVersion: '1.0.0',
+            }
+          : undefined,
+      },
+    )
+
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getByText('Removed App')).toBeTruthy()
+    })
+    expect(screen.getByText('Live App')).toBeTruthy()
+
+    // The tombstone is NOT launchable: the open gate refuses per-row facts.
+    fireEvent.click(directoryCard(dirKeyFor(installedTombstone)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+
+    // The retained local installation keeps its uninstall entry, through the
+    // SAME uninstall dialog as before.
+    fireEvent.click(directoryUninstallButton(dirKeyFor(installedTombstone)))
+    await waitFor(() => {
+      expect(screen.getByText('Uninstall Removed App?')).toBeTruthy()
+    })
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Uninstall' }))
+    await waitFor(() => {
+      expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(installedTombstone, true)
+    })
+  })
+
+  it('hides the toolbar, circles entry and workspace entries when no ProductSpace context exists', async () => {
+    renderHome()
+    await act(async () => {})
+
+    expect(screen.queryByTestId('home-directory-toolbar')).toBeNull()
+    expect(screen.queryByTestId('home-circles-link')).toBeNull()
+    expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
+    expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
+  })
+})
+
+describe('HomePage A→B ProductSpace isolation (R39)', () => {
+  it('A→B ProductSpace transition: the first committed target Home layout exposes no prior-scope Apps, sources, or Skill metadata', async () => {
+    const appA = workApp('ctx-a-app', 'Scope A App', 0)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
     const view = renderHome()
     await waitFor(() => expect(screen.getByText('Scope A App')).toBeTruthy())
-    // Context A commits the certified-creator presentation for its own source.
-    expect(screen.getByTestId('home-app-hub').textContent).toContain('Scope A Circle')
+    expect(screen.getByTestId('home-app-hub').textContent).toContain('Scope A App Source')
 
     // A→B: the committed ProductSpace context transitions to a different
     // account + ProductSpace (a different owner epoch).
@@ -456,7 +948,7 @@ describe('HomePage quick access (POO-43)', () => {
       remoteUrl: 'https://b.example.com',
       sortOrder: 0,
       availability: 'available',
-      catalogSources: [{ kind: 'creator_circle', name: 'Scope B Circle' }],
+      catalogSources: [{ kind: 'enterprise_import', name: 'Scope B Source' }],
     }
     const catalogB = {
       ...enterpriseCatalogWith([appB]),
@@ -464,26 +956,20 @@ describe('HomePage quick access (POO-43)', () => {
       organizationId: 'organization-b',
     }
     const hookB = hookWithCatalog(catalogB)
-    const keyB = `v1:${
-      createProductSpaceContextKey('account-b', 'organization-b')
-    }`
-    quickAccessByContext.set(keyB, [{ id: hookB.uiIdentityKeyForApp(appB), addedAt: 1 }])
     act(() => {
-      // Stable root: mutate ONLY the hook value; the rendered root shape
-      // (ProductSpaceProvider > I18nextProvider > HomePage) is untouched, so
-      // React updates the SAME mounted tree instead of remounting.
+      // Stable root: mutate ONLY the hook value; the rendered root shape is
+      // untouched, so React updates the SAME mounted tree instead of
+      // remounting.
       appCatalogHook = hookB
       viewRerender()
     })
 
     // FIRST committed target Home layout: no prior-scope App identity,
-    // sources, or Skill metadata may appear — the assistant card renders the
-    // frozen neutral source label (the dynamic Skill count is deliberately
-    // omitted: no scope-keyed Skill source exists at Home).
+    // sources, or Skill metadata may appear.
     const hub = screen.getByTestId('home-app-hub')
     const firstCommitText = hub.textContent ?? ''
     expect(firstCommitText).not.toContain('Scope A App')
-    expect(firstCommitText).not.toContain('Scope A Circle')
+    expect(firstCommitText).not.toContain('Scope A Source')
     expect(firstCommitText).not.toContain('Skill 已启用')
     expect(firstCommitText).not.toContain('skills enabled')
     expect(firstCommitText).toContain('Built into Polo')
@@ -492,243 +978,53 @@ describe('HomePage quick access (POO-43)', () => {
     // identity only.
     await waitFor(() => expect(screen.getByText('Scope B App')).toBeTruthy())
     const hydratedText = screen.getByTestId('home-app-hub').textContent ?? ''
-    expect(hydratedText).toContain('Scope B Circle')
+    expect(hydratedText).toContain('Scope B Source')
     expect(hydratedText).not.toContain('Scope A App')
-    expect(hydratedText).not.toContain('Scope A Circle')
+    expect(hydratedText).not.toContain('Scope A Source')
     view.unmount()
   })
 
-  it('hides space management entries when no ProductSpace context exists', async () => {
-    renderHome()
-    await act(async () => {})
-
-    expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
-    expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
-    expect(screen.queryByTestId('add-external-app')).toBeNull()
-  })
-
-  it('renders persisted quick-access entries from the active space Catalog', async () => {
-    const appA: CatalogApp = {
-      id: 'quick-app-a',
-      organizationId: 'organization-a',
-      name: 'Quick App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    quickAccessByContext.set(contextKey, [{
-      id: appCatalogHook.uiIdentityKeyForApp(appA),
-      addedAt: 1,
-    }])
-
-    renderHome()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry')).toBeTruthy()
-    })
-    expect(screen.getByText('Quick App A')).toBeTruthy()
-  })
-
-  it('prunes stale quick-access ids and persists the pruned list', async () => {
-    const appA: CatalogApp = {
-      id: 'prune-app-a',
-      organizationId: 'organization-a',
-      name: 'Prune App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    quickAccessByContext.set(contextKey, [
-      { id: appCatalogHook.uiIdentityKeyForApp(appA), addedAt: 1 },
-      // Another space's scope key and a legacy local id must both vanish.
-      { id: '["catalog","account-b","organization-z","ghost"]', addedAt: 2 },
-      { id: 'legacy-local-app', addedAt: 3 },
-    ])
-
-    renderHome()
-
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledTimes(1)
-    })
-    const [savedContext, savedApps] = setHomeQuickAccess.mock.calls[0]!
-    expect(savedContext).toBe(contextKey)
-    expect(savedApps).toEqual([{
-      id: appCatalogHook.uiIdentityKeyForApp(appA),
-      addedAt: 1,
-    }])
-    expect(screen.getByText('Prune App A')).toBeTruthy()
-    expect(screen.queryByText('ghost')).toBeNull()
-  })
-
-  it('never writes a pending space-A quick-access save into space B after a switch', async () => {
-    const appA: CatalogApp = {
-      id: 'race-app-a',
-      organizationId: 'organization-a',
-      name: 'Race App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
+  it('usage records never cross the ProductSpace context: A usage is invisible to B and back', async () => {
+    const appA = workApp('usage-a', 'Usage A App', 0)
     const appB: CatalogApp = {
-      id: 'race-app-b',
+      ...workApp('usage-b', 'Usage B App', 0),
       organizationId: 'organization-b',
-      name: 'Race App B',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://b.example.com',
-      sortOrder: 0,
-      availability: 'available',
     }
-    const contextKeyA = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const contextKeyB = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-b')
-    }`
-    quickAccessByContext.set(contextKeyA, [{
-      id: 'ui:race-app-a',
-      addedAt: 1,
-    }])
-    quickAccessByContext.set(contextKeyB, [{
-      id: 'ui:race-app-b',
-      addedAt: 1,
-    }])
-    appCatalogHook = {
-      ...hookWithCatalog(enterpriseCatalogWith([appA])),
-      scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
-      uiIdentityKeyForApp: (target: CatalogApp) => `ui:${target.id}`,
-    }
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(appA))
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]), { resolveLaunch })
     const view = renderHome()
-    await waitFor(() => {
-      expect(screen.getByText('Race App A')).toBeTruthy()
-    })
+    await waitFor(() => expect(screen.getByText('Usage A App')).toBeTruthy())
 
-    // Gate the space-A write-back so it is still in flight across the
-    // context switch — the exact race window from the review finding.
-    let releaseSpaceASave!: (saved: unknown) => void
-    const gatedSpaceASave = new Promise(resolve => {
-      releaseSpaceASave = resolve
-    })
-    setHomeQuickAccess.mockImplementation(async (contextKey: string, apps: any[]) => {
-      if (contextKey === contextKeyA) {
-        quickAccessByContext.set(contextKeyA, apps)
-        return (await gatedSpaceASave) as any[]
-      }
-      quickAccessByContext.set(contextKey, apps)
-      return apps
-    })
+    // Open A's app: the record lands in A's context store only.
+    fireEvent.click(directoryCard(dirKeyFor(appA)))
+    await waitFor(() => expect(storePublish).toHaveBeenCalled())
 
-    // Remove the A shortcut: a save to context A is now pending.
-    fireEvent.click(screen.getByTestId('home-manage-quick-access'))
-    await waitFor(() => {
-      expect(screen.getByTestId('manage-home-apps-dialog')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId('manage-home-apps-item'))
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKeyA, [])
-    })
+    const keyA = `v1:${createProductSpaceContextKey('account-a', 'organization-a')}`
+    expect(loadHomeAppUsage(keyA).size).toBe(1)
 
-    // Switch the committed ProductSpace to B while the A save is pending.
-    appCatalogHook = {
-      ...hookWithCatalog(enterpriseCatalogWith([appB], {
-        organizationId: 'organization-b',
-      })),
-      scopeKeyForApp: (target: CatalogApp) => `key:${target.id}`,
-      uiIdentityKeyForApp: (target: CatalogApp) => `ui:${target.id}`,
+    // Switch to B (different organization): no A record may leak into B.
+    const catalogB = {
+      ...enterpriseCatalogWith([appB]),
+      organizationId: 'organization-b',
     }
-    view.rerender(homeTree())
-    await waitFor(() => {
-      expect(screen.getByText('Race App B')).toBeTruthy()
-    })
+    appCatalogHook = hookWithCatalog(catalogB)
+    act(() => { viewRerender() })
+    await waitFor(() => expect(screen.getByText('Usage B App')).toBeTruthy())
 
-    // The stale A save resolves now: it must NOT enter space B's view and
-    // must NOT trigger the B-side prune to persist an emptied B config.
-    releaseSpaceASave([])
-    await Promise.resolve()
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(screen.getByText('Race App B')).toBeTruthy()
-    const savedContexts = setHomeQuickAccess.mock.calls.map(call => call[0])
-    expect(savedContexts).not.toContain(contextKeyB)
-    expect(quickAccessByContext.get(contextKeyB)).toEqual([{
-      id: 'ui:race-app-b',
-      addedAt: 1,
-    }])
+    const keyB = `v1:${createProductSpaceContextKey('account-a', 'organization-b')}`
+    expect(loadHomeAppUsage(keyB).size).toBe(0)
+
+    // Back to A: A's record is still A's only.
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
+    act(() => { viewRerender() })
+    await waitFor(() => expect(screen.getByText('Usage A App')).toBeTruthy())
+    expect(loadHomeAppUsage(keyB).size).toBe(0)
+    expect(loadHomeAppUsage(keyA).size).toBe(1)
     view.unmount()
   })
+})
 
-  it('opens quick-access Apps through the authorized catalog flow', async () => {
-    const appA: CatalogApp = {
-      id: 'open-app-a',
-      organizationId: 'organization-a',
-      name: 'Open App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]), {
-      resolveLaunch: jest.fn(async () => resolvedLaunch(appA)),
-    })
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    quickAccessByContext.set(contextKey, [{
-      id: appCatalogHook.uiIdentityKeyForApp(appA),
-      addedAt: 1,
-    }])
-
-    renderHome()
-    fireEvent.click(await screen.findByText('Open App A'))
-
-    await waitFor(() => {
-      expect(storePublish).toHaveBeenCalledWith(
-        { accountId: 'account-a', productSpaceId: 'organization-a' },
-        7,
-        'account-a',
-        resolvedLaunch(appA),
-      )
-    })
-    expect(openApp).not.toHaveBeenCalled()
-  })
-
-  it('keeps Polo visible while the current Catalog is loading or failed', async () => {
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([]),
-      {},
-      { catalog: null, loading: true },
-    )
-    const loading = renderHome()
-    await act(async () => {})
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.getByTestId('home-quick-access-loading')).toBeTruthy()
-    loading.unmount()
-
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([]),
-      {},
-      { catalog: null, loading: false, errorCode: 'NETWORK_ERROR' },
-    )
-    renderHome()
-    await act(async () => {})
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.getByText('Could not load the App catalog')).toBeTruthy()
-  })
-
+describe('HomePage enterprise workflows (committed-lease fail-closed)', () => {
   it('opens enterprise workflows with the committed enterprise context', async () => {
     const catalog = enterpriseCatalogWith([])
     appCatalogHook = hookWithCatalog(catalog)
@@ -759,48 +1055,6 @@ describe('HomePage quick access (POO-43)', () => {
         'https://admin.example.com/organization-apps?organizationId=enterprise-a',
       )
     })
-  })
-
-  it('fail-closed drops a quick entry whose artifact instance was replaced (never re-binds)', async () => {
-    // entry-1 was previously pinned with artifact-old; the fresh Catalog
-    // re-issues entry-1 for artifact-new. The persisted quick id binds the
-    // OLD artifact instance, so it must be pruned — never silently re-bound
-    // to the new instance.
-    const replacedApp: CatalogApp = {
-      id: 'entry-1',
-      catalogEntryId: 'entry-1',
-      artifactInstanceId: 'artifact-new',
-      catalogVersion: { versionId: 'version-new', version: '2.0.0' },
-      organizationId: 'organization-a',
-      name: 'Replaced App',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://new.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([replacedApp]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    quickAccessByContext.set(contextKey, [{
-      id: JSON.stringify([
-        'product-space-ui',
-        'account-a',
-        'organization-a',
-        'entry-1',
-        'artifact-old',
-      ]),
-      addedAt: 1,
-    }])
-
-    renderHome()
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [])
-    })
-    // The replaced app is NOT silently re-pinned by the stale binding.
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-    expect(quickAccessByContext.get(contextKey)).toEqual([])
   })
 
   it('fails closed when the committed enterprise switches while adminGetStatus is pending (members + publishing)', async () => {
@@ -1120,1561 +1374,6 @@ describe('HomePage quick access (POO-43)', () => {
       )
     })
   })
-
-  it('preserves persisted quick access until an authoritative Catalog commits, then prunes once (observation dd293484…)', async () => {
-    const appA: CatalogApp = {
-      id: 'delayed-app-a',
-      organizationId: 'organization-a',
-      name: 'Delayed App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const persistedId = JSON.stringify([
-      'product-space-ui',
-      'account-a',
-      'organization-a',
-      'delayed-app-a',
-      null,
-    ])
-    quickAccessByContext.set(contextKey, [{ id: persistedId, addedAt: 1 }])
-
-    // Cold load: no Catalog snapshot yet (loading) — the stored entry must
-    // be preserved untouched (no prune, no persistence).
-    const loadingHook = hookWithCatalog(enterpriseCatalogWith([]))
-    appCatalogHook = {
-      ...loadingHook,
-      state: {
-        ...loadingHook.state,
-        catalog: null,
-        loading: true,
-      },
-    }
-    renderHome()
-    // Event-driven lifecycle barrier: the writer's hydration gate and
-    // persistence queue settled (no elapsed-time wait).
-    await act(async () => {
-      expect(await __homeQuickWriterSettledForTests(contextKey)).toBe(true)
-    })
-    // The loading placeholder hides the quick grid — the persisted entry is
-    // NOT rendered and NOT pruned.
-    expect(screen.queryByText('Delayed App A')).toBeNull()
-    expect(setHomeQuickAccess).not.toHaveBeenCalled()
-    expect(quickAccessByContext.get(contextKey)).toEqual([
-      { id: persistedId, addedAt: 1 },
-    ])
-
-    // NETWORK_ERROR failure (catalog=null): still preserved.
-    appCatalogHook = {
-      ...loadingHook,
-      state: {
-        ...loadingHook.state,
-        catalog: null,
-        loading: false,
-        errorCode: 'NETWORK_ERROR',
-      },
-    }
-    act(() => { viewRerender() })
-    await act(async () => {
-      expect(await __homeQuickWriterSettledForTests(contextKey)).toBe(true)
-    })
-    expect(setHomeQuickAccess).not.toHaveBeenCalled()
-    expect(quickAccessByContext.get(contextKey)).toEqual([
-      { id: persistedId, addedAt: 1 },
-    ])
-
-    // AUTHORITATIVE Catalog commits: the entry resolves and stays.
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    act(() => { viewRerender() })
-    await act(async () => {
-      expect(await __homeQuickWriterSettledForTests(contextKey)).toBe(true)
-    })
-    expect(setHomeQuickAccess).not.toHaveBeenCalled()
-    expect(quickAccessByContext.get(contextKey)).toEqual([
-      { id: persistedId, addedAt: 1 },
-    ])
-
-    // The authoritative Catalog then stops listing the App: exactly ONE
-    // prune+persist against the committed snapshot.
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
-    act(() => { viewRerender() })
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledTimes(1)
-    })
-    expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [])
-    expect(quickAccessByContext.get(contextKey)).toEqual([])
-    // Flush the durable-ack state update inside act (no unwrapped warnings).
-    await act(async () => {})
-  })
-
-  it('renders denied rows with retained identity and no install/open capability (observation 391939f5…)', async () => {
-    // Enterprise A loads successfully (authorized snapshot with identity)…
-    const appA: CatalogApp = {
-      id: 'denied-app-a',
-      catalogEntryId: 'denied-entry-a',
-      artifactInstanceId: 'denied-artifact-a',
-      organizationId: 'organization-a',
-      name: 'Denied App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    expect(screen.getByText('Denied App A')).toBeTruthy()
-
-    // …then a 403 denies the scope: the committed projection strips every
-    // delivery capability but RETAINS the stable UI identity, so the frozen
-    // restricted rows keep rendering (no crash) while exposing no
-    // open/install capability.
-    const deniedSnapshot = markAppCatalogAccessDenied(enterpriseCatalogWith([appA]))
-    expect(deniedSnapshot.apps[0]).toMatchObject({
-      catalogEntryId: 'denied-entry-a',
-      artifactInstanceId: 'denied-artifact-a',
-      availability: 'unavailable',
-    })
-    // Delivery capabilities stay stripped.
-    expect(deniedSnapshot.apps[0]).not.toHaveProperty('remoteUrl')
-    expect(deniedSnapshot.apps[0]).not.toHaveProperty('currentRelease')
-
-    appCatalogHook = {
-      ...hookWithCatalog(deniedSnapshot as unknown as AppCatalogCacheEntry),
-      state: {
-        ...signedOutCatalogHook().state,
-        catalog: deniedSnapshot as unknown as AppCatalogCacheEntry,
-        accessMode: 'denied' as const,
-        errorCode: 'FORBIDDEN',
-      },
-    }
-    viewRerender()
-
-    // The row keeps rendering with its frozen restricted state...
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-restricted-banner')).toBeTruthy()
-    })
-    expect(screen.getByText('Denied App A')).toBeTruthy()
-    // ...and the row can be neither opened nor installed.
-    const deniedAction = screen.getByTestId(
-      `all-apps-action-${JSON.stringify(['product-space-ui', 'account-a', 'organization-a', 'denied-entry-a', 'denied-artifact-a'])}`,
-    ) as HTMLButtonElement
-    expect(deniedAction.disabled).toBe(true)
-    fireEvent.click(deniedAction)
-    expect(openApp).not.toHaveBeenCalled()
-    expect(storePublish).not.toHaveBeenCalled()
-    expect(screen.queryByTestId('all-apps-inspector-uninstall')).toBeNull()
-  })
-
-  const pinnedApp = (id: string, entryId: string, artifactId: string, name: string): CatalogApp => ({
-    id,
-    catalogEntryId: entryId,
-    artifactInstanceId: artifactId,
-    organizationId: 'organization-a',
-    name,
-    description: '',
-    deliveryMode: 'remote_url',
-    remoteUrl: `https://${id}.example.com`,
-    sortOrder: 0,
-    availability: 'available',
-  })
-
-  /** Number of load-scope calls recorded so far (pseudo-wait guard). */
-  const loadCallCount = () => getHomeQuickAccess.mock.calls.length
-  /** Waits for the NEXT load-scope call after `before`, asserting its key. */
-  async function waitForNextScopeLoad(before: number, contextKey: string) {
-    await waitFor(() => {
-      if (getHomeQuickAccess.mock.calls.length <= before) {
-        throw new Error('scope load pending')
-      }
-    })
-    expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKey)
-  }
-  function apiSaveCallKeys(index: number): string[] {
-    const call = setHomeQuickAccess.mock.calls[index] as
-      | [string, Array<{ id: string }>]
-      | undefined
-    return (call?.[1] ?? []).map(entry => entry.id)
-  }
-  /** Waits until the persisted save queue has settled to `count` calls. */
-  async function waitForSaveCalls(count: number) {
-    await waitFor(() => {
-      if (setHomeQuickAccess.mock.calls.length < count) {
-        throw new Error('save pending')
-      }
-    })
-  }
-
-  /**
-   * Deferred save model: each queued save call is a pending write. Resolving
-   * a task COMMITS it to the persisted Map (durability); rejecting it fails
-   * the write. Returns the pending tasks in call order.
-   */
-  function installDeferredSave() {
-    const tasks: Array<{
-      key: string
-      apps: unknown[]
-      resolve: () => void
-      reject: (error: unknown) => void
-    }> = []
-    setHomeQuickAccess.mockImplementation(async (key: string, apps: unknown[]) => {
-      return await new Promise<unknown[]>((resolve, reject) => {
-        tasks.push({
-          key,
-          apps,
-          resolve: () => {
-            void defaultSetHomeQuickAccess(key, apps)
-            resolve(apps)
-          },
-          reject,
-        })
-      })
-    })
-    return tasks
-  }
-
-  async function openAllAppsAndPin(app: CatalogApp, contextKey: string) {
-    const renderResult = renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(
-      `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(app)}`,
-    ))
-    await waitForSaveCalls(1)
-    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
-    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
-      { id: appCatalogHook.uiIdentityKeyForApp(app), addedAt: expect.any(Number) },
-    ])
-    return renderResult
-  }
-
-  it('pins a catalog App from All Apps: exact persisted payload, home test-id after back, remount persistence', async () => {
-    const appA = pinnedApp('pin-app-a', 'pin-entry-a', 'pin-artifact-a', 'Pin App A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-
-    const view = await openAllAppsAndPin(appA, contextKey)
-
-    // 'Pin App A' already exists as an All Apps row name: verifying the pin
-    // through getByText would match that row. Return to the home and verify
-    // through the HOME-ONLY quick-entry test-id and its persisted identity.
-    fireEvent.click(screen.getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(screen.queryByTestId('all-apps-view')).toBeNull()
-    })
-    const card = screen.getByTestId('home-quick-entry')
-    expect(card.getAttribute('data-identity-key')).toBe(
-      appCatalogHook.uiIdentityKeyForApp(appA),
-    )
-
-    // REAL remount: the persisted Map now holds the entry; a fresh mount
-    // must load it back into the home quick access.
-    view.unmount()
-    // The idle final-owner unmount swept the writer: the remount re-derives
-    // the baseline with a REAL load (event-driven, not a fixed sleep).
-    const loadsBefore = loadCallCount()
-    renderHome()
-    await waitForNextScopeLoad(loadsBefore, contextKey)
-    await waitFor(() => {
-      expect(screen.queryByTestId('all-apps-view')).toBeNull()
-    })
-    expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(
-      appCatalogHook.uiIdentityKeyForApp(appA),
-    )
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-  })
-
-  it('a rejected pin save rolls back: card never shows and the Map stays empty', async () => {
-    const appA = pinnedApp('reject-app-a', 'reject-entry-a', 'reject-artifact-a', 'Reject App A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    setHomeQuickAccess.mockImplementation(async () => {
-      throw new Error('persistence rejected')
-    })
-
-    await openAllAppsAndPin(appA, contextKey)
-
-    fireEvent.click(screen.getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(screen.queryByTestId('all-apps-view')).toBeNull()
-    })
-    // No persisted acknowledgement: the home keeps its empty confirmed
-    // snapshot — the pinned card never appears and nothing was stored.
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(quickAccessByContext.get(contextKey)).toBeUndefined()
-  })
-
-  it('an explicitly empty quick-access collection stays empty across real remount and A→B→A', async () => {
-    const appA = pinnedApp('empty-app-a', 'empty-entry-a', 'empty-artifact-a', 'Empty Fallback A')
-    const appB = pinnedApp('empty-app-b', 'empty-entry-b', 'empty-artifact-b', 'Empty Fallback B')
-    // Two available apps, NOTHING persisted: no default curation may fill
-    // the home.
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
-    const contextKeyA = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const view = renderHome()
-    await waitForNextScopeLoad(0, contextKeyA)
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-
-    // REAL remount: the idle final-owner unmount swept the writer, so the
-    // remount re-derives the (still empty) baseline with a REAL load —
-    // event-driven, nothing is invented.
-    view.unmount()
-    const loadsBeforeRemount = loadCallCount()
-    renderHome()
-    await waitForNextScopeLoad(loadsBeforeRemount, contextKeyA)
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-
-    // A→B→A: switch to another context and back — nothing is invented.
-    const catalogB = enterpriseCatalogWith(
-      [pinnedApp('b-app', 'b-entry', 'b-artifact', 'Space B App')],
-      { organizationId: 'organization-b' },
-    )
-    const contextKeyB = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-b')
-    }`
-    appCatalogHook = hookWithCatalog(catalogB)
-    viewRerender()
-    await waitForNextScopeLoad(1, contextKeyB)
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
-    viewRerender()
-    // Returning to A reuses A's shared writer (no reload) — still empty.
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-    })
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-  })
-
-  it('pins same-artifact different-entry and same-entry different-artifact identities as distinct slots', async () => {
-    const sharedArtifactA = pinnedApp('sa-app-a', 'sa-entry-a', 'sa-artifact-shared', 'Shared Artifact A')
-    const sharedArtifactB = pinnedApp('sa-app-b', 'sa-entry-b', 'sa-artifact-shared', 'Shared Artifact B')
-    const sameEntryOld = pinnedApp('se-app', 'se-entry', 'se-artifact-old', 'Same Entry Old')
-    const sameEntryNew = pinnedApp('se-app-2', 'se-entry', 'se-artifact-new', 'Same Entry New')
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([sharedArtifactA, sharedArtifactB, sameEntryOld, sameEntryNew]),
-    )
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const view = renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-
-    for (const target of [sharedArtifactA, sharedArtifactB, sameEntryOld, sameEntryNew]) {
-      fireEvent.click(screen.getByTestId(
-        `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(target)}`,
-      ))
-    }
-    // The single-writer queue serializes the four pins: payloads accumulate
-    // in click order and the LAST write carries all four identities.
-    await waitForSaveCalls(4)
-    expect(setHomeQuickAccess.mock.calls[3]?.[0]).toBe(contextKey)
-    expect(setHomeQuickAccess.mock.calls[3]?.[1]).toEqual([
-      { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactA), addedAt: expect.any(Number) },
-      { id: appCatalogHook.uiIdentityKeyForApp(sharedArtifactB), addedAt: expect.any(Number) },
-      { id: appCatalogHook.uiIdentityKeyForApp(sameEntryOld), addedAt: expect.any(Number) },
-      { id: appCatalogHook.uiIdentityKeyForApp(sameEntryNew), addedAt: expect.any(Number) },
-    ])
-
-    // All four identities resolve into DISTINCT home cards.
-    fireEvent.click(screen.getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(4)
-    })
-    const identities = screen.getAllByTestId('home-quick-entry')
-      .map(card => card.getAttribute('data-identity-key'))
-    expect(new Set(identities).size).toBe(4)
-    view.unmount()
-  })
-
-  it('S1 success then S2 failure keeps S1 on disk and rolls the UI back to the S1 ack', async () => {
-    const appA = pinnedApp('s1-app', 's1-entry', 's1-artifact', 'Serial App A')
-    const appB = pinnedApp('s2-app', 's2-entry', 's2-artifact', 'Serial App B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
-    const tasks = installDeferredSave()
-
-    renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyB}`))
-    // Single writer: S2 is QUEUED, not started while S1 is in flight.
-    expect(tasks).toHaveLength(1)
-
-    // S1 commits; only then does S2 start (on S1's acked base) and FAIL.
-    tasks[0]!.resolve()
-    await waitForSaveCalls(2)
-    tasks[1]!.reject(new Error('S2 persistence rejected'))
-    // Back on the home: exactly the S1 card survives the S2 rollback.
-    fireEvent.click(screen.getByTestId('all-apps-back'))
-    await waitFor(() => {
-      const cards = screen.getAllByTestId('home-quick-entry')
-      if (cards.length !== 1) throw new Error('rollback pending')
-      expect(cards[0]?.getAttribute('data-identity-key')).toBe(keyA)
-    })
-    // Disk keeps exactly S1's committed payload — S2's rejected suffix is gone.
-    expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyA])
-  })
-
-  it('two out-of-order-duration successes still write the disk strictly in click order', async () => {
-    const appA = pinnedApp('oo-app-a', 'oo-entry-a', 'oo-artifact-a', 'Order App A')
-    const appB = pinnedApp('oo-app-b', 'oo-entry-b', 'oo-artifact-b', 'Order App B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
-    const tasks = installDeferredSave()
-
-    renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyB}`))
-    // S2 must NOT have started while S1 is in flight (single writer).
-    expect(tasks).toHaveLength(1)
-
-    // S1 resolves LATE — only then does S2 start, building on S1's result.
-    tasks[0]!.resolve()
-    await waitForSaveCalls(2)
-    expect(tasks[1]?.key).toBe(contextKey)
-    expect((tasks[1]?.apps as Array<{ id: string }> | undefined)?.map(entry => entry.id))
-      .toEqual([keyA, keyB])
-    tasks[1]!.resolve()
-    await waitFor(() => {
-      if (!(quickAccessByContext.get(contextKey)?.length === 2)) {
-        throw new Error('condition pending')
-      }
-    })
-    // Disk order: [A] then [A,B] — never [A,B] overwritten by a late [A].
-    expect((quickAccessByContext.get(contextKey) as Array<{ id: string }> | undefined)
-      ?.map(entry => entry.id))
-      .toEqual([keyA, keyB])
-  })
-
-  it('a pin clicked before hydration builds on the stored collection instead of wiping it', async () => {
-    const storedApp = pinnedApp('hyd-app-a', 'hyd-entry-a', 'hyd-artifact-a', 'Stored App A')
-    const clickApp = pinnedApp('hyd-app-b', 'hyd-entry-b', 'hyd-artifact-b', 'Clicked App B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([storedApp, clickApp]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyStored = appCatalogHook.uiIdentityKeyForApp(storedApp)
-    const keyClicked = appCatalogHook.uiIdentityKeyForApp(clickApp)
-    quickAccessByContext.set(contextKey, [{ id: keyStored, addedAt: 1 }])
-
-    // Defer the LOAD: the click happens before hydration completes.
-    let releaseLoad: ((entries: unknown[]) => void) | undefined
-    getHomeQuickAccess.mockImplementation(async (_key: string) => {
-      const entries = await new Promise<unknown[]>(resolve => { releaseLoad = resolve })
-      return entries
-    })
-
-    renderHome()
-    await waitFor(() => {
-      if (!(releaseLoad)) {
-        throw new Error('condition pending')
-      }
-    })
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyClicked}`))
-
-    // Hydration completes AFTER the click: the queued pin must persist the
-    // MERGED collection, never [B] alone.
-    releaseLoad?.([{ id: keyStored, addedAt: 1 }])
-    await waitForSaveCalls(1)
-    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
-    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
-      { id: keyStored, addedAt: 1 },
-      { id: keyClicked, addedAt: expect.any(Number) },
-    ])
-  })
-
-  it('a rejected load retries once on a STABLE gate: mutations queued before the reject from BOTH mounts land in order', async () => {
-    const appA = pinnedApp('hl-app-a', 'hl-entry-a', 'hl-artifact-a', 'Hydration Lost A')
-    const appB = pinnedApp('hl-app-b', 'hl-entry-b', 'hl-artifact-b', 'Hydration Lost B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')}`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
-
-    // Attempt 1 is an in-flight DEFERRED rejection; attempt 2 (the bounded
-    // retry) succeeds through a deferred release.
-    let rejectFirst: ((error: unknown) => void) | undefined
-    let releaseRetry: ((entries: unknown[]) => void) | undefined
-    getHomeQuickAccess.mockImplementationOnce(async (_key: string): Promise<any[]> => {
-      await new Promise<any[]>((_, reject) => { rejectFirst = reject })
-      return []
-    }).mockImplementation(async (_key: string) => {
-      const entries = await new Promise<unknown[]>(resolve => { releaseRetry = resolve })
-      return entries
-    })
-
-    // BOTH mounts join the SAME in-flight activation (attempt 1).
-    const firstMount = renderHome()
-    await waitFor(() => { if (!rejectFirst) throw new Error('first load pending') })
-    const survivor = render(homeTree())
-    const loadsAfterJoin = loadCallCount()
-
-    // Queue mutations from BOTH mounts BEFORE attempt 1 rejects.
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-
-    // Attempt 1 rejects; the bounded retry starts on the SAME gate.
-    rejectFirst!(new Error('hydration load rejected (injected)'))
-    await waitFor(() => { if (!releaseRetry) throw new Error('retry load pending') })
-    fireEvent.click(within(survivor.container).getByTestId('home-all-apps-open'))
-    fireEvent.click(within(survivor.container).getByTestId(`all-apps-pin-${keyB}`))
-
-    // Loads: attempt 1 + attempt 2 = EXACTLY 2 (single shared activation).
-    expect(loadCallCount()).toBe(loadsAfterJoin + 1)
-
-    // Retry succeeds: queued mutations from BOTH mounts persist in order.
-    releaseRetry?.([
-      { id: keyA, addedAt: 1 },
-    ])
-    await waitFor(() => { if (setHomeQuickAccess.mock.calls.length < 2) throw new Error('saves pending') })
-    expect(apiSaveCallKeys(0)).toEqual([keyA])
-    expect(apiSaveCallKeys(1)).toEqual([keyA, keyB])
-    // Both mounts converge on the acked baseline (navigate A back home):
-    // each displays BOTH acked cards.
-    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
-    const assertBothCards = async (container: HTMLElement): Promise<void> => {
-      // NOTE: the file-local waitFor rejects on a thrown predicate — poll
-      // with an undefined-return predicate until the cards settle.
-      await waitFor(() => {
-        const cards = within(container).queryAllByTestId('home-quick-entry')
-        if (cards.length !== 2) return undefined
-        const identities = cards.map(card => card.getAttribute('data-identity-key'))
-        return new Set(identities).size === 2 ? true : undefined
-      })
-    }
-    await assertBothCards(firstMount.container)
-    await assertBothCards(survivor.container)
-    firstMount.unmount()
-    survivor.unmount()
-  })
-
-  it('an exhausted load (exactly 2 attempts) fails queued mutations VISIBLY with a toast on both mounts', async () => {
-    const appA = pinnedApp('ex-app-a', 'ex-entry-a', 'ex-artifact-a', 'Exhausted A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-
-    // Attempt 1: in-flight DEFERRED rejection; attempt 2: immediate reject
-    // (bounded retry exhausted).
-    let rejectFirst: ((error: unknown) => void) | undefined
-    getHomeQuickAccess.mockImplementationOnce(async (_key: string): Promise<any[]> => {
-      await new Promise<any[]>((_, reject) => { rejectFirst = reject })
-      return []
-    }).mockImplementation(async () => {
-      throw new Error('hydration load rejected (injected)')
-    })
-
-    // Mount A starts attempt 1; mount B JOINS the same in-flight activation.
-    const firstMount = renderHome()
-    await waitFor(() => { if (!rejectFirst) throw new Error('first load pending') })
-    const survivor = render(homeTree())
-
-    // Queue the mutation BEFORE exhaustion.
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-
-    // Attempt 1 rejects → retry (attempt 2) rejects immediately → terminal.
-    rejectFirst!(new Error('hydration load rejected (injected)'))
-    await waitFor(() => { if (toastErrorSpy.mock.calls.length === 0) throw new Error('toast pending') })
-    expect(toastErrorSpy).toHaveBeenCalled()
-
-    // Visible failure: NO persisted save, both mounts converge with no
-    // quick entries, and the load count is EXACTLY 2 (initial + 1 retry).
-    expect(setHomeQuickAccess.mock.calls.length).toBe(0)
-    expect(loadCallCount()).toBe(2)
-    expect(within(firstMount.container).queryAllByTestId('home-quick-entry')).toHaveLength(0)
-    expect(within(survivor.container).queryAllByTestId('home-quick-entry')).toHaveLength(0)
-    firstMount.unmount()
-    survivor.unmount()
-  })
-
-  it('an optimistic ack is visible on BOTH mounts before a later reject rolls BOTH back (two unmount orders)', async () => {
-    const appA = pinnedApp('os-app-a', 'os-entry-a', 'os-artifact-a', 'Optimistic A')
-    const appB = pinnedApp('os-app-b', 'os-entry-b', 'os-artifact-b', 'Optimistic B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')}`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
-    const tasks = installDeferredSave()
-
-    // Two live mounts on the same context.
-    const firstMount = renderHome()
-    const survivor = render(homeTree())
-    await waitFor(() => {
-      expect(within(survivor.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
-    })
-
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-
-    // (a) successful pin from the SURVIVOR: optimistic ack visible on BOTH.
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-    tasks[0]!.resolve()
-    await waitFor(() => {
-      expect(within(survivor.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-
-    // (b) rejected pin from the FIRST mount: rollback broadcast reverts BOTH.
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyB}`))
-    await waitForSaveCalls(2)
-    tasks[1]!.reject(new Error('save rejected (injected)'))
-    // Navigate the first mount home, then assert the rollback broadcast
-    // converged BOTH mounts on the same confirmed snapshot.
-    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
-    await waitFor(() => {
-      if (within(survivor.container).queryAllByTestId('home-quick-entry').length !== 1) {
-        throw new Error('survivor rollback pending')
-      }
-    })
-    await waitFor(() => {
-      if (within(firstMount.container).queryAllByTestId('home-quick-entry').length !== 1) {
-        throw new Error('first mount rollback pending')
-      }
-    })
-    expect(quickAccessByContext.get(contextKey)?.map((entry: { id: string }) => entry.id))
-      .toEqual([keyA])
-
-    // (c) owner-order unmount variants: unmount the survivor FIRST — the
-    // first mount still works; then settle-remount path.
-    survivor.unmount()
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyB}`))
-    await waitForSaveCalls(3)
-    tasks[2]!.resolve()
-    await waitFor(() => {
-      if (quickAccessByContext.get(contextKey)?.length !== 2) throw new Error('write pending')
-    })
-    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
-    await waitFor(() => {
-      const cards = within(firstMount.container).getAllByTestId('home-quick-entry')
-      if (cards.length !== 2) throw new Error('remount display pending')
-    })
-    firstMount.unmount()
-  })
-
-  it('a THIRD owner joining between attempt-1 reject and retry rides the SAME activation: loads stay 2, queued mutations settle, no sweep', async () => {
-    const storedApp = pinnedApp('it3-app-a', 'it3-entry-a', 'it3-artifact-a', 'Interleave A')
-    const appB = pinnedApp('it3-app-b', 'it3-entry-b', 'it3-artifact-b', 'Interleave B')
-    const appC = pinnedApp('it3-app-c', 'it3-entry-c', 'it3-artifact-c', 'Interleave C')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([storedApp, appB, appC]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')}`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(storedApp)
-    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
-    const keyC = appCatalogHook.uiIdentityKeyForApp(appC)
-    quickAccessByContext.set(contextKey, [{ id: keyA, addedAt: 1 }])
-
-    // Attempt 1: in-flight DEFERRED; attempt 2 (bounded retry): in-flight
-    // DEFERRED — full control over the interleave window.
-    let rejectFirst: ((error: unknown) => void) | undefined
-    let releaseRetry: ((entries: unknown[]) => void) | undefined
-    getHomeQuickAccess.mockImplementationOnce(async (_key: string): Promise<any[]> => {
-      await new Promise<never>((_, reject) => { rejectFirst = reject })
-      return []
-    }).mockImplementation(async (_key: string): Promise<any[]> => {
-      const entries = await new Promise<any[]>(resolve => { releaseRetry = resolve })
-      return entries
-    })
-
-    // Mounts A and B join attempt 1 (single load).
-    const mountA = renderHome()
-    await waitFor(() => { if (!rejectFirst) throw new Error('attempt1 pending') })
-    const mountB = render(homeTree())
-    expect(loadCallCount()).toBe(1)
-
-    // Queue mutations from A and B while attempt 1 is unresolved. The pins
-    // target entries OUTSIDE the stored baseline (B, C) so the queued
-    // mutations are observable additions.
-    fireEvent.click(within(mountA.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(mountA.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(mountA.container).getByTestId(`all-apps-pin-${keyB}`))
-    fireEvent.click(within(mountB.container).getByTestId('home-all-apps-open'))
-    fireEvent.click(within(mountB.container).getByTestId(`all-apps-pin-${keyC}`))
-
-    // Attempt 1 rejects; the SAME-gate retry starts (attempt 2).
-    rejectFirst!(new Error('attempt 1 rejected (injected)'))
-    await waitFor(() => { if (!releaseRetry) throw new Error('retry pending') })
-
-    // The decisive interleave: a THIRD owner mounts in the retry window.
-    // It must ride the SAME activation (no third load, no gate replacement,
-    // no writer sweep).
-    const mountC = render(homeTree())
-    expect(loadCallCount()).toBe(2)
-
-    // The retry resolves: queued mutations from A and B settle in order —
-    // B first (queued first), then C.
-    releaseRetry?.([
-      { id: keyA, addedAt: 1 },
-    ])
-    await waitForSaveCalls(2)
-    expect(apiSaveCallKeys(0)).toEqual([keyA, keyB])
-    expect(apiSaveCallKeys(1)).toEqual([keyA, keyB, keyC])
-
-    // All live mounts converge on the full acked baseline.
-    const assertConverged = async (container: HTMLElement): Promise<void> => {
-      await waitFor(() => {
-        const cards = within(container).queryAllByTestId('home-quick-entry')
-        if (cards.length !== 3) return undefined
-        const identities = cards.map(card => card.getAttribute('data-identity-key'))
-        return new Set(identities).size === 3 ? true : undefined
-      })
-    }
-    await assertConverged(mountA.container)
-    await assertConverged(mountB.container)
-    await assertConverged(mountC.container)
-
-    // Final unmounts drain the registry.
-    mountA.unmount()
-    mountB.unmount()
-    mountC.unmount()
-    await waitFor(() => { if (__homeQuickWritersCountForTests() !== 0) throw new Error('registry drain pending') })
-  })
-
-  it('removing the last persisted entry persists an explicitly empty collection', async () => {
-    const appA = pinnedApp('last-app-a', 'last-entry-a', 'last-artifact-a', 'Last App A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    quickAccessByContext.set(contextKey, [{ id: keyA, addedAt: 1 }])
-
-    const view = renderHome()
-    await waitForNextScopeLoad(0, contextKey)
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry')).toBeTruthy()
-    })
-
-    // Remove the last entry through the manage dialog.
-    fireEvent.click(screen.getByTestId('home-manage-quick-access'))
-    await waitFor(() => {
-      expect(screen.getByTestId('manage-home-apps-dialog')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId('manage-home-apps-item'))
-    fireEvent.click(screen.getByTestId('manage-home-apps-done'))
-    await waitForSaveCalls(1)
-    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
-    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([])
-    expect(quickAccessByContext.get(contextKey)).toEqual([])
-
-    // REAL remount: the explicitly empty collection stays empty.
-    view.unmount()
-    renderHome()
-    await waitForNextScopeLoad(1, contextKey)
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-  })
-
-  it('a rejected prune keeps the confirmed entries in UI and Map', async () => {
-    const keptApp = pinnedApp('prune-app-kept', 'prune-entry-kept', 'prune-artifact-kept', 'Prune Kept')
-    const vanishingApp = pinnedApp('prune-app-gone', 'prune-entry-gone', 'prune-artifact-gone', 'Prune Gone')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([keptApp, vanishingApp]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyKept = appCatalogHook.uiIdentityKeyForApp(keptApp)
-    const keyGone = appCatalogHook.uiIdentityKeyForApp(vanishingApp)
-    quickAccessByContext.set(contextKey, [
-      { id: keyKept, addedAt: 1 },
-      { id: keyGone, addedAt: 2 },
-    ])
-
-    renderHome()
-    await waitForNextScopeLoad(0, contextKey)
-    await waitFor(() => {
-      expect(screen.getAllByTestId('home-quick-entry')).toHaveLength(2)
-    })
-
-    // The Catalog drops the second App: the prune runs but EVERY persistence
-    // attempt rejects (durable failure). Each rejected suffix rolls back to
-    // the last acknowledgement — nothing may ever commit.
-    setHomeQuickAccess.mockImplementation(async () => {
-      throw new Error('prune persistence rejected')
-    })
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([keptApp]))
-    viewRerender()
-    // The prune's save rejects and rolls back to the acknowledgement.
-    await waitForSaveCalls(1)
-    // The persisted collection keeps BOTH entries — nothing committed.
-    expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyKept, keyGone])
-
-    // And the entries are still held in state: restoring the Catalog brings
-    // BOTH cards back (a committed prune would have deleted the entry).
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([keptApp, vanishingApp]))
-    viewRerender()
-    await waitFor(() => {
-      const cards = screen.getAllByTestId('home-quick-entry')
-      if (cards.length !== 2) throw new Error('entries not restored')
-      const identities = cards.map(card => card.getAttribute('data-identity-key'))
-      expect(new Set(identities)).toEqual(new Set([keyKept, keyGone]))
-    })
-  })
-
-  it('a queued write from context A lands in order after a switch and never pollutes B; remount shows it', async () => {
-    const appA = pinnedApp('switch-app-a', 'switch-entry-a', 'switch-artifact-a', 'Switch App A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKeyA = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const tasks = installDeferredSave()
-
-    renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-
-    // Switch to space B while A's save is still in flight.
-    const contextKeyB = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-b')
-    }`
-    const loadsBefore = loadCallCount()
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([], { organizationId: 'organization-b' }),
-    )
-    viewRerender()
-    await waitForNextScopeLoad(loadsBefore, contextKeyB)
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-
-    // A's save commits LATE: it lands in A's slot only; B shows nothing.
-    tasks[0]!.resolve()
-    await waitFor(() => {
-      if (!(quickAccessByContext.get(contextKeyA)?.length === 1)) {
-        throw new Error('condition pending')
-      }
-    })
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
-
-    // Return to A: the SHARED writer already advanced its baseline with the
-    // late ack — A's pin shows without any re-read.
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    viewRerender()
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-  })
-
-  it('an unmounted component still lands queued writes in order; a remount reads them back', async () => {
-    const appA = pinnedApp('unmount-app-a', 'unmount-entry-a', 'unmount-artifact-a', 'Unmount App A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const tasks = installDeferredSave()
-
-    const view = renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-
-    // Unmount BEFORE the save resolves: the in-order write must still land.
-    view.unmount()
-    tasks[0]!.resolve()
-    await waitFor(() => {
-      if (!(quickAccessByContext.get(contextKey)?.length === 1)) {
-        throw new Error('condition pending')
-      }
-    })
-    expect(quickAccessByContext.get(contextKey)?.map(entry => entry.id)).toEqual([keyA])
-
-    // REAL remount rejoins the SHARED writer (its baseline advanced with the
-    // late ack even though the component was unmounted) — the pin shows.
-    renderHome()
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-  })
-
-  it('A/S1+A/S2 across A→B→A with B completing independently (per-context writers)', async () => {
-    const appA1 = pinnedApp('pc-app-a1', 'pc-entry-a1', 'pc-artifact-a1', 'PerContext A1')
-    const appA2 = pinnedApp('pc-app-a2', 'pc-entry-a2', 'pc-artifact-a2', 'PerContext A2')
-    const appB = pinnedApp('pc-app-b', 'pc-entry-b', 'pc-artifact-b', 'PerContext B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA1, appA2]))
-    const contextKeyA = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA1 = appCatalogHook.uiIdentityKeyForApp(appA1)
-    const keyA2 = appCatalogHook.uiIdentityKeyForApp(appA2)
-    const tasks = installDeferredSave()
-
-    renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    // A/S1 fires; A/S2 queues behind it on A's OWN writer.
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA1}`))
-    await waitForSaveCalls(1)
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA2}`))
-    expect(tasks).toHaveLength(1)
-
-    // Switch to B while both A writes are outstanding.
-    const contextKeyB = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-b')
-    }`
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(
-      [pinnedApp('pc-app-b', 'pc-entry-b', 'pc-artifact-b', 'PerContext B')],
-      { organizationId: 'organization-b' },
-    ))
-    viewRerender()
-    await waitForNextScopeLoad(0, contextKeyB)
-    expect(screen.queryByTestId('home-quick-entry')).toBeNull()
-
-    const keyB = appCatalogHook.uiIdentityKeyForApp(appB)
-    // B pins and COMPLETES while A/S1 is still hung: B is never blocked by A.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(
-      `all-apps-pin-${appCatalogHook.uiIdentityKeyForApp(appB)}`,
-    ))
-    await waitForSaveCalls(2)
-    expect(tasks[1]?.key).toBe(contextKeyB)
-    tasks[1]!.resolve()
-    // Back on B's home: the acked B pin displays.
-    fireEvent.click(screen.getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyB)
-    })
-
-    // A/S1 acks while B is DISPLAYED: A's durable baseline advances, B's
-    // view is untouched.
-    tasks[0]!.resolve()
-    await waitFor(() => (quickAccessByContext.get(contextKeyA)?.length === 1 ? true : undefined))
-    expect(screen.getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(
-      appCatalogHook.uiIdentityKeyForApp(appB),
-    )
-
-    // A/S2 starts from S1's ACKED base (never B's intent) and its payload
-    // targets A's slot only.
-    await waitForSaveCalls(3)
-    expect(tasks[2]?.key).toBe(contextKeyA)
-    expect((tasks[2]?.apps as Array<{ id: string }>).map(entry => entry.id)).toEqual([keyA1, keyA2])
-    tasks[2]!.resolve()
-    await waitFor(() => (quickAccessByContext.get(contextKeyA)?.length === 2 ? true : undefined))
-
-    // A→B→A: the shared writer's advanced baseline displays both A pins.
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA1, appA2]))
-    viewRerender()
-    await waitFor(() => {
-      const cards = screen.getAllByTestId('home-quick-entry')
-      if (cards.length !== 2) throw new Error('A cards pending')
-      const identities = cards.map(card => card.getAttribute('data-identity-key'))
-      expect(new Set(identities)).toEqual(new Set([keyA1, keyA2]))
-    })
-    expect(quickAccessByContext.get(contextKeyA)?.map((entry: { id: string }) => entry.id))
-      .toEqual([keyA1, keyA2])
-    expect(quickAccessByContext.get(contextKeyB)?.map((entry: { id: string }) => entry.id))
-      .toEqual([keyB])
-  })
-
-  it('two mounts of the SAME context share one writer and BOTH display acks from either mount', async () => {
-    const appA = pinnedApp('mm-app-a', 'mm-entry-a', 'mm-artifact-a', 'MultiMount A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-
-    const firstMount = renderHome()
-    await waitForNextScopeLoad(0, contextKey)
-    const loadsBeforeSecondMount = loadCallCount()
-    const survivor = render(homeTree())
-    // The second mount JOINS the same context writer: no second racing load
-    // (the shared baseline is displayed directly).
-    await waitFor(() => {
-      expect(within(survivor.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
-    })
-    expect(loadCallCount()).toBe(loadsBeforeSecondMount)
-
-    // Mutate from the FIRST mount: the persisted ack must appear in BOTH
-    // mounts (subscriber broadcast).
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKey)
-    // The SURVIVOR mount (idle on the home view) displays the ack through
-    // the subscriber broadcast — without any mutation of its own.
-    await waitFor(() => {
-      expect(within(survivor.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-
-    // The initiating mount returns home and displays the same ack.
-    fireEvent.click(within(firstMount.container).getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-
-    // Unmount the initiating mount: the survivor still works off the shared
-    // writer.
-    firstMount.unmount()
-    expect(within(survivor.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    survivor.unmount()
-  })
-
-  it('two mounts on DIFFERENT contexts own separate writers; unmounting either lets the survivor pin/prune its own context', async () => {
-    const appA = pinnedApp('mm2-app-a', 'mm2-entry-a', 'mm2-artifact-a', 'MultiMount2 A')
-    const appB = pinnedApp('mm2-app-b', 'mm2-entry-b', 'mm2-artifact-b', 'MultiMount2 B')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKeyA = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-
-    // Mount 1 on context A.
-    const ownerMountA = renderHome()
-    await waitForNextScopeLoad(0, contextKeyA)
-
-    // Mount 2 on context B (fresh hook — the provider value follows it).
-    const contextKeyB = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-b')
-    }`
-    const hookB = hookWithCatalog(
-      enterpriseCatalogWith([appB], { organizationId: 'organization-b' }),
-    )
-    const mountB = render(homeTree(hookB))
-    await waitFor(() => {
-      if (getHomeQuickAccess.mock.calls.length < 2) throw new Error('B load pending')
-    })
-    expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKeyB)
-
-    // Unmount mount 2 (context B): mount 1's context-A writer must survive.
-    mountB.unmount()
-    await waitFor(() => {
-      if (!within(ownerMountA.container).getByTestId('home-quick-entry-polo')) {
-        throw new Error('A home pending')
-      }
-    })
-    fireEvent.click(within(ownerMountA.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(ownerMountA.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(ownerMountA.container).getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-    expect(setHomeQuickAccess.mock.calls[0]?.[0]).toBe(contextKeyA)
-    expect(setHomeQuickAccess.mock.calls[0]?.[1]).toEqual([
-      { id: keyA, addedAt: expect.any(Number) },
-    ])
-    expect(quickAccessByContext.get(contextKeyA)?.map((entry: { id: string }) => entry.id))
-      .toEqual([keyA])
-    fireEvent.click(within(ownerMountA.container).getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(within(ownerMountA.container).getByTestId('home-quick-entry').getAttribute('data-identity-key')).toBe(keyA)
-    })
-
-    // Unmount the OTHER order too: a fresh mount 1' on B, unmount mount 1
-    // (context A) — the B survivor still pins into B's own slot.
-    ownerMountA.unmount()
-    const survivorB = render(homeTree(hookB))
-    await waitFor(() => {
-      if (getHomeQuickAccess.mock.calls.length < 3) throw new Error('reload pending')
-    })
-    expect(getHomeQuickAccess.mock.calls[getHomeQuickAccess.mock.calls.length - 1]?.[0]).toBe(contextKeyB)
-    fireEvent.click(within(survivorB.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(survivorB.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(survivorB.container).getByTestId(
-      `all-apps-pin-${hookB.uiIdentityKeyForApp(appB)}`,
-    ))
-    await waitForSaveCalls(2)
-    expect(setHomeQuickAccess.mock.calls[1]?.[0]).toBe(contextKeyB)
-    survivorB.unmount()
-  })
-
-  it('a rejected save rolls BOTH same-context mounts back identically (rollback broadcast)', async () => {
-    const appA = pinnedApp('rb-app-a', 'rb-entry-a', 'rb-artifact-a', 'Rollback A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')}`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const tasks = installDeferredSave()
-
-    const firstMount = renderHome()
-    const survivor = render(homeTree())
-    await waitFor(() => {
-      expect(within(survivor.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
-    })
-    fireEvent.click(within(firstMount.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(firstMount.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(within(firstMount.container).getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-    tasks[0]!.reject(new Error('save rejected (injected)'))
-
-    // The rollback broadcast converges BOTH mounts: no persisted entry
-    // anywhere and no quick-entry card on either mount.
-    await waitFor(() => {
-      if (within(firstMount.container).queryAllByTestId('home-quick-entry').length !== 0) {
-        throw new Error('first mount rollback pending')
-      }
-    })
-    await waitFor(() => {
-      if (within(survivor.container).queryAllByTestId('home-quick-entry').length !== 0) {
-        throw new Error('survivor rollback pending')
-      }
-    })
-    expect(quickAccessByContext.get(contextKey)).toBeUndefined()
-    firstMount.unmount()
-    survivor.unmount()
-  })
-
-  it('the final owner unmounts during a pending save: settle sweeps the registry to zero and the write lands', async () => {
-    const appA = pinnedApp('final-app-a', 'final-entry-a', 'final-artifact-a', 'Final Owner A')
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-    const keyA = appCatalogHook.uiIdentityKeyForApp(appA)
-    const tasks = installDeferredSave()
-
-    const view = renderHome()
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
-    })
-    fireEvent.click(screen.getByTestId(`all-apps-pin-${keyA}`))
-    await waitForSaveCalls(1)
-
-    // The final owner unmounts while the save is still in flight: the
-    // writer must be RETAINED (busy > 0) — no data loss.
-    view.unmount()
-    expect(__homeQuickWritersCountForTests()).toBe(1)
-
-    // The save settles: the durable write lands and the busy→0 transition
-    // sweeps the registry to zero retained writers.
-    tasks[0]!.resolve()
-    await waitFor(() => (quickAccessByContext.get(contextKey)?.length === 1 ? true : undefined))
-    await waitFor(() => {
-      if (__homeQuickWritersCountForTests() !== 0) throw new Error('sweep pending')
-    })
-    expect(quickAccessByContext.get(contextKey)?.map((entry: { id: string }) => entry.id))
-      .toEqual([keyA])
-  })
-
-  it('adds a shortcut through the manage dialog without installing', async () => {
-    const appA: CatalogApp = {
-      id: 'manage-app-a',
-      organizationId: 'organization-a',
-      name: 'Manage App A',
-      description: '',
-      deliveryMode: 'local_bundle',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const contextKey = `v1:${
-      createProductSpaceContextKey('account-a', 'organization-a')
-    }`
-
-    renderHome()
-    fireEvent.click(screen.getByTestId('home-manage-quick-access'))
-    await waitFor(() => {
-      expect(screen.getByTestId('manage-home-apps-dialog')).toBeTruthy()
-    })
-
-    const item = screen.getByTestId('manage-home-apps-item')
-    expect(item.getAttribute('data-app-id')).toBe('manage-app-a')
-    fireEvent.click(item)
-    fireEvent.click(screen.getByTestId('manage-home-apps-done'))
-    await waitFor(() => {
-      expect(setHomeQuickAccess).toHaveBeenCalledWith(contextKey, [{
-        id: appCatalogHook.uiIdentityKeyForApp(appA),
-        addedAt: expect.any(Number),
-      }])
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('home-quick-entry')).toBeTruthy()
-    })
-    expect(screen.getByText('Manage App A')).toBeTruthy()
-  })
-
-  it('shows the add-shortcut tile only with free slots and a Catalog', async () => {
-    const appA: CatalogApp = {
-      id: 'tile-app-a',
-      organizationId: 'organization-a',
-      name: 'Tile App A',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://a.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA]))
-    const view = renderHome()
-    await act(async () => {})
-    expect(screen.getByTestId('home-manage-quick-access')).toBeTruthy()
-    view.unmount()
-
-    // No ProductSpace context → no add tile.
-    appCatalogHook = signedOutCatalogHook()
-    const signedOut = renderHome()
-    await act(async () => {})
-    expect(signedOut.queryByTestId('home-manage-quick-access')).toBeNull()
-  })
-})
-
-describe('HomePage all-Apps view (POO-43)', () => {
-  it('resolves the exact Catalog launch through main before opening a WebView', async () => {
-    const remoteApp: CatalogApp = {
-      id: 'remote-app',
-      organizationId: 'organization-a',
-      name: 'Remote App',
-      description: '',
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://stale.example.com',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const resolveLaunch = jest.fn(async () => {
-      throw new Error('NOT_AUTHORIZED')
-    })
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([remoteApp]),
-      { resolveLaunch },
-    )
-
-    await renderAllApps()
-    fireEvent.click(screen.getByTestId(`all-apps-action-${uiKeyFor(remoteApp)}`))
-
-    await waitFor(() => {
-      expect(resolveLaunch).toHaveBeenCalledWith(remoteApp)
-    })
-    expect(openApp).not.toHaveBeenCalled()
-  })
-
-  it('installs a resolved bundle and publishes a sealed POO-47 handoff without opening a Tab', async () => {
-    const bundleApp: CatalogApp = {
-      id: 'bundle-entry',
-      catalogEntryId: 'bundle-entry',
-      artifactInstanceId: 'bundle-artifact',
-      catalogVersion: { versionId: 'bundle-version-id', version: '3.0.0' },
-      organizationId: 'organization-a',
-      name: 'Bundle App',
-      description: '',
-      deliveryMode: 'resolve_launch',
-      sortOrder: 0,
-      availability: 'available',
-    }
-    const launch = resolvedBundleLaunch(bundleApp)
-    const resolveLaunch = jest.fn(async () => launch)
-    const installProductSpaceBundle = jest.fn(async () => {})
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([bundleApp]),
-      { resolveLaunch, installProductSpaceBundle },
-    )
-
-    await renderAllApps()
-    fireEvent.click(screen.getByTestId(`all-apps-action-${appCatalogHook.uiIdentityKeyForApp({
-      accountId: 'account-a',
-      productSpaceId: 'organization-a',
-      catalogEntryId: 'bundle-entry',
-      artifactInstanceId: 'bundle-artifact',
-    })}`))
-    await waitFor(() => expect(screen.getByText('Install Bundle App')).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
-
-    await waitFor(() => {
-      expect(installProductSpaceBundle).toHaveBeenCalledWith(bundleApp)
-      expect(resolveLaunch).toHaveBeenCalledTimes(2)
-      expect(storePublish).toHaveBeenCalledWith(
-        { accountId: 'account-a', productSpaceId: 'organization-a' },
-        7,
-        'account-a',
-        launch,
-      )
-    })
-    expect(openApp).not.toHaveBeenCalled()
-  })
-
-  it('keeps withdrawn tombstones visible and non-launchable in a maximum Catalog', async () => {
-    const visibleApps: CatalogApp[] = Array.from(
-      { length: 10_000 },
-      (_, index) => ({
-        id: `visible-${index}`,
-        organizationId: 'organization-a',
-        name: `Visible ${index}`,
-        description: '',
-        deliveryMode: 'remote_url' as const,
-        remoteUrl: `https://example.com/${index}`,
-        sortOrder: index,
-        availability: 'available' as const,
-      }),
-    )
-    const withdrawnApps: CatalogApp[] = Array.from(
-      { length: 10_000 },
-      (_, index) => ({
-        id: `withdrawn-${index}`,
-        organizationId: 'organization-a',
-        name: `Withdrawn ${index}`,
-        description: '',
-        deliveryMode: 'local_bundle' as const,
-        sortOrder: index + 20_000,
-        availability: 'withdrawn' as const,
-      }),
-    )
-    withdrawnApps[9_999] = {
-      ...withdrawnApps[9_999]!,
-      name: 'Installed Withdrawn',
-      sortOrder: -1,
-      catalogEntryId: 'withdrawn-9999',
-      artifactInstanceId: 'artifact-withdrawn-9999',
-      catalogVersion: { versionId: 'version-withdrawn-9999', version: '1.0.0' },
-    }
-    const catalog = enterpriseCatalogWith(visibleApps, {
-      appConfigVersion: 'maximum',
-      withdrawnApps,
-    })
-    const installedWithdrawn = withdrawnApps[9_999]!
-    const installedScopeKey = createLocalAppScopeKey({
-      kind: 'catalog',
-      accountId: 'account-a',
-      organizationId: 'organization-a',
-      catalogAppId: installedWithdrawn.id,
-    })
-    const statuses = {
-      [installedScopeKey]: {
-        appId: installedWithdrawn.id,
-        scope: {
-          kind: 'catalog' as const,
-          accountId: 'account-a',
-          organizationId: 'organization-a',
-          catalogAppId: installedWithdrawn.id,
-        },
-        status: 'installed' as const,
-        currentVersion: '1.0.0',
-      },
-    }
-    appCatalogHook = hookWithCatalog(
-      catalog,
-      {
-        getInstallState: (target: CatalogApp) => target.id === installedWithdrawn.id
-          ? {
-              app: {
-                accountId: 'account-a',
-                productSpaceId: 'organization-a',
-                catalogRevision: 'rev-1',
-                catalogEntryId: installedWithdrawn.catalogEntryId!,
-                artifactInstanceId: installedWithdrawn.artifactInstanceId!,
-                versionId: installedWithdrawn.catalogVersion!.versionId,
-                version: installedWithdrawn.catalogVersion!.version,
-              },
-              state: 'installed' as const,
-              currentVersion: '1.0.0',
-            }
-          : undefined,
-      },
-      { statuses },
-    )
-
-    await renderAllApps()
-
-    // Tombstones stay visible with their retained explanation: the installed
-    // one sorts first via its retained row, pagination still applies.
-    expect(screen.getByText('Installed Withdrawn')).toBeTruthy()
-    expect(screen.getAllByTestId('all-apps-row')).toHaveLength(60)
-    expect(screen.getByTestId('all-apps-count').textContent).toContain('20000')
-    expect(screen.getByText('Removed by your organization')).toBeTruthy()
-
-    // The withdrawn tombstone is NEVER launchable, even when installed.
-    const tombstoneAction = screen.getByTestId(
-      `all-apps-action-${appCatalogHook.uiIdentityKeyForApp(installedWithdrawn)}`,
-    ) as HTMLButtonElement
-    expect(tombstoneAction.disabled).toBe(true)
-    // A live App on the same page stays launchable.
-    expect((screen.getByTestId(
-      `all-apps-action-${JSON.stringify(['product-space-ui', 'account-a', 'organization-a', 'visible-0', null])}`,
-    ) as HTMLButtonElement).disabled).toBe(false)
-
-    // The retained installation keeps its row-level uninstall entry.
-    expect(screen.getByTestId(
-      `all-apps-uninstall-${appCatalogHook.uiIdentityKeyForApp(installedWithdrawn)}`,
-    )).toBeTruthy()
-  })
-
-  it('merges withdrawn tombstones into all-Apps with identity dedup and live preference', () => {
-    const live: CatalogApp = {
-      id: 'entry-dup',
-      catalogEntryId: 'entry-dup',
-      artifactInstanceId: 'artifact-dup',
-      catalogVersion: { versionId: 'version-2', version: '2.0.0' },
-      organizationId: 'organization-a',
-      name: 'Dup App',
-      description: '',
-      deliveryMode: 'resolve_launch',
-      sortOrder: 3,
-      availability: 'available',
-    }
-    const tombstoneOfSameArtifact: CatalogApp = {
-      ...live,
-      name: 'Dup App (old)',
-      // The stale version of the SAME artifact instance: dedup must be
-      // version-agnostic so an upgrade never pairs live v2 + withdrawn v1.
-      catalogVersion: { versionId: 'version-1', version: '1.0.0' },
-      availability: 'withdrawn',
-      sortOrder: 1,
-    }
-    const plainTombstone: CatalogApp = {
-      id: 'entry-gone',
-      catalogEntryId: 'entry-gone',
-      artifactInstanceId: 'artifact-gone',
-      catalogVersion: { versionId: 'version-1', version: '1.0.0' },
-      organizationId: 'organization-a',
-      name: 'Gone App',
-      description: '',
-      deliveryMode: 'resolve_launch',
-      sortOrder: 2,
-      availability: 'withdrawn',
-    }
-    const merged = selectAllAppsForDisplay(enterpriseCatalogWith(
-      [live],
-      { withdrawnApps: [tombstoneOfSameArtifact, plainTombstone] },
-    ))
-
-    // Same artifact identity collapses to the LIVE entry; the pure tombstone
-    // is retained; Catalog order is preserved.
-    expect(merged.map(app => app.id)).toEqual(['entry-gone', 'entry-dup'])
-    expect(merged.find(app => app.id === 'entry-dup')?.availability).toBe('available')
-    expect(merged.find(app => app.id === 'entry-gone')?.availability).toBe('withdrawn')
-    expect(selectAllAppsForDisplay(null)).toEqual([])
-  })
-
-  it('opens the uninstall dialog for an installed withdrawn tombstone', async () => {
-    const installedTombstone: CatalogApp = {
-      id: 'gone-installed',
-      catalogEntryId: 'gone-installed',
-      artifactInstanceId: 'artifact-gone-installed',
-      catalogVersion: { versionId: 'version-gone', version: '1.5.0' },
-      organizationId: 'organization-a',
-      name: 'Gone Installed',
-      description: '',
-      deliveryMode: 'resolve_launch',
-      sortOrder: 5,
-      availability: 'withdrawn',
-    }
-    const uninstallProductSpaceBundle = jest.fn(async () => {})
-    appCatalogHook = hookWithCatalog(
-      enterpriseCatalogWith([], { withdrawnApps: [installedTombstone] }),
-      {
-        uninstallProductSpaceBundle,
-        getInstallState: (target: CatalogApp) => target.id === 'gone-installed'
-          ? {
-              app: {
-                accountId: 'account-a',
-                productSpaceId: 'organization-a',
-                catalogRevision: 'rev-1',
-                catalogEntryId: installedTombstone.catalogEntryId!,
-                artifactInstanceId: installedTombstone.artifactInstanceId!,
-                versionId: installedTombstone.catalogVersion!.versionId,
-                version: installedTombstone.catalogVersion!.version,
-              },
-              state: 'installed' as const,
-              currentVersion: '1.5.0',
-            }
-          : undefined,
-      },
-    )
-
-    await renderAllApps()
-    expect(screen.getByText('Gone Installed')).toBeTruthy()
-    expect((screen.getByTestId(
-      `all-apps-action-${appCatalogHook.uiIdentityKeyForApp(installedTombstone)}`,
-    ) as HTMLButtonElement).disabled).toBe(true)
-
-    fireEvent.click(screen.getByTestId(
-      `all-apps-uninstall-${appCatalogHook.uiIdentityKeyForApp(installedTombstone)}`,
-    ))
-    await waitFor(() => {
-      expect(screen.getByText('Uninstall Gone Installed?')).toBeTruthy()
-    })
-    const dialog = screen.getByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Uninstall' }))
-    await waitFor(() => {
-      expect(uninstallProductSpaceBundle).toHaveBeenCalledWith(
-        installedTombstone,
-        true,
-      )
-    })
-  })
-
 })
 
 describe('HomePage copy and formatting', () => {
