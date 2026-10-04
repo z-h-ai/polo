@@ -234,6 +234,9 @@ function installBridge() {
 interface CatalogDoubleState {
   errorCode: string | null
   catalog: import('@polo-ai/shared/admin').AppCatalogCacheEntry | null
+  /** Sync-intermediate markers, as the REAL instance flips them (IPC window). */
+  refreshing?: boolean
+  loading?: boolean
 }
 
 function minimalCatalog(): import('@polo-ai/shared/admin').AppCatalogCacheEntry {
@@ -254,11 +257,13 @@ let catalogRenderCounter = 0
 
 type CatalogDouble = import('@/hooks/useAppCatalog').AppCatalogInstance
 
-function createCatalogInstance(): CatalogDouble {
+function createCatalogInstance(
+  intermediate?: { refreshing?: boolean; loading?: boolean },
+): CatalogDouble {
   catalogRenderCounter += 1
   // A fresh snapshot object per "render" — identity is what the hook fences
   // its settle judgment on, exactly like a real instance's state object.
-  const snapshot: CatalogDoubleState = { ...catalogLogicalState }
+  const snapshot: CatalogDoubleState = { ...catalogLogicalState, ...intermediate }
   return {
     state: snapshot,
     sync: mock(async (force?: boolean) => {
@@ -276,9 +281,14 @@ function makeCatalog(): CatalogDouble {
  * Simulate H1 re-rendering after its internal state moved: the NEXT instance
  * consumers receive carries the settled snapshot under a NEW identity.
  * Must be passed to hook.rerender to reach the hook's commit observers.
+ * `intermediate` models sync's OWN in-flight renders (the refreshing/loading
+ * flips while the IPC runs) — identity moves, but the snapshot is NOT one a
+ * settle judgment may consume.
  */
-function commitCatalogRender(): CatalogDouble {
-  return createCatalogInstance()
+function commitCatalogRender(
+  intermediate?: { refreshing?: boolean; loading?: boolean },
+): CatalogDouble {
+  return createCatalogInstance(intermediate)
 }
 
 function resetCatalog() {
@@ -681,6 +691,43 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
 
     // PROVE the new implementation: the post-sync snapshot commits (a new
     // instance identity), the observer fires, and the judgment is FAILED.
+    const outcome = await commitRenderAndSettle(hook, outcomePromise)
+    expect(outcome).toEqual({ relations: 'refreshed', catalog: 'failed', circleId: null, orderId: null })
+  })
+
+  it('does NOT settle on sync\'s OWN intermediate refreshing commit — only a TERMINAL snapshot settles (P2 timing hardening)', async () => {
+    // EXACTLY the shape that defeated the previous implementation: H1's sync
+    // flips `refreshing`/`loading` while the IPC is in flight, which commits
+    // a NEW instance identity MID-SYNC. Identity movement alone must never
+    // settle the outcome.
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+
+    catalogSyncImpl = async () => {
+      catalogLogicalState = { errorCode: 'ADMIN_UNAVAILABLE', catalog: null }
+    }
+    const { promise: outcomePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh(),
+    )
+
+    // The intermediate commit: identity moves (a new instance), but the
+    // snapshot is sync's own in-flight refreshing flip — NOT terminal.
+    await act(async () => {
+      hook.rerender({ catalog: commitCatalogRender({ refreshing: true }) })
+    })
+    let raced: string | null = null
+    const raceResult: { value: string | null } = { value: null }
+    await act(async () => {
+      raceResult.value = await Promise.race([
+        outcomePromise.then(() => 'settled'),
+        new Promise<string>(resolve => setTimeout(() => resolve('awaiting'), 50)),
+      ])
+    })
+    expect(raceResult.value).toBe('awaiting')
+
+    // The TERMINAL snapshot (refreshing flipped back down) finally commits.
     const outcome = await commitRenderAndSettle(hook, outcomePromise)
     expect(outcome).toEqual({ relations: 'refreshed', catalog: 'failed', circleId: null, orderId: null })
   })

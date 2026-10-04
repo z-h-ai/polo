@@ -138,10 +138,12 @@ export type MemberCirclesRefreshOutcome =
  * "relations changed, rows/catalog pending re-verification" rather than
  * treating the pre-invalidate view as current.
  *
- * `catalog` is judged from the injected H1 instance's POST-SYNC RENDERED
- * SNAPSHOT — never in the same continuation as the awaited `sync()` call
- * (React only exposes the settled state on a later commit). Production
- * `sync()` never rejects; failures settle into the instance state:
+ * `catalog` is judged from the injected H1 instance's SETTLED post-sync
+ * RENDERED snapshot — never in the same continuation as the awaited `sync()`
+ * call, and never from one of sync's own INTERMEDIATE commits (sync flips
+ * `loading`/`refreshing` during the IPC window; those identity moves do not
+ * settle the outcome). Production `sync()` never rejects; failures settle
+ * into the instance state:
  * - 'refreshed': the SETTLED snapshot reports a live catalog with no errorCode;
  * - 'pending': the settled snapshot has no catalog yet — relations changed
  *   while the catalog awaits re-verification;
@@ -209,6 +211,16 @@ const MEMBER_CIRCLE_NETWORK_CLASS_CODES: ReadonlySet<string> = new Set([
   'timeout',
   'service_unavailable',
 ])
+
+/**
+ * Bounded fallback for the catalog settle await: normally the outcome is
+ * released by the commit observer when the injected instance renders a
+ * TERMINAL post-sync snapshot (this REQUIRES the holder to re-render the
+ * instance after its sync settles — the normal React flow). If that never
+ * happens, the awaiting leave/return flow is released from the current fact
+ * after this timeout instead of hanging forever.
+ */
+export const MEMBER_CIRCLES_CATALOG_SETTLE_TIMEOUT_MS = 10_000
 
 export function isMemberCircleNetworkClassError(
   error: MemberCircleReadError | null,
@@ -380,6 +392,18 @@ export function useMemberCirclesResource(
     return 'pending'
   }, [])
 
+  /**
+   * Terminal-snapshot guard: sync's OWN intermediate commits flip
+   * `loading`/`refreshing` while the IPC is in flight (useAppCatalog.ts sets
+   * `loading: !current.catalog, refreshing: Boolean(current.catalog)` at
+   * sync start and lands both back to false in every terminal branch). An
+   * identity move alone is therefore NOT settle-worthy — only a snapshot
+   * with neither flag set may complete the outcome.
+   */
+  const isCatalogSnapshotSettled = useCallback((instance: AppCatalogInstance | null): instance is AppCatalogInstance => (
+    instance !== null && instance.state.refreshing !== true && instance.state.loading !== true
+  ), [])
+
   // Track the injected instance's latest rendered state identity: H1 returns
   // a NEW instance object per render, so the prop reference moving is the
   // commit signal.
@@ -388,17 +412,22 @@ export function useMemberCirclesResource(
   }, [catalog])
 
   // Commit observer: when the observed state identity has moved past the one
-  // captured at sync-issue time, the post-sync snapshot has been rendered —
-  // judge from it and release the awaiting outcome.
+  // captured at sync-issue time AND the committed snapshot is TERMINAL (not
+  // one of sync's own intermediate refreshing/loading flips), judge from it
+  // and release the awaiting outcome. Intermediate commits keep waiting.
   useEffect(() => {
     const pending = catalogSettleRef.current
     if (!pending) return
     if (observedCatalogState === pending.stateAtIssue) return
+    const latest = catalogRef.current
+    if (!isCatalogSnapshotSettled(latest)) return
     catalogSettleRef.current = null
-    pending.resolve(judgeCatalogOutcome(catalogRef.current))
-  }, [observedCatalogState, judgeCatalogOutcome])
+    pending.resolve(judgeCatalogOutcome(latest))
+  }, [observedCatalogState, judgeCatalogOutcome, isCatalogSnapshotSettled])
 
-  // Unmount settlement: never leave an awaiting outcome hanging.
+  // Unmount settlement: never leave an awaiting outcome hanging. Current-fact
+  // semantics by design (no terminal guard — the advisory on the outcome type
+  // already states the result is never proof of catalog currency).
   useEffect(() => () => {
     const pending = catalogSettleRef.current
     if (pending) {
@@ -585,11 +614,13 @@ export function useMemberCirclesResource(
     // snapshot — the instance state visible in the same continuation as the
     // awaited sync is still the PRE-sync one, so no judgment happens here.
     // Capture the state identity AT ISSUE, then either judge an already-
-    // committed post-sync snapshot, or hand the outcome to the commit
-    // observer (which fires when the identity moves) / the scope-teardown
-    // settlement (which reports from the current fact). A throwing sync is
-    // reported as failed, defensively. A catalog failure never rolls the
-    // relations back.
+    // committed TERMINAL post-sync snapshot, or hand the outcome to the
+    // commit observer (which fires when the identity moves to a TERMINAL
+    // snapshot — sync's own intermediate refreshing/loading flips keep it
+    // waiting; a bounded fallback releases from the current fact if no
+    // terminal snapshot ever commits) / the scope-teardown settlement (which
+    // reports from the current fact). A throwing sync is reported as failed,
+    // defensively. A catalog failure never rolls the relations back.
     let catalogOutcome: MemberCirclesInvalidationOutcome['catalog'] = 'unavailable'
     const requestedCatalog = catalogRef.current
     if (requestedCatalog) {
@@ -602,17 +633,34 @@ export function useMemberCirclesResource(
       if (!isScopeCurrent(fence)) {
         // The scope died mid-sync: report from the current fact, no waiting.
         catalogOutcome = judgeCatalogOutcome(catalogRef.current)
-      } else if (catalogRef.current && catalogRef.current.state !== stateAtIssue) {
-        // A post-sync snapshot is already committed.
+      } else if (
+        catalogRef.current
+        && catalogRef.current.state !== stateAtIssue
+        && isCatalogSnapshotSettled(catalogRef.current)
+      ) {
+        // A TERMINAL post-sync snapshot is already committed.
         catalogOutcome = judgeCatalogOutcome(catalogRef.current)
       } else {
         catalogOutcome = await new Promise<MemberCirclesInvalidationOutcome['catalog']>(resolve => {
-          catalogSettleRef.current = { stateAtIssue, resolve }
+          const settleTimer = setTimeout(() => {
+            // Bounded fallback: if no terminal snapshot ever commits (the
+            // holder stopped re-rendering), release from the CURRENT fact
+            // instead of hanging the leave/return flow forever.
+            if (catalogSettleRef.current?.resolve === guardedResolve) {
+              catalogSettleRef.current = null
+              resolve(judgeCatalogOutcome(catalogRef.current))
+            }
+          }, MEMBER_CIRCLES_CATALOG_SETTLE_TIMEOUT_MS)
+          const guardedResolve: (outcome: MemberCirclesInvalidationOutcome['catalog']) => void = outcome => {
+            clearTimeout(settleTimer)
+            resolve(outcome)
+          }
+          catalogSettleRef.current = { stateAtIssue, resolve: guardedResolve }
         })
       }
     }
     return { relations, catalog: catalogOutcome, circleId, orderId }
-  }, [fetchRelations, isScopeCurrent, judgeCatalogOutcome])
+  }, [fetchRelations, isScopeCurrent, judgeCatalogOutcome, isCatalogSnapshotSettled])
 
   const previewRenewal = useCallback(async (membershipId: string) => (
     runScopedCommand(api => api.previewRenewal(membershipId))
