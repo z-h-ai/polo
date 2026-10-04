@@ -4,14 +4,13 @@ import type { TFunction } from 'i18next'
 import { Trans, useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
-import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import type { HomeQuickAccessApp } from '@polo-ai/shared/config/home-quick-access'
 import {
   MAX_HOME_QUICK_ACCESS_APPS,
 } from '@polo-ai/shared/config/home-quick-access'
-import { AppIcon } from './AppIcon'
 import { AllAppsView } from './AllAppsView'
 import { ManageHomeAppsDialog } from './ManageHomeAppsDialog'
+import { MemberAppCard } from './MemberAppCard'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -22,13 +21,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAppCatalog } from '@/hooks/useAppCatalog'
+import { useMemberAppActions } from '@/hooks/useMemberAppActions'
+import { MemberCatalogProvider } from '@/context/MemberCatalogContext'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
 import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
 import { POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
 import {
   catalogStateMessage,
-  getHomeAppErrorCode,
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
 import {
@@ -92,17 +92,6 @@ export function formatBytes(t: TFunction, sizeBytes: number): string {
   return `${
     size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)
   } ${t(unitKeys[unit]!)}`
-}
-
-type BundleAppLaunch = ResolveLaunchResponse & {
-  subject: Extract<ResolveLaunchResponse['subject'], { kind: 'artifact_instance' }>
-  delivery: Extract<ResolveLaunchResponse['delivery'], { kind: 'bundle' }>
-}
-
-function isBundleAppLaunch(launch: ResolveLaunchResponse): launch is BundleAppLaunch {
-  return launch.subject.kind === 'artifact_instance'
-    && launch.subject.artifactType === 'app'
-    && launch.delivery.kind === 'bundle'
 }
 
 export function createEnterpriseWorkflowUrl(
@@ -295,11 +284,6 @@ export function HomePage() {
   // target-scope first commit could display the previous scope's count
   // (R39 review). It returns to the frozen neutral "Polo 内置" until a
   // scope-keyed authoritative source exists.
-  const [installTarget, setInstallTarget] = useState<{
-    app: CatalogApp
-    launch: BundleAppLaunch
-  } | null>(null)
-  const installTargetApp = installTarget?.app ?? null
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [showCirclesCard, setShowCirclesCard] = useState(false)
   const [preserveData, setPreserveData] = useState(true)
@@ -679,56 +663,18 @@ export function HomePage() {
     return persistQuickToggle(quickContextKey, scopeKey, enabled)
   }
 
-  const openCatalogApp = async (app: CatalogApp) => {
-    if (app.availability !== 'available') {
-      toast.error(t('homeApps.errors.unavailable'))
-      return
-    }
-    try {
-      const accountId = catalog.state.catalog?.accountId
-      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
-      const launch = await catalog.resolveLaunch(app)
-      if (isBundleAppLaunch(launch)) {
-        const installState = catalog.getInstallState(app)
-        if (
-          installState?.state !== 'installed'
-          || installState.currentVersion !== launch.subject.version
-        ) {
-          setInstallTarget({ app, launch })
-          return
-        }
-      }
-      launchHandoff.publish(accountId, launch)
-    } catch (error) {
-      toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'open', spaceKind),
-      })
-    }
-  }
-
-  const confirmInstall = async () => {
-    const target = installTarget
-    if (!target) return
-    setInstallTarget(null)
-    const { app } = target
-    try {
-      await catalog.installProductSpaceBundle(app)
-      toast.success(t('homeApps.toast.installed', { name: app.name }))
-      const accountId = catalog.state.catalog?.accountId
-      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
-      const launch = await catalog.resolveLaunch(app)
-      if (!isBundleAppLaunch(launch)) {
-        throw new Error(t('homeApps.errors.staleContext'))
-      }
-      launchHandoff.publish(accountId, launch)
-    } catch (error) {
-      if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
-        toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
-          description: homeAppOperationErrorText(t, error, 'install', spaceKind),
-        })
-      }
-    }
-  }
+  // POO-70 H2 extraction (P70-CARD-02): open/prepare/permission-feedback
+  // actions live in useMemberAppActions, driven by THIS page's original
+  // catalog instance (injected — no second useAppCatalog, no Provider
+  // requirement for the hook itself). The same instance is shared downward
+  // through MemberCatalogProvider so H1's member catalog surface and this
+  // page stay one authority. Launch authority remains with the catalog's
+  // resolveLaunch + the existing handoff publish.
+  const memberActions = useMemberAppActions({
+    context: { spaceKind, launchHandoff },
+    catalog,
+  })
+  const prepareTargetApp = memberActions.prepareTarget?.app ?? null
 
   const confirmUninstall = async () => {
     const app = uninstallTarget
@@ -764,24 +710,6 @@ export function HomePage() {
     }
   }
 
-  // Frozen POO-41 home-card contract: every server-authoritative
-  // catalogSources entry stays visible with its identity — creator_circle
-  // entries carry the localized 认证创作者 label, other entries keep their
-  // organization/source name, and multiplicity is preserved.
-  const renderQuickEntrySource = (app: CatalogApp) => {
-    const sources = app.catalogSources?.length
-      ? app.catalogSources
-      : (app.sourceNames ?? []).map((name) => ({ kind: '', name }))
-    if (sources.length === 0) return t('homeApps.allApps.unknownSource')
-    return sources
-      .map((source) => (
-        source.kind === 'creator_circle' && source.name
-          ? t('homeApps.home.certifiedCreatorSource', { creator: source.name })
-          : source.name || t('homeApps.allApps.unknownSource')
-      ))
-      .join(' · ')
-  }
-
   // Runtime status for a quick-entry card (prototype status badge, e.g.
   // 运行中): looked up through the runtime scope key, never the UI identity
   // key. A failed scope derivation simply means "no badge".
@@ -802,14 +730,21 @@ export function HomePage() {
     && homeWorkCards.length === 0
 
   return (
-    // Frozen POO-41 `.main` mirror: the centered 1260px column with the
-    // breakpoint paddings INSIDE it, content-sized exactly like the frozen
-    // `.main` element. Scrolling is owned by the DEDICATED wrapper above
-    // (h-full min-h-0 overflow-y-auto): html/body/#root are overflow-hidden
-    // globally and the region element must stay content-sized, so the
-    // wrapper — never the region — owns viewport-bounded scrolling. Every
-    // launcher row and Catalog App below the fold stays reachable (R39/R40
-    // review).
+    // H1 handoff (injection mode): the SAME catalog instance this page owns
+    // is shared downward through the member catalog context. The injected
+    // branch of MemberCatalogProvider is a pure Context.Provider — no second
+    // useAppCatalog instance, no duplicate catalog syncs. HomePage itself
+    // keeps its original instance; switching the page onto useMemberCatalog
+    // is deferred to H3 (POO-91, depends on N1).
+    <MemberCatalogProvider catalog={catalog}>
+    {/* Frozen POO-41 `.main` mirror: the centered 1260px column with the
+    breakpoint paddings INSIDE it, content-sized exactly like the frozen
+    `.main` element. Scrolling is owned by the DEDICATED wrapper above
+    (h-full min-h-0 overflow-y-auto): html/body/#root are overflow-hidden
+    globally and the region element must stay content-sized, so the
+    wrapper — never the region — owns viewport-bounded scrolling. Every
+    launcher row and Catalog App below the fold stays reachable (R39/R40
+    review). */}
     <div className="h-full min-h-0 overflow-y-auto">
     <main
       className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
@@ -834,7 +769,7 @@ export function HomePage() {
             circleCount={catalog.creatorCircles?.length ?? 0}
             onPin={pinApp}
             onRefresh={() => { void catalog.sync(true) }}
-            onOpen={(target) => { void openCatalogApp(target) }}
+            onOpen={(target) => { void memberActions.open(target) }}
             onUninstall={setUninstallTarget}
             onBack={() => setView('home')}
           />
@@ -997,57 +932,17 @@ export function HomePage() {
                   </div>
                 ) : (
                   <>
-                    {homeWorkCards.map((app) => {
-                      const runtimeStatus = runtimeStatusFor(app)
-                      return (
-                        <article
-                          key={uiKeyForApp(app)}
-                          data-testid="home-quick-entry"
-                          data-identity-key={uiKeyForApp(app)}
-                          onClick={() => { void openCatalogApp(app) }}
-                          className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
-                        >
-                          <span className="mb-[26px] grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success">
-                            {app.iconUrl
-                              ? <img src={app.iconUrl} alt="" className="size-full object-cover" />
-                              : <span className="text-[17px] font-semibold">{app.name.slice(0, 1)}</span>}
-                          </span>
-                          <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
-                          <p className="mt-[4px] truncate text-[12px] leading-[normal] text-muted-foreground">
-                            {renderQuickEntrySource(app)}
-                          </p>
-                          <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
-                            {app.description || t('homeApps.noDescription')}
-                          </p>
-                          <div
-                            className={
-                              runtimeStatus?.status === 'running'
-                                ? 'mt-auto flex items-center justify-between gap-[6px] pt-[14px]'
-                                : 'mt-auto flex items-center justify-end gap-[7px] pt-[14px]'
-                            }
-                          >
-                            {runtimeStatus?.status === 'running' && (
-                              <span className="inline-flex min-h-[20px] items-center gap-[5px] whitespace-nowrap rounded-[4px] bg-info/10 px-[7px] text-[10px] font-medium text-info">
-                                <span className="size-[5px] rounded-full bg-info" aria-hidden="true" />
-                                {t('homeApps.status.running')}
-                              </span>
-                            )}
-                            {/* Prototype `.home-app-grid .card-action`:
-                            borderless quiet label, fg-5 hover fill. */}
-                            <button
-                              type="button"
-                              className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void openCatalogApp(app)
-                              }}
-                            >
-                              {t('common.open')}
-                            </button>
-                          </div>
-                        </article>
-                      )
-                    })}
+                    {homeWorkCards.map((app) => (
+                      <MemberAppCard
+                        key={uiKeyForApp(app)}
+                        variant="home"
+                        app={app}
+                        runtimeStatus={runtimeStatusFor(app)}
+                        identityKey={uiKeyForApp(app)}
+                        testId="home-quick-entry"
+                        onOpen={(target) => { void memberActions.open(target) }}
+                      />
+                    ))}
                   </>
                 )}
               </div>
@@ -1101,39 +996,39 @@ export function HomePage() {
         onToggle={toggleQuickAccess}
       />
 
-      <Dialog open={Boolean(installTarget)} onOpenChange={(open) => {
-        if (!open) setInstallTarget(null)
+      <Dialog open={Boolean(memberActions.prepareTarget)} onOpenChange={(open) => {
+        if (!open) memberActions.cancelPrepare()
       }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {installTargetApp && catalog.getInstallState(installTargetApp)?.state === 'installed'
+              {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
                 ? t('homeApps.install.updateTitle', {
-                    name: installTargetApp.name,
+                    name: prepareTargetApp.name,
                   })
                 : t('homeApps.install.installTitle', {
-                    name: installTargetApp?.name ?? t('homeApps.appFallback'),
+                    name: prepareTargetApp?.name ?? t('homeApps.appFallback'),
                   })}
             </DialogTitle>
             <DialogDescription>
               {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
-          {installTargetApp && installTarget && (
+          {prepareTargetApp && memberActions.prepareTarget && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.version')}
                   </p>
-                  <p className="mt-1 font-medium">{installTarget.launch.subject.version}</p>
+                  <p className="mt-1 font-medium">{memberActions.prepareTarget.launch.subject.version}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.downloadSize')}
                   </p>
                   <p className="mt-1 font-medium">
-                    {formatBytes(t, installTarget.launch.delivery.sizeBytes)}
+                    {formatBytes(t, memberActions.prepareTarget.launch.delivery.sizeBytes)}
                   </p>
                 </div>
               </div>
@@ -1141,9 +1036,9 @@ export function HomePage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t('homeApps.install.permissions')}
                 </p>
-                {installTargetApp.permissions?.length ? (
+                {prepareTargetApp.permissions?.length ? (
                   <ul className="mt-2 space-y-1.5">
-                    {installTargetApp.permissions.map(permission => (
+                    {prepareTargetApp.permissions.map(permission => (
                       <li key={permission} className="flex items-start gap-2">
                         <Icons.ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                         <span>{permission}</span>
@@ -1159,11 +1054,11 @@ export function HomePage() {
             </div>
           )}
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setInstallTarget(null)}>
+            <Button type="button" variant="secondary" onClick={() => memberActions.cancelPrepare()}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" onClick={() => { void confirmInstall() }}>
-              {installTargetApp && catalog.getInstallState(installTargetApp)?.state === 'installed'
+            <Button type="button" onClick={() => { void memberActions.confirmPrepare() }}>
+              {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
             </Button>
@@ -1217,5 +1112,6 @@ export function HomePage() {
 
     </main>
     </div>
+    </MemberCatalogProvider>
   )
 }
