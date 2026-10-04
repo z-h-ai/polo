@@ -572,6 +572,48 @@ describe('member circle client surface', () => {
     }
   })
 
+  it('sends the provider login boundary header on login (POO-77 API-AUTH-01a)', async () => {
+    // polo-admin dev@83acdeca normalizes a MISSING x-client to
+    // `admin-console` (login/handler.ts normalizeLoginClient) and that
+    // boundary admits only staff platform_admins — a business member's
+    // password login failed 403 "Admin request is not permitted" in the
+    // POO-77 V1 acceptance. The desktop must declare its consumption-grade
+    // client explicitly, inside the provider's SessionClient set.
+    const requests: Array<{ url: string; init: RequestInit }> = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        url: typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url,
+        init: init ?? {},
+      })
+      return new Response(JSON.stringify({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user: {
+          id: 'user-1',
+          username: 'member-a',
+          displayName: null,
+          role: 'member',
+          groupIds: [],
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof globalThis.fetch
+    try {
+      const client = new AdminClient('https://admin.example.com')
+      await client.login('member-a', 'secret')
+      expect(requests).toHaveLength(1)
+      expect(requests[0]!.url).toBe('https://admin.example.com/api/auth/login')
+      const headers = new Headers(requests[0]!.init.headers)
+      expect(headers.get('x-client')).toBe('organization-console')
+      // A declared boundary is a business surface: staff-only alternatives
+      // (admin-console / polo-operations) must never be selected.
+      expect(['admin-console', 'polo-operations']).not.toContain(headers.get('x-client'))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('constructs the leave request body from the single strict command', async () => {
     const requests: Array<{ path: string; options: { method: string; body?: unknown } }> = []
     const prototype = AdminClient.prototype as unknown as Record<string, unknown>

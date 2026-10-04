@@ -260,6 +260,27 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
 const MAX_RETRY_AFTER_SECONDS = 86_400;
 export const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Login consumption boundary declared to Polo Admin via the `x-client`
+ * header. POO-77 V1 acceptance (API-AUTH-01a / API-AUTH-01a-CLIENT-BOUNDARY):
+ * the provider normalizes a MISSING x-client to `admin-console`
+ * (polo-admin dev@83acdeca `src/app/api/auth/login/handler.ts`
+ * normalizeLoginClient), and the admin-console boundary admits ONLY staff
+ * platform_admins — a business member's password login therefore fails 403
+ * before any token is signed.
+ *
+ * The Electron desktop is a business member consumption surface, so it
+ * declares `organization-console`: the same business-only boundary the
+ * provider's phone-auth chain already assigns to header-less callers
+ * (`src/app/api/auth/phone/verify/route.ts` resolvePhoneSessionClient —
+ * "every other caller keeps the consumption-grade default"), keeping both
+ * desktop login paths in one boundary family. The value must stay inside
+ * the provider's six-value SessionClient set (`src/lib/auth.ts`); unknown
+ * values are rejected with 400 before credential checks.
+ */
+export const ADMIN_LOGIN_CLIENT_HEADER_NAME = 'x-client' as const;
+export const ADMIN_LOGIN_CLIENT = 'organization-console' as const;
+
 export function getSafeAdminErrorMessage(
   errorCode: AdminErrorCode,
   status?: number,
@@ -307,6 +328,9 @@ export class AdminClient {
   async login(identifier: string, password: string): Promise<AdminLoginResponse> {
     const response = await this.request<unknown>('/api/auth/login', {
       method: 'POST',
+      headers: {
+        [ADMIN_LOGIN_CLIENT_HEADER_NAME]: ADMIN_LOGIN_CLIENT,
+      },
       body: { identifier, password },
     });
     return this.readSuccessResponse(response, AdminLoginResponseSchema);
