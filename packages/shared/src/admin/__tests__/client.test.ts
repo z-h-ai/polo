@@ -49,9 +49,13 @@ describe('AdminClient', () => {
     expect(result).toEqual(response);
     expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/login');
     expect(fetchCalls[0]!.init.method).toBe('POST');
+    // x-client is the provider login boundary (POO-77 API-AUTH-01a): the
+    // desktop declares its consumption-grade client so business accounts
+    // are not defaulted into the staff-only admin-console boundary.
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
       'Content-Type': 'application/json',
+      'x-client': 'organization-console',
     });
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
       identifier: 'admin',
