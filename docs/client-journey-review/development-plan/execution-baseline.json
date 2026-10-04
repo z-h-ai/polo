@@ -2,7 +2,7 @@
   "version": 1,
   "task_id": "POO-80",
   "slice": "poo70-entry-f0",
-  "generated_at": "2026-10-04T08:40:46",
+  "generated_at": "2026-10-04T08:45:25",
   "generated_by": "POO-80 owner agent (zcode-orchestrator-poo70)",
   "purpose": "记录执行基线事实与继承结果；不新增政策，不代表产品验收",
   "plan": {
@@ -18,7 +18,7 @@
     "branch": "integration/poo70-client-entry-r15",
     "workdir": "/Users/wow/project/z-h-ai/polo-dir/integration/poo70-client-entry-r15",
     "head_at_check": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
-    "worktree_head": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+    "worktree_head": "7bcfa23867553b4db0fd9db870791bb9dc527470",
     "minimum_design_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b",
     "ancestor_check": "pass",
     "created_by": "POO-70 docs 任务（本轮设计源传播），POO-80 只核对不重建",
@@ -26,7 +26,7 @@
     "dev_commits_not_in_integration": [
       "eacda68e Merge origin/integration/pol68-g5-client into dev (POO-72)"
     ],
-    "integration_commits_not_in_dev_count": "43",
+    "integration_commits_not_in_dev_count": 43,
     "policy": "不从 dev 覆盖回旧实现；不合并 dev/main；不推送；不部署"
   },
   "design_source": {
@@ -138,173 +138,176 @@
     "missing_interface": "未落地上游接口在其集成后自动 re-pin；缺接口真实验收保持 pending"
   },
   "tasks": {
-    "POO-77": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-77/chore/client-entry-v1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-78": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-78/chore/client-entry-v2",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-79": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-79/chore/client-entry-v3",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-80": {
-      "notma_status": "in-progress",
-      "notma_workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-80/chore/client-entry-f0",
-      "branch": "POO-80/chore/client-entry-f0",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-81": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-81/chore/client-entry-f1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-82": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-82/feat/client-entry-a1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-83": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-83/feat/client-entry-a2",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-84": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-84/feat/client-entry-a3",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-85": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-85/feat/client-entry-h1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-86": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-86/feat/client-entry-a4",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-87": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-87/feat/client-entry-h2",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-88": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-88/feat/client-entry-c1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-89": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-89/feat/client-entry-n1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-90": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-90/feat/client-entry-c2",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-91": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-91/feat/client-entry-h3",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-92": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-92/feat/client-entry-c3",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-93": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-93/feat/client-entry-c4",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-94": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-94/feat/client-entry-c5",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-95": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-95/feat/client-entry-c6",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-96": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-96/feat/client-entry-c7",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-97": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-97/feat/client-entry-b1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-98": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-98/feat/client-entry-s1",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-99": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-99/feat/client-entry-c8",
-      "ai_run_active": false,
-      "ai_run_exists": false
-    },
-    "POO-100": {
-      "notma_status": "todo",
-      "notma_workdir": "",
-      "branch": "POO-100/feat/client-entry-c9",
-      "ai_run_active": false,
-      "ai_run_exists": false
+    "as_of": "本节为生成时点快照；实时状态以 Notma 为准",
+    "cards": {
+      "POO-77": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-77/chore/client-entry-v1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-78": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-78/chore/client-entry-v2",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-79": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-79/chore/client-entry-v3",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-80": {
+        "notma_status": "review",
+        "notma_workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-80/chore/client-entry-f0",
+        "branch": "POO-80/chore/client-entry-f0",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-81": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-81/chore/client-entry-f1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-82": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-82/feat/client-entry-a1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-83": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-83/feat/client-entry-a2",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-84": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-84/feat/client-entry-a3",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-85": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-85/feat/client-entry-h1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-86": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-86/feat/client-entry-a4",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-87": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-87/feat/client-entry-h2",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-88": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-88/feat/client-entry-c1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-89": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-89/feat/client-entry-n1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-90": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-90/feat/client-entry-c2",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-91": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-91/feat/client-entry-h3",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-92": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-92/feat/client-entry-c3",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-93": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-93/feat/client-entry-c4",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-94": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-94/feat/client-entry-c5",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-95": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-95/feat/client-entry-c6",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-96": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-96/feat/client-entry-c7",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-97": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-97/feat/client-entry-b1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-98": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-98/feat/client-entry-s1",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-99": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-99/feat/client-entry-c8",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      },
+      "POO-100": {
+        "notma_status": "todo",
+        "notma_workdir": "",
+        "branch": "POO-100/feat/client-entry-c9",
+        "ai_run_active": false,
+        "ai_run_exists": false
+      }
     }
   },
   "existing_worktrees": [
@@ -389,7 +392,7 @@
     {
       "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-80/chore/client-entry-f0",
       "branch": "POO-80/chore/client-entry-f0",
-      "head": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+      "head": "7bcfa23867553b4db0fd9db870791bb9dc527470",
       "dirty_files": 1
     }
   ],
