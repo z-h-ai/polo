@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "确认退出",
   "poo70.c7.dialog.confirming": "正在退出…",
   "poo70.c7.dialog.errorRejected": "退出失败，你仍在该圈子中；可重试。",
+  "poo70.c7.dialog.errorSuspended": "会员关系已暂停，退出不可用；恢复会员状态后可再退出。",
   "poo70.c7.dialog.errorSession": "登录状态已变化，未执行退出；请重新确认。",
   "poo70.c7.dialog.errorStillMember": "退出未完成，核对你仍然是该圈子成员；可重试。",
   "poo70.c7.dialog.note": "确认后立即退出该圈子；取消不变更任何授权。",

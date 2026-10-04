@@ -303,7 +303,7 @@ function TestHost({
   initialCatalog,
 }: {
   apiRef: { current: UseLeaveCircleResult | null }
-  initialCatalog: CatalogDouble
+  initialCatalog: CatalogDouble | null
 }) {
   const [catalog, setCatalog] = useState(initialCatalog)
   const [, setNonce] = useState(0)
@@ -318,9 +318,15 @@ function TestHost({
   })
 }
 
-function renderFlow() {
+function renderFlow(options: { withCatalog?: boolean } = {}) {
   const apiRef: { current: UseLeaveCircleResult | null } = { current: null }
-  render(createElement(TestHost, { apiRef, initialCatalog: createCatalogInstance() }))
+  render(createElement(TestHost, {
+    apiRef,
+    // `withCatalog: false` mounts the provider WITHOUT the H1 instance — the
+    // P2 case where C2's invalidateAndRefresh returns without any settle
+    // await, so verdicts must still come from COMMITTED receipts only.
+    initialCatalog: options.withCatalog === false ? null : createCatalogInstance(),
+  }))
   return apiRef
 }
 
@@ -410,6 +416,12 @@ describe('judgeMembershipLeft (authoritative receipt verdict)', () => {
 
   it('active row present → member', () => {
     expect(judgeMembershipLeft([{ membershipId: 'm-1', status: 'active' }], 'm-1')).toBe('member')
+  })
+
+  it('P1: suspended row present → suspended (NOT left — F1 409 fires for status ≠ active)', () => {
+    // A suspended relation is NOT a departure: the user is still a member,
+    // cannot leave (409) and must never be presented as 已退出 / rejoinable.
+    expect(judgeMembershipLeft([{ membershipId: 'm-1', status: 'suspended' }], 'm-1')).toBe('suspended')
   })
 
   it('row absent → left (no active relation)', () => {
@@ -686,6 +698,134 @@ describe('useLeaveCircle — 结果未知只重读 (503 / F1 409 replay)', () =>
     expect(screen.queryByTestId('leave-circle-dialog')).toBeNull()
     expect(apiRef.current!.state.outcome).toBeNull()
   })
+
+  it('P1 regression: a 409 replay + SUSPENDED receipt reads 暂停, never 已退出 and never rejoinable', async () => {
+    // F1: leave_now on a suspended relation answers 409 — the user has NOT
+    // left, cannot rejoin, and must not be shown the 已退出 presentation.
+    leaveImpl = async () => failure('conflict')
+    const suspendedRow = { ...membership('circle-a'), membershipId: 'm-1', status: 'suspended' as const }
+    listMembershipsImpl = async () => success({ memberships: [suspendedRow] })
+    const apiRef = renderFlow()
+    await waitFor(() => expect(apiRef.current).not.toBeNull())
+    await requestLeave(apiRef, { membershipId: 'm-1' })
+
+    await clickConfirm()
+    await flushFlow()
+    await commitCatalogAndSettle()
+
+    await waitFor(() => expect(screen.getByTestId('leave-circle-dialog-error')).toBeTruthy())
+    expect(screen.getByTestId('leave-circle-dialog-error').textContent).toContain('暂停')
+    expect(apiRef.current!.state.outcome).toMatchObject({ kind: 'suspended', membershipId: 'm-1' })
+    expect(callCounts.leave).toBe(1)
+    // The retry is contract-doomed (suspended cannot be left): disabled.
+    expect(confirmButton().disabled).toBe(true)
+  })
+
+  it('P2-1(a): without a mounted catalog the verdict is judged from the COMMITTED receipt, not the stale pre-invalidate one', async () => {
+    leaveImpl = async () => failure('service_unavailable')
+    // The MOUNT receipt says ACTIVE m-1; the re-read says EXPIRED m-1. A
+    // same-continuation stale read would misjudge member (inducing a second
+    // write) or unverifiable; the committed-snapshot verdict is left.
+    const activeRow = { ...membership('circle-a'), membershipId: 'm-1', status: 'active' as const }
+    let fetchCount = 0
+    listImpl = async () => success({ circles: [circle('circle-a')] })
+    listMembershipsImpl = async () => {
+      fetchCount += 1
+      if (fetchCount === 1) return success({ memberships: [activeRow] })
+      return success({ memberships: [{ ...activeRow, status: 'expired' as const }] })
+    }
+    const apiRef = renderFlow({ withCatalog: false })
+    await waitFor(() => expect(apiRef.current).not.toBeNull())
+    await requestLeave(apiRef, { membershipId: 'm-1' })
+
+    await clickConfirm()
+    await flushFlow()
+
+    await waitFor(() => expect(apiRef.current!.state.outcome?.kind).toBe('left'))
+    // No H1 instance was injected: the relations verdict stands but the
+    // catalog was not re-verified — honestly pending-recheck.
+    expect(apiRef.current!.state.outcome).toMatchObject({
+      kind: 'left',
+      membershipId: 'm-1',
+      verification: 'pending-recheck',
+    })
+    expect(callCounts.leave).toBe(1)
+    expect(await screen.queryByTestId('leave-circle-dialog')).toBeNull()
+  })
+
+  it('P2-1(b): an account switch during the auto re-verification fails the verdict closed — another account\'s receipt never proves left', async () => {
+    leaveImpl = async () => failure('timeout')
+    // Both relations reads hang until the test releases them — the rebind
+    // supersedes the in-flight refetch before any receipt can be applied.
+    const slowRead = deferred<unknown>()
+    listImpl = () => slowRead.promise
+    listMembershipsImpl = () => slowRead.promise
+    const apiRef = renderFlow()
+    await waitFor(() => expect(apiRef.current).not.toBeNull())
+    await requestLeave(apiRef, { membershipId: 'm-1' })
+    await clickConfirm()
+    await flushFlow()
+    expect(apiRef.current!.state.dialog).toMatchObject({ phase: 'recheck', busy: true })
+
+    // Account B signs in mid-recheck; B's receipts do not contain m-1 at all.
+    productSpaceContextState = spaceContext({ accountId: 'account-b', contextVersion: 2 })
+    await act(async () => {
+      forceHostRender()
+      slowRead.resolve(success({ circles: [circle('circle-b')], memberships: [membership('circle-b')] }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+
+    // Fail closed: unresolved recheck, no left claim, no second write.
+    await waitFor(() => expect(apiRef.current!.state.dialog).toMatchObject({
+      phase: 'recheck',
+      busy: false,
+      recheckUnresolved: true,
+    }))
+    expect(apiRef.current!.state.outcome).toBeNull()
+    expect(callCounts.leave).toBe(1)
+  })
+
+  it('P2-2: an unresolved recheck keeps a READ-ONLY recovery — cancel, then reverify() proves left without any second write', async () => {
+    leaveImpl = async () => failure('timeout')
+    listImpl = async () => success({ circles: [circle('circle-a')] })
+    let membershipsFail = true
+    listMembershipsImpl = async () => {
+      if (membershipsFail) return failure('network_error')
+      return success({
+        memberships: [{ ...membership('circle-a'), membershipId: 'm-1', status: 'expired' as const }],
+      })
+    }
+    const apiRef = renderFlow()
+    await waitFor(() => expect(apiRef.current).not.toBeNull())
+    await requestLeave(apiRef, { membershipId: 'm-1' })
+
+    // First re-verification half-fails → honestly unresolved.
+    await clickConfirm()
+    await flushFlow()
+    await commitCatalogAndSettle()
+    await waitFor(() => expect(screen.getByTestId('leave-circle-dialog-recheck')).toBeTruthy())
+    expect(apiRef.current!.state.outcome).toBeNull()
+
+    // Dismiss the unresolved recheck; the read-only recovery stays available.
+    fireEvent.click(screen.getByTestId('leave-circle-dialog-cancel'))
+    await act(async () => {})
+    expect(screen.queryByTestId('leave-circle-dialog')).toBeNull()
+
+    membershipsFail = false
+    const writesBefore = callCounts.leave
+    const listBefore = callCounts.list
+    act(() => {
+      apiRef.current!.reverify()
+    })
+    await flushFlow()
+    await commitCatalogAndSettle()
+
+    await waitFor(() => expect(apiRef.current!.state.outcome?.kind).toBe('left'))
+    expect(apiRef.current!.state.outcome).toMatchObject({ kind: 'left', membershipId: 'm-1', verification: 'fresh' })
+    // Read-only: reads happened, the write count did not move.
+    expect(callCounts.leave).toBe(writesBefore)
+    expect(callCounts.list).toBeGreaterThan(listBefore)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -702,14 +842,7 @@ describe('useLeaveCircle — P70-LEAVE-02 (成功刷新 / 两源变一源 / 最�
     leaveImpl = async membershipId => success({ membership: leaveReceipt(membershipId, 'circle-a') })
     // After the leave, the refreshed receipts keep circle-b (still valid) and
     // the expired circle-a relation (F1: expired rows stay listed).
-    let mountFetchDone = false
-    listImpl = async () => {
-      if (!mountFetchDone) {
-        mountFetchDone = true
-        return success({ circles: [circle('circle-a'), circle('circle-b')] })
-      }
-      return success({ circles: [circle('circle-a'), circle('circle-b')] })
-    }
+    listImpl = async () => success({ circles: [circle('circle-a'), circle('circle-b')] })
     let membershipsFetchCount = 0
     const mountMemberships = listMembershipsImpl
     listMembershipsImpl = async () => {
@@ -812,7 +945,7 @@ describe('useLeaveCircle — P70-LEAVE-02 (成功刷新 / 两源变一源 / 最�
     expect(apiRef.current!.state.reverifying).toBe(false)
   })
 
-  it('reverify() is refused without a left outcome (nothing to re-verify)', async () => {
+  it('reverify() is refused with no flow target at all (nothing requested, nothing to re-verify)', async () => {
     const apiRef = renderFlow()
     await waitFor(() => expect(apiRef.current).not.toBeNull())
     const listBefore = callCounts.list
@@ -847,6 +980,11 @@ describe('LeaveCircleDialog presentation', () => {
   it('renders the read-only recheck status while the leave result is unknown', async () => {
     const slowLeave = deferred<unknown>()
     leaveImpl = () => slowLeave.promise
+    // The automatic re-verification's reads hang on the same deferred pair so
+    // the recheck-in-flight state is deterministic under observation.
+    const slowRead = deferred<unknown>()
+    listImpl = () => slowRead.promise
+    listMembershipsImpl = () => slowRead.promise
     const apiRef = renderFlow()
     await waitFor(() => expect(apiRef.current).not.toBeNull())
     await requestLeave(apiRef, { membershipId: 'm-1' })
@@ -864,9 +1002,28 @@ describe('LeaveCircleDialog presentation', () => {
     expect(confirmButton().disabled).toBe(true)
     expect(callCounts.leave).toBe(1)
 
-    // The re-read settles from the fresh receipt: row absent → left.
+    // The re-read settles from the fresh receipt: row absent → left. The C2
+    // settle still needs one committed H1 snapshot to release the leave.
+    await act(async () => {
+      slowRead.resolve(success({ circles: [circle('circle-a')], memberships: [membership('circle-a')] }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
     await commitCatalogAndSettle()
     await waitFor(() => expect(apiRef.current!.state.outcome?.kind).toBe('left'))
     expect(callCounts.leave).toBe(1)
+    expect(screen.queryByTestId('leave-circle-dialog')).toBeNull()
+  })
+
+  it('Escape dismisses the open confirmation without writing', async () => {
+    const apiRef = renderFlow()
+    await waitFor(() => expect(apiRef.current).not.toBeNull())
+    await requestLeave(apiRef)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await act(async () => {})
+
+    expect(screen.queryByTestId('leave-circle-dialog')).toBeNull()
+    expect(callCounts.leave).toBe(0)
+    expect(apiRef.current!.state.outcome).toBeNull()
   })
 })

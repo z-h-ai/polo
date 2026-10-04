@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "Salir del círculo",
   "poo70.c7.dialog.confirming": "Saliendo…",
   "poo70.c7.dialog.errorRejected": "No se pudo salir: sigues en este círculo; puedes reintentarlo.",
+  "poo70.c7.dialog.errorSuspended": "Tu membresía está suspendida, por lo que no se puede salir; podrás salir del círculo cuando la membresía se restaure.",
   "poo70.c7.dialog.errorSession": "Tu estado de sesión cambió y no se salió de nada; confirma de nuevo.",
   "poo70.c7.dialog.errorStillMember": "La salida no se completó: la comprobación indica que sigues siendo miembro; puedes reintentarlo.",
   "poo70.c7.dialog.note": "Al confirmar sales del círculo de inmediato; cancelar no cambia nada.",

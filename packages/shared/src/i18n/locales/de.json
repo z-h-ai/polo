@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "Circle verlassen",
   "poo70.c7.dialog.confirming": "Wird verlassen…",
   "poo70.c7.dialog.errorRejected": "Das Verlassen ist fehlgeschlagen — du bist noch in diesem Circle; du kannst es erneut versuchen.",
+  "poo70.c7.dialog.errorSuspended": "Deine Mitgliedschaft ist ausgesetzt, ein Verlassen ist nicht möglich; sobald die Mitgliedschaft wiederhergestellt ist, kannst du den Circle erneut verlassen.",
   "poo70.c7.dialog.errorSession": "Dein Anmeldestatus hat sich geändert, es wurde nichts verlassen; bitte bestätige erneut.",
   "poo70.c7.dialog.errorStillMember": "Das Verlassen wurde nicht abgeschlossen — die Prüfung zeigt, dass du noch Mitglied bist; du kannst es erneut versuchen.",
   "poo70.c7.dialog.note": "Nach dem Bestätigen verlässt du den Circle sofort; ein Abbruch ändert nichts.",

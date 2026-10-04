@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LeaveCircleDialogState } from '@/hooks/useLeaveCircle'
 
@@ -27,6 +28,12 @@ import type { LeaveCircleDialogState } from '@/hooks/useLeaveCircle'
  * - 结果未知 (recheck): the body explains the read-only re-verification; the
  *   confirm button stays disabled (no rewrite path exists from this dialog),
  *   cancel remains available.
+ * - suspended: the F1 suspended relation is NOT a departure — the dialog
+ *   says so explicitly instead of ever presenting 已退出 or a rejoin.
+ *
+ * Escape routes through `onCancel` (the flow refuses it while the write is
+ * in flight). Focus trap / shared Radix dialog-base alignment is a C9
+ * integration concern (recorded handoff, see the card notes).
  */
 export function LeaveCircleDialog({
   state,
@@ -39,14 +46,27 @@ export function LeaveCircleDialog({
 }) {
   const { t } = useTranslation()
 
+  useEffect(() => {
+    if (!state) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [state, onCancel])
+
   if (!state) return null
 
   const confirming = state.busy && state.phase === 'confirm'
   const rechecking = state.phase === 'recheck'
   // The confirm button is the single write per attempt: enabled in `confirm`
   // and as the deliberate retry after an honest `error`; never during `busy`
-  // and never in `recheck` (no rewrite path exists from a recheck).
-  const confirmDisabled = state.busy || (state.phase !== 'confirm' && state.phase !== 'error')
+  // and never in `recheck` (no rewrite path exists from a recheck). A
+  // suspended relation cannot be left at all (F1: status ≠ active → 409),
+  // so the retry affordance is disabled for that failure kind.
+  const confirmDisabled = state.busy
+    || (state.phase !== 'confirm' && state.phase !== 'error')
+    || state.failure?.kind === 'suspended'
   // The write must land truthfully before the dialog may close — cancel is
   // disabled while the confirm write is in flight (the hook refuses it too).
   const cancelDisabled = confirming
@@ -107,7 +127,9 @@ export function LeaveCircleDialog({
                       ? t('poo70.c7.dialog.errorSession')
                       : state.failure.kind === 'still-member'
                         ? t('poo70.c7.dialog.errorStillMember')
-                        : t('poo70.c7.dialog.errorRejected')}
+                        : state.failure.kind === 'suspended'
+                          ? t('poo70.c7.dialog.errorSuspended')
+                          : t('poo70.c7.dialog.errorRejected')}
                   </p>
                 </div>
               )}

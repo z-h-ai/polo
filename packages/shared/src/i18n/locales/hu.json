@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "Kilépés a körből",
   "poo70.c7.dialog.confirming": "Kilépés folyamatban…",
   "poo70.c7.dialog.errorRejected": "A kilépés nem sikerült — még ebben a körben vagy; újra megpróbálhatod.",
+  "poo70.c7.dialog.errorSuspended": "A tagságod fel van függesztve, így a kilépés nem érhető el; a tagság helyreállítása után újra kiléphetsz a körből.",
   "poo70.c7.dialog.errorSession": "A bejelentkezési állapotod megváltozott, így nem történt kilépés; kérlek, erősítsd meg újra.",
   "poo70.c7.dialog.errorStillMember": "A kilépés nem fejeződött be — az ellenőrzés szerint még tag vagy; újra megpróbálhatod.",
   "poo70.c7.dialog.note": "A megerősítés után azonnal kilépsz a körből; a mégse nem változtat semmin.",

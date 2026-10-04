@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "Opuść koło",
   "poo70.c7.dialog.confirming": "Opuszczanie…",
   "poo70.c7.dialog.errorRejected": "Opuszczenie koła nie udało się — nadal jesteś w tym kole; możesz spróbować ponownie.",
+  "poo70.c7.dialog.errorSuspended": "Członkostwo jest zawieszone, więc opuszczenie koła jest niemożliwe; możesz opuścić koło po przywróceniu członkostwa.",
   "poo70.c7.dialog.errorSession": "Stan Twojej sesji się zmienił, nic nie zostało opuszczone; potwierdź ponownie.",
   "poo70.c7.dialog.errorStillMember": "Opuszczenie nie zostało ukończone — weryfikacja pokazuje, że nadal jesteś członkiem; możesz spróbować ponownie.",
   "poo70.c7.dialog.note": "Po potwierdzeniu opuszczasz koło natychmiast; anulowanie niczego nie zmienia.",

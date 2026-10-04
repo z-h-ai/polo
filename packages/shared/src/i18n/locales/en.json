@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "Leave circle",
   "poo70.c7.dialog.confirming": "Leaving…",
   "poo70.c7.dialog.errorRejected": "Leaving failed — you are still in this circle; you can retry.",
+  "poo70.c7.dialog.errorSuspended": "Your membership is suspended, so leaving is unavailable; you can leave once the membership is restored.",
   "poo70.c7.dialog.errorSession": "Your sign-in state changed, so nothing was left; please confirm again.",
   "poo70.c7.dialog.errorStillMember": "Leaving did not complete — the re-check shows you are still a member; you can retry.",
   "poo70.c7.dialog.note": "Confirming leaves the circle immediately; canceling changes nothing.",

@@ -2148,6 +2148,7 @@
   "poo70.c7.dialog.confirm": "退会する",
   "poo70.c7.dialog.confirming": "退会中…",
   "poo70.c7.dialog.errorRejected": "退会に失敗しました。まだこのサークルのメンバーです。再試行できます。",
+  "poo70.c7.dialog.errorSuspended": "メンバーシップが停止しているため、退会できません。メンバーシップが回復すれば退会できます。",
   "poo70.c7.dialog.errorSession": "ログイン状態が変わったため、退会は実行されていません。もう一度確認してください。",
   "poo70.c7.dialog.errorStillMember": "退会が完了していません。確認の結果、まだメンバーです。再試行できます。",
   "poo70.c7.dialog.note": "確認すると直ちに退会します。キャンセルしても変更はありません。",
