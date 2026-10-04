@@ -271,6 +271,8 @@ function WorkbenchProbe(): ReactNode {
 function buildShellTree(scope: ProviderScope): ReactNode {
   const { ProductSpaceProvider } =
     require('@/context/ProductSpaceContext') as typeof import('@/context/ProductSpaceContext')
+  const { MemberCatalogProvider } =
+    require('@/context/MemberCatalogContext') as typeof import('@/context/MemberCatalogContext')
   const { TabShellProvider } =
     require('../context/TabShellContext') as typeof import('../context/TabShellContext')
   const inner = createElement(LayoutSnapshot, {
@@ -295,12 +297,15 @@ function buildShellTree(scope: ProviderScope): ReactNode {
       children: inner,
     },
   )
+  // H3/POO-91 mount contract: the App-level MemberCatalogProvider sits
+  // OUTSIDE TabShell and owns the single catalog instance the home page
+  // consumes through useMemberCatalog.
   return createElement(
     I18nextProvider,
     { i18n },
     createElement(ProductSpaceProvider, {
       value: contextValueForScope(scope) as unknown as ProductSpaceContextValue,
-      children: shell,
+      children: createElement(MemberCatalogProvider, { children: shell }),
     }),
   )
 }

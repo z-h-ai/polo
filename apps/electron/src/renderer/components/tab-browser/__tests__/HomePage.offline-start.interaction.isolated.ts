@@ -22,6 +22,8 @@ GlobalRegistrator.register()
 setupI18n()
 
 const openApp = jest.fn()
+const toastErrorSpy = jest.fn()
+const toastSuccessSpy = jest.fn()
 
 mock.module('@/context/TabShellContext', () => ({
   useTabShell: () => ({
@@ -31,10 +33,18 @@ mock.module('@/context/TabShellContext', () => ({
   }),
 }))
 
+mock.module('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorSpy(...args),
+    success: (...args: unknown[]) => toastSuccessSpy(...args),
+  },
+}))
+
 const { cleanup, fireEvent, render, screen, waitFor } = await import(
   '@testing-library/react'
 )
 const { ProductSpaceProvider } = await import('@/context/ProductSpaceContext')
+const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
 const { useProductSpaceContextState } = await import('@/hooks/useProductSpaceContext')
 const {
   resetProductSpaceStorageMemoryForTests,
@@ -108,7 +118,14 @@ function AppHomeHarness() {
         ProductSpaceProvider,
         {
           value: contextValue,
-          children: createElement(HomePage),
+          // H3 mount contract: HomePage consumes the catalog through the
+          // App-level MemberCatalogProvider (own-instance branch of the REAL
+          // hook — this harness wires the REAL RPCs below).
+          children: createElement(
+            MemberCatalogProvider,
+            null,
+            createElement(HomePage),
+          ),
         },
       )
     : createElement('div', { 'data-testid': 'product-space-flow' }, context.flowState)
@@ -120,6 +137,8 @@ beforeEach(async () => {
   resetProductSpaceStorageMemoryForTests()
   openApp.mockClear()
   start.mockClear()
+  toastErrorSpy.mockClear()
+  toastSuccessSpy.mockClear()
   await i18n.changeLanguage('en')
   productSpaceContextStorage = null
 
@@ -229,6 +248,9 @@ beforeEach(async () => {
           description: 'Prepared locally',
           availability: 'available',
           deliveryMode: 'local_bundle',
+          // H1 projection contract: the row must prove its authorization from
+          // authoritative sources — an unprovable row is refused fail-closed.
+          sources: [{ kind: 'enterprise_import', name: 'Offline Studio' }],
           currentRelease: {
             version: '1.0.0',
             runtime: 'static' as const,
@@ -291,22 +313,20 @@ describe('restricted offline App to HomePage start flow', () => {
       createElement(AppHomeHarness),
     ))
 
+    // H3 home: the complete directory renders directly on the page — the
+    // offline App row stays visible with the offline banner, and opening it
+    // fails closed BEFORE any launch authority is asked.
     await waitFor(() => {
-      expect(screen.getByTestId('home-all-apps-open')).toBeTruthy()
-    })
-
-    // The offline App lives in the all-Apps directory view.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(screen.getByTestId('all-apps-view')).toBeTruthy()
+      expect(screen.getByTestId('home-directory-offline-banner')).toBeTruthy()
+      expect(screen.getByTestId('home-directory-app')).toBeTruthy()
       expect(screen.getByText('Offline App')).toBeTruthy()
       expect(screen.getByText(/You are offline/)).toBeTruthy()
     })
 
-    const openButton = screen.getByTestId(
-      'all-apps-action-["product-space-ui","account-offline","11111111-1111-4111-8111-111111111111","offline-app","offline-app-instance"]',
-    ) as HTMLButtonElement
-    expect(openButton.disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('home-directory-app'))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
     expect(start).not.toHaveBeenCalled()
     expect(openApp).not.toHaveBeenCalled()
   })

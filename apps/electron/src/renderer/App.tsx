@@ -82,6 +82,7 @@ import {
   ClientPageProvider,
   clientPageScopeKey,
 } from '@/context/ClientPageContext'
+import { MemberCatalogProvider } from '@/context/MemberCatalogContext'
 import {
   ProductSpaceProvider,
   type ProductSpaceContextValue,
@@ -3249,12 +3250,14 @@ export default function App() {
                 render observes the fresh value. Home/Circles tab content
                 assembly stays with POO-100; this provider only publishes the
                 typed route and the main-scroll registration.
-                Card step 4 deviation (adjudicated, review P2-1): H1's
-                MemberCatalogProvider stays mounted INSIDE HomePage for now —
-                lifting it here would either duplicate the catalog instance or
-                require editing HomePage (H2/H3-owned, read-only for N1).
-                H3/POO-91 owns the lift to THIS level; until then HomePage's
-                injected instance remains the single catalog holder. */}
+                Card step 4 deviation (adjudicated, review P2-1), RESOLVED by
+                H3/POO-91: H1's MemberCatalogProvider used to stay mounted
+                INSIDE HomePage; H3 lifted it to THIS level (same layer as
+                ClientPageProvider, still OUTSIDE TabShell and inside the
+                ProductSpace consumption boundary) and switched HomePage onto
+                useMemberCatalog(), so the App-level provider now owns the
+                SINGLE useAppCatalog instance for member pages. */}
+            <MemberCatalogProvider>
             <ClientPageProvider
               key={clientPageScopeKey({
                 accountId: productSpaceContextValue?.accountId ?? null,
@@ -3372,6 +3375,7 @@ export default function App() {
               )}
             </TabShellProvider>
             </ClientPageProvider>
+            </MemberCatalogProvider>
             <ProductSpaceSwitchDialog />
           </MaybeProductSpaceProvider>
           </AppShellProvider>

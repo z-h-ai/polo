@@ -1785,9 +1785,9 @@ describe('real ProductSpace payload projection through useAppCatalog into the UI
   })
 })
 
-const { HomePage, __resetHomeQuickWritersForTests } = await import('@/components/tab-browser/HomePage')
+const { HomePage } = await import('@/components/tab-browser/HomePage')
 
-describe('raw Catalog payload drives the production Home pin/open/uninstall paths', () => {
+describe('raw Catalog payload drives the production Home open/uninstall paths', () => {
 
   function rawEntry(overrides: Record<string, unknown> = {}) {
     return {
@@ -1934,73 +1934,27 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     getProductSpaceWithdrawnInstallStates = mock(async (identities: any[]) =>
       identities.map(identity => ({ app: identity, state: 'not_installed' as const })))
 
+    // H3 mount contract: HomePage consumes the catalog through the App-level
+    // MemberCatalogProvider, which here runs its own instance of the REAL
+    // hook under test.
+    const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
     const view = react.render(createElement(
       I18nextProvider,
       { i18n },
-      createElement(HomePage),
+      createElement(MemberCatalogProvider, null, createElement(HomePage)),
     ))
     // The REAL hook syncs on mount; wait for the mapped catalog.
     await waitFor(() => {
       expect(within(view.container).getByTestId('home-quick-entry-polo')).toBeTruthy()
     })
-
-    // ---- PIN through the production persistence RPC ----
-    fireEvent.click(within(view.container).getByTestId('home-all-apps-open'))
+    // H3: the home IS the complete directory — the mapped rows render
+    // directly, with their REAL production identity keys.
     await waitFor(() => {
-      expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
+      if (view.container.querySelectorAll('[data-testid="home-directory-app"]').length >= 2) {
+        return true
+      }
+      throw new Error('directory rows pending')
     })
-    // The apps come from the REAL mapper (read through the same rendered
-    // rows): iterate the rows' own production identity keys.
-    const appEntries = (entries as Array<{
-      kind: string
-      catalogEntryId: string
-      artifactInstanceId: string
-      version: { versionId: string; version: string }
-      name: string
-    }>).filter(entry => entry.kind === 'app')
-    const apps: CatalogApp[] = appEntries.map(entry => ({
-      id: entry.catalogEntryId,
-      catalogEntryId: entry.catalogEntryId,
-      artifactInstanceId: entry.artifactInstanceId,
-      catalogVersion: entry.version,
-      organizationId: scopeA.productSpaceId,
-      name: entry.name,
-      description: '',
-      deliveryMode: 'resolve_launch' as const,
-      sortOrder: 0,
-      availability: 'available' as const,
-    }))
-    const { result } = react.renderHook(() => useAppCatalog())
-    await waitFor(() => {
-      if (result.current.state.catalog === null) throw new Error('probe catalog pending')
-    })
-    const hook = result.current
-    for (const app of hook.state.catalog!.apps) {
-      fireEvent.click(within(view.container).getByTestId(
-        `all-apps-pin-${hook.uiIdentityKeyForApp(app)}`,
-      ))
-    }
-    await waitFor(() => {
-      if (api.saveCalls.length < 2) throw new Error('pin saves pending')
-    })
-    expect(api.saveCalls.every(call => call.key === `v1:${createProductSpaceContextKey(scopeA.accountId, scopeA.productSpaceId)}`)).toBe(true)
-    // The single-writer queue accumulates: the LAST write carries both.
-    // NOTE: the persisted id is deliberately VERSION-STABLE (account+space+
-    // entry+artifact) — pinning survives version upgrades; the OPEN path
-    // re-validates against the CURRENT Catalog (resolve-launch re-checks
-    // entry/artifact/version) and uninstall binds the full version identity.
-    const pinnedIds = (api.saveCalls[1]?.apps ?? []).map(entry => entry.id)
-    expect(pinnedIds).toHaveLength(2)
-    const decoded = pinnedIds.map(id => JSON.parse(id))
-    for (const tuple of decoded) {
-      expect(tuple[0]).toBe('product-space-ui')
-      expect(tuple[1]).toBe(scopeA.accountId)
-      expect(tuple[2]).toBe(scopeA.productSpaceId)
-    }
-    expect(new Set(decoded.map(tuple => `${tuple[3]}:${tuple[4]}`))).toEqual(new Set([
-      'entry-alpha:artifact-alpha',
-      'entry-beta:artifact-beta',
-    ]))
 
     // ---- OPEN through the production resolve-launch RPC ----
     // Pin the subject mapping in CARD ORDER (first resolve per entry wins).
@@ -2017,10 +1971,6 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
       resolveSeenEntryByCatalogEntryId.set(catalogEntryId, entry)
       return entry
     }
-    fireEvent.click(within(view.container).getByTestId('all-apps-back'))
-    await waitFor(() => {
-      expect(within(view.container).queryByTestId('all-apps-view')).toBeNull()
-    })
     // A background install-state refresh may advance the hook generation
     // mid-open (fail-closed stale-context): keep clicking the still-
     // unpublished rows until every distinct subject has been published.
@@ -2038,7 +1988,7 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     for (let round = 0; round < 8 && publishedSubjectSet().size < 2; round++) {
       const before = api.resolveCalls.length
       const liveCards = Array.from(
-        view.container.querySelectorAll('[data-testid="home-quick-entry"]'),
+        view.container.querySelectorAll('[data-testid="home-directory-app"]'),
       )
       const target = liveCards[round % Math.max(1, liveCards.length)]
       if (!target) break
@@ -2071,12 +2021,11 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     ]))
 
     // ---- UNINSTALL through the production uninstall RPC (both collision
-    // directions are installed rows) ----
-    fireEvent.click(within(view.container).getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      expect(within(view.container).getByTestId('all-apps-view')).toBeTruthy()
-    })
-    const uninstallButtons = within(view.container).getAllByTestId(/^all-apps-uninstall-/)
+    // directions are installed rows; the page-level uninstall entries sit on
+    // the directory card wrappers) ----
+    const uninstallButtons = Array.from(
+      view.container.querySelectorAll('[data-testid^="home-directory-uninstall-"]'),
+    )
     expect(uninstallButtons).toHaveLength(2)
     for (const button of uninstallButtons) {
       fireEvent.click(button)
@@ -2119,6 +2068,5 @@ describe('raw Catalog payload drives the production Home pin/open/uninstall path
     ])
 
     view.unmount()
-    __resetHomeQuickWritersForTests()
   })
 })

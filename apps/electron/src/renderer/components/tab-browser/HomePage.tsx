@@ -1,15 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
-import { Trans, useTranslation } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
-import type { HomeQuickAccessApp } from '@polo-ai/shared/config/home-quick-access'
-import {
-  MAX_HOME_QUICK_ACCESS_APPS,
-} from '@polo-ai/shared/config/home-quick-access'
-import { AllAppsView } from './AllAppsView'
-import { ManageHomeAppsDialog } from './ManageHomeAppsDialog'
+import type { CatalogApp } from '@polo-ai/shared/admin'
 import { MemberAppCard } from './MemberAppCard'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,9 +14,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useAppCatalog } from '@/hooks/useAppCatalog'
+import { useMemberCatalog } from '@/context/MemberCatalogContext'
+import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { useMemberAppActions } from '@/hooks/useMemberAppActions'
-import { MemberCatalogProvider } from '@/context/MemberCatalogContext'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
 import { useTabShell } from '@/context/TabShellContext'
 import { useProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
@@ -32,46 +26,34 @@ import {
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
 import {
-  createHomeQuickAccessContextKey,
-  loadHomeQuickAccess,
-  resolveHomeQuickAccessApps,
-  saveHomeQuickAccess,
-  toggleHomeQuickAccessApp,
-} from '@/lib/home-quick-access'
+  selectHomeAppDirectory,
+  type HomeAppDirectory,
+  type HomeAppDirectoryEntry,
+} from '@/lib/home-app-directory'
+import { createHomeQuickAccessContextKey } from '@/lib/home-quick-access'
 
 /**
- * Full "当前空间全部 Apps" projection: current Catalog Apps plus the
- * withdrawn tombstones the Catalog hook retains for explanation. A stopped
- * distribution must never disappear without a trace — installed members keep
- * a visible, non-launchable row with its frozen withdrawn status and, when
- * still installed, its uninstall entry. Dedup uses the full stable Catalog
- * UI identity tuple (organizationId + catalogEntryId + artifactInstanceId):
- * one row per artifact instance, a version upgrade replaces the live row
- * instead of pairing it with a stale withdrawn row, and the same artifact
- * reissued under a DIFFERENT catalog entry keeps its live and withdrawn rows
- * distinct. The live entry wins a key collision and rows keep Catalog order.
+ * POO-70 H3 (P70-HOME-01/02/03) — the "我的应用" home page.
+ *
+ * Since this card the home IS the complete directory: the H1 projection
+ * (`selectHomeAppDirectory`) supplies the FULL authorized directory of the
+ * active ProductSpace (no frequently-used cap, no pinning, no
+ * add/remove-from-home), topped by the fixed Polo assistant card (P70-HOME-02,
+ * open action along the existing code). The former quick-access main flow
+ * (writer registry, manage dialog, pin/prune, the nested All-Apps view and
+ * the page-internal MemberCatalogProvider mount) is retired from this page:
+ * the single `useAppCatalog` instance now lives in the App-level
+ * `MemberCatalogProvider` (lifted by this card next to ClientPageProvider)
+ * and is consumed here through `useMemberCatalog()`.
+ *
+ * State contract (P70-HOME-03): loading / vacuum / error / denied / offline /
+ * ready come from the H1 `phase`. Per the H1 reviewer contract the phase is
+ * consumed TOGETHER with `rejections.length` (a fully-rejected directory is
+ * NOT a vacuum) and cached rows are NEVER launchable while
+ * denied/offline/error — the open handler fails closed here and the
+ * authoritative grant stays with `resolveLaunch` inside the shared action.
+ * Retry is always explicit; nothing auto-executes.
  */
-export function selectAllAppsForDisplay(
-  catalog: AppCatalogCacheEntry | null,
-): CatalogApp[] {
-  if (!catalog) return []
-  const identityKey = (app: CatalogApp): string => JSON.stringify([
-    app.organizationId ?? null,
-    app.catalogEntryId ?? app.id ?? null,
-    app.artifactInstanceId ?? null,
-  ])
-  const merged = new Map<string, CatalogApp>()
-  for (const app of [...catalog.apps, ...(catalog.withdrawnApps ?? [])]) {
-    const key = identityKey(app)
-    const existing = merged.get(key)
-    if (!existing
-      || (existing.availability === 'withdrawn' && app.availability !== 'withdrawn')
-    ) {
-      merged.set(key, app)
-    }
-  }
-  return [...merged.values()].sort((left, right) => left.sortOrder - right.sortOrder)
-}
 
 export function formatBytes(t: TFunction, sizeBytes: number): string {
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
@@ -106,480 +88,339 @@ export function createEnterpriseWorkflowUrl(
   return url.toString()
 }
 
+// ─── Per-context "recently used" records (P70-HOME-01) ──────────────────────
+
 /**
- * MODULE-LEVEL per-context quick-access writer registry. Every context key
- * owns an INDEPENDENT single-writer queue, hydration gate and transaction
- * baseline (intent/confirmed). The lifetime is bound to the CONTEXT, not to
- * any HomePage mount:
- *
- * - a durable acknowledgement always advances its OWN context's baseline,
- *   even while another context is displayed or the component is unmounted —
- *   only the React UI update is gated by the current context + mount;
- * - a hung save in context A never blocks context B (separate queues);
- * - an immediate remount rejoins the SAME writer — no second racing queue;
- * - queued mutations wait for the context's hydration gate, so they build
- *   on the persisted collection instead of an empty intent;
- * - a rejected save rolls the unconfirmed suffix of THAT context back to
- *   its last acknowledgement.
- *
- * Cleanup: idle (busy===0) writers of non-active contexts are swept. Sweeping
- * never loses pending durable writes, and a swept baseline is re-derived
- * from the persisted store on the next activation via the hydration gate.
+ * One REAL open action recorded by this page. This is UI-level usage
+ * evidence (the member pressed open on THIS device), never an authorization
+ * or entitlement fact — sort-only.
  */
-interface HomeQuickContextWriter {
-  queue: Promise<void>
-  /** Queued-but-unsettled mutation tasks. */
-  busy: number
-  /** Mount ids currently owning this context (multiple mounts allowed). */
-  owners: Set<number>
-  /**
-   * Live mount notification channels: hydration, persisted acks and
-   * rollbacks are BROADCAST to every owner so all simultaneous mounts of a
-   * context display the same confirmed baseline.
-   */
-  subscribers: Map<number, (entries: HomeQuickAccessApp[]) => void>
-  gate: Promise<boolean>
-  resolveGate: (hydrated: boolean) => void
-  hydrated: boolean
-  /** True while an activation load is still in flight. */
-  hydrating: boolean
-  /** Monotonic activation token: only the CURRENT attempt may settle state. */
-  activationToken: number
-  /** Observable bounded-retry counter for the activation load. */
-  hydrationAttempts: number
-  intent: HomeQuickAccessApp[]
-  confirmed: HomeQuickAccessApp[]
-}
-
-const homeQuickWriters = new Map<string, HomeQuickContextWriter>()
-let nextHomeQuickMountId = 0
-let homeQuickActivationSequence = 0
-/** Bounded hydration retries while owners remain (initial + 1 retry). */
-const MAX_HYDRATION_ATTEMPTS = 2
-
-function getHomeQuickWriter(contextKey: string): HomeQuickContextWriter {
-  let writer = homeQuickWriters.get(contextKey)
-  if (!writer) {
-    let resolveGate!: (hydrated: boolean) => void
-    const gate = new Promise<boolean>(resolve => { resolveGate = resolve })
-    writer = {
-      queue: Promise.resolve(),
-      busy: 0,
-      owners: new Set<number>(),
-      subscribers: new Map<number, (entries: HomeQuickAccessApp[]) => void>(),
-      gate,
-      resolveGate,
-      hydrated: false,
-      hydrating: false,
-      activationToken: 0,
-      hydrationAttempts: 0,
-      intent: [],
-      confirmed: [],
-    }
-    homeQuickWriters.set(contextKey, writer)
-  }
-  return writer
+export interface HomeAppUsageRecord {
+  lastUsedAt: number
+  openCount: number
 }
 
 /**
- * Cleanup: a writer is dropped ONLY when no mount owns it, no mutation task
- * is pending AND no hydration is in flight. Sweeping therefore can never
- * delete a writer another mount still uses, never lose pending durable
- * writes, and never interrupt an activation load; a swept baseline is
- * re-derived from the persisted store on the next activation.
+ * Module-level per-ProductSpace-context usage records, keyed by the SAME
+ * context-key convention as the retired quick-access registry
+ * (`v1:account|space`), so personal and enterprise usage never mix and an
+ * account switch cannot leak records across accounts. Records persist in the
+ * renderer's localStorage (best-effort, bounded); a corrupted or unavailable
+ * store fails closed to an empty record set and the sort simply degrades to
+ * the authoritative Catalog order.
  */
-function sweepHomeQuickWriters(): void {
-  for (const [key, writer] of homeQuickWriters) {
-    if (writer.owners.size === 0 && writer.busy === 0 && !writer.hydrating) {
-      homeQuickWriters.delete(key)
+const HOME_APP_USAGE_STORAGE_PREFIX = 'poo70.h3:home-app-usage:'
+const HOME_APP_USAGE_MAX_ENTRIES = 200
+const homeAppUsageByContext = new Map<string, Map<string, HomeAppUsageRecord>>()
+
+export function loadHomeAppUsage(contextKey: string): Map<string, HomeAppUsageRecord> {
+  const cached = homeAppUsageByContext.get(contextKey)
+  if (cached) return cached
+  const records = new Map<string, HomeAppUsageRecord>()
+  try {
+    const raw = window.localStorage.getItem(HOME_APP_USAGE_STORAGE_PREFIX + contextKey)
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') {
+        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+          if (!value || typeof value !== 'object') continue
+          const { lastUsedAt, openCount } = value as {
+            lastUsedAt?: unknown
+            openCount?: unknown
+          }
+          if (
+            typeof lastUsedAt === 'number' && Number.isFinite(lastUsedAt) && lastUsedAt >= 0
+            && typeof openCount === 'number' && Number.isFinite(openCount) && openCount >= 0
+          ) {
+            records.set(key, { lastUsedAt, openCount })
+          }
+        }
+      }
     }
+  } catch {
+    // Fail closed to an empty record set — never block the directory.
   }
+  homeAppUsageByContext.set(contextKey, records)
+  return records
 }
 
-/** Broadcast one confirmed snapshot to every live owner of the writer. */
-function notifyHomeQuickSubscribers(
-  writer: HomeQuickContextWriter,
-  entries: HomeQuickAccessApp[],
+function persistHomeAppUsage(
+  contextKey: string,
+  records: Map<string, HomeAppUsageRecord>,
 ): void {
-  for (const notify of writer.subscribers.values()) {
-    notify(entries)
-  }
-}
-
-/** Test-only: drop every writer (tests reset the persisted store too). */
-export function __resetHomeQuickWritersForTests(): void {
-  homeQuickWriters.clear()
-}
-
-/** Test-only: number of retained per-context writers (bounded-registry proof). */
-export function __homeQuickWritersCountForTests(): number {
-  return homeQuickWriters.size
-}
-
-/** Test-only: subscriber/owner/busy snapshot of one writer. */
-export function __homeQuickWriterStatsForTests(contextKey: string): {
-  owners: number
-  subscribers: number
-  busy: number
-  hydrated: boolean
-} | null {
-  const writer = homeQuickWriters.get(contextKey)
-  if (!writer) return null
-  return {
-    owners: writer.owners.size,
-    subscribers: writer.subscribers.size,
-    busy: writer.busy,
-    hydrated: writer.hydrated,
+  try {
+    // Bound the record set: evict the OLDEST last-use first.
+    while (records.size > HOME_APP_USAGE_MAX_ENTRIES) {
+      let oldestKey: string | null = null
+      let oldestAt = Infinity
+      for (const [key, record] of records) {
+        if (record.lastUsedAt < oldestAt) {
+          oldestAt = record.lastUsedAt
+          oldestKey = key
+        }
+      }
+      if (oldestKey === null) break
+      records.delete(oldestKey)
+    }
+    const payload: Record<string, HomeAppUsageRecord> = {}
+    for (const [key, record] of records) payload[key] = record
+    window.localStorage.setItem(
+      HOME_APP_USAGE_STORAGE_PREFIX + contextKey,
+      JSON.stringify(payload),
+    )
+  } catch {
+    // Persistence is best-effort: the in-memory records keep the session sort.
   }
 }
 
 /**
- * Test-only EVENT-DRIVEN barrier: resolves after the context writer's
- * hydration gate has settled and every queued mutation task has finished —
- * never after an elapsed-time wait. Resolves `false` when work is still
- * pending (busy tasks or an in-flight activation), so tests can assert a
- * deterministic settled lifecycle before negative persistence expectations.
+ * Records one open action for an App of the given ProductSpace context.
+ * UI-preference data only (never an authorization fact) and scoped to the
+ * exact account+space context key.
  */
-export function __homeQuickWriterSettledForTests(contextKey: string): Promise<boolean> {
-  const writer = homeQuickWriters.get(contextKey)
-  if (!writer) return Promise.resolve(true)
-  return writer.gate
-    .catch(() => undefined)
-    .then(() => writer.queue)
-    .then(() => writer.busy === 0 && !writer.hydrating)
+export function recordHomeAppUsage(
+  contextKey: string,
+  identityKey: string,
+  now = Date.now(),
+): void {
+  if (!contextKey || !identityKey) return
+  const records = loadHomeAppUsage(contextKey)
+  const previous = records.get(identityKey)
+  records.set(identityKey, {
+    lastUsedAt: now,
+    openCount: (previous?.openCount ?? 0) + 1,
+  })
+  persistHomeAppUsage(contextKey, records)
 }
+
+/** Test-only: drop every per-context usage record. */
+export function __resetHomeAppUsageForTests(): void {
+  homeAppUsageByContext.clear()
+}
+
+// ─── Pure directory search / source-filter / sort (P70-HOME-01) ─────────────
+
+export type HomeAppSortMode = 'recent' | 'frequent' | 'name'
+
+/**
+ * Sorts directory entries using ONLY fields that actually exist: `recent`
+ * and `frequent` rank the page's REAL open records (never invented data),
+ * and entries without records keep the authoritative Catalog order after
+ * the used ones (H1 contract: the default order IS the authoritative
+ * order). The sort is stable — ties always resolve to the authoritative
+ * order.
+ */
+export function sortHomeAppDirectory(
+  entries: readonly HomeAppDirectoryEntry[],
+  mode: HomeAppSortMode,
+  usage: ReadonlyMap<string, HomeAppUsageRecord>,
+): HomeAppDirectoryEntry[] {
+  const decorated = entries.map((entry, index) => ({ entry, index }))
+  decorated.sort((left, right) => {
+    if (mode === 'name') {
+      const byName = left.entry.app.name.localeCompare(right.entry.app.name)
+      if (byName !== 0) return byName
+      return left.index - right.index
+    }
+    const leftRecord = usage.get(left.entry.identityKey)
+    const rightRecord = usage.get(right.entry.identityKey)
+    if (mode === 'recent') {
+      const leftAt = leftRecord?.lastUsedAt ?? -1
+      const rightAt = rightRecord?.lastUsedAt ?? -1
+      if (leftAt !== rightAt) return rightAt - leftAt
+    } else {
+      const leftCount = leftRecord?.openCount ?? 0
+      const rightCount = rightRecord?.openCount ?? 0
+      if (leftCount !== rightCount) return rightCount - leftCount
+    }
+    return left.index - right.index
+  })
+  return decorated.map(item => item.entry)
+}
+
+/** Stable source label of one catalog source (display name, kind fallback). */
+function homeAppSourceLabel(source: { kind: string; name?: string }): string {
+  return (typeof source.name === 'string' ? source.name.trim() : '') || source.kind
+}
+
+function catalogSourcesOf(entry: HomeAppDirectoryEntry): Array<{ kind: string; name?: string }> {
+  return entry.app.catalogSources?.length
+    ? [...entry.app.catalogSources]
+    : (entry.app.sourceNames ?? []).map(name => ({ kind: '', name }))
+}
+
+/**
+ * Source filter options derived from the CURRENT directory's actual sources
+ * (never a fixed list): first-appearance order, deduplicated by label.
+ */
+export function collectHomeAppSourceOptions(
+  entries: readonly HomeAppDirectoryEntry[],
+): Array<{ key: string; label: string }> {
+  const labels: string[] = []
+  const seen = new Set<string>()
+  for (const entry of entries) {
+    for (const source of catalogSourcesOf(entry)) {
+      const label = homeAppSourceLabel(source)
+      if (!label || seen.has(label)) continue
+      seen.add(label)
+      labels.push(label)
+    }
+  }
+  return labels.map(label => ({ key: label, label }))
+}
+
+export function homeAppMatchesSource(
+  entry: HomeAppDirectoryEntry,
+  sourceKey: string,
+): boolean {
+  if (sourceKey === 'all') return true
+  return catalogSourcesOf(entry).some(source => homeAppSourceLabel(source) === sourceKey)
+}
+
+/** Case-insensitive search over name, description, creator and source names. */
+export function homeAppMatchesQuery(
+  entry: HomeAppDirectoryEntry,
+  normalizedQuery: string,
+): boolean {
+  if (!normalizedQuery) return true
+  return [
+    entry.app.name,
+    entry.app.description,
+    entry.app.creatorName,
+    ...catalogSourcesOf(entry).map(source => homeAppSourceLabel(source)),
+  ].some(value => value?.toLocaleLowerCase().includes(normalizedQuery))
+}
+
+// ─── The page ────────────────────────────────────────────────────────────────
 
 export function HomePage() {
   const { t } = useTranslation()
   const { openApp } = useTabShell()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
-  const catalog = useAppCatalog()
-  const [view, setView] = useState<'home' | 'all-apps'>('home')
-  const [quickEntries, setQuickEntries] = useState<HomeQuickAccessApp[]>([])
-  /**
-   * Display fence for hydration results: a load that started for context X
-   * must never display into context Y that was switched to afterwards. The
-   * TRANSACTION baseline it advances belongs to the per-context writer (see
-   * the module-level registry) and is context-scoped anyway.
-   */
-  const quickMountedRef = useRef(false)
-  /** This mount's registry identity (owner token in the writer registry). */
-  const homeQuickMountIdRef = useRef(0)
-  if (homeQuickMountIdRef.current === 0) {
-    homeQuickMountIdRef.current = ++nextHomeQuickMountId
-  }
-  /** The context key this mount currently owns in the registry. */
-  const ownedHomeQuickContextKeyRef = useRef<string | null>(null)
-  /**
-   * The ProductSpace context the CURRENT entries were hydrated (or last
-   * mutated) for. `null` between a context switch and its hydration, so the
-   * prune effect can never judge the previous context's entries against the
-   * new context's Catalog and persist a wiped config.
-   */
-  const quickHydratedContextRef = useRef<string | null>(null)
-  const [manageOpen, setManageOpen] = useState(false)
-  // The frozen assistant-card Skill count is deliberately omitted: the only
-  // Skill store reachable from Home is the process-global workspace
-  // skillsAtom, which is not keyed by account/ProductSpace/owner epoch — a
-  // target-scope first commit could display the previous scope's count
-  // (R39 review). It returns to the frozen neutral "Polo 内置" until a
-  // scope-keyed authoritative source exists.
-  const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
+  // H3 (card step 4): the catalog instance is owned by the App-level
+  // MemberCatalogProvider — this page CONSUMES the shared surface instead of
+  // creating its own useAppCatalog instance.
+  const catalog = useMemberCatalog()
+  // N1 navigation contract: the personal "my circles" entry navigates the
+  // client-page route stack. Optional: surfaces mounted without the App's
+  // provider tree (isolated tests) fall back to the local circles card.
+  const clientPage = useOptionalClientPage()
   const [showCirclesCard, setShowCirclesCard] = useState(false)
+  const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [preserveData, setPreserveData] = useState(true)
+  // Directory toolbar state: search, source filter and sort.
+  const [query, setQuery] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('all')
+  const [sortMode, setSortMode] = useState<HomeAppSortMode>('recent')
+  // Bumped after every recorded open so the sort re-ranks from the mutated
+  // usage records (the records map itself is a stable module-level cache).
+  const [usageVersion, setUsageVersion] = useState(0)
 
   const activeProductSpace = catalog.productSpace?.activeProductSpace
   const spaceKind = activeProductSpace?.kind ?? null
-  const quickContextKey = createHomeQuickAccessContextKey(
+  const usageContextKey = createHomeQuickAccessContextKey(
     catalog.productSpace?.productSpaceContextKey,
   )
-  const quickContextKeyRef = useRef(quickContextKey)
-  quickContextKeyRef.current = quickContextKey
-  /**
-   * THE quick-access transaction primitive (pin, manage toggle and prune
-   * all share it). Mutations are appended to the CONTEXT'S OWN single-writer
-   * queue: each task awaits that context's hydration gate, applies its
-   * change to the context's synchronous intent, and persists IN ORDER. A
-   * successful save advances the context's durable baseline UNCONDITIONALLY —
-   * only the React UI update is gated by the current context + mount — and a
-   * rejected save rolls that context's unconfirmed suffix back to its last
-   * acknowledgement. A hung save in one context never blocks another.
-   */
-  const enqueueQuickMutation = useCallback((
-    contextKey: string,
-    apply: (entries: HomeQuickAccessApp[]) => {
-      next: HomeQuickAccessApp[] | null
-      rejected?: boolean
-    },
-  ): void => {
-    const writer = getHomeQuickWriter(contextKey)
-    writer.busy += 1
-    const task = writer.queue
-      .catch(() => {})
-      .then(async () => {
-        const hydrated = await writer.gate
-        if (!hydrated) {
-          // HYDRATION LOST: the mutation must NOT be silently dropped. A
-          // queued task that could never build on a hydrated baseline takes
-          // the visible error path (rollback broadcast + toast) — no pseudo
-          // acks.
-          toast.error(t('homeApps.quick.loadFailed'))
-          throw new Error('hydration unavailable')
-        }
-        const { next, rejected } = apply(writer.intent)
-        if (rejected || next === null) return
-        const saved = await saveHomeQuickAccess(contextKey, next)
-        // Durable baseline: advances for THIS context regardless of which
-        // context is displayed or whether the component is mounted — then
-        // BROADCASTS to every live owner of the context.
-        writer.intent = saved
-        writer.confirmed = saved
-        notifyHomeQuickSubscribers(writer, saved)
-      })
-      .catch(() => {
-        // Save rejected (or hydration lost): roll THIS context's unconfirmed
-        // suffix back to its last persisted acknowledgement and broadcast
-        // the rollback so every live mount converges on the same state.
-        writer.intent = writer.confirmed
-        notifyHomeQuickSubscribers(writer, writer.confirmed)
-      })
-      .finally(() => {
-        writer.busy -= 1
-        // The final owner may have unmounted while this task was in flight:
-        // once busy reaches 0 the writer is sweepable.
-        sweepHomeQuickWriters()
-      })
-    writer.queue = task
-  }, [t])
-  // UI selection + quick-entry persistence use the collision-free stable
-  // artifact identity key (account + space + entry + artifact instance), NOT
-  // the runtime scope: a catalogEntryId reused across artifact instances
-  // must keep its live row, withdrawn row, and quick-entry slot independent,
-  // and an artifact swap must fail-closed drop the old shortcut instead of
-  // silently re-binding it.
+  const usageContextKeyRef = useRef(usageContextKey)
+  usageContextKeyRef.current = usageContextKey
   const uiKeyForApp = catalog.uiIdentityKeyForApp
 
-  const availableApps = useMemo(
-    () => (catalog.state.catalog?.apps ?? []).filter(
-      app => app.availability === 'available',
-    ),
-    [catalog.state.catalog],
+  // H1 projection: the authoritative full directory of the CURRENT space,
+  // with loading/vacuum/error/denied/offline as distinct phases.
+  const directory = useMemo<HomeAppDirectory>(
+    () => selectHomeAppDirectory(catalog.state.catalog, {
+      accountId: catalog.productSpace?.accountId ?? null,
+      productSpaceId: catalog.productSpace?.activeProductSpaceId ?? null,
+      spaceKind,
+      loading: catalog.state.loading,
+      errorCode: catalog.state.errorCode,
+      accessMode: catalog.state.accessMode,
+    }),
+    [
+      catalog.productSpace?.accountId,
+      catalog.productSpace?.activeProductSpaceId,
+      catalog.state.accessMode,
+      catalog.state.catalog,
+      catalog.state.errorCode,
+      catalog.state.loading,
+      spaceKind,
+    ],
   )
-  const allApps = useMemo(
-    () => selectAllAppsForDisplay(catalog.state.catalog),
-    [catalog.state.catalog],
-  )
-  const quickApps = useMemo(
-    () => resolveHomeQuickAccessApps(quickEntries, availableApps, uiKeyForApp),
-    [availableApps, quickEntries, uiKeyForApp],
-  )
-  // Authoritative pinned identity keys: derived from the persisted quick
-  // entries, never from local All Apps view state.
-  const quickPinnedIds = useMemo(
-    () => new Set(quickEntries.map(entry => entry.id)),
-    [quickEntries],
-  )
-  // Home work cards render ONLY the persisted quick entries of the current
-  // account + ProductSpace context, resolved against its Catalog. There is
-  // deliberately NO first-run default curation: an explicitly empty (or
-  // unpersisted) collection stays empty — across first mount, remounts and
-  // A→B→A context round-trips — instead of silently surfacing Catalog apps
-  // the member never pinned.
-  const homeWorkCards = quickApps
+  const phase = directory.phase
 
-  useEffect(() => {
-    // Fail-closed across space transitions: a ProductSpace identity change
-    // resets the home view and closes in-place dialogs. The DISPLAY is
-    // switched to the new context; the OLD context's writer keeps owning its
-    // in-flight writes and advances its own baseline independently.
-    const contextKey = quickContextKey
-    // Ownership transfer for THIS mount: release the previously owned
-    // context's writer, acquire the new one. Other mounts' ownership is
-    // untouched.
-    const mountId = homeQuickMountIdRef.current
-    const previousOwned = ownedHomeQuickContextKeyRef.current
-    if (previousOwned !== null && previousOwned !== contextKey) {
-      const previousWriter = homeQuickWriters.get(previousOwned)
-      previousWriter?.owners.delete(mountId)
-      previousWriter?.subscribers.delete(mountId)
-    }
-    const writer = getHomeQuickWriter(contextKey)
-    writer.owners.add(mountId)
-    ownedHomeQuickContextKeyRef.current = contextKey
-    quickHydratedContextRef.current = null
-    setView('home')
-    setManageOpen(false)
-    setQuickEntries([])
-    // Every mount of the context subscribes: hydration, persisted acks and
-    // rollbacks broadcast to ALL live owners, so simultaneous mounts stay in
-    // lockstep on the shared confirmed baseline.
-    writer.subscribers.set(mountId, entries => {
-      if (
-        quickMountedRef.current
-        && quickContextKeyRef.current === contextKey
-      ) {
-        quickHydratedContextRef.current = contextKey
-        setQuickEntries(entries)
-      }
-    })
-    if (writer.hydrated) {
-      // Same-context remount or A→B→A: the SHARED writer already holds the
-      // transaction baseline — display it without a second racing queue.
-      setQuickEntries(writer.confirmed)
-      quickHydratedContextRef.current = contextKey
-      sweepHomeQuickWriters()
-      return
-    }
-    // Fresh activation for THIS mount: only ONE load may be in flight per
-    // context (a second mount joining during hydration awaits the SAME gate
-    // and displays the shared baseline). Every mount waits for the gate and
-    // displays from the baseline through its own state setter.
-    //
-    // SINGLE TERMINAL ACTIVATION LOOP: the initial attempt and its bounded
-    // retry live inside ONE async loop with ONE terminal finally, guarded by
-    // an activation epoch. The stable deferred gate is created once per
-    // activation and resolves exactly once at the terminal outcome. The
-    // loop keeps `hydrating` true across attempts — a third owner joining
-    // mid-retry joins the SAME activation instead of starting a duplicate.
-    // All stale callbacks / context switches / owner changes fail closed on
-    // the activation epoch.
-    if (!writer.hydrating) {
-      writer.hydrating = true
-      writer.hydrationAttempts = 0
-      let resolveGate!: (hydrated: boolean) => void
-      writer.gate = new Promise<boolean>(resolve => { resolveGate = resolve })
-      writer.resolveGate = resolveGate
-      const activationEpoch = ++homeQuickActivationSequence
-      writer.activationToken = activationEpoch
-      void (async (): Promise<void> => {
-        try {
-          for (let attempt = 1; attempt <= MAX_HYDRATION_ATTEMPTS; attempt++) {
-            writer.hydrationAttempts = attempt
-            try {
-              const entries = await loadHomeQuickAccess(contextKey)
-              if (writer.activationToken !== activationEpoch) return
-              // Terminal SUCCESS: the baseline ALWAYS advances for this
-              // context, then BROADCASTS to every live owner.
-              writer.intent = entries
-              writer.confirmed = entries
-              writer.hydrated = true
-              writer.resolveGate(true)
-              notifyHomeQuickSubscribers(writer, entries)
-              return
-            } catch {
-              if (writer.activationToken !== activationEpoch) return
-              if (attempt === MAX_HYDRATION_ATTEMPTS || writer.owners.size === 0) {
-                // Terminal FAILURE: the gate resolves FALSE exactly once so
-                // queued mutations take their VISIBLE failure path (rollback
-                // broadcast + toast) — never a silent pseudo-ack.
-                writer.resolveGate(false)
-                return
-              }
-              // Bounded observable retry — SAME gate, same activation; the
-              // loop keeps `hydrating` true so joining owners ride along.
-            }
-          }
-        } finally {
-          // ONE terminal cleanup for the WHOLE activation: only the current
-          // epoch may clear the in-flight flag or sweep.
-          if (writer.activationToken === activationEpoch) {
-            writer.hydrating = false
-            sweepHomeQuickWriters()
-          }
-        }
-      })()
-    }
-    sweepHomeQuickWriters()
-  }, [quickContextKey])
-
-  useEffect(() => {
-    const mountId = homeQuickMountIdRef.current
-    quickMountedRef.current = true
-    return () => {
-      quickMountedRef.current = false
-      // Release ONLY this mount's ownership and notification channel:
-      // another live mount sharing a context keeps its writer (gate,
-      // baseline, queue, remaining subscribers) fully intact.
-      const owned = ownedHomeQuickContextKeyRef.current
-      if (owned !== null) {
-        const writer = homeQuickWriters.get(owned)
-        writer?.owners.delete(mountId)
-        writer?.subscribers.delete(mountId)
-        ownedHomeQuickContextKeyRef.current = null
-      }
-      sweepHomeQuickWriters()
-    }
-  }, [])
-
-  // Prune quick-access entries that no longer resolve to an available App
-  // of the ACTIVE ProductSpace (space switch, withdrawal, stale ids). Runs
-  // only for entries that were hydrated in THIS context — during the switch
-  // commit the stale previous-context entries must never be pruned against
-  // the new Catalog and persisted into the new context. It also requires an
-  // AUTHORITATIVE Catalog snapshot to have been committed for this context:
-  // before that (loading, catalog=null, failure, denied) the stored entries
-  // are preserved untouched — pruning against an empty/unavailable view
-  // would permanently destroy valid shortcuts.
-  const catalogCommitted = catalog.state.catalog !== null
-    && catalog.state.accessMode !== 'denied'
-  useEffect(() => {
-    if (quickHydratedContextRef.current !== quickContextKey) return
-    if (!catalogCommitted) return
-    if (quickEntries.length === 0) return
-    const availableIds = new Set<string>()
-    for (const app of availableApps) {
-      try {
-        availableIds.add(uiKeyForApp(app))
-      } catch {
-        continue
-      }
-    }
-    const hasUnresolvable = quickEntries.some(entry => !availableIds.has(entry.id))
-    if (!hasUnresolvable) return
-    // Prune shares the same single-writer transaction primitive: the filter
-    // re-runs against the intent at EXECUTION time, so a concurrent pin is
-    // never clobbered, and a no-op second run persists nothing.
-    enqueueQuickMutation(quickContextKey, entries => {
-      const pruned = entries.filter(entry => availableIds.has(entry.id))
-      if (pruned.length === entries.length) return { next: null }
-      return { next: pruned }
-    })
-  }, [availableApps, catalogCommitted, enqueueQuickMutation, quickContextKey, quickEntries, uiKeyForApp])
-
+  // The Polo assistant card and its launch action stay on the existing code
+  // path (P70-HOME-02). The prototype's 管理技能 entry targets the deferred
+  // skills page — an unbuilt entry must not pretend to succeed, so it is NOT
+  // rendered this batch.
   const openPoloAssistant = () => {
     openApp(POLO_APP_DEFINITION)
   }
 
+  // H2 shared actions: open / prepare / permission feedback through the SAME
+  // trusted flow, driven by the shared catalog instance.
+  const memberActions = useMemberAppActions({
+    context: { spaceKind, launchHandoff },
+    catalog,
+  })
+  const prepareTargetApp = memberActions.prepareTarget?.app ?? null
 
-  /**
-   * Ack-committed quick-access toggle (pin and manage-dialog both route
-   * here) — a queued task on the SAME single-writer primitive as prune. The
-   * toggle applies at EXECUTION time against the hydrated intent, so a
-   * click before hydration can never wipe the stored collection.
-   */
-  const persistQuickToggle = useCallback((
-    contextKey: string,
-    scopeKey: string,
-    enabled: boolean,
-  ): boolean => {
-    enqueueQuickMutation(contextKey, entries => {
-      const { next, rejected } = toggleHomeQuickAccessApp(entries, scopeKey, enabled)
-      if (rejected) {
-        toast.error(t('homeApps.manage.limitReached', {
-          max: MAX_HOME_QUICK_ACCESS_APPS,
-        }))
-        return { next: null, rejected: true }
-      }
-      return { next }
-    })
-    return true
-  }, [enqueueQuickMutation, t])
+  const usage = loadHomeAppUsage(usageContextKey)
+  const sourceOptions = useMemo(
+    () => collectHomeAppSourceOptions(directory.entries),
+    [directory.entries],
+  )
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filteredEntries = useMemo(
+    () => directory.entries.filter(entry =>
+      homeAppMatchesQuery(entry, normalizedQuery)
+      && homeAppMatchesSource(entry, sourceFilter)),
+    [directory.entries, normalizedQuery, sourceFilter],
+  )
+  const visibleEntries = useMemo(
+    () => sortHomeAppDirectory(filteredEntries, sortMode, usage),
+    // `usageVersion` re-ranks after a recorded open; `usage` is the stable
+    // module-level record cache the mutation writes into.
+    [filteredEntries, sortMode, usage, usageVersion],
+  )
 
-  // 显示在首页: pin a catalog App into the home quick access — queued on the
-  // same single-writer primitive as every other quick-access mutation.
-  const pinApp = useCallback((app: CatalogApp) => {
-    persistQuickToggle(quickContextKey, uiKeyForApp(app), true)
-  }, [persistQuickToggle, quickContextKey, uiKeyForApp])
+  // Open handler: the fail-closed gate demanded by the H1 reviewer contract.
+  // A cached row NEVER carries launch authority: offline/denied/error phases
+  // and per-row launchBlocked facts stop HERE with visible feedback (the
+  // card stays in place, nothing navigates, nothing auto-executes). The
+  // authoritative grant stays with resolveLaunch inside the shared action.
+  const handleOpenApp = useCallback((entry: HomeAppDirectoryEntry) => {
+    if (phase !== 'ready') {
+      toast.error(
+        phase === 'offline'
+          ? t('homeApps.organization.offlineWarning')
+          : t('homeApps.errors.unavailable'),
+      )
+      return
+    }
+    if (entry.launchBlocked) {
+      toast.error(t('homeApps.errors.unavailable'))
+      return
+    }
+    recordHomeAppUsage(usageContextKeyRef.current, entry.identityKey)
+    setUsageVersion(version => version + 1)
+    void memberActions.open(entry.app)
+  }, [memberActions, phase, t])
+
+  const confirmUninstall = async () => {
+    const app = uninstallTarget
+    if (!app) return
+    setUninstallTarget(null)
+    try {
+      await catalog.uninstallProductSpaceBundle(app, preserveData)
+      toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
+    } catch (error) {
+      toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
+        description: homeAppOperationErrorText(t, error, 'uninstall', spaceKind),
+      })
+    } finally {
+      setPreserveData(true)
+    }
+  }
 
   // Authoritative committed-context lease for enterprise workflow jumps:
   // account (from the committed ProductSpaceContext authority — present even
@@ -651,68 +492,9 @@ export function HomePage() {
     }
   }
 
-  const toggleQuickAccess = (
-    _app: CatalogApp,
-    scopeKey: string,
-    enabled: boolean,
-  ): boolean => {
-    // Ack-based commit, identical to pinApp: the dialog's `enabled` flag is
-    // an intent until the persistence resolves; a reject or superseded
-    // context/generation rolls the intent back to the last persisted
-    // snapshot.
-    return persistQuickToggle(quickContextKey, scopeKey, enabled)
-  }
-
-  // POO-70 H2 extraction (P70-CARD-02): open/prepare/permission-feedback
-  // actions live in useMemberAppActions, driven by THIS page's original
-  // catalog instance (injected — no second useAppCatalog, no Provider
-  // requirement for the hook itself). The same instance is shared downward
-  // through MemberCatalogProvider so H1's member catalog surface and this
-  // page stay one authority. Launch authority remains with the catalog's
-  // resolveLaunch + the existing handoff publish.
-  const memberActions = useMemberAppActions({
-    context: { spaceKind, launchHandoff },
-    catalog,
-  })
-  const prepareTargetApp = memberActions.prepareTarget?.app ?? null
-
-  const confirmUninstall = async () => {
-    const app = uninstallTarget
-    if (!app) return
-    setUninstallTarget(null)
-    try {
-      await catalog.uninstallProductSpaceBundle(app, preserveData)
-      toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
-    } catch (error) {
-      toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
-        description: homeAppOperationErrorText(t, error, 'uninstall', spaceKind),
-      })
-    } finally {
-      setPreserveData(true)
-    }
-  }
-
-  const selectedQuickIds = useMemo(
-    () => new Set(quickEntries.map(entry => entry.id)),
-    [quickEntries],
-  )
-
-  const quickTileFor = (app: CatalogApp) => {
-    const scopeKey = uiKeyForApp(app)
-    return {
-      key: scopeKey,
-      definition: {
-        id: `catalog-tile:${scopeKey}`,
-        name: app.name,
-        iconUrl: app.iconUrl,
-        type: 'webapp' as const,
-      },
-    }
-  }
-
-  // Runtime status for a quick-entry card (prototype status badge, e.g.
-  // 运行中): looked up through the runtime scope key, never the UI identity
-  // key. A failed scope derivation simply means "no badge".
+  // Runtime status for a directory card (prototype 运行中 badge): looked up
+  // through the runtime scope key, never the UI identity key. A failed scope
+  // derivation simply means "no badge".
   const runtimeStatusFor = (app: CatalogApp) => {
     try {
       return catalog.state.statuses[catalog.scopeKeyForApp(app)] ?? null
@@ -721,280 +503,358 @@ export function HomePage() {
     }
   }
 
-  // Prototype P-M03-HOME-ZERO: with a committed Catalog and nothing pinned,
-  // the assistant CTA becomes the low-threshold daily-task invitation and a
-  // dashed guide routes first-run members to All Apps.
-  const showZeroGuide = catalogCommitted
-    && !catalog.state.loading
-    && !catalog.state.errorCode
-    && homeWorkCards.length === 0
+  // Grid body phases. The work-App slots render rows ONLY when the projection
+  // is authoritative (ready) or explains retained rows (denied/offline); a
+  // first load keeps the dedicated loading tile and a transport failure keeps
+  // the explicit retry tile (P70-HOME-03: never synthesize, never auto-run).
+  const showDirectoryRows = phase === 'ready' || phase === 'denied' || phase === 'offline'
+  const directoryEmpty = phase === 'empty'
+  // A fully-rejected directory is NOT a vacuum (H1 reviewer contract): the
+  // empty phase must be consumed together with rejections.length.
+  const directoryRejected = directoryEmpty && directory.rejections.length > 0
 
   return (
-    // H1 handoff (injection mode): the SAME catalog instance this page owns
-    // is shared downward through the member catalog context. The injected
-    // branch of MemberCatalogProvider is a pure Context.Provider — no second
-    // useAppCatalog instance, no duplicate catalog syncs. HomePage itself
-    // keeps its original instance; switching the page onto useMemberCatalog
-    // is deferred to H3 (POO-91, depends on N1).
-    <MemberCatalogProvider catalog={catalog}>
-    {/* Frozen POO-41 `.main` mirror: the centered 1260px column with the
-    breakpoint paddings INSIDE it, content-sized exactly like the frozen
-    `.main` element. Scrolling is owned by the DEDICATED wrapper above
-    (h-full min-h-0 overflow-y-auto): html/body/#root are overflow-hidden
-    globally and the region element must stay content-sized, so the
-    wrapper — never the region — owns viewport-bounded scrolling. Every
-    launcher row and Catalog App below the fold stays reachable (R39/R40
-    review). */}
+    // Frozen POO-41 `.main` mirror: the centered 1260px column with the
+    // breakpoint paddings INSIDE it, content-sized exactly like the frozen
+    // `.main` element. Scrolling is owned by the DEDICATED wrapper above
+    // (h-full min-h-0 overflow-y-auto): html/body/#root are overflow-hidden
+    // globally and the region element must stay content-sized, so the
+    // wrapper — never the region — owns viewport-bounded scrolling. Every
+    // launcher row and directory row below the fold stays reachable
+    // (R39/R40 review). The `home-quick-access-section` test id is the
+    // long-standing HOME-SURFACE marker consumed by the narrow-window guard
+    // and scope-isolation tests — it marks the home content region, not the
+    // retired quick-access feature.
     <div className="h-full min-h-0 overflow-y-auto">
     <main
       className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
       data-testid="home-app-hub"
     >
-      <div className="space-y-[34px]">
-        {view === 'all-apps' && catalog.productSpace ? (
-          <AllAppsView
-            spaceName={activeProductSpace?.name
-              || t('homeApps.organization.current')}
-            spaceKind={activeProductSpace?.kind ?? null}
-            apps={allApps}
-            loading={catalog.state.loading}
-            refreshing={catalog.state.refreshing}
-            warningCode={catalog.state.warningCode}
-            errorCode={catalog.state.errorCode}
-            offline={catalog.state.accessMode === 'offline'}
-            restricted={catalog.state.accessMode === 'denied'}
-            pinnedIds={quickPinnedIds}
-            identityKeyForApp={uiKeyForApp}
-            getInstallState={catalog.getInstallState}
-            circleCount={catalog.creatorCircles?.length ?? 0}
-            onPin={pinApp}
-            onRefresh={() => { void catalog.sync(true) }}
-            onOpen={(target) => { void memberActions.open(target) }}
-            onUninstall={setUninstallTarget}
-            onBack={() => setView('home')}
-          />
-        ) : (
-          <div data-testid="home-quick-access-section">
-            {/* Prototype `.home-hero`: time-of-day greeting + space lead at
-            left, the circles context link bottom-aligned at desktop and
-            stacked full-width under the text at ≤760px. */}
-            <div className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end">
-              <div className="min-w-0">
-                <h1 className="m-0 text-[30px] font-bold leading-[1.08] tracking-[-0.055em] min-[761px]:text-[36px]">
-                  {t(new Date().getHours() < 12
-                    ? 'homeApps.home.greetingMorning'
-                    : new Date().getHours() < 18
-                      ? 'homeApps.home.greetingAfternoon'
-                      : 'homeApps.home.greetingEvening')}
-                </h1>
-                <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
-                  <Trans
-                    i18nKey="homeApps.home.greetingLead"
-                    values={{
-                      space: activeProductSpace?.name
-                        ?? t('homeApps.organization.current'),
-                    }}
-                    components={{ strong: <strong className="font-semibold text-foreground" /> }}
-                  />
-                </p>
-              </div>
-              {catalog.productSpace && activeProductSpace?.kind === 'personal' && (
-                <button
-                  type="button"
-                  data-testid="home-circles-link"
-                  onClick={() => setShowCirclesCard(value => !value)}
-                  className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[10px] rounded-[12px] px-[10px] py-[9px] text-left text-foreground-70 hover:bg-foreground-5 hover:text-foreground min-[761px]:w-auto min-[761px]:min-w-[210px]"
-                >
-                  <Icons.UserRoundPlus className="size-4 text-accent" aria-hidden="true" />
-                  <span className="grid gap-[3px]">
-                    <strong className="text-[13px] font-semibold">{t('homeSpace.context.myCircles')}</strong>
-                    <small className="text-[11px] text-foreground-50">
-                      {t('homeSpace.context.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
-                    </small>
-                  </span>
-                  <Icons.ChevronRight className="size-3.5 text-foreground-40" aria-hidden="true" />
-                </button>
-              )}
-            </div>
-
-            {catalog.state.accessMode === 'denied' && (
-              <div
-                className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
-                data-testid="home-restricted-banner"
-              >
-                {t('homeApps.organization.accessError')}
-              </div>
-            )}
-
-            {catalog.productSpace && activeProductSpace?.kind === 'enterprise' && (
-              <HomeSpaceContext
-                spaceName={activeProductSpace?.name
-                  || t('homeApps.organization.current')}
-                spaceKind="enterprise"
-                creatorCircles={catalog.creatorCircles}
-                spaceKey={catalog.productSpace.productSpaceContextKey}
-                enterpriseRole={activeProductSpace?.kind === 'enterprise'
-                  ? activeProductSpace.role
-                  : undefined}
-                enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
-                  ? activeProductSpace.accessMode
-                  : undefined}
-                onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
-                onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
-              />
-            )}
-
-            <section className="mt-[34px]">
-              <div className="mb-[18px] flex items-start justify-between gap-[16px]">
-                <div>
-                  <h2 className="m-0 text-[20px] font-bold leading-[normal] tracking-[-0.03em]">{t('homeApps.home.sectionTitle')}</h2>
-                  <p className="mt-[6px] text-[14px] leading-[1.45] text-muted-foreground">
-                    {t('homeApps.home.sectionDescription')}
-                  </p>
-                </div>
-                {catalog.productSpace && (
-                  <div className="flex shrink-0 items-center gap-[8px]">
-                    <button
-                      type="button"
-                      data-testid="home-manage-quick-access"
-                      onClick={() => setManageOpen(true)}
-                      className="inline-flex min-h-[30px] items-center rounded-[6px] px-[8px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
-                    >
-                      {t('homeApps.quick.manage')}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="home-all-apps-open"
-                      onClick={() => setView('all-apps')}
-                      className="inline-flex min-h-[30px] items-center rounded-[6px] px-[8px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
-                    >
-                      {t('homeApps.quick.allApps')}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
-                {/* The fixed Polo assistant card always renders — loading and
-                    error tiles only occupy the work-App slots beside it. */}
-                <article
-                  data-testid="home-quick-entry-polo"
-                  onClick={openPoloAssistant}
-                  className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
-                >
-                  <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
-                    <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
-                  </span>
-                  <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
-                  <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
-                  <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
-                    {t('homeApps.home.poloDescription')}
-                  </p>
-                  <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-                    {/* Prototype `.home-app-grid .assistant-card
-                    .home-primary-action`: solid accent, weight 650, lifts
-                    with shadow-middle on hover. */}
-                    <button
-                      type="button"
-                      className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        openPoloAssistant()
-                      }}
-                    >
-                      {showZeroGuide
-                        ? t('homeApps.home.tryTask')
-                        : t('homeApps.home.openAssistant')}
-                    </button>
-                  </div>
-                </article>
-                {catalog.state.loading && !catalog.state.catalog ? (
-                  <div
-                    className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
-                    data-testid="home-quick-access-loading"
-                  >
-                    <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : catalog.state.errorCode && !catalog.state.catalog ? (
-                  <div className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-[24px] text-center">
-                    <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
-                    <p className="text-sm font-medium">{t('homeApps.quick.loadFailed')}</p>
-                    <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                      {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-3 inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
-                      onClick={() => { void catalog.sync(true) }}
-                    >
-                      {t('homeApps.actions.tryAgain')}
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {homeWorkCards.map((app) => (
-                      <MemberAppCard
-                        key={uiKeyForApp(app)}
-                        variant="home"
-                        app={app}
-                        runtimeStatus={runtimeStatusFor(app)}
-                        identityKey={uiKeyForApp(app)}
-                        testId="home-quick-entry"
-                        onOpen={(target) => { void memberActions.open(target) }}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
-
-              {showZeroGuide && (
-                <div
-                  data-testid="home-zero-guide"
-                  className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-border px-[20px] py-[34px] text-center"
-                >
-                  <span className="grid size-[52px] place-items-center rounded-[14px] bg-info/10 text-info">
-                    <Icons.LayoutGrid className="size-[25px]" aria-hidden="true" />
-                  </span>
-                  <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
-                    {t('homeApps.home.zeroTitle')}
-                  </h2>
-                  <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
-                    {t('homeApps.home.zeroDescription', { max: MAX_HOME_QUICK_ACCESS_APPS })}
-                  </p>
-                  {/* Prototype `.button.primary`: accent fill, on-accent
-                  label, hover darkens to accent 86% + black. */}
-                  <button
-                    type="button"
-                    className="mt-[4px] inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)]"
-                    onClick={() => setView('all-apps')}
-                  >
-                    {t('homeApps.home.zeroCta')}
-                  </button>
-                </div>
-              )}
-            </section>
-            {catalog.productSpace && activeProductSpace?.kind === 'personal' && showCirclesCard && (
-              <HomeSpaceContext
-                spaceName={activeProductSpace?.name
-                  || t('homeApps.organization.current')}
-                spaceKind="personal"
-                creatorCircles={catalog.creatorCircles}
-                spaceKey={catalog.productSpace.productSpaceContextKey}
-              />
-            )}
-          </div>
+      {/* Prototype `.r14-home .home-hero`: 我的应用 title + space lead at
+      left, the personal circles context link bottom-aligned at desktop and
+      stacked full-width under the text at ≤760px. Enterprise homes never mix
+      in the circles entry (P70-HOME-02). The test id is the long-standing
+      HOME-SURFACE marker (see the note above). */}
+      <div
+        className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end"
+        data-testid="home-quick-access-section"
+      >
+        <div className="min-w-0">
+          <h1
+            data-testid="home-directory-title"
+            className="m-0 text-[30px] font-bold leading-[1.08] tracking-[-0.055em] min-[761px]:text-[36px]"
+          >
+            {t('poo70.h3.home.title')}
+          </h1>
+          {catalog.productSpace && (
+            <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
+              {spaceKind === 'enterprise'
+                ? t('poo70.h3.home.leadEnterprise')
+                : t('poo70.h3.home.leadPersonal')}
+            </p>
+          )}
+        </div>
+        {catalog.productSpace && spaceKind === 'personal' && (
+          <button
+            type="button"
+            data-testid="home-circles-link"
+            onClick={() => {
+              if (clientPage) {
+                // N1 (POO-89) navigation contract: the circles route is a
+                // typed navigation candidate; the real circles page mounts
+                // through POO-100.
+                clientPage.navigate({ kind: 'circles' })
+                return
+              }
+              // Isolated-mount fallback (tests/probes without the App's
+              // provider tree): the local circles card instead of a silent
+              // no-op.
+              setShowCirclesCard(value => !value)
+            }}
+            className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[10px] rounded-[12px] px-[10px] py-[9px] text-left text-foreground-70 hover:bg-foreground-5 hover:text-foreground min-[761px]:w-auto min-[761px]:min-w-[210px]"
+          >
+            <Icons.UserRoundPlus className="size-4 text-accent" aria-hidden="true" />
+            <span className="grid gap-[3px]">
+              <strong className="text-[13px] font-semibold">{t('homeSpace.context.myCircles')}</strong>
+              <small className="text-[11px] text-foreground-50">
+                {t('homeSpace.context.circlesCount', { count: catalog.creatorCircles?.length ?? 0 })}
+              </small>
+            </span>
+            <Icons.ChevronRight className="size-3.5 text-foreground-40" aria-hidden="true" />
+          </button>
         )}
       </div>
 
-      <ManageHomeAppsDialog
-        open={manageOpen}
-        onOpenChange={setManageOpen}
-        apps={availableApps}
-        identityKeyForApp={uiKeyForApp}
-        selectedIds={selectedQuickIds}
-        maxSlots={MAX_HOME_QUICK_ACCESS_APPS}
-        onToggle={toggleQuickAccess}
-      />
+      {catalog.productSpace && spaceKind === 'enterprise' && (
+        <HomeSpaceContext
+          spaceName={activeProductSpace?.name
+            || t('homeApps.organization.current')}
+          spaceKind="enterprise"
+          creatorCircles={catalog.creatorCircles}
+          spaceKey={catalog.productSpace.productSpaceContextKey}
+          enterpriseRole={activeProductSpace?.kind === 'enterprise'
+            ? activeProductSpace.role
+            : undefined}
+          enterpriseAccessMode={activeProductSpace?.kind === 'enterprise'
+            ? activeProductSpace.accessMode
+            : undefined}
+          onOpenMemberManagement={() => { void openEnterpriseWorkflow('members') }}
+          onOpenCreatorPublishing={() => { void openEnterpriseWorkflow('publishing') }}
+        />
+      )}
+
+      {/* Prototype `.r14-toolbar`: search + source filter + sort. Hidden
+      while the directory cannot be verified (transport failure), matching
+      the prototype LOAD-FAIL state. */}
+      {catalog.productSpace && phase !== 'error' && (
+        <div
+          className="mt-[24px] flex flex-wrap items-end gap-[16px]"
+          data-testid="home-directory-toolbar"
+        >
+          <label className="grid min-w-[220px] flex-1 gap-[6px] text-[12px] text-muted-foreground">
+            <span>{t('poo70.h3.home.searchLabel')}</span>
+            <input
+              type="search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder={t('poo70.h3.home.searchPlaceholder')}
+              data-testid="home-directory-search"
+              className="min-h-[38px] w-full appearance-none rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+            />
+          </label>
+          <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+            <span>{t('homeApps.allApps.sourceLabel')}</span>
+            <select
+              value={sourceFilter}
+              onChange={event => setSourceFilter(event.target.value)}
+              data-testid="home-directory-source"
+              className="min-h-[38px] rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground"
+            >
+              <option value="all">{t('poo70.h3.home.sourceAll')}</option>
+              {sourceOptions.map(option => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-[6px] text-[12px] text-muted-foreground">
+            <span>{t('poo70.h3.home.sortLabel')}</span>
+            <select
+              value={sortMode}
+              onChange={event => setSortMode(event.target.value as HomeAppSortMode)}
+              data-testid="home-directory-sort"
+              className="min-h-[38px] rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground"
+            >
+              <option value="recent">{t('poo70.h3.home.sortRecent')}</option>
+              <option value="frequent">{t('poo70.h3.home.sortFrequent')}</option>
+              <option value="name">{t('poo70.h3.home.sortName')}</option>
+            </select>
+          </label>
+        </div>
+      )}
+
+      {phase === 'denied' && (
+        <div
+          className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+          data-testid="home-restricted-banner"
+        >
+          {t('homeApps.organization.accessError')}
+        </div>
+      )}
+      {phase === 'offline' && (
+        <div
+          className="mt-[24px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text"
+          data-testid="home-directory-offline-banner"
+        >
+          {t('homeApps.organization.offlineWarning')}
+        </div>
+      )}
+
+      <section className="mt-[34px]">
+        <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+          {/* The fixed Polo assistant card always renders — loading, error
+          and empty states only occupy the work-App slots beside it. */}
+          <article
+            data-testid="home-quick-entry-polo"
+            onClick={openPoloAssistant}
+            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
+          >
+            <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
+              <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
+            </span>
+            <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
+            <p className="mt-[4px] text-[12px] leading-[normal] text-muted-foreground">{t('homeApps.home.poloSource')}</p>
+            <p className="mt-[17px] text-[13px] leading-[1.6] text-muted-foreground">
+              {t('homeApps.home.poloDescription')}
+            </p>
+            <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+              {/* Prototype `.home-app-grid .assistant-card
+              .home-primary-action`: solid accent, weight 650, lifts with
+              shadow-middle on hover. */}
+              <button
+                type="button"
+                className="inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  openPoloAssistant()
+                }}
+              >
+                {t('homeApps.home.openAssistant')}
+              </button>
+            </div>
+          </article>
+          {phase === 'loading' && !catalog.state.catalog ? (
+            <div
+              className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
+              data-testid="home-directory-loading"
+            >
+              <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : phase === 'error' && !catalog.state.catalog ? (
+            <div
+              className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-[24px] text-center"
+              data-testid="home-directory-load-failed"
+            >
+              <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
+              <p className="text-sm font-medium">{t('homeApps.allApps.loadFailed')}</p>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                {catalogStateMessage(t, catalog.state.errorCode, 'error', spaceKind)}
+              </p>
+              {/* Explicit retry only — a failure never auto-executes. */}
+              <button
+                type="button"
+                className="mt-3 inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                onClick={() => { void catalog.sync(true) }}
+              >
+                {t('homeApps.actions.tryAgain')}
+              </button>
+            </div>
+          ) : (
+            <>
+              {showDirectoryRows && visibleEntries.map((entry) => (
+                <div key={entry.identityKey} className="group relative">
+                  <MemberAppCard
+                    variant="home"
+                    app={entry.app}
+                    runtimeStatus={runtimeStatusFor(entry.app)}
+                    identityKey={entry.identityKey}
+                    testId="home-directory-app"
+                    onOpen={() => handleOpenApp(entry)}
+                  />
+                  {/* Retained local management: a work App installed on THIS
+                  device keeps its uninstall entry even when the directory row
+                  is not launchable (withdrawn tombstone / blocked row). The
+                  entry is page-level UI on the existing uninstall flow. */}
+                  {catalog.getInstallState(entry.app)?.state === 'installed' && (
+                    <button
+                      type="button"
+                      data-testid={`home-directory-uninstall-${entry.identityKey}`}
+                      aria-label={t('homeApps.actions.uninstall')}
+                      title={t('homeApps.actions.uninstall')}
+                      onClick={() => setUninstallTarget(entry.app)}
+                      className="absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Icons.Trash2 className="size-[13px]" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {directoryRejected && (
+          <div
+            className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-danger/30 px-[20px] py-[34px] text-center"
+            data-testid="home-directory-rejected"
+          >
+            <span className="grid size-[52px] place-items-center rounded-[14px] bg-danger/10 text-danger">
+              <Icons.ShieldQuestion className="size-[25px]" aria-hidden="true" />
+            </span>
+            <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
+              {t('poo70.h3.home.rejectedTitle')}
+            </h2>
+            <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+              {t('poo70.h3.home.rejectedHint')}
+            </p>
+            <button
+              type="button"
+              className="mt-[4px] inline-flex min-h-[32px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              onClick={() => { void catalog.sync(true) }}
+            >
+              {t('homeApps.actions.tryAgain')}
+            </button>
+          </div>
+        )}
+        {directoryEmpty && !directoryRejected && catalog.productSpace && (
+          /* Honest vacuum (P70-HOME-03): personal spaces invite the circles
+          join path, enterprise spaces say plainly that nothing has been
+          distributed yet — never a generic "no results". */
+          <div
+            className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-border px-[20px] py-[34px] text-center"
+            data-testid={spaceKind === 'enterprise'
+              ? 'home-directory-empty-enterprise'
+              : 'home-directory-empty-personal'}
+          >
+            {spaceKind === 'enterprise' ? (
+              <>
+                <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
+                  {t('homeApps.allApps.empty')}
+                </h2>
+                <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+                  {t('poo70.h3.home.emptyEnterprise')}
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="grid size-[52px] place-items-center rounded-[14px] bg-info/10 text-info">
+                  <Icons.LayoutGrid className="size-[25px]" aria-hidden="true" />
+                </span>
+                <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
+                  {t('poo70.h3.home.emptyPersonalTitle')}
+                </h2>
+                <p className="m-0 max-w-[460px] text-[12px] leading-[1.5] text-muted-foreground">
+                  {t('poo70.h3.home.emptyPersonalHint')}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+        {phase === 'ready' && directory.entries.length > 0 && visibleEntries.length === 0 && (
+          /* Prototype `[data-library-empty]`: the search/filter vacuum —
+          distinct from the directory vacuum above, with the explicit clear
+          action. */
+          <div
+            className="mt-[16px] grid justify-items-center gap-[8px] rounded-[20px] border border-dashed border-border px-[20px] py-[30px] text-center"
+            data-testid="home-directory-no-match"
+          >
+            <h2 className="m-0 text-[16px] font-bold tracking-[-0.02em]">
+              {t('poo70.h3.home.noMatch')}
+            </h2>
+            <p className="m-0 text-[12px] leading-[1.5] text-muted-foreground">
+              {t('poo70.h3.home.noMatchHint')}
+            </p>
+            <button
+              type="button"
+              className="mt-[2px] inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              onClick={() => {
+                setQuery('')
+                setSourceFilter('all')
+              }}
+            >
+              {t('poo70.h3.home.clearFilters')}
+            </button>
+          </div>
+        )}
+      </section>
+      {catalog.productSpace && spaceKind === 'personal' && showCirclesCard && (
+        <HomeSpaceContext
+          spaceName={activeProductSpace?.name
+            || t('homeApps.organization.current')}
+          spaceKind="personal"
+          creatorCircles={catalog.creatorCircles}
+          spaceKey={catalog.productSpace.productSpaceContextKey}
+        />
+      )}
 
       <Dialog open={Boolean(memberActions.prepareTarget)} onOpenChange={(open) => {
         if (!open) memberActions.cancelPrepare()
@@ -1112,6 +972,5 @@ export function HomePage() {
 
     </main>
     </div>
-    </MemberCatalogProvider>
   )
 }

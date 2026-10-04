@@ -199,11 +199,18 @@ describe('HomePage × production useAppCatalog runtime boundary (POO-43 / POO-47
       onDismissTargetAccessLost: () => {},
       onStopSwitchExecution: () => {},
     }
+    // H3 mount contract: HomePage consumes the catalog through the App-level
+    // MemberCatalogProvider, which runs its own instance of the REAL hook.
+    const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
     const tree = createElement(
       ProductSpaceProvider,
       {
         value: contextValue as never,
-        children: createElement(I18nextProvider, { i18n }, createElement(HomePage)),
+        children: createElement(
+          I18nextProvider,
+          { i18n },
+          createElement(MemberCatalogProvider, null, createElement(HomePage)),
+        ),
       },
     )
 
@@ -216,22 +223,31 @@ describe('HomePage × production useAppCatalog runtime boundary (POO-43 / POO-47
     expectRuntimeBoundaryIntact()
 
     // Explicit CATALOG barrier: release the gated real productSpaceGetCatalog
-    // response and wait until the production hook hydrated the page.
+    // response and wait until the production hook hydrated the page — since
+    // H3 the home IS the complete directory, so the hydrated row renders
+    // directly on the page.
     releaseCatalog!(rawCatalogResponse())
     await waitFor(() => {
-      if (!screen.getByTestId('home-all-apps-open')) throw new Error('catalog not hydrated')
+      if (!screen.getByTestId('home-directory-app')) throw new Error('catalog not hydrated')
     })
     expectRuntimeBoundaryIntact()
 
-    // Interaction: open the all-apps view driven by the SAME production hook.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(() => {
-      if (!screen.getByTestId('all-apps-row')) throw new Error('all-apps rows pending')
-    })
+    // The directory row's identity comes from the REAL mapper's stable UI
+    // identity tuple (never the display name).
+    expect(screen.getByTestId('home-directory-app').getAttribute('data-identity-key'))
+      .toBe(JSON.stringify([
+        'catalog-app-identity',
+        'account-a',
+        'organization-a',
+        'catalog-entry-real',
+        'artifact-instance-real',
+      ]))
 
     // Explicit INSTALL-STATE barrier: the production hook issued the
-    // install-state IPC with a sealed identity, the gated IPC resolves, and
-    // the reconciled 'Installed' status becomes visible.
+    // install-state IPC with a sealed identity, the gated IPC resolves.
+    // (The H3 home card is a work card, not an install-state surface — the
+    // reconciled states flow through the hook, the label lives in the
+    // withdrawn/uninstall management UI.)
     await waitFor(() => {
       if (lastInstallStatesRequest !== null) return undefined
       throw new Error('install-state IPC not requested')
@@ -243,16 +259,17 @@ describe('HomePage × production useAppCatalog runtime boundary (POO-43 / POO-47
     expect((lastInstallStatesRequest as ProductSpaceAppIdentity[])[0]!.availability).toBe('available')
     releaseInstallStates!([])
     await act(async () => {})
-    await waitFor(() => {
-      if (!screen.getByText('Installed')) throw new Error('install states not reconciled')
-    })
     expectRuntimeBoundaryIntact()
 
-    // Interaction: search filter and navigation back to Home.
-    fireEvent.change(screen.getByTestId('all-apps-search'), { target: { value: 'Real Hook' } })
-    fireEvent.click(screen.getByTestId('all-apps-back'))
+    // Interaction: the page-level search filter narrows the directory.
+    fireEvent.change(screen.getByTestId('home-directory-search'), { target: { value: 'Real Hook' } })
     await waitFor(() => {
-      if (!screen.getByTestId('home-all-apps-open')) throw new Error('back navigation pending')
+      if (!screen.getByTestId('home-directory-app')) throw new Error('row lost by search')
+    })
+    fireEvent.change(screen.getByTestId('home-directory-search'), { target: { value: 'zzz-none' } })
+    await waitFor(() => {
+      if (screen.queryByTestId('home-directory-no-match')) return true
+      throw new Error('no-match state pending')
     })
 
     // THE BOUNDARY, asserted at EVERY stage: NEITHER production
