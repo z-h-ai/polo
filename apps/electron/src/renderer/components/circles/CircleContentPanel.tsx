@@ -55,13 +55,17 @@ import {
  *   must combine it with the directory phase, which this panel does.
  * - Feedback stays accurate (P70-CIRCLE-CONTENT-03): an exited circle
  *   (`unknown_circle` in the C2 receipt) renders NO rows at all — nothing
- *   can launch through a cache; a circle whose receipt lists app-class
- *   entitlements that the trusted Catalog cannot verify renders an explicit
- *   partial note instead of fabricated rows; C2's `partial` relations phase
- *   and the directory phases (loading/denied/offline/error/rejected) each
- *   keep their distinct explanation. Works that keep ANOTHER valid source
- *   stay openable from 我的应用 (H1 keeps those rows launchable) — this
- *   panel only refuses what THIS circle can no longer prove.
+ *   can launch through a cache — and the exit VERDICT is keyed off the C2
+ *   relations phase: an unsettled read (loading/error/offline/partial/
+ *   denied) renders its own waiting/explanation state, only a settled read
+ *   (ready/empty) lets absence become the exit fact; a circle whose receipt
+ *   lists app-class entitlements that the trusted Catalog cannot verify
+ *   renders an explicit partial note instead of fabricated rows; C2's
+ *   `partial` relations phase and the directory phases
+ *   (loading/denied/offline/error/rejected) each keep their distinct
+ *   explanation. Works that keep ANOTHER valid source stay openable from
+ *   我的应用 (H1 keeps those rows launchable) — this panel only refuses what
+ *   THIS circle can no longer prove.
  */
 
 export interface CircleContentPanelContextValue {
@@ -77,9 +81,16 @@ export interface CircleContentPanelContextValue {
   /** The existing launch handoff surface (same instance the home publishes through). */
   launchHandoff: ProductSpaceAppLaunchHandoff
   /**
-   * C2 relations phase when the holder wants the panel to explain a partial
-   * authoritative read (one of the two relations reads failed). Null/absent
-   * renders no relations banner; the partial fact is never faked into ready.
+   * C2 relations phase (`state.phase`) — REQUIRED for an accurate
+   * `unknown_circle` rendering. `getCircle` returns `unknown_circle` both for
+   * a genuinely exited circle AND while the relations read has not settled
+   * (loading / error / offline / partial / denied), so the panel keys the
+   * exit verdict off this phase: `loading` renders a waiting state, `error`
+   * / `offline` / `partial` their own explanation (with the holder-wired
+   * retry), `denied` the access banner, and only a SETTLED phase (`ready` /
+   * `empty`) lets absence become the authoritative "exited" fact. Null or
+   * absent falls through to the settled verdict — the holder that omits the
+   * phase asserts the relations read has settled.
    */
   relationsPhase?: MemberCirclesReadPhase | null
   /** Explicit relations retry wired by the holder (C2 `refresh`); optional. */
@@ -194,11 +205,70 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
     void memberActions.open(row.entry.app)
   }, [directory.phase, memberActions, t])
 
-  // P70-CIRCLE-CONTENT-03: an exited circle is `unknown_circle` in THIS
-  // scope's authoritative receipt. It renders NO rows — nothing may launch
-  // through a stale cache. Works that still have another valid source stay
-  // openable from 我的应用 (the H1 directory keeps those rows launchable).
+  // P70-CIRCLE-CONTENT-03: `unknown_circle` means THIS circleId is absent
+  // from the current scope's authoritative rows — but absence alone is only
+  // the exit fact once the relations read has SETTLED. While the read is in
+  // flight or half-failed (loading / error / offline / partial / denied) the
+  // panel renders the accurate waiting/explanation state instead of a
+  // premature "exited" verdict; only `ready` / `empty` (or an absent phase,
+  // i.e. the holder asserts settle) let absence become the verdict. Either
+  // way it renders NO rows — nothing may launch through a stale cache.
+  // Works that still have another valid source stay openable from 我的应用
+  // (the H1 directory keeps those rows launchable).
   if (circle.availability === 'unknown_circle') {
+    const relationsState = relationsPhase ?? null
+    if (relationsState === 'loading') {
+      return (
+        <div
+          className="mt-[16px] flex items-center gap-[8px] rounded-[13px] border border-border px-4 py-3 text-xs text-muted-foreground"
+          data-testid="circle-content-relations-loading"
+        >
+          <Icons.LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+          {t('poo70.c4.content.relationsLoading')}
+        </div>
+      )
+    }
+    if (relationsState === 'error' || relationsState === 'offline' || relationsState === 'partial') {
+      const relationsCopy = relationsState === 'error'
+        ? t('poo70.c4.content.relationsError')
+        : relationsState === 'offline'
+          ? t('poo70.c4.content.relationsOffline')
+          : t('poo70.c4.content.relationsPartial')
+      return (
+        <div
+          className={
+            relationsState === 'error'
+              ? 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger'
+              : 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text'
+          }
+          data-testid={`circle-content-relations-${relationsState}`}
+        >
+          <span>{relationsCopy}</span>
+          {onRefreshRelations && (
+            <button
+              type="button"
+              data-testid="circle-content-relations-retry"
+              className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+              onClick={onRefreshRelations}
+            >
+              {t('homeApps.actions.tryAgain')}
+            </button>
+          )}
+        </div>
+      )
+    }
+    if (relationsState === 'denied') {
+      return (
+        <div
+          className="mt-[16px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+          data-testid="circle-content-relations-denied"
+        >
+          {t('homeApps.organization.accessError')}
+        </div>
+      )
+    }
+    // Settled relations (ready / empty): absence is now the authoritative
+    // exit fact — the exited verdict, with no rows and no actions.
     return (
       <div
         className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-border px-[20px] py-[34px] text-center"

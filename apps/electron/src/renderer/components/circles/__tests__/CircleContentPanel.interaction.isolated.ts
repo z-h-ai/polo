@@ -472,9 +472,13 @@ describe('CircleContentPanel (P70-CIRCLE-CONTENT-02 read-only skill boundary)', 
     expect(screen.getByText('资料研究')).toBeTruthy()
     expect(screen.getByText('检索打法与案例')).toBeTruthy()
     // §13.13: the install-purpose note stays once per skill entry (rendered
-    // on the same meta line as the version — substring match).
-    expect(screen.getByText('Installed on this device, for use by the Polo assistant', { exact: false }))
-      .toBeTruthy()
+    // on the same meta line as the version — substring match). The note is
+    // CONDITIONAL: it must never assert an install that has not happened
+    // (P70-CIRCLE-CONTENT-03 — no fabricated success facts).
+    expect(screen.getByText(
+      'After it is installed on this device, it can be used by the Polo assistant',
+      { exact: false },
+    )).toBeTruthy()
     // No actions at all: no install/manage buttons anywhere in the skills
     // section, and no 查看全部应用 / 管理本机技能 entries on the panel.
     const skillsSection = screen.getByTestId('circle-content-skills-section')
@@ -618,6 +622,217 @@ describe('CircleContentPanel (P70-CIRCLE-CONTENT-03 accurate feedback)', () => {
     expect(within(screen.getByTestId('circle-content-exited')).queryAllByRole('button'))
       .toHaveLength(0)
     expect(catalog.resolveLaunch).not.toHaveBeenCalled()
+  })
+
+  it('does NOT render the exit verdict while the C2 relations read is unsettled (loading/error/offline/partial/denied)', () => {
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    // `unknown_circle` also happens while the relations read has not
+    // settled — absence must not become a premature "exited" verdict.
+    const onRefreshRelations = jest.fn()
+    const unsettledCases: Array<{ phase: 'loading' | 'error' | 'offline' | 'partial' | 'denied', testid: string, hasRetry: boolean }> = [
+      { phase: 'loading', testid: 'circle-content-relations-loading', hasRetry: false },
+      { phase: 'error', testid: 'circle-content-relations-error', hasRetry: true },
+      { phase: 'offline', testid: 'circle-content-relations-offline', hasRetry: true },
+      { phase: 'partial', testid: 'circle-content-relations-partial', hasRetry: true },
+      { phase: 'denied', testid: 'circle-content-relations-denied', hasRetry: false },
+    ]
+    for (const testCase of unsettledCases) {
+      const caseView = renderPanel(
+        { availability: 'unknown_circle' } as MemberCircleDetailView,
+        contextWithDirectory(catalog, {}, { relationsPhase: testCase.phase, onRefreshRelations }),
+      )
+      expect(screen.getByTestId(testCase.testid)).toBeTruthy()
+      expect(screen.queryByTestId('circle-content-exited')).toBeNull()
+      expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+      if (testCase.hasRetry) {
+        expect(screen.getByTestId('circle-content-relations-retry')).toBeTruthy()
+      } else {
+        expect(screen.queryByTestId('circle-content-relations-retry')).toBeNull()
+      }
+      caseView.unmount()
+    }
+    // The retry on error/offline/partial drives the holder-wired C2 refresh.
+    renderPanel(
+      { availability: 'unknown_circle' } as MemberCircleDetailView,
+      contextWithDirectory(catalog, {}, { relationsPhase: 'error', onRefreshRelations }),
+    )
+    fireEvent.click(screen.getByTestId('circle-content-relations-retry'))
+    expect(onRefreshRelations).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders the exit verdict only when the relations read has settled (ready)', () => {
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    renderPanel(
+      { availability: 'unknown_circle' } as MemberCircleDetailView,
+      contextWithDirectory(catalog, {}, { relationsPhase: 'ready' }),
+    )
+    expect(screen.getByTestId('circle-content-exited')).toBeTruthy()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+  })
+
+  it('unknown_circle with a dual-source entry: the exited panel renders nothing while the same work stays launchable for 我的应用 via its other valid source', () => {
+    // D-PC-09 combination: the work keeps ANOTHER valid circle source, so the
+    // H1 directory (the 我的应用 projection) still marks it launchable, while
+    // the exited circle's own panel shows no rows at all.
+    const app = catalogApp({
+      id: 'entry-dual',
+      catalogEntryId: 'entry-dual',
+      artifactInstanceId: 'artifact-dual',
+      name: '双来源应用',
+      catalogSources: [
+        { kind: 'creator_circle', circleId: 'circle-gone', name: '已退出圈' },
+        { kind: 'creator_circle', circleId: 'circle-2', name: '晨星设计圈' },
+      ],
+    })
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([app]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    const context = contextWithDirectory(
+      catalog,
+      { lostCircleIds: new Set(['circle-gone']) },
+      { relationsPhase: 'ready' },
+    )
+    renderPanel(
+      { availability: 'unknown_circle' } as MemberCircleDetailView,
+      context,
+    )
+    // The exited circle's panel: verdict only — zero rows, zero actions.
+    expect(screen.getByTestId('circle-content-exited')).toBeTruthy()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+    expect(within(screen.getByTestId('circle-content-exited')).queryAllByRole('button'))
+      .toHaveLength(0)
+    // The SAME H1 directory row keeps the work usable through the surviving
+    // valid source — 我的应用 can still open it (launch stays with
+    // resolveLaunch there; this panel renders nothing to click).
+    expect(context.directory.entries).toHaveLength(1)
+    expect(context.directory.entries[0]!.launchBlocked).toBe(false)
+    expect(context.directory.entries[0]!.sources.some(
+      source => source.circleId === 'circle-2' && source.valid,
+    )).toBe(true)
+    expect(catalog.resolveLaunch).not.toHaveBeenCalled()
+  })
+
+  it('renders the denied directory phase banner and no rows', () => {
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'denied',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    renderPanel(readyCircle({ circleId: 'circle-1' }), panelContext(catalog))
+    expect(screen.getByTestId('circle-content-denied')).toBeTruthy()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+  })
+
+  it('renders the error directory phase with the catalog retry and no rows', async () => {
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: 'catalog_failed',
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    renderPanel(readyCircle({ circleId: 'circle-1' }), panelContext(catalog))
+    expect(screen.getByTestId('circle-content-error')).toBeTruthy()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+    // The retry drives the SAME injected catalog instance's explicit sync.
+    fireEvent.click(screen.getByTestId('circle-content-catalog-retry'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(catalog.sync).toHaveBeenCalledWith(true)
+  })
+
+  it('renders the no-space directory phase and no rows', () => {
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    // No active space context: the receipt is refused wholesale (fail closed).
+    renderPanel(
+      readyCircle({ circleId: 'circle-1' }),
+      contextWithDirectory(catalog, { accountId: null, productSpaceId: null }),
+    )
+    expect(screen.getByTestId('circle-content-no-space')).toBeTruthy()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+  })
+
+  it('renders the rejected directory explanation (empty phase consumed WITH rejections) and no rows', () => {
+    // A row whose organizationId does not match the space is refused
+    // consumer-side: entries stay empty, rejections recorded — that is NOT a
+    // vacuum, it keeps its own explanation.
+    const foreign = catalogApp({
+      id: 'entry-foreign',
+      catalogEntryId: 'entry-foreign',
+      artifactInstanceId: 'artifact-foreign',
+      name: '外来空间的应用',
+      organizationId: 'space-other',
+      catalogSources: [{ kind: 'creator_circle', circleId: 'circle-1', name: '晨星增长圈' }],
+    })
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([foreign]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    renderPanel(readyCircle({ circleId: 'circle-1' }), panelContext(catalog))
+    expect(screen.getByTestId('circle-content-rejected')).toBeTruthy()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+    expect(screen.queryByTestId('circle-content-empty')).toBeNull()
   })
 
   it('flags the explicit count-based partial when receipt app entitlements exceed verified catalog rows', () => {
