@@ -121,7 +121,9 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { formatBytes, HomePage, __resetHomeAppUsageForTests, loadHomeAppUsage } = await import('../HomePage')
+const { formatBytes, HomePage } = await import('../HomePage')
+const { loadHomeAppUsage, __resetHomeAppUsageForTests } = await import('@/lib/home-app-usage')
+const { loadHomeHiddenApps, __resetHomeHiddenAppsForTests } = await import('@/lib/home-app-hidden')
 const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
 const { markAppCatalogAccessDenied } = await import('@polo-ai/shared/admin/authorization-failure')
 const {
@@ -140,6 +142,7 @@ beforeEach(async () => {
   appCatalogHook = signedOutCatalogHook()
   installedApps = [...BUILTIN_APP_DEFINITIONS]
   __resetHomeAppUsageForTests()
+  __resetHomeHiddenAppsForTests()
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
@@ -659,7 +662,123 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(openApp).not.toHaveBeenCalled()
   })
 
-  it('P70-HOME-03: a denied snapshot keeps rows visible with the restricted banner and no open/install capability', async () => {
+  it('P70-HOME-03: a failed REFRESH keeps the cached directory visible under an explicit stale banner, with opens fail-closed and explicit retry', async () => {
+    // Regression guard (review P1-1): a NON-denied refresh failure keeps
+    // state.catalog and sets errorCode — phase 'error' OVER a retained
+    // cache. The directory must never silently blank: the cached rows stay
+    // visible (never launchable), the stale banner explains the state, and
+    // the retry is an explicit click.
+    const app = workApp('stale-1', 'Stale App', 0)
+    const resolveLaunch = jest.fn(async () => resolvedLaunch(app))
+    const sync = jest.fn(async () => {})
+    appCatalogHook = hookWithCatalog(
+      enterpriseCatalogWith([app]),
+      { resolveLaunch, sync },
+      { errorCode: 'NETWORK_ERROR' },
+    )
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-stale-banner')).toBeTruthy()
+    })
+    // The cached directory is STILL rendered...
+    expect(screen.getByText('Stale App')).toBeTruthy()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    // ...but opening a cached row fails closed BEFORE any launch authority.
+    fireEvent.click(directoryCard(dirKeyFor(app)))
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalled()
+    })
+    expect(resolveLaunch).not.toHaveBeenCalled()
+    expect(storePublish).not.toHaveBeenCalled()
+    expect(openApp).not.toHaveBeenCalled()
+    // The retry is a click, never an auto-execution.
+    expect(sync).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('home-directory-stale-retry'))
+    expect(sync).toHaveBeenCalledWith(true)
+  })
+
+  it('R39/R41: the dedicated wrapper owns viewport-bounded scrolling and rows below the fold stay reachable in the full directory', async () => {
+    // More than a viewport of directory rows: every row renders inside the
+    // home-app-hub, the dedicated PARENT wrapper is the viewport-bounded
+    // scroll owner (h-full min-h-0 overflow-y-auto), and the hub region
+    // itself stays content-sized.
+    const apps = [
+      workApp('scroll-1', 'Scroll App A', 0),
+      workApp('scroll-2', 'Scroll App B', 1),
+      workApp('scroll-3', 'Scroll App C', 2),
+      workApp('scroll-4', 'Scroll App D', 3),
+      workApp('scroll-5', 'Scroll App E', 4),
+      workApp('scroll-6', 'Scroll App F', 5),
+      workApp('scroll-7', 'Scroll App G', 6),
+    ]
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(7)
+    })
+
+    const hub = screen.getByTestId('home-app-hub')
+    const scrollOwner = hub.parentElement
+    if (!scrollOwner) {
+      throw new Error('dedicated scroll-owner wrapper is missing: home-app-hub has no parent element in the committed tree')
+    }
+    expect(scrollOwner.className).toContain('h-full')
+    expect(scrollOwner.className).toContain('min-h-0')
+    expect(scrollOwner.className).toContain('overflow-y-auto')
+    expect(hub.className).not.toContain('h-full')
+
+    // Every row — including the LAST, below any realistic fold — renders
+    // inside the hub.
+    expect(screen.getByText('Scroll App G')).toBeTruthy()
+    expect(within(hub).getAllByText(/Scroll App G Source/).length).toBeGreaterThan(0)
+  })
+
+  it('P70-HOME-01 保留本机隐藏恢复: hide moves a work to the hidden section, restore brings it back, and the preference is device-local per context', async () => {
+    const appA = workApp('hide-a', 'Hideable App A', 0)
+    const appB = workApp('hide-b', 'Hideable App B', 1)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([appA, appB]))
+    renderHome()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-directory-hidden-section')).toBeNull()
+
+    // Hide App A: it leaves the grid and appears in the hidden section with
+    // an explicit restore action.
+    fireEvent.click(screen.getByTestId(`home-directory-hide-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-hidden-section')).toBeTruthy()
+    })
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(1)
+    expect(screen.getByText('Hideable App B')).toBeTruthy()
+    // The hidden section lists A by name (with its restore action); A has no
+    // grid card anymore (the grid holds exactly B, asserted above).
+    const item = screen.getByTestId(`home-directory-hidden-item-${dirKeyFor(appA)}`)
+    expect(within(item).getByText('Hideable App A')).toBeTruthy()
+
+    // Restore: back into the grid, section gone.
+    fireEvent.click(screen.getByTestId(`home-directory-hidden-restore-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-directory-hidden-section')).toBeNull()
+
+    // The preference is device-local, bounded to the SAME account+space
+    // context — after a REAL remount it still holds (persisted), and the
+    // restored state is clean again.
+    fireEvent.click(screen.getByTestId(`home-directory-hide-${dirKeyFor(appA)}`))
+    await waitFor(() => {
+      expect(screen.getByTestId('home-directory-hidden-section')).toBeTruthy()
+    })
+    const contextKey = `v1:${
+      createProductSpaceContextKey('account-a', 'organization-a')
+    }`
+    expect(loadHomeHiddenApps(contextKey).size).toBe(1)
+    viewRerender()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('P70-HOME-03: a denied snapshot hides its refused rows behind the restricted banner with no open/install capability', async () => {
     const app = workApp('denied-1', 'Denied App', 0)
     const deniedSnapshot = markAppCatalogAccessDenied(enterpriseCatalogWith([app]))
     expect(deniedSnapshot.apps[0]).toMatchObject({

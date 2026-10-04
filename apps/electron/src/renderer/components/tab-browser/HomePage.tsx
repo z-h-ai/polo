@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
+import type { HomeAppUsageRecord } from '@/lib/home-app-usage'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CatalogApp } from '@polo-ai/shared/admin'
@@ -30,7 +31,21 @@ import {
   type HomeAppDirectory,
   type HomeAppDirectoryEntry,
 } from '@/lib/home-app-directory'
+import {
+  formatBytes,
+  loadHomeAppUsage,
+  recordHomeAppUsage,
+} from '@/lib/home-app-usage'
+import {
+  hideHomeApp,
+  loadHomeHiddenApps,
+  restoreHomeApp,
+} from '@/lib/home-app-hidden'
 import { createHomeQuickAccessContextKey } from '@/lib/home-quick-access'
+
+// Re-exported for the established test/import surface (implementation lives
+// in the H3 lib layer).
+export { formatBytes }
 
 /**
  * POO-70 H3 (P70-HOME-01/02/03) — the "我的应用" home page.
@@ -52,29 +67,18 @@ import { createHomeQuickAccessContextKey } from '@/lib/home-quick-access'
  * NOT a vacuum) and cached rows are NEVER launchable while
  * denied/offline/error — the open handler fails closed here and the
  * authoritative grant stays with `resolveLaunch` inside the shared action.
- * Retry is always explicit; nothing auto-executes.
+ * A REFRESH failure over a retained cache renders the stale rows under an
+ * explicit stale banner with retry (a background sync failure must never
+ * silently blank the directory); a failure with NO cache keeps the retry
+ * tile. Retry is always explicit; nothing auto-executes.
+ *
+ * Local surfaces (P70-HOME-01 保留最近使用和本机隐藏恢复): the recent/frequent
+ * sort ranks REAL open records and every row carries a local HIDE control —
+ * both are per-account+space device preferences persisted through
+ * `@/lib/home-app-usage` / `@/lib/home-app-hidden` (fail-closed degradation),
+ * and hidden works are restored from the in-page section below the grid. The
+ * lib contracts are shared so the circle views can record opens too.
  */
-
-export function formatBytes(t: TFunction, sizeBytes: number): string {
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-    return t('homeApps.install.unknownSize')
-  }
-  const unitKeys = [
-    'homeApps.install.sizeUnit.bytes',
-    'homeApps.install.sizeUnit.kilobytes',
-    'homeApps.install.sizeUnit.megabytes',
-    'homeApps.install.sizeUnit.gigabytes',
-  ] as const
-  let size = sizeBytes
-  let unit = 0
-  while (size >= 1024 && unit < unitKeys.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-  return `${
-    size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)
-  } ${t(unitKeys[unit]!)}`
-}
 
 export function createEnterpriseWorkflowUrl(
   adminUrl: string,
@@ -86,116 +90,6 @@ export function createEnterpriseWorkflowUrl(
     : new URL('/organization-apps', adminUrl)
   if (workflow === 'publishing') url.searchParams.set('organizationId', enterpriseId)
   return url.toString()
-}
-
-// ─── Per-context "recently used" records (P70-HOME-01) ──────────────────────
-
-/**
- * One REAL open action recorded by this page. This is UI-level usage
- * evidence (the member pressed open on THIS device), never an authorization
- * or entitlement fact — sort-only.
- */
-export interface HomeAppUsageRecord {
-  lastUsedAt: number
-  openCount: number
-}
-
-/**
- * Module-level per-ProductSpace-context usage records, keyed by the SAME
- * context-key convention as the retired quick-access registry
- * (`v1:account|space`), so personal and enterprise usage never mix and an
- * account switch cannot leak records across accounts. Records persist in the
- * renderer's localStorage (best-effort, bounded); a corrupted or unavailable
- * store fails closed to an empty record set and the sort simply degrades to
- * the authoritative Catalog order.
- */
-const HOME_APP_USAGE_STORAGE_PREFIX = 'poo70.h3:home-app-usage:'
-const HOME_APP_USAGE_MAX_ENTRIES = 200
-const homeAppUsageByContext = new Map<string, Map<string, HomeAppUsageRecord>>()
-
-export function loadHomeAppUsage(contextKey: string): Map<string, HomeAppUsageRecord> {
-  const cached = homeAppUsageByContext.get(contextKey)
-  if (cached) return cached
-  const records = new Map<string, HomeAppUsageRecord>()
-  try {
-    const raw = window.localStorage.getItem(HOME_APP_USAGE_STORAGE_PREFIX + contextKey)
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object') {
-        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-          if (!value || typeof value !== 'object') continue
-          const { lastUsedAt, openCount } = value as {
-            lastUsedAt?: unknown
-            openCount?: unknown
-          }
-          if (
-            typeof lastUsedAt === 'number' && Number.isFinite(lastUsedAt) && lastUsedAt >= 0
-            && typeof openCount === 'number' && Number.isFinite(openCount) && openCount >= 0
-          ) {
-            records.set(key, { lastUsedAt, openCount })
-          }
-        }
-      }
-    }
-  } catch {
-    // Fail closed to an empty record set — never block the directory.
-  }
-  homeAppUsageByContext.set(contextKey, records)
-  return records
-}
-
-function persistHomeAppUsage(
-  contextKey: string,
-  records: Map<string, HomeAppUsageRecord>,
-): void {
-  try {
-    // Bound the record set: evict the OLDEST last-use first.
-    while (records.size > HOME_APP_USAGE_MAX_ENTRIES) {
-      let oldestKey: string | null = null
-      let oldestAt = Infinity
-      for (const [key, record] of records) {
-        if (record.lastUsedAt < oldestAt) {
-          oldestAt = record.lastUsedAt
-          oldestKey = key
-        }
-      }
-      if (oldestKey === null) break
-      records.delete(oldestKey)
-    }
-    const payload: Record<string, HomeAppUsageRecord> = {}
-    for (const [key, record] of records) payload[key] = record
-    window.localStorage.setItem(
-      HOME_APP_USAGE_STORAGE_PREFIX + contextKey,
-      JSON.stringify(payload),
-    )
-  } catch {
-    // Persistence is best-effort: the in-memory records keep the session sort.
-  }
-}
-
-/**
- * Records one open action for an App of the given ProductSpace context.
- * UI-preference data only (never an authorization fact) and scoped to the
- * exact account+space context key.
- */
-export function recordHomeAppUsage(
-  contextKey: string,
-  identityKey: string,
-  now = Date.now(),
-): void {
-  if (!contextKey || !identityKey) return
-  const records = loadHomeAppUsage(contextKey)
-  const previous = records.get(identityKey)
-  records.set(identityKey, {
-    lastUsedAt: now,
-    openCount: (previous?.openCount ?? 0) + 1,
-  })
-  persistHomeAppUsage(contextKey, records)
-}
-
-/** Test-only: drop every per-context usage record. */
-export function __resetHomeAppUsageForTests(): void {
-  homeAppUsageByContext.clear()
 }
 
 // ─── Pure directory search / source-filter / sort (P70-HOME-01) ─────────────
@@ -312,9 +206,10 @@ export function HomePage() {
   const [query, setQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [sortMode, setSortMode] = useState<HomeAppSortMode>('recent')
-  // Bumped after every recorded open so the sort re-ranks from the mutated
-  // usage records (the records map itself is a stable module-level cache).
+  // Bumped after every recorded open or local hide/restore so the directory
+  // re-derives from the mutated module-level record caches.
   const [usageVersion, setUsageVersion] = useState(0)
+  const [hiddenVersion, setHiddenVersion] = useState(0)
 
   const activeProductSpace = catalog.productSpace?.activeProductSpace
   const spaceKind = activeProductSpace?.kind ?? null
@@ -323,7 +218,6 @@ export function HomePage() {
   )
   const usageContextKeyRef = useRef(usageContextKey)
   usageContextKeyRef.current = usageContextKey
-  const uiKeyForApp = catalog.uiIdentityKeyForApp
 
   // H1 projection: the authoritative full directory of the CURRENT space,
   // with loading/vacuum/error/denied/offline as distinct phases.
@@ -365,16 +259,30 @@ export function HomePage() {
   const prepareTargetApp = memberActions.prepareTarget?.app ?? null
 
   const usage = loadHomeAppUsage(usageContextKey)
+  // Local hidden set (本机隐藏): the display preference of THIS device for
+  // THIS account+space context. Hidden works drop out of the grid and appear
+  // in the in-page restore section (P70-HOME-01 保留本机隐藏恢复).
+  const hiddenApps = loadHomeHiddenApps(usageContextKey)
+  const matchableEntries = useMemo(
+    () => directory.entries.filter(entry => !hiddenApps.has(entry.identityKey)),
+    // `hiddenVersion` re-derives after a local hide/restore; `hiddenApps` is
+    // the stable module-level cache the mutation writes into.
+    [directory.entries, hiddenApps, hiddenVersion],
+  )
+  const hiddenVisibleEntries = useMemo(
+    () => directory.entries.filter(entry => hiddenApps.has(entry.identityKey)),
+    [directory.entries, hiddenApps, hiddenVersion],
+  )
   const sourceOptions = useMemo(
-    () => collectHomeAppSourceOptions(directory.entries),
-    [directory.entries],
+    () => collectHomeAppSourceOptions(matchableEntries),
+    [matchableEntries],
   )
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filteredEntries = useMemo(
-    () => directory.entries.filter(entry =>
+    () => matchableEntries.filter(entry =>
       homeAppMatchesQuery(entry, normalizedQuery)
       && homeAppMatchesSource(entry, sourceFilter)),
-    [directory.entries, normalizedQuery, sourceFilter],
+    [matchableEntries, normalizedQuery, sourceFilter],
   )
   const visibleEntries = useMemo(
     () => sortHomeAppDirectory(filteredEntries, sortMode, usage),
@@ -405,6 +313,19 @@ export function HomePage() {
     setUsageVersion(version => version + 1)
     void memberActions.open(entry.app)
   }, [memberActions, phase, t])
+
+  // Local hide (本机隐藏): a display preference of THIS device — never an
+  // uninstall, never an authorization change. The work leaves the grid and
+  // appears in the in-page restore section.
+  const handleHideApp = useCallback((entry: HomeAppDirectoryEntry) => {
+    hideHomeApp(usageContextKeyRef.current, entry.identityKey)
+    setHiddenVersion(version => version + 1)
+  }, [])
+
+  const handleRestoreApp = useCallback((entry: HomeAppDirectoryEntry) => {
+    restoreHomeApp(usageContextKeyRef.current, entry.identityKey)
+    setHiddenVersion(version => version + 1)
+  }, [])
 
   const confirmUninstall = async () => {
     const app = uninstallTarget
@@ -503,11 +424,19 @@ export function HomePage() {
     }
   }
 
-  // Grid body phases. The work-App slots render rows ONLY when the projection
-  // is authoritative (ready) or explains retained rows (denied/offline); a
-  // first load keeps the dedicated loading tile and a transport failure keeps
-  // the explicit retry tile (P70-HOME-03: never synthesize, never auto-run).
-  const showDirectoryRows = phase === 'ready' || phase === 'denied' || phase === 'offline'
+  // Grid body phases. The work-App slots render rows when the projection is
+  // authoritative (ready), explains retained rows (denied/offline), or a
+  // REFRESH failed over the retained cache (P70-HOME-03: a background sync
+  // failure must never silently blank the directory — the stale cache stays
+  // visible, non-launchable, under an explicit stale banner with retry). A
+  // first load keeps the dedicated loading tile; a failure with NO cache
+  // keeps the explicit retry tile (P70-HOME-03: never synthesize, never
+  // auto-run).
+  const hasCachedCatalog = catalog.state.catalog !== null
+  const showDirectoryRows = phase === 'ready'
+    || phase === 'denied'
+    || phase === 'offline'
+    || (phase === 'error' && hasCachedCatalog)
   const directoryEmpty = phase === 'empty'
   // A fully-rejected directory is NOT a vacuum (H1 reviewer contract): the
   // empty phase must be consumed together with rejections.length.
@@ -603,10 +532,11 @@ export function HomePage() {
         />
       )}
 
-      {/* Prototype `.r14-toolbar`: search + source filter + sort. Hidden
-      while the directory cannot be verified (transport failure), matching
-      the prototype LOAD-FAIL state. */}
-      {catalog.productSpace && phase !== 'error' && (
+      {/* Prototype `.r14-toolbar`: search + source filter + sort. Hidden when
+      the directory cannot be verified AND nothing cached is retained (a
+      refresh failure over a retained cache keeps the toolbar usable over the
+      stale rows), matching the prototype LOAD-FAIL state. */}
+      {catalog.productSpace && (phase !== 'error' || hasCachedCatalog) && (
         <div
           className="mt-[24px] flex flex-wrap items-end gap-[16px]"
           data-testid="home-directory-toolbar"
@@ -666,6 +596,25 @@ export function HomePage() {
           data-testid="home-directory-offline-banner"
         >
           {t('homeApps.organization.offlineWarning')}
+        </div>
+      )}
+      {phase === 'error' && hasCachedCatalog && (
+        /* P70-HOME-03: a failed refresh over the retained cache must never
+        silently blank the directory — the stale-catalog banner explains the
+        state and carries the explicit retry. */
+        <div
+          className="mt-[24px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text"
+          data-testid="home-directory-stale-banner"
+        >
+          <span>{t('homeApps.organization.refreshWarning')}</span>
+          <button
+            type="button"
+            data-testid="home-directory-stale-retry"
+            className="inline-flex min-h-[28px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+            onClick={() => { void catalog.sync(true) }}
+          >
+            {t('homeApps.actions.tryAgain')}
+          </button>
         </div>
       )}
 
@@ -740,10 +689,29 @@ export function HomePage() {
                     testId="home-directory-app"
                     onOpen={() => handleOpenApp(entry)}
                   />
+                  {/* P70-HOME-01 保留本机隐藏恢复: a local hide control on
+                  every row — a display preference of THIS device, never an
+                  uninstall or an authorization change. The work moves to the
+                  in-page restore section below the grid. Rendered on ready
+                  rows only (a cached denied/offline/error row must not invite
+                  preference writes over a non-authoritative view). */}
+                  {phase === 'ready' && (
+                    <button
+                      type="button"
+                      data-testid={`home-directory-hide-${entry.identityKey}`}
+                      aria-label={t('poo70.h3.home.hideAction')}
+                      title={t('poo70.h3.home.hideAction')}
+                      onClick={() => handleHideApp(entry)}
+                      className="absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Icons.EyeOff className="size-[13px]" aria-hidden="true" />
+                    </button>
+                  )}
                   {/* Retained local management: a work App installed on THIS
                   device keeps its uninstall entry even when the directory row
                   is not launchable (withdrawn tombstone / blocked row). The
-                  entry is page-level UI on the existing uninstall flow. */}
+                  entry is page-level UI on the existing uninstall flow; it
+                  sits beside the hide control when both are present. */}
                   {catalog.getInstallState(entry.app)?.state === 'installed' && (
                     <button
                       type="button"
@@ -751,7 +719,11 @@ export function HomePage() {
                       aria-label={t('homeApps.actions.uninstall')}
                       title={t('homeApps.actions.uninstall')}
                       onClick={() => setUninstallTarget(entry.app)}
-                      className="absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                      className={
+                        phase === 'ready'
+                          ? 'absolute right-[40px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+                          : 'absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+                      }
                     >
                       <Icons.Trash2 className="size-[13px]" aria-hidden="true" />
                     </button>
@@ -761,6 +733,45 @@ export function HomePage() {
             </>
           )}
         </div>
+
+        {showDirectoryRows && hiddenVisibleEntries.length > 0 && (
+          /* P70-HOME-01 保留本机隐藏恢复: the in-page restore surface —
+          everything THIS device hid from THIS account+space context, each
+          with an explicit restore action back into the directory. */
+          <div
+            className="mt-[16px] rounded-[20px] border border-dashed border-border px-[20px] py-[18px]"
+            data-testid="home-directory-hidden-section"
+          >
+            <div className="flex items-center gap-[8px]">
+              <Icons.EyeOff className="size-[14px] text-muted-foreground" aria-hidden="true" />
+              <h2 className="m-0 text-[13px] font-semibold tracking-[-0.01em] text-muted-foreground">
+                {t('poo70.h3.home.hiddenSectionTitle')}
+              </h2>
+              <span className="inline-flex min-h-[18px] items-center rounded-full bg-foreground/6 px-[7px] text-[10px] font-medium text-muted-foreground">
+                {hiddenVisibleEntries.length}
+              </span>
+            </div>
+            <ul className="m-0 mt-[10px] grid list-none gap-[6px] p-0">
+              {hiddenVisibleEntries.map(entry => (
+                <li
+                  key={entry.identityKey}
+                  className="flex min-h-[34px] items-center justify-between gap-[12px] rounded-[10px] px-[10px] hover:bg-foreground-4"
+                  data-testid={`home-directory-hidden-item-${entry.identityKey}`}
+                >
+                  <span className="min-w-0 truncate text-[13px] text-foreground-70">{entry.app.name}</span>
+                  <button
+                    type="button"
+                    data-testid={`home-directory-hidden-restore-${entry.identityKey}`}
+                    className="inline-flex min-h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-[7px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                    onClick={() => handleRestoreApp(entry)}
+                  >
+                    {t('poo70.h3.home.hiddenRestore')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {directoryRejected && (
           <div
@@ -819,10 +830,11 @@ export function HomePage() {
             )}
           </div>
         )}
-        {phase === 'ready' && directory.entries.length > 0 && visibleEntries.length === 0 && (
+        {phase === 'ready' && matchableEntries.length > 0 && visibleEntries.length === 0 && (
           /* Prototype `[data-library-empty]`: the search/filter vacuum —
           distinct from the directory vacuum above, with the explicit clear
-          action. */
+          action. Fully-hidden directories do NOT show this: the restore
+          section below is the accurate feedback for that state. */
           <div
             className="mt-[16px] grid justify-items-center gap-[8px] rounded-[20px] border border-dashed border-border px-[20px] py-[30px] text-center"
             data-testid="home-directory-no-match"

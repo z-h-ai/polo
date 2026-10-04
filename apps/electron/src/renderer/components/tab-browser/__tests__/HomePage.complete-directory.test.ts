@@ -107,11 +107,19 @@ const {
   collectHomeAppSourceOptions,
   homeAppMatchesQuery,
   homeAppMatchesSource,
+  sortHomeAppDirectory,
+} = await import('../HomePage')
+const {
   loadHomeAppUsage,
   recordHomeAppUsage,
-  sortHomeAppDirectory,
   __resetHomeAppUsageForTests,
-} = await import('../HomePage')
+} = await import('@/lib/home-app-usage')
+const {
+  hideHomeApp,
+  loadHomeHiddenApps,
+  restoreHomeApp,
+  __resetHomeHiddenAppsForTests,
+} = await import('@/lib/home-app-hidden')
 const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
 const {
   ClientPageProvider,
@@ -183,6 +191,7 @@ beforeEach(async () => {
   storePublish.mockClear()
   appCatalogHook = signedOutCatalogHook()
   __resetHomeAppUsageForTests()
+  __resetHomeHiddenAppsForTests()
   stubCatalogEntries = []
   // Minimal real-hook surface: the catalog hook touches localApps and the
   // catalog RPC on mount even in the page-level tests below.
@@ -337,6 +346,57 @@ describe('search and source filter (P70-HOME-01)', () => {
       { key: 'Report Builder Circle', label: 'Report Builder Circle' },
       { key: 'Org A', label: 'Org A' },
     ])
+  })
+})
+
+describe('per-context hidden apps (P70-HOME-01 本机隐藏恢复)', () => {
+  it('hide/restore toggle one identity, scoped to the ProductSpace context', () => {
+    hideHomeApp(contextKeyA, 'key-1')
+    hideHomeApp(contextKeyA, 'key-2')
+    expect(loadHomeHiddenApps(contextKeyA).has('key-1')).toBe(true)
+    expect(loadHomeHiddenApps(contextKeyA).size).toBe(2)
+    // Another context owns NO hidden record of context A.
+    expect(loadHomeHiddenApps('v1:account-a|organization-b').size).toBe(0)
+
+    restoreHomeApp(contextKeyA, 'key-1')
+    expect(loadHomeHiddenApps(contextKeyA).has('key-1')).toBe(false)
+    expect(loadHomeHiddenApps(contextKeyA).has('key-2')).toBe(true)
+    // Restoring an absent identity is a no-op.
+    restoreHomeApp(contextKeyA, 'key-1')
+    expect(loadHomeHiddenApps(contextKeyA).size).toBe(1)
+  })
+
+  it('persists for the next session and fails OPEN (empty set) on a corrupted store', () => {
+    hideHomeApp(contextKeyA, 'persisted-key')
+    const raw = window.localStorage.getItem(`poo70.h3:home-hidden-apps:${contextKeyA}`)
+    expect(raw).toBeTruthy()
+
+    __resetHomeHiddenAppsForTests()
+    expect(loadHomeHiddenApps(contextKeyA).has('persisted-key')).toBe(true)
+
+    // Corrupted / malformed payloads never hide a row.
+    window.localStorage.setItem(`poo70.h3:home-hidden-apps:${contextKeyA}`, '{not json')
+    __resetHomeHiddenAppsForTests()
+    expect(loadHomeHiddenApps(contextKeyA).size).toBe(0)
+    window.localStorage.setItem(
+      `poo70.h3:home-hidden-apps:${contextKeyA}`,
+      JSON.stringify(['good', 42, null, '']),
+    )
+    __resetHomeHiddenAppsForTests()
+    const mixed = loadHomeHiddenApps(contextKeyA)
+    expect(mixed.size).toBe(1)
+    expect(mixed.has('good')).toBe(true)
+  })
+
+  it('bounds the hidden set (FIFO eviction beyond the cap)', () => {
+    for (let index = 0; index < 505; index++) {
+      hideHomeApp(contextKeyA, `key-${index}`)
+    }
+    __resetHomeHiddenAppsForTests()
+    const hidden = loadHomeHiddenApps(contextKeyA)
+    expect(hidden.size).toBeLessThanOrEqual(500)
+    expect(hidden.has('key-0')).toBe(false)
+    expect(hidden.has('key-504')).toBe(true)
   })
 })
 
