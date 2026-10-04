@@ -1,0 +1,424 @@
+{
+  "version": 1,
+  "task_id": "POO-81",
+  "slice": "poo70-entry-f1",
+  "parent_task": "POO-70",
+  "generated_at": "2026-10-04",
+  "generated_by": "POO-81 owner agent (F1 核对成员圈子接口与详情数据交接)",
+  "purpose": "成员圈子（我的圈子/圈子详情）消费侧接口契约快照：逐项绑定提供方静态源码路径与 commit，给出鉴权、字段、错误码、币种/时间/来源身份、已知缺口 owner 与再查时机。只记录版本化 DTO/endpoint/字段出处，不建立第二套产品需求，不代表接口实现或正式联调完成。",
+  "card_binding": {
+    "card_body_sha256": "a6d16298a33fe65c30cbc24be7061f0e6951e0bfbfb3fd17e104f5579d2162c1",
+    "requirements": ["P70-CONTRACT-01", "P70-CONTRACT-02", "P70-CONTRACT-03"],
+    "acceptance": { "schedule": "none", "api": false, "browser": false, "visual": "none" }
+  },
+  "consumer_baseline": {
+    "repo_line": "integration/poo70-client-entry-r15",
+    "worktree": "/Users/wow/project/z-h-ai/polo-dir/POO-81/chore/client-entry-f1",
+    "branch": "POO-81/chore/client-entry-f1",
+    "head": "ec15ecd6",
+    "baseline_commit_checked": "ac831ea71a798030806f4e0906bdc93292bc918b",
+    "ancestor_check": "pass",
+    "design_closure_check": "pass (check_design_system.py exit 0, errors=[], 12 sources / 10 components / 51 scenes)",
+    "card_source_hashes_check": "pass (卡内 design_source_preparation.sources 全部 10 项 shasum -a 256 一致)",
+    "existing_client_consumption": "本 worktree 内尚无任何 me/circles、circle-memberships、circle-payment-orders、circle-checkout 消费代码（grep 全仓无命中）；本契约是 C 系列卡的唯一消费依据来源"
+  },
+  "provider_source": {
+    "kind": "polo-admin（提供方静态源码参考，非已部署服务）",
+    "primary": {
+      "repo_root": "/Users/wow/project/z-h-ai/polo-admin-dir",
+      "worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/integration/pol114-creator-r26",
+      "branch": "integration/pol114-creator-r26",
+      "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd",
+      "head_at_check": "17477dbfee2640a68d530aa144cf199ff39fe8dd",
+      "worktree_clean": true
+    },
+    "support_configuration_reference": {
+      "worktree": "/Users/wow/project/z-h-ai/polo-admin-dir/integration/pol115-operations-v34",
+      "branch": "integration/pol115-operations-v34",
+      "commit": "2f8b536ec5b7d5ef045ee8e7ae27601c3012fb31",
+      "note": "客服配置（POL-115 D-OPS-17 / POL-210 支持边界）不在 pol114-creator-r26@17477dbf 线上（该线 src/lib/operations/ 无 support-boundary.ts）；此节事实取自 pol115 线并单独绑定其 commit，re-pin 时须复核该线 HEAD 是否推进"
+    },
+    "warning": "静态代码核对只证明源码事实，不证明该 commit 已部署为真实服务；所有 live_service_verification 均为 pending"
+  },
+  "auth": {
+    "member_consumer_chain": {
+      "source": "src/lib/creator-circles/http.ts L10-17 (commit 17477dbf)",
+      "rule": "requireCircleConsumerAuth = requireBusinessAuth(request)；仅当 AuthError.code 为 unauthorized 或 token_revoked 时 fallback requireBusinessWorkbenchAuth(request)",
+      "consequence": "业务 JWT 与工作台会话两种身份均可消费成员接口；其他鉴权失败原样抛出",
+      "billing_variant": "circle-checkout 端点用同一 fallback 链的 requireCircleBillingConsumerAuth（src/lib/circle-billing/http.ts L10-17）"
+    },
+    "ownership_rule": "全部成员读接口均按 actor.sub（当前登录者 userId）过滤行；不存在跨账号读取；circle-payment-orders 与 circle-checkout 按 (orderId, userId) 双条件查询，他人订单统一 404 not_found"
+  },
+  "error_model": {
+    "envelope": "errorJson(code, message, status)：{code, message} + HTTP status",
+    "mapping": {
+      "creator_circles": "circleResponse：CreatorCircleError / CircleBillingError / AuthError → 各自 (code,message,status)；其余一律 503 service_unavailable（src/lib/creator-circles/http.ts L19-21）",
+      "circle_billing": "billingResponse：CircleBillingError / CreatorCircleError / AuthError → 各自三元组；其余 503 service_unavailable（src/lib/circle-billing/http.ts L24-29）",
+      "me_circles_special": "GET /api/me/circles 自带 try/catch：AuthError 原样，其余 503（src/app/api/me/circles/route.ts L25-28）"
+    },
+    "observed_codes": [
+      { "code": "validation_error", "status": 400, "when": "orderId/membershipId 非 uuid；PATCH/POST 缺 application/json Content-Type；命令体 schema 校验失败" },
+      { "code": "unauthorized / token_revoked", "status": 401, "when": "两种鉴权链均失败" },
+      { "code": "not_found", "status": 404, "when": "membership/order 不属于当前用户或不存在" },
+      { "code": "invalid_membership_transition", "status": 409, "when": "leave_now 时 membership.status ≠ active" },
+      { "code": "calendar_contract_invalid", "status": 409, "when": "circle.billingCycle 不是 month|year（preview/建单 fail closed）" },
+      { "code": "service_unavailable", "status": 503, "when": "非类型化服务端错误；或 GET membership 时 circle.shareId 为空（圈子分享暂不可用）" },
+      { "code": "replacement_chain_invalid", "status": 409, "when": "checkout 读接口替换链成环/超深/后继不可见（circle-checkout 专属）" }
+    ],
+    "principles": [
+      "unsupported/不存在场景是显式 4xx 错误码，不得在客户端降级为空列表成功；反之 circles:[] / memberships:[] / entitlements:[] 是合法成功态（无成员关系），二者不得混淆",
+      "未知字段/授权事实 fail closed：客户端只消费本契约列出的字段，未列字段出现时不猜测语义"
+    ]
+  },
+  "conventions": {
+    "currency": "amountMinor/membershipPriceMinor/nextPeriodPriceMinor 均为最小货币单位整数（分）；currency 为 ISO-4217 三字母大写，创建缺省 CNY（src/lib/creator-circles/contracts.ts L42, L176-188）",
+    "time": "全部时间字段为 ISO-8601 字符串（服务端 Date.toISOString() 输出）；preview 锚点类字段带 At 后缀",
+    "identity": "来源身份 = requireCircleConsumerAuth 解析的 actor.sub（uuid）；ownerUserId 为圈主 userId（uuid），不是显示名",
+    "not_product_space": "圈子关系读取与 /me/product-spaces 刻意分离，不能作为 ProductSpace 切换目标消费（src/app/api/me/circles/route.ts L10-11 注释原文：'It cannot be consumed as a ProductSpace switch target'）",
+    "enums": {
+      "circleStatus": ["active", "suspended", "closing", "closed"],
+      "membershipStatus": ["active", "suspended", "expired"],
+      "joinMode": ["free", "invite_only", "paid"],
+      "billingCycle": ["month", "year"],
+      "paymentEventStatus": ["paid", "failed", "unknown", "cancelled", "refunded", "disputed"],
+      "checkoutResultState": ["confirm", "processing", "success", "failed", "changed", "unknown"],
+      "periodKind": ["legacy_days", "calendar_month", "calendar_year"],
+      "viewerState": ["not_joined", "free_member", "paid_active", "paid_expired", "suspended"],
+      "entitlementSourceKind": ["active_distribution", "paid_retention"]
+    }
+  },
+  "endpoints": [
+    {
+      "id": "me-circles-list",
+      "method": "GET",
+      "path": "/api/me/circles",
+      "status": "verified",
+      "source": { "file": "src/app/api/me/circles/route.ts", "lines": "L12-28", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "consumes_entitlements_from": { "function": "resolveCircleEntitlements", "file": "src/lib/creator-circles/distributions.ts", "lines": "L29-183", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "request": {},
+      "response": {
+        "circles": {
+          "item_fields": {
+            "id": "membershipId uuid",
+            "status": "membershipStatus（列表 where 含 active/suspended/expired，route.ts L16）",
+            "billingKind": "free | paid",
+            "modeTransitionEndsAt": "ISO|null（免费模式过渡窗口截止）",
+            "currentPeriodEnd": "ISO|null（付费期截止）",
+            "joinSource": "加入来源",
+            "joinedAt": "ISO",
+            "circle": { "id": "uuid", "name": "string", "purpose": "string", "status": "circleStatus（where 含 active/suspended/closing/closed）", "ownerUserId": "uuid（非显示名，见 GAPS G1）" },
+            "entitlements": "resolveCircleEntitlements 按 circleId 过滤后的数组（L20-24）：{id, circleId, artifactId, sourceKind: active_distribution|paid_retention, sourceValidUntil: ISO|null（仅 paid_retention 非空）, artifact: {id,type,slug,name,summary,status,currentStableVersionId}, artifactVersion: {id,version,status,publishedAt}}（distributions.ts L160-182）"
+          },
+          "entitlement_resolution_gate": "entitlements 仅在 distribution active/stopped 且 circle.status ∈ active/closing、artifact 与 stable version published、创作者 business+active、资格治理可运行时解析（distributions.ts L126-133, L135-151）；closed 圈与不可运行作品解析为空数组——空 entitlements 是合法状态不是错误"
+        }
+      },
+      "errors": ["401 unauthorized/token_revoked", "503 service_unavailable（非 AuthError 全部）"],
+      "consumer_guidance": "POO-88 (C1) 我的圈子列表与 POO-92+ (C3+) 详情入口按此读取；ownerUserId 不得直接当创作者姓名渲染（G1）",
+      "fixture_need": "至少覆盖：active 付费成员含 1 条 active_distribution；paid_retention（停用分发已购保留）；closed 圈 membership 仍在列表且 entitlements 为空；suspended membership；免费过渡窗口内/外各一",
+      "fixture_status": "requested_pending_live_verification"
+    },
+    {
+      "id": "me-memberships-list",
+      "method": "GET",
+      "path": "/api/me/circle-memberships",
+      "status": "verified",
+      "source": { "file": "src/app/api/me/circle-memberships/route.ts", "lines": "L7-32", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "projection_dependency": { "function": "projectCircleMemberOrderStatuses", "file": "src/lib/circle-billing/checkout.ts", "lines": "L146-191", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "request": {},
+      "response": {
+        "memberships": {
+          "item_fields": {
+            "id": "membershipId uuid（无状态过滤，含 expired）",
+            "status": "membershipStatus",
+            "billingKind": "free | paid",
+            "modeTransitionEndsAt": "ISO|null",
+            "currentPeriodEnd": "ISO|null",
+            "suspendedReason": "string|null",
+            "joinedAt": "ISO",
+            "updatedAt": "ISO（orderBy updatedAt desc）",
+            "paymentOrders": "最近 5 条（take:5, orderBy updatedAt desc）：{id, status（存储原值）, amountMinor, currency, effectivePaymentStatus, correction}",
+            "effectivePaymentStatus": "投影值：有 correction 时 refunded|disputed|partially_refunded|partially_disputed（checkout.ts L183-185）；否则最近权威 evidence status（paid|failed|unknown|cancelled|refunded|disputed）；无 evidence 时回落存储 order.status",
+            "correction": "null | {kind: refund|chargeback, amountMinor: 合计, partial: boolean, refundAmountMinor, chargebackAmountMinor}（checkout.ts L115-121）",
+            "circle": "{id, name, purpose, status, joinMode, membershipPriceMinor, membershipCurrency, nextPeriodPriceMinor, nextPriceEffectiveAt}"
+          }
+        }
+      },
+      "errors": ["circleResponse 映射族（见 error_model）"],
+      "consumer_guidance": "判当前权益优先用 circle-checkout 读接口（me-checkout-result）；本接口的 effectivePaymentStatus/correction 已含退款/拒付校正投影（POL-91 review 修正），比单订单原始 status 可信",
+      "fixture_need": "至少覆盖：全额退款→refunded；部分退款→partially_refunded（剩余权利期内有效）；退款后拒付→disputed；无 correction 无 evidence→回落存储 status；>5 条订单截断为最近 5 条",
+      "fixture_status": "requested_pending_live_verification"
+    },
+    {
+      "id": "me-membership-renewal-preview",
+      "method": "GET",
+      "path": "/api/me/circle-memberships/{membershipId}",
+      "status": "verified",
+      "source": { "file": "src/app/api/me/circle-memberships/[membershipId]/route.ts", "lines": "L65-75", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "preview_source": { "function": "previewCircleRenewal", "file": "src/lib/creator-circles/service.ts", "lines": "L1311-1339", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "request": {},
+      "response": {
+        "purchaseUrl": "string，`/c/{shareId}?renew=1`（浏览器公开页续费入口；shareId 缺失时整个请求 503）",
+        "preview": {
+          "membershipId": "uuid",
+          "circleId": "uuid",
+          "billingCycle": "month | year（固定于创建，不可变：contracts.ts L18-22）",
+          "periodKind": "calendar_month | calendar_year（CirclePaidPeriodTarget L128：新报价恒为日历周期）",
+          "priceMinor": "当前生效价（nextPriceEffectiveAt 已到点取 nextPeriodPriceMinor，否则 membershipPriceMinor；null 时上游已 409 calendar_contract_invalid 之外的 renewal_price_unavailable 只在建单路径出现，preview 可能返回 null priceMinor —— 消费端必须处理 null）",
+          "currency": "ISO-4217",
+          "anchorAt": "ISO 谱系锚点（报价时点已知；结算可能对新谱系重定锚）",
+          "projectedPeriodStartAt": "ISO",
+          "projectedPeriodEndAt": "ISO",
+          "periodCapEndAt": "ISO（月付 12 个日历月 / 年付至多下一年度的续费上限边界）",
+          "canRenew": "boolean",
+          "capReason": "null | string"
+        }
+      },
+      "errors": ["400 validation_error（uuid/Content-Type）", "404 not_found", "409 calendar_contract_invalid", "503 service_unavailable（shareId 为空）"],
+      "consumer_guidance": "这是下一年度/下一周期权益的权威周期来源（卡正文第 4 步：需要权威周期时优先消费该读接口族）；对 expired membership 亦可读（previewCircleRenewal 无 status 过滤，service.ts L1312）——这正是已退出成员的恢复入口：purchaseUrl 引导回公开页重购",
+      "fixture_need": "至少覆盖：active 月付续费（延展锚点）；expired 重购（新谱系重定锚）；nextPriceEffectiveAt 已生效换价；canRenew=false 携带 capReason；shareId 为空 503",
+      "fixture_status": "requested_pending_live_verification"
+    },
+    {
+      "id": "me-membership-leave-now",
+      "method": "PATCH",
+      "path": "/api/me/circle-memberships/{membershipId}",
+      "status": "verified",
+      "source": { "file": "src/app/api/me/circle-memberships/[membershipId]/route.ts", "lines": "L23-33", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "schema_source": { "name": "changeOwnCircleMembershipSchema", "file": "src/lib/creator-circles/contracts.ts", "lines": "L137-139", "rule": "{action: \"leave_now\"}，strict（多余字段拒绝）；成员生命周期唯一自助命令" },
+      "request": { "body": { "action": "\"leave_now\"（唯一合法值）" }, "headers": { "Content-Type": "application/json 必须，否则 400" } },
+      "response": {
+        "membership": "{id, circleId, userId, status, billingKind, currentPeriodEnd, modeTransitionEndsAt, suspendedReason, joinedAt, endedAt, updatedAt}（consumerMembershipDto route.ts L13-21）"
+      },
+      "semantics": "仅 active → expired（endedAt=now，service.ts L1085-1098）；非 active 一律 409 invalid_membership_transition。立即退出；无延迟退出/撤销命令",
+      "errors": ["400 validation_error", "404 not_found", "409 invalid_membership_transition", "401 鉴权失败"],
+      "consumer_guidance": "已退出（expired）关系仍出现在 me/circles 与 me/circle-memberships 列表；恢复入口见 me-membership-renewal-preview（purchaseUrl/preview 对 expired 可读）",
+      "fixture_need": "至少覆盖：active 成功退出（响应 status=expired, endedAt 非空）；suspended/expired 重放退出 409；命令体带多余字段 strict 拒绝",
+      "fixture_status": "requested_pending_live_verification"
+    },
+    {
+      "id": "me-membership-create-renewal-order",
+      "method": "POST",
+      "path": "/api/me/circle-memberships/{membershipId}",
+      "status": "verified_not_consumed_by_client",
+      "source": { "file": "src/app/api/me/circle-memberships/[membershipId]/route.ts", "lines": "L38-61", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "schema_source": { "name": "createCircleRenewalOrderSchema", "file": "src/lib/creator-circles/contracts.ts", "lines": "L143-148" },
+      "note": "卡正文第 2 步明确：客户端不调用建单 POST。此处仅记录其存在与 schema（acknowledgedPriceMinor/consentVersion/channel 必填，idempotencyKey 可选），防止消费端误建第二购买入口；首购与续购的浏览器入口在公开页 /c/{shareId}（POL-114 域）",
+      "fixture_need": "无需客户端 fixture；集中验收若覆盖只验证客户端不发起该 POST",
+      "fixture_status": "not_applicable_for_client"
+    },
+    {
+      "id": "me-order-raw",
+      "method": "GET",
+      "path": "/api/me/circle-payment-orders/{orderId}",
+      "status": "verified",
+      "source": { "file": "src/app/api/me/circle-payment-orders/[orderId]/route.ts", "lines": "L10-19", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "request": {},
+      "response": {
+        "order": "{id, status（存储原值，无校正投影）, amountMinor, currency, checkoutUrl, periodEndAt, circle: {id, name}}",
+        "paymentOwner": "\"B01\"（字面量，支付权威方标识）"
+      },
+      "errors": ["400 validation_error", "404 not_found（他人订单同形）"],
+      "consumer_guidance": "raw paid 不足以判当前权益（GAPS G5）：退款/拒付是 append-only 校正，不改写原订单行；权益判断必须消费 me-checkout-result（或列表接口的 effectivePaymentStatus 投影）",
+      "fixture_need": "至少覆盖：原单存储 paid 但存在全额退款 evidence → 该接口仍返回 status=paid（证明不可单独作为权益依据的反例）",
+      "fixture_status": "requested_pending_live_verification"
+    },
+    {
+      "id": "me-checkout-result",
+      "method": "GET",
+      "path": "/api/circle-checkout/{orderId}",
+      "status": "verified",
+      "source": { "file": "src/app/api/circle-checkout/[orderId]/route.ts", "lines": "L13-25", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "result_source": { "function": "readCircleCheckoutResult", "file": "src/lib/circle-billing/checkout.ts", "lines": "L193-323", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "request": { "query": { "shareId": "可选；提供时须与 result.circleId 的 shareId 匹配，否则 404（route.ts L19-20）" } },
+      "response": {
+        "CheckoutResult_type": "src/lib/circle-billing/checkout.ts L35-82",
+        "fields": {
+          "state": "checkoutResultState: confirm|processing|success|failed|changed|unknown（src/lib/circle-billing/contracts.ts L11-18；推导见 checkout.ts L622-648）",
+          "orderId": "终态后继订单 id（替换链解析后）",
+          "circleId": "uuid",
+          "circleName": "string",
+          "amountMinor": "整数（分）",
+          "currency": "ISO-4217",
+          "periodDays": "30 | null（legacy_days 冻结 30 天；日历订单为 null，周期形状在 period）",
+          "period": "CircleEntitlementPeriod 判别联合（service.ts L1348-1390）：legacy_days {kind, periodDays:30, periodEndAt} | calendar_month|calendar_year {kind, billingCycle, anchorAt, periodStartAt, periodEndAt, projectedPeriodEndAt, periodCapEndAt, canRenew, capReason}",
+          "periodEndAt": "ISO|null",
+          "membershipPeriodEndAt": "ISO|null（本单前已付到期）",
+          "projectedPeriodEndAt": "ISO（本单结算后预计到期）",
+          "periodCapEndAt": "ISO（累计权益 12 个月上限边界）",
+          "expiresAt": "ISO（订单/二维码有效期，15 分钟窗口）",
+          "qrIssuedAt": "ISO|null（实际持久化出码时刻）",
+          "qrExpiresAt": "ISO|null",
+          "codeUrl": "string|null（仅 active 圈 + pending + confirm/processing 暴露）",
+          "merchantExpiresAt": "ISO|null",
+          "providerState": "unpaid|paid|closed|unknown|null",
+          "canRecoverQr": "boolean",
+          "canReconsent": "boolean",
+          "recoveryOrderId": "恢复必须绑定的订单 id（原单被替换时为终态后继）",
+          "consentVersion": "string|null",
+          "channel": "string|null",
+          "currentPriceMinor": "int|null（报价漂移检测基准）",
+          "computeExcluded": "true（字面量）",
+          "replacedByOrderId": "string|null（请求的原单已被替换时指向后继）",
+          "canRetry": "boolean"
+        },
+        "authority_semantics": "权威性来源：替换链终态解析 resolveEffectiveCheckoutOrder（checkout.ts L334-363）；最近 B01 权威 evidence 优先于存储 status（L234）；paid 必须消费完整 aggregate（evidence+attempt+entitlement event+revenue charge 五重核对，hasAppliedPaidCheckoutAggregate L365-380）才投影 success，否则回落 pending（L238-241）；过期 pending 无在途尝试投影 failed（L278-285）",
+        "idempotent_read": "同订单幂等重读字节稳定（衍生时间锚定不可变订单列，不读 now，L246-265）"
+      },
+      "errors": ["400 validation_error", "404 not_found", "409 replacement_chain_invalid", "billingResponse 映射族"],
+      "consumer_guidance": "卡正文第 4 步：需要权威周期/校正时优先消费本读接口，经合同验证后接 C1（POO-88）；C 系列详情的原订单校正状态一律以本接口（或列表投影）为准",
+      "fixture_need": "至少覆盖：state=success（完整 paid aggregate）；evidence paid 但 aggregate 未消费→processing/pending；替换链 O→R 后请求 O（replacedByOrderId/recoveryOrderId 指向 R）；过期 pending→failed；shareId 不匹配→404",
+      "fixture_status": "requested_pending_live_verification"
+    },
+    {
+      "id": "public-circle-session",
+      "method": "GET",
+      "path": "/api/circle-join/{token}",
+      "status": "verified",
+      "source": { "file": "src/app/api/circle-join/[token]/route.ts", "lines": "L53-59（shareId 分支；token 参数 22-36 字符 share id 走此分支）", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "view_source": { "file": "src/lib/creator-circles/public-view.ts", "lines": "L44-224", "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd" },
+      "request": {},
+      "response": {
+        "payload": "PublicCircleSessionPayload（L195-202）：{target:\"share\", circle:null, unavailable: null|\"closing\"|\"closed\", view: PublicCircleView|null, viewer: PublicCircleViewer|null, pendingOrderId: string|null}",
+        "view_fields": "PublicCircleView（L44-54）：{circleId, shareId, name, purpose, joinMode, billingCycle: month|year, creatorName, works: [{id,name,summary,kind,version}]（active 分发+published stable version，≤50）, price: null|{minor,currency,cycle}}",
+        "creatorName_rule": "owner.creatorWorkbenchProfile.publicName || owner.displayName || \"\"（L150）——显示名只在公开视图可得（G1/G3 的事实依据）",
+        "price_rule": "仅 joinMode=paid 且 priceReviewStatus=approved 且 membershipPriceMinor 非 null 时非空（L138-140）；付费空圈不做预售",
+        "viewer_fields": "PublicCircleViewer（L65-74）：{userId, label（当前会话账号 username）, state: not_joined|free_member|paid_active|paid_expired|suspended, periodEndAt: ISO|null, membershipId?}；匿名 viewer=null；每次请求重算，无跨账号缓存（L18-22 注释）",
+        "share_id_unresolvable": "shareId 非法或未解析时 view/unavailable 双 null（L210）——显式死链态，不是错误对象"
+      },
+      "consumer_guidance": "只在已授权 circleId 可可靠关联 shareId 时读此资料（卡正文第 5 步）；当前可靠关联仅有 me-membership-renewal-preview 的 purchaseUrl 桥（G3）；消费者不得自行读取 creator 管理 API",
+      "fixture_need": "至少覆盖：匿名 viewer=null；五态各一；unavailable=closing/closed；死链双 null；price=null（待审价/免费圈）",
+      "fixture_status": "requested_pending_live_verification"
+    }
+  ],
+  "support_configuration_contract": {
+    "requirement": "POL-115 D-OPS-17 真实客服配置的读取接口与字段；服务端未配置/加载失败两类",
+    "verified_on": "pol115-operations-v34@2f8b536e（非本卡主提供方 commit，见 provider_source.support_configuration_reference）",
+    "operations_side": {
+      "endpoint": "GET /api/admin/operations/support-configuration（?image=1 取真实文件字节）",
+      "source": { "file": "src/app/api/admin/operations/support-configuration/route.ts", "lines": "L22-47", "commit": "2f8b536ec5b7d5ef045ee8e7ae27601c3012fb31" },
+      "dto": "SupportConfiguration（src/lib/operations/support-boundary.ts L46-53, L80-97）：{configured: boolean, qrSha256?, qrContentType?, updatedAt?, updatedByMasked?, guidance?}",
+      "unconfigured_state": "显式 {configured:false, guidance:\"当前未配置外部客服二维码：用户暂时无法通过外部客服联系人工支持。\"}——无示例码、无静默空图",
+      "auth": "requireOperationsAdmin：仅 staff + platform_admin + active 的运营专用账号；失权账号旧会话 fail closed（support-boundary.ts L58-76）"
+    },
+    "member_side": "不存在成员/消费端客服配置读取接口（全仓 readSupportConfiguration 仅运营端 route 引用；route.ts L16 注释明言 user-side consumption wiring 属客户端 owner 后续接线）",
+    "load_failure_state": "服务端未定义专用\"加载失败\"错误契约：AuthError/SupportBoundaryError 走 errorJson，其余 500/网络层失败由客户端归类处理——消费端需自行定义加载失败态，不得假装是未配置（二态不得混淆）",
+    "consumer_split": "按卡正文第 6 步：C1（POO-88）拥有 getSupport 桥接，C2（POO-90）暴露读取状态，S1（POO-98）展示；不得把原型码复制到客户端",
+    "recheck": "成员端读取接口由 POL-115/POL-210 owner 落地后，在提供方 re-pin 时将本节升级为 endpoints[] 条目"
+  },
+  "protocol_handoff": {
+    "topic": "public-circle 发布的打开桌面端入口与本端协议注册差异（B1 typed event/协议字段锁定）",
+    "provider_fact": {
+      "evidence": "src/components/creator-center/public-circle.tsx L601：<a className=\"pc-btn secondary-open\" href=\"polo://open\" data-testid=\"pc-open-polo\">已经安装？打开 Polo</a>",
+      "commit": "17477dbfee2640a68d530aa144cf199ff39fe8dd",
+      "facts": ["scheme 为 polo://，非本端注册的 poloai://", "URL 无任何参数：不携带 orderId，也不携带 shareId/circleId"]
+    },
+    "consumer_fact": {
+      "repo_line": "integration/poo70-client-entry-r15（本 worktree，HEAD ec15ecd6）",
+      "registration": "apps/electron/src/main/index.ts：L281 DEEPLINK_SCHEME = process.env.POLO_AI_DEEPLINK_SCHEME || 'poloai'；L415-423 app.setAsDefaultProtocolClient（运行时注册，多实例 dev 可换 poloai1/poloai2）；L473 app.on('open-url')；生产打包 electron-builder.yml mac.extendInfo 未声明 CFBundleURLTypes（依赖运行时注册）",
+      "router": "apps/electron/src/main/deep-link.ts：路由表含 allSessions/flagged/state/sources/settings/join/{token}/action/{...}；无 open 动作；packages/shared/src/protocol/dto.ts L742 joinToken（poloai://join/<token>）",
+      "consequence": "点击 polo://open 在本端既不命中注册 scheme（poloai），即使命中也无 open 路由且无参数可定位原订单/圈子"
+    },
+    "typed_event_lock_proposal": "B1（POO-97）在 shared types/channels/dto 锁定的字段需求：scheme（双方约定，默认 poloai）、动作（如 open-order/open-circle）、orderId、shareId、callbackId（POLOAI_CALLBACK_ID_PATTERN，dto.ts L750）——在 provider 采纳前只做类型预留，不做行为假设",
+    "status": "upstream-expected",
+    "owner": "POL-114（public-circle.tsx 发布方）+ POL-174（跨端独立联调）；本端 B1 只锁定类型",
+    "recheck_timing": "POL-114 下一版提供方 re-pin 时核对链接是否改为携带参数的约定 scheme；POL-174 联调时验证真实唤起"
+  },
+  "gaps": [
+    {
+      "id": "G1",
+      "gap": "me/circles 只有 circle.ownerUserId（uuid），不是可显示创作者姓名，也没有头像字段",
+      "evidence": "src/app/api/me/circles/route.ts L18 select 仅 ownerUserId；对照公开视图 public-view.ts L107/L150 的 creatorName（creatorWorkbenchProfile.publicName || displayName）证明服务端存在显示名来源但成员列表未暴露",
+      "impact_on_consumers": "C1 列表/C3+ 详情不得渲染 ownerUserId 为姓名，不得猜测 fallback 值",
+      "owner": "POL-114 提供方（成员 DTO 增加创作者显示名/头像字段或授权的公开 profile 关联查询）",
+      "status": "upstream-expected",
+      "fixture_request": "请在 me/circles（或成员详情 DTO）增加 creatorDisplayName/creatorAvatarUrl 字段，并给出可复现 fixture（有 publicName、仅 displayName、两者皆空三例）",
+      "recheck_timing": "POL-114 下一版提供方 re-pin 时；期间客户端对创作者姓名/头像保持待上游（占位为\"待提供\"而非假名）"
+    },
+    {
+      "id": "G2",
+      "gap": "圈子更新历史（更新/公告列表）不存在对应接口",
+      "evidence": "src/app/api 下圈子相关路由全集（见 endpoints）无 updates/changelog/announcement 列表端点；api/creator-circles/* 均为创作者管理面，消费者不得调用",
+      "impact_on_consumers": "详情页\"更新\"区块无数据来源；不得补假历史",
+      "owner": "POL-114 提供方（定义更新列表 endpoint/DTO/分页/排序）",
+      "status": "upstream-expected",
+      "fixture_request": "请提供更新列表 endpoint 与版本化 DTO（含分页 cursor、排序、字段语义），并给出空列表/有更新/更新被撤回三类 fixture",
+      "recheck_timing": "提供方定义交接后 re-pin 解析为 existing 再锁定；此前该区块保持 pending"
+    },
+    {
+      "id": "G3",
+      "gap": "无 circleId→shareId 直接映射查询",
+      "evidence": "src/app/api/me 下唯一出现 shareId 的是 circle-memberships/[membershipId]/route.ts L70-73（membershipId→shareId，经 purchaseUrl）；无按 circleId 查 shareId 的成员接口",
+      "impact_on_consumers": "详情页想读公开 profile（creatorName/works/price）时，只能从已持有 membershipId 出发经 GET me/circle-memberships/{membershipId} 的 purchaseUrl 桥接解析 shareId（shareId 为空时 503）；circleId 直查不可行",
+      "owner": "POL-114 提供方（成员 DTO 暴露 shareId 或提供受控映射查询）",
+      "status": "upstream-expected",
+      "fixture_request": "请在成员接口暴露 circle.shareId（含 null 语义说明），并给出 shareId 为空（未开分享）fixture",
+      "recheck_timing": "POL-114 下一版 re-pin；期间公开资料读取仅在用户已持有 membershipId 且 purchaseUrl 可解析时进行"
+    },
+    {
+      "id": "G4",
+      "gap": "客服配置无成员端读取接口；加载失败无专用错误契约",
+      "evidence": "readSupportConfiguration 全仓仅运营端 route 引用（pol115 线）；support-configuration/route.ts L16 注明 user-side wiring 属客户端 owner",
+      "impact_on_consumers": "S1 客服展示无真实数据源；getSupport 桥接（C1）在成员端接口落地前只能返回明确的\"暂不可用\"态，不得用原型演示码",
+      "owner": "POL-115/POL-210 提供方（成员端读取接口）；C1（POO-88）拥有 getSupport 桥接、C2（POO-90）暴露读取状态、S1（POO-98）展示",
+      "status": "upstream-expected",
+      "fixture_request": "请提供成员端读取 endpoint（复用 SupportConfiguration DTO），并给出 未配置（configured:false+guidance）/已配置/运营端失权或网络失败 三类 fixture",
+      "recheck_timing": "POL-115 成员端接口落地后 re-pin；未落地期间真实验收保持 pending"
+    },
+    {
+      "id": "G5",
+      "gap": "原订单读取的 raw paid 不能绕过 corrections 判定当前权益",
+      "evidence": "me/circle-payment-orders/[orderId]/route.ts L15 只投影存储 status；对照 checkout.ts L99-113（evidence 覆盖存储值）与 L146-191（退款/拒付 append-only 校正投影）以及 L238-241/L365-380（paid 需完整 aggregate）",
+      "impact_on_consumers": "消费规则（非提供方变更）：权益判断一律以 me-checkout-result（权威读）为准，列表态用 effectivePaymentStatus/correction 投影；raw order.status 仅作展示性历史",
+      "owner": "消费侧各 C 卡遵循；提供方无需变更",
+      "status": "verified_consumption_rule",
+      "fixture_request": "见 me-order-raw 与 me-checkout-result 的 fixture_need（含\"存储 paid 但已全额退款\"反例）",
+      "recheck_timing": "集中节点真实验收时以反例 fixture 回放验证"
+    },
+    {
+      "id": "G6",
+      "gap": "provider 发布的 polo://open 不携带 orderId（也不携带 shareId），且 scheme 与本端注册不一致",
+      "evidence": "public-circle.tsx L601 vs apps/electron/src/main/index.ts L281/L415-423 与 deep-link.ts 路由表（见 protocol_handoff）",
+      "impact_on_consumers": "从浏览器唤起桌面端后无法定位原订单/圈子；本端不得实现基于猜测参数的兜底路由",
+      "owner": "POL-114（发布方改链接）+ POL-174（联调）；B1（POO-97）锁定 typed event/协议字段类型",
+      "status": "upstream-expected",
+      "fixture_request": "请 provider 侧采用约定 scheme + {action, orderId, shareId, callbackId} 参数集（见 protocol_handoff.typed_event_lock_proposal）；联调需真实唤起回环 fixture",
+      "recheck_timing": "POL-114 下一版 re-pin；provider 采用完成前该入口行为保持 pending"
+    },
+    {
+      "id": "G7",
+      "gap": "本端深链 scheme 默认 poloai 但可被 POLO_AI_DEEPLINK_SCHEME 环境变量覆盖（多实例 dev）",
+      "evidence": "apps/electron/src/main/index.ts L279-281",
+      "impact_on_consumers": "跨端协议不能硬编码假设 scheme 恒为 poloai；B1 类型与桥接需显式携带 scheme 约定",
+      "owner": "B1（POO-97）+ POL-174",
+      "status": "verified_consumption_rule",
+      "fixture_request": "联调 fixture 覆盖默认 scheme 与覆盖态各一次",
+      "recheck_timing": "POL-174 联调时"
+    },
+    {
+      "id": "G8",
+      "gap": "entitlements 解析门槛导致空数组语义易被误读",
+      "evidence": "distributions.ts L126-133（circle 需 active/closing、artifact/version published、创作者 business+active、资格治理可运行）",
+      "impact_on_consumers": "closed 圈 membership 正常在列但 entitlements=[]——空 entitlements 是合法事实（来源关闭/不可运行），不是接口失败；客户端须区分\"空列表成功\"与\"unsupported 显式错误\"",
+      "owner": "消费侧各 C 卡遵循",
+      "status": "verified_consumption_rule",
+      "fixture_request": "见 me-circles-list fixture_need（closed 圈 entitlements 空数组一例）",
+      "recheck_timing": "集中节点真实验收时回放"
+    }
+  ],
+  "evidence_status": {
+    "independent_coding": "done —— 本契约由 POO-81 owner 独立完成：只读核对提供方源码并逐字段绑定 file:line:commit；未运行业务构建，未触发业务写",
+    "contract_fixture": "requested —— 每个 endpoint 已给出 fixture 边界需求（fixture_need）与状态（fixture_status: requested_pending_live_verification）；fixture 数值必须来自真实服务回放，不得由本契约编造",
+    "live_service_verification": "pending —— 全部端点无真实验证：静态源码 ≠ 已部署服务；缺接口真实验收保持 pending，不阻塞本卡文档交付，但阻塞对应正式场景验收（集中节点/POL-174）"
+  },
+  "recheck_policy": {
+    "trigger": "提供方 re-pin（POL-114 下一版 / POL-115 成员端落地 / POL-174 联调开始）时，将 gaps[] 中 upstream-expected 项逐条解析为 verified 或保持 pending，并更新 provider_source.commit",
+    "fail_closed": "未知字段、未在本契约登记的端点、以及 support_configuration_reference 的 HEAD 漂移，均按未知授权事实 fail closed，先核对再消费"
+  },
+  "not_claims": [
+    "本文件不是接口实现，不代替正式联调（卡内明令：禁止以编写此文件代替接口实现或正式联调）",
+    "静态源码核对不证明已部署服务行为；live_service_verification 全部 pending",
+    "本文件通过来源核对与独立 Review 即达成 POO-81 acceptance（schedule none / api false / browser false / visual none），不代表产品验收或 execution_ready",
+    "fixture 需求描述不构成可用测试数据；数值必须来自真实服务回放",
+    "原型演示账号/金额/订单/版本不进入生产代码"
+  ]
+}
