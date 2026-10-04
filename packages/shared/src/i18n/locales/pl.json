@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "Wygasło {{date}}",
   "poo70.c6.detail.freeTerm": "Bez wygaśnięcia",
   "poo70.c6.detail.nextPrice": "Dnia {{date}} cena zmieni się na {{price}}.",
+  "poo70.c6.detail.period.free": "Darmowe",
   "poo70.c6.detail.period.loading": "Sprawdzanie okresu subskrypcji…",
   "poo70.c6.detail.period.month": "Subskrypcja miesięczna",
   "poo70.c6.detail.period.unavailable": "Okres subskrypcji jest niedostępny",

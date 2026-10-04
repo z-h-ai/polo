@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "Abgelaufen am {{date}}",
   "poo70.c6.detail.freeTerm": "Ohne Ablauf",
   "poo70.c6.detail.nextPrice": "Der Preis ändert sich am {{date}} zu {{price}}.",
+  "poo70.c6.detail.period.free": "Kostenlos",
   "poo70.c6.detail.period.loading": "Der Bezugszeitraum wird geprüft…",
   "poo70.c6.detail.period.month": "Monatsabonnement",
   "poo70.c6.detail.period.unavailable": "Bezugszeitraum derzeit nicht verfügbar",

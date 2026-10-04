@@ -196,29 +196,33 @@ export function CircleSubscriptionPanel({
   const [order, setOrder] = useState<OrderState>({ phase: 'idle' })
   const [launch, setLaunch] = useState<LaunchState>({ phase: 'idle' })
 
-  // Latest preview request wins; a superseded response never lands. The ref
-  // mirrors the state so an async click handler can read the FRESH payload
-  // after its await (the state closure alone would be stale).
+  // Latest preview request wins; a superseded response never lands. The
+  // order/launch round-trips carry the SAME seq guard: a receipt resolved
+  // after a circle switch belongs to the previous identity and must never
+  // land on the new circle's panel.
   const previewSeqRef = useRef(0)
-  const previewRef = useRef<PreviewState>(preview)
-  previewRef.current = preview
+  const orderSeqRef = useRef(0)
+  const launchSeqRef = useRef(0)
 
-  const requestPreview = useCallback(async (membershipId: string): Promise<boolean> => {
+  /**
+   * ONE authoritative preview GET: resolves the trusted payload on success,
+   * `null` on any failure OR when this request was superseded before it
+   * landed (the caller must not open from a stale round-trip).
+   */
+  const requestPreview = useCallback(async (membershipId: string): Promise<MemberCircleRenewalPreviewResultPayload | null> => {
     const seq = ++previewSeqRef.current
     setPreview(current => (current.phase === 'ready' ? current : { phase: 'loading' }))
     const result = await resource.previewRenewal(membershipId)
-    if (seq !== previewSeqRef.current) return false
+    if (seq !== previewSeqRef.current) return null
     if (result.success) {
-      setPreview({
-        phase: 'ready',
-        payload: {
-          purchaseUrl: result.purchaseUrl,
-          resolvedPurchaseUrl: result.resolvedPurchaseUrl,
-          purchaseUrlResolutionError: result.purchaseUrlResolutionError,
-          preview: result.preview,
-        },
-      })
-      return true
+      const payload: MemberCircleRenewalPreviewResultPayload = {
+        purchaseUrl: result.purchaseUrl,
+        resolvedPurchaseUrl: result.resolvedPurchaseUrl,
+        purchaseUrlResolutionError: result.purchaseUrlResolutionError,
+        preview: result.preview,
+      }
+      setPreview({ phase: 'ready', payload })
+      return payload
     }
     const error = toMemberCircleReadError(result)
     // A ready receipt stays on screen over a failed refresh (P70-SUBSCRIPTION-03):
@@ -226,13 +230,18 @@ export function CircleSubscriptionPanel({
     setPreview(current => (current.phase === 'ready'
       ? current
       : { phase: 'failed', retryable: error.retryable, errorCode: error.code }))
-    return false
+    return null
   }, [resource])
 
   // Circle switch hygiene (P70 旧回执不串圈): a different membership must
-  // never display the previous circle's preview/order/launch state — the
-  // internal state is dropped synchronously and refetched for THIS identity.
+  // never display the previous circle's preview/order/launch state. The
+  // internal state is dropped synchronously AND every in-flight round-trip
+  // of the previous identity is invalidated, so a late getOrder/openUrl
+  // settlement can never write a stale receipt or banner onto THIS panel.
   useEffect(() => {
+    previewSeqRef.current += 1
+    orderSeqRef.current += 1
+    launchSeqRef.current += 1
     setPreview({ phase: 'idle' })
     setOrder({ phase: 'idle' })
     setLaunch({ phase: 'idle' })
@@ -254,9 +263,11 @@ export function CircleSubscriptionPanel({
 
   const readyPreview = preview.phase === 'ready' ? preview.payload : null
   const canRenew = readyPreview?.preview.canRenew === true
-  // 到期不显示为购买上限: an expired membership renders the restore entry,
-  // never the cap block — even if the preview reported a cap.
-  const showCap = isPaid && readyPreview !== null && !canRenew && status !== 'expired'
+  // 到期不显示为购买上限, and a suspended membership fails closed (reason
+  // display only, no renewal claims): neither renders the cap block — the
+  // cap copy is only meaningful for an ACTIVE membership's early renewal.
+  const showCap = isPaid && readyPreview !== null && !canRenew
+    && status !== 'expired' && status !== 'suspended'
 
   const handleRetryPreview = useCallback(() => {
     if (!membershipId) return
@@ -264,51 +275,51 @@ export function CircleSubscriptionPanel({
   }, [membershipId, requestPreview])
 
   const openInBrowser = useCallback(async (url: string) => {
+    // Superseded round-trips never land: a circle switch (or a newer launch)
+    // invalidates THIS attempt's feedback, so a rejection resolved after the
+    // switch cannot render a dead banner on the new circle's panel.
+    const seq = ++launchSeqRef.current
     setLaunch({ phase: 'opening' })
     const api = (typeof window !== 'undefined' ? window.electronAPI : undefined) as
       | { openUrl?: (url: string) => Promise<void> }
       | undefined
     if (!api?.openUrl) {
       // Fail closed: no bridge, no fake success.
-      setLaunch({ phase: 'open-failed' })
+      if (seq === launchSeqRef.current) setLaunch({ phase: 'open-failed' })
       return
     }
     try {
       await api.openUrl(url)
-      setLaunch({ phase: 'opened' })
+      if (seq === launchSeqRef.current) setLaunch({ phase: 'opened' })
     } catch {
-      setLaunch({ phase: 'open-failed' })
+      if (seq === launchSeqRef.current) setLaunch({ phase: 'open-failed' })
     }
   }, [])
 
   // P70-SUBSCRIPTION-02: renewal opens ONLY through a preview GET — either
-  // the already-held authoritative preview, or a fresh one requested first.
-  // A cap (canRenew=false) and a blocked handoff open nothing.
+  // the already-held authoritative preview (read BEFORE any await, so the
+  // closure is fresh), or the payload a fresh fetch resolves with. A cap
+  // (canRenew=false) and a blocked handoff open nothing.
   const handleRenew = useCallback(() => {
     if (!membershipId) return
     void (async () => {
-      const current = previewRef.current
-      let payload = current.phase === 'ready' ? current.payload : null
-      if (!payload) {
-        const fetched = await requestPreview(membershipId)
-        if (!fetched) return
-        const fresh = previewRef.current
-        payload = fresh.phase === 'ready' ? fresh.payload : null
-      }
+      const payload = preview.phase === 'ready'
+        ? preview.payload
+        : await requestPreview(membershipId)
       if (!payload || !payload.preview.canRenew) return
       const handoff = selectCirclePurchaseHandoff(payload)
       if (handoff.state !== 'ready') return // blocked: fail closed, banner below
       await openInBrowser(handoff.url)
     })()
-  }, [membershipId, requestPreview, openInBrowser])
+  }, [membershipId, preview, requestPreview, openInBrowser])
 
   const handleRetryLaunch = useCallback(() => {
-    const payload = previewRef.current.phase === 'ready' ? previewRef.current.payload : null
+    const payload = preview.phase === 'ready' ? preview.payload : null
     if (!payload || !payload.preview.canRenew) return
     const handoff = selectCirclePurchaseHandoff(payload)
     if (handoff.state !== 'ready') return
     void openInBrowser(handoff.url)
-  }, [openInBrowser])
+  }, [preview, openInBrowser])
 
   const latestOrderSummary = membership?.paymentOrders[0] ?? null
 
@@ -321,8 +332,12 @@ export function CircleSubscriptionPanel({
   const handleViewOriginalOrder = useCallback(() => {
     if (!latestOrderSummary) return
     void (async () => {
+      // Same supersede guard as the preview: an order receipt resolved after
+      // a circle switch belongs to the previous identity and never renders.
+      const seq = ++orderSeqRef.current
       setOrder({ phase: 'loading' })
       const result = await resource.getOrder(latestOrderSummary.orderId)
+      if (seq !== orderSeqRef.current) return
       if (result.success) {
         setOrder({ phase: 'ready', order: result.order })
       } else {
@@ -418,7 +433,7 @@ export function CircleSubscriptionPanel({
             className="m-0 text-right text-[13px] font-medium text-foreground"
             data-testid="circle-subscription-period-value"
           >
-            {!isPaid && t('poo70.c3.entitlement.free')}
+            {!isPaid && t('poo70.c6.detail.period.free')}
             {isPaid && preview.phase === 'loading' && (
               <span data-testid="circle-subscription-period-loading">{t('poo70.c6.detail.period.loading')}</span>
             )}

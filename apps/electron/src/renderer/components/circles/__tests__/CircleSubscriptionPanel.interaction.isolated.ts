@@ -6,13 +6,15 @@
  * binding is a mutable module double, the trusted C1 bridge and
  * `electronAPI.openUrl` are mutable window stubs, and the panel mounts under
  * the REAL C2 resource provider so the scope fence is exercised for real.
+ * Interactions use the fireEvent/act conventions; controlled round-trips are
+ * released inside `await act(async () => ...)`.
  *
  * Scenarios (P70-SUBSCRIPTION-01/02/03):
  * - 01 display: identity + status header; price/period/validity each ONCE;
  *   月/年 wording ONLY from the preview periodKind (calendar_month /
  *   calendar_year); free circles show no renewal surface; null price states
- *   web confirmation instead of a fabricated amount; the next-period price
- *   fact renders from the circle DTO.
+ *   web confirmation instead of a fabricated amount; a changed preview price
+ *   is a re-confirmation fact and the handoff still opens.
  * - 02 handoff: renewal opens ONLY after the preview GET through the
  *   renderer gate; cap opens nothing (no order, no QR, no payment SDK);
  *   blocked/untrusted URLs never reach openUrl; launch failure retries
@@ -21,10 +23,15 @@
  *   cap state keeps 查看原订单 (getOrder receipt is display history, G5);
  *   preview/order failures are distinct retryable states; the exit region
  *   is a reserved mount point and onLeave/onReturn are NEVER invoked here.
+ * - Cross-circle isolation (P70 旧回执不串圈): switching the circle drops
+ *   ALL internal state synchronously and invalidates in-flight
+ *   preview/order/openUrl round-trips — a late receipt or rejection from the
+ *   previous circle never lands on the new circle's panel.
  */
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement } from 'react'
+import type { ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type {
@@ -56,7 +63,7 @@ mock.module('@/context/ProductSpaceContext', () => ({
   useProductSpaceContext: () => productSpaceContextState,
 }))
 
-const { cleanup, render, screen, waitFor } = await import('@testing-library/react')
+const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
 const { MemberCircleResourceProvider } = await import('@/context/MemberCircleResourceContext')
 const {
   CircleSubscriptionPanel,
@@ -128,6 +135,40 @@ function membershipFixture(overrides: Partial<MemberMembership> = {}): MemberMem
   }
 }
 
+/** A DISTINCT second circle for cross-circle isolation probes. */
+function circleBFixture(): MemberCircleSnapshot {
+  return {
+    ...circleFixture(),
+    membershipId: 'membership-b-fixture',
+    circle: {
+      circleId: 'circle-b-fixture',
+      name: '星河年度圈',
+      purpose: '年度订阅样例',
+      status: 'active',
+      ownerUserId: 'owner-uuid-b-fixture',
+    },
+  }
+}
+
+function membershipBFixture(): MemberMembership {
+  return {
+    ...membershipFixture(),
+    membershipId: 'membership-b-fixture',
+    paymentOrders: [],
+    circle: {
+      circleId: 'circle-b-fixture',
+      name: '星河年度圈',
+      purpose: '年度订阅样例',
+      status: 'active',
+      joinMode: 'paid',
+      membershipPriceMinor: 49000,
+      membershipCurrency: 'CNY',
+      nextPeriodPriceMinor: null,
+      nextPriceEffectiveAt: null,
+    },
+  }
+}
+
 function previewFixture(overrides: Partial<MemberCircleRenewalPreview> = {}): MemberCircleRenewalPreview {
   return {
     membershipId: 'membership-monthly-fixture',
@@ -179,6 +220,19 @@ let previewCalls = 0
 let openUrlCalls: string[] = []
 let orderResponse: unknown = { success: true as const, order: orderFixture() }
 let orderCalls: string[] = []
+// Injectable round-trip implementations (held-promise races override these).
+let previewRenewalImpl: () => Promise<unknown> = () => {
+  previewCalls += 1
+  return Promise.resolve(previewResponse)
+}
+let getOrderImpl: (orderId: string) => Promise<unknown> = orderId => {
+  orderCalls.push(orderId)
+  return Promise.resolve(orderResponse)
+}
+let openUrlImpl: (url: string) => Promise<void> = url => {
+  openUrlCalls.push(url)
+  return Promise.resolve()
+}
 
 function installBridge() {
   Object.defineProperty(window, 'electronAPI', {
@@ -187,24 +241,15 @@ function installBridge() {
       memberCircles: {
         list: () => Promise.resolve({ success: true, circles: [circleFixture()] }),
         listMemberships: () => Promise.resolve({ success: true, memberships: [membershipFixture()] }),
-        previewRenewal: () => {
-          previewCalls += 1
-          return Promise.resolve(previewResponse)
-        },
-        getOrder: (orderId: string) => {
-          orderCalls.push(orderId)
-          return Promise.resolve(orderResponse)
-        },
+        previewRenewal: () => previewRenewalImpl(),
+        getOrder: (orderId: string) => getOrderImpl(orderId),
         getCheckoutResult: () => Promise.resolve({ success: false as const, errorCode: 'not_found' as const, message: 'unused' }),
         getUpdates: () => Promise.resolve({ success: false as const, errorCode: 'not_found' as const, message: 'unused' }),
         getProfile: () => Promise.resolve({ success: false as const, errorCode: 'not_found' as const, message: 'unused' }),
         getSupport: () => Promise.resolve({ success: false as const, errorCode: 'not_found' as const, message: 'unused' }),
         leave: () => Promise.resolve({ success: false as const, errorCode: 'not_found' as const, message: 'unused' }),
       },
-      openUrl: (url: string) => {
-        openUrlCalls.push(url)
-        return Promise.resolve()
-      },
+      openUrl: (url: string) => openUrlImpl(url),
     },
   })
 }
@@ -223,6 +268,18 @@ beforeEach(() => {
   openUrlCalls = []
   orderResponse = { success: true as const, order: orderFixture() }
   orderCalls = []
+  previewRenewalImpl = () => {
+    previewCalls += 1
+    return Promise.resolve(previewResponse)
+  }
+  getOrderImpl = orderId => {
+    orderCalls.push(orderId)
+    return Promise.resolve(orderResponse)
+  }
+  openUrlImpl = url => {
+    openUrlCalls.push(url)
+    return Promise.resolve()
+  }
   installBridge()
 })
 
@@ -230,16 +287,18 @@ afterEach(() => {
   cleanup()
 })
 
+function panelTree(props: Partial<Parameters<typeof CircleSubscriptionPanel>[0]> = {}): ReactElement {
+  return createElement(I18nextProvider, { i18n }, createElement(MemberCircleResourceProvider, null,
+    createElement(CircleSubscriptionPanel, {
+      circle: circleFixture(),
+      membership: membershipFixture(),
+      ...props,
+    }),
+  ))
+}
+
 function renderPanel(props: Partial<Parameters<typeof CircleSubscriptionPanel>[0]> = {}) {
-  return render(
-    createElement(I18nextProvider, { i18n }, createElement(MemberCircleResourceProvider, null,
-      createElement(CircleSubscriptionPanel, {
-        circle: circleFixture(),
-        membership: membershipFixture(),
-        ...props,
-      }),
-    )),
-  )
+  return render(panelTree(props))
 }
 
 const price = (minor: number) => formatSubscriptionPrice(minor, 'CNY', 'zh-Hans')
@@ -340,8 +399,10 @@ describe('P70-SUBSCRIPTION-01: identity, single occurrence, authoritative period
     expect(screen.queryByTestId('circle-subscription-renew')).toBeNull()
     expect(screen.queryByTestId('circle-subscription-preview-loading')).toBeNull()
     expect(previewCalls).toBe(0)
+    // 免费 appears ONCE in the period row; 长期有效 lives in the validity row.
     const period = screen.getByTestId('circle-subscription-period-value')
-    expect(period.textContent).toContain('免费 · 长期有效')
+    expect(period.textContent).toContain('免费')
+    expect(period.textContent).not.toContain('长期有效')
     expect(screen.getByTestId('circle-subscription-validity-value').textContent).toContain('长期有效')
   })
 
@@ -359,6 +420,22 @@ describe('P70-SUBSCRIPTION-01: identity, single occurrence, authoritative period
     expect(note.textContent).toContain('2026-12-01')
     expect(note.textContent).toContain(price(4900))
   })
+
+  it('a changed preview price is a re-confirmation fact and the handoff still opens (价格变化可恢复)', async () => {
+    // Circle DTO says 3900; the authoritative preview comes back at 4900.
+    previewResponse = successPreviewPayload({ priceMinor: 4900 })
+    const { container } = renderPanel()
+    const changed = await screen.findByTestId('circle-subscription-preview-price-changed')
+    expect(changed.textContent).toContain(price(4900))
+    expect(changed.textContent).toContain('以网页确认价格为准')
+    // The changed price is stated once for the change fact itself; the
+    // period row carries the CURRENT preview price.
+    expect(container.textContent!.split(price(4900)).length - 1).toBe(2)
+    // The re-confirmation happens on the web page: the handoff still opens.
+    fireEvent.click(screen.getByTestId('circle-subscription-renew'))
+    await waitFor(() => expect(openUrlCalls).toHaveLength(1))
+    expect(openUrlCalls[0]).toBe(`${CONTROLLED_ORIGIN}/c/morning-star?renew=1`)
+  })
 })
 
 // -------------------------------------------------------------------------
@@ -368,10 +445,10 @@ describe('P70-SUBSCRIPTION-01: identity, single occurrence, authoritative period
 describe('P70-SUBSCRIPTION-02: preview-then-open, fail closed, no payment surface', () => {
   it('renewal opens the resolved creator path after the single preview GET', async () => {
     renderPanel()
-    const renew = await screen.findByTestId('circle-subscription-renew')
+    await screen.findByTestId('circle-subscription-renew')
     // The auto preview GET happened exactly once; renew must NOT re-GET.
     expect(previewCalls).toBe(1)
-    renew.click()
+    fireEvent.click(screen.getByTestId('circle-subscription-renew'))
     await waitFor(() => expect(openUrlCalls).toHaveLength(1))
     expect(openUrlCalls[0]).toBe(`${CONTROLLED_ORIGIN}/c/morning-star?renew=1`)
     expect(previewCalls).toBe(1)
@@ -387,10 +464,10 @@ describe('P70-SUBSCRIPTION-02: preview-then-open, fail closed, no payment surfac
     expect(screen.queryByTestId('circle-subscription-renew')).toBeNull()
     // Recovery: retry the preview GET, then the CTA appears and opens.
     previewResponse = successPreviewPayload()
-    screen.getByTestId('circle-subscription-preview-retry').click()
-    const renew = await screen.findByTestId('circle-subscription-renew')
+    fireEvent.click(screen.getByTestId('circle-subscription-preview-retry'))
+    await screen.findByTestId('circle-subscription-renew')
     expect(previewCalls).toBe(2)
-    renew.click()
+    fireEvent.click(screen.getByTestId('circle-subscription-renew'))
     await waitFor(() => expect(openUrlCalls).toHaveLength(1))
   })
 
@@ -411,22 +488,21 @@ describe('P70-SUBSCRIPTION-02: preview-then-open, fail closed, no payment surfac
   })
 
   it('a browser launch failure is a distinct retryable state that re-opens without a second GET', async () => {
-    Object.defineProperty(window, 'electronAPI', {
-      configurable: true,
-      value: {
-        memberCircles: (window as unknown as { electronAPI: { memberCircles: object } }).electronAPI.memberCircles,
-        openUrl: () => Promise.reject(new Error('launch failed')),
-      },
-    })
+    openUrlImpl = () => Promise.reject(new Error('launch failed'))
     renderPanel()
-    const renew = await screen.findByTestId('circle-subscription-renew')
-    renew.click()
+    await screen.findByTestId('circle-subscription-renew')
+    fireEvent.click(screen.getByTestId('circle-subscription-renew'))
     const failed = await screen.findByTestId('circle-subscription-open-failed')
     expect(failed.textContent).toContain('续费网页启动失败')
     const getsAfterFailure = previewCalls
     // Recovery retries the LAUNCH, not the preview GET.
-    screen.getByTestId('circle-subscription-open-retry').click()
+    openUrlImpl = url => {
+      openUrlCalls.push(url)
+      return Promise.resolve()
+    }
+    fireEvent.click(screen.getByTestId('circle-subscription-open-retry'))
     await waitFor(() => expect(screen.queryByTestId('circle-subscription-open-failed')).toBeNull())
+    expect(openUrlCalls).toHaveLength(1)
     expect(previewCalls).toBe(getsAfterFailure)
   })
 
@@ -441,8 +517,8 @@ describe('P70-SUBSCRIPTION-02: preview-then-open, fail closed, no payment surfac
     expect(screen.getByTestId('circle-subscription-cap-reason').textContent)
       .toContain('next_period_already_purchased')
     // 限额不建单仍可查原单.
-    screen.getByTestId('circle-subscription-view-order').click()
-    const order = await screen.findByTestId('circle-subscription-order')
+    fireEvent.click(screen.getByTestId('circle-subscription-view-order'))
+    await screen.findByTestId('circle-subscription-order')
     expect(orderCalls).toEqual(['order-original-fixture'])
     expect(screen.getByTestId('circle-subscription-order-id').textContent).toContain('order-original-fixture')
     expect(screen.getByTestId('circle-subscription-order-status').textContent).toContain('paid')
@@ -481,7 +557,8 @@ describe('P70-SUBSCRIPTION-03: expired recovery, order display, exit region', ()
     expect(openUrlCalls).toHaveLength(0)
   })
 
-  it('a suspended membership fails closed: reason shown, no renewal CTA', async () => {
+  it('a suspended membership fails closed: reason shown, no renewal CTA, no cap block', async () => {
+    previewResponse = successPreviewPayload({ canRenew: false, capReason: 'any_cap' })
     renderPanel({
       membership: membershipFixture({
         status: 'suspended',
@@ -492,6 +569,9 @@ describe('P70-SUBSCRIPTION-03: expired recovery, order display, exit region', ()
     expect(reason.textContent).toBe('payment_review')
     expect(screen.queryByTestId('circle-subscription-renew')).toBeNull()
     expect(screen.queryByTestId('circle-subscription-renew-restore')).toBeNull()
+    // The cap copy is only meaningful for an ACTIVE membership's early
+    // renewal — a suspended member gets the reason, never the limit block.
+    expect(screen.queryByTestId('circle-subscription-cap')).toBeNull()
     expect(openUrlCalls).toHaveLength(0)
   })
 
@@ -499,11 +579,11 @@ describe('P70-SUBSCRIPTION-03: expired recovery, order display, exit region', ()
     orderResponse = { success: false as const, errorCode: 'network_error' as const, message: 'down' }
     renderPanel()
     await screen.findByTestId('circle-subscription-renew')
-    screen.getByTestId('circle-subscription-view-order-cta').click()
+    fireEvent.click(screen.getByTestId('circle-subscription-view-order-cta'))
     const failed = await screen.findByTestId('circle-subscription-order-failed')
     expect(failed.textContent).toContain('原订单查询失败')
     orderResponse = { success: true as const, order: orderFixture() }
-    screen.getByTestId('circle-subscription-order-retry').click()
+    fireEvent.click(screen.getByTestId('circle-subscription-order-retry'))
     await screen.findByTestId('circle-subscription-order')
     expect(screen.getByTestId('circle-subscription-order').textContent)
       .toContain('订单记录仅作展示')
@@ -516,10 +596,111 @@ describe('P70-SUBSCRIPTION-03: expired recovery, order display, exit region', ()
     renderPanel({ onLeave, onReturn })
     await screen.findByTestId('circle-subscription-renew')
     // Exercise every interactive control above before judging the contract.
-    screen.getByTestId('circle-subscription-view-order-cta').click()
+    fireEvent.click(screen.getByTestId('circle-subscription-view-order-cta'))
     await screen.findByTestId('circle-subscription-order')
+    fireEvent.click(screen.getByTestId('circle-subscription-renew'))
+    await waitFor(() => expect(openUrlCalls).toHaveLength(1))
     expect(screen.getByTestId('circle-subscription-exit-region')).toBeTruthy()
     expect(onLeave).not.toHaveBeenCalled()
     expect(onReturn).not.toHaveBeenCalled()
+  })
+})
+
+// -------------------------------------------------------------------------
+// Cross-circle isolation (P70 旧回执不串圈 — P2 regression guards)
+// -------------------------------------------------------------------------
+
+describe('cross-circle isolation: switching circles drops state and invalidates in-flight round-trips', () => {
+  function switchToB(view: ReturnType<typeof renderPanel>) {
+    // Same provider tree position, NEW circle props → the panel's identity
+    // switch hygiene must fire (state drop + seq invalidation).
+    view.rerender(panelTree({ circle: circleBFixture(), membership: membershipBFixture() }))
+  }
+
+  it('settled state never bleeds across a circle switch', async () => {
+    const view = renderPanel()
+    await screen.findByTestId('circle-subscription-renew')
+    fireEvent.click(screen.getByTestId('circle-subscription-view-order-cta'))
+    await screen.findByTestId('circle-subscription-order')
+    expect(screen.getByTestId('circle-subscription-order-id').textContent).toContain('order-original-fixture')
+    // Switch to the year circle B; B's own preview arrives afterwards.
+    previewResponse = successPreviewPayload({
+      membershipId: 'membership-b-fixture',
+      circleId: 'circle-b-fixture',
+      billingCycle: 'year',
+      periodKind: 'calendar_year',
+      priceMinor: 49000,
+    })
+    switchToB(view)
+    await screen.findByTestId('circle-subscription-renew')
+    // The previous circle's order receipt is gone; B's identity shows.
+    expect(screen.queryByTestId('circle-subscription-order')).toBeNull()
+    expect(screen.queryByTestId('circle-subscription-order-id')).toBeNull()
+    expect(screen.getByTestId('circle-subscription-circle-name').textContent).toBe('星河年度圈')
+    expect(screen.getByTestId('circle-subscription-period-value').textContent).toContain('年度订阅')
+  })
+
+  it('a late getOrder receipt resolved AFTER the switch never renders (in-flight guard)', async () => {
+    let releaseOrder: (value: unknown) => void = () => {}
+    getOrderImpl = orderId => {
+      orderCalls.push(orderId)
+      return new Promise(resolve => {
+        releaseOrder = resolve
+      })
+    }
+    const view = renderPanel()
+    await screen.findByTestId('circle-subscription-renew')
+    fireEvent.click(screen.getByTestId('circle-subscription-view-order-cta'))
+    // The round-trip is still in flight when the user switches circles.
+    previewResponse = successPreviewPayload({
+      membershipId: 'membership-b-fixture',
+      circleId: 'circle-b-fixture',
+      billingCycle: 'year',
+      periodKind: 'calendar_year',
+      priceMinor: 49000,
+    })
+    switchToB(view)
+    await screen.findByTestId('circle-subscription-renew')
+    // The stale receipt lands NOW: it belongs to the previous identity and
+    // must be dropped instead of rendering under circle B.
+    await act(async () => {
+      releaseOrder({ success: true as const, order: orderFixture() })
+    })
+    expect(screen.queryByTestId('circle-subscription-order')).toBeNull()
+    expect(screen.queryByTestId('circle-subscription-order-id')).toBeNull()
+    expect(screen.getByTestId('circle-subscription-circle-name').textContent).toBe('星河年度圈')
+  })
+
+  it('a late openUrl rejection resolved AFTER the switch never renders a dead banner (in-flight guard)', async () => {
+    let rejectLaunch: (reason?: unknown) => void = () => {}
+    openUrlImpl = url => {
+      openUrlCalls.push(url)
+      return new Promise((_resolve, reject) => {
+        rejectLaunch = reject
+      })
+    }
+    const view = renderPanel()
+    await screen.findByTestId('circle-subscription-renew')
+    fireEvent.click(screen.getByTestId('circle-subscription-renew'))
+    expect(openUrlCalls).toHaveLength(1)
+    // Switch while the launch round-trip is still pending.
+    previewResponse = successPreviewPayload({
+      membershipId: 'membership-b-fixture',
+      circleId: 'circle-b-fixture',
+      billingCycle: 'year',
+      periodKind: 'calendar_year',
+      priceMinor: 49000,
+    })
+    switchToB(view)
+    await screen.findByTestId('circle-subscription-renew')
+    await act(async () => {
+      rejectLaunch(new Error('launch failed'))
+    })
+    // No launch-failure banner from the PREVIOUS circle's attempt on B.
+    expect(screen.queryByTestId('circle-subscription-open-failed')).toBeNull()
+    // B's own renewal CTA is live, not stuck in the previous opening state.
+    const renewB = screen.getByTestId('circle-subscription-renew')
+    expect((renewB as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByTestId('circle-subscription-circle-name').textContent).toBe('星河年度圈')
   })
 })

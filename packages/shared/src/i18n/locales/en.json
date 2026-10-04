@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "Expired {{date}}",
   "poo70.c6.detail.freeTerm": "No expiry",
   "poo70.c6.detail.nextPrice": "The price changes to {{price}} on {{date}}.",
+  "poo70.c6.detail.period.free": "Free",
   "poo70.c6.detail.period.loading": "Checking the subscription period…",
   "poo70.c6.detail.period.month": "Monthly subscription",
   "poo70.c6.detail.period.unavailable": "Subscription period unavailable",

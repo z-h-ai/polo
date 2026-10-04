@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "Lejárt: {{date}}",
   "poo70.c6.detail.freeTerm": "Nincs lejárat",
   "poo70.c6.detail.nextPrice": "Az ár {{date}} napon {{price}} értékre változik.",
+  "poo70.c6.detail.period.free": "Ingyenes",
   "poo70.c6.detail.period.loading": "Előfizetési időszak ellenőrzése…",
   "poo70.c6.detail.period.month": "Havi előfizetés",
   "poo70.c6.detail.period.unavailable": "Az előfizetési időszak most nem érhető el",

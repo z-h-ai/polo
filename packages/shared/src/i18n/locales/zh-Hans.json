@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "{{date}} 到期",
   "poo70.c6.detail.freeTerm": "长期有效",
   "poo70.c6.detail.nextPrice": "{{date}} 起价格调整为 {{price}}。",
+  "poo70.c6.detail.period.free": "免费",
   "poo70.c6.detail.period.loading": "正在核对订阅周期…",
   "poo70.c6.detail.period.month": "月度订阅",
   "poo70.c6.detail.period.unavailable": "订阅周期暂不可读",

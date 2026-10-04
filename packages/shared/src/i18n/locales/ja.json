@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "{{date}} に期限切れ",
   "poo70.c6.detail.freeTerm": "無期限",
   "poo70.c6.detail.nextPrice": "{{date}} から価格が {{price}} に変わります。",
+  "poo70.c6.detail.period.free": "無料",
   "poo70.c6.detail.period.loading": "サブスクリプション期間を確認しています…",
   "poo70.c6.detail.period.month": "月額サブスクリプション",
   "poo70.c6.detail.period.unavailable": "サブスクリプション期間を表示できません",

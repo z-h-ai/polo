@@ -2154,6 +2154,7 @@
   "poo70.c6.detail.expiredAt": "Caducó el {{date}}",
   "poo70.c6.detail.freeTerm": "Sin caducidad",
   "poo70.c6.detail.nextPrice": "El precio cambia a {{price}} el {{date}}.",
+  "poo70.c6.detail.period.free": "Gratis",
   "poo70.c6.detail.period.loading": "Comprobando el periodo de suscripción…",
   "poo70.c6.detail.period.month": "Suscripción mensual",
   "poo70.c6.detail.period.unavailable": "Periodo de suscripción no disponible",
