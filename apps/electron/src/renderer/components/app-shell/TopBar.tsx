@@ -4,6 +4,15 @@
  *
  * Layout: [traffic-light inset] [Brand lockup] [Home tab + web tabs] [web nav] ... [Runtime] [ProductSpace switcher] [Notifications] [Account]
  *
+ * P70-NAV-01: this bar is the ONLY top navigation — the opened app tabs, the
+ * ProductSpace switcher and the account menu live here, and there is no
+ * second app/skill/circle row. Circles are reached from the personal home
+ * content area (ClientPageContext routes), never from a bar tab.
+ *
+ * P70-NAV-03: the bottom hairline is not unconditional — it responds only to
+ * the current page's registered MAIN scroll container and starts hidden
+ * (ClientPageContext). Web app tabs keep the frozen POO-41 always-on border.
+ *
  * Fixed to the top of the window, 64px tall, always visible across shell
  * surfaces (Home view and web app tabs included). Rendered by TabShell inside
  * the hydration gate so a stale previous-scope bar can never surface before
@@ -16,6 +25,7 @@ import * as Icons from "lucide-react"
 import { useAtomValue } from "jotai"
 import { sessionMetaMapAtom } from "@/atoms/sessions"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
+import { useOptionalClientPage } from "@/context/ClientPageContext"
 import { useOptionalProductSpaceContext } from "@/context/ProductSpaceContext"
 import { useTabShell } from "@/context/TabShellContext"
 import { useOptionalTheme } from "@/context/ThemeContext"
@@ -95,6 +105,18 @@ export function TopBar() {
   const isHome = activeTab.type === "home"
   const showNavigation = activeTab.type === "webapp"
   const trafficLightInset = isMac && !isWebUI ? 86 : 8
+
+  // P70-NAV-03 header hairline: the bar's bottom border responds ONLY to the
+  // current page's registered MAIN scroll container (ClientPageContext) and
+  // starts hidden. Assistant-internal scrollers never register, so opening
+  // the Polo tab can never show the hairline. Web app tabs keep the frozen
+  // POO-41 always-on border (their scroller lives inside the webview and is
+  // out of this contract's scope); the narrow-window guard below the shell
+  // replaces the whole bar, so mobile stays out of scope as well.
+  const clientPage = useOptionalClientPage()
+  const showHeaderLine = showNavigation
+    ? true
+    : (clientPage?.isHeaderLineVisible ?? false)
 
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
   const [ownedSnapshot, setOwnedSnapshot] = useState<OwnedExecutionSnapshot | null>(null)
@@ -176,7 +198,12 @@ export function TopBar() {
   return (
     <div
       data-testid="app-topbar"
-      className="fixed left-0 right-0 top-0 z-panel flex items-center gap-[12px] border-b border-border/60 bg-background/92 backdrop-blur-[18px] titlebar-drag-region max-md:gap-1.5"
+      className={cn(
+        "fixed left-0 right-0 top-0 z-panel flex items-center gap-[12px] bg-background/92 backdrop-blur-[18px] titlebar-drag-region max-md:gap-1.5",
+        // The hairline keeps its 1px slot in both states so the bar never
+        // changes height when the main scroller crosses the top edge.
+        showHeaderLine ? "border-b border-border/60" : "border-b border-transparent",
+      )}
       style={{ height: "var(--topbar-height)", paddingLeft: trafficLightInset, paddingRight: 8 }}
     >
       {/* === LEFT: Brand lockup === */}
