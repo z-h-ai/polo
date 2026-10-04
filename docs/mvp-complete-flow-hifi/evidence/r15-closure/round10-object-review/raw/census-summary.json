@@ -1,0 +1,15 @@
+{
+ "scene_viewport_observations": 1272,
+ "scenes_total": 424,
+ "viewports": [
+  "desktop-1440x900",
+  "desktop-1024x768",
+  "desktop-800x600"
+ ],
+ "screenshots": 70,
+ "scene_link_clicks": 1272,
+ "page_errors": [],
+ "external_requests": [],
+ "page_error_count": 0,
+ "external_request_count": 0
+}

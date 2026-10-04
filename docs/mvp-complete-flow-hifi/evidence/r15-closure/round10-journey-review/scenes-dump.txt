@@ -1,0 +1,424 @@
+mvp | P-M01-LOGIN-PASSWORD | 登录 · 密码登录 | M01
+mvp | P-M01-LOGIN-PHONE | 登录 · 验证码登录 | M01
+mvp | P-M01-LOGIN-CODE | 登录 · 验证码已发送 | M01
+mvp | P-M01-LOGIN-CANCEL | 登录 · 用户取消 | M01
+mvp | P-M01-PERSONAL-PREP | 我的空间 · 准备中 | M01
+mvp | P-M01-PERSONAL-PREP-FAIL | 我的空间 · 准备失败 | M01
+mvp | P-M01-REOPEN | 重开 · 登录恢复 | M01
+mvp | P-M01-INVITE-BROWSER | 企业邀请已在浏览器处理 | M01
+mvp | P-M01-INVITE-MISMATCH | 邀请 · 账号不匹配 | M01
+mvp | P-M01-INVITE-PENDING | 共享邀请 · 待审批 | M01
+mvp | P-M01-REFRESH-FAIL | 企业列表刷新失败 | M01
+mvp | P-M01-NOT-INSTALLED | 未安装 · 下载指引 | M01
+mvp | P-M01-CREATE-ENT | 创建企业（浏览器交接） | M01
+mvp | P-M01-COLD-START | 冷启动 · 候选目标重验 | M01
+mvp | P-M02-SWITCHER | 切换空间 · 企业空间 | M02
+mvp | P-M02-SWITCHER-PERSONAL | 切换空间 · 我的空间 | M02
+mvp | P-M02-CONFIRM | 切换确认 · 终止 3 项 | M02
+mvp | P-M02-CONFIRM-PERSONAL | 切换确认 · 从我的空间到企业 | M02
+mvp | P-M02-STOPPING | 终止进度 | M02
+mvp | P-M02-STOP-FAILED | 部分停止失败 | M02
+mvp | P-M02-STOP-CANCEL | 取消切换 · 仍在原空间 | M02
+mvp | P-M02-TARGET-LOADING | 目标空间加载中 | M02
+mvp | P-M02-TARGET-FAILED | 目标空间加载失败 | M02
+mvp | P-M02-ACCESS-LOST | 目标无权访问 | M02
+mvp | P-M03-HOME-PERSONAL | 首页 · 我的空间 | M03
+mvp | P-M03-HOME-ZERO | 首页 · 首次使用 | M03
+mvp | P-M03-HOME-EMPTY-DIR | 首页 · 真空目录 | M03
+mvp | P-M03-HOME-LOAD-FAIL | 首页 · 目录加载失败 | M03
+mvp | P-M03-HOME-OFFLINE | 首页 · 离线缓存目录 | M03
+mvp | P-M03-HOME-ENT | 首页 · 企业空间（晨星科技） | M03
+mvp | P-M03-HOME-ENT-AFTER-CANCEL | 首页 · 晨星科技（取消切换后） | M03
+mvp | P-M03-HOME-ENT-AFTER-CLOSE | 首页 · 晨星科技（报价整理已关闭） | M03
+mvp | P-M03-ALL-APPS | 全部 Apps · 作品去重与授权来源 | M03
+mvp | P-M03-ALL-APPS-ZERO | 我的应用 · 首次使用 | M03
+mvp | P-M07-SOURCE-FALLBACK | 授权来源更新 · 仍可使用 | M07
+mvp | P-M03-ALL-APPS-ENT-EMPTY | 我的应用 · 企业尚未分发 | M03
+mvp | P-M03-INSPECTOR | App 详情（inspector） | M03
+mvp | P-M03-MANAGE-HOME | 我的应用 · 本机隐藏项 | M03
+mvp | P-M03-CONTROLS | 我的应用 · 恢复隐藏项 | M03
+mvp | P-M04-APP-VIEW | 应用 · 报价整理 | M04
+mvp | P-M04-APP-VIEW-PERSONAL | 应用 · 会议纪要整理 | M04
+mvp | P-M04-PREPARE | 应用请求访问所选文件 | M04
+mvp | P-M04-PREP-FAILED | 应用加载失败 · 合同审查 | M04
+mvp | P-M04-CLOSE-ACTIVE | 关闭 · 三选项 | M04
+mvp | P-M04-TERM-FAILED | 终止失败 · 标签保留 | M04
+mvp | P-M04-BACKGROUND | 后台继续 | M04
+mvp | P-M04-RUNTIME | 运行状态中心 | M04
+mvp | P-M04-NOTIFY-ENT | 通知中心 | M04
+mvp | P-M04-RUNTIME-PERSONAL | 运行状态 · 我的空间 | M04
+mvp | P-M04-NOTIFY-PERSONAL | 通知 · 我的空间 | M04
+mvp | P-M04-PERM-DENIED | OS 权限被拒 | M04
+mvp | P-M07-LIST | 我的圈子 · 列表 | M07
+mvp | P-M07-EMPTY | 我的圈子 · 空态 | M07
+mvp | P-M07-DETAIL-FOCUS | 圈子详情 · 已加入 | M07
+mvp | P-M07-JOIN-FREE | 使用圈子分享链接 | M07
+mvp | P-M07-DETAIL-PAID | 付费订阅详情 | M07
+mvp | P-M07-DETAIL-PAID-AFTER-LEAVE | 圈子详情 · 已退出 | M07
+mvp | P-M07-PAY-BROWSER | 在圈子公开页确认购买 | M07
+mvp | P-M07-PAY-RETURN-FAIL | 订单与资格暂时无法核对 | M07
+mvp | P-M07-RENEW | 手动续费 | M07
+mvp | P-M07-RENEW-EXPIRED | 手动续费 · 到期恢复 | M07
+mvp | P-M07-EXPIRED | 圈子到期 | M07
+mvp | P-M07-LEAVE | 退出圈子 | M07
+mvp | P-M07-LEAVE-PAID | 退出圈子 · 晨星设计圈 | M07
+mvp | P-M09-APP-BANNER | App 企业积分不足 | M09
+mvp | P-M09-BROWSER | 充值（浏览器交接） | M09
+mvp | P-M10-MENU | 账号菜单 · 有管理资格 | M10
+mvp | P-M10-MENU-ENT | 账号菜单 · 晨星科技 | M10
+mvp | P-M10-MENU-NOPRIV | 账号菜单 · 无创作资格 · 晨星科技 | M10
+mvp | P-M10-SETTINGS | 设置 · 账号安全 | M10
+mvp | P-M10-SETTINGS-ENT | 设置 · 晨星科技 | M10
+mvp | P-M10-SETTINGS-APPEARANCE | 设置 · 外观 | M10
+mvp | P-M10-SETTINGS-APPEARANCE-ENT | 外观设置 · 晨星科技 | M10
+mvp | P-M10-ADMIN-BROWSER | 北方贸易 · 企业管理后台（个人空间返回） | M10
+mvp | P-M10-ADMIN-RETURN | 返回后 · 资格刷新 · 晨星科技 | M10
+mvp | P-M11-REAUTH | 会话过期 · 重新登录 | M11
+mvp | P-M11-REVOKE | 运行中被移除 | M11
+mvp | P-M11-PERSONAL-RESTRICTED | 个人也受限 · 安全页 | M11
+mvp | P-M11-BLOCKED-WITHDRAWN | 作品 · 分发被撤下 | M11
+mvp | P-M11-BLOCKED-EXPIRED | 作品 · 最后一个来源失效 | M11
+mvp | P-M11-BLOCKED-VERSION | 作品 · 版本紧急阻断 | M11
+mvp | P-M11-OFFLINE-HOME | 离线打开 | M11
+mvp | P-M11-OFFLINE-RUNNING | 运行中断网 | M11
+mvp | P-M11-CONTRACT | 需要升级 Polo | M11
+mvp | P-M11-CONTRACT-DL | 正在下载更新 | M11
+mvp | P-M11-CONTRACT-FAIL | 更新没有完成 | M11
+mvp | P-M11-SPACE-ERROR | 空间列表加载失败 | M11
+mvp | P-M11-REOPEN-RECOVERY | 重开恢复 | M11
+mvp | P-M11-SUPPORT-BROWSER | 联系企业管理员 | M11
+mvp | P-M03-INSPECTOR-PERSONAL | App 详情 · 我的空间 | M03
+mvp | P-M02-ACCESS-LOST-ENT | 目标无权访问 · 企业空间 | M02
+mvp | P-M09-BROWSER-STREAM | 充值（生成中断） | M09
+mvp | P-M09-BROWSER-MENU | 充值与账单（浏览器交接） | M09
+mvp | P-M09-BROWSER-MENU-ENT | 充值与账单（浏览器交接 · 企业） | M09
+mvp | P-M07-PAY-BROWSER-EXPIRED | 在圈子公开页确认购买 | M07
+mvp | P-M03-ALL-APPS-ENT | 全部应用 · 企业提供 | M03
+mvp | P-M04-APP-CONTRACT | 应用 · 合同审查 | M04
+mvp | P-M04-APP-GROWTH | 应用 · 增长打法手册 | M04
+mvp | P-M04-APP-REPORT | 应用 · 数据报表生成器 | M04
+mvp | P-M04-APP-BRAND | 应用 · 品牌语气分析 | M04
+mvp | P-M04-APP-ACTIVE | 应用 · 有后台 AI 请求 | M04
+mvp | P-M04-REPORT-STOPPED | 数据报表生成器 · 后台请求已停止 | M04
+mvp | P-M09-BROWSER-OWNER | 企业充值（浏览器交接） | M09
+mvp | P-M09-BROWSER-BUDGET | 企业预算（浏览器交接） | M09
+mvp | P-M07-PUBLIC-WEB | 在圈子网页完成加入 | M07
+mvp | P-M07-RETURN | 核对圈子加入结果 | M07
+mvp | P-M07-RETURN-FAIL | 暂时无法刷新圈子资格 | M07
+mvp | P-M07-ACCOUNT-MISMATCH | 当前账号没有这次加入记录 | M07
+mvp | P-M07-LOGIN | 切回完成加入的账号 | M07
+mvp | P-M01-RETURN | 核对可进入的企业 | M01
+mvp | P-M01-ENTERPRISE-READY | 可以进入晨星科技 | M01
+mvp | P-M07-PAY-RETURN | 返回后核对原订阅订单 | M07
+mvp | P-M07-SUPPORT | 联系客服 | M07
+mvp | P-M07-SUPPORT-LOAD-FAIL | 联系客服 | M07
+mvp | P-M11-SUPPORT-MEMBER | 联系客服 | M11
+mvp | P-M07-RENEW-YEAR | 年度订阅续费 | M07
+mvp | P-M07-YEAR-WEB | 在年度圈网页确认续费 | M07
+mvp | P-M07-YEAR-RETURN | 核对年度圈的原订单 | M07
+mvp | P-M07-YEAR-RESULT | 星河年度圈 · 订阅权益 | M07
+mvp | P-M07-RENEW-LIMIT | 暂时不能提前续费 | M07
+mvp | P-M07-LOGIN-PHONE | 切回加入账号 · 验证码登录 | M01
+mvp | P-M07-LOGIN-CODE | 切回加入账号 · 输入验证码 | M01
+mvp | P-M11-SUPPORT-ACCOUNT-ADMIN | 账号受限 · 联系企业管理员 | M11
+mvp | P-M07-RENEW-WEB | 在网页确认月度续费 | M07
+mvp | P-M07-RENEW-RETURN | 返回后核对原续费订单 | M07
+mvp | P-M07-RENEW-RESULT | 月度续费已核对 | M07
+mvp | P-M07-LIST-RENEWED | 我的圈子 · 月付续费后 | M07
+mvp | P-M07-DETAIL-FOCUS-UPDATES | 晨星增长圈 | M07
+mvp | P-M07-DETAIL-FOCUS-SUBSCRIPTION | 晨星增长圈 | M07
+mvp | P-M07-DETAIL-PAID-UPDATES | 晨星设计圈 | M07
+mvp | P-M07-DETAIL-PAID-SUBSCRIPTION | 晨星设计圈 | M07
+mvp | P-M10-SETTINGS-DEVICE | Polo 设置 | M10
+mvp | P-M10-SETTINGS-PERMISSIONS | Polo 设置 | M10
+mvp | P-M10-SETTINGS-SHORTCUTS | Polo 设置 | M10
+mvp | P-M10-SETTINGS-ENT-DEVICE | Polo 设置 | M10
+mvp | P-M10-SETTINGS-ENT-PERMISSIONS | Polo 设置 | M10
+mvp | P-M10-SETTINGS-ENT-SHORTCUTS | Polo 设置 | M10
+mvp | P-M10-SETTINGS-DEVICE-FAILED | Polo 设置 · 保存失败 | M10
+mvp | P-M10-SETTINGS-ENT-DEVICE-FAILED | Polo 设置 · 保存失败 | M10
+mvp | P-M07-DETAIL-DATA | 数据工坊圈 | M07
+mvp | P-M07-DETAIL-DATA-SUBSCRIPTION | 数据工坊圈 · 订阅 | M07
+mvp | P-M07-LEAVE-DATA | 退出数据工坊圈 | M07
+mvp | P-M07-LEAVE-YEAR | 退出星河年度圈 | M07
+mvp | P-M10-CREATOR-BROWSER | 创作者工作台（个人空间返回） | M10
+mvp | P-M10-ADMIN-BROWSER-ENT | 北方贸易 · 企业管理后台（企业空间返回） | M10
+mvp | P-M10-CREATOR-BROWSER-ENT | 创作者工作台（企业空间返回） | M10
+mvp | P-M11-CONTRACT-HELP | 升级帮助 | M11
+mvp | P-M11-CONTRACT-READY | 升级检查通过 | M11
+mvp | P-M02-STOPPING-PERSONAL | 正在停止我的空间任务 | M02
+mvp | P-M02-TARGET-LOADING-ENT | 正在进入晨星科技 | M02
+mvp | P-M04-CLOSE-REPORT | 关闭运行中的数据报表生成器 | M04
+mvp | P-M04-CLOSE-CONTRACT | 关闭运行中的合同审查 | M04
+mvp | P-M02-STOP-FAILED-PERSONAL | 未能停止我的空间任务 | M02
+mvp | P-M09-APP-NOTIFIED | 已通知企业所有者 | M09
+mvp | P-M01-CREATE-BROWSER | 在系统浏览器创建企业 | M01
+mvp | P-M01-CREATE-RETURN | 核对企业创建结果 | M01
+mvp | P-M01-CREATE-READY | 晨星科技已创建 | M01
+mvp | P-M01-CREATE-PENDING | 尚未核对到新企业 | M01
+mvp | P-M01-CREATE-QUERY-FAILED | 暂时无法核对创建结果 | M01
+mvp | P-M07-REJOIN-BROWSER | 重新加入晨星设计圈 | M07
+mvp | P-M11-GOVERNANCE-PAUSED-MEMBER | 企业已暂停 | M11
+mvp | P-M11-GOVERNANCE-PAUSED-MANAGER | 企业已暂停 | M11
+mvp | P-M11-GOVERNANCE-PAUSED-OWNER | 企业已暂停 | M11
+mvp | P-M11-GOVERNANCE-CLOSING-MEMBER | 企业关闭处理中 | M11
+mvp | P-M11-GOVERNANCE-CLOSING-MANAGER | 企业关闭处理中 | M11
+mvp | P-M11-GOVERNANCE-CLOSING-OWNER | 企业关闭处理中 | M11
+mvp | P-M11-GOVERNANCE-ARREARS-MEMBER | 企业因欠费受限 | M11
+mvp | P-M11-GOVERNANCE-ARREARS-MANAGER | 企业因欠费受限 | M11
+mvp | P-M11-GOVERNANCE-ARREARS-OWNER | 企业因欠费受限 | M11
+mvp | P-M11-GOVERNANCE-STATUS | 晨星科技暂不可用 | M11
+mvp | P-M11-GOVERNANCE-BROWSER | 在系统浏览器处理企业限制 | M11
+mvp | P-M11-GOVERNANCE-CONTACT | 联系企业所有者 | M11
+mvp | P-M11-GOVERNANCE-RETURN | 重新核对晨星科技 | M11
+mvp | P-M11-GOVERNANCE-PENDING | 企业限制尚未解除 | M11
+mvp | P-M11-GOVERNANCE-FAILED | 暂时无法核对企业状态 | M11
+mvp | P-M11-GOVERNANCE-READY | 企业治理限制已解除 | M11
+mvp | P-M10-MENU-RESPONSIBILITY | 创作者资格失效 · 责任只读 · 我的空间 | M10
+mvp | P-M10-RESPONSIBILITY-BROWSER | 在浏览器查看创作者责任 | M10
+mvp | P-M10-RESPONSIBILITY-BROWSER-FAILED | 暂时无法打开责任页面 | M10
+mvp | P-M10-RESPONSIBILITY-RETURN | 核对原账号资格 | M10
+mvp | P-M10-RESPONSIBILITY-QUERY-FAILED | 暂时无法核对资格 | M10
+mvp | P-M10-RESPONSIBILITY-VERIFIED | 责任只读资格已核对 | M10
+mvp | P-M10-MENU-RESPONSIBILITY-ENT | 创作者资格失效 · 责任只读 · 企业空间 | M10
+mvp | P-M10-RESPONSIBILITY-BROWSER-ENT | 在浏览器查看创作者责任 | M10
+mvp | P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT | 暂时无法打开责任页面 | M10
+mvp | P-M10-RESPONSIBILITY-RETURN-ENT | 核对原账号资格 | M10
+mvp | P-M10-RESPONSIBILITY-QUERY-FAILED-ENT | 暂时无法核对资格 | M10
+mvp | P-M10-RESPONSIBILITY-VERIFIED-ENT | 责任只读资格已核对 | M10
+assistant | A-personal-new | 新会话 · 我的空间 | M05
+assistant | A-personal-conversation | 原会话 · 我的空间 | M05
+assistant | A-personal-generating | 正在生成 · 我的空间 | M05
+assistant | A-personal-stopped | 已停止 · 我的空间 | M05
+assistant | A-personal-question | 等待回答 · 我的空间 | M05
+assistant | A-personal-reopen | 重开后恢复问题 · 我的空间 | M05
+assistant | A-personal-answered | 已回答 · 我的空间 | M05
+assistant | A-personal-deferred | 暂不回答 · 我的空间 | M05
+assistant | A-personal-expired | 问题已过期 · 我的空间 | M05
+assistant | A-personal-deleted | 原会话不可访问 · 我的空间 | M05
+assistant | A-personal-answerfailed | 回答未提交 · 我的空间 | M05
+assistant | A-personal-offline | 网络已断开 · 我的空间 | M05
+assistant | A-personal-service | 服务暂时不可用 · 我的空间 | M05
+assistant | A-personal-restored | 重新验证完成 · 我的空间 | M05
+assistant | A-personal-completezero | 本次生成已完成 · 我的空间 | M05
+assistant | A-personal-files | 原对话附件与生成文件 · 我的空间 | M08
+assistant | A-personal-viewer | 查看生成文件 · 我的空间 | M08
+assistant | A-personal-attachment | 查看原对话附件 · 我的空间 | M08
+assistant | A-personal-missing | 文件已移动或删除 · 我的空间 | M08
+assistant | A-personal-reselected | 已重新选择材料 · 我的空间 | M08
+assistant | A-personal-sources | 数据源与工具 · 我的空间 | M06
+assistant | A-personal-sourceauth | 数据源需要认证 · 我的空间 | M06
+assistant | A-personal-sourcefailed | 数据源连接失败 · 我的空间 | M06
+assistant | A-personal-sourcedenied | 数据源权限被拒绝 · 我的空间 | M06
+assistant | A-personal-automations | 自动化 · 我的空间 | M06
+assistant | A-personal-browser | 助手浏览器 · 我的空间 | M06
+assistant | A-personal-return | 返回后待查询 · 我的空间 | M09
+assistant | A-personal-preblock | 发送前积分不足 · 我的空间 | M09
+assistant | A-personal-cut | 生成因积分不足停止 · 我的空间 | M09
+assistant | A-personal-checking | 正在查询 · 我的空间 | M09
+assistant | A-personal-notyet | 尚未到账 · 我的空间 | M09
+assistant | A-personal-queryfailed | 查询失败 · 我的空间 | M09
+assistant | A-personal-resumed | 积分可用 · 我的空间 | M09
+assistant | A-personal-skills | 技能 · 我的空间 | M06
+assistant | A-personal-discover | 获取技能 · 我的空间 | M06
+assistant | A-personal-acquire | 技能详情 · 我的空间 | M06
+assistant | A-personal-enabledpending | 已启用 · 设备待准备 · 我的空间 | M06
+assistant | A-personal-installing | 正在准备本机 · 我的空间 | M06
+assistant | A-personal-installfailed | 设备准备失败 · 我的空间 | M06
+assistant | A-personal-installed | 已安装 · 我的空间 | M06
+assistant | A-personal-enabled | 已启用 · 我的空间 | M06
+assistant | A-personal-detail | 技能版本 · 我的空间 | M06
+assistant | A-personal-updated | 版本已更新 · 我的空间 | M06
+assistant | A-personal-updatefailed | 更新失败 · 我的空间 | M06
+assistant | A-personal-remove | 卸载确认 · 我的空间 | M06
+assistant | A-personal-uninstalled | 本机已卸载 · 我的空间 | M06
+assistant | A-personal-denied | 未获授权 · 我的空间 | M06
+assistant | A-personal-restricted | 最后来源失效 · 我的空间 | M06
+assistant | A-personal-fallback | 部分来源失效 · 我的空间 | M06
+assistant | A-personal-reauthorized | 来源恢复 · 我的空间 | M06
+assistant | A-personal-builtinoff | 内置技能已停用 · 我的空间 | M06
+assistant | A-personal-builtinon | 内置技能已启用 · 我的空间 | M06
+assistant | A-enterprise-new | 新会话 · 晨星科技 | M05
+assistant | A-enterprise-conversation | 原会话 · 晨星科技 | M05
+assistant | A-enterprise-generating | 正在生成 · 晨星科技 | M05
+assistant | A-enterprise-stopped | 已停止 · 晨星科技 | M05
+assistant | A-enterprise-question | 等待回答 · 晨星科技 | M05
+assistant | A-enterprise-reopen | 重开后恢复问题 · 晨星科技 | M05
+assistant | A-enterprise-answered | 已回答 · 晨星科技 | M05
+assistant | A-enterprise-deferred | 暂不回答 · 晨星科技 | M05
+assistant | A-enterprise-expired | 问题已过期 · 晨星科技 | M05
+assistant | A-enterprise-deleted | 原会话不可访问 · 晨星科技 | M05
+assistant | A-enterprise-answerfailed | 回答未提交 · 晨星科技 | M05
+assistant | A-enterprise-offline | 网络已断开 · 晨星科技 | M05
+assistant | A-enterprise-service | 服务暂时不可用 · 晨星科技 | M05
+assistant | A-enterprise-restored | 重新验证完成 · 晨星科技 | M05
+assistant | A-enterprise-completezero | 本次生成已完成 · 晨星科技 | M05
+assistant | A-enterprise-files | 原对话附件与生成文件 · 晨星科技 | M08
+assistant | A-enterprise-viewer | 查看生成文件 · 晨星科技 | M08
+assistant | A-enterprise-attachment | 查看原对话附件 · 晨星科技 | M08
+assistant | A-enterprise-missing | 文件已移动或删除 · 晨星科技 | M08
+assistant | A-enterprise-reselected | 已重新选择材料 · 晨星科技 | M08
+assistant | A-enterprise-sources | 数据源与工具 · 晨星科技 | M06
+assistant | A-enterprise-sourceauth | 数据源需要认证 · 晨星科技 | M06
+assistant | A-enterprise-sourcefailed | 数据源连接失败 · 晨星科技 | M06
+assistant | A-enterprise-sourcedenied | 数据源权限被拒绝 · 晨星科技 | M06
+assistant | A-enterprise-automations | 自动化 · 晨星科技 | M06
+assistant | A-enterprise-browser | 助手浏览器 · 晨星科技 | M06
+assistant | A-enterprise-return | 返回后待查询 · 晨星科技 | M09
+assistant | A-enterprise-ownerreturn | 企业返回后待查询 · 晨星科技 | M09
+assistant | A-enterprise-preblock | 发送前积分不足 · 晨星科技 | M09
+assistant | A-enterprise-cut | 生成因积分不足停止 · 晨星科技 | M09
+assistant | A-enterprise-checking | 正在查询 · 晨星科技 | M09
+assistant | A-enterprise-notyet | 尚未到账 · 晨星科技 | M09
+assistant | A-enterprise-queryfailed | 查询失败 · 晨星科技 | M09
+assistant | A-enterprise-resumed | 积分可用 · 晨星科技 | M09
+assistant | A-enterprise-notify | 企业积分不足 · 晨星科技 | M09
+assistant | A-enterprise-notified | 已通知所有者 · 晨星科技 | M09
+assistant | A-enterprise-budget | 企业预算已达上限 · 晨星科技 | M09
+assistant | A-enterprise-budgetowner | 所有者处理企业预算 · 晨星科技 | M09
+assistant | A-enterprise-ownerblock | 所有者处理企业积分 · 晨星科技 | M09
+assistant | A-enterprise-ownerresumed | 企业积分可用 · 晨星科技 | M09
+assistant | A-enterprise-skills | 技能 · 晨星科技 | M06
+assistant | A-enterprise-discover | 获取技能 · 晨星科技 | M06
+assistant | A-enterprise-acquire | 技能详情 · 晨星科技 | M06
+assistant | A-enterprise-enabledpending | 已启用 · 设备待准备 · 晨星科技 | M06
+assistant | A-enterprise-installing | 正在准备本机 · 晨星科技 | M06
+assistant | A-enterprise-installfailed | 设备准备失败 · 晨星科技 | M06
+assistant | A-enterprise-installed | 已安装 · 晨星科技 | M06
+assistant | A-enterprise-enabled | 已启用 · 晨星科技 | M06
+assistant | A-enterprise-detail | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-updated | 版本已更新 · 晨星科技 | M06
+assistant | A-enterprise-updatefailed | 更新失败 · 晨星科技 | M06
+assistant | A-enterprise-remove | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled | 本机已卸载 · 晨星科技 | M06
+assistant | A-enterprise-denied | 未获授权 · 晨星科技 | M06
+assistant | A-enterprise-restricted | 最后来源失效 · 晨星科技 | M06
+assistant | A-enterprise-reauthorized | 来源恢复 · 晨星科技 | M06
+assistant | A-enterprise-builtinoff | 内置技能已停用 · 晨星科技 | M06
+assistant | A-enterprise-builtinon | 内置技能已启用 · 晨星科技 | M06
+assistant | A-personal-legacy-local-100-0-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-100-0-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-100-0-0 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-100-0-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-100-0-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-100-0-1 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-100-1-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-100-1-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-100-1-0 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-100-1-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-100-1-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-100-1-1 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-110-0-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-110-0-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-110-0-0 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-110-0-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-110-0-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-110-0-1 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-110-1-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-110-1-0 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-110-1-0 | 卸载确认 · 我的空间 | M06
+assistant | A-personal-legacy-local-110-1-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-detail-110-1-1 | 技能版本 · 我的空间 | M06
+assistant | A-personal-legacy-remove-110-1-1 | 卸载确认 · 我的空间 | M06
+assistant | A-enterprise-legacy-local-100-0-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-100-0-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-100-0-0 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-100-0-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-100-0-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-100-0-1 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-100-1-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-100-1-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-100-1-0 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-100-1-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-100-1-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-100-1-1 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-110-0-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-110-0-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-110-0-0 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-110-0-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-110-0-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-110-0-1 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-110-1-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-110-1-0 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-110-1-0 | 卸载确认 · 晨星科技 | M06
+assistant | A-enterprise-legacy-local-110-1-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-detail-110-1-1 | 技能版本 · 晨星科技 | M06
+assistant | A-enterprise-legacy-remove-110-1-1 | 卸载确认 · 晨星科技 | M06
+assistant | A-personal-restricted-remove | 卸载已失效副本 · 我的空间 | M06
+assistant | A-personal-restricted-uninstalled | 已失效副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-100-0-0 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-100-0-1 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-100-1-0 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-100-1-1 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-110-0-0 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-110-0-1 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-110-1-0 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-personal-uninstalled-110-1-1 | 本机副本已卸载 · 我的空间 | M06
+assistant | A-enterprise-restricted-remove | 卸载已失效副本 · 晨星科技 | M06
+assistant | A-enterprise-restricted-uninstalled | 已失效副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-100-0-0 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-100-0-1 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-100-1-0 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-100-1-1 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-110-0-0 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-110-0-1 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-110-1-0 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-enterprise-uninstalled-110-1-1 | 本机副本已卸载 · 晨星科技 | M06
+assistant | A-personal-empty-skills | 暂无额外技能 · 我的空间 | M06
+assistant | A-personal-empty-sources | 暂无数据源 · 我的空间 | M06
+assistant | A-personal-sourcedisconnected | 数据源未连接 · 我的空间 | M06
+assistant | A-personal-sourceconnecting | 正在连接数据源 · 我的空间 | M06
+assistant | A-personal-permission | 需要文件访问权限 · 我的空间 | M05
+assistant | A-personal-permissiondenied | 文件访问权限被拒绝 · 我的空间 | M05
+assistant | A-personal-permissiongranted | 访问权限已授予 · 我的空间 | M05
+assistant | A-enterprise-empty-skills | 暂无额外技能 · 晨星科技 | M06
+assistant | A-enterprise-empty-sources | 暂无数据源 · 晨星科技 | M06
+assistant | A-enterprise-sourcedisconnected | 数据源未连接 · 晨星科技 | M06
+assistant | A-enterprise-sourceconnecting | 正在连接数据源 · 晨星科技 | M06
+assistant | A-enterprise-permission | 需要文件访问权限 · 晨星科技 | M05
+assistant | A-enterprise-permissiondenied | 文件访问权限被拒绝 · 晨星科技 | M05
+assistant | A-enterprise-permissiongranted | 访问权限已授予 · 晨星科技 | M05
+assistant | A-personal-returnstream | 生成中断后返回 · 我的空间 | M09
+assistant | A-personal-checkingstream | 正在查询充值 · 我的空间 | M09
+assistant | A-personal-notyetstream | 生成中断 · 未到账 · 我的空间 | M09
+assistant | A-personal-failedstream | 生成中断 · 查询失败 · 我的空间 | M09
+assistant | A-personal-resumedstream | 生成中断 · 积分可用 · 我的空间 | M09
+assistant | A-enterprise-ownerchecking | 企业积分 · 正在查询 · 晨星科技 | M09
+assistant | A-enterprise-ownerpending | 企业积分 · 尚未恢复 · 晨星科技 | M09
+assistant | A-enterprise-ownerfailed | 企业积分 · 查询失败 · 晨星科技 | M09
+assistant | A-enterprise-budgetreturn | 企业预算 · 返回后待查询 · 晨星科技 | M09
+assistant | A-enterprise-budgetchecking | 企业预算 · 正在查询 · 晨星科技 | M09
+assistant | A-enterprise-budgetpending | 企业预算 · 尚未恢复 · 晨星科技 | M09
+assistant | A-enterprise-budgetfailed | 企业预算 · 查询失败 · 晨星科技 | M09
+assistant | A-enterprise-budgetresumed | 企业预算 · 已恢复可用 · 晨星科技 | M09
+assistant | A-personal-availability | 恢复发送 · 我的空间 | M05
+assistant | A-enterprise-availability | 恢复发送 · 晨星科技 | M05
+assistant | A-enterprise-budgetnotified | 已通知所有者调整预算 · 晨星科技 | M09
+assistant | A-enterprise-budgetmemberchecking | 正在核对企业预算 · 晨星科技 | M09
+assistant | A-enterprise-budgetmemberpending | 企业预算仍受限 · 晨星科技 | M09
+assistant | A-enterprise-budgetmemberfailed | 预算查询失败 · 晨星科技 | M09
+assistant | A-enterprise-budgetmemberresumed | 企业预算恢复 · 晨星科技 | M09
+assistant | A-personal-activity | 助手任务 · 我的空间 | M04
+assistant | A-personal-preferences | 助手偏好 · 我的空间 | M05
+assistant | A-personal-preferences-savefailed | 助手偏好保存失败 · 我的空间 | M05
+assistant | A-personal-close | 关闭 Polo 助手 · 我的空间 | M04
+assistant | A-personal-closefailed | 未能停止任务 · 我的空间 | M04
+assistant | A-enterprise-activity | 助手任务 · 晨星科技 | M04
+assistant | A-enterprise-preferences | 助手偏好 · 晨星科技 | M05
+assistant | A-enterprise-preferences-savefailed | 助手偏好保存失败 · 晨星科技 | M05
+assistant | A-enterprise-close | 关闭 Polo 助手 · 晨星科技 | M04
+assistant | A-enterprise-closefailed | 未能停止任务 · 晨星科技 | M04
+assistant | A-personal-transfer-export | 导出允许的对话内容 · 我的空间 | M08
+assistant | A-personal-transfer-exported | 对话内容已导出 · 我的空间 | M08
+assistant | A-personal-transfer-import | 导入对话内容 · 我的空间 | M08
+assistant | A-personal-transfer-preview | 确认导入 · 我的空间 | M08
+assistant | A-personal-transfer-done | 已建立导入对话 · 我的空间 | M08
+assistant | A-personal-transfer-invalid | 无法导入此文件 · 我的空间 | M08
+assistant | A-personal-legacy-isolation | 旧数据归属待核验 · 我的空间 | M08
+assistant | A-enterprise-transfer-export | 导出允许的对话内容 · 晨星科技 | M08
+assistant | A-enterprise-transfer-exported | 对话内容已导出 · 晨星科技 | M08
+assistant | A-enterprise-transfer-import | 导入对话内容 · 晨星科技 | M08
+assistant | A-enterprise-transfer-preview | 确认导入 · 晨星科技 | M08
+assistant | A-enterprise-transfer-done | 已建立导入对话 · 晨星科技 | M08
+assistant | A-enterprise-transfer-invalid | 无法导入此文件 · 晨星科技 | M08
+assistant | A-enterprise-legacy-isolation | 旧数据归属待核验 · 晨星科技 | M08

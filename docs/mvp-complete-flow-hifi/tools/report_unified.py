@@ -25,7 +25,7 @@ for key in ['structure','browser','invariants','review-continuity','semantic']+(
  assert observed==artifacts,f'{key} is stale'
 s=json.loads((E/'semantic.json').read_text())
 if 'second-semantic' in files:
- second=json.loads((E/'second-semantic.json').read_text());assert second['independence']['allowed_inputs_only'];assert second['reviewer_context']['agent'] not in ['/root',s['reviewer_context']['agent']];assert not [f for f in second.get('findings',[]) if f.get('status')!='resolved'];assert all(h(R/p)==sha for p,sha in second['inputs'].items()),'second semantic input stale'
+ second=json.loads((E/'second-semantic.json').read_text());assert second['independence']['allowed_inputs_only'];assert second['reviewer_context']['agent'] not in ['/root',s['reviewer_context']['agent']];assert not [f for f in second.get('findings',[]) if f.get('status')!='resolved'];second_inputs={v['path']:v['sha256'] for v in second['inputs']} if isinstance(second['inputs'],list) else second['inputs'];assert all(h(R/p)==sha for p,sha in second_inputs.items()),'second semantic input stale'
 reviewer=s['reviewer_context'].get('agent') if isinstance(s['reviewer_context'],dict) else s['reviewer_context']
 assert reviewer and reviewer!='/root' and s['independence']['allowed_inputs_only']
 inputs={v['path']:v['sha256'] for v in s['inputs']} if isinstance(s['inputs'],list) else s['inputs']

@@ -46,8 +46,10 @@ function fixture(scene){
  if(['preblock','cut'].includes(k))c.creditOrigin=k
  if(['new'].includes(k))sessions[scene.scope]='draft'
  if(['conversation','question','reopen','expired','deleted','files','missing'].includes(k))sessions[scene.scope]='saved'
- if(['preblock','cut','notify','ownerblock'].includes(k)){c.blocks.add('credits');c.creditsKnown=true;}
- if(['budget','budgetowner'].includes(k))c.blocks.add('budget')
+ if(scene.family==='credits'&&!['resumed','resumedstream','ownerresumed','budgetresumed','budgetmemberresumed'].includes(k)){
+  if(k.startsWith('budget'))c.blocks.add('budget');
+  else {c.blocks.add('credits');c.creditsKnown=true;}
+ }
  if(k==='offline')c.blocks.add('offline')
  if(['permission','permissiondenied'].includes(k))c.blocks.add('permission')
  if(k==='restored')c.blocks.delete('offline')

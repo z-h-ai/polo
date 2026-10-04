@@ -44,9 +44,12 @@ function SkillNavigator({scene}){
 }
 function Skills({scene}){
  const title=scene.scope==='personal'?'资料研究':'销售周报',restricted=scene.authorization==='已失效',remove=scene.key==='restricted-remove'||scene.key==='remove'||scene.legacyView==='remove'
+ const copy=scene.scope==='personal'
+  ?{tagline:'整理材料与进展，形成可核对的报告草稿',update:'1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。',usage:'使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。'}
+  :{tagline:'汇总本周销售进展，形成团队周报草稿',update:'1.1.0：改善销售数据汇总与图表呈现。更新用于后续调用，已运行的任务不切换版本。',usage:'使用当前空间中已授权的销售数据源汇总周报。执行前请核对统计范围与输出内容。'}
  if(scene.key==='empty-skills')return <SourceResourceEmptyPanel kind="skills" actions={false}/>
  return <div className="mvp-detail">{remove&&<div className="source-navigator__header"><span className="source-navigator__header-title">卸载本机副本</span></div>}<InfoPageContent>
- <Hero avatar={<HeroSkillIcon emoji="📋"/>} title={title} tagline="整理材料与进展，形成可核对的报告草稿"/>
+ <Hero avatar={<HeroSkillIcon emoji="📋"/>} title={title} tagline={copy.tagline}/>
  <InfoSection title="来源与使用状态"><InfoTable rows={[
  ['来源',getSkillSourceText(scene.scope)],['来源授权',scene.authorization],['本人启用',scene.enabled?'已启用':'未启用'],['本机准备',scene.device],['本机版本',scene.device==='未安装'?'—':scene.version],['内置资料研究',scene.builtin===false||scene.key==='builtinoff'?'已停用':'已启用']
  ]}/></InfoSection>
@@ -57,7 +60,7 @@ function Skills({scene}){
  {scene.key==='denied'&&<p className="mvp-alert">你尚未获得此技能的使用授权。{scene.scope==='personal'?'请向提供该技能的圈子确认资格。':'请联系企业管理员。'}</p>}
  {scene.authorization==='另一来源有效'&&scene.scope==='personal'&&<p>仍可通过其他有效来源使用；失效来源不再提供调用授权。</p>}
  {remove&&<p>将删除这台设备的技能副本。原对话及附件保留。</p>}
- <Actions scene={scene}/><InfoSection title="版本更新"><p className="mvp-description">最新可用版本：1.1.0</p><p className="mvp-description">1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。</p></InfoSection><InfoSection title="说明"><p className="mvp-description">使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。</p></InfoSection>
+ <Actions scene={scene}/><InfoSection title="版本更新"><p className="mvp-description">最新可用版本：1.1.0</p><p className="mvp-description">{copy.update}</p></InfoSection><InfoSection title="说明"><p className="mvp-description">{copy.usage}</p></InfoSection>
  </InfoPageContent></div>
 }
 function Sources({scene}){
@@ -84,7 +87,7 @@ function SkillLibrary({scene}){
  const [query,setQuery]=useState(''),[filter,setFilter]=useState('全部技能'),[source,setSource]=useState('全部来源'),[selected,select]=useState('circle'),[detailOpen,setDetailOpen]=useState(false)
  useEffect(()=>{select(['builtinon','builtinoff'].includes(scene.key)?'builtin':'circle')},[scene.key])
  const name=scene.scope==='personal'?'资料研究':'销售周报',empty=scene.key==='empty-skills'
- const match=!empty&&(name+' 整理材料 报告').includes(query)&& (filter==='全部技能'||filter==='已启用'&&scene.enabled||filter==='待准备'&&scene.device!=='就绪'||filter==='有更新'&&scene.version!=='1.1.0'||filter==='受限'&&scene.authorization==='已失效')&&source!=='Polo 内置'
+ const match=!empty&&(name+' '+(scene.scope==='personal'?'整理材料 报告':'销售数据 周报 汇总')).includes(query)&& (filter==='全部技能'||filter==='已启用'&&scene.enabled||filter==='待准备'&&scene.device!=='就绪'||filter==='有更新'&&scene.version!=='1.1.0'||filter==='受限'&&scene.authorization==='已失效')&&source!=='Polo 内置'
  const builtin=!empty&&'资料研究 Polo 内置'.includes(query)&&['全部技能','已启用'].includes(filter)&&(filter!=='已启用'||scene.builtin!==false)&&['全部来源','Polo 内置'].includes(source)
  return <div className={'polo-skill-manager '+(detailOpen?'show-skill-detail':'')}><div className="polo-resource-heading"><div><h1>技能</h1><p>管理当前空间的技能、来源与版本</p></div><div className="polo-resource-tools"><label>搜索技能<input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="名称或用途"/></label>{scene.transitions.filter(t=>t.key==='assistant').map(t=><Action key={t.id} scene={scene} edge={t}/>)}</div></div><div className="polo-skill-columns"><aside className="source-sidebar polo-skill-filters" aria-label="技能筛选">{['全部技能','已启用','待准备','有更新','受限'].map(v=><button key={v} className={filter===v?'selected':''} onClick={()=>setFilter(v)}>{v}</button>)}<label>来源<select value={source} onChange={e=>setSource(e.target.value)}><option>全部来源</option><option>Polo 内置</option>{scene.scope==='personal'?<><option>晨星增长圈</option><option>晨星设计圈</option></>:<option>晨星科技</option>}</select></label></aside><section className="polo-skill-results" aria-label="技能列表"><p className="polo-list-count">{Number(match)+Number(builtin)} 项技能</p>{match&&<button type="button" onClick={()=>{select('circle');setDetailOpen(true)}} aria-label="查看来源技能" className={'polo-skill-summary '+(selected==='circle'?'selected':'')}><strong>{name}</strong><p>{getSkillSourceText(scene.scope)}</p><small>{scene.enabled?'已启用':'未启用'} · {scene.device} · {scene.version||'未安装'}</small></button>}{builtin&&<button type="button" onClick={()=>{select('builtin');setDetailOpen(true)}} aria-label="查看内置技能" className={'polo-skill-summary '+(selected==='builtin'?'selected':'')}><strong>资料研究</strong><p>Polo 内置</p><small>{scene.builtin===false?'已停用':'已启用'}</small></button>}{!match&&!builtin&&<p className="polo-library-empty">没有匹配的技能。请调整搜索或筛选。</p>}</section><section className="polo-skill-detail" aria-label="技能详情"><button className="mvp-action polo-skill-back" onClick={()=>setDetailOpen(false)}>返回技能列表</button><div hidden={!match||selected==='builtin'}><Skills scene={scene}/></div><div hidden={!builtin||(selected!=='builtin'&&match)} className="polo-library-empty"><h2>资料研究</h2><p>Polo 内置 · 随客户端提供</p><p>启用状态：{scene.builtin===false?'已停用':'已启用'}</p><Actions scene={scene} area="builtin"/><p>随 Polo 版本维护，不使用圈子版本，也不依赖圈子订阅。</p></div>{!match&&!builtin&&<div className="polo-library-empty">暂无匹配的技能。清空搜索或调整筛选后重试。</div>}</section></div><div className="polo-resource-footer">{scene.transitions.filter(t=>['new','sessions','skills','sources'].includes(t.key)).map(t=><Action key={t.id} scene={scene} edge={t}>{t.key==='skills'?'返回完整技能列表':t.key==='new'?'新建助手会话':t.key==='sources'?'助手数据源':t.label}</Action>)}</div></div>
 }

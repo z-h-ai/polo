@@ -1,0 +1,4 @@
+viewport desktop-1024x768 done, observations=158
+viewport desktop-800x600 done, observations=582
+{"run_viewports": ["desktop-1024x768", "desktop-800x600"], "observations_this_run": 582, "resumed_already_done": 266, "external_requests": [], "request_count": 3}
+page_errors: 0

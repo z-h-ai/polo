@@ -1949,6 +1949,54 @@
     {
       "scene": "P-M11-GOVERNANCE-READY",
       "reason": "查看企业治理限制、角色交接或受信状态核验结果。"
+    },
+    {
+      "scene": "P-M10-MENU-RESPONSIBILITY",
+      "reason": "查看创作者资格失效但保留本人历史责任的账号菜单。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-BROWSER",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-BROWSER-FAILED",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-RETURN",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-QUERY-FAILED",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-VERIFIED",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-MENU-RESPONSIBILITY-ENT",
+      "reason": "查看创作者资格失效但保留本人历史责任的账号菜单。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-RETURN-ENT",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-QUERY-FAILED-ENT",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
+    },
+    {
+      "scene": "P-M10-RESPONSIBILITY-VERIFIED-ENT",
+      "reason": "查看责任只读交接、失败或重新核验结果。"
     }
   ],
   "revision": "poo70-workbench-r15-closure",
@@ -7643,6 +7691,18 @@
           "label": "管理本机版本",
           "to": "A-personal-restricted",
           "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
         }
       ],
       "annotations": [],
@@ -8086,6 +8146,36 @@
           "label": "去浏览器支付",
           "to": "P-M07-RENEW-WEB",
           "feedback": "去浏览器支付"
+        },
+        {
+          "id": "P-M07-RENEW-R8-LIMIT",
+          "label": "查看续费限制",
+          "to": "P-M07-RENEW-LIMIT",
+          "feedback": "查看续费限制"
+        },
+        {
+          "id": "T-P-M07-RENEW-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-RENEW-014-P-M07-RENEW-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        },
+        {
+          "id": "P-M07-RENEW-R9-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "P-M07-RENEW-R9-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
         }
       ],
       "annotations": [
@@ -8888,6 +8978,18 @@
           "label": "确认退出",
           "to": "P-M07-DETAIL-PAID-AFTER-LEAVE",
           "feedback": "确认退出"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
         }
       ],
       "annotations": [
@@ -9193,6 +9295,12 @@
           "label": "打开",
           "to": "P-M04-APP-BRAND",
           "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-R14-C-9-RESPONSIBILITY",
+          "label": "创作者责任只读  资格失效 · 仅只读",
+          "to": "P-M10-RESPONSIBILITY-BROWSER",
+          "feedback": "在系统浏览器查看本人历史责任，保持只读资格"
         }
       ],
       "surface": "mvp"
@@ -9316,6 +9424,12 @@
           "label": "查看原因",
           "to": "P-M11-BLOCKED-VERSION",
           "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-ENT-R14-C-9-RESPONSIBILITY",
+          "label": "创作者责任只读  资格失效 · 仅只读",
+          "to": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+          "feedback": "在系统浏览器查看本人历史责任，保持只读资格"
         }
       ],
       "surface": "mvp"
@@ -9579,6 +9693,12 @@
           "label": "打开助手偏好",
           "to": "A-personal-preferences",
           "feedback": "打开助手偏好"
+        },
+        {
+          "id": "T-P-M10-SETTINGS-018-P-M10-ADMIN-BROWSER-RESPONSIBILITY",
+          "label": "在浏览器打开",
+          "to": "P-M10-RESPONSIBILITY-BROWSER",
+          "feedback": "在系统浏览器查看本人历史责任，保持只读资格"
         }
       ],
       "annotations": [],
@@ -9726,6 +9846,12 @@
           "label": "打开助手偏好",
           "to": "A-enterprise-preferences",
           "feedback": "打开助手偏好"
+        },
+        {
+          "id": "T-P-M10-SETTINGS-ENT-036-P-M10-ADMIN-BROWSER-RESPONSIBILITY",
+          "label": "在浏览器打开",
+          "to": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+          "feedback": "在系统浏览器查看本人历史责任，保持只读资格"
         }
       ],
       "annotations": [],
@@ -12977,7 +13103,7 @@
         {
           "id": "P-M07-RENEW-LIMIT-R13-1",
           "label": "查看原订单",
-          "to": "P-M07-PAY-RETURN",
+          "to": "P-M07-RENEW-RETURN",
           "feedback": "查看原订单"
         },
         {
@@ -13157,6 +13283,12 @@
           "label": "返回我的圈子",
           "to": "P-M07-LIST-RENEWED",
           "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-RENEW-RESULT-R8-ORDER",
+          "label": "查看原订单",
+          "to": "P-M07-RENEW-RETURN",
+          "feedback": "查看原订单"
         }
       ]
     },
@@ -13617,6 +13749,18 @@
           "label": "查看技能更新",
           "to": "A-personal-detail",
           "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-13-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-13-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
         }
       ],
       "annotations": [],
@@ -13740,6 +13884,18 @@
           "label": "退出圈子",
           "to": "P-M07-LEAVE-PAID",
           "feedback": "退出圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
         }
       ],
       "annotations": [],
@@ -16710,6 +16866,542 @@
           "label": "返回我的空间",
           "to": "P-M03-HOME-PERSONAL",
           "feedback": "返回我的空间"
+        }
+      ]
+    },
+    {
+      "annotation": "PC-F09：曾有创作者资格但现已失效；本人历史责任仍可只读。企业资格独立，普通无创作资格账号不是此状态。",
+      "annotations": [],
+      "category": "调整",
+      "id": "P-M10-MENU-RESPONSIBILITY",
+      "journey": "J10 账号与设置",
+      "module": "M10",
+      "node": "P-M10-MENU",
+      "state": "creator-responsibility",
+      "status": "suggested",
+      "title": "创作者资格失效 · 责任只读 · 我的空间",
+      "transitions": [
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-2",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-3",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-4",
+          "label": "打开账号菜单",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-5",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-6",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-7",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-8",
+          "label": "企业管理后台北方贸易 · 所有者 · 打开浏览器",
+          "to": "P-M10-ADMIN-BROWSER",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-9",
+          "label": "创作者工作台资格有效 · 打开浏览器",
+          "to": "P-M10-CREATOR-BROWSER",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-10",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-11",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-12",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-13",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-16",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-15",
+          "label": "管理技能",
+          "to": "A-personal-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-17",
+          "label": "打开助手",
+          "to": "A-personal-new",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-18",
+          "label": "打开",
+          "to": "P-M04-APP-REPORT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-19",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-20",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-21",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-P-M10-MENU-R14-C-9-RESPONSIBILITY",
+          "label": "创作者责任只读  资格失效 · 仅只读",
+          "to": "P-M10-RESPONSIBILITY-BROWSER",
+          "feedback": "在系统浏览器查看本人历史责任，保持只读资格"
+        }
+      ],
+      "surface": "mvp"
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-BROWSER",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "browser",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "在浏览器查看创作者责任",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-0",
+          "label": "返回 Polo",
+          "to": "P-M10-RESPONSIBILITY-RETURN",
+          "feedback": "返回 Polo"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-1",
+          "label": "取消本次前往",
+          "to": "P-M10-MENU-RESPONSIBILITY",
+          "feedback": "取消本次前往"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "browser-failed",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "暂时无法打开责任页面",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-0",
+          "label": "重试打开",
+          "to": "P-M10-RESPONSIBILITY-BROWSER",
+          "feedback": "重试打开"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-RETURN",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "return",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "核对原账号资格",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-RETURN-0",
+          "label": "重新核对资格",
+          "to": "P-M10-RESPONSIBILITY-VERIFIED",
+          "feedback": "重新核对资格"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-RETURN-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-QUERY-FAILED",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "query-failed",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "暂时无法核对资格",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-QUERY-FAILED-0",
+          "label": "重试查询",
+          "to": "P-M10-RESPONSIBILITY-RETURN",
+          "feedback": "重试查询"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-QUERY-FAILED-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-VERIFIED",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "verified",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "责任只读资格已核对",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-VERIFIED-0",
+          "label": "查看创作者责任",
+          "to": "P-M10-RESPONSIBILITY-BROWSER",
+          "feedback": "查看创作者责任"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-VERIFIED-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "annotation": "PC-F09：曾有创作者资格但现已失效；本人历史责任仍可只读。企业资格独立，普通无创作资格账号不是此状态。",
+      "annotations": [],
+      "category": "调整",
+      "id": "P-M10-MENU-RESPONSIBILITY-ENT",
+      "journey": "J10 账号与设置",
+      "module": "M10",
+      "node": "P-M10-MENU",
+      "state": "creator-responsibility",
+      "status": "suggested",
+      "title": "创作者资格失效 · 责任只读 · 企业空间",
+      "transitions": [
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-2",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-3",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-4",
+          "label": "打开账号菜单",
+          "to": "P-M03-HOME-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-5",
+          "label": "切换空间当前：晨星科技",
+          "to": "P-M02-SWITCHER",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-6",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-7",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-8",
+          "label": "企业管理后台北方贸易 · 所有者 · 打开浏览器",
+          "to": "P-M10-ADMIN-BROWSER-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-9",
+          "label": "创作者工作台资格有效 · 打开浏览器",
+          "to": "P-M10-CREATOR-BROWSER-ENT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-10",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-11",
+          "label": "数据报表生成器已在后台完成点顶栏「3 项运行中」查看",
+          "to": "P-M04-RUNTIME",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-12",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-14",
+          "label": "管理技能",
+          "to": "A-enterprise-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-15",
+          "label": "打开助手",
+          "to": "A-enterprise-new",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-16",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-17",
+          "label": "打开",
+          "to": "P-M04-APP-CONTRACT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-18",
+          "label": "查看原因",
+          "to": "P-M11-BLOCKED-VERSION",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M10-MENU-RESPONSIBILITY-ENT-P-M10-MENU-ENT-R14-C-9-RESPONSIBILITY",
+          "label": "创作者责任只读  资格失效 · 仅只读",
+          "to": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+          "feedback": "在系统浏览器查看本人历史责任，保持只读资格"
+        }
+      ],
+      "surface": "mvp"
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "browser",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "在浏览器查看创作者责任",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-ENT-0",
+          "label": "返回 Polo",
+          "to": "P-M10-RESPONSIBILITY-RETURN-ENT",
+          "feedback": "返回 Polo"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-ENT-1",
+          "label": "取消本次前往",
+          "to": "P-M10-MENU-RESPONSIBILITY-ENT",
+          "feedback": "取消本次前往"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "browser-failed",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "暂时无法打开责任页面",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT-0",
+          "label": "重试打开",
+          "to": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+          "feedback": "重试打开"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY-ENT",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-RETURN-ENT",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "return",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "核对原账号资格",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-RETURN-ENT-0",
+          "label": "重新核对资格",
+          "to": "P-M10-RESPONSIBILITY-VERIFIED-ENT",
+          "feedback": "重新核对资格"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-RETURN-ENT-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY-ENT",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-QUERY-FAILED-ENT",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "query-failed",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "暂时无法核对资格",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-QUERY-FAILED-ENT-0",
+          "label": "重试查询",
+          "to": "P-M10-RESPONSIBILITY-RETURN-ENT",
+          "feedback": "重试查询"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-QUERY-FAILED-ENT-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY-ENT",
+          "feedback": "返回账号菜单"
+        }
+      ]
+    },
+    {
+      "id": "P-M10-RESPONSIBILITY-VERIFIED-ENT",
+      "module": "M10",
+      "surface": "mvp",
+      "journey": "J-PC-03",
+      "node": "creator-responsibility",
+      "state": "verified",
+      "status": "proposed",
+      "category": "创作者责任只读",
+      "title": "责任只读资格已核对",
+      "annotation": "PC-F09 / C-R08：原账号历史责任只读交接；不授予创作/发布权限，不复制 Browser 后台。系统失败结果由评审入口提供。",
+      "transitions": [
+        {
+          "id": "P-M10-RESPONSIBILITY-VERIFIED-ENT-0",
+          "label": "查看创作者责任",
+          "to": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+          "feedback": "查看创作者责任"
+        },
+        {
+          "id": "P-M10-RESPONSIBILITY-VERIFIED-ENT-1",
+          "label": "返回账号菜单",
+          "to": "P-M10-MENU-RESPONSIBILITY-ENT",
+          "feedback": "返回账号菜单"
         }
       ]
     },
@@ -44762,7 +45454,7 @@
       "label": "当前唯一客户端产品说明",
       "path": "docs/client-journey-review/spec.md",
       "revision": "master-r15-closure（2026-10-03）",
-      "sha256": "bde5ff1f01f0c59d29c253aff2d390e1446c447cfc65102385e75229103da2fc"
+      "sha256": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6"
     },
     {
       "id": "skill-terminology-review-r11",
@@ -44839,7 +45531,7 @@
       "path": ".agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js",
       "label": "空间切换系统进度",
       "revision": "poo70-workbench-r15-closure",
-      "sha256": "ec4c2e86e3adc653667f071ed000dff216204f5e23b527d84b9271bb8fb50727"
+      "sha256": "b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808"
     },
     {
       "id": "assistant-r12-review",

@@ -2,7 +2,15 @@
    never a new authorization result; only review entry/reset injects fixtures. */
 (() => {
   const joined = {growth:true, design:true, data:true, year:true};
-  let designExpiry='2026-11-02';const left=new Set();const baselineText=new WeakMap();
+  let designExpiry='2026-11-02';
+  // Fixed authoritative quote fixtures for the demo's 2026-10-02 confirmation
+  // instant. The desktop consumes server periods, never computes month lengths.
+  const monthlyPeriods=['2026-11-02','2026-12-02','2027-01-02','2027-02-02','2027-03-02','2027-04-02','2027-05-02','2027-06-02','2027-07-02','2027-08-02','2027-09-02','2027-10-02'];
+  const monthlyQuotes=monthlyPeriods.slice(0,-1).map((start,i)=>({start,end:monthlyPeriods[i+1],id:'SUB-20261002-'+String(183+i).padStart(4,'0')}));
+  let renewalQuote=monthlyQuotes[0],renewalOrder=monthlyQuotes[0],renewalResult=monthlyQuotes[0];
+  const quoteForCurrent=()=>monthlyQuotes.find(q=>q.start===designExpiry)||null;
+  const period=q=>q.start+' 至 '+q.end;
+const left=new Set();const baselineText=new WeakMap();
   window.poloCircleMemberships = joined;const relations={};window.poloCircleRelations=relations;
   const works = {meeting:['growth','design'],growth:['growth'],brand:['design'],report:['data']};
   const routes = {'P-M04-APP-VIEW-PERSONAL':'meeting','P-M04-APP-GROWTH':'growth','P-M04-APP-BRAND':'brand','P-M04-APP-REPORT':'report'};
@@ -19,8 +27,18 @@
     const scene = document.querySelector('.scene.active'); if (!scene) return;
     const sid=scene.dataset.prototypeScene;for(const k of Object.keys(joined))relations[k]=left.has(k)?'left':joined[k]?'active':'expired';
     const targets=[...scene.querySelectorAll('[data-circle-kind="design"]')];
-    if(sid.startsWith('P-M07-DETAIL-PAID')||sid==='P-M07-LEAVE-PAID')targets.push(...scene.querySelectorAll('.circle-heading-meta,.permission-summary'));
+    if(sid.startsWith('P-M07-DETAIL-PAID')||['P-M07-LEAVE-PAID','P-M07-RENEW'].includes(sid))targets.push(...scene.querySelectorAll('.circle-heading-meta,.permission-summary'));
     for(const root of targets){const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){if(!baselineText.has(node))baselineText.set(node,node.textContent);node.textContent=baselineText.get(node).replace(/2026-(?:(?:11|12)-02|09-01)/g,designExpiry);}}
+
+    const quote=sid==='P-M07-RENEW-WEB'?renewalOrder:renewalQuote;
+    const relation=left.has('design')?'left':joined.design?'active':'expired';
+    scene.querySelectorAll('[data-design-renewal-entry]').forEach(el=>el.hidden=el.dataset.designRenewalEntry!==relation);
+    scene.querySelectorAll('[data-renewal-quote-period]').forEach(el=>el.textContent=relation==='left'?'已退出圈子，请重新加入':relation==='expired'?'本圈来源已到期，需重新核对付款起算日':quote?period(quote):'当前权益已达提前购买上限');
+    scene.querySelectorAll('[data-renewal-pay]').forEach(el=>{el.disabled=relation!=='active'||!renewalQuote;el.hidden=relation!=='active';});
+    scene.querySelectorAll('[data-renewal-limit]').forEach(el=>el.hidden=relation!=='active'||!!renewalQuote);
+    scene.querySelectorAll('[data-renewal-order]').forEach(el=>el.textContent=(sid==='P-M07-RENEW-RESULT'?renewalResult:renewalOrder).id);
+    scene.querySelectorAll('[data-renewal-result-period]').forEach(el=>el.textContent=period(renewalResult));
+    scene.querySelectorAll('[data-renewal-result-expiry]').forEach(el=>el.textContent=designExpiry);
 
     for (const [key,kind] of [['growth','growth'],['design','design'],['data','data'],['year','annual']]) {
       const card=scene.querySelector(`[data-circle-kind="${kind}"]`);
@@ -48,17 +66,23 @@
   },true);
   window.addEventListener('polo:scene-shown',event=>{
     const {scene,reason,from}=event.detail;
-    if(reason==='reset'){Object.keys(joined).forEach(k=>joined[k]=true);designExpiry='2026-11-02';left.clear();}
+    if(reason==='reset'){Object.keys(joined).forEach(k=>joined[k]=true);designExpiry='2026-11-02';renewalQuote=renewalOrder=renewalResult=monthlyQuotes[0];left.clear();}
     if(reason==='action'){
+      if(scene==='P-M07-RENEW')renewalQuote=quoteForCurrent();
+      if(scene==='P-M07-RENEW-WEB'&&from==='P-M07-RENEW'&&renewalQuote)renewalOrder=renewalQuote;
+
       if(scene==='P-M07-DETAIL-FOCUS'&&['P-M07-RETURN','P-M07-RETURN-FAIL'].includes(from)){joined.growth=true;left.delete('growth');}
-      if((scene==='P-M07-DETAIL-PAID'&&from==='P-M07-PAY-RETURN')||(scene==='P-M07-RENEW-RESULT'&&from==='P-M07-RENEW-RETURN')){joined.design=true;left.delete('design');}
+      if(scene==='P-M07-DETAIL-PAID'&&from==='P-M07-PAY-RETURN'){joined.design=true;left.delete('design');} if(scene==='P-M07-RENEW-RESULT'&&from==='P-M07-RENEW-RETURN'&&!left.has('design'))joined.design=true;
       if(scene==='P-M07-DETAIL-PAID'&&from==='P-M07-PAY-RETURN')designExpiry=designExpiry<'2026-11-02'?'2026-11-02':designExpiry;
-      if(scene==='P-M07-RENEW-RESULT'&&from==='P-M07-RENEW-RETURN')designExpiry='2026-12-02';
+      if(scene==='P-M07-RENEW-RESULT'&&from==='P-M07-RENEW-RETURN'){renewalResult=renewalOrder;designExpiry=designExpiry<renewalOrder.end?renewalOrder.end:designExpiry;}
       if(scene==='P-M07-YEAR-RESULT'&&from==='P-M07-YEAR-RETURN'){joined.year=true;left.delete('year');}
     }
     // Historical deep links seed their stated result, without undoing other exits.
     if(reason==='command'&&window.poloReviewArrival!=='action'){
-      if(['P-M07-LIST-RENEWED','P-M07-RENEW-RESULT'].includes(scene))designExpiry='2026-12-02';
+      if(['P-M07-LIST-RENEWED','P-M07-RENEW-RESULT'].includes(scene)){designExpiry='2026-12-02';renewalOrder=renewalResult=monthlyQuotes[0];}
+      if(scene==='P-M07-RENEW')renewalQuote=quoteForCurrent();
+      if(scene==='P-M07-RENEW-LIMIT'){designExpiry='2027-10-02';renewalOrder=renewalResult=monthlyQuotes[monthlyQuotes.length-1];renewalQuote=null;}
+
       if(scene==='P-M07-SOURCE-FALLBACK'){joined.growth=false;left.add('growth');}
       if(scene==='P-M07-DETAIL-PAID-AFTER-LEAVE')left.add('design');
       if(scene==='P-M11-BLOCKED-EXPIRED')joined.growth=false;

@@ -1,10 +1,10 @@
 {
   "revision": "poo70-workbench-r15-closure",
   "artifacts": {
-    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "8449bae28dd49766ad515a4eb589d9c021d4c4bb24ab530af048871b35f241e1",
-    "docs/mvp-complete-flow-hifi/prototype.html": "57a566d55e497b8940581ccdb69473d767c4c0265bfcdb63b0b4f34b367d20ea",
-    "docs/mvp-complete-flow-hifi/review.html": "339d077e47efd701891f6f74fbb88f9d17c79889ac7836965007e5beb0f4c000",
-    "design-demos/polo-client-source-baseline/prototype.html": "2a1f78ffa8a82545063e983e58e67edf340fc767b68afa5c95ffc4f886312335"
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47",
+    "docs/mvp-complete-flow-hifi/prototype.html": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4",
+    "docs/mvp-complete-flow-hifi/review.html": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3",
+    "design-demos/polo-client-source-baseline/prototype.html": "2677f79495c15c1da170d4c45af407b5f34023774bd801e4d433f5716e98b05d"
   },
   "checks": [
     {
@@ -964,6 +964,421 @@
     },
     {
       "name": "cancel with missing confirmation never commits target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "first renewal consumes current period",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "first renewal current entitlement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "same paid order query is idempotent",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second renewal uses latest verified entitlement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel second quote preserves purchased rights",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second browser handoff consumes same new quote",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel browser handoff leaves entitlement unchanged",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second order is distinct and updates same circle",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "original second order retained on return",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "rechecking second order does not purchase another month",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second entitlement reaches ordinary subscription",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-02-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-03-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-04-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-05-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-06-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-07-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-08-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-09-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-10-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "monthly limit blocks new payment",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "limit preserves original last order and entitlement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "restored membership next quote uses restored expiry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "annual paid next period stays owned after list return",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-return independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-preblock independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-cut independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-checking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-notyet independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-queryfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-return independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerreturn independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-preblock independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-cut independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-checking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-notyet independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-queryfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-notify independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-notified independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budget independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetowner independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerblock independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-returnstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-checkingstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-notyetstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-failedstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerchecking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerpending independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetreturn independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetchecking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetpending independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetnotified independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetmemberchecking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetmemberpending independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetmemberfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY hides write creator entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY shows responsibility only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "responsibility cancels into original P-M10-MENU-RESPONSIBILITY",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-SETTINGS consumes same read-only qualification",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY return does not grant creator write",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY verified result remains read-only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY ordinary consumers retain responsibility state",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY BROWSER-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY QUERY-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT hides write creator entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT shows responsibility only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "responsibility cancels into original P-M10-MENU-RESPONSIBILITY-ENT",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-SETTINGS-ENT consumes same read-only qualification",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT return does not grant creator write",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT verified result remains read-only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT ordinary consumers retain responsibility state",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT BROWSER-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT QUERY-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU does not invent former creator responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-NOPRIV does not invent former creator responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired notification chooses restore not monthly renewal",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired notification does not claim purchase limit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel expired notification recovery leaves source expired",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "notification recovery now receives active latest quote",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "left circle notification offers explicit rejoin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel notification rejoin preserves revoked sole source",
       "passed": true,
       "detail": ""
     }

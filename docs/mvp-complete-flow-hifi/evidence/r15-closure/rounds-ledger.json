@@ -1,0 +1,130 @@
+{
+ "revision": "poo70-workbench-r15-closure",
+ "note": "Stable findings ledger across closure rounds. Final-round dirs keep raw evidence; superseded rounds are distilled to current-version snapshot tarballs, stay traceable and are never relabeled.",
+ "artifacts_now": {
+  "docs/mvp-complete-flow-hifi/prototype-manifest.json": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47",
+  "docs/mvp-complete-flow-hifi/prototype.html": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4",
+  "docs/mvp-complete-flow-hifi/review.html": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3",
+  "design-demos/polo-client-source-baseline/prototype.html": "2677f79495c15c1da170d4c45af407b5f34023774bd801e4d433f5716e98b05d"
+ },
+ "rounds": [
+  {
+   "round": "round1-6 (archived)",
+   "dirs": [
+    "before-repair.tar.gz",
+    "intermediate-evidence.tar.gz",
+    "intermediate-round3.tar.gz",
+    "round4-current-version-evidence.tar.gz",
+    "round5-current-version-evidence.tar.gz",
+    "round6-current-version-evidence.tar.gz",
+    "round7-discovery",
+    "superseded-duplicate-and-credit-run.tar.gz"
+   ],
+   "status": "superseded evidence, kept traceable"
+  },
+  {
+   "round": "round7 journey",
+   "snapshot": "round7-current-version-evidence.tar.gz",
+   "verdict": "revise",
+   "findings": [
+    "JRN-01",
+    "JRN-02"
+   ],
+   "status": "superseded by round11 journey; raw review dir removed, snapshot kept traceable"
+  },
+  {
+   "round": "round7 objects",
+   "snapshot": "round7-current-version-evidence.tar.gz",
+   "verdict": "revise",
+   "findings": [
+    "F-OBJ-01"
+   ],
+   "status": "superseded by round11 objects; raw review dir removed, snapshot kept traceable"
+  },
+  {
+   "round": "round8 journey/objects",
+   "snapshot": "round8-current-version-evidence.tar.gz",
+   "verdict": "revise",
+   "findings": [],
+   "status": "interrupted: version still changing; not final evidence; raw review dir removed, snapshot kept traceable"
+  },
+  {
+   "round": "round9 discovery",
+   "dir": "round9-discovery",
+   "findings": [
+    "expired notification wrongly claimed purchase limit"
+   ]
+  },
+  {
+   "round": "round11 journey",
+   "dir": "round11-journey-review",
+   "verdict": "ready",
+   "findings": [],
+   "note": "修复 F-01 后最终版本的旅程视角完整独立复查：424×3 全量、1272 观察、23/23 义务无缺口、0 pageerror、起止哈希一致"
+  },
+  {
+   "round": "round11 objects",
+   "dir": "round11-object-review",
+   "verdict": "ready（OBJ-R15C-01 复验后解除）",
+   "findings": [
+    "OBJ-R15C-01"
+   ],
+   "note": "对象视角完整独立复查；唯一 finding OBJ-R15C-01 经评审员本人 11+1 真实点击序列复验确认为方法盲区（静态默认态普查无法覆盖会话内状态序列），状态 resolved，最终 verdict ready。复验证据 probe-renew-cap-replay.json（11 个独立订单 SUB-20261002-0183→0193、上限态入口可见可点、导航正确）。"
+  },
+  {
+   "round": "round11 reconciliation",
+   "file": "round11-reconciliation.json",
+   "note": "主会话对 OBJ-R15C-01 的回放调和记录"
+  }
+ ],
+ "findings": [
+  {
+   "id": "JRN-01",
+   "title": "创作者资格失效后缺少责任只读入口场景",
+   "first_round": "round7-journey",
+   "status": "verified closed",
+   "repair": "新增 P-M10-MENU-RESPONSIBILITY/-ENT、P-M10-RESPONSIBILITY-BROWSER(+FAILED 状态) 与菜单/设置消费者；spec §9 增补对应反例",
+   "verification": "check_product_closure.py responsibility 链（菜单→只读 Browser→取消/返回→重验仍只读→普通消费者保持只读；FAILED 恢复目标正确；从未有资格菜单不虚构责任入口）全部通过"
+  },
+  {
+   "id": "JRN-02",
+   "title": "独立进入失败/待恢复状态后积分/预算阻断丢失",
+   "first_round": "round7-journey",
+   "status": "verified closed",
+   "repair": "为 credits 家族全部独立失败/待恢复状态建立一致阻断初始化；spec §9 增补 PC-N03 反例",
+   "verification": "check_product_closure.py 遍历 credits 家族非恢复态场景：首页→打开助手→输入→发送 disabled 全部通过；恢复态仍可发送"
+  },
+  {
+   "id": "F-OBJ-01",
+   "title": "续费已核对后再次续费仍展示旧起止周期",
+   "first_round": "round7-object",
+   "status": "verified closed",
+   "repair": "续费确认/底页/Browser 交接消费本圈最新已核对权益；新建订单与原单查询分别保留对象身份；月度达上限不建新单；过期恢复从恢复后到期报价；spec §9 增补 PC-F03/C-R03/08 反例",
+   "verification": "check_product_closure.py 连续两次续费、重复查询幂等、取消保持已购、上限阻断、过期恢复、年度下一周期各断言全部通过"
+  },
+  {
+   "id": "EXP-NOTICE-01",
+   "title": "到期通知入口误显示“已达提前购买上限”",
+   "first_round": "round9-discovery",
+   "status": "verified closed",
+   "repair": "到期关系通知入口区分泌续费恢复/退出后重新加入，不再展示购买上限；spec §9 增补“到期不显示为购买上限”",
+   "verification": "check_product_closure.py expired notification 链（恢复报价、取消留过期、重新加入、取消保持唯一来源撤销）全部通过"
+  },
+  {
+   "id": "F-01",
+   "title": "企业技能详情/搜索关键词仍绑定「资料研究」文案",
+   "first_round": "round10-journey",
+   "status": "verified closed",
+   "repair": "Assistant.jsx Skills 详情 tagline/版本更新/说明改为随所选技能；SkillLibrary 搜索关键词随空间技能用途；check_workbench.py 新增详情跟随与搜索消费者断言",
+   "verification": "修复后：check_workbench.py 新增 3 项断言通过（enterprise detail follows selected skill / enterprise search consumes own purpose copy + rejects other skill purpose / personal detail keeps research copy）；round11-journey 独立复查（424×3 全量、23/23 义务 checked-no-gap、findings=[]）在该修复版本上给出 ready。"
+  },
+  {
+   "id": "OBJ-R15C-01",
+   "title": "manifest 声明的 P-M07-RENEW→P-M07-RENEW-LIMIT 转场在静态普查中不可见",
+   "first_round": "round11-object",
+   "status": "verified closed",
+   "repair": "无需修复：入口存在于续费弹窗 footer，达上限状态（会话内 11 次续费后第 12 次报价）下解除隐藏，点击导航到 P-M07-RENEW-LIMIT 且内容正确",
+   "verification": "主会话回放（round11-reconciliation.json）+ 评审员独立复验（probe-renew-cap-replay.json）一致；check_product_closure.py at-limit 链实际点击该入口，275 项检查通过"
+  }
+ ]
+}

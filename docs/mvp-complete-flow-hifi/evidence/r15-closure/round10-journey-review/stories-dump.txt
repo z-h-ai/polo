@@ -1,0 +1,192 @@
+## UI-refinement | 本轮调整 · 首页、圈子与技能管理
+   UI-refinement-1 -> P-M03-HOME-PERSONAL | 我的应用与精简卡片
+   UI-refinement-2 -> P-M07-LIST | 统一圈子列表
+   UI-refinement-3 -> P-M07-DETAIL-FOCUS | 圈子应用与首页共用卡片
+   UI-refinement-4 -> P-M07-DETAIL-FOCUS-SUBSCRIPTION | 订阅内退出
+   UI-refinement-5 -> P-M07-YEAR-RESULT | 年度权益
+   UI-refinement-6 -> A-personal-skills | 管理技能是本轮助手侧重点
+   UI-refinement-7 -> A-personal-detail | 技能来源与版本
+   UI-refinement-8 -> P-M02-CONFIRM | 点击停止全部并切换，自动完成进度
+## R15-all-ui | 全客户端 · 页面与交互复看
+   R15-all-ui-1 -> P-M01-LOGIN-PASSWORD | 登录 · 密码登录
+   R15-all-ui-2 -> P-M01-ENTERPRISE-READY | 可以进入晨星科技
+   R15-all-ui-3 -> P-M03-HOME-ENT | 首页 · 企业空间（晨星科技）
+   R15-all-ui-4 -> P-M04-APP-VIEW | 应用 · 报价整理
+   R15-all-ui-5 -> A-enterprise-new | 新会话 · 晨星科技
+   R15-all-ui-6 -> A-enterprise-files | 原对话附件与生成文件 · 晨星科技
+   R15-all-ui-7 -> P-M02-CONFIRM | 切换确认 · 终止 3 项
+   R15-all-ui-8 -> P-M02-STOP-FAILED | 部分停止失败
+   R15-all-ui-9 -> P-M03-HOME-PERSONAL | 首页 · 个人空间（有常用）
+   R15-all-ui-10 -> A-personal-detail | 技能版本 · 我的空间
+   R15-all-ui-11 -> A-personal-updatefailed | 更新失败 · 我的空间
+   R15-all-ui-12 -> P-M07-LIST | 我的圈子 · 列表
+   R15-all-ui-13 -> P-M07-DETAIL-PAID-SUBSCRIPTION | 晨星设计圈
+   R15-all-ui-14 -> P-M10-SETTINGS-DEVICE | Polo 设置
+   R15-all-ui-15 -> A-personal-preferences | 助手偏好 · 我的空间
+   R15-all-ui-16 -> A-personal-preblock | 发送前积分不足 · 我的空间
+   R15-all-ui-17 -> P-M09-BROWSER | 充值（浏览器交接）
+   R15-all-ui-18 -> P-M11-REOPEN-RECOVERY | 重开恢复
+## R14-workbench | 新版工作台 · 应用、技能、圈子与设置
+   R14-0 -> P-M03-HOME-PERSONAL | 首页直接查找已有应用
+   R14-1 -> A-personal-new | 助手保留 Polo 顶栏
+   R14-2 -> A-personal-skills | 从首页助手卡片进入技能管理
+   R14-3 -> A-personal-detail | 查看来源与版本
+   R14-4 -> A-personal-updatefailed | 更新失败保留可用旧版本
+   R14-5 -> P-M07-LIST | 圈子提供了什么
+   R14-6 -> P-M07-DETAIL-FOCUS-UPDATES | 查看圈子内容更新
+   R14-7 -> P-M10-SETTINGS | Polo 全局设置
+   R14-8 -> A-personal-preferences | 助手专属偏好
+   R14-9 -> P-M03-HOME-ENT | 企业只展示企业资源
+## S-DESKTOP | 企业员工 · 打开工作应用
+   S-DESKTOP-01 -> P-M03-HOME-ENT | 首页 · 企业空间（晨星科技）
+   S-DESKTOP-02 -> P-M04-APP-CONTRACT | 应用 · 合同审查
+   S-DESKTOP-03 -> P-M03-HOME-ENT | 首页 · 企业空间（晨星科技）
+   S-DESKTOP-04 -> P-M03-ALL-APPS-ENT | 全部应用 · 企业提供
+   S-DESKTOP-05 -> A-enterprise-new | 新建对话 · 晨星科技
+## S-TEAM-SKILLS | 企业 · 复用同事技能
+   S-TEAM-SKILLS-01 -> P-M03-HOME-ENT | 首页 · 企业空间（晨星科技）
+   S-TEAM-SKILLS-02 -> A-enterprise-skills | 本机技能 · 晨星科技 · 本机
+   S-TEAM-SKILLS-03 -> A-enterprise-discover | 企业共享技能 · 晨星科技 · 获取
+   S-TEAM-SKILLS-04 -> A-enterprise-acquire | 销售周报 · 晨星科技 · 安装详情
+   S-TEAM-SKILLS-05 -> A-enterprise-installed | 本机技能 · 晨星科技 · 已安装
+   S-TEAM-SKILLS-06 -> A-enterprise-enabled | 本机技能 · 晨星科技 · 已启用
+   S-TEAM-SKILLS-07 -> A-enterprise-new | 新建对话 · 晨星科技
+## S-CAPABILITY | 按需授权与后台任务
+   S-CAPABILITY-01 -> P-M04-APP-CONTRACT | 应用 · 合同审查
+   S-CAPABILITY-02 -> P-M04-PREPARE | 应用请求访问所选文件
+   S-CAPABILITY-03 -> P-M04-APP-CONTRACT | 应用 · 合同审查
+   S-CAPABILITY-04 -> P-M04-APP-ACTIVE | 应用 · 有后台 AI 请求
+   S-CAPABILITY-05 -> P-M04-CLOSE-ACTIVE | 关闭 · 三选项
+   S-CAPABILITY-06 -> P-M04-BACKGROUND | 后台继续
+## S1 | 故事一 · 登录准备与企业 App 执行
+   S1-01 -> P-M01-LOGIN-PASSWORD | 账号密码登录：输入凭据，继续
+   S1-02 -> P-M01-PERSONAL-PREP | 首次登录自动准备「我的空间」，幂等不建第二个
+   S1-03 -> P-M03-HOME-ZERO | 首次使用首页：展示完整目录并采用默认顺序（PC-N01 / D-PC-11）
+   S1-04 -> P-M03-ALL-APPS-ZERO | 全部 Apps：目录、来源行与企业/个人分区
+   S1-05 -> P-M03-HOME-PERSONAL | 使用后的个人首页：Polo 助手卡片 + 完整应用目录，默认按最近使用排序
+   S1-05-ACCOUNT -> P-M10-MENU | 头像菜单：选择切换空间
+   S1-05-SWITCH -> P-M02-SWITCHER-PERSONAL | 空间列表：选择晨星科技
+   S1-05A -> P-M02-CONFIRM-PERSONAL | 我的空间有运行项：先确认终止，再进入企业空间
+   S1-06 -> P-M03-HOME-ENT | 切入企业空间首页（晨星科技）：企业目录与常用区
+   S1-07 -> P-M04-PREPARE | 打开有更新的 App：透明准备（下载/校验），可取消
+   S1-08 -> P-M04-APP-VIEW | App 容器占满工作区，内部界面为中性 FDE 占位（D-PC-05）
+   S1-09 -> P-M04-RUNTIME | 顶栏运行状态中心：逐项查看运行中 App 与助手
+   S1-10 -> A-enterprise-generating | 从运行项进入助手会话：生成中可停止
+   S1-11 -> A-enterprise-files | 会话文件：附件与生成文件留在原对话内（D-PC-03）
+## S2 | 故事二 · 空间切换、失败与重开恢复
+   S2-01 -> P-M03-HOME-ENT | 企业空间首页：发起空间切换
+   S2-02 -> P-M04-RUNTIME | 先查看运行状态：3 项运行中
+   S2-02A -> P-M10-MENU-ENT | 头像菜单：选择切换空间
+   S2-03 -> P-M02-SWITCHER | 空间切换器：选择「我的空间」（C-R03 同一已提交空间）
+   S2-04 -> P-M02-CONFIRM | 切换确认：列出须终止的运行项，逐项可取消
+   S2-05 -> P-M02-STOPPING | 逐项终止进行中：进度与幂等说明
+   S2-06 -> P-M02-STOP-FAILED | 部分终止失败：已终止项不自动恢复，可重试
+   S2-07 -> P-M02-STOP-CANCEL | 取消切换：留在企业空间，无半切状态（C-R04）
+   S2-08 -> P-M03-HOME-ENT-AFTER-CANCEL | 回到企业首页：分支 · 重开客户端且会话过期
+   S2-09 -> P-M01-REOPEN | 会话过期：重新登录承接，不自动执行原动作（C-R01）
+   S2-10 -> P-M11-REOPEN-RECOVERY | 重开恢复：先重验身份与空间，再恢复标签与运行状态（C-R05）
+   S2-11 -> P-M03-HOME-ENT | 恢复后回到企业首页
+   S2-12 -> P-M04-APP-VIEW | 重新打开 App 容器
+   S2-13 -> P-M04-CLOSE-ACTIVE | 关闭运行中 App：取消 / 后台 / 终止三选项（J-PC-07）
+   S2-14 -> P-M04-BACKGROUND | 转入后台：标签保留运行点，顶栏可随时回
+## S3 | 故事三 · 积分不足、充值与恢复
+   S3-01 -> A-personal-generating | 助手会话生成中：可随时停止
+   S3-02 -> A-personal-cut | 积分耗尽：生成暂停，已生成部分如实保留并标注
+   S3-03 -> P-M09-BROWSER | 浏览器端充值交接卡：桌面端不复制支付后台（C-R08）
+   S3-04 -> A-personal-checking | 回到桌面查询到账状态：每次点击一次查询
+   S3-05 -> A-personal-notyet | 尚未到账：如实提示，可稍后再查，不猜测成功
+   S3-06 -> A-personal-resumed | 已到账：由用户决定是否继续，输入内容保留
+   S3-07 -> A-personal-generating | 继续会话：基于保留的部分输出继续生成
+## S4 | 故事四 · 多圈授权去重与逐来源失效
+   S4-01 -> P-M03-ALL-APPS | 同一作品只显示一次，来源行保留两个有效圈子
+   S4-02 -> P-M07-DETAIL-FOCUS | 进入晨星增长圈详情
+   S4-03 -> P-M07-LEAVE | 退出晨星增长圈前说明逐来源影响
+   S4-04 -> P-M07-SOURCE-FALLBACK | 退出后仍由晨星设计圈授权并可打开
+   S4-05 -> P-M07-EXPIRED | 评审分支：单一圈子到期时，共同授权作品仍由另一来源支持
+   S4-06 -> P-M11-BLOCKED-EXPIRED | 评审分支：最后一个有效来源失效后才进入不可用与恢复
+   S4-07 -> P-M03-HOME-ENT | 评审分支：企业首页只显示企业导入与分发作品，无个人圈子来源
+## R13-circle-handoff | 圈子自助加入 → 桌面同账号核对
+   R13-circle-handoff-1 -> P-M07-JOIN-FREE | 使用圈子分享链接
+   R13-circle-handoff-2 -> P-M07-PUBLIC-WEB | 在圈子网页完成加入
+   R13-circle-handoff-3 -> P-M07-RETURN | 核对圈子加入结果
+   R13-circle-handoff-4 -> P-M07-DETAIL-FOCUS | 圈子详情 · 已加入
+## R13-enterprise-handoff | 企业邀请 → 刷新 → 主动进入
+   R13-enterprise-handoff-1 -> P-M01-INVITE-BROWSER | 企业邀请已在浏览器处理
+   R13-enterprise-handoff-2 -> P-M01-RETURN | 核对可进入的企业
+   R13-enterprise-handoff-3 -> P-M01-ENTERPRISE-READY | 可以进入晨星科技
+   R13-enterprise-handoff-4 -> P-M03-HOME-ENT | 首页 · 企业空间（晨星科技）
+## R13-support | 原订单异常 → 客服 → 回原单复验
+   R13-support-1 -> P-M07-PAY-RETURN-FAIL | 订单与资格暂时无法核对
+   R13-support-2 -> P-M07-SUPPORT | 联系客服
+   R13-support-3 -> P-M07-PAY-RETURN-FAIL | 订单与资格暂时无法核对
+   R13-support-4 -> P-M07-DETAIL-PAID | 付费订阅详情
+## AS-personal | 助手 · 个人会话与恢复
+   AS-personal-1 -> P-M03-HOME-PERSONAL | P-M03-HOME-PERSONAL
+   AS-personal-2 -> A-personal-new | new
+   AS-personal-3 -> A-personal-generating | generating
+   AS-personal-4 -> A-personal-stopped | stopped
+   AS-personal-5 -> A-personal-question | question
+   AS-personal-6 -> A-personal-reopen | reopen
+   AS-personal-7 -> A-personal-answered | answered
+   AS-personal-8 -> A-personal-files | files
+   AS-personal-9 -> A-personal-viewer | viewer
+   AS-personal-10 -> A-personal-missing | missing
+   AS-personal-11 -> A-personal-reselected | reselected
+## AS-enterprise | 助手 · 企业隔离与额度
+   AS-enterprise-1 -> P-M03-HOME-ENT | P-M03-HOME-ENT
+   AS-enterprise-2 -> A-enterprise-new | new
+   AS-enterprise-3 -> A-enterprise-generating | generating
+   AS-enterprise-4 -> A-enterprise-question | question
+   AS-enterprise-5 -> A-enterprise-deferred | deferred
+   AS-enterprise-6 -> A-enterprise-notify | notify
+   AS-enterprise-7 -> A-enterprise-notified | notified
+   AS-enterprise-8 -> A-enterprise-budget | budget
+   AS-enterprise-9 -> A-enterprise-budgetowner | budgetowner
+   AS-enterprise-10 -> P-M09-BROWSER-MENU-ENT | P-M09-BROWSER-MENU-ENT
+   AS-enterprise-11 -> A-enterprise-ownerresumed | ownerresumed
+## AS-skills-personal | Polo 技能 · 获取、启用与设备准备 · personal
+   AS-skills-personal-1 -> A-personal-discover | discover
+   AS-skills-personal-2 -> A-personal-acquire | acquire
+   AS-skills-personal-3 -> A-personal-enabledpending | enabledpending
+   AS-skills-personal-4 -> A-personal-installing | installing
+   AS-skills-personal-5 -> A-personal-enabled | enabled
+   AS-skills-personal-6 -> A-personal-detail | detail
+   AS-skills-personal-7 -> A-personal-updated | updated
+   AS-skills-personal-8 -> A-personal-updatefailed | updatefailed
+   AS-skills-personal-9 -> A-personal-remove | remove
+   AS-skills-personal-10 -> A-personal-uninstalled | uninstalled
+   AS-skills-personal-11 -> A-personal-restricted | restricted
+   AS-skills-personal-12 -> A-personal-reauthorized | reauthorized
+   AS-skills-personal-13 -> A-personal-sources | sources
+   AS-skills-personal-14 -> A-personal-sourceauth | sourceauth
+   AS-skills-personal-15 -> A-personal-sourcefailed | sourcefailed
+   AS-skills-personal-16 -> A-personal-sourcedenied | sourcedenied
+## AS-skills-enterprise | Polo 技能 · 获取、启用与设备准备 · enterprise
+   AS-skills-enterprise-1 -> A-enterprise-discover | discover
+   AS-skills-enterprise-2 -> A-enterprise-acquire | acquire
+   AS-skills-enterprise-3 -> A-enterprise-enabledpending | enabledpending
+   AS-skills-enterprise-4 -> A-enterprise-installing | installing
+   AS-skills-enterprise-5 -> A-enterprise-enabled | enabled
+   AS-skills-enterprise-6 -> A-enterprise-detail | detail
+   AS-skills-enterprise-7 -> A-enterprise-updated | updated
+   AS-skills-enterprise-8 -> A-enterprise-updatefailed | updatefailed
+   AS-skills-enterprise-9 -> A-enterprise-remove | remove
+   AS-skills-enterprise-10 -> A-enterprise-uninstalled | uninstalled
+   AS-skills-enterprise-11 -> A-enterprise-restricted | restricted
+   AS-skills-enterprise-12 -> A-enterprise-reauthorized | reauthorized
+   AS-skills-enterprise-13 -> A-enterprise-sources | sources
+   AS-skills-enterprise-14 -> A-enterprise-sourceauth | sourceauth
+   AS-skills-enterprise-15 -> A-enterprise-sourcefailed | sourcefailed
+   AS-skills-enterprise-16 -> A-enterprise-sourcedenied | sourcedenied
+## AS-credits | 助手 · 充值后主动恢复
+   AS-credits-1 -> A-personal-preblock | preblock
+   AS-credits-2 -> P-M09-BROWSER | P-M09-BROWSER
+   AS-credits-3 -> A-personal-checking | checking
+   AS-credits-4 -> A-personal-notyet | notyet
+   AS-credits-5 -> A-personal-queryfailed | queryfailed
+   AS-credits-6 -> A-personal-resumed | resumed
+   AS-credits-7 -> A-personal-generating | generating
+   AS-credits-8 -> A-personal-cut | cut
+   AS-credits-9 -> P-M09-BROWSER-STREAM | P-M09-BROWSER-STREAM
+   AS-credits-10 -> A-personal-checking | checking
+   AS-credits-11 -> A-personal-resumed | resumed

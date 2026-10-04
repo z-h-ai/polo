@@ -1,0 +1,894 @@
+{
+ "A-personal-skills": {
+  "A-personal-skills-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-skills-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-skills-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-skills-skills": {
+   "label": "技能",
+   "to": "A-personal-skills",
+   "feedback": "技能"
+  },
+  "A-personal-skills-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-skills-discover": {
+   "label": "获取技能",
+   "to": "A-personal-discover",
+   "feedback": "获取技能"
+  },
+  "A-personal-skills-detail": {
+   "label": "管理版本",
+   "to": "A-personal-detail",
+   "feedback": "管理版本"
+  },
+  "A-personal-skills-disablebuiltin": {
+   "label": "停用内置技能",
+   "to": "A-personal-builtinoff",
+   "feedback": "停用内置技能"
+  },
+  "A-personal-skills-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-skills-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-skills-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-skills-enablebuiltin": {
+   "label": "启用内置技能",
+   "to": "A-personal-builtinon",
+   "feedback": "启用内置技能"
+  },
+  "A-personal-skills-assistant": {
+   "label": "打开 Polo 助手",
+   "to": "A-personal-conversation",
+   "feedback": "打开 Polo 助手"
+  },
+  "A-personal-skills-enable": {
+   "label": "为我启用",
+   "to": "A-personal-enabledpending",
+   "feedback": "为我启用"
+  },
+  "A-personal-skills-disable": {
+   "label": "为我停用",
+   "to": "A-personal-installed",
+   "feedback": "为我停用"
+  },
+  "A-personal-skills-install": {
+   "label": "准备本机",
+   "to": "A-personal-installing",
+   "feedback": "准备本机"
+  },
+  "A-personal-skills-update": {
+   "label": "更新到 1.1.0",
+   "to": "A-personal-updated",
+   "feedback": "更新到 1.1.0"
+  },
+  "A-personal-skills-remove": {
+   "label": "卸载本机副本",
+   "to": "A-personal-remove",
+   "feedback": "卸载本机副本"
+  },
+  "A-personal-skills-recheck": {
+   "label": "重新验证来源",
+   "to": "A-personal-skills",
+   "feedback": "重新验证来源"
+  }
+ },
+ "A-personal-detail": {
+  "A-personal-detail-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-detail-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-detail-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-detail-skills": {
+   "label": "技能",
+   "to": "A-personal-legacy-local-100-1-1",
+   "feedback": "技能"
+  },
+  "A-personal-detail-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-detail-disable": {
+   "label": "为我停用",
+   "to": "A-personal-legacy-local-100-0-1",
+   "feedback": "为我停用"
+  },
+  "A-personal-detail-update": {
+   "label": "更新到 1.1.0",
+   "to": "A-personal-legacy-detail-110-1-1",
+   "feedback": "更新到 1.1.0"
+  },
+  "A-personal-detail-remove": {
+   "label": "卸载本机副本",
+   "to": "A-personal-legacy-remove-100-1-1",
+   "feedback": "卸载本机副本"
+  },
+  "A-personal-detail-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-detail-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-detail-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-detail-enablebuiltin": {
+   "label": "启用内置技能",
+   "to": "A-personal-builtinon",
+   "feedback": "启用内置技能"
+  },
+  "A-personal-detail-disablebuiltin": {
+   "label": "停用内置技能",
+   "to": "A-personal-builtinoff",
+   "feedback": "停用内置技能"
+  },
+  "A-personal-detail-assistant": {
+   "label": "打开 Polo 助手",
+   "to": "A-personal-conversation",
+   "feedback": "打开 Polo 助手"
+  }
+ },
+ "A-personal-restricted": {
+  "A-personal-restricted-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-restricted-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-restricted-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-restricted-skills": {
+   "label": "技能",
+   "to": "A-personal-skills",
+   "feedback": "技能"
+  },
+  "A-personal-restricted-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-restricted-remove": {
+   "label": "卸载本机副本",
+   "to": "A-personal-restricted-remove",
+   "feedback": "卸载本机副本"
+  },
+  "A-personal-restricted-recheck": {
+   "label": "重新验证来源",
+   "to": "A-personal-restricted",
+   "feedback": "重新验证来源"
+  },
+  "A-personal-restricted-source": {
+   "label": "查看来源",
+   "to": "P-M07-DETAIL-FOCUS",
+   "feedback": "查看来源"
+  },
+  "A-personal-restricted-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-restricted-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-restricted-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-restricted-enablebuiltin": {
+   "label": "启用内置技能",
+   "to": "A-personal-builtinon",
+   "feedback": "启用内置技能"
+  },
+  "A-personal-restricted-disablebuiltin": {
+   "label": "停用内置技能",
+   "to": "A-personal-builtinoff",
+   "feedback": "停用内置技能"
+  },
+  "A-personal-restricted-assistant": {
+   "label": "打开 Polo 助手",
+   "to": "A-personal-conversation",
+   "feedback": "打开 Polo 助手"
+  }
+ },
+ "A-personal-acquire": {
+  "A-personal-acquire-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-acquire-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-acquire-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-acquire-skills": {
+   "label": "技能",
+   "to": "A-personal-skills",
+   "feedback": "技能"
+  },
+  "A-personal-acquire-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-acquire-enable": {
+   "label": "为我启用",
+   "to": "A-personal-enabledpending",
+   "feedback": "为我启用"
+  },
+  "A-personal-acquire-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-acquire-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-acquire-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-acquire-enablebuiltin": {
+   "label": "启用内置技能",
+   "to": "A-personal-builtinon",
+   "feedback": "启用内置技能"
+  },
+  "A-personal-acquire-disablebuiltin": {
+   "label": "停用内置技能",
+   "to": "A-personal-builtinoff",
+   "feedback": "停用内置技能"
+  },
+  "A-personal-acquire-assistant": {
+   "label": "打开 Polo 助手",
+   "to": "A-personal-conversation",
+   "feedback": "打开 Polo 助手"
+  }
+ },
+ "A-personal-transfer-export": {
+  "A-personal-transfer-export-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-transfer-export-export-content": {
+   "label": "下载允许内容",
+   "to": "A-personal-transfer-exported",
+   "feedback": "下载允许内容"
+  },
+  "A-personal-transfer-export-cancel-transfer": {
+   "label": "返回原对话",
+   "to": "A-personal-conversation",
+   "feedback": "返回原对话"
+  }
+ },
+ "A-personal-transfer-exported": {
+  "A-personal-transfer-exported-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-transfer-exported-cancel-transfer": {
+   "label": "返回原对话",
+   "to": "A-personal-conversation",
+   "feedback": "返回原对话"
+  }
+ },
+ "A-personal-transfer-import": {
+  "A-personal-transfer-import-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-transfer-import-select-import": {
+   "label": "选择导出文件",
+   "to": "A-personal-transfer-preview",
+   "feedback": "选择导出文件"
+  },
+  "A-personal-transfer-import-cancel-transfer": {
+   "label": "返回原对话",
+   "to": "A-personal-conversation",
+   "feedback": "返回原对话"
+  }
+ },
+ "A-personal-blocked": "MISSING",
+ "A-personal-partial": "MISSING",
+ "A-personal-stopped": {
+  "A-personal-stopped-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-stopped-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-stopped-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-stopped-skills": {
+   "label": "技能",
+   "to": "A-personal-skills",
+   "feedback": "技能"
+  },
+  "A-personal-stopped-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-stopped-send": {
+   "label": "发送消息",
+   "to": "A-personal-generating",
+   "feedback": "发送消息"
+  },
+  "A-personal-stopped-files": {
+   "label": "查看会话文件",
+   "to": "A-personal-files",
+   "feedback": "查看会话文件"
+  },
+  "A-personal-stopped-recovery": {
+   "label": "恢复发送",
+   "to": "A-personal-availability",
+   "feedback": "恢复发送"
+  },
+  "A-personal-stopped-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-stopped-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-stopped-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-stopped-closeidle": {
+   "label": "关闭助手标签",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "关闭助手标签"
+  },
+  "A-personal-stopped-closeactive": {
+   "label": "关闭助手标签",
+   "to": "A-personal-close",
+   "feedback": "关闭助手标签"
+  },
+  "A-personal-stopped-preferences": {
+   "label": "助手偏好",
+   "to": "A-personal-preferences",
+   "feedback": "助手偏好"
+  },
+  "A-personal-stopped-open-imported": {
+   "label": "打开导入对话",
+   "to": "A-personal-conversation",
+   "feedback": "打开导入对话"
+  }
+ },
+ "A-enterprise-budgetowner": {
+  "A-enterprise-budgetowner-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "首页"
+  },
+  "A-enterprise-budgetowner-new": {
+   "label": "新建会话",
+   "to": "A-enterprise-new",
+   "feedback": "新建会话"
+  },
+  "A-enterprise-budgetowner-sessions": {
+   "label": "所有会话",
+   "to": "A-enterprise-conversation",
+   "feedback": "所有会话"
+  },
+  "A-enterprise-budgetowner-skills": {
+   "label": "技能",
+   "to": "A-enterprise-skills",
+   "feedback": "技能"
+  },
+  "A-enterprise-budgetowner-sources": {
+   "label": "数据源",
+   "to": "A-enterprise-sources",
+   "feedback": "数据源"
+  },
+  "A-enterprise-budgetowner-files": {
+   "label": "查看会话文件",
+   "to": "A-enterprise-files",
+   "feedback": "查看会话文件"
+  },
+  "A-enterprise-budgetowner-manage": {
+   "label": "调整预算",
+   "to": "P-M09-BROWSER-BUDGET",
+   "feedback": "调整预算"
+  },
+  "A-enterprise-budgetowner-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU-ENT",
+   "feedback": "打开账号菜单"
+  },
+  "A-enterprise-budgetowner-runtime": {
+   "label": "后台任务",
+   "to": "A-enterprise-activity",
+   "feedback": "后台任务"
+  },
+  "A-enterprise-budgetowner-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-ENT",
+   "feedback": "通知"
+  },
+  "A-enterprise-budgetowner-closeidle": {
+   "label": "关闭助手标签",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "关闭助手标签"
+  },
+  "A-enterprise-budgetowner-closeactive": {
+   "label": "关闭助手标签",
+   "to": "A-enterprise-close",
+   "feedback": "关闭助手标签"
+  },
+  "A-enterprise-budgetowner-preferences": {
+   "label": "助手偏好",
+   "to": "A-enterprise-preferences",
+   "feedback": "助手偏好"
+  },
+  "A-enterprise-budgetowner-open-imported": {
+   "label": "打开导入对话",
+   "to": "A-enterprise-conversation",
+   "feedback": "打开导入对话"
+  }
+ },
+ "A-enterprise-ownerblock": {
+  "A-enterprise-ownerblock-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "首页"
+  },
+  "A-enterprise-ownerblock-new": {
+   "label": "新建会话",
+   "to": "A-enterprise-new",
+   "feedback": "新建会话"
+  },
+  "A-enterprise-ownerblock-sessions": {
+   "label": "所有会话",
+   "to": "A-enterprise-conversation",
+   "feedback": "所有会话"
+  },
+  "A-enterprise-ownerblock-skills": {
+   "label": "技能",
+   "to": "A-enterprise-skills",
+   "feedback": "技能"
+  },
+  "A-enterprise-ownerblock-sources": {
+   "label": "数据源",
+   "to": "A-enterprise-sources",
+   "feedback": "数据源"
+  },
+  "A-enterprise-ownerblock-files": {
+   "label": "查看会话文件",
+   "to": "A-enterprise-files",
+   "feedback": "查看会话文件"
+  },
+  "A-enterprise-ownerblock-query": {
+   "label": "已完成，查询结果",
+   "to": "A-enterprise-ownerchecking",
+   "feedback": "已完成，查询结果"
+  },
+  "A-enterprise-ownerblock-manage": {
+   "label": "去充值",
+   "to": "P-M09-BROWSER-OWNER",
+   "feedback": "去充值"
+  },
+  "A-enterprise-ownerblock-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU-ENT",
+   "feedback": "打开账号菜单"
+  },
+  "A-enterprise-ownerblock-runtime": {
+   "label": "后台任务",
+   "to": "A-enterprise-activity",
+   "feedback": "后台任务"
+  },
+  "A-enterprise-ownerblock-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-ENT",
+   "feedback": "通知"
+  },
+  "A-enterprise-ownerblock-closeidle": {
+   "label": "关闭助手标签",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "关闭助手标签"
+  },
+  "A-enterprise-ownerblock-closeactive": {
+   "label": "关闭助手标签",
+   "to": "A-enterprise-close",
+   "feedback": "关闭助手标签"
+  },
+  "A-enterprise-ownerblock-preferences": {
+   "label": "助手偏好",
+   "to": "A-enterprise-preferences",
+   "feedback": "助手偏好"
+  },
+  "A-enterprise-ownerblock-open-imported": {
+   "label": "打开导入对话",
+   "to": "A-enterprise-conversation",
+   "feedback": "打开导入对话"
+  }
+ },
+ "A-enterprise-ownerreturn": {
+  "A-enterprise-ownerreturn-query": {
+   "label": "已完成，查询结果",
+   "to": "A-enterprise-ownerchecking",
+   "feedback": "已完成，查询结果"
+  },
+  "A-enterprise-ownerreturn-notnow": {
+   "label": "还没有",
+   "to": "A-enterprise-ownerblock",
+   "feedback": "还没有"
+  },
+  "A-enterprise-ownerreturn-files": {
+   "label": "查看会话文件",
+   "to": "A-enterprise-files",
+   "feedback": "查看会话文件"
+  },
+  "A-enterprise-ownerreturn-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "首页"
+  },
+  "A-enterprise-ownerreturn-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU-ENT",
+   "feedback": "打开账号菜单"
+  },
+  "A-enterprise-ownerreturn-runtime": {
+   "label": "后台任务",
+   "to": "A-enterprise-activity",
+   "feedback": "后台任务"
+  },
+  "A-enterprise-ownerreturn-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-ENT",
+   "feedback": "通知"
+  },
+  "A-enterprise-ownerreturn-closeidle": {
+   "label": "关闭助手标签",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "关闭助手标签"
+  },
+  "A-enterprise-ownerreturn-closeactive": {
+   "label": "关闭助手标签",
+   "to": "A-enterprise-close",
+   "feedback": "关闭助手标签"
+  },
+  "A-enterprise-ownerreturn-preferences": {
+   "label": "助手偏好",
+   "to": "A-enterprise-preferences",
+   "feedback": "助手偏好"
+  },
+  "A-enterprise-ownerreturn-open-imported": {
+   "label": "打开导入对话",
+   "to": "A-enterprise-conversation",
+   "feedback": "打开导入对话"
+  }
+ },
+ "A-personal-question": {
+  "A-personal-question-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-question-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-question-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-question-skills": {
+   "label": "技能",
+   "to": "A-personal-skills",
+   "feedback": "技能"
+  },
+  "A-personal-question-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-question-answer": {
+   "label": "提交回答",
+   "to": "A-personal-answered",
+   "feedback": "提交回答"
+  },
+  "A-personal-question-defer": {
+   "label": "暂不回答",
+   "to": "A-personal-deferred",
+   "feedback": "暂不回答"
+  },
+  "A-personal-question-files": {
+   "label": "查看会话文件",
+   "to": "A-personal-files",
+   "feedback": "查看会话文件"
+  },
+  "A-personal-question-recovery": {
+   "label": "恢复发送",
+   "to": "A-personal-availability",
+   "feedback": "恢复发送"
+  },
+  "A-personal-question-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-question-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-question-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-question-closeidle": {
+   "label": "关闭助手标签",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "关闭助手标签"
+  },
+  "A-personal-question-closeactive": {
+   "label": "关闭助手标签",
+   "to": "A-personal-close",
+   "feedback": "关闭助手标签"
+  },
+  "A-personal-question-preferences": {
+   "label": "助手偏好",
+   "to": "A-personal-preferences",
+   "feedback": "助手偏好"
+  },
+  "A-personal-question-open-imported": {
+   "label": "打开导入对话",
+   "to": "A-personal-conversation",
+   "feedback": "打开导入对话"
+  }
+ },
+ "A-personal-new": {
+  "A-personal-new-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "首页"
+  },
+  "A-personal-new-new": {
+   "label": "新建会话",
+   "to": "A-personal-new",
+   "feedback": "新建会话"
+  },
+  "A-personal-new-sessions": {
+   "label": "所有会话",
+   "to": "A-personal-conversation",
+   "feedback": "所有会话"
+  },
+  "A-personal-new-skills": {
+   "label": "技能",
+   "to": "A-personal-skills",
+   "feedback": "技能"
+  },
+  "A-personal-new-sources": {
+   "label": "数据源",
+   "to": "A-personal-sources",
+   "feedback": "数据源"
+  },
+  "A-personal-new-send": {
+   "label": "发送消息",
+   "to": "A-personal-generating",
+   "feedback": "发送消息"
+  },
+  "A-personal-new-files": {
+   "label": "查看会话文件",
+   "to": "A-personal-files",
+   "feedback": "查看会话文件"
+  },
+  "A-personal-new-recovery": {
+   "label": "恢复发送",
+   "to": "A-personal-availability",
+   "feedback": "恢复发送"
+  },
+  "A-personal-new-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU",
+   "feedback": "打开账号菜单"
+  },
+  "A-personal-new-runtime": {
+   "label": "后台任务",
+   "to": "A-personal-activity",
+   "feedback": "后台任务"
+  },
+  "A-personal-new-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-PERSONAL",
+   "feedback": "通知"
+  },
+  "A-personal-new-closeidle": {
+   "label": "关闭助手标签",
+   "to": "P-M03-HOME-PERSONAL",
+   "feedback": "关闭助手标签"
+  },
+  "A-personal-new-closeactive": {
+   "label": "关闭助手标签",
+   "to": "A-personal-close",
+   "feedback": "关闭助手标签"
+  },
+  "A-personal-new-preferences": {
+   "label": "助手偏好",
+   "to": "A-personal-preferences",
+   "feedback": "助手偏好"
+  },
+  "A-personal-new-open-imported": {
+   "label": "打开导入对话",
+   "to": "A-personal-conversation",
+   "feedback": "打开导入对话"
+  }
+ },
+ "A-personal-home": "MISSING",
+ "A-enterprise-home": "MISSING",
+ "A-enterprise-skills": {
+  "A-enterprise-skills-home": {
+   "label": "首页",
+   "to": "P-M03-HOME-ENT",
+   "feedback": "首页"
+  },
+  "A-enterprise-skills-new": {
+   "label": "新建会话",
+   "to": "A-enterprise-new",
+   "feedback": "新建会话"
+  },
+  "A-enterprise-skills-sessions": {
+   "label": "所有会话",
+   "to": "A-enterprise-conversation",
+   "feedback": "所有会话"
+  },
+  "A-enterprise-skills-skills": {
+   "label": "技能",
+   "to": "A-enterprise-skills",
+   "feedback": "技能"
+  },
+  "A-enterprise-skills-sources": {
+   "label": "数据源",
+   "to": "A-enterprise-sources",
+   "feedback": "数据源"
+  },
+  "A-enterprise-skills-discover": {
+   "label": "获取技能",
+   "to": "A-enterprise-discover",
+   "feedback": "获取技能"
+  },
+  "A-enterprise-skills-detail": {
+   "label": "管理版本",
+   "to": "A-enterprise-detail",
+   "feedback": "管理版本"
+  },
+  "A-enterprise-skills-disablebuiltin": {
+   "label": "停用内置技能",
+   "to": "A-enterprise-builtinoff",
+   "feedback": "停用内置技能"
+  },
+  "A-enterprise-skills-account": {
+   "label": "打开账号菜单",
+   "to": "P-M10-MENU-ENT",
+   "feedback": "打开账号菜单"
+  },
+  "A-enterprise-skills-runtime": {
+   "label": "后台任务",
+   "to": "A-enterprise-activity",
+   "feedback": "后台任务"
+  },
+  "A-enterprise-skills-notification": {
+   "label": "通知",
+   "to": "P-M04-NOTIFY-ENT",
+   "feedback": "通知"
+  },
+  "A-enterprise-skills-enablebuiltin": {
+   "label": "启用内置技能",
+   "to": "A-enterprise-builtinon",
+   "feedback": "启用内置技能"
+  },
+  "A-enterprise-skills-assistant": {
+   "label": "打开 Polo 助手",
+   "to": "A-enterprise-conversation",
+   "feedback": "打开 Polo 助手"
+  },
+  "A-enterprise-skills-enable": {
+   "label": "为我启用",
+   "to": "A-enterprise-enabledpending",
+   "feedback": "为我启用"
+  },
+  "A-enterprise-skills-disable": {
+   "label": "为我停用",
+   "to": "A-enterprise-installed",
+   "feedback": "为我停用"
+  },
+  "A-enterprise-skills-install": {
+   "label": "准备本机",
+   "to": "A-enterprise-installing",
+   "feedback": "准备本机"
+  },
+  "A-enterprise-skills-update": {
+   "label": "更新到 1.1.0",
+   "to": "A-enterprise-updated",
+   "feedback": "更新到 1.1.0"
+  },
+  "A-enterprise-skills-remove": {
+   "label": "卸载本机副本",
+   "to": "A-enterprise-remove",
+   "feedback": "卸载本机副本"
+  },
+  "A-enterprise-skills-recheck": {
+   "label": "重新验证来源",
+   "to": "A-enterprise-skills",
+   "feedback": "重新验证来源"
+  }
+ }
+}

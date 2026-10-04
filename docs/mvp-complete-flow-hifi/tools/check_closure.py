@@ -13,7 +13,12 @@ with sync_playwright() as pw:
  def go(id):
   # Each direct review fixture is an independent case; actual actions below remain sequential.
   page.locator('[data-reset]').evaluate('(el)=>el.click()');page.wait_for_timeout(40)
-  page.locator('[data-scene-link="'+id+'"]').evaluate('(el)=>el.click()');page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=id)
+  page.locator('[data-scene-link="'+id+'"]').evaluate('(el)=>el.click()')
+  try:page.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=id)
+  except Exception:
+   print('REVIEW NAV FAILURE',{'target':id,'shell':page.evaluate('document.body.dataset.currentScene'),'hash':page.evaluate('location.hash')},flush=True)
+   page.screenshot(path=str(E/'closure-navigation-failure.png'))
+   raise
   f=page.locator('[data-prototype-viewport]').element_handle().content_frame();f.wait_for_function('(s)=>document.body.dataset.currentScene===s',arg=id);return f
  for vp in m['target']['viewports']:
   page.locator('[data-viewport-select]').select_option(vp['id'],force=True)

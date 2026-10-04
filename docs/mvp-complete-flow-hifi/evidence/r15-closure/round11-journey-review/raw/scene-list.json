@@ -1,0 +1,2546 @@
+[
+{
+"id": "P-M01-LOGIN-PASSWORD",
+"surface": "mvp",
+"module": "M01",
+"title": "登录 · 密码登录"
+},
+{
+"id": "P-M01-LOGIN-PHONE",
+"surface": "mvp",
+"module": "M01",
+"title": "登录 · 验证码登录"
+},
+{
+"id": "P-M01-LOGIN-CODE",
+"surface": "mvp",
+"module": "M01",
+"title": "登录 · 验证码已发送"
+},
+{
+"id": "P-M01-LOGIN-CANCEL",
+"surface": "mvp",
+"module": "M01",
+"title": "登录 · 用户取消"
+},
+{
+"id": "P-M01-PERSONAL-PREP",
+"surface": "mvp",
+"module": "M01",
+"title": "我的空间 · 准备中"
+},
+{
+"id": "P-M01-PERSONAL-PREP-FAIL",
+"surface": "mvp",
+"module": "M01",
+"title": "我的空间 · 准备失败"
+},
+{
+"id": "P-M01-REOPEN",
+"surface": "mvp",
+"module": "M01",
+"title": "重开 · 登录恢复"
+},
+{
+"id": "P-M01-INVITE-BROWSER",
+"surface": "mvp",
+"module": "M01",
+"title": "企业邀请已在浏览器处理"
+},
+{
+"id": "P-M01-INVITE-MISMATCH",
+"surface": "mvp",
+"module": "M01",
+"title": "邀请 · 账号不匹配"
+},
+{
+"id": "P-M01-INVITE-PENDING",
+"surface": "mvp",
+"module": "M01",
+"title": "共享邀请 · 待审批"
+},
+{
+"id": "P-M01-REFRESH-FAIL",
+"surface": "mvp",
+"module": "M01",
+"title": "企业列表刷新失败"
+},
+{
+"id": "P-M01-NOT-INSTALLED",
+"surface": "mvp",
+"module": "M01",
+"title": "未安装 · 下载指引"
+},
+{
+"id": "P-M01-CREATE-ENT",
+"surface": "mvp",
+"module": "M01",
+"title": "创建企业（浏览器交接）"
+},
+{
+"id": "P-M01-COLD-START",
+"surface": "mvp",
+"module": "M01",
+"title": "冷启动 · 候选目标重验"
+},
+{
+"id": "P-M02-SWITCHER",
+"surface": "mvp",
+"module": "M02",
+"title": "切换空间 · 企业空间"
+},
+{
+"id": "P-M02-SWITCHER-PERSONAL",
+"surface": "mvp",
+"module": "M02",
+"title": "切换空间 · 我的空间"
+},
+{
+"id": "P-M02-CONFIRM",
+"surface": "mvp",
+"module": "M02",
+"title": "切换确认 · 终止 3 项"
+},
+{
+"id": "P-M02-CONFIRM-PERSONAL",
+"surface": "mvp",
+"module": "M02",
+"title": "切换确认 · 从我的空间到企业"
+},
+{
+"id": "P-M02-STOPPING",
+"surface": "mvp",
+"module": "M02",
+"title": "终止进度"
+},
+{
+"id": "P-M02-STOP-FAILED",
+"surface": "mvp",
+"module": "M02",
+"title": "部分停止失败"
+},
+{
+"id": "P-M02-STOP-CANCEL",
+"surface": "mvp",
+"module": "M02",
+"title": "取消切换 · 仍在原空间"
+},
+{
+"id": "P-M02-TARGET-LOADING",
+"surface": "mvp",
+"module": "M02",
+"title": "目标空间加载中"
+},
+{
+"id": "P-M02-TARGET-FAILED",
+"surface": "mvp",
+"module": "M02",
+"title": "目标空间加载失败"
+},
+{
+"id": "P-M02-ACCESS-LOST",
+"surface": "mvp",
+"module": "M02",
+"title": "目标无权访问"
+},
+{
+"id": "P-M03-HOME-PERSONAL",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 我的空间"
+},
+{
+"id": "P-M03-HOME-ZERO",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 首次使用"
+},
+{
+"id": "P-M03-HOME-EMPTY-DIR",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 真空目录"
+},
+{
+"id": "P-M03-HOME-LOAD-FAIL",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 目录加载失败"
+},
+{
+"id": "P-M03-HOME-OFFLINE",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 离线缓存目录"
+},
+{
+"id": "P-M03-HOME-ENT",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 企业空间（晨星科技）"
+},
+{
+"id": "P-M03-HOME-ENT-AFTER-CANCEL",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 晨星科技（取消切换后）"
+},
+{
+"id": "P-M03-HOME-ENT-AFTER-CLOSE",
+"surface": "mvp",
+"module": "M03",
+"title": "首页 · 晨星科技（报价整理已关闭）"
+},
+{
+"id": "P-M03-ALL-APPS",
+"surface": "mvp",
+"module": "M03",
+"title": "全部 Apps · 作品去重与授权来源"
+},
+{
+"id": "P-M03-ALL-APPS-ZERO",
+"surface": "mvp",
+"module": "M03",
+"title": "我的应用 · 首次使用"
+},
+{
+"id": "P-M07-SOURCE-FALLBACK",
+"surface": "mvp",
+"module": "M07",
+"title": "授权来源更新 · 仍可使用"
+},
+{
+"id": "P-M03-ALL-APPS-ENT-EMPTY",
+"surface": "mvp",
+"module": "M03",
+"title": "我的应用 · 企业尚未分发"
+},
+{
+"id": "P-M03-INSPECTOR",
+"surface": "mvp",
+"module": "M03",
+"title": "App 详情（inspector）"
+},
+{
+"id": "P-M03-MANAGE-HOME",
+"surface": "mvp",
+"module": "M03",
+"title": "我的应用 · 本机隐藏项"
+},
+{
+"id": "P-M03-CONTROLS",
+"surface": "mvp",
+"module": "M03",
+"title": "我的应用 · 恢复隐藏项"
+},
+{
+"id": "P-M04-APP-VIEW",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 报价整理"
+},
+{
+"id": "P-M04-APP-VIEW-PERSONAL",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 会议纪要整理"
+},
+{
+"id": "P-M04-PREPARE",
+"surface": "mvp",
+"module": "M04",
+"title": "应用请求访问所选文件"
+},
+{
+"id": "P-M04-PREP-FAILED",
+"surface": "mvp",
+"module": "M04",
+"title": "应用加载失败 · 合同审查"
+},
+{
+"id": "P-M04-CLOSE-ACTIVE",
+"surface": "mvp",
+"module": "M04",
+"title": "关闭 · 三选项"
+},
+{
+"id": "P-M04-TERM-FAILED",
+"surface": "mvp",
+"module": "M04",
+"title": "终止失败 · 标签保留"
+},
+{
+"id": "P-M04-BACKGROUND",
+"surface": "mvp",
+"module": "M04",
+"title": "后台继续"
+},
+{
+"id": "P-M04-RUNTIME",
+"surface": "mvp",
+"module": "M04",
+"title": "运行状态中心"
+},
+{
+"id": "P-M04-NOTIFY-ENT",
+"surface": "mvp",
+"module": "M04",
+"title": "通知中心"
+},
+{
+"id": "P-M04-RUNTIME-PERSONAL",
+"surface": "mvp",
+"module": "M04",
+"title": "运行状态 · 我的空间"
+},
+{
+"id": "P-M04-NOTIFY-PERSONAL",
+"surface": "mvp",
+"module": "M04",
+"title": "通知 · 我的空间"
+},
+{
+"id": "P-M04-PERM-DENIED",
+"surface": "mvp",
+"module": "M04",
+"title": "OS 权限被拒"
+},
+{
+"id": "P-M07-LIST",
+"surface": "mvp",
+"module": "M07",
+"title": "我的圈子 · 列表"
+},
+{
+"id": "P-M07-EMPTY",
+"surface": "mvp",
+"module": "M07",
+"title": "我的圈子 · 空态"
+},
+{
+"id": "P-M07-DETAIL-FOCUS",
+"surface": "mvp",
+"module": "M07",
+"title": "圈子详情 · 已加入"
+},
+{
+"id": "P-M07-JOIN-FREE",
+"surface": "mvp",
+"module": "M07",
+"title": "使用圈子分享链接"
+},
+{
+"id": "P-M07-DETAIL-PAID",
+"surface": "mvp",
+"module": "M07",
+"title": "付费订阅详情"
+},
+{
+"id": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+"surface": "mvp",
+"module": "M07",
+"title": "圈子详情 · 已退出"
+},
+{
+"id": "P-M07-PAY-BROWSER",
+"surface": "mvp",
+"module": "M07",
+"title": "在圈子公开页确认购买"
+},
+{
+"id": "P-M07-PAY-RETURN-FAIL",
+"surface": "mvp",
+"module": "M07",
+"title": "订单与资格暂时无法核对"
+},
+{
+"id": "P-M07-RENEW",
+"surface": "mvp",
+"module": "M07",
+"title": "手动续费"
+},
+{
+"id": "P-M07-RENEW-EXPIRED",
+"surface": "mvp",
+"module": "M07",
+"title": "手动续费 · 到期恢复"
+},
+{
+"id": "P-M07-EXPIRED",
+"surface": "mvp",
+"module": "M07",
+"title": "圈子到期"
+},
+{
+"id": "P-M07-LEAVE",
+"surface": "mvp",
+"module": "M07",
+"title": "退出圈子"
+},
+{
+"id": "P-M07-LEAVE-PAID",
+"surface": "mvp",
+"module": "M07",
+"title": "退出圈子 · 晨星设计圈"
+},
+{
+"id": "P-M09-APP-BANNER",
+"surface": "mvp",
+"module": "M09",
+"title": "App 企业积分不足"
+},
+{
+"id": "P-M09-BROWSER",
+"surface": "mvp",
+"module": "M09",
+"title": "充值（浏览器交接）"
+},
+{
+"id": "P-M10-MENU",
+"surface": "mvp",
+"module": "M10",
+"title": "账号菜单 · 有管理资格"
+},
+{
+"id": "P-M10-MENU-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "账号菜单 · 晨星科技"
+},
+{
+"id": "P-M10-MENU-NOPRIV",
+"surface": "mvp",
+"module": "M10",
+"title": "账号菜单 · 无创作资格 · 晨星科技"
+},
+{
+"id": "P-M10-SETTINGS",
+"surface": "mvp",
+"module": "M10",
+"title": "设置 · 账号安全"
+},
+{
+"id": "P-M10-SETTINGS-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "设置 · 晨星科技"
+},
+{
+"id": "P-M10-SETTINGS-APPEARANCE",
+"surface": "mvp",
+"module": "M10",
+"title": "设置 · 外观"
+},
+{
+"id": "P-M10-SETTINGS-APPEARANCE-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "外观设置 · 晨星科技"
+},
+{
+"id": "P-M10-ADMIN-BROWSER",
+"surface": "mvp",
+"module": "M10",
+"title": "北方贸易 · 企业管理后台（个人空间返回）"
+},
+{
+"id": "P-M10-ADMIN-RETURN",
+"surface": "mvp",
+"module": "M10",
+"title": "返回后 · 资格刷新 · 晨星科技"
+},
+{
+"id": "P-M11-REAUTH",
+"surface": "mvp",
+"module": "M11",
+"title": "会话过期 · 重新登录"
+},
+{
+"id": "P-M11-REVOKE",
+"surface": "mvp",
+"module": "M11",
+"title": "运行中被移除"
+},
+{
+"id": "P-M11-PERSONAL-RESTRICTED",
+"surface": "mvp",
+"module": "M11",
+"title": "个人也受限 · 安全页"
+},
+{
+"id": "P-M11-BLOCKED-WITHDRAWN",
+"surface": "mvp",
+"module": "M11",
+"title": "作品 · 分发被撤下"
+},
+{
+"id": "P-M11-BLOCKED-EXPIRED",
+"surface": "mvp",
+"module": "M11",
+"title": "作品 · 最后一个来源失效"
+},
+{
+"id": "P-M11-BLOCKED-VERSION",
+"surface": "mvp",
+"module": "M11",
+"title": "作品 · 版本紧急阻断"
+},
+{
+"id": "P-M11-OFFLINE-HOME",
+"surface": "mvp",
+"module": "M11",
+"title": "离线打开"
+},
+{
+"id": "P-M11-OFFLINE-RUNNING",
+"surface": "mvp",
+"module": "M11",
+"title": "运行中断网"
+},
+{
+"id": "P-M11-CONTRACT",
+"surface": "mvp",
+"module": "M11",
+"title": "需要升级 Polo"
+},
+{
+"id": "P-M11-CONTRACT-DL",
+"surface": "mvp",
+"module": "M11",
+"title": "正在下载更新"
+},
+{
+"id": "P-M11-CONTRACT-FAIL",
+"surface": "mvp",
+"module": "M11",
+"title": "更新没有完成"
+},
+{
+"id": "P-M11-SPACE-ERROR",
+"surface": "mvp",
+"module": "M11",
+"title": "空间列表加载失败"
+},
+{
+"id": "P-M11-REOPEN-RECOVERY",
+"surface": "mvp",
+"module": "M11",
+"title": "重开恢复"
+},
+{
+"id": "P-M11-SUPPORT-BROWSER",
+"surface": "mvp",
+"module": "M11",
+"title": "联系企业管理员"
+},
+{
+"id": "P-M03-INSPECTOR-PERSONAL",
+"surface": "mvp",
+"module": "M03",
+"title": "App 详情 · 我的空间"
+},
+{
+"id": "P-M02-ACCESS-LOST-ENT",
+"surface": "mvp",
+"module": "M02",
+"title": "目标无权访问 · 企业空间"
+},
+{
+"id": "P-M09-BROWSER-STREAM",
+"surface": "mvp",
+"module": "M09",
+"title": "充值（生成中断）"
+},
+{
+"id": "P-M09-BROWSER-MENU",
+"surface": "mvp",
+"module": "M09",
+"title": "充值与账单（浏览器交接）"
+},
+{
+"id": "P-M09-BROWSER-MENU-ENT",
+"surface": "mvp",
+"module": "M09",
+"title": "充值与账单（浏览器交接 · 企业）"
+},
+{
+"id": "P-M07-PAY-BROWSER-EXPIRED",
+"surface": "mvp",
+"module": "M07",
+"title": "在圈子公开页确认购买"
+},
+{
+"id": "P-M03-ALL-APPS-ENT",
+"surface": "mvp",
+"module": "M03",
+"title": "全部应用 · 企业提供"
+},
+{
+"id": "P-M04-APP-CONTRACT",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 合同审查"
+},
+{
+"id": "P-M04-APP-GROWTH",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 增长打法手册"
+},
+{
+"id": "P-M04-APP-REPORT",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 数据报表生成器"
+},
+{
+"id": "P-M04-APP-BRAND",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 品牌语气分析"
+},
+{
+"id": "P-M04-APP-ACTIVE",
+"surface": "mvp",
+"module": "M04",
+"title": "应用 · 有后台 AI 请求"
+},
+{
+"id": "P-M04-REPORT-STOPPED",
+"surface": "mvp",
+"module": "M04",
+"title": "数据报表生成器 · 后台请求已停止"
+},
+{
+"id": "P-M09-BROWSER-OWNER",
+"surface": "mvp",
+"module": "M09",
+"title": "企业充值（浏览器交接）"
+},
+{
+"id": "P-M09-BROWSER-BUDGET",
+"surface": "mvp",
+"module": "M09",
+"title": "企业预算（浏览器交接）"
+},
+{
+"id": "P-M07-PUBLIC-WEB",
+"surface": "mvp",
+"module": "M07",
+"title": "在圈子网页完成加入"
+},
+{
+"id": "P-M07-RETURN",
+"surface": "mvp",
+"module": "M07",
+"title": "核对圈子加入结果"
+},
+{
+"id": "P-M07-RETURN-FAIL",
+"surface": "mvp",
+"module": "M07",
+"title": "暂时无法刷新圈子资格"
+},
+{
+"id": "P-M07-ACCOUNT-MISMATCH",
+"surface": "mvp",
+"module": "M07",
+"title": "当前账号没有这次加入记录"
+},
+{
+"id": "P-M07-LOGIN",
+"surface": "mvp",
+"module": "M07",
+"title": "切回完成加入的账号"
+},
+{
+"id": "P-M01-RETURN",
+"surface": "mvp",
+"module": "M01",
+"title": "核对可进入的企业"
+},
+{
+"id": "P-M01-ENTERPRISE-READY",
+"surface": "mvp",
+"module": "M01",
+"title": "可以进入晨星科技"
+},
+{
+"id": "P-M07-PAY-RETURN",
+"surface": "mvp",
+"module": "M07",
+"title": "返回后核对原订阅订单"
+},
+{
+"id": "P-M07-SUPPORT",
+"surface": "mvp",
+"module": "M07",
+"title": "联系客服"
+},
+{
+"id": "P-M07-SUPPORT-LOAD-FAIL",
+"surface": "mvp",
+"module": "M07",
+"title": "联系客服"
+},
+{
+"id": "P-M11-SUPPORT-MEMBER",
+"surface": "mvp",
+"module": "M11",
+"title": "联系客服"
+},
+{
+"id": "P-M07-RENEW-YEAR",
+"surface": "mvp",
+"module": "M07",
+"title": "年度订阅续费"
+},
+{
+"id": "P-M07-YEAR-WEB",
+"surface": "mvp",
+"module": "M07",
+"title": "在年度圈网页确认续费"
+},
+{
+"id": "P-M07-YEAR-RETURN",
+"surface": "mvp",
+"module": "M07",
+"title": "核对年度圈的原订单"
+},
+{
+"id": "P-M07-YEAR-RESULT",
+"surface": "mvp",
+"module": "M07",
+"title": "星河年度圈 · 订阅权益"
+},
+{
+"id": "P-M07-RENEW-LIMIT",
+"surface": "mvp",
+"module": "M07",
+"title": "暂时不能提前续费"
+},
+{
+"id": "P-M07-LOGIN-PHONE",
+"surface": "mvp",
+"module": "M01",
+"title": "切回加入账号 · 验证码登录"
+},
+{
+"id": "P-M07-LOGIN-CODE",
+"surface": "mvp",
+"module": "M01",
+"title": "切回加入账号 · 输入验证码"
+},
+{
+"id": "P-M11-SUPPORT-ACCOUNT-ADMIN",
+"surface": "mvp",
+"module": "M11",
+"title": "账号受限 · 联系企业管理员"
+},
+{
+"id": "P-M07-RENEW-WEB",
+"surface": "mvp",
+"module": "M07",
+"title": "在网页确认月度续费"
+},
+{
+"id": "P-M07-RENEW-RETURN",
+"surface": "mvp",
+"module": "M07",
+"title": "返回后核对原续费订单"
+},
+{
+"id": "P-M07-RENEW-RESULT",
+"surface": "mvp",
+"module": "M07",
+"title": "月度续费已核对"
+},
+{
+"id": "P-M07-LIST-RENEWED",
+"surface": "mvp",
+"module": "M07",
+"title": "我的圈子 · 月付续费后"
+},
+{
+"id": "P-M07-DETAIL-FOCUS-UPDATES",
+"surface": "mvp",
+"module": "M07",
+"title": "晨星增长圈"
+},
+{
+"id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+"surface": "mvp",
+"module": "M07",
+"title": "晨星增长圈"
+},
+{
+"id": "P-M07-DETAIL-PAID-UPDATES",
+"surface": "mvp",
+"module": "M07",
+"title": "晨星设计圈"
+},
+{
+"id": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+"surface": "mvp",
+"module": "M07",
+"title": "晨星设计圈"
+},
+{
+"id": "P-M10-SETTINGS-DEVICE",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置"
+},
+{
+"id": "P-M10-SETTINGS-PERMISSIONS",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置"
+},
+{
+"id": "P-M10-SETTINGS-SHORTCUTS",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置"
+},
+{
+"id": "P-M10-SETTINGS-ENT-DEVICE",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置"
+},
+{
+"id": "P-M10-SETTINGS-ENT-PERMISSIONS",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置"
+},
+{
+"id": "P-M10-SETTINGS-ENT-SHORTCUTS",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置"
+},
+{
+"id": "P-M10-SETTINGS-DEVICE-FAILED",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置 · 保存失败"
+},
+{
+"id": "P-M10-SETTINGS-ENT-DEVICE-FAILED",
+"surface": "mvp",
+"module": "M10",
+"title": "Polo 设置 · 保存失败"
+},
+{
+"id": "P-M07-DETAIL-DATA",
+"surface": "mvp",
+"module": "M07",
+"title": "数据工坊圈"
+},
+{
+"id": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+"surface": "mvp",
+"module": "M07",
+"title": "数据工坊圈 · 订阅"
+},
+{
+"id": "P-M07-LEAVE-DATA",
+"surface": "mvp",
+"module": "M07",
+"title": "退出数据工坊圈"
+},
+{
+"id": "P-M07-LEAVE-YEAR",
+"surface": "mvp",
+"module": "M07",
+"title": "退出星河年度圈"
+},
+{
+"id": "P-M10-CREATOR-BROWSER",
+"surface": "mvp",
+"module": "M10",
+"title": "创作者工作台（个人空间返回）"
+},
+{
+"id": "P-M10-ADMIN-BROWSER-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "北方贸易 · 企业管理后台（企业空间返回）"
+},
+{
+"id": "P-M10-CREATOR-BROWSER-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "创作者工作台（企业空间返回）"
+},
+{
+"id": "P-M11-CONTRACT-HELP",
+"surface": "mvp",
+"module": "M11",
+"title": "升级帮助"
+},
+{
+"id": "P-M11-CONTRACT-READY",
+"surface": "mvp",
+"module": "M11",
+"title": "升级检查通过"
+},
+{
+"id": "P-M02-STOPPING-PERSONAL",
+"surface": "mvp",
+"module": "M02",
+"title": "正在停止我的空间任务"
+},
+{
+"id": "P-M02-TARGET-LOADING-ENT",
+"surface": "mvp",
+"module": "M02",
+"title": "正在进入晨星科技"
+},
+{
+"id": "P-M04-CLOSE-REPORT",
+"surface": "mvp",
+"module": "M04",
+"title": "关闭运行中的数据报表生成器"
+},
+{
+"id": "P-M04-CLOSE-CONTRACT",
+"surface": "mvp",
+"module": "M04",
+"title": "关闭运行中的合同审查"
+},
+{
+"id": "P-M02-STOP-FAILED-PERSONAL",
+"surface": "mvp",
+"module": "M02",
+"title": "未能停止我的空间任务"
+},
+{
+"id": "P-M09-APP-NOTIFIED",
+"surface": "mvp",
+"module": "M09",
+"title": "已通知企业所有者"
+},
+{
+"id": "P-M01-CREATE-BROWSER",
+"surface": "mvp",
+"module": "M01",
+"title": "在系统浏览器创建企业"
+},
+{
+"id": "P-M01-CREATE-RETURN",
+"surface": "mvp",
+"module": "M01",
+"title": "核对企业创建结果"
+},
+{
+"id": "P-M01-CREATE-READY",
+"surface": "mvp",
+"module": "M01",
+"title": "晨星科技已创建"
+},
+{
+"id": "P-M01-CREATE-PENDING",
+"surface": "mvp",
+"module": "M01",
+"title": "尚未核对到新企业"
+},
+{
+"id": "P-M01-CREATE-QUERY-FAILED",
+"surface": "mvp",
+"module": "M01",
+"title": "暂时无法核对创建结果"
+},
+{
+"id": "P-M07-REJOIN-BROWSER",
+"surface": "mvp",
+"module": "M07",
+"title": "重新加入晨星设计圈"
+},
+{
+"id": "P-M11-GOVERNANCE-PAUSED-MEMBER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业已暂停"
+},
+{
+"id": "P-M11-GOVERNANCE-PAUSED-MANAGER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业已暂停"
+},
+{
+"id": "P-M11-GOVERNANCE-PAUSED-OWNER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业已暂停"
+},
+{
+"id": "P-M11-GOVERNANCE-CLOSING-MEMBER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业关闭处理中"
+},
+{
+"id": "P-M11-GOVERNANCE-CLOSING-MANAGER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业关闭处理中"
+},
+{
+"id": "P-M11-GOVERNANCE-CLOSING-OWNER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业关闭处理中"
+},
+{
+"id": "P-M11-GOVERNANCE-ARREARS-MEMBER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业因欠费受限"
+},
+{
+"id": "P-M11-GOVERNANCE-ARREARS-MANAGER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业因欠费受限"
+},
+{
+"id": "P-M11-GOVERNANCE-ARREARS-OWNER",
+"surface": "mvp",
+"module": "M11",
+"title": "企业因欠费受限"
+},
+{
+"id": "P-M11-GOVERNANCE-STATUS",
+"surface": "mvp",
+"module": "M11",
+"title": "晨星科技暂不可用"
+},
+{
+"id": "P-M11-GOVERNANCE-BROWSER",
+"surface": "mvp",
+"module": "M11",
+"title": "在系统浏览器处理企业限制"
+},
+{
+"id": "P-M11-GOVERNANCE-CONTACT",
+"surface": "mvp",
+"module": "M11",
+"title": "联系企业所有者"
+},
+{
+"id": "P-M11-GOVERNANCE-RETURN",
+"surface": "mvp",
+"module": "M11",
+"title": "重新核对晨星科技"
+},
+{
+"id": "P-M11-GOVERNANCE-PENDING",
+"surface": "mvp",
+"module": "M11",
+"title": "企业限制尚未解除"
+},
+{
+"id": "P-M11-GOVERNANCE-FAILED",
+"surface": "mvp",
+"module": "M11",
+"title": "暂时无法核对企业状态"
+},
+{
+"id": "P-M11-GOVERNANCE-READY",
+"surface": "mvp",
+"module": "M11",
+"title": "企业治理限制已解除"
+},
+{
+"id": "P-M10-MENU-RESPONSIBILITY",
+"surface": "mvp",
+"module": "M10",
+"title": "创作者资格失效 · 责任只读 · 我的空间"
+},
+{
+"id": "P-M10-RESPONSIBILITY-BROWSER",
+"surface": "mvp",
+"module": "M10",
+"title": "在浏览器查看创作者责任"
+},
+{
+"id": "P-M10-RESPONSIBILITY-BROWSER-FAILED",
+"surface": "mvp",
+"module": "M10",
+"title": "暂时无法打开责任页面"
+},
+{
+"id": "P-M10-RESPONSIBILITY-RETURN",
+"surface": "mvp",
+"module": "M10",
+"title": "核对原账号资格"
+},
+{
+"id": "P-M10-RESPONSIBILITY-QUERY-FAILED",
+"surface": "mvp",
+"module": "M10",
+"title": "暂时无法核对资格"
+},
+{
+"id": "P-M10-RESPONSIBILITY-VERIFIED",
+"surface": "mvp",
+"module": "M10",
+"title": "责任只读资格已核对"
+},
+{
+"id": "P-M10-MENU-RESPONSIBILITY-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "创作者资格失效 · 责任只读 · 企业空间"
+},
+{
+"id": "P-M10-RESPONSIBILITY-BROWSER-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "在浏览器查看创作者责任"
+},
+{
+"id": "P-M10-RESPONSIBILITY-BROWSER-FAILED-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "暂时无法打开责任页面"
+},
+{
+"id": "P-M10-RESPONSIBILITY-RETURN-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "核对原账号资格"
+},
+{
+"id": "P-M10-RESPONSIBILITY-QUERY-FAILED-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "暂时无法核对资格"
+},
+{
+"id": "P-M10-RESPONSIBILITY-VERIFIED-ENT",
+"surface": "mvp",
+"module": "M10",
+"title": "责任只读资格已核对"
+},
+{
+"id": "A-personal-new",
+"surface": "assistant",
+"module": "M05",
+"title": "新会话 · 我的空间"
+},
+{
+"id": "A-personal-conversation",
+"surface": "assistant",
+"module": "M05",
+"title": "原会话 · 我的空间"
+},
+{
+"id": "A-personal-generating",
+"surface": "assistant",
+"module": "M05",
+"title": "正在生成 · 我的空间"
+},
+{
+"id": "A-personal-stopped",
+"surface": "assistant",
+"module": "M05",
+"title": "已停止 · 我的空间"
+},
+{
+"id": "A-personal-question",
+"surface": "assistant",
+"module": "M05",
+"title": "等待回答 · 我的空间"
+},
+{
+"id": "A-personal-reopen",
+"surface": "assistant",
+"module": "M05",
+"title": "重开后恢复问题 · 我的空间"
+},
+{
+"id": "A-personal-answered",
+"surface": "assistant",
+"module": "M05",
+"title": "已回答 · 我的空间"
+},
+{
+"id": "A-personal-deferred",
+"surface": "assistant",
+"module": "M05",
+"title": "暂不回答 · 我的空间"
+},
+{
+"id": "A-personal-expired",
+"surface": "assistant",
+"module": "M05",
+"title": "问题已过期 · 我的空间"
+},
+{
+"id": "A-personal-deleted",
+"surface": "assistant",
+"module": "M05",
+"title": "原会话不可访问 · 我的空间"
+},
+{
+"id": "A-personal-answerfailed",
+"surface": "assistant",
+"module": "M05",
+"title": "回答未提交 · 我的空间"
+},
+{
+"id": "A-personal-offline",
+"surface": "assistant",
+"module": "M05",
+"title": "网络已断开 · 我的空间"
+},
+{
+"id": "A-personal-service",
+"surface": "assistant",
+"module": "M05",
+"title": "服务暂时不可用 · 我的空间"
+},
+{
+"id": "A-personal-restored",
+"surface": "assistant",
+"module": "M05",
+"title": "重新验证完成 · 我的空间"
+},
+{
+"id": "A-personal-completezero",
+"surface": "assistant",
+"module": "M05",
+"title": "本次生成已完成 · 我的空间"
+},
+{
+"id": "A-personal-files",
+"surface": "assistant",
+"module": "M08",
+"title": "原对话附件与生成文件 · 我的空间"
+},
+{
+"id": "A-personal-viewer",
+"surface": "assistant",
+"module": "M08",
+"title": "查看生成文件 · 我的空间"
+},
+{
+"id": "A-personal-attachment",
+"surface": "assistant",
+"module": "M08",
+"title": "查看原对话附件 · 我的空间"
+},
+{
+"id": "A-personal-missing",
+"surface": "assistant",
+"module": "M08",
+"title": "文件已移动或删除 · 我的空间"
+},
+{
+"id": "A-personal-reselected",
+"surface": "assistant",
+"module": "M08",
+"title": "已重新选择材料 · 我的空间"
+},
+{
+"id": "A-personal-sources",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源与工具 · 我的空间"
+},
+{
+"id": "A-personal-sourceauth",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源需要认证 · 我的空间"
+},
+{
+"id": "A-personal-sourcefailed",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源连接失败 · 我的空间"
+},
+{
+"id": "A-personal-sourcedenied",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源权限被拒绝 · 我的空间"
+},
+{
+"id": "A-personal-automations",
+"surface": "assistant",
+"module": "M06",
+"title": "自动化 · 我的空间"
+},
+{
+"id": "A-personal-browser",
+"surface": "assistant",
+"module": "M06",
+"title": "助手浏览器 · 我的空间"
+},
+{
+"id": "A-personal-return",
+"surface": "assistant",
+"module": "M09",
+"title": "返回后待查询 · 我的空间"
+},
+{
+"id": "A-personal-preblock",
+"surface": "assistant",
+"module": "M09",
+"title": "发送前积分不足 · 我的空间"
+},
+{
+"id": "A-personal-cut",
+"surface": "assistant",
+"module": "M09",
+"title": "生成因积分不足停止 · 我的空间"
+},
+{
+"id": "A-personal-checking",
+"surface": "assistant",
+"module": "M09",
+"title": "正在查询 · 我的空间"
+},
+{
+"id": "A-personal-notyet",
+"surface": "assistant",
+"module": "M09",
+"title": "尚未到账 · 我的空间"
+},
+{
+"id": "A-personal-queryfailed",
+"surface": "assistant",
+"module": "M09",
+"title": "查询失败 · 我的空间"
+},
+{
+"id": "A-personal-resumed",
+"surface": "assistant",
+"module": "M09",
+"title": "积分可用 · 我的空间"
+},
+{
+"id": "A-personal-skills",
+"surface": "assistant",
+"module": "M06",
+"title": "技能 · 我的空间"
+},
+{
+"id": "A-personal-discover",
+"surface": "assistant",
+"module": "M06",
+"title": "获取技能 · 我的空间"
+},
+{
+"id": "A-personal-acquire",
+"surface": "assistant",
+"module": "M06",
+"title": "技能详情 · 我的空间"
+},
+{
+"id": "A-personal-enabledpending",
+"surface": "assistant",
+"module": "M06",
+"title": "已启用 · 设备待准备 · 我的空间"
+},
+{
+"id": "A-personal-installing",
+"surface": "assistant",
+"module": "M06",
+"title": "正在准备本机 · 我的空间"
+},
+{
+"id": "A-personal-installfailed",
+"surface": "assistant",
+"module": "M06",
+"title": "设备准备失败 · 我的空间"
+},
+{
+"id": "A-personal-installed",
+"surface": "assistant",
+"module": "M06",
+"title": "已安装 · 我的空间"
+},
+{
+"id": "A-personal-enabled",
+"surface": "assistant",
+"module": "M06",
+"title": "已启用 · 我的空间"
+},
+{
+"id": "A-personal-detail",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-updated",
+"surface": "assistant",
+"module": "M06",
+"title": "版本已更新 · 我的空间"
+},
+{
+"id": "A-personal-updatefailed",
+"surface": "assistant",
+"module": "M06",
+"title": "更新失败 · 我的空间"
+},
+{
+"id": "A-personal-remove",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled",
+"surface": "assistant",
+"module": "M06",
+"title": "本机已卸载 · 我的空间"
+},
+{
+"id": "A-personal-denied",
+"surface": "assistant",
+"module": "M06",
+"title": "未获授权 · 我的空间"
+},
+{
+"id": "A-personal-restricted",
+"surface": "assistant",
+"module": "M06",
+"title": "最后来源失效 · 我的空间"
+},
+{
+"id": "A-personal-fallback",
+"surface": "assistant",
+"module": "M06",
+"title": "部分来源失效 · 我的空间"
+},
+{
+"id": "A-personal-reauthorized",
+"surface": "assistant",
+"module": "M06",
+"title": "来源恢复 · 我的空间"
+},
+{
+"id": "A-personal-builtinoff",
+"surface": "assistant",
+"module": "M06",
+"title": "内置技能已停用 · 我的空间"
+},
+{
+"id": "A-personal-builtinon",
+"surface": "assistant",
+"module": "M06",
+"title": "内置技能已启用 · 我的空间"
+},
+{
+"id": "A-enterprise-new",
+"surface": "assistant",
+"module": "M05",
+"title": "新会话 · 晨星科技"
+},
+{
+"id": "A-enterprise-conversation",
+"surface": "assistant",
+"module": "M05",
+"title": "原会话 · 晨星科技"
+},
+{
+"id": "A-enterprise-generating",
+"surface": "assistant",
+"module": "M05",
+"title": "正在生成 · 晨星科技"
+},
+{
+"id": "A-enterprise-stopped",
+"surface": "assistant",
+"module": "M05",
+"title": "已停止 · 晨星科技"
+},
+{
+"id": "A-enterprise-question",
+"surface": "assistant",
+"module": "M05",
+"title": "等待回答 · 晨星科技"
+},
+{
+"id": "A-enterprise-reopen",
+"surface": "assistant",
+"module": "M05",
+"title": "重开后恢复问题 · 晨星科技"
+},
+{
+"id": "A-enterprise-answered",
+"surface": "assistant",
+"module": "M05",
+"title": "已回答 · 晨星科技"
+},
+{
+"id": "A-enterprise-deferred",
+"surface": "assistant",
+"module": "M05",
+"title": "暂不回答 · 晨星科技"
+},
+{
+"id": "A-enterprise-expired",
+"surface": "assistant",
+"module": "M05",
+"title": "问题已过期 · 晨星科技"
+},
+{
+"id": "A-enterprise-deleted",
+"surface": "assistant",
+"module": "M05",
+"title": "原会话不可访问 · 晨星科技"
+},
+{
+"id": "A-enterprise-answerfailed",
+"surface": "assistant",
+"module": "M05",
+"title": "回答未提交 · 晨星科技"
+},
+{
+"id": "A-enterprise-offline",
+"surface": "assistant",
+"module": "M05",
+"title": "网络已断开 · 晨星科技"
+},
+{
+"id": "A-enterprise-service",
+"surface": "assistant",
+"module": "M05",
+"title": "服务暂时不可用 · 晨星科技"
+},
+{
+"id": "A-enterprise-restored",
+"surface": "assistant",
+"module": "M05",
+"title": "重新验证完成 · 晨星科技"
+},
+{
+"id": "A-enterprise-completezero",
+"surface": "assistant",
+"module": "M05",
+"title": "本次生成已完成 · 晨星科技"
+},
+{
+"id": "A-enterprise-files",
+"surface": "assistant",
+"module": "M08",
+"title": "原对话附件与生成文件 · 晨星科技"
+},
+{
+"id": "A-enterprise-viewer",
+"surface": "assistant",
+"module": "M08",
+"title": "查看生成文件 · 晨星科技"
+},
+{
+"id": "A-enterprise-attachment",
+"surface": "assistant",
+"module": "M08",
+"title": "查看原对话附件 · 晨星科技"
+},
+{
+"id": "A-enterprise-missing",
+"surface": "assistant",
+"module": "M08",
+"title": "文件已移动或删除 · 晨星科技"
+},
+{
+"id": "A-enterprise-reselected",
+"surface": "assistant",
+"module": "M08",
+"title": "已重新选择材料 · 晨星科技"
+},
+{
+"id": "A-enterprise-sources",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源与工具 · 晨星科技"
+},
+{
+"id": "A-enterprise-sourceauth",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源需要认证 · 晨星科技"
+},
+{
+"id": "A-enterprise-sourcefailed",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源连接失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-sourcedenied",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源权限被拒绝 · 晨星科技"
+},
+{
+"id": "A-enterprise-automations",
+"surface": "assistant",
+"module": "M06",
+"title": "自动化 · 晨星科技"
+},
+{
+"id": "A-enterprise-browser",
+"surface": "assistant",
+"module": "M06",
+"title": "助手浏览器 · 晨星科技"
+},
+{
+"id": "A-enterprise-return",
+"surface": "assistant",
+"module": "M09",
+"title": "返回后待查询 · 晨星科技"
+},
+{
+"id": "A-enterprise-ownerreturn",
+"surface": "assistant",
+"module": "M09",
+"title": "企业返回后待查询 · 晨星科技"
+},
+{
+"id": "A-enterprise-preblock",
+"surface": "assistant",
+"module": "M09",
+"title": "发送前积分不足 · 晨星科技"
+},
+{
+"id": "A-enterprise-cut",
+"surface": "assistant",
+"module": "M09",
+"title": "生成因积分不足停止 · 晨星科技"
+},
+{
+"id": "A-enterprise-checking",
+"surface": "assistant",
+"module": "M09",
+"title": "正在查询 · 晨星科技"
+},
+{
+"id": "A-enterprise-notyet",
+"surface": "assistant",
+"module": "M09",
+"title": "尚未到账 · 晨星科技"
+},
+{
+"id": "A-enterprise-queryfailed",
+"surface": "assistant",
+"module": "M09",
+"title": "查询失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-resumed",
+"surface": "assistant",
+"module": "M09",
+"title": "积分可用 · 晨星科技"
+},
+{
+"id": "A-enterprise-notify",
+"surface": "assistant",
+"module": "M09",
+"title": "企业积分不足 · 晨星科技"
+},
+{
+"id": "A-enterprise-notified",
+"surface": "assistant",
+"module": "M09",
+"title": "已通知所有者 · 晨星科技"
+},
+{
+"id": "A-enterprise-budget",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算已达上限 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetowner",
+"surface": "assistant",
+"module": "M09",
+"title": "所有者处理企业预算 · 晨星科技"
+},
+{
+"id": "A-enterprise-ownerblock",
+"surface": "assistant",
+"module": "M09",
+"title": "所有者处理企业积分 · 晨星科技"
+},
+{
+"id": "A-enterprise-ownerresumed",
+"surface": "assistant",
+"module": "M09",
+"title": "企业积分可用 · 晨星科技"
+},
+{
+"id": "A-enterprise-skills",
+"surface": "assistant",
+"module": "M06",
+"title": "技能 · 晨星科技"
+},
+{
+"id": "A-enterprise-discover",
+"surface": "assistant",
+"module": "M06",
+"title": "获取技能 · 晨星科技"
+},
+{
+"id": "A-enterprise-acquire",
+"surface": "assistant",
+"module": "M06",
+"title": "技能详情 · 晨星科技"
+},
+{
+"id": "A-enterprise-enabledpending",
+"surface": "assistant",
+"module": "M06",
+"title": "已启用 · 设备待准备 · 晨星科技"
+},
+{
+"id": "A-enterprise-installing",
+"surface": "assistant",
+"module": "M06",
+"title": "正在准备本机 · 晨星科技"
+},
+{
+"id": "A-enterprise-installfailed",
+"surface": "assistant",
+"module": "M06",
+"title": "设备准备失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-installed",
+"surface": "assistant",
+"module": "M06",
+"title": "已安装 · 晨星科技"
+},
+{
+"id": "A-enterprise-enabled",
+"surface": "assistant",
+"module": "M06",
+"title": "已启用 · 晨星科技"
+},
+{
+"id": "A-enterprise-detail",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-updated",
+"surface": "assistant",
+"module": "M06",
+"title": "版本已更新 · 晨星科技"
+},
+{
+"id": "A-enterprise-updatefailed",
+"surface": "assistant",
+"module": "M06",
+"title": "更新失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-remove",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled",
+"surface": "assistant",
+"module": "M06",
+"title": "本机已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-denied",
+"surface": "assistant",
+"module": "M06",
+"title": "未获授权 · 晨星科技"
+},
+{
+"id": "A-enterprise-restricted",
+"surface": "assistant",
+"module": "M06",
+"title": "最后来源失效 · 晨星科技"
+},
+{
+"id": "A-enterprise-reauthorized",
+"surface": "assistant",
+"module": "M06",
+"title": "来源恢复 · 晨星科技"
+},
+{
+"id": "A-enterprise-builtinoff",
+"surface": "assistant",
+"module": "M06",
+"title": "内置技能已停用 · 晨星科技"
+},
+{
+"id": "A-enterprise-builtinon",
+"surface": "assistant",
+"module": "M06",
+"title": "内置技能已启用 · 晨星科技"
+},
+{
+"id": "A-personal-legacy-local-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-personal-legacy-local-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-detail-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 我的空间"
+},
+{
+"id": "A-personal-legacy-remove-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 我的空间"
+},
+{
+"id": "A-enterprise-legacy-local-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-local-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-detail-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "技能版本 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-remove-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载确认 · 晨星科技"
+},
+{
+"id": "A-personal-restricted-remove",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载已失效副本 · 我的空间"
+},
+{
+"id": "A-personal-restricted-uninstalled",
+"surface": "assistant",
+"module": "M06",
+"title": "已失效副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-personal-uninstalled-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 我的空间"
+},
+{
+"id": "A-enterprise-restricted-remove",
+"surface": "assistant",
+"module": "M06",
+"title": "卸载已失效副本 · 晨星科技"
+},
+{
+"id": "A-enterprise-restricted-uninstalled",
+"surface": "assistant",
+"module": "M06",
+"title": "已失效副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-100-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-100-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-100-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-100-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-110-0-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-110-0-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-110-1-0",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-enterprise-uninstalled-110-1-1",
+"surface": "assistant",
+"module": "M06",
+"title": "本机副本已卸载 · 晨星科技"
+},
+{
+"id": "A-personal-empty-skills",
+"surface": "assistant",
+"module": "M06",
+"title": "暂无额外技能 · 我的空间"
+},
+{
+"id": "A-personal-empty-sources",
+"surface": "assistant",
+"module": "M06",
+"title": "暂无数据源 · 我的空间"
+},
+{
+"id": "A-personal-sourcedisconnected",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源未连接 · 我的空间"
+},
+{
+"id": "A-personal-sourceconnecting",
+"surface": "assistant",
+"module": "M06",
+"title": "正在连接数据源 · 我的空间"
+},
+{
+"id": "A-personal-permission",
+"surface": "assistant",
+"module": "M05",
+"title": "需要文件访问权限 · 我的空间"
+},
+{
+"id": "A-personal-permissiondenied",
+"surface": "assistant",
+"module": "M05",
+"title": "文件访问权限被拒绝 · 我的空间"
+},
+{
+"id": "A-personal-permissiongranted",
+"surface": "assistant",
+"module": "M05",
+"title": "访问权限已授予 · 我的空间"
+},
+{
+"id": "A-enterprise-empty-skills",
+"surface": "assistant",
+"module": "M06",
+"title": "暂无额外技能 · 晨星科技"
+},
+{
+"id": "A-enterprise-empty-sources",
+"surface": "assistant",
+"module": "M06",
+"title": "暂无数据源 · 晨星科技"
+},
+{
+"id": "A-enterprise-sourcedisconnected",
+"surface": "assistant",
+"module": "M06",
+"title": "数据源未连接 · 晨星科技"
+},
+{
+"id": "A-enterprise-sourceconnecting",
+"surface": "assistant",
+"module": "M06",
+"title": "正在连接数据源 · 晨星科技"
+},
+{
+"id": "A-enterprise-permission",
+"surface": "assistant",
+"module": "M05",
+"title": "需要文件访问权限 · 晨星科技"
+},
+{
+"id": "A-enterprise-permissiondenied",
+"surface": "assistant",
+"module": "M05",
+"title": "文件访问权限被拒绝 · 晨星科技"
+},
+{
+"id": "A-enterprise-permissiongranted",
+"surface": "assistant",
+"module": "M05",
+"title": "访问权限已授予 · 晨星科技"
+},
+{
+"id": "A-personal-returnstream",
+"surface": "assistant",
+"module": "M09",
+"title": "生成中断后返回 · 我的空间"
+},
+{
+"id": "A-personal-checkingstream",
+"surface": "assistant",
+"module": "M09",
+"title": "正在查询充值 · 我的空间"
+},
+{
+"id": "A-personal-notyetstream",
+"surface": "assistant",
+"module": "M09",
+"title": "生成中断 · 未到账 · 我的空间"
+},
+{
+"id": "A-personal-failedstream",
+"surface": "assistant",
+"module": "M09",
+"title": "生成中断 · 查询失败 · 我的空间"
+},
+{
+"id": "A-personal-resumedstream",
+"surface": "assistant",
+"module": "M09",
+"title": "生成中断 · 积分可用 · 我的空间"
+},
+{
+"id": "A-enterprise-ownerchecking",
+"surface": "assistant",
+"module": "M09",
+"title": "企业积分 · 正在查询 · 晨星科技"
+},
+{
+"id": "A-enterprise-ownerpending",
+"surface": "assistant",
+"module": "M09",
+"title": "企业积分 · 尚未恢复 · 晨星科技"
+},
+{
+"id": "A-enterprise-ownerfailed",
+"surface": "assistant",
+"module": "M09",
+"title": "企业积分 · 查询失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetreturn",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算 · 返回后待查询 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetchecking",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算 · 正在查询 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetpending",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算 · 尚未恢复 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetfailed",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算 · 查询失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetresumed",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算 · 已恢复可用 · 晨星科技"
+},
+{
+"id": "A-personal-availability",
+"surface": "assistant",
+"module": "M05",
+"title": "恢复发送 · 我的空间"
+},
+{
+"id": "A-enterprise-availability",
+"surface": "assistant",
+"module": "M05",
+"title": "恢复发送 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetnotified",
+"surface": "assistant",
+"module": "M09",
+"title": "已通知所有者调整预算 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetmemberchecking",
+"surface": "assistant",
+"module": "M09",
+"title": "正在核对企业预算 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetmemberpending",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算仍受限 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetmemberfailed",
+"surface": "assistant",
+"module": "M09",
+"title": "预算查询失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-budgetmemberresumed",
+"surface": "assistant",
+"module": "M09",
+"title": "企业预算恢复 · 晨星科技"
+},
+{
+"id": "A-personal-activity",
+"surface": "assistant",
+"module": "M04",
+"title": "助手任务 · 我的空间"
+},
+{
+"id": "A-personal-preferences",
+"surface": "assistant",
+"module": "M05",
+"title": "助手偏好 · 我的空间"
+},
+{
+"id": "A-personal-preferences-savefailed",
+"surface": "assistant",
+"module": "M05",
+"title": "助手偏好保存失败 · 我的空间"
+},
+{
+"id": "A-personal-close",
+"surface": "assistant",
+"module": "M04",
+"title": "关闭 Polo 助手 · 我的空间"
+},
+{
+"id": "A-personal-closefailed",
+"surface": "assistant",
+"module": "M04",
+"title": "未能停止任务 · 我的空间"
+},
+{
+"id": "A-enterprise-activity",
+"surface": "assistant",
+"module": "M04",
+"title": "助手任务 · 晨星科技"
+},
+{
+"id": "A-enterprise-preferences",
+"surface": "assistant",
+"module": "M05",
+"title": "助手偏好 · 晨星科技"
+},
+{
+"id": "A-enterprise-preferences-savefailed",
+"surface": "assistant",
+"module": "M05",
+"title": "助手偏好保存失败 · 晨星科技"
+},
+{
+"id": "A-enterprise-close",
+"surface": "assistant",
+"module": "M04",
+"title": "关闭 Polo 助手 · 晨星科技"
+},
+{
+"id": "A-enterprise-closefailed",
+"surface": "assistant",
+"module": "M04",
+"title": "未能停止任务 · 晨星科技"
+},
+{
+"id": "A-personal-transfer-export",
+"surface": "assistant",
+"module": "M08",
+"title": "导出允许的对话内容 · 我的空间"
+},
+{
+"id": "A-personal-transfer-exported",
+"surface": "assistant",
+"module": "M08",
+"title": "对话内容已导出 · 我的空间"
+},
+{
+"id": "A-personal-transfer-import",
+"surface": "assistant",
+"module": "M08",
+"title": "导入对话内容 · 我的空间"
+},
+{
+"id": "A-personal-transfer-preview",
+"surface": "assistant",
+"module": "M08",
+"title": "确认导入 · 我的空间"
+},
+{
+"id": "A-personal-transfer-done",
+"surface": "assistant",
+"module": "M08",
+"title": "已建立导入对话 · 我的空间"
+},
+{
+"id": "A-personal-transfer-invalid",
+"surface": "assistant",
+"module": "M08",
+"title": "无法导入此文件 · 我的空间"
+},
+{
+"id": "A-personal-legacy-isolation",
+"surface": "assistant",
+"module": "M08",
+"title": "旧数据归属待核验 · 我的空间"
+},
+{
+"id": "A-enterprise-transfer-export",
+"surface": "assistant",
+"module": "M08",
+"title": "导出允许的对话内容 · 晨星科技"
+},
+{
+"id": "A-enterprise-transfer-exported",
+"surface": "assistant",
+"module": "M08",
+"title": "对话内容已导出 · 晨星科技"
+},
+{
+"id": "A-enterprise-transfer-import",
+"surface": "assistant",
+"module": "M08",
+"title": "导入对话内容 · 晨星科技"
+},
+{
+"id": "A-enterprise-transfer-preview",
+"surface": "assistant",
+"module": "M08",
+"title": "确认导入 · 晨星科技"
+},
+{
+"id": "A-enterprise-transfer-done",
+"surface": "assistant",
+"module": "M08",
+"title": "已建立导入对话 · 晨星科技"
+},
+{
+"id": "A-enterprise-transfer-invalid",
+"surface": "assistant",
+"module": "M08",
+"title": "无法导入此文件 · 晨星科技"
+},
+{
+"id": "A-enterprise-legacy-isolation",
+"surface": "assistant",
+"module": "M08",
+"title": "旧数据归属待核验 · 晨星科技"
+}
+]

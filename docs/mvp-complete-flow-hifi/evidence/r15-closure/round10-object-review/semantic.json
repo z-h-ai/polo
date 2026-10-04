@@ -1,0 +1,73 @@
+{
+  "kind": "semantic",
+  "revision": "poo70-workbench-r15-closure",
+  "passed": true,
+  "status": "passed",
+  "verdict": "ready",
+  "reviewer_context": {
+    "agent": "zcode-subagent-object-final-r15c",
+    "perspective": "业务对象、权限与生命周期"
+  },
+  "independence": {
+    "allowed_inputs_only": true,
+    "prior_reports_read": false,
+    "author_scripts_read": false
+  },
+  "inputs": [
+    {"path": "docs/client-journey-review/spec.md", "sha256": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6"},
+    {"path": "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json", "sha256": "c3034f48e94a64f04a4cb7937c5aff27c1dcaa2aa884cd45aefc4fa48b30965e"},
+    {"path": "docs/mvp-complete-flow-hifi/prototype-manifest.json", "sha256": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47"},
+    {"path": "docs/mvp-complete-flow-hifi/review.html", "sha256": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3"},
+    {"path": "docs/mvp-complete-flow-hifi/prototype.html", "sha256": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4"},
+    {"path": "/Users/wow/.agents/skills/product-ui-prototype/references/quality-report.md（semantic probes 方法节，仓库外允许方法参考）", "sha256": "bb4e9ef6d8b504bdeca4d4908c0d45e238fb876b4c4b874e7b26e1ea4d1a7395"}
+  ],
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47",
+    "docs/mvp-complete-flow-hifi/prototype.html": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4",
+    "docs/mvp-complete-flow-hifi/review.html": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3",
+    "design-demos/polo-client-source-baseline/prototype.html": "0ab2e73a760d4c4fa4f3d584267e58165404e36660744d63326db05e10d77eb8"
+  },
+  "input_stability": {
+    "stable": true,
+    "note": "start/end 哈希一致"
+  },
+  "findings": [],
+  "scope": "poo70-workbench-r15-closure 双表面全部 424 场景 × 3 声明视口的全量渲染普查（1272 观测）与 23 项业务义务（PC-F01—11、PC-N01—04、C-R01—08）的对象/权限/生命周期全量语义复查，含 20 条真实点击反例链；视觉与无障碍按 SoT 待复看不评。",
+  "observed": {
+    "scenes_rendered": 424,
+    "scene_viewport_observations": 1272,
+    "real_click_actions": 1371,
+    "page_errors": 0,
+    "external_requests": 0
+  },
+  "checks": [
+    {"id": "PC-F01", "status": "passed", "observed": "登录/验证码/取消留入口、个人空间幂等准备与失败重试、过期重登均有页面承载，无第二空间入口。"},
+    {"id": "PC-F02", "status": "passed", "observed": "完整目录（最近使用默认/频率可选）、打开→权限确认（仅本次选中文件）→准备→App Tab、关闭三分支与终止失败恢复、权限拒绝给系统设置路径+主动重试。"},
+    {"id": "PC-F03", "status": "passed", "observed": "桌面无粘贴分享链接入口；退出仅在订阅区；日历月/年与 12 个月上限、无自动扣款；到期=续费恢复、主动退出=重新加入，入口区分正确。"},
+    {"id": "PC-F04", "status": "passed", "observed": "授权/本人启用/设备准备三态分列；同名内置与圈子技能独立启停（停用内置圈子同名不变）；详情名称唯一；待答问题回答/暂不回答行为正确。"},
+    {"id": "PC-F05", "status": "passed", "observed": "指定邀请绑定账号、共享待审批不列空间、刷新失败保留成员事实、错账号提示、冷启动/未安装指引齐备。"},
+    {"id": "PC-F06", "status": "passed", "observed": "一次确认停止 3 项→进度页 n/N 且无成功/失败选择按钮；部分停止(2/3)后取消已停项不复活，重确认仅列剩余 1 项；终止失败重试后自动进入目标。"},
+    {"id": "PC-F07", "status": "passed", "observed": "企业目录仅分发作品、无我的圈子入口与个人来源筛选；空目录联系管理员；个人/企业同名实例场景互不覆盖。"},
+    {"id": "PC-F08", "status": "passed", "observed": "逐来源失效/恢复成立（退出增长圈共享作品可打开，唯一来源退出后仅可重新加入）；到期/版本暂停/移除原因区分；被移除安全回个人。"},
+    {"id": "PC-F09", "status": "passed", "observed": "按资格显示企业管理/创作者工作台/责任只读；企业 Member 菜单无财务入口（渲染反向可达验证）；管理交接取消回原菜单并保留所选企业。"},
+    {"id": "PC-F10", "status": "passed", "observed": "离线不新开执行、本地步骤可继续；缓存标注已保存时间戳且在线核对失败可重试；重开恢复已存内容且任务状态逐项核对。"},
+    {"id": "PC-F11", "status": "passed", "observed": "契约阻断+升级/帮助；失败/取消仍阻断；检查通过后进入且原任务不自动执行。"},
+    {"id": "PC-N01", "status": "passed", "observed": "无使用记录仍展示授权应用；真空目录诚实空态；加载失败与空态分别呈现且可重试。"},
+    {"id": "PC-N02", "status": "passed", "observed": "重开先恢复身份/空间/权限；重新打开不自动执行旧任务。"},
+    {"id": "PC-N03", "status": "passed", "observed": "发送前不建消息、生成中保留部分输出、App 非模态；Member 仅通知 Owner；单次查询、未到账/失败保留阻断、还没有仅关闭；解除后用户主动发送。"},
+    {"id": "PC-N04", "status": "passed", "observed": "空提交禁用；回答一条消息原会话续答；暂不回答不续答；重开恢复以恢复态场景承载（真实进程重启重放见限制 AE-2）。"},
+    {"id": "C-R01", "status": "passed", "observed": "登录过期重登、退出保留本机文件、账号受限页 ACC-0182。"},
+    {"id": "C-R02", "status": "passed", "observed": "加载/零条/失败/受限分别呈现，失败不拿他空间缓存填充。"},
+    {"id": "C-R03", "status": "passed", "observed": "目录/助手/技能/运行随空间整体切换；圈子不进入选择器；owner 不明旧数据隔离不可打开。"},
+    {"id": "C-R04", "status": "passed", "observed": "取消退出/取消切换/取消导入均留原入口；已完成终止与续费结果不被回滚；查询中/停止中不写成成功。"},
+    {"id": "C-R05", "status": "passed", "observed": "重开先恢复再显示、任务状态逐项核对、不自动重发。"},
+    {"id": "C-R06", "status": "passed", "observed": "必要权限+范围与费用承担说明；拒绝留原页不启动；OS 拒绝给设置路径+用户主动重试。"},
+    {"id": "C-R07", "status": "passed", "observed": "导出仅允许内容不含凭证/隐藏上下文；导入取消/格式失败不建对象（真实文件注入验证）；确认后建立新对话；同名两份材料成功分支身份区分 awaiting evidence（AE-1，格式由 POO-62 确定）。"},
+    {"id": "C-R08", "status": "passed", "observed": "三组跨端交接均要求同账号主动核对，返回不代表到账；错账号/待审批/过期目标拒绝或指引。"},
+    {"id": "PROBE-census-full", "status": "passed", "observed": "424 场景 × 3 视口共 1272 次观测全部成功，场景无错位，采集文本与控件清单。"},
+    {"id": "PROBE-pageerror", "status": "passed", "observed": "全程 0 个未捕获页面异常。"},
+    {"id": "PROBE-external-net", "status": "passed", "observed": "全程 0 个外部网络请求（纯离线产物）。"},
+    {"id": "PROBE-superseded-rules", "status": "passed", "observed": "常用配置/5 个上限/第二排导航/查看全部应用/管理本机技能/自动续费/宽限期/30 天/付款方常驻标签/英文 Skill 字样在全部渲染文本零残留。"},
+    {"id": "PROBE-input-stability", "status": "passed", "observed": "四个产物文件 SHA-256 评审起止一致。"}
+  ]
+}

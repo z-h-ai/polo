@@ -1,0 +1,13 @@
+{
+  "scenes_in_manifest": 424,
+  "viewports": 3,
+  "expected_observations": 1272,
+  "scene_viewport_observations": 1269,
+  "page_errors": 0,
+  "external_requests": 0,
+  "console_errors": 0,
+  "timeouts": 3,
+  "screenshots": 789,
+  "pageerror_samples": [],
+  "external_request_samples": []
+}

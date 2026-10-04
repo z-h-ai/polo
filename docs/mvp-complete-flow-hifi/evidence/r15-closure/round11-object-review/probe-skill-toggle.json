@@ -1,0 +1,1071 @@
+{
+ "steps": [
+  {
+   "tag": "list-initial",
+   "cap": {
+    "id": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n准备本机\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "ctrls": [
+     {
+      "l": "首页",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "后台任务",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "通知",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "打开账号菜单",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "名称或用途",
+      "d": false,
+      "c": null,
+      "t": "input"
+     },
+     {
+      "l": "打开 Polo 助手",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "全部技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "已启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "待准备",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "有更新",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "受限",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看来源技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "返回技能列表",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "获取技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "管理版本",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我停用",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "准备本机",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "更新到 1.1.0",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "卸载本机副本",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "重新验证来源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "停用内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "启用内置技能",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "新建会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "所有会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "数据源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     }
+    ]
+   }
+  },
+  {
+   "tag": "select-builtin",
+   "clicked": true,
+   "cap": {
+    "id": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n资料研究\n\nPolo 内置 · 随客户端提供\n\n启用状态：已启用\n\n停用内置技能\n\n随 Polo 版本维护，不使用圈子版本，也不依赖圈子订阅。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "ctrls": [
+     {
+      "l": "首页",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "后台任务",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "通知",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "打开账号菜单",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "名称或用途",
+      "d": false,
+      "c": null,
+      "t": "input"
+     },
+     {
+      "l": "打开 Polo 助手",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "全部技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "已启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "待准备",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "有更新",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "受限",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看来源技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "返回技能列表",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "获取技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "管理版本",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我停用",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "准备本机",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "更新到 1.1.0",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "卸载本机副本",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "重新验证来源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "停用内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "启用内置技能",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "新建会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "所有会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "数据源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     }
+    ]
+   }
+  },
+  {
+   "tag": "toggle-builtin-off",
+   "clicked": false,
+   "cap": {
+    "id": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n资料研究\n\nPolo 内置 · 随客户端提供\n\n启用状态：已启用\n\n停用内置技能\n\n随 Polo 版本维护，不使用圈子版本，也不依赖圈子订阅。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "ctrls": [
+     {
+      "l": "首页",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "后台任务",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "通知",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "打开账号菜单",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "名称或用途",
+      "d": false,
+      "c": null,
+      "t": "input"
+     },
+     {
+      "l": "打开 Polo 助手",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "全部技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "已启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "待准备",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "有更新",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "受限",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看来源技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "返回技能列表",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "获取技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "管理版本",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我停用",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "准备本机",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "更新到 1.1.0",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "卸载本机副本",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "重新验证来源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "停用内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "启用内置技能",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "新建会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "所有会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "数据源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     }
+    ]
+   }
+  },
+  {
+   "tag": "list-after-off",
+   "cap": {
+    "id": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n资料研究\n\nPolo 内置 · 随客户端提供\n\n启用状态：已启用\n\n停用内置技能\n\n随 Polo 版本维护，不使用圈子版本，也不依赖圈子订阅。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "ctrls": [
+     {
+      "l": "首页",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "后台任务",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "通知",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "打开账号菜单",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "名称或用途",
+      "d": false,
+      "c": null,
+      "t": "input"
+     },
+     {
+      "l": "打开 Polo 助手",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "全部技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "已启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "待准备",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "有更新",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "受限",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看来源技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "返回技能列表",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "获取技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "管理版本",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我停用",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "准备本机",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "更新到 1.1.0",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "卸载本机副本",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "重新验证来源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "停用内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "启用内置技能",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "新建会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "所有会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "数据源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     }
+    ]
+   }
+  },
+  {
+   "tag": "search-samename",
+   "filled": true,
+   "cap": {
+    "id": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n资料研究\n\nPolo 内置 · 随客户端提供\n\n启用状态：已启用\n\n停用内置技能\n\n随 Polo 版本维护，不使用圈子版本，也不依赖圈子订阅。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "ctrls": [
+     {
+      "l": "首页",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "后台任务",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "通知",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "打开账号菜单",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "资料研究",
+      "d": false,
+      "c": null,
+      "t": "input"
+     },
+     {
+      "l": "打开 Polo 助手",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "全部技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "已启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "待准备",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "有更新",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "受限",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看来源技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "返回技能列表",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "获取技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "管理版本",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我停用",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "准备本机",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "更新到 1.1.0",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "卸载本机副本",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "重新验证来源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "停用内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "启用内置技能",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "新建会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "所有会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "数据源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     }
+    ]
+   }
+  },
+  {
+   "tag": "toggle-builtin-on",
+   "clicked_select": true,
+   "clicked_enable": false,
+   "cap": {
+    "id": "A-personal-skills",
+    "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n资料研究\n\nPolo 内置 · 随客户端提供\n\n启用状态：已启用\n\n停用内置技能\n\n随 Polo 版本维护，不使用圈子版本，也不依赖圈子订阅。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+    "ctrls": [
+     {
+      "l": "首页",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "后台任务",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "通知",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "打开账号菜单",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "名称或用途",
+      "d": false,
+      "c": null,
+      "t": "input"
+     },
+     {
+      "l": "打开 Polo 助手",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "全部技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "已启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "待准备",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "有更新",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "受限",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看来源技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "查看内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "返回技能列表",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "获取技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "管理版本",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我启用",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "为我停用",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "准备本机",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "更新到 1.1.0",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "卸载本机副本",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "重新验证来源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "停用内置技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "启用内置技能",
+      "d": true,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "新建会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "所有会话",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "技能",
+      "d": false,
+      "c": null,
+      "t": "button"
+     },
+     {
+      "l": "数据源",
+      "d": false,
+      "c": null,
+      "t": "button"
+     }
+    ]
+   }
+  }
+ ]
+}

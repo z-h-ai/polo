@@ -1,0 +1,14 @@
+{
+ "command": [
+  "python3",
+  "/Users/wow/.agents/skills/product-ui-prototype/scripts/validate_prototype.py",
+  "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview/docs/mvp-complete-flow-hifi",
+  "--root",
+  "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview"
+ ],
+ "exit_code": 2,
+ "stdout": "",
+ "stderr": "ERROR: manifest: invalid fields\n",
+ "passed": false,
+ "applicability": "Upstream single-surface v3 schema does not accept established repository surfaces/aliases extension; repository validate_unified.py is the applicable multi-surface contract. No upstream clearance is claimed."
+}

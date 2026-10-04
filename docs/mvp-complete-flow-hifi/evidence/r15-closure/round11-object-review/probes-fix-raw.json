@@ -1,0 +1,2767 @@
+[
+ {
+  "chain": "FX1-open-dedup-report-exact",
+  "steps": [
+   {
+    "step": 0,
+    "nav": "P-M03-ALL-APPS",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "P-M03-ALL-APPS",
+     "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：我的空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重试连接",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "我的圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "搜索应用",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "应用来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "应用排序",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "管理技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "清空筛选",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M03-ALL-APPS"
+   },
+   {
+    "step": 1,
+    "click": "打开",
+    "found": {
+     "ok": true,
+     "label": "打开",
+     "total": 4
+    },
+    "arrived": false,
+    "expected": "P-M04-APP-REPORT",
+    "capture": {
+     "ok": true,
+     "id": "P-M04-APP-VIEW-PERSONAL",
+     "text": "P\nPolo\n首页\n会议纪要整理\n×\n后台任务\n我\n我的空间\n王\n会\n会议纪要整理\n\n我的空间",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "会议纪要整理",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "关闭标签",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：我的空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M04-APP-VIEW-PERSONAL"
+   }
+  ]
+ },
+ {
+  "chain": "FX2-samename-toggle-and-search",
+  "steps": [
+   {
+    "step": 0,
+    "nav": "A-personal-skills",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "A-personal-skills",
+     "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n准备本机\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+     "controls": [
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "名称或用途",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "打开 Polo 助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "全部技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "已启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "待准备",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "有更新",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "受限",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "全部来源 Polo 内置 晨星增长圈 晨星设计圈",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "查看来源技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "查看内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "返回技能列表",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "获取技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "管理版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我停用",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "准备本机",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "更新到 1.1.0",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "卸载本机副本",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "重新验证来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "停用内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "启用内置技能",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "新建会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "所有会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "数据源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      }
+     ]
+    },
+    "shell_scene": "A-personal-skills"
+   },
+   {
+    "step": 1,
+    "click": "停用内置技能",
+    "found": {
+     "ok": false,
+     "reason": "no-control",
+     "want": "停用内置技能"
+    },
+    "capture": {
+     "ok": true,
+     "id": "A-personal-skills",
+     "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n准备本机\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+     "controls": [
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "名称或用途",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "打开 Polo 助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "全部技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "已启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "待准备",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "有更新",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "受限",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "全部来源 Polo 内置 晨星增长圈 晨星设计圈",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "查看来源技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "查看内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "返回技能列表",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "获取技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "管理版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我停用",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "准备本机",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "更新到 1.1.0",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "卸载本机副本",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "重新验证来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "停用内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "启用内置技能",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "新建会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "所有会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "数据源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      }
+     ]
+    },
+    "shell_scene": "A-personal-skills"
+   },
+   {
+    "step": 2,
+    "nav": "A-personal-skills",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "A-personal-skills",
+     "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n准备本机\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+     "controls": [
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "名称或用途",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "打开 Polo 助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "全部技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "已启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "待准备",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "有更新",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "受限",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "全部来源 Polo 内置 晨星增长圈 晨星设计圈",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "查看来源技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "查看内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "返回技能列表",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "获取技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "管理版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我停用",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "准备本机",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "更新到 1.1.0",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "卸载本机副本",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "重新验证来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "停用内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "启用内置技能",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "新建会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "所有会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "数据源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      }
+     ]
+    },
+    "shell_scene": "A-personal-skills"
+   },
+   {
+    "step": 3,
+    "fill": "搜索",
+    "fill_ok": false,
+    "capture": {
+     "ok": true,
+     "id": "A-personal-skills",
+     "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n未启用\n本机准备\n未安装\n本机版本\n—\n内置资料研究\n已启用\n获取技能\n管理版本\n为我启用\n准备本机\n重新验证来源\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+     "controls": [
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "名称或用途",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "打开 Polo 助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "全部技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "已启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "待准备",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "有更新",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "受限",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "全部来源 Polo 内置 晨星增长圈 晨星设计圈",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "查看来源技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "查看内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "返回技能列表",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "获取技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "管理版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "为我停用",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "准备本机",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "更新到 1.1.0",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "卸载本机副本",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "重新验证来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "停用内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "启用内置技能",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "新建会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "所有会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "数据源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      }
+     ]
+    },
+    "shell_scene": "A-personal-skills"
+   },
+   {
+    "step": 4,
+    "fill": "搜索",
+    "fill_ok": false
+   },
+   {
+    "step": 5,
+    "nav": "A-personal-detail",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "A-personal-detail",
+     "text": "P\nPolo\n首页\n后台任务\n我的空间\n王\n技能\n\n管理当前空间的技能、来源与版本\n\n搜索技能\n打开 Polo 助手\n全部技能\n已启用\n待准备\n有更新\n受限\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n\n2 项技能\n\n资料研究\n\n晨星增长圈 / 晨星设计圈\n\n已启用 · 就绪 · 1.0.0\n资料研究\n\nPolo 内置\n\n已启用\n📋\n资料研究\n\n整理材料与进展，形成可核对的报告草稿\n\n来源与使用状态\n来源\n晨星增长圈 / 晨星设计圈\n来源授权\n有效\n本人启用\n已启用\n本机准备\n就绪\n本机版本\n1.0.0\n内置资料研究\n已启用\n为我停用\n更新到 1.1.0\n卸载本机副本\n版本更新\n\n最新可用版本：1.1.0\n\n1.1.0：改善资料摘要和引用整理。更新用于后续调用，已运行的任务不切换版本。\n\n说明\n\n使用当前空间中已授权的数据源整理资料。执行前请核对文件范围与输出内容。\n\n新建助手会话\n所有会话\n返回完整技能列表\n助手数据源",
+     "controls": [
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "名称或用途",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "打开 Polo 助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "全部技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "已启用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "待准备",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "有更新",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "受限",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "全部来源 Polo 内置 晨星增长圈 晨星设计圈",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "查看来源技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "查看内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "返回技能列表",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "为我停用",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "更新到 1.1.0",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "卸载本机副本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "启用内置技能",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "停用内置技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "新建会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "所有会话",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      },
+      {
+       "label": "数据源",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": "button"
+      }
+     ]
+    },
+    "shell_scene": "A-personal-detail"
+   }
+  ]
+ },
+ {
+  "chain": "FX3-renew-limit-click",
+  "steps": [
+   {
+    "step": 0,
+    "nav": "P-M07-RENEW",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "P-M07-RENEW",
+     "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 到期 2026-11-02\n管理成员资格\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n同一技能保留晨星增长圈、晨星设计圈两个有效来源\n可使用\n查看并安装\n手动续费 · 晨星设计圈\n\n月付：从当前到期时刻顺延；剩余权益最多 12 个日历月\n\n续费时长\n1 个日历月（¥39）\n起算日\n2026-11-02 至 2026-12-02\n自动扣款\n无 · 到期前需手动续费\n支付位置\n系统浏览器\n取消\n去浏览器支付",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：我的空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重试连接",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "返回我的圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理成员资格",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "续费恢复",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重新加入圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看并安装",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看并安装",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "关闭",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "取消",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "去浏览器支付",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看续费限制",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "续费恢复",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重新加入圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M07-RENEW"
+   },
+   {
+    "step": 1,
+    "click": "查看续费限制",
+    "found": {
+     "ok": false,
+     "reason": "no-control",
+     "want": "查看续费限制"
+    },
+    "capture": {
+     "ok": true,
+     "id": "P-M07-RENEW",
+     "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 到期 2026-11-02\n管理成员资格\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n同一技能保留晨星增长圈、晨星设计圈两个有效来源\n可使用\n查看并安装\n手动续费 · 晨星设计圈\n\n月付：从当前到期时刻顺延；剩余权益最多 12 个日历月\n\n续费时长\n1 个日历月（¥39）\n起算日\n2026-11-02 至 2026-12-02\n自动扣款\n无 · 到期前需手动续费\n支付位置\n系统浏览器\n取消\n去浏览器支付",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：我的空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重试连接",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "返回我的圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理成员资格",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "续费恢复",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重新加入圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看并安装",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看并安装",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "管理本机版本",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "关闭",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "取消",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "去浏览器支付",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看续费限制",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "续费恢复",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重新加入圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M07-RENEW"
+   }
+  ]
+ },
+ {
+  "chain": "FX4-cancel-switch-runtime",
+  "steps": [
+   {
+    "step": 0,
+    "nav": "P-M02-STOPPING",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "P-M02-STOPPING",
+     "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n正在停止任务\n已停止 0 / 3 项\n正在停止\n报价整理\n运行中 · 前台\n正在停止\n助手 · Q2 报价汇总\n正在生成回答\n正在停止\n合同审查\n同空间后台运行\n取消切换",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：晨星科技",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「3 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "搜索应用",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "应用来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "应用排序",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "管理技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看原因",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "清空筛选",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "关闭",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "取消切换",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M02-STOPPING"
+   },
+   {
+    "step": 1,
+    "click": "取消切换",
+    "found": {
+     "ok": true,
+     "label": "取消切换",
+     "total": 1
+    },
+    "arrived": true,
+    "expected": "P-M02-STOP-CANCEL",
+    "capture": {
+     "ok": true,
+     "id": "P-M02-STOP-CANCEL",
+     "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n已取消切换\n\n你仍在 晨星科技。\n\n已停止 0 / 3\n0%\n运行中\n报价整理\n运行中 · 前台\n运行中\n助手 · Q2 报价汇总\n正在生成回答\n运行中\n合同审查\n同空间后台运行\n\n取消的是切换，不撤销已经完成的停止。\n\n返回首页\n重新选择空间",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：晨星科技",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「3 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "搜索应用",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "应用来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "应用排序",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "管理技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看原因",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "清空筛选",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "关闭",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "返回首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重新选择空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M02-STOP-CANCEL"
+   },
+   {
+    "step": 2,
+    "click": "后台任务",
+    "found": {
+     "ok": true,
+     "label": "后台任务",
+     "total": 1
+    },
+    "arrived": true,
+    "expected": "P-M04-RUNTIME",
+    "capture": {
+     "ok": true,
+     "id": "P-M04-RUNTIME",
+     "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n运行状态 · 晨星科技\n报价整理正在汇总 3 个客户的报价\n运行中\n停止\n打开\n助手 · Q2 报价汇总正在生成回答\n运行中\n停止\n打开\n合同审查同空间后台运行\n运行中\n打开\n全部停止并切换空间\nPolo 助手查看当前空间的任务与原会话\n查看助手任务\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：晨星科技",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": true,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "停止",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "停止",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "全部停止并切换空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看助手任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「3 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "重试连接",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "搜索应用",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "应用来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "应用排序",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "管理技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "查看原因",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "清空筛选",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M04-RUNTIME"
+   }
+  ]
+ },
+ {
+  "chain": "FX5-home-search-report",
+  "steps": [
+   {
+    "step": 0,
+    "nav": "P-M03-HOME-PERSONAL",
+    "nav_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "P-M03-HOME-PERSONAL",
+     "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n整理资料、处理问题，在当前空间继续对话。\n\n管理技能\n打开助手\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开\n增长打法手册\n\n晨星增长工作室\n\n查找增长方法和案例。\n\n打开",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：我的空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "我的圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "搜索应用",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "应用来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "应用排序",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "管理技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "清空筛选",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M03-HOME-PERSONAL"
+   },
+   {
+    "step": 1,
+    "fill": "搜索应用",
+    "fill_ok": true,
+    "capture": {
+     "ok": true,
+     "id": "P-M03-HOME-PERSONAL",
+     "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n我的应用\n\n各圈子提供的应用，都可以从这里打开。\n\n我的圈子\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星增长圈\n晨星设计圈\n数据工坊圈\n排序\n最近使用\n使用频率\n名称\n数据报表生成器\n\n数据工坊\n\n汇总数据，生成周期报表。\n\n打开",
+     "controls": [
+      {
+       "label": "返回 Polo 首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "首页",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "后台任务",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "通知",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开账号菜单",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "切换空间当前：我的空间",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "Polo 设置管理 Polo 设置",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "充值与账单在系统浏览器打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "退出登录保留本机文件",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "我的圈子",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "搜索应用",
+       "disabled": false,
+       "checked": "false",
+       "tag": "input",
+       "type": "search"
+      },
+      {
+       "label": "应用来源",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "应用排序",
+       "disabled": false,
+       "checked": null,
+       "tag": "select",
+       "type": null
+      },
+      {
+       "label": "管理技能",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开助手",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "打开",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      },
+      {
+       "label": "清空筛选",
+       "disabled": false,
+       "checked": null,
+       "tag": "button",
+       "type": null
+      }
+     ]
+    },
+    "shell_scene": "P-M03-HOME-PERSONAL"
+   }
+  ]
+ }
+]
