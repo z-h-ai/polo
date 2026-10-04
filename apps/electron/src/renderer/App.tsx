@@ -79,6 +79,10 @@ import { toast } from 'sonner'
 import { TabShellProvider } from '@/context/TabShellContext'
 import { TabShell } from '@/components/tab-browser/TabShell'
 import {
+  ClientPageProvider,
+  clientPageScopeKey,
+} from '@/context/ClientPageContext'
+import {
   ProductSpaceProvider,
   type ProductSpaceContextValue,
 } from '@/context/ProductSpaceContext'
@@ -565,9 +569,10 @@ export default function App() {
    * (clearProductSpaceAccount).
    */
   const resetAccountScopedClientState = useCallback(() => {
+    // A4 P3-4: initializeSessionsAtom already rewrites sessionMetaMapAtom and
+    // sessionIdsAtom (and evicts stale atom-family entries) — the redundant
+    // store.set pair that used to follow it is gone.
     initializeSessions([])
-    store.set(sessionMetaMapAtom, new Map())
-    store.set(sessionIdsAtom, [])
     store.set(sourcesAtom, [])
     store.set(skillsAtom, [])
     setPendingPermissions(new Map())
@@ -686,6 +691,11 @@ export default function App() {
     // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the RPC is issued and
     // closes after the payload has been applied synchronously — terminal
     // markers are pinned for the whole in-flight window.
+    // A4 P3 tail (left for N1, now closed): the reconcile below is fenced to
+    // the account session that issued the refresh, so a superseded account's
+    // late permission-mode receipt never writes back into the cleared
+    // projections.
+    const capturedEpoch = accountSessionEpochRef.current
     try {
       let outcome: 'refreshed' | 'preserved_stale_messages' | 'failed' = 'refreshed'
       await applySnapshotUnderGuard(
@@ -709,7 +719,7 @@ export default function App() {
           // the snapshot — an existing entry (fresher realtime state) is never
           // downgraded by the fetch.
           applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
-          void reconcilePermissionModeState(sessionId)
+          void reconcilePermissionModeState(sessionId, () => accountSessionEpochRef.current === capturedEpoch)
           if (preservedStaleMessages) outcome = 'preserved_stale_messages'
         },
       )
@@ -1156,7 +1166,10 @@ export default function App() {
     resetAccountScopedClientState,
   ])
 
-  // Reauth login handler - placeholder (reauth is not currently used)
+  // Reauth login handler. No current code path enters the `reauth` app state
+  // (A4 P3-6: the screen below is retained for recovery semantics), but the
+  // handler stays production-real: it revalidates the session and routes
+  // through the SAME ProductSpace entry as every other login path.
   const handleReauthLogin = useCallback(async () => {
     invalidateProductSpaceDeepLinkRefresh()
     let validation = await window.electronAPI.adminValidate()
@@ -1482,7 +1495,12 @@ export default function App() {
                 next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
                 return next
               })
-              void reconcilePermissionModeState(effect.sessionId)
+              // A4 P3 tail (left for N1, now closed): the reconcile fence is
+              // captured per EVENT (never per effect subscription — the
+              // subscription outlives account sessions), so a late receipt of
+              // a superseded account session is dropped after the await.
+              const reconcileEpoch = accountSessionEpochRef.current
+              void reconcilePermissionModeState(effect.sessionId, () => accountSessionEpochRef.current === reconcileEpoch)
             }
             break
           }
@@ -2588,6 +2606,11 @@ export default function App() {
     // BEFORE credentials are invalidated — otherwise a stale fence survives
     // the logout. A failed revoke aborts the logout (fail-closed): credential
     // cleanup never completes against a live runtime scope.
+    // N1 note: on THIS early-return path the epoch bump above has no paired
+    // commitCurrentAdminUser setState, so the ClientPageProvider keyed remount
+    // is deferred to the next re-render — the direction stays fail-closed (the
+    // shell is left as-is, nothing of a NEXT scope can be observed), and the
+    // render-phase scope seal re-seals it anyway on any later scope change.
     try {
       const revoke = await window.electronAPI.productSpaceRevokeActiveContext()
       if (!revoke?.success) {
@@ -3213,6 +3236,37 @@ export default function App() {
               both layers read one memoized value. */}
           <AppShellProvider value={appShellContextValue}>
           <MaybeProductSpaceProvider value={productSpaceContextValue}>
+            {/* N1 (P70-NAV-01/02): the client-page routing + header-hairline
+                provider sits INSIDE the ProductSpace consumption boundary and
+                OUTSIDE TabShell. Its key carries the full
+                epoch::accountId::productSpaceId scope, so an account switch, a
+                committed space switch or an A4 epoch bump destroys the whole
+                instance — no back stack or circle detail of a previous scope
+                survives into the next one (the provider also re-seals itself
+                when it observes a scope change without a remount). The
+                epoch ref is read at commit time: every epoch bump is paired
+                with a commitCurrentAdminUser state change, so the remount
+                render observes the fresh value. Home/Circles tab content
+                assembly stays with POO-100; this provider only publishes the
+                typed route and the main-scroll registration.
+                Card step 4 deviation (adjudicated, review P2-1): H1's
+                MemberCatalogProvider stays mounted INSIDE HomePage for now —
+                lifting it here would either duplicate the catalog instance or
+                require editing HomePage (H2/H3-owned, read-only for N1).
+                H3/POO-91 owns the lift to THIS level; until then HomePage's
+                injected instance remains the single catalog holder. */}
+            <ClientPageProvider
+              key={clientPageScopeKey({
+                accountId: productSpaceContextValue?.accountId ?? null,
+                productSpaceId: productSpaceContextValue?.activeProductSpaceId ?? null,
+                epoch: accountSessionEpochRef.current,
+              })}
+              scope={{
+                accountId: productSpaceContextValue?.accountId ?? null,
+                productSpaceId: productSpaceContextValue?.activeProductSpaceId ?? null,
+                epoch: accountSessionEpochRef.current,
+              }}
+            >
             <TabShellProvider
               key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
               workspaceId={windowWorkspaceId}
@@ -3317,6 +3371,7 @@ export default function App() {
                 </div>
               )}
             </TabShellProvider>
+            </ClientPageProvider>
             <ProductSpaceSwitchDialog />
           </MaybeProductSpaceProvider>
           </AppShellProvider>

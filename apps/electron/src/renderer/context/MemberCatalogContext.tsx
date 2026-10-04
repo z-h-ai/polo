@@ -8,10 +8,15 @@ export type { AppCatalogInstance } from '@/hooks/useAppCatalog'
  * POO-70 H1 (P70-CATALOG-01/02/03): the SINGLE holder of `useAppCatalog` for
  * member pages.
  *
- * Mounted by N1 inside the current ProductSpace provider, the provider calls
- * `useAppCatalog` EXACTLY ONCE and every consumer reads the same
- * catalog/refresh/launch surface through `useMemberCatalog()` — pages must
- * not create their own instances.
+ * Mount location (docblock corrected by N1 review P2-1): since the H2
+ * extraction the provider is mounted by HomePage, which injects its own
+ * pre-created instance via the `catalog` prop — `useAppCatalog` runs EXACTLY
+ * ONCE and every consumer reads the same catalog/refresh/launch surface
+ * through `useMemberCatalog()`; pages must not create their own instances.
+ * N1's ClientPageProvider now occupies the App-level slot OUTSIDE TabShell
+ * (routing + hairline only); H3/POO-91 owns lifting THIS provider up next to
+ * it (App.tsx, inside the ProductSpace boundary), retiring the page-internal
+ * mount.
  *
  * H2 extraction transition: the provider accepts an already-created instance
  * (e.g. HomePage's current one) via the `catalog` prop, so extraction can
@@ -63,9 +68,10 @@ export function MemberCatalogProvider({
 
 /**
  * Returns THE shared member catalog surface (same catalog / refresh /
- * launch methods for every consumer). Throws outside a provider — mounting
- * the provider is N1's responsibility and consumers must fail loudly rather
- * than silently creating diverging catalog instances.
+ * launch methods for every consumer). Throws outside a provider — the
+ * HomePage-internal mount (until H3/POO-91 lifts it to the App level) is the
+ * single holder, and consumers must fail loudly rather than silently creating
+ * diverging catalog instances.
  */
 export function useMemberCatalog(): AppCatalogInstance {
   const catalog = useContext(MemberCatalogContext)
