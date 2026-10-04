@@ -95,7 +95,7 @@ describe('PhoneAuthStep interaction state', () => {
     })
   })
 
-  it('accepts only a complete six-digit code for verification', () => {
+  it('accepts only a consented, complete six-digit code for verification', () => {
     const verifying = {
       ...INITIAL_PHONE_AUTH_FORM_STATE,
       mode: 'verify' as const,
@@ -113,7 +113,16 @@ describe('PhoneAuthStep interaction state', () => {
       value: '12 3a45-6',
     })
     expect(complete.code).toBe('123456')
-    expect(canVerifyPhoneAuthCode(complete)).toBe(true)
+    // P70-PHONE-03: withdrawing the agreement on the code scene blocks
+    // verification exactly like it blocks sending.
+    expect(complete.consented).toBe(false)
+    expect(canVerifyPhoneAuthCode(complete)).toBe(false)
+
+    const consented = reducePhoneAuthForm(complete, {
+      type: 'consentChanged',
+      value: true,
+    })
+    expect(canVerifyPhoneAuthCode(consented)).toBe(true)
   })
 
   it('clears the code without owning or discarding the parent resend deadline', () => {
