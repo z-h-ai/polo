@@ -228,6 +228,10 @@ import type {
   ProductSpaceBundleInstallRequest,
   LocalAppLifecycleRequest,
   ProductSpaceAppRuntimeStartResult,
+  CircleReturnAckResult,
+  CircleReturnCancelResult,
+  CircleReturnCandidate,
+  CircleReturnPendingState,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -917,6 +921,31 @@ export interface ElectronAPI {
     /** Support config: upstream_pending (G4) until the member-side endpoint exists. */
     getSupport(): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>>
   }
+
+  // Circle web→desktop return bridge (POO-70 B1). The Main candidate store
+  // holds ONE pending navigation candidate (ids only, never an authorization);
+  // consumption is event-or-read exactly once via candidateId dedup. B1 does
+  // not navigate routes itself — C8/C9 consume the candidate.
+  circleReturn: {
+    /**
+     * Read the pending candidate. Delivery is gated on the trusted account
+     * mirror: `unavailable` (startup not settled / account transition in
+     * flight) delivers nothing and mutates nothing; a signed-out caller gets
+     * `none` (an account-bound candidate is cleared — logout cleanup — while
+     * a pre-login candidate is retained for delivery after login).
+     */
+    getPending(): Promise<CircleReturnPendingState>
+    /** Consumption confirmation; clears the candidate. Idempotent. */
+    ack(candidateId: string): Promise<CircleReturnAckResult>
+    /** Renderer-declined navigation; clears the candidate. Idempotent. */
+    cancel(candidateId: string): Promise<CircleReturnCancelResult>
+  }
+  /**
+   * Main→renderer push of a pending circle-return candidate (P70-RETURN-BRIDGE-03).
+   * Register BEFORE reading getPending (event-first), dedup by candidateId;
+   * any event/read interleaving must consume exactly once.
+   */
+  onCircleReturnCandidate(callback: (candidate: CircleReturnCandidate) => void): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>

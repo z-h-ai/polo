@@ -19,6 +19,17 @@
  * Organization join:
  *   poloai://join/{token}
  *
+ * F1 circle web→desktop return (POO-70 B1):
+ *   poloai://circle-return?v=1&circleId=<uuid>&membershipId=<uuid>&orderId=<uuid>
+ *   - three ids optional, at least one required, strict UUID/param/version
+ *     validation; recorded as the single pending navigation candidate and
+ *     delivered via the typed circleReturn event + getPending RPC. Never a
+ *     join/payment/authorization (P70-RETURN-BRIDGE-01/02/03).
+ *
+ * Legacy provider launch entry (compat only, F1 G6):
+ *   polo://open - no params, no target: just launches/focuses the app.
+ *   Any other polo:// shape is rejected.
+ *
  * Actions:
  *   new-chat                  - Create new chat, optional ?input=text&name=name&send=true
  *                               If send=true is provided with input, immediately sends the message
@@ -42,8 +53,16 @@ import { mainLog } from './logger'
 import type { WindowManager } from './window-manager'
 import { RPC_CHANNELS } from '../shared/types'
 import type { EventSink } from '@polo-ai/server-core/transport'
-import { isValidPoloaiCallbackId } from '../shared/types'
+import { isValidPoloaiCallbackId, isValidPoloUuid } from '../shared/types'
+import {
+  CIRCLE_RETURN_DEEP_LINK_HOST,
+  CIRCLE_RETURN_PROTOCOL_VERSION,
+  LEGACY_OPEN_DEEP_LINK_HOST,
+  LEGACY_OPEN_DEEP_LINK_SCHEME,
+} from '@polo-ai/shared/protocol'
+import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { describeDeepLinkForLog } from './deep-link-log'
+import { captureCircleReturnAccountView, getCircleReturnCandidateStore } from './circle-return-candidate-store'
 
 export interface DeepLinkTarget {
   /** Workspace ID - undefined means use active window */
@@ -62,6 +81,19 @@ export interface DeepLinkTarget {
   joinToken?: string
   /** Ask the client to refresh its ProductSpace list (no selection change). */
   productSpaceRefresh?: true
+  /**
+   * F1 versioned circle-return target ids (poloai://circle-return?...).
+   * Ids only ADDRESS a page — never an authorization; the candidate is
+   * recorded in the Main candidate store and delivered to the outer page
+   * through the typed circleReturn event + pending RPC (P70-RETURN-BRIDGE-02).
+   */
+  circleReturn?: CircleReturnTargetIds
+  /**
+   * Legacy provider launch entry (polo://open, F1 G6): launch/focus
+   * compatibility ONLY — no navigation target is derived from it
+   * (P70-RETURN-BRIDGE-01).
+   */
+  legacyLaunch?: true
 }
 
 export interface DeepLinkResult {
@@ -110,8 +142,57 @@ function parseCallbackId(parsed: URL): string | undefined {
 
 function isSupportedDeepLinkProtocol(protocol: string): boolean {
   const configuredScheme = process.env.POLO_AI_DEEPLINK_SCHEME || 'poloai'
-  const schemes = new Set(['poloai', configuredScheme].map(scheme => scheme.toLowerCase()))
+  // The legacy provider scheme (polo://, F1 G6) is accepted at the protocol
+  // level ONLY for the published no-target launch entry — see parseDeepLink.
+  const schemes = new Set(
+    ['poloai', LEGACY_OPEN_DEEP_LINK_SCHEME, configuredScheme].map(scheme => scheme.toLowerCase()),
+  )
   return schemes.has(protocol.replace(/:$/, '').toLowerCase())
+}
+
+/**
+ * Strict parse of the F1 versioned circle-return target
+ * (poloai://circle-return?v=1&circleId=<uuid>&membershipId=<uuid>&orderId=<uuid>).
+ * Fail closed (P70-RETURN-BRIDGE-02): any path segment, duplicate parameter,
+ * unknown parameter, non-UUID id, unsupported protocol version, or a link
+ * with no target id at all is rejected.
+ */
+function parseCircleReturnTarget(pathParts: string[], parsed: URL): CircleReturnTargetIds | null {
+  if (pathParts.length !== 0) return null
+
+  const params = parsed.searchParams
+
+  // Duplicate parameters fail closed across the board — including `v`
+  // (`?v=1&v=2` must never be resolved by picking the first value).
+  const versionValues = params.getAll('v')
+  if (versionValues.length > 1) return null
+  const versionParam = versionValues[0] ?? null
+  // Absent version = current protocol (first-adoption tolerance); an
+  // explicit version must match exactly — never guess across versions.
+  if (versionParam !== null && versionParam !== String(CIRCLE_RETURN_PROTOCOL_VERSION)) {
+    return null
+  }
+
+  const ids: CircleReturnTargetIds = {}
+  for (const key of ['circleId', 'membershipId', 'orderId'] as const) {
+    const values = params.getAll(key)
+    if (values.length === 0) continue
+    if (values.length > 1) return null
+    const value = values[0]!
+    if (!isValidPoloUuid(value)) return null
+    ids[key] = value
+  }
+
+  if (ids.circleId === undefined && ids.membershipId === undefined && ids.orderId === undefined) {
+    return null
+  }
+
+  const ALLOWED_PARAMS = new Set(['v', 'circleId', 'membershipId', 'orderId'])
+  for (const key of params.keys()) {
+    if (!ALLOWED_PARAMS.has(key)) return null
+  }
+
+  return ids
 }
 
 /**
@@ -137,6 +218,27 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
     // poloai://auth-callback?... (OAuth callbacks - return null to let existing handler process)
     if (host === 'auth-callback') {
       return null
+    }
+
+    // Legacy published provider entry: polo://open (F1 G6, P70-RETURN-BRIDGE-01).
+    // Launch/focus compatibility ONLY — the provider link carries no params,
+    // so no order/circle target is ever guessed from it. Any other polo://
+    // shape (including a return target under the legacy scheme) fails closed.
+    if (parsed.protocol.replace(/:$/, '').toLowerCase() === LEGACY_OPEN_DEEP_LINK_SCHEME) {
+      const hasParams = [...parsed.searchParams.keys()].length > 0
+      if (host === LEGACY_OPEN_DEEP_LINK_HOST && pathParts.length === 0 && !hasParams) {
+        return { workspaceId: undefined, legacyLaunch: true }
+      }
+      return null
+    }
+
+    // poloai://circle-return?v=1&circleId=…&membershipId=…&orderId=… — the F1
+    // versioned web→desktop return target (P70-RETURN-BRIDGE-02). The ids are
+    // strict UUIDs; anything else about the link fails closed.
+    if (host === CIRCLE_RETURN_DEEP_LINK_HOST) {
+      const circleReturn = parseCircleReturnTarget(pathParts, parsed)
+      if (!circleReturn) return null
+      return { workspaceId: undefined, circleReturn }
     }
 
     if (host === 'join') {
@@ -385,6 +487,47 @@ export async function handleDeepLink(
 
   // 2. Wait for window to be ready (renderer loaded)
   await waitForWindowReady(window)
+
+  // 2b. Circle-return candidate (P70-RETURN-BRIDGE-02/03): record the minimal
+  // navigation candidate BEFORE any renderer subscription and push the typed
+  // event. The store keeps the candidate pending until ack/cancel/logout, so
+  // a late subscriber still reads the original target via getPending — no
+  // fixed delay, no renderer-mount guessing. The event/record dedups by
+  // candidateId on the consumer side; any event/read interleaving consumes
+  // exactly once.
+  if (target.circleReturn) {
+    const store = getCircleReturnCandidateStore()
+    const accountView = captureCircleReturnAccountView()
+    // An in-flight account transition records an unbound (login-pending)
+    // candidate — never an anchor to a dying account.
+    const { candidate, duplicated } = store.recordCandidate(
+      target.circleReturn,
+      accountView.status === 'transition' ? { status: 'signed_out' } : accountView,
+    )
+    mainLog.info('[DeepLink] Circle-return candidate recorded', logContext, {
+      candidateId: candidate.candidateId,
+      duplicated,
+    })
+
+    if (sink) {
+      // Same targeting precedence as NAVIGATE; the `all` fallback keeps the
+      // event buffered for clients that reconnect mid-startup (the pending
+      // RPC remains the authoritative late-subscription path).
+      const wsId = target.workspaceId ?? windowManager.getWorkspaceForWindow(window.webContents.id)
+      const resolvedClientId = resolveClientId?.(window.webContents.id)
+      const clientId = resolvedClientId ?? (!resolveClientId ? preferredClientId : undefined)
+
+      if (clientId) {
+        sink(RPC_CHANNELS.circleReturn.CANDIDATE, { to: 'client', clientId }, candidate)
+      } else if (wsId) {
+        sink(RPC_CHANNELS.circleReturn.CANDIDATE, { to: 'workspace', workspaceId: wsId }, candidate)
+      } else {
+        sink(RPC_CHANNELS.circleReturn.CANDIDATE, { to: 'all' }, candidate)
+      }
+    }
+
+    return { success: true, windowId: window.isDestroyed() ? -1 : window.webContents.id }
+  }
 
   // 3. Send navigation command to renderer
   if (target.view || target.action || target.joinToken || target.productSpaceRefresh) {

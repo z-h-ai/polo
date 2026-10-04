@@ -255,6 +255,17 @@ export const RPC_CHANNELS = {
     GET_PROFILE: 'memberCircles:getProfile',
     GET_SUPPORT: 'memberCircles:getSupport',
   },
+  circleReturn: {
+    // F1 web→desktop return bridge (POO-70 B1). Main-process GUI handlers own
+    // a single pending navigation candidate; the ids only ADDRESS a page —
+    // every object/permission re-verification happens through the C1
+    // memberCircles bridge (P70-RETURN-BRIDGE-02/03). No join/pay/auth here.
+    GET_PENDING: 'circleReturn:getPending',
+    ACK: 'circleReturn:ack',
+    CANCEL: 'circleReturn:cancel',
+    /** Main → renderer push of a pending CircleReturnCandidate (dedup by candidateId). */
+    CANDIDATE: 'circleReturn:candidate',
+  },
   llmConnections: {
     LIST: 'LLM_Connection:list',
     LIST_WITH_STATUS: 'LLM_Connection:listWithStatus',

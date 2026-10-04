@@ -328,7 +328,36 @@
     "typed_event_lock_proposal": "B1（POO-97）在 shared types/channels/dto 锁定的字段需求：scheme（双方约定，默认 poloai）、动作（如 open-order/open-circle）、orderId、shareId、callbackId（POLOAI_CALLBACK_ID_PATTERN，dto.ts L750）——在 provider 采纳前只做类型预留，不做行为假设",
     "status": "upstream-expected",
     "owner": "POL-114（public-circle.tsx 发布方）+ POL-174（跨端独立联调）；本端 B1 只锁定类型",
-    "recheck_timing": "POL-114 下一版提供方 re-pin 时核对链接是否改为携带参数的约定 scheme；POL-174 联调时验证真实唤起"
+    "recheck_timing": "POL-114 下一版提供方 re-pin 时核对链接是否改为携带参数的约定 scheme；POL-174 联调时验证真实唤起",
+    "implemented_v1_addendum": {
+      "topic": "POO-97（B1）已实现的 v1 返回目标线格式与字段拒绝集——仅追加记录，不改写上方 typed_event_lock_proposal 历史草案",
+      "implemented_by": "POO-97",
+      "status": "pending provider adoption（G6 upstream-expected：POL-114 尚未发布携带参数的链接，本端只锁定类型与桥接，不宣称 provider 已接入）",
+      "wire_format": "poloai://circle-return?v=1&circleId=<uuid>&membershipId=<uuid>&orderId=<uuid>",
+      "protocol_version": 1,
+      "scheme_rule": "scheme 恒为 poloai（G7：运行时注册 scheme 仍可被 POLO_AI_DEEPLINK_SCHEME 覆盖，但跨端返回协议线格式固定 poloai://，不做 per-instance 变体）；legacy polo:// 仅接受无参数的 polo://open 无目标 launch，绝不在其上猜目标",
+      "consumed_fields": {
+        "v": "可选；缺省按当前版本 1（首版采纳容忍），显式出现必须等于 1，重复出现（如 v=1&v=2）整链拒绝",
+        "circleId": "可选，严格 UUID，重复出现拒绝",
+        "membershipId": "可选，严格 UUID，重复出现拒绝",
+        "orderId": "可选，严格 UUID，重复出现拒绝；三 id 至少其一，否则拒绝"
+      },
+      "rejected_fields": [
+        "shareId（G6/G3 草案字段，v1 未采纳，出现即整链拒绝）",
+        "callbackId（助手协议字段，返回协议明确排除）",
+        "window / sidebar（本协议不允许通用导航修饰参数）",
+        "任何未知或重复参数、任何路径段（poloai://circle-return/<segment>）",
+        "显式 v ≠ 1 的任何版本"
+      ],
+      "consumer_contract": "候选只携带寻址 id（CircleReturnCandidate：candidateId/protocolVersion/target/createdAt），不是授权；Main 候选存储在 UI 订阅前持有、ack/cancel/注销清理，按 A4 账号镜像门控投递（登录前保留、换账号重锚、注销清除）；对象/权限一律由 C1 memberCircles 桥再验",
+      "code_bindings": {
+        "shared_protocol": "packages/shared/src/protocol/dto.ts（CIRCLE_RETURN_PROTOCOL_VERSION / CIRCLE_RETURN_DEEP_LINK_HOST / CircleReturnCandidate 等）",
+        "channels": "packages/shared/src/protocol/channels.ts circleReturn namespace（getPending/ack/cancel/candidate，LOCAL_ONLY）",
+        "parser": "apps/electron/src/main/deep-link.ts parseCircleReturnTarget",
+        "bridge": "apps/electron/src/main/circle-return-candidate-store.ts + apps/electron/src/main/handlers/system.ts + apps/electron/src/preload/bootstrap.ts"
+      },
+      "history_note": "上方 typed_event_lock_proposal（action/orderId/shareId/callbackId 字段集）按原样保留为规划历史；与本次实现的线格式冲突之处（动作字段、shareId、callbackId）以本 addendum 的 v1 实现为准，直至 POL-114 采纳并在 POL-174 re-pin 时统一改写"
+    }
   },
   "gaps": [
     {

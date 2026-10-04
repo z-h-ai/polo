@@ -288,6 +288,15 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.memberCircles.GET_PROFILE,
   RPC_CHANNELS.memberCircles.GET_SUPPORT,
 
+  // circleReturn — the F1 web→desktop return candidate lives in the Electron
+  // Main process next to the deep-link parser and the trusted account mirror;
+  // like memberCircles it must never be workspace-proxied. CANDIDATE is a
+  // push-only channel (Main → renderer), classified for routing coverage.
+  RPC_CHANNELS.circleReturn.GET_PENDING,
+  RPC_CHANNELS.circleReturn.ACK,
+  RPC_CHANNELS.circleReturn.CANCEL,
+  RPC_CHANNELS.circleReturn.CANDIDATE,
+
   // preferences — device-local launcher and verified Admin organization state
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
