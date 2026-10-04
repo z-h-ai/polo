@@ -164,32 +164,56 @@ describe('MemberCircleResourceProvider (POO-70 C2 single instance holder)', () =
 
   it('wires the injected H1 catalog instance into invalidateAndRefresh', async () => {
     let syncCalls = 0
-    // Mirrors the real instance shape: sync() resolves (never rejects) and
-    // the settled state lives on the instance itself.
-    const catalog = {
-      state: {
-        errorCode: null,
-        catalog: { accountId: 'account-a', organizationId: 'personal-space' },
-      },
+    // RENDER-SNAPSHOT model: each createCatalog() is one committed render of
+    // the H1 instance — a NEW object holding a NEW state identity. sync()
+    // resolves (never rejects); the settled snapshot only becomes visible to
+    // the hook when the NEXT instance is passed via rerender.
+    let logicalState = { errorCode: null as string | null, catalog: { accountId: 'account-a', organizationId: 'personal-space' } as unknown as import('@polo-ai/shared/admin').AppCatalogCacheEntry | null }
+    const createCatalog = () => ({
+      state: { ...logicalState },
       sync: async () => {
         syncCalls += 1
       },
-    } as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
+    }) as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
+    const firstCatalog = createCatalog()
     const recorder: ProbeRecorder = { current: null }
-    render(createElement(MemberCircleResourceProvider, {
-      catalog,
+    const view = render(createElement(MemberCircleResourceProvider, {
+      catalog: firstCatalog,
       children: createElement(ProbeChild, { recorder }),
     }))
     expect(recorder.current).not.toBeNull()
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 20))
     })
-    const outcome = await act(async () => {
-      return recorder.current!.invalidateAndRefresh({ circleId: 'circle-1' })
+    // FALSIFY the same-continuation judgment: while no post-sync snapshot has
+    // been committed, the outcome must still be awaiting.
+    let outcomePromise: Promise<unknown> | null = null
+    await act(async () => {
+      outcomePromise = recorder.current!.invalidateAndRefresh({ circleId: 'circle-1' })
+      await new Promise(resolve => setTimeout(resolve, 0))
     })
-    // The SAME injected instance was refreshed together with the relations;
-    // 'refreshed' is judged from the instance's settled state (live catalog,
-    // no errorCode), not merely from the call having been issued.
+    const raceResult: { value: string | null } = { value: null }
+    await act(async () => {
+      raceResult.value = await Promise.race([
+        outcomePromise!.then(() => 'settled'),
+        new Promise<string>(resolve => setTimeout(() => resolve('awaiting'), 50)),
+      ])
+    })
+    expect(raceResult.value).toBe('awaiting')
+
+    // PROVE it: the settled snapshot commits (rerender with a NEW instance),
+    // the observer judges 'refreshed' from it.
+    const secondCatalog = createCatalog()
+    await act(async () => {
+      view.rerender(createElement(MemberCircleResourceProvider, {
+        catalog: secondCatalog,
+        children: createElement(ProbeChild, { recorder }),
+      }))
+    })
+    const outcome = await outcomePromise
+    // The SAME injected instance lineage was refreshed together with the
+    // relations; 'refreshed' is judged from the settled snapshot (live
+    // catalog, no errorCode), not merely from the call having been issued.
     expect(syncCalls).toBe(1)
     expect(outcome).toMatchObject({ relations: 'refreshed', catalog: 'refreshed', circleId: 'circle-1' })
     expect(listCalls).toBe(2)
@@ -197,26 +221,35 @@ describe('MemberCircleResourceProvider (POO-70 C2 single instance holder)', () =
 
   it('reports catalog FAILED when the injected instance settled into an errorCode without rejecting', async () => {
     let syncCalls = 0
-    const catalog = {
-      state: {
-        errorCode: 'ADMIN_UNAVAILABLE',
-        catalog: null,
-      },
+    let logicalState = { errorCode: 'ADMIN_UNAVAILABLE' as string | null, catalog: null as import('@polo-ai/shared/admin').AppCatalogCacheEntry | null }
+    const createCatalog = () => ({
+      state: { ...logicalState },
       sync: async () => {
         syncCalls += 1
       },
-    } as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
+    }) as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
+    const firstCatalog = createCatalog()
     const recorder: ProbeRecorder = { current: null }
-    render(createElement(MemberCircleResourceProvider, {
-      catalog,
+    const view = render(createElement(MemberCircleResourceProvider, {
+      catalog: firstCatalog,
       children: createElement(ProbeChild, { recorder }),
     }))
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 20))
     })
-    const outcome = await act(async () => {
-      return recorder.current!.invalidateAndRefresh()
+    let outcomePromise: Promise<unknown> | null = null
+    await act(async () => {
+      outcomePromise = recorder.current!.invalidateAndRefresh()
+      await new Promise(resolve => setTimeout(resolve, 0))
     })
+    const secondCatalog = createCatalog()
+    await act(async () => {
+      view.rerender(createElement(MemberCircleResourceProvider, {
+        catalog: secondCatalog,
+        children: createElement(ProbeChild, { recorder }),
+      }))
+    })
+    const outcome = await outcomePromise
     expect(syncCalls).toBe(1)
     expect(outcome).toMatchObject({ relations: 'refreshed', catalog: 'failed' })
   })

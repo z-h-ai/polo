@@ -220,8 +220,15 @@ function installBridge() {
 }
 
 // -------------------------------------------------------------------------
-// Catalog double (H1 shared instance) — mirrors the REAL sync() shape:
-// production sync never rejects, failures settle into the instance state.
+// Catalog double (H1 shared instance) — RENDER-SNAPSHOT model.
+// A real useAppCatalog instance exposes the state object of its LAST
+// COMMITTED render: production sync never rejects and settles failures into
+// internal state, but the snapshot a consumer reads only moves when React
+// re-renders the instance. The double mirrors that: `catalogLogicalState` is
+// the internal (post-settle) state, and `commitCatalogRender()` produces a
+// NEW instance holding a NEW state object — until then every `.state` read
+// returns the SAME pre-commit snapshot, so the hook can never accidentally
+// judge from state that has not been rendered yet.
 // -------------------------------------------------------------------------
 
 interface CatalogDoubleState {
@@ -240,28 +247,45 @@ function minimalCatalog(): import('@polo-ai/shared/admin').AppCatalogCacheEntry 
   }
 }
 
-let catalogState: CatalogDoubleState = { errorCode: null, catalog: minimalCatalog() }
+let catalogLogicalState: CatalogDoubleState = { errorCode: null, catalog: minimalCatalog() }
 let catalogSyncImpl: (force?: boolean) => Promise<void> = async () => {}
 const catalogSyncCalls: boolean[] = []
+let catalogRenderCounter = 0
 
-function makeCatalog() {
+type CatalogDouble = import('@/hooks/useAppCatalog').AppCatalogInstance
+
+function createCatalogInstance(): CatalogDouble {
+  catalogRenderCounter += 1
+  // A fresh snapshot object per "render" — identity is what the hook fences
+  // its settle judgment on, exactly like a real instance's state object.
+  const snapshot: CatalogDoubleState = { ...catalogLogicalState }
   return {
-    // A getter so a test can mutate catalogState mid-flight and the hook's
-    // post-sync snapshot reads the settled instance state, like the real one.
-    get state() {
-      return catalogState
-    },
+    state: snapshot,
     sync: mock(async (force?: boolean) => {
       catalogSyncCalls.push(Boolean(force))
       await catalogSyncImpl(force)
     }),
-  } as unknown as import('@/hooks/useAppCatalog').AppCatalogInstance
+  } as unknown as CatalogDouble
+}
+
+function makeCatalog(): CatalogDouble {
+  return createCatalogInstance()
+}
+
+/**
+ * Simulate H1 re-rendering after its internal state moved: the NEXT instance
+ * consumers receive carries the settled snapshot under a NEW identity.
+ * Must be passed to hook.rerender to reach the hook's commit observers.
+ */
+function commitCatalogRender(): CatalogDouble {
+  return createCatalogInstance()
 }
 
 function resetCatalog() {
-  catalogState = { errorCode: null, catalog: minimalCatalog() }
+  catalogLogicalState = { errorCode: null, catalog: minimalCatalog() }
   catalogSyncImpl = async () => {}
   catalogSyncCalls.length = 0
+  catalogRenderCounter = 0
 }
 
 const {
@@ -282,8 +306,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
 })
-
-type CatalogDouble = ReturnType<typeof makeCatalog>
 
 function renderResource(catalog?: CatalogDouble) {
   return renderHook((props: { catalog?: CatalogDouble | null } = {}) => useMemberCirclesResource({ catalog: props.catalog ?? catalog ?? null }))
@@ -520,6 +542,38 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-02 (phases, fencing, ret
 })
 
 describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh + leave)', () => {
+  /**
+   * Settle an awaiting invalidateAndRefresh/leave outcome: simulate the H1
+   * re-render that commits the post-sync snapshot (a NEW instance identity),
+   * then await the promise. Call only after the sync has settled (the first
+   * act must have flushed the bridge microtasks).
+   */
+  /** NOTE: returns a WRAPPER — `await` on an async function returning a
+   * still-pending promise would adopt it and block until the outcome
+   * settles, destroying the awaiting semantics under test. */
+  async function commitRenderAndSettle(
+    hook: { rerender: (props: { catalog?: CatalogDouble | null }) => void },
+    outcomePromise: Promise<unknown>,
+  ): Promise<unknown> {
+    await act(async () => {
+      hook.rerender({ catalog: commitCatalogRender() })
+    })
+    return outcomePromise
+  }
+
+  /** First act: start the outcome and let the catalog sync settle. */
+  async function startOutcome(
+    hook: Parameters<typeof commitRenderAndSettle>[0],
+    start: () => Promise<unknown>,
+  ): Promise<{ promise: Promise<unknown> }> {
+    let outcomePromise: Promise<unknown> | null = null
+    await act(async () => {
+      outcomePromise = start()
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    return { promise: outcomePromise! }
+  }
+
   it('leave refreshes the relations AND the shared catalog exactly once', async () => {
     const catalog = makeCatalog()
     const hook = renderResource(catalog)
@@ -543,10 +597,11 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
         updatedAt: '2026-10-04T00:00:00.000Z',
       },
     })
-    let leaveResult: unknown
-    await act(async () => {
-      leaveResult = await hook.result.current.leave('00000000-0000-4000-8000-000000000001')
-    })
+    const { promise: leavePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.leave('00000000-0000-4000-8000-000000000001'),
+    )
+    const leaveResult = await commitRenderAndSettle(hook, leavePromise)
     expect(leaveResult).toMatchObject({ success: true })
     // One leave ⇒ exactly one authoritative relations refetch + one catalog sync.
     expect(callCounts.list).toBe(2)
@@ -563,10 +618,11 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
     // The refetch half-fails: memberships never come back.
     listImpl = async () => success({ circles: [circle('circle-a'), circle('circle-b')] })
     listMembershipsImpl = async () => failure('service_unavailable')
-    let outcome: unknown
-    await act(async () => {
-      outcome = await hook.result.current.invalidateAndRefresh({ circleId: 'circle-a' })
-    })
+    const { promise: outcomePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh({ circleId: 'circle-a' }),
+    )
+    const outcome = await commitRenderAndSettle(hook, outcomePromise)
     expect(outcome).toEqual({ relations: 'partial', catalog: 'refreshed', circleId: 'circle-a', orderId: null })
     // The NEW circles receipt is in, and the OLD memberships are NOT revived.
     expect(hook.result.current.circles).toHaveLength(2)
@@ -590,32 +646,101 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
     expect(hook.result.current.state.phase).toBe('ready')
   })
 
-  it('reports catalog FAILED when a sync settles WITHOUT rejecting but the instance reports an errorCode (P2)', async () => {
-    // The REAL H1 sync never rejects: offline/denied syncs settle into the
-    // instance's own errorCode. 'refreshed' must not be faked for that path.
+  it('does NOT judge the outcome in the sync continuation: it stays awaiting until the post-sync snapshot commits, then reports FAILED (P2 timing)', async () => {
+    // The REAL H1 sync never rejects: an offline/denied sync settles the
+    // errorCode into internal state, and that state only becomes visible to
+    // consumers when React re-renders the instance.
     const catalog = makeCatalog()
     const hook = renderResource(catalog)
     await waitForPhase(hook, 'ready')
+    expect(catalog.state.errorCode).toBeNull()
 
-    catalogState = { errorCode: 'ADMIN_UNAVAILABLE', catalog: null }
-    let outcome: unknown
+    catalogSyncImpl = async () => {
+      // Internal setState — the CURRENT snapshot is NOT updated by this.
+      catalogLogicalState = { errorCode: 'ADMIN_UNAVAILABLE', catalog: null }
+    }
+
+    // FALSIFY the old implementation: judging in the same continuation as
+    // `await sync()` would resolve IMMEDIATELY — from the stale PRE-sync
+    // snapshot — with a fake 'refreshed'. The new implementation must still
+    // be awaiting while no post-sync snapshot has been committed.
+    const { promise: outcomePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh(),
+    )
+    const raceResult: { value: string | null } = { value: null }
     await act(async () => {
-      outcome = await hook.result.current.invalidateAndRefresh()
+      raceResult.value = await Promise.race([
+        outcomePromise.then(() => 'settled'),
+        new Promise<string>(resolve => setTimeout(() => resolve('awaiting'), 50)),
+      ])
     })
+    expect(raceResult.value).toBe('awaiting')
+    // The snapshot the hook can see is still the pre-sync one:
+    expect(catalog.state.errorCode).toBeNull()
+
+    // PROVE the new implementation: the post-sync snapshot commits (a new
+    // instance identity), the observer fires, and the judgment is FAILED.
+    const outcome = await commitRenderAndSettle(hook, outcomePromise)
     expect(outcome).toEqual({ relations: 'refreshed', catalog: 'failed', circleId: null, orderId: null })
   })
 
-  it('reports catalog PENDING when the sync settles with no catalog and no errorCode (P2)', async () => {
+  it('reports catalog PENDING when the settled snapshot has no catalog and no errorCode (P2)', async () => {
     const catalog = makeCatalog()
     const hook = renderResource(catalog)
     await waitForPhase(hook, 'ready')
 
-    catalogState = { errorCode: null, catalog: null }
-    let outcome: unknown
-    await act(async () => {
-      outcome = await hook.result.current.invalidateAndRefresh({ circleId: 'circle-a' })
-    })
+    catalogSyncImpl = async () => {
+      catalogLogicalState = { errorCode: null, catalog: null }
+    }
+    const { promise: outcomePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh({ circleId: 'circle-a' }),
+    )
+    const outcome = await commitRenderAndSettle(hook, outcomePromise)
     expect(outcome).toEqual({ relations: 'refreshed', catalog: 'pending', circleId: 'circle-a', orderId: null })
+  })
+
+  it('reports catalog REFRESHED only from the committed post-sync snapshot (P2)', async () => {
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+
+    // The healthy default: logical state stays live; the re-render commits a
+    // fresh healthy snapshot under a new identity.
+    const { promise: refreshedOutcomePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh(),
+    )
+    const outcome = await commitRenderAndSettle(hook, refreshedOutcomePromise)
+    expect(outcome).toEqual({ relations: 'refreshed', catalog: 'refreshed', circleId: null, orderId: null })
+  })
+
+  it('settles an awaiting catalog outcome from the current fact when the scope rebinds mid-sync (P2)', async () => {
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+
+    catalogSyncImpl = async () => {
+      catalogLogicalState = { errorCode: 'ADMIN_UNAVAILABLE', catalog: null }
+    }
+    const { promise: rebindOutcomePromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh(),
+    )
+
+    // Rebind the scope BEFORE any post-sync snapshot is committed: the
+    // outcome must be released from the CURRENT fact (the still-healthy
+    // visible snapshot), never left hanging across the rebind.
+    productSpaceContextState = spaceContext({ accountId: 'account-b', contextVersion: 2 })
+    await act(async () => {
+      hook.rerender({ catalog })
+    })
+    const outcome = await rebindOutcomePromise
+    expect(outcome).toEqual({ relations: 'refreshed', catalog: 'refreshed', circleId: null, orderId: null })
+    // And the rebind still reset the relations to the new scope:
+    await waitForPhase(hook, 'ready')
+    expect(hook.result.current.state.scope).toMatchObject({ accountId: 'account-b' })
   })
 
   it('reports catalog unavailable when no H1 instance was injected', async () => {
