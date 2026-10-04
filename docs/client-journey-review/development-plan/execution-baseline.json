@@ -1,0 +1,413 @@
+{
+  "version": 1,
+  "task_id": "POO-80",
+  "slice": "poo70-entry-f0",
+  "generated_at": "2026-10-04T08:40:46",
+  "generated_by": "POO-80 owner agent (zcode-orchestrator-poo70)",
+  "purpose": "记录执行基线事实与继承结果；不新增政策，不代表产品验收",
+  "plan": {
+    "path": "docs/client-journey-review/development-plan/plan.md",
+    "revision": "planning-r4-design-rebind",
+    "sha256": "729a6975bfb8118b3d18d52447cf292297fd9ce6c6219bcb6c6ec83719f4d7be",
+    "orchestration_prompt": {
+      "path": "docs/client-journey-review/development-plan/dev-plan-prompt.md",
+      "sha256": "8b1e3cb726d403b5d8cf948de2d2ba0a171440e813ebe3c01a878a81319ba8e0"
+    }
+  },
+  "integration_line": {
+    "branch": "integration/poo70-client-entry-r15",
+    "workdir": "/Users/wow/project/z-h-ai/polo-dir/integration/poo70-client-entry-r15",
+    "head_at_check": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+    "worktree_head": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+    "minimum_design_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b",
+    "ancestor_check": "pass",
+    "created_by": "POO-70 docs 任务（本轮设计源传播），POO-80 只核对不重建",
+    "dev_head": "eacda68e8a560af1136973ebd43ca6704eb59104",
+    "dev_commits_not_in_integration": [
+      "eacda68e Merge origin/integration/pol68-g5-client into dev (POO-72)"
+    ],
+    "integration_commits_not_in_dev_count": "43",
+    "policy": "不从 dev 覆盖回旧实现；不合并 dev/main；不推送；不部署"
+  },
+  "design_source": {
+    "revision": "poo70-client-design-r2-20261004",
+    "skill_path": ".agents/skills/polo-ai-design-system/SKILL.md",
+    "closure_check": {
+      "command": "python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py",
+      "exit_code": 0,
+      "errors": [],
+      "source_count": 12,
+      "component_count": 10,
+      "consumer_scenes": 51,
+      "execution_ready": false,
+      "product_acceptance": "not_run"
+    },
+    "sources": {
+      "docs/client-journey-review/spec.md": {
+        "expected": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
+        "actual": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
+        "match": true
+      },
+      "docs/mvp-complete-flow-hifi/prototype.html": {
+        "expected": "302c749194dd8f8f7fe574d33ba637d26241edcb7f4526ece49effeee02887bf",
+        "actual": "302c749194dd8f8f7fe574d33ba637d26241edcb7f4526ece49effeee02887bf",
+        "match": true
+      },
+      "docs/mvp-complete-flow-hifi/prototype-manifest.json": {
+        "expected": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
+        "actual": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/SKILL.md": {
+        "expected": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+        "actual": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/references/design-system.json": {
+        "expected": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
+        "actual": "64d5bd9ad99d4ce336665963e18bc81bc3f54020d319908554db306c2156f2a4",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/references/foundations.md": {
+        "expected": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+        "actual": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/references/client-workbench.template.html": {
+        "expected": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
+        "actual": "78a1406f6fbbf6f729106281ef457d29c5bcb76d47a41fe17d84b7fb28ffdde8",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css": {
+        "expected": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+        "actual": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css": {
+        "expected": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+        "actual": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+        "match": true
+      },
+      ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json": {
+        "expected": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332",
+        "actual": "79cb7d8270497b6a35be4d42a20b3d34e6968b8f341e48014466a28cf6441332",
+        "match": true
+      }
+    },
+    "all_sources_match": true
+  },
+  "inherited_confirmations": {
+    "style_b82fa1e5": "已确认，作为实现约束",
+    "entry_copy_prd_13_9_13_13": "已确认入口/文案/行为方向",
+    "page_layout_visual": "待复看；不得冒充 parity 或已验收设计",
+    "prototype_is_derived": "演示账号/金额/订单/版本不进入生产代码"
+  },
+  "scope": {
+    "included": [
+      "登录（密码/验证码）",
+      "手机号首次自动注册",
+      "首页",
+      "我的圈子",
+      "圈子详情",
+      "必需的受信读取/异常恢复/浏览器交接",
+      "圈子技能只读呈现"
+    ],
+    "deferred": [
+      "管理技能页面",
+      "打开助手后的 Polo 助手内置应用代码（仅保留已有入口/回调兼容）"
+    ],
+    "external": {
+      "POL-114": "浏览器公开加入/支付/创作者管理",
+      "POL-112": "身份约定",
+      "POL-174": "跨端独立联调（合同 fixture 不能取代）",
+      "POL-175": "包格式（仅正式包约束）"
+    },
+    "excluded_redispatch": "POO-44/47/48/52/55/59—66/74—76 历史卡不重新派发；既有队列不重派"
+  },
+  "execution_rules": {
+    "worktree": "每卡从执行时 integration/poo70-client-entry-r15 真实 HEAD re-pin；Notma ensure 创建/复用",
+    "per_card_checks": [
+      "git merge-base --is-ancestor ac831ea71a798030806f4e0906bdc93292bc918b HEAD",
+      "python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py",
+      "核对卡内 design_source_preparation.sources 哈希"
+    ],
+    "review": "独立 code-reviewer（GLM-5.3）审查并修复至通过；不可用则如实记录，不静默替换",
+    "e2e": "实现卡不逐卡 E2E；测试/Review并集成后可供下游；集中验收节点通过才 Done",
+    "acceptance": "按各卡 Notma YAML；browser 用 zcode；API 与 visual smoke 在集中节点；待复看布局不冒充 parity",
+    "shared_files": "App.tsx A4→N1；HomePage H2→H3；shared types/channels/dto C1→B1；TabContent 最终由 C9 组装；locales 按 poo70.<slice> namespace 串行合并",
+    "missing_interface": "未落地上游接口在其集成后自动 re-pin；缺接口真实验收保持 pending"
+  },
+  "tasks": {
+    "POO-77": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-77/chore/client-entry-v1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-78": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-78/chore/client-entry-v2",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-79": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-79/chore/client-entry-v3",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-80": {
+      "notma_status": "in-progress",
+      "notma_workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-80/chore/client-entry-f0",
+      "branch": "POO-80/chore/client-entry-f0",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-81": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-81/chore/client-entry-f1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-82": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-82/feat/client-entry-a1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-83": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-83/feat/client-entry-a2",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-84": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-84/feat/client-entry-a3",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-85": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-85/feat/client-entry-h1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-86": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-86/feat/client-entry-a4",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-87": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-87/feat/client-entry-h2",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-88": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-88/feat/client-entry-c1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-89": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-89/feat/client-entry-n1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-90": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-90/feat/client-entry-c2",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-91": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-91/feat/client-entry-h3",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-92": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-92/feat/client-entry-c3",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-93": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-93/feat/client-entry-c4",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-94": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-94/feat/client-entry-c5",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-95": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-95/feat/client-entry-c6",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-96": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-96/feat/client-entry-c7",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-97": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-97/feat/client-entry-b1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-98": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-98/feat/client-entry-s1",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-99": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-99/feat/client-entry-c8",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    },
+    "POO-100": {
+      "notma_status": "todo",
+      "notma_workdir": "",
+      "branch": "POO-100/feat/client-entry-c9",
+      "ai_run_active": false,
+      "ai_run_exists": false
+    }
+  },
+  "existing_worktrees": [
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/main",
+      "branch": "main",
+      "head": "bcf9067001e570e742e0d11e2aba8a6a3eb1a96f",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/dev",
+      "branch": "dev",
+      "head": "eacda68e8a560af1136973ebd43ca6704eb59104",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/integration/pol114-creator-r26",
+      "branch": "integration/pol114-creator-r26",
+      "head": "eacda68e8a560af1136973ebd43ca6704eb59104",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/integration/pol68-g5-client",
+      "branch": "integration/pol68-g5-client",
+      "head": "3dc20ca373a9ad64c8b0701d1156a5adaf55aef8",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/integration/poo70-client-entry-r15",
+      "branch": "integration/poo70-client-entry-r15",
+      "head": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POL-24/feature/output-prototype-desig",
+      "branch": "POL-24/feature/output-prototype-desig",
+      "head": "e327f771bd82bb0084b1fc36842ea180b5ca30ae",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-31/feature/optimize-invite-flow",
+      "branch": "POO-31/feature/optimize-invite-flow",
+      "head": "e327f771bd82bb0084b1fc36842ea180b5ca30ae",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-41/feat/polo-client-g4-ui",
+      "branch": "POO-41/feat/polo-client-g4-ui",
+      "head": "83f4128b7fc97e45d6989baa5189f5060fcdc613",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-47/refactor/app-runtime-center",
+      "branch": "POO-47/refactor/app-runtime-center",
+      "head": "0bda88f80c9cf6b63469d887e64b881ba5378ac2",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-52/feat/productspace-skill-enablement",
+      "branch": "POO-52/feat/productspace-skill-enablement",
+      "head": "86be8e63333842efeb050b6e2be226d69850bec3",
+      "dirty_files": 18
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-55/feat/app-tab-lifecycle",
+      "branch": "POO-55/feat/app-tab-lifecycle",
+      "head": "9d5bc8cedaf54e7f7243be01ad98f43a43669443",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-57/feat/product-space-recent-files",
+      "branch": "POO-57/feat/product-space-recent-files",
+      "head": "47ca212eb7f9b9e2dfc772e50629663085431ba1",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview",
+      "branch": "POO-70/docs/client-journey-policy-interview",
+      "head": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+      "dirty_files": 0
+    },
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-80/chore/client-entry-f0",
+      "branch": "POO-80/chore/client-entry-f0",
+      "head": "833d5d1ab59f76b57ba7712d4cf503770056ad60",
+      "dirty_files": 1
+    }
+  ],
+  "wip_preservation": [
+    {
+      "workdir": "/Users/wow/project/z-h-ai/polo-dir/POO-52/feat/productspace-skill-enablement",
+      "dirty_files": 18,
+      "action": "保留原样；由原 owner 决定与集成线重整或仅引入设计闭包；禁止 reset/覆盖"
+    }
+  ],
+  "open_items": [
+    "policy readiness 为 needs_preparation：缺 policy inventory；F0 已核对政策/设计继承，不新增高层政策",
+    "F1 契约缺口：ownerUserId≠displayName、更新历史、circleId→shareId、客服配置读取、原订单 paid 权益判断、polo://open 无 orderId",
+    "高风险卡（A4/C6/C7/C8）执行接受后按最新 Plan hash 重新评估技术会签"
+  ],
+  "not_claims": [
+    "本基线不是 execution_ready/function_accepted/产品验收",
+    "来源/生成 PASS 不证明真实 Electron/API/支付/安装验收",
+    "visual smoke 不等于 parity"
+  ]
+}
