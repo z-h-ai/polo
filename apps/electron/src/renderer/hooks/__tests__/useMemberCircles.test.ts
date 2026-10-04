@@ -714,8 +714,12 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
 
     // The intermediate commit: identity moves (a new instance), but the
     // snapshot is sync's own in-flight refreshing flip — NOT terminal.
+    // Field values mirror the PRODUCTION pre-sync intermediate shape
+    // (useAppCatalog sync start: loading:!current.catalog,
+    // refreshing:Boolean(current.catalog) — a live catalog means
+    // refreshing:true, loading:false).
     await act(async () => {
-      hook.rerender({ catalog: commitCatalogRender({ refreshing: true }) })
+      hook.rerender({ catalog: commitCatalogRender({ refreshing: true, loading: false }) })
     })
     let raced: string | null = null
     const raceResult: { value: string | null } = { value: null }
@@ -730,6 +734,46 @@ describe('useMemberCirclesResource — P70-CIRCLE-STATE-03 (invalidateAndRefresh
     // The TERMINAL snapshot (refreshing flipped back down) finally commits.
     const outcome = await commitRenderAndSettle(hook, outcomePromise)
     expect(outcome).toEqual({ relations: 'refreshed', catalog: 'failed', circleId: null, orderId: null })
+  })
+
+  it('a racing invalidateAndRefresh releases the SUPERSEDED pending from the current fact instead of orphaning it (concurrency)', async () => {
+    // C8 races leave against return-verification: the second invalidation
+    // takes over the single settle slot BEFORE any terminal snapshot
+    // commits. The superseded first outcome must resolve from the CURRENT
+    // fact — never hang on an await no observer will complete.
+    const catalog = makeCatalog()
+    const hook = renderResource(catalog)
+    await waitForPhase(hook, 'ready')
+
+    catalogSyncImpl = async () => {
+      catalogLogicalState = { errorCode: 'ADMIN_UNAVAILABLE', catalog: null }
+    }
+    const { promise: firstPromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh(),
+    )
+    const { promise: secondPromise } = await startOutcome(
+      hook,
+      () => hook.result.current.invalidateAndRefresh(),
+    )
+
+    // No terminal snapshot has committed yet, but the FIRST outcome is
+    // already released (superseded → current fact = the healthy snapshot).
+    const firstRace: { value: string | null } = { value: null }
+    await act(async () => {
+      firstRace.value = await Promise.race([
+        firstPromise.then(() => 'settled'),
+        new Promise<string>(resolve => setTimeout(() => resolve('awaiting'), 50)),
+      ])
+    })
+    expect(firstRace.value).toBe('settled')
+    const firstOutcome = await firstPromise
+    expect(firstOutcome).toEqual({ relations: 'refreshed', catalog: 'refreshed', circleId: null, orderId: null })
+
+    // The REGISTERED second outcome still observes the terminal snapshot.
+    const secondOutcome = await commitRenderAndSettle(hook, secondPromise)
+    expect(secondOutcome).toEqual({ relations: 'refreshed', catalog: 'failed', circleId: null, orderId: null })
+    await waitForPhase(hook, 'ready')
   })
 
   it('reports catalog PENDING when the settled snapshot has no catalog and no errorCode (P2)', async () => {

@@ -655,6 +655,15 @@ export function useMemberCirclesResource(
             clearTimeout(settleTimer)
             resolve(outcome)
           }
+          // The settle slot is single: a racing invalidateAndRefresh (C8's
+          // leave + return-verification) supersedes THIS registration.
+          // Release the superseded pending from the CURRENT fact first —
+          // its caller must never be orphaned on an await that no observer
+          // will ever complete.
+          const superseded = catalogSettleRef.current
+          if (superseded) {
+            superseded.resolve(judgeCatalogOutcome(catalogRef.current))
+          }
           catalogSettleRef.current = { stateAtIssue, resolve: guardedResolve }
         })
       }
