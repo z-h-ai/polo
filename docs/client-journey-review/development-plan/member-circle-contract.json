@@ -7,7 +7,8 @@
   "generated_by": "POO-81 owner agent (F1 核对成员圈子接口与详情数据交接)",
   "purpose": "成员圈子（我的圈子/圈子详情）消费侧接口契约快照：逐项绑定提供方静态源码路径与 commit，给出鉴权、字段、错误码、币种/时间/来源身份、已知缺口 owner 与再查时机。只记录版本化 DTO/endpoint/字段出处，不建立第二套产品需求，不代表接口实现或正式联调完成。",
   "card_binding": {
-    "card_body_sha256": "a6d16298a33fe65c30cbc24be7061f0e6951e0bfbfb3fd17e104f5579d2162c1",
+    "card_file_sha256": "a6d16298a33fe65c30cbc24be7061f0e6951e0bfbfb3fd17e104f5579d2162c1",
+    "card_file_sha256_scope": "POO-81 卡文件 raw（frontmatter+body）在 git revision 143be0e8 的 SHA256；非 task.body 文本哈希。re-pin 时按 notma task.rev 比对，不复算本字段",
     "requirements": ["P70-CONTRACT-01", "P70-CONTRACT-02", "P70-CONTRACT-03"],
     "acceptance": { "schedule": "none", "api": false, "browser": false, "visual": "none" }
   },
@@ -71,6 +72,7 @@
     ]
   },
   "conventions": {
+    "source_line_references": "契约中提供方 file:line 为生成时近似定位（部分存在 ±1~5 行漂移），以语义定位为准；re-pin 时按 provider_source.commit 重新校正行号",
     "currency": "amountMinor/membershipPriceMinor/nextPeriodPriceMinor 均为最小货币单位整数（分）；currency 为 ISO-4217 三字母大写，创建缺省 CNY（src/lib/creator-circles/contracts.ts L42, L176-188）",
     "time": "全部时间字段为 ISO-8601 字符串（服务端 Date.toISOString() 输出）；preview 锚点类字段带 At 后缀",
     "identity": "来源身份 = requireCircleConsumerAuth 解析的 actor.sub（uuid）；ownerUserId 为圈主 userId（uuid），不是显示名",
@@ -271,6 +273,10 @@
     },
     {
       "id": "public-circle-session",
+      "errors": [
+        { "family": "circleResponse 映射族", "when": "该路由 catch 统一走 circleResponse（route.ts L62）" },
+        { "family": "404 join_token_invalid", "when": "非 shareId token 走邀请分支，超出本条目成员侧范围" }
+      ],
       "method": "GET",
       "path": "/api/circle-join/{token}",
       "status": "verified",
@@ -294,6 +300,7 @@
     "requirement": "POL-115 D-OPS-17 真实客服配置的读取接口与字段；服务端未配置/加载失败两类",
     "verified_on": "pol115-operations-v34@2f8b536e（非本卡主提供方 commit，见 provider_source.support_configuration_reference）",
     "operations_side": {
+      "live_wip_note": "pol115-operations-v34 工作树在生成本契约时存在未提交 WIP（migration.sql、support-configuration/route.ts +19 行 PUT 区、测试文件）；GET 与提交版 2f8b536e 一致，本契约事实未被污染；re-pin 须在该 WIP 落地后重核 HEAD",
       "endpoint": "GET /api/admin/operations/support-configuration（?image=1 取真实文件字节）",
       "source": { "file": "src/app/api/admin/operations/support-configuration/route.ts", "lines": "L22-47", "commit": "2f8b536ec5b7d5ef045ee8e7ae27601c3012fb31" },
       "dto": "SupportConfiguration（src/lib/operations/support-boundary.ts L46-53, L80-97）：{configured: boolean, qrSha256?, qrContentType?, updatedAt?, updatedByMasked?, guidance?}",
