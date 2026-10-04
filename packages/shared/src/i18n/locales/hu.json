@@ -2130,5 +2130,16 @@
   "workspace.selectWorkspaceDesc": "Válassz egy munkaterületet ezen a szerveren, vagy hozz létre újat.",
   "workspace.selectWorkspacePlaceholder": "Válassz munkaterületet...",
   "workspace.serverAuthToken": "Szerver hitelesítési token",
-  "workspace.underDefaultFolder": "a .polo-ai mappában"
+  "workspace.underDefaultFolder": "a .polo-ai mappában",
+  "poo70.c5.emptyBody": "Ennek a körnek jelenleg nincsenek közzétett frissítései.",
+  "poo70.c5.emptyTitle": "Nincsenek frissítések",
+  "poo70.c5.entryPublishedAt": "Közzétéve: {{time}}",
+  "poo70.c5.errorTitle": "A frissítések betöltése nem sikerült",
+  "poo70.c5.forbiddenBody": "Az aktuális identitás nem olvashatja ennek a körnek a frissítéseit.",
+  "poo70.c5.forbiddenTitle": "Nincs jogosultság a frissítések megtekintésére",
+  "poo70.c5.loading": "Frissítések betöltése…",
+  "poo70.c5.pendingUpstreamBody": "A kör forrása még nem kínál tagsági frissítési előzményeket. Amint elérhetővé válik, itt jelenik meg.",
+  "poo70.c5.pendingUpstreamTitle": "A frissítési előzmények még nem érhetők el",
+  "poo70.c5.retry": "Újra",
+  "poo70.c5.title": "Frissítések"
 }

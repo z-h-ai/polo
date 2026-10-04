@@ -2130,5 +2130,16 @@
   "workspace.selectWorkspaceDesc": "Elige un Workspace en este servidor o crea uno nuevo.",
   "workspace.selectWorkspacePlaceholder": "Selecciona un Workspace...",
   "workspace.serverAuthToken": "Token de autenticación del servidor",
-  "workspace.underDefaultFolder": "bajo la carpeta .polo-ai"
+  "workspace.underDefaultFolder": "bajo la carpeta .polo-ai",
+  "poo70.c5.emptyBody": "Este círculo no tiene novedades publicadas por ahora.",
+  "poo70.c5.emptyTitle": "No hay novedades",
+  "poo70.c5.entryPublishedAt": "Publicado el {{time}}",
+  "poo70.c5.errorTitle": "No se pudieron cargar las novedades",
+  "poo70.c5.forbiddenBody": "Tu identidad actual no puede leer las novedades de este círculo.",
+  "poo70.c5.forbiddenTitle": "No tienes permiso para ver las novedades",
+  "poo70.c5.loading": "Cargando novedades…",
+  "poo70.c5.pendingUpstreamBody": "La fuente de este círculo aún no ofrece un historial de novedades para miembros. Cuando esté disponible, se mostrará aquí.",
+  "poo70.c5.pendingUpstreamTitle": "El historial de novedades aún no está disponible",
+  "poo70.c5.retry": "Reintentar",
+  "poo70.c5.title": "Novedades"
 }

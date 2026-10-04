@@ -2130,5 +2130,16 @@
   "workspace.selectWorkspaceDesc": "Choose a workspace on this server, or create a new one.",
   "workspace.selectWorkspacePlaceholder": "Select a workspace...",
   "workspace.serverAuthToken": "Server authentication token",
-  "workspace.underDefaultFolder": "under .polo-ai folder"
+  "workspace.underDefaultFolder": "under .polo-ai folder",
+  "poo70.c5.emptyBody": "This circle has no published updates right now.",
+  "poo70.c5.emptyTitle": "No updates",
+  "poo70.c5.entryPublishedAt": "Published {{time}}",
+  "poo70.c5.errorTitle": "Could not load updates",
+  "poo70.c5.forbiddenBody": "Your current identity does not have access to this circle's updates.",
+  "poo70.c5.forbiddenTitle": "Not allowed to view updates",
+  "poo70.c5.loading": "Loading updates…",
+  "poo70.c5.pendingUpstreamBody": "This circle's source does not offer a member-side update history yet. Updates will appear here once it is available.",
+  "poo70.c5.pendingUpstreamTitle": "Update history is not available yet",
+  "poo70.c5.retry": "Retry",
+  "poo70.c5.title": "Updates"
 }

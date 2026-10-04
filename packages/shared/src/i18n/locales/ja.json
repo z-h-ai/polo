@@ -2130,5 +2130,16 @@
   "workspace.selectWorkspaceDesc": "このサーバー上のWorkspaceを選択するか、新規作成してください。",
   "workspace.selectWorkspacePlaceholder": "Workspaceを選択...",
   "workspace.serverAuthToken": "サーバー認証トークン",
-  "workspace.underDefaultFolder": ".polo-aiフォルダ内"
+  "workspace.underDefaultFolder": ".polo-aiフォルダ内",
+  "poo70.c5.emptyBody": "このサークルには現在公開済みの更新がありません。",
+  "poo70.c5.emptyTitle": "更新はありません",
+  "poo70.c5.entryPublishedAt": "{{time}} に更新",
+  "poo70.c5.errorTitle": "更新履歴の取得に失敗しました",
+  "poo70.c5.forbiddenBody": "現在の ID ではこのサークルの更新を取得できません。",
+  "poo70.c5.forbiddenTitle": "更新を表示する権限がありません",
+  "poo70.c5.loading": "更新履歴を取得しています…",
+  "poo70.c5.pendingUpstreamBody": "このサークルのソースにはまだメンバー側の更新履歴が用意されていません。提供開始後にここに表示されます。",
+  "poo70.c5.pendingUpstreamTitle": "更新履歴はまだ利用できません",
+  "poo70.c5.retry": "再試行",
+  "poo70.c5.title": "更新"
 }

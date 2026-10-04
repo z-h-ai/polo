@@ -2130,5 +2130,16 @@
   "workspace.selectWorkspaceDesc": "Wybierz Workspace na tym serwerze lub utwórz nowy.",
   "workspace.selectWorkspacePlaceholder": "Wybierz Workspace...",
   "workspace.serverAuthToken": "Token uwierzytelniający serwera",
-  "workspace.underDefaultFolder": "w folderze .polo-ai"
+  "workspace.underDefaultFolder": "w folderze .polo-ai",
+  "poo70.c5.emptyBody": "To koło nie ma obecnie opublikowanych aktualizacji.",
+  "poo70.c5.emptyTitle": "Brak aktualizacji",
+  "poo70.c5.entryPublishedAt": "Opublikowano {{time}}",
+  "poo70.c5.errorTitle": "Nie udało się wczytać aktualizacji",
+  "poo70.c5.forbiddenBody": "Obecna tożsamość nie może odczytać aktualizacji tego koła.",
+  "poo70.c5.forbiddenTitle": "Brak uprawnień do aktualizacji",
+  "poo70.c5.loading": "Wczytywanie aktualizacji…",
+  "poo70.c5.pendingUpstreamBody": "Źródło tego koła nie udostępnia jeszcze historii aktualizacji po stronie członka. Gdy będzie dostępna, pojawi się tutaj.",
+  "poo70.c5.pendingUpstreamTitle": "Historia aktualizacji jeszcze niedostępna",
+  "poo70.c5.retry": "Ponów",
+  "poo70.c5.title": "Aktualizacje"
 }
