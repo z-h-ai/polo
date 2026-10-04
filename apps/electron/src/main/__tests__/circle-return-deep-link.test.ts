@@ -119,6 +119,11 @@ describe('parseDeepLink — poloai://circle-return (P70-RETURN-BRIDGE-02)', () =
     expect(target).toBeNull()
   })
 
+  it('rejects a duplicated version parameter (never resolves it by picking the first value)', () => {
+    expect(parseDeepLink(`poloai://circle-return?v=1&v=2&circleId=${CIRCLE_ID}`)).toBeNull()
+    expect(parseDeepLink(`poloai://circle-return?v=1&v=1&circleId=${CIRCLE_ID}`)).toBeNull()
+  })
+
   it('rejects a link with no target id', () => {
     expect(parseDeepLink('poloai://circle-return?v=1')).toBeNull()
     expect(parseDeepLink('poloai://circle-return')).toBeNull()
@@ -149,8 +154,16 @@ describe('parseDeepLink — poloai://circle-return (P70-RETURN-BRIDGE-02)', () =
 })
 
 describe('parseDeepLink — legacy provider launch entry polo://open (P70-RETURN-BRIDGE-01)', () => {
-  it('parses the exact published entry as a no-target launch', () => {
+  it('accepts the exact published entry as a no-target launch', () => {
     expect(parseDeepLink('polo://open')).toEqual({ workspaceId: undefined, legacyLaunch: true })
+  })
+
+  it('accepts cosmetic trailing-slash/fragment variants (documented: they carry no target either)', () => {
+    // Documented acceptance, not an accident: a bare trailing slash or
+    // fragment provably carries no navigation target, so launch compat
+    // never breaks on OS-level URL cosmetics.
+    expect(parseDeepLink('polo://open/')).toEqual({ workspaceId: undefined, legacyLaunch: true })
+    expect(parseDeepLink('polo://open#section')).toEqual({ workspaceId: undefined, legacyLaunch: true })
   })
 
   it('rejects the legacy entry with params or path (no target may be guessed)', () => {
@@ -262,6 +275,32 @@ describe('CircleReturnCandidateStore — account epoch semantics (P70-RETURN-BRI
     expect(replaced.duplicated).toBe(false)
     expect(replaced.candidate.candidateId).not.toBe(first.candidate.candidateId)
     expect(store.getPending(AUTH_A)).toEqual({ status: 'pending', candidate: replaced.candidate })
+  })
+
+  it('re-record dedup re-takes the account anchor from the CURRENT record-time view', () => {
+    // Pre-login capture (unbound), then the SAME link is redelivered after
+    // the login — the dedup keeps the candidateId but re-anchors, so the
+    // candidate no longer rides the login-pending retention.
+    const recorded = store.recordCandidate(TARGET, SIGNED_OUT)
+    const duplicate = store.recordCandidate(TARGET, AUTH_A)
+    expect(duplicate.candidate.candidateId).toBe(recorded.candidate.candidateId)
+
+    store.noteAccountSessionEnding(ACCOUNT_A)
+    expect(store.getPending(SIGNED_OUT)).toEqual({ status: 'none' })
+    expect(store.peekForTests()).toBeNull() // account-bound now → logout clears
+  })
+
+  it('re-record during an account transition detaches a dying account anchor', () => {
+    // Candidate anchored to A; the SAME link is redelivered while the A→B
+    // transition is in flight (deep-link maps `transition` → signed_out).
+    store.recordCandidate(TARGET, AUTH_A)
+    store.recordCandidate(TARGET, SIGNED_OUT)
+    // The dying account's anchor is gone (deep-link.ts invariant), so a
+    // completed logout can never clear it as A's residue — the just-reclicked
+    // link rides the pre-login retention into the next verified login.
+    store.noteAccountSessionEnding(ACCOUNT_A)
+    expect(store.getPending(SIGNED_OUT)).toEqual({ status: 'none' })
+    expect(store.peekForTests()).not.toBeNull()
   })
 })
 

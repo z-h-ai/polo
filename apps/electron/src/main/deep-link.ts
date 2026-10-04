@@ -162,7 +162,11 @@ function parseCircleReturnTarget(pathParts: string[], parsed: URL): CircleReturn
 
   const params = parsed.searchParams
 
-  const versionParam = params.get('v')
+  // Duplicate parameters fail closed across the board — including `v`
+  // (`?v=1&v=2` must never be resolved by picking the first value).
+  const versionValues = params.getAll('v')
+  if (versionValues.length > 1) return null
+  const versionParam = versionValues[0] ?? null
   // Absent version = current protocol (first-adoption tolerance); an
   // explicit version must match exactly — never guess across versions.
   if (versionParam !== null && versionParam !== String(CIRCLE_RETURN_PROTOCOL_VERSION)) {

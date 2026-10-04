@@ -72,6 +72,13 @@ function sameTarget(a: CircleReturnTargetIds, b: CircleReturnTargetIds): boolean
     && a.orderId === b.orderId
 }
 
+/** Capture-time anchor: authenticated views bind the account, everything else stays unbound (login-pending). */
+function anchorFromView(accountView: CircleReturnAccountView): StoredCandidate['anchor'] {
+  return accountView.status === 'authenticated'
+    ? { accountId: accountView.accountId, accountGeneration: accountView.accountGeneration }
+    : { accountId: null, accountGeneration: null }
+}
+
 function toPublicCandidate(stored: StoredCandidate): CircleReturnCandidate {
   return {
     candidateId: stored.candidateId,
@@ -93,17 +100,19 @@ export class CircleReturnCandidateStore {
 
   /**
    * Records a parsed circle-return target as the single pending candidate.
-   * Recording an IDENTICAL target while one is pending is a no-op that
-   * returns the existing candidateId (store-side dedup — the renderer dedups
-   * by candidateId too, so OS-level link redelivery never produces a second
-   * consumption). A different target REPLACES the pending one under a fresh
-   * candidateId.
+   * Recording an IDENTICAL target while one is pending keeps the existing
+   * candidateId (store-side dedup — the renderer dedups by candidateId too,
+   * so OS-level link redelivery never produces a second consumption) and
+   * re-takes the account anchor from the CURRENT record-time view, so a
+   * redelivery can never leave a dying account's anchor in place. A
+   * different target REPLACES the pending one under a fresh candidateId.
    */
   recordCandidate(
     target: CircleReturnTargetIds,
     accountView: CircleReturnAccountView,
   ): { candidate: CircleReturnCandidate; duplicated: boolean } {
     if (this.candidate && sameTarget(this.candidate.target, target)) {
+      this.candidate.anchor = anchorFromView(accountView)
       return { candidate: toPublicCandidate(this.candidate), duplicated: true }
     }
 
@@ -115,9 +124,7 @@ export class CircleReturnCandidateStore {
         ...(target.orderId !== undefined && { orderId: target.orderId }),
       },
       createdAt: new Date().toISOString(),
-      anchor: accountView.status === 'authenticated'
-        ? { accountId: accountView.accountId, accountGeneration: accountView.accountGeneration }
-        : { accountId: null, accountGeneration: null },
+      anchor: anchorFromView(accountView),
     }
     this.candidate = stored
     return { candidate: toPublicCandidate(stored), duplicated: false }
