@@ -1,49 +1,124 @@
 ---
 name: polo-ai-design-system
-description: Polo 桌面客户端（Electron 工作台）产品 UI 的视觉令牌与组件语言。制作 Polo 客户端线框、高保真原型或评审产品页面视觉时使用；不适用于 Admin/浏览器后台、第三方 App 内部业务页或其他产品。
+description: Apply the polo-ai repository design system within its declared platform, module, and path scope. Use only after verifying the bound sources remain current.
 ---
 
-# Polo AI 设计系统（客户端）
+# polo-ai Design System
 
-提取式设计 Skill。**当前助手实现约束（Spec §13.11）**：既有聊天/输入/附件/会话导航以真实 `apps/electron/src/renderer/` 实现为准；原型转译组件仅用于衔接示意，不得据此重写现有 UI。本轮只评审技能管理与明确记录的新增差异；画布颜色按用户要求与首页统一为 #fbfbfa。以下固定来源属于历史复刻证据，不代表当前实现或整页验收标准。
+Adoption revision: `poo70-client-design-r2-20261004`. Mode: `extracted`.
 
-**历史助手基线以 `design-demos/polo-client-source-baseline/src/` 为用户指定基线**：固定组件来源 `01f4447cf77612ca2c62d9c7155601a51bdb7b5b`，证据见该目录 `SOURCE-EVIDENCE.md` / `SCENE-TRACEABILITY.md`。聊天壳层调整与 `src/mvp/` 新增状态属于设计提案，非真实客户端现状。默认工作区由系统准备；当前个人/企业仅静态标识；不迁移旧助手 Workspace 创建/切换、远程工作区或组织管理入口。助手样式沿用基线 `src/styles/`，不要以旧 MVP 助手为生成参考。
+## Applicability
 
-**非助手范围**的权威来源是 POO-41 的 **G4 UI v1 冻结稿**（`POO-41/feat/polo-client-g4-ui@ef3528ef` 的 `docs/g4-polo-client-ui/`，2026-08-11 产品确认冻结，对应本卡快照 `docs/mvp-complete-flow-hifi/sources/g4-product.css`）；冻结范围是 PC-F01—F11 整端 UI v1（见 `sources/g4-review-record.md`）。G4 是历史基线；本卡 2026-10-03 用户明确要求配色和风格恢复为 `b82fa1e5`。MVP 基础样式回到该提交的原有样式；助手保留该提交的 source 样式。`assets/tokens/workbench-review.css` 只适配后续新增功能与已确认入口/Header 行为，不再覆盖为 r15 灰蓝/黑按钮方案；不覆盖历史快照，也不据此改写已确认业务规则。
+- Repository: `polo-ai`
+- Paths: `apps/electron/src/renderer`, `apps/electron/src/main`, `apps/electron/src/preload`, `docs/mvp-complete-flow-hifi`, `.agents/skills/polo-ai-design-system`
+- Platforms: desktop-electron
+- Modules: 登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉
 
-## 令牌权威与实现证据
+If repository identity or path scope does not match, do not apply this Skill. Read [the bound design model](references/design-system.json) and verify its sources before high-fidelity work.
 
-| 角色 | 来源 | 用法 |
-| --- | --- | --- |
-| authority | `docs/mvp-complete-flow-hifi/sources/g4-product.css`（G4 冻结稿） | 历史冻结视觉依据：background/foreground 派生色 + accent/info/success/destructive、system-ui 字体栈与字号阶梯、圆角/阴影/层级、`[data-theme=dark]` 深色令牌 |
-| implementation | `docs/mvp-complete-flow-hifi/sources/renderer-index.css`（dev 01f4447c，原路径 apps/electron/src/renderer/index.css） | 固定版本实现样式证据，已与该 commit 逐字节核对；不以当前工作树文件冒充此版本。非助手与 G4 冻结稿不一致时以冻结稿为准 |
-| implementation（历史基线） | `docs/DESIGN.md`（oklch · `#5e17eb`） | 与 G4 冻结主色 `#6e56cf` 不一致，按冻结稿执行；DESIGN.md 待后续卡更新 |
+## Sources
 
-主题只对 `light` 做过视觉验收；dark 令牌存在但验收延后。
+- `docs/client-journey-review/spec.md` — authority; 当前产品唯一来源 master-r15-closure；§13.8—13.13 覆盖旧设计指令; SHA-256 `44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6`
+- `.agents/skills/polo-ai-design-system/references/foundations.md` — authority; 本次原型提取与消费边界；明确确认/实现事实/待复看范围; SHA-256 `1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d`
+- `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css` — authority; b82fa1e5 基础样式，按最新原型逐字节提取；当前外层工作台样式维护源; SHA-256 `fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a`
+- `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css` — authority; 导航/Header、首页和统一圈子列表已明确增量；按最终CSS cascade消费; SHA-256 `75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591`
+- `apps/electron/src/renderer/index.css` — implementation; 本轮工作树Renderer样式事实；不是发布版或新的产品设计授权; SHA-256 `91fb77782a6d5dadb2cff70f05a88fa2ec67672e50dc2362020aa5b393d13449`
+- `docs/mvp-complete-flow-hifi/sources/g4-product.css` — implementation; POO-41 ef3528ef 历史冻结样式；不覆盖当前Spec; SHA-256 `fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218`
+- `docs/mvp-complete-flow-hifi/sources/g4-review-record.md` — implementation; 2026-08-11 历史冻结范围记录，非当前全页Acceptance; SHA-256 `56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843`
+- `docs/mvp-complete-flow-hifi/sources/renderer-index.css` — implementation; 01f4447c固定Renderer快照，只作历史比较; SHA-256 `964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf`
+- `.agents/skills/polo-ai-design-system/assets/components/workbench-header-scroll.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `56eb0f05806951543eaaf4c0033c7fcc08eae3336ca6010794776f6ca97ab409`
+- `.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73`
+- `.agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7`
+- `.agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js` — implementation; 原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果; SHA-256 `b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808`
 
-## 结构组件（直接复用，不重画）
+## Reuse
 
-- **workbench-bar 顶栏**：品牌、标签、运行状态 pill、当前空间静态标识、通知、账号菜单。头像菜单中的「切换空间」进入 M02 空间列表；顶栏始终显示已提交的当前空间，但不再提供独立切换下拉（D-PC-10）。企业/创作者管理及全局设置在账号菜单按资格出现；技能管理依 Spec §13.9 置于首页助手卡片，与「打开助手」并列；圈子是个人首页普通入口。移除「应用 / 技能 / 圈子」第二排导航。Header 仅在页面主体滚动离开顶部时显示分隔线。
-- **app-shell + workspace-main**：主内容工作区。App 打开后占满工作区（D-PC-05），容器外不得加 App 内部 chrome。
-- **product-card / card-grid / app-art**：App 卡与完整应用目录，首页与圈子详情共用卡片结构；标题下保留创作者来源用于辨识，同作品跨圈子按作品 ID 去重。左下角常驻状态标签和来源数量不显示（Spec §13.11）。
-- **助手 SourcePoloShell + EmptyChat / ResourceListDetail**：输入区、会话和数据源复用新基线；依 master-r14 §13，外层补 Polo 顶栏，技能管理独立于助手导航，复用授权/准备/版本状态；MVP 业务状态由 `src/mvp/` 扩展，旧 `assistant-shell` 不再是当前来源。
-- **dialog / dialog-row / progress-track**：空间切换确认、关闭三选项、安装准备等模态。
-- **system-state-card / state-icon / state-facts**：登录承接、ContractGate、失败恢复等整页系统态，居中 + 最小操作集。
-- **flow-state-page**：浏览器跨端交接卡——eyebrow 标注系统浏览器上下文，事实用 state-facts，不复制完整后台。
-- **circle-card / circle-work-row / circle-detail-heading**：我的圈子列表/详情。
-- **chat-file-row / skill-row / credits-banner**：文件留在会话内（D-PC-03）；积分不足用 Polo 容器级横幅（PC-N03）。
-- **status / statusChip 语义**（good/info/bad/neutral/stopping）：运行、阻断、到期、待审批一律用语义色，不新造色。
+- Token family `颜色与语义派生色（完整CSS color）` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`; use its actual values rather than duplicating them here.
+- Token family `系统字体栈与字号/字重/行高` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`; use its actual values rather than duplicating them here.
+- Token family `圆角/阴影/层级` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`; use its actual values rather than duplicating them here.
+- Token family `工作区尺寸/间距/密度/桌面断点` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`; use its actual values rather than duplicating them here.
+- Token family `当前导航与首页/圈子增量样式` comes from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`; use its actual values rather than duplicating them here.
+- `登录表单` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 密码/验证码切换及手机号自动注册，复用真实认证；不新增独立注册页
+- `工作台顶栏` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`: 顶部首页与已打开App标签，账号菜单切换空间，主体滚离顶部才出现边线；无第二排资源Tab
+- `工作区布局` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 读取最大宽度/内边距及断点；工作区纵向滚动，主内容不出现非预期横向溢出
+- `应用卡` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 首页/圈子复用同一结构，创作者来源保留，省略常驻状态与来源数量；稳定作品ID去重
+- `首页目录` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`: 标题我的应用，完整目录搜索/排序及空失败态，个人圈子普通入口；助手仅保留已有打开动作
+- `圈子统一列表` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`: 免费/月度/年度统一头像/身份/摘要/权益/详情入口；不增加桌面分享链接输入
+- `圈子详情分区` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css`: 内容/更新/订阅；退出仅订阅区，价格周期有效期各一次；技能本批只读
+- `确认对话框` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 明确原对象的确认/取消及失败恢复；用edge圆角/panel阴影，不以模拟按钮选择业务结果
+- `系统态与恢复` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 准备/加载/错误/离线/失权/主动重试，各自保留真实事实和最小恢复操作
+- `浏览器交接` from `.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css`: 只承接原对象并主动核对，不复制网页支付/管理，不自动重复业务写
 
-## 原型指导
+## Themes and viewports
 
-- 当前统一评审入口 `docs/mvp-complete-flow-hifi/review.html`；MVP 与助手各保留独立产品 HTML，由 manifest 页面归属映射驱动。助手只改源码再导出；统一入口用 `python3 docs/mvp-complete-flow-hifi/tools/build_review.py` 更新。
-- 高保真原型离线双文件：`prototype.html` 纯产品表面 + `review.html` 评审壳（product-ui-prototype v3）；零网络请求、零外部资源。
-- 演示数据一律虚构（人名、企业、价格、积分），不使用真实账号或真实 App 材料。
-- App 内部一律中性 FDE 占位；不得用示例 App 的执行/结果页充当 Polo 产品设计。
-- 失败/取消分支若无可自然触达的产品按钮，用评审壳的 `review_entries` 进入，不在产品表面增加演示按钮。
-- 目标视口 1440×900 与 1024×768：不得出现非预期横向溢出、遮挡或不可达操作。
+- Themes: light
+- `desktop-1440x900`: 1440 x 900
+- `desktop-1024x768`: 1024 x 768
+- `desktop-800x600`: 800 x 600
 
-## 边界
+## Interaction states
 
-- 不适用于 Polo 管理端（POL-113 企业后台）、创作者工作台、平台后台的页面设计；浏览器端在这些卡走查。
-- 第三方 App 内部业务交互由 FDE 负责（D-PC-02/D-PC-05），本 Skill 不为它们提供容器外样式。
+- loading/preparing/submitting, empty/search-no-results, hover/focus-visible/disabled, error/retry/offline, expired/revoked/multi-source fallback, success/cancel/interruption, return to original circle/order with manual recheck
+
+## Prototype guidance
+
+- 先读 references/foundations.md，产品行为读Spec；UI消费最新 docs/mvp-complete-flow-hifi/prototype.html 与主manifest，逐卡按scene定位。
+- 最新原型是目标呈现；已确认风格/入口/文案与待复看整页布局分别记录。
+- 仅维护Skill模板与样式；文档原型、消费manifest与兼容adoption是生成产物，不独立手改。
+- 管理技能页面和Polo助手内部代码暂缓；真实助手UI继续复用Renderer，转译示意不能成为重写标准。
+- 仅产品页面可进入客户端；review-shell按钮、模拟结果、虚构账号金额订单及第三方应用内部内容不进入生产。
+- 未建立完整政策注册或生产parity绑定；来源/结构检查不证明execution_ready或业务验收。
+
+## Checks
+
+- `python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py`
+- `python3 docs/mvp-complete-flow-hifi/tools/build_review.py`
+- `POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py`
+
+## Decisions
+
+- `D-CURRENT-STYLE` confirmed: Spec §13.10：b82fa1e5配色/风格替代初始r15灰黑方案；当前第一段CSS与该版本一致 (source `docs/client-journey-review/spec.md`)
+- `D-NAV-HEADER` confirmed: Spec §13.9：去第二排资源Tab，圈子个人首页入口，管理技能在助手卡内，Header仅主体滚动后显示细线 (source `docs/client-journey-review/spec.md`)
+- `D-HOME-CIRCLE` confirmed: Spec §13.11—13.13：我的应用标题、共享应用卡、圈子统一列表与详情文案去重、退出仅订阅区 (source `docs/client-journey-review/spec.md`)
+- `D-ASSISTANT-REUSE` confirmed: Spec §13.11：真实助手UI复用当前Renderer；本批暂缓技能管理及助手内部应用代码 (source `.agents/skills/polo-ai-design-system/references/foundations.md`)
+- `D-PAGE-VISUAL` suggested: 整页布局待复看；当前提取只是目标实现事实；集中visual smoke不升级parity (source `.agents/skills/polo-ai-design-system/references/foundations.md`)
+
+When a bound source changes, locate affected rules and pages before refreshing this Skill. Preserve confirmations whose source and scope did not change.
+
+
+## Design coverage
+
+- color: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 已确认b82fa1e5色彩与当前增量cascade；使用实际CSS颜色
+- typography: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 源CSS定义字体/字号/行高阶梯；不能套全局新字体覆盖助手
+- layout: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 原型提取几何为目标实现事实，具体新组合布局待复看
+- size: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 控件/头像/工作区实际尺寸来自源CSS和最终cascade
+- spacing: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 组件内外间距读取源CSS/断点，不建立第二份数值表
+- radius: explicit — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 源CSS radius与组件例外分别使用
+- density: derived — .agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css; 目录/卡片/统一圈子列表沿实际CSS；不恢复紧凑灰黑方案
+- states: explicit — .agents/skills/polo-ai-design-system/references/foundations.md; loading/empty/error/recovery/focus/disabled与恢复合同明确
+- responsive: derived — .agents/skills/polo-ai-design-system/references/foundations.md; 1440×900及1024×768目标，800×600额外回归；媒体查询按最终规则
+
+## Asset ownership and component lifecycle
+
+Maintain current assets in this Skill under assets/; do not create a second project design directory.
+Migrate the editable prototype source and update consumers; retain only version-labelled historical evidence.
+Production components stay in their owning code modules. Reference them rather than copying their implementation.
+Read component contracts and consumers before reuse. Business behavior follows current business authority.
+Generated wrappers never delete or overwrite assets. Readiness and hashes are not visual acceptance.
+
+- 登录表单: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 工作台顶栏: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 工作区布局: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 应用卡: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 首页目录: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 圈子统一列表: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 圈子详情分区: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 确认对话框: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 系统态与恢复: foundation, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+- 浏览器交接: business, current; contract `.agents/skills/polo-ai-design-system/references/foundations.md`; replacement: none.
+
+## Task-scoped scene source
+
+For a selected consumer manifest and scene ID, inspect the manifest first. If it declares `react_source`, run `product-ui-prototype/scripts/react_source.py <bundle> --scenes <IDs>` from the pinned framework checkout. Read the returned native JSX/TSX/CSS files, state/data, global entries, tokens, package and config once per task; follow additional imports when needed.
+Prototype components are design references. Production components stay in their owning `src` modules; read their bound source paths and current contracts instead of copying prototype implementations.
+HTML-only consumers keep their scoped scene reader when present. The offline `review.html` and `prototype.html` export remains bound to the authored source.

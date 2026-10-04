@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Current r12 entry: assistant source export -> unified manifest -> two surfaces.
-MVP HTML remains the maintained non-assistant product source. Review source is
-review-shell.html; never invoke pre-r12 reconstruction scripts for current output.
+MVP source is maintained in the project Design System Skill; docs/prototype.html
+is its compatibility export. Review source is review-shell.html; never invoke
+pre-r12 reconstruction scripts for current output.
 """
 import hashlib,json,re,subprocess,tarfile
 from pathlib import Path
 BUNDLE=Path(__file__).resolve().parents[1]
 ROOT=BUNDLE.parents[1]
 ASSISTANT=ROOT/'design-demos/polo-client-source-baseline'
+DESIGN=ROOT/'.agents/skills/polo-ai-design-system'
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def main():
  subprocess.run(['node',str(ASSISTANT/'tools/export-single-file.mjs')],check=True)
@@ -79,7 +81,17 @@ def main():
  for key in ['space-switch-sequence','space-switch-progress','circle-membership-feedback']:
   path=f'.agents/skills/polo-ai-design-system/assets/components/{key}.js'
   manifest['sources']=[x for x in manifest['sources'] if x['id']!=key]+[{'id':key,'path':path,'label':'空间切换系统进度','revision':exported['revision'],'sha256':digest(ROOT/path)}]
- manifest['design']['sha256']=digest(ROOT/manifest['design']['skill_path']);manifest['design']['revision']=exported['revision']+'：助手源组件与 G4 历史基线；当前共用 workbench-review 设计提案'
+ model=json.loads((DESIGN/'references/design-system.json').read_text())
+ manifest['design']['sha256']=digest(ROOT/manifest['design']['skill_path'])
+ manifest['design']['revision']=model['revision']
+ manifest['design']['model_path']='.agents/skills/polo-ai-design-system/references/design-system.json'
+ manifest['design']['sources']=[{'path':s['path'],'sha256':s['sha256']} for s in model['sources']]
+ for key,path,label in [
+  ('client-workbench-template','.agents/skills/polo-ai-design-system/references/client-workbench.template.html','客户端产品页面唯一维护模板'),
+  ('workbench-base-css','.agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css','最新原型提升的 b82fa1e5 基础样式'),
+  ('client-design-model','.agents/skills/polo-ai-design-system/references/design-system.json','当前客户端设计模型'),
+  ('client-design-foundations','.agents/skills/polo-ai-design-system/references/foundations.md','当前客户端设计来源和消费边界')]:
+  manifest['sources']=[s for s in manifest['sources'] if s['id']!=key]+[{'id':key,'path':path,'label':label,'revision':model['revision'],'sha256':digest(ROOT/path)}]
  manifest['change']={'summary':'统一入口选择 MVP 或新助手；旧助手退为历史，兼容链接仍可到达。新增布局与状态待复看。','changed_scenes':sorted(ids),'removed_scenes':sorted(set(before)-ids)}
  manifest['summary']=['统一入口，两份产品表面。','助手源码是助手的唯一维护来源。','业务规则沿用已接受 Spec；新增布局待复看。']
  brief={'source':'assistant-r12-review','item':'assistant-unified-entry','revision':exported['revision'],'current':'既有助手页面是固定版本组件转译后的行为示意，并非当前真实 Renderer 的整页复刻。','target':'聚焦技能管理和明确新增差异；既有聊天、输入、附件与会话导航沿用真实代码，不从示意页面派生 UI 重写。','reason':'用户担心简化原型误导实现范围，Spec §13.11 明确增量边界。','question':'技能管理是否清晰，既有助手沿用真实实现的边界是否明确？'}
@@ -97,11 +109,32 @@ def main():
   if source['path'] in ['docs/client-journey-review/spec.md','.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css']:source['sha256']=digest(ROOT/source['path'])
  encoded=json.dumps(manifest,ensure_ascii=False,separators=(',',':')).replace('</','<\\/')
  (BUNDLE/'prototype-manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
+ # Legacy docs entry remains the only runnable MVP export. This Skill-owned
+ # consumer manifest indexes its selected scenes without duplicating the HTML.
+ consumers={}
+ for row in model['component_contracts']:
+  for consumer in row['consumers']:
+   consumers.setdefault(consumer['scene'],[]).append(row['name'])
+ consumer_manifest={
+  'schema_version':1,'kind':'client-entry-consumer-index',
+  'revision':manifest['revision'],'design_revision':model['revision'],
+  'source_manifest':'docs/mvp-complete-flow-hifi/prototype-manifest.json',
+  'source_manifest_sha256':digest(BUNDLE/'prototype-manifest.json'),
+  'product_export':'docs/mvp-complete-flow-hifi/prototype.html',
+  'target':manifest['target'],
+  'scenes':[dict(s,components=consumers[s['id']]) for s in manifest['scenes'] if s['id'] in consumers]}
+ cp=DESIGN/'assets/prototypes/client-entry/prototype-manifest.json'
+ cp.parent.mkdir(parents=True,exist_ok=True)
+ cp.write_text(json.dumps(consumer_manifest,ensure_ascii=False,indent=2)+'\n')
+ # Compatibility model is derived; references/design-system.json is canonical.
+ (BUNDLE/'design-system.adoption.json').write_text(json.dumps(model,ensure_ascii=False,indent=2)+'\n')
  sequence_path='.agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js'
  review=(BUNDLE/'tools/review-shell.html').read_text().replace('__MANIFEST__',encoded)
  review=review.replace('__SPACE_SWITCH_SEQUENCE__',(ROOT/sequence_path).read_text())
  (BUNDLE/'review.html').write_text(review)
- product=(BUNDLE/'prototype.html').read_text()
+ product=(DESIGN/'references/client-workbench.template.html').read_text()
+ if product.count('__WORKBENCH_BASE_CSS__')!=1:raise ValueError('Expected one maintained base style marker')
+ product=product.replace('__WORKBENCH_BASE_CSS__',(DESIGN/'assets/tokens/workbench-base.css').read_text())
  shared_style=ROOT/'.agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css'
  product=re.sub(r'<style id="workbench-review-style">[\s\S]*?</style>','',product)
  product=product.replace('</head>','<style id="workbench-review-style">'+shared_style.read_text()+'</style></head>')
