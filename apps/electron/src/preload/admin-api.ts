@@ -48,6 +48,7 @@ type AdminPreloadApi = Pick<
   | 'productSpaceRestoreOfflineView'
   | 'productSpaceRevokeActiveContext'
   | 'productSpaceCleanupLegacyState'
+  | 'memberCircles'
 >
 
 export function buildAdminPreloadApi(
@@ -151,5 +152,25 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT),
     productSpaceCleanupLegacyState: () =>
       client.invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE),
+    // Member circles (POO-70 C1): forward the addressing id only — the main
+    // process derives the permission subject from the trusted Admin session,
+    // so no userId is ever sent (P70-CIRCLE-API-01).
+    memberCircles: {
+      list: () => client.invoke(RPC_CHANNELS.memberCircles.LIST),
+      listMemberships: () => client.invoke(RPC_CHANNELS.memberCircles.LIST_MEMBERSHIPS),
+      previewRenewal: membershipId =>
+        client.invoke(RPC_CHANNELS.memberCircles.PREVIEW_RENEWAL, membershipId),
+      leave: membershipId =>
+        client.invoke(RPC_CHANNELS.memberCircles.LEAVE, membershipId),
+      getOrder: orderId =>
+        client.invoke(RPC_CHANNELS.memberCircles.GET_ORDER, orderId),
+      getCheckoutResult: orderId =>
+        client.invoke(RPC_CHANNELS.memberCircles.GET_CHECKOUT_RESULT, orderId),
+      getUpdates: circleId =>
+        client.invoke(RPC_CHANNELS.memberCircles.GET_UPDATES, circleId),
+      getProfile: circleId =>
+        client.invoke(RPC_CHANNELS.memberCircles.GET_PROFILE, circleId),
+      getSupport: () => client.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT),
+    },
   }
 }

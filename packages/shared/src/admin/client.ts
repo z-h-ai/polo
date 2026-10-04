@@ -111,6 +111,21 @@ import type {
   TrustedProductSpaceCatalog,
   TrustedProductSpaceSummary,
 } from '../product-spaces/schemas.ts';
+import {
+  MEMBER_CIRCLE_LEAVE_COMMAND,
+  parseMemberCirclesResponse,
+  parseMemberCheckoutResultResponse,
+  parseMemberLeaveResponse,
+  parseMemberMembershipsResponse,
+  parseMemberOriginalOrderResponse,
+  parseMemberRenewalPreviewResponse,
+  type MemberCircleCheckoutResult,
+  type MemberCircleLeaveMembership,
+  type MemberCircleListResponse,
+  type MemberCircleRenewalPreviewPayload,
+  type MemberMembershipListResponse,
+  type OriginalCircleOrder,
+} from './member-circles.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -1119,6 +1134,91 @@ export class AdminClient {
       { method: 'PATCH', accessToken, body: input, signal: options?.signal },
     );
     return this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+  }
+
+  // -------------------------------------------------------------------------
+  // Member circle reads (POO-70 C1) — F1-verified member-side endpoints only.
+  // There is deliberately NO purchase/create-order/grant method here: the
+  // client never creates circle payment orders (contract
+  // me-membership-create-renewal-order is verified_not_consumed_by_client).
+  // -------------------------------------------------------------------------
+
+  /** GET /api/me/circles — "My circles" snapshots with entitlements. */
+  async listMemberCircles(accessToken: string): Promise<MemberCircleListResponse> {
+    const response = await this.request<unknown>('/api/me/circles', {
+      method: 'GET',
+      accessToken,
+    });
+    return parseMemberCirclesResponse(response);
+  }
+
+  /** GET /api/me/circle-memberships — memberships with payment projections. */
+  async listMemberCircleMemberships(accessToken: string): Promise<MemberMembershipListResponse> {
+    const response = await this.request<unknown>('/api/me/circle-memberships', {
+      method: 'GET',
+      accessToken,
+    });
+    return parseMemberMembershipsResponse(response);
+  }
+
+  /**
+   * GET /api/me/circle-memberships/{membershipId} — authoritative renewal
+   * preview (priceMinor may legitimately be null) plus the raw purchaseUrl.
+   */
+  async previewMemberCircleRenewal(
+    accessToken: string,
+    membershipId: string,
+  ): Promise<MemberCircleRenewalPreviewPayload> {
+    const response = await this.request<unknown>(
+      `/api/me/circle-memberships/${encodeURIComponent(membershipId)}`,
+      { method: 'GET', accessToken },
+    );
+    return parseMemberRenewalPreviewResponse(response);
+  }
+
+  /**
+   * PATCH /api/me/circle-memberships/{membershipId} — the ONLY member write
+   * on this surface: leave_now on the caller's own membership. The provider
+   * filters by the authenticated actor, and the serialized body is the strict
+   * single-field leave command.
+   */
+  async leaveMemberCircle(
+    accessToken: string,
+    membershipId: string,
+  ): Promise<MemberCircleLeaveMembership> {
+    const response = await this.request<unknown>(
+      `/api/me/circle-memberships/${encodeURIComponent(membershipId)}`,
+      { method: 'PATCH', accessToken, body: { ...MEMBER_CIRCLE_LEAVE_COMMAND } },
+    );
+    return parseMemberLeaveResponse(response);
+  }
+
+  /**
+   * GET /api/me/circle-payment-orders/{orderId} — original order receipt.
+   * Read-only: never triggers a payment query or order creation, and the
+   * stored status is display history, not an entitlement judgment.
+   */
+  async getMemberCircleOriginalOrder(
+    accessToken: string,
+    orderId: string,
+  ): Promise<OriginalCircleOrder> {
+    const response = await this.request<unknown>(
+      `/api/me/circle-payment-orders/${encodeURIComponent(orderId)}`,
+      { method: 'GET', accessToken },
+    );
+    return parseMemberOriginalOrderResponse(response);
+  }
+
+  /** GET /api/circle-checkout/{orderId} — authoritative checkout/cycle read. */
+  async getMemberCircleCheckoutResult(
+    accessToken: string,
+    orderId: string,
+  ): Promise<MemberCircleCheckoutResult> {
+    const response = await this.request<unknown>(
+      `/api/circle-checkout/${encodeURIComponent(orderId)}`,
+      { method: 'GET', accessToken },
+    );
+    return parseMemberCheckoutResultResponse(response);
   }
 
   private async request<T>(path: string, options: {
