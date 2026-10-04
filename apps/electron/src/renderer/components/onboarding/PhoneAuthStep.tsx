@@ -241,10 +241,12 @@ export function PhoneAuthStep({
           onSwitch={onUsePassword}
         />
 
-        {/* Prototype `.button.quiet`: bordered quiet row under the primary. */}
+        {/* Prototype `.button.quiet`: bordered quiet row under the primary.
+        Resending is a code send, so it shares the entry consent gate
+        (P70-PHONE-03) in addition to the server resend deadline. */}
         <button
           type="button"
-          disabled={isBusy || resendSeconds > 0}
+          disabled={isBusy || !canSend}
           onClick={sendCode}
           className="inline-flex min-h-[28px] w-full items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground transition-colors hover:bg-foreground-5 disabled:pointer-events-none disabled:opacity-50"
         >
