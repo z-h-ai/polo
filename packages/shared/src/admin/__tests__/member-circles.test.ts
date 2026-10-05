@@ -142,6 +142,65 @@ describe('member circle snapshot DTO', () => {
     expect(() => parseMemberCirclesResponse(null)).toThrow(AdminError)
   })
 
+  it('keeps null artifact name/summary as facts across a full list (POO-79 API-CIRCLE-02-SUMMARY-NULL)', () => {
+    // pol114@17477dbf: Artifact.name / Artifact.summary are nullable DB
+    // columns passed through verbatim by the entitlements projection — a
+    // legal 200 response must parse and reach the view, not be rejected as
+    // invalid_response (that defect zeroed the whole list).
+    const payload = {
+      circles: [
+        {
+          id: MEMBERSHIP_ID,
+          status: 'active',
+          billingKind: 'paid',
+          modeTransitionEndsAt: null,
+          currentPeriodEnd: '2026-11-01T00:00:00.000Z',
+          joinSource: 'paid_join',
+          joinedAt: '2026-01-01T00:00:00.000Z',
+          circle: {
+            id: CIRCLE_ID,
+            name: 'Design Circle',
+            purpose: 'Design reviews',
+            status: 'active',
+            ownerUserId: OWNER_USER_ID,
+          },
+          entitlements: [
+            {
+              id: ENTITLEMENT_ID,
+              circleId: CIRCLE_ID,
+              artifactId: ARTIFACT_ID,
+              sourceKind: 'active_distribution',
+              sourceValidUntil: null,
+              artifact: {
+                id: ARTIFACT_ID,
+                type: 'skill',
+                slug: 'design-kit',
+                name: null,
+                summary: null,
+                status: 'published',
+                currentStableVersionId: STABLE_VERSION_ID,
+              },
+              artifactVersion: {
+                id: ENTITLEMENT_VERSION_ID,
+                version: '1.2.0',
+                status: 'published',
+                publishedAt: '2026-02-01T00:00:00.000Z',
+              },
+            },
+          ],
+        },
+      ],
+    }
+    const parsed = parseMemberCirclesResponse(payload)
+    expect(parsed.circles).toHaveLength(1)
+    const artifact = parsed.circles[0]!.entitlements[0]!.artifact
+    expect(artifact.name).toBeNull()
+    expect(artifact.summary).toBeNull()
+    // Non-nullable identity fields stay intact around the null facts.
+    expect(artifact.slug).toBe('design-kit')
+    expect(artifact.id).toBe(ARTIFACT_ID)
+  })
+
   it('strips unknown fields without guessing their semantics', () => {
     const mutated = structuredClone(validCirclesPayload) as typeof validCirclesPayload
     ;(mutated.circles[0] as Record<string, unknown>).creatorDisplayName = 'Injected Name'
@@ -386,6 +445,14 @@ describe('original order DTO', () => {
     expect(parsed.storedStatus).toBe('paid')
     expect(parsed.paymentOwner).toBe('B01')
     expect(parsed.circle.circleId).toBe(CIRCLE_ID)
+  })
+
+  it('keeps a null checkoutUrl as a fact (CirclePaymentOrder.checkoutUrl String?)', () => {
+    const mutated = structuredClone(validOrderPayload) as typeof validOrderPayload
+    ;(mutated.order as Record<string, unknown>).checkoutUrl = null
+    const parsed = parseMemberOriginalOrderResponse(mutated)
+    expect(parsed.checkoutUrl).toBeNull()
+    expect(parsed.orderId).toBe(ORDER_ID)
   })
 
   it('fails closed when paymentOwner is missing', () => {
