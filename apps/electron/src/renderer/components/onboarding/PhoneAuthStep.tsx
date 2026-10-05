@@ -134,7 +134,7 @@ export function PhoneAuthStep({
                   onClearError()
                 }}
                 disabled={isBusy}
-                className="h-[44px] min-w-0 flex-1 px-[12px] text-[11px] md:text-[11px] rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="h-full min-w-0 flex-1 px-[12px] text-[11px] md:text-[11px] rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </span>
           </div>

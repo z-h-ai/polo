@@ -399,16 +399,19 @@ export function HomePage() {
         || live.enterpriseId !== clickLease.enterpriseId
         || live.contextKey !== clickLease.contextKey
         || live.contextVersion !== clickLease.contextVersion
-      ) throw new Error(t('homeApps.errors.staleContext'))
+      ) {
+        toast.error(t('homeSpace.workflows.openFailed'), {
+          description: t('homeApps.errors.staleContext'),
+        })
+        return
+      }
       await window.electronAPI.openUrl(createEnterpriseWorkflowUrl(
         status.adminUrl,
         clickLease.enterpriseId ?? '',
         workflow,
       ))
-    } catch (error) {
-      toast.error(t('homeSpace.workflows.openFailed'), {
-        description: error instanceof Error ? error.message : t('homeApps.errors.openGeneric'),
-      })
+    } catch {
+      toast.error(t('homeSpace.workflows.openFailed'))
     }
   }
 

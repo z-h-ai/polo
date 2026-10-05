@@ -35,7 +35,7 @@ export function LoginTrustRow({
           checked={checked}
           onChange={(event) => onCheckedChange(event.target.checked)}
           disabled={disabled}
-          className="size-3 accent-[var(--accent)]"
+          className="size-[14px] shrink-0 accent-[var(--accent)]"
         />
         <span>{children}</span>
       </label>

@@ -169,7 +169,7 @@ export function mapAdminLoginError(error: unknown): string {
   ) {
     return i18n.t('onboarding.adminLogin.genericError')
   }
-  if (errorLike?.errorCode === 'NETWORK_ERROR') {
+  if (errorLike?.errorCode === 'NETWORK_ERROR' || errorLike?.errorCode === 'TIMEOUT') {
     return i18n.t('onboarding.adminLogin.networkError')
   }
   const message = error instanceof Error ? error.message : errorLike?.message
@@ -177,7 +177,8 @@ export function mapAdminLoginError(error: unknown): string {
     return i18n.t('onboarding.adminLogin.networkError')
   }
 
-  return message || i18n.t('onboarding.adminLogin.genericError')
+  // Protocol messages remain diagnostics; customer copy follows this locale.
+  return i18n.t('onboarding.adminLogin.genericError')
 }
 
 export function mapAdminPhoneAuthError(error: unknown): string {
@@ -215,6 +216,7 @@ export function mapAdminPhoneAuthError(error: unknown): string {
     case 'phone_auth_configuration_error':
       return i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
     case 'NETWORK_ERROR':
+    case 'TIMEOUT':
       return i18n.t('onboarding.adminLogin.networkError')
   }
 

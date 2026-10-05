@@ -145,14 +145,14 @@ describe('PhoneAuthStep rendered interactions', () => {
     expect((phoneInput as HTMLInputElement).value).toBe('13800138000')
   })
 
-  it('uses the server countdown, normalizes autofill, verifies, and resets on edit', async () => {
+  it('keeps the server countdown through a rejected verification, allows explicit retry, and resets on edit', async () => {
     const onSendCode = mock(async () => ({
       success: true as const,
       accepted: true,
       expiresIn: 300,
       resendAfter: 47,
     }))
-    const onVerify = mock(async () => true)
+    const onVerify = mock(async () => false)
     const user = userEvent.setup({ document: window.document })
 
     function PhoneAuthHarness() {
@@ -195,6 +195,14 @@ describe('PhoneAuthStep rendered interactions', () => {
     expect((codeInput as HTMLInputElement).value).toBe('123456')
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onVerify).toHaveBeenCalledWith('13800138000', '123456')
+    expect(onVerify).toHaveBeenCalledTimes(1)
+    expect(onSendCode).toHaveBeenCalledTimes(1)
+    expect((screen.getByRole('button', { name: /Resend in \d+s/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Verification code') as HTMLInputElement).value).toBe('123456')
+    onVerify.mockImplementation(async () => true)
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(onVerify).toHaveBeenCalledTimes(2)
+    expect(onSendCode).toHaveBeenCalledTimes(1)
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))
     expect(

@@ -382,6 +382,33 @@ describe('admin onboarding flow', () => {
 // ============================================================
 
 describe('admin login rejection mapping', () => {
+  for (const language of ['zh-Hans', 'en']) {
+    it(`localizes typed transport and safe protocol failures in ${language} without changing denial precedence`, async () => {
+      await i18n.changeLanguage(language)
+      try {
+        for (const errorCode of ['TIMEOUT', 'NETWORK_ERROR']) {
+          const failure = { errorCode, message: 'Admin request timed out' }
+          expect(mapAdminLoginError(failure)).toBe(i18n.t('onboarding.adminLogin.networkError'))
+          expect(mapAdminPhoneAuthError(failure)).toBe(i18n.t('onboarding.adminLogin.networkError'))
+        }
+        for (const failure of [
+          { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' },
+          { errorCode: 'FORBIDDEN', status: 403, message: 'Admin request is not permitted' },
+          new Error('Safe protocol diagnostic'),
+        ]) {
+          expect(mapAdminLoginError(failure)).toBe(i18n.t('onboarding.adminLogin.genericError'))
+        }
+        expect(mapAdminLoginError({ errorCode: 'invalid_credentials', status: 401 })).toBe(i18n.t('onboarding.adminLogin.invalidCredentials'))
+        expect(mapAdminLoginError({ errorCode: 'account_disabled', status: 403 })).toBe(i18n.t('onboarding.adminLogin.accountDisabled'))
+        expect(mapAdminLoginError({ errorCode: 'TOKEN_EXPIRED', status: 401 })).toBe(i18n.t('onboarding.adminLogin.genericError'))
+        expect(mapAdminLoginError({ errorCode: 'TIMEOUT', status: 503 })).toBe(i18n.t('onboarding.adminLogin.genericError'))
+        expect(mapAdminPhoneAuthError({ errorCode: 'TIMEOUT', status: 503 })).toBe(i18n.t('onboarding.adminLogin.phoneAuthUnavailable'))
+      } finally {
+        await i18n.changeLanguage('en')
+      }
+    })
+  }
+
   it('maps 401 and session-invalid codes to the stable sign-in failure copy', () => {
     const expected = i18n.t('onboarding.adminLogin.genericError')
 
@@ -528,6 +555,47 @@ function renderAdminLoginHooks(
 describe('admin login session fencing (hook)', () => {
   afterEach(() => {
     delete (window as unknown as { electronAPI?: unknown }).electronAPI
+  })
+
+  it('keeps a typed password timeout failed until an explicit same-account retry succeeds', async () => {
+    const adminLogin = mock(async () => ({ success: false as const, errorCode: 'TIMEOUT', message: 'Admin request timed out' }))
+    installElectronApi({ adminLogin })
+    const onConfigSaved = mock(() => {})
+    const { result } = renderAdminLoginHooks({ onConfigSaved })
+    await act(async () => { await result.current.handleAdminLogin('user-a', 'pw') })
+    expect(result.current.state.step).toBe('admin-login')
+    expect(result.current.state.loginStatus).toBe('error')
+    expect(result.current.state.errorMessage).toBe(i18n.t('onboarding.adminLogin.networkError'))
+    expect(adminLogin).toHaveBeenCalledTimes(1)
+    expect(onConfigSaved).not.toHaveBeenCalled()
+    const retry = mock(async () => ({ success: true as const, user: adminUser('user-a') }))
+    installElectronApi({ adminLogin: retry })
+    await act(async () => { await result.current.handleAdminLogin('user-a', 'pw') })
+    expect(retry).toHaveBeenCalledTimes(1)
+    expect(retry).toHaveBeenCalledWith('user-a', 'pw')
+    expect(result.current.state.step).toBe('complete')
+    expect(onConfigSaved).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not automatically send or verify again after typed phone timeouts', async () => {
+    const failure = { success: false as const, errorCode: 'TIMEOUT', message: 'Admin request timed out' }
+    const send = mock(async () => failure)
+    const verify = mock(async () => failure)
+    const challenge = mock(async () => 'issuer-signed-opaque-token')
+    installElectronApi({ adminSendPhoneAuthCode: send, adminVerifyPhoneAuthCode: verify })
+    const { result } = renderAdminLoginHooks({ phoneAuthChallengeProvider: challenge })
+    await act(async () => { expect(await result.current.handleAdminSendPhoneCode('13800138000')).toEqual(failure) })
+    expect(result.current.state.errorMessage).toBe(i18n.t('onboarding.adminLogin.networkError'))
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(challenge).toHaveBeenCalledTimes(1)
+    expect(verify).not.toHaveBeenCalled()
+    await act(async () => { expect(await result.current.handleAdminVerifyPhoneCode('13800138000', '123456')).toBe(false) })
+    expect(result.current.state.step).toBe('admin-login')
+    expect(result.current.state.loginStatus).toBe('error')
+    expect(result.current.state.errorMessage).toBe(i18n.t('onboarding.adminLogin.networkError'))
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(verify).toHaveBeenCalledTimes(1)
+    expect(challenge).toHaveBeenCalledTimes(1)
   })
 
   it('fires exactly one login RPC for a double submit, then completes once', async () => {

@@ -1031,6 +1031,32 @@ describe('HomePage A→B ProductSpace isolation (R39)', () => {
 })
 
 describe('HomePage enterprise workflows (committed-lease fail-closed)', () => {
+  for (const language of ['zh-Hans', 'en']) {
+    it(`localizes capability rejection and permits explicit same-context workflow retry in ${language}`, async () => {
+      await i18n.changeLanguage(language)
+      appCatalogHook = hookWithCatalog(enterpriseCatalogWith([]))
+      appCatalogHook.productSpace.activeProductSpace = {
+        id: 'organization-a', enterpriseId: 'enterprise-a', kind: 'enterprise',
+        name: 'Enterprise A', role: 'manager', accessMode: 'active',
+      }
+      adminGetStatus.mockResolvedValue({ loggedIn: true, userId: 'account-a', adminUrl: 'https://admin.example.com' })
+      openUrl.mockRejectedValueOnce(new Error('Failed to open URL: Cannot open URL on client: capability unavailable'))
+      renderHome()
+      fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+      await waitFor(() => expect(toastErrorSpy).toHaveBeenCalledWith(i18n.t('homeSpace.workflows.openFailed')))
+      expect(JSON.stringify(toastErrorSpy.mock.calls)).not.toContain('Cannot open URL')
+      expect(openUrl).toHaveBeenCalledTimes(1)
+      openUrl.mockResolvedValue(undefined)
+      fireEvent.click(screen.getByTestId('enterprise-member-management-link'))
+      await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(2))
+      expect(openUrl).toHaveBeenLastCalledWith('https://admin.example.com/enterprise/enterprise-a/members')
+      fireEvent.click(screen.getByTestId('enterprise-creator-publishing-link'))
+      await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(3))
+      expect(openUrl).toHaveBeenLastCalledWith('https://admin.example.com/organization-apps?organizationId=enterprise-a')
+      expect(toastErrorSpy).toHaveBeenCalledTimes(1)
+    })
+  }
+
   it('opens enterprise workflows with the committed enterprise context', async () => {
     const catalog = enterpriseCatalogWith([])
     appCatalogHook = hookWithCatalog(catalog)
@@ -1106,6 +1132,9 @@ describe('HomePage enterprise workflows (committed-lease fail-closed)', () => {
     // Release A's status: the stale continuation must fail closed.
     releaseStatusA!({ loggedIn: true, userId: 'account-a', adminUrl: 'https://admin.example.com' })
     await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalledWith(i18n.t('homeSpace.workflows.openFailed'), {
+        description: i18n.t('homeApps.errors.staleContext'),
+      })
       expect(openUrl).not.toHaveBeenCalled()
     })
     expect(openUrl).not.toHaveBeenCalledWith(
