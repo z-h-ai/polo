@@ -8,6 +8,10 @@ import { BUILTIN_APP_DEFINITIONS } from '../../../../shared/tab-browser-types'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 // Register only when no window exists yet (shared bun test process).
 if (typeof window === 'undefined') {
   GlobalRegistrator.register()

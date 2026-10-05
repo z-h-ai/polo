@@ -85,9 +85,9 @@ export function MemberAppCard({
       data-variant={variant}
       aria-busy={busy}
       onClick={handleOpen}
-      className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
+      className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
     >
-      <span className="mb-[26px] grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success">
+      <span className="mb-[24px] min-[1081px]:mb-[26px] grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success">
         {app.iconUrl
           ? <img src={app.iconUrl} alt="" className="size-full object-cover" />
           : <span className="text-[17px] font-semibold">{app.name.slice(0, 1)}</span>}

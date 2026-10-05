@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName } from '@/components/ui/client-workbench'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
@@ -35,10 +36,8 @@ import type { CircleReturnState } from '@/hooks/useCircleReturn'
  *   display history and never an entitlement (G5); entitlement validity is
  *   the hook's joint verdict.
  *
- * Layout is a derived composition over the confirmed workbench tokens
- * (banner pattern, fact rows, hairline sections) consistent with the C3/C5
- * surfaces. The full-page combination is still pending design re-review —
- * no parity claim is made.
+ * Layout consumes the current flow-state-page and state-facts composition.
+ * Real native UI parity still requires independent review of this HEAD.
  */
 
 export interface CircleReturnPanelProps {
@@ -71,12 +70,12 @@ function EntitlementValue({ entitlement }: { entitlement: CircleReturnEntitlemen
         ? 'poo70.c8.entitlement.unknown'
         : 'poo70.c8.entitlement.pending'
   return (
-    <dd
+    <span
       className="m-0 font-medium text-foreground"
       data-testid="circle-return-fact-entitlement-value"
     >
       {t(key)}
-    </dd>
+    </span>
   )
 }
 
@@ -90,15 +89,15 @@ function FactRow({
   children: ReactNode
 }) {
   return (
-    <div className="grid grid-cols-[minmax(84px,auto)_1fr] gap-[12px] py-[8px] text-[13px]" data-testid={testId}>
+    <div className="grid grid-cols-[116px_minmax(0,1fr)] gap-[12px] border-b border-border px-[13px] py-[11px] text-[12px] last:border-b-0" data-testid={testId}>
       <dt className="m-0 text-muted-foreground">{label}</dt>
-      <dd className="m-0 break-all font-medium text-foreground">{children}</dd>
+      <dd className="m-0 min-w-0 [overflow-wrap:anywhere] font-medium text-foreground">{children}</dd>
     </div>
   )
 }
 
-const SECONDARY_BUTTON_CLASS = 'inline-flex min-h-[34px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[14px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-50'
-const PRIMARY_BUTTON_CLASS = 'inline-flex min-h-[34px] items-center justify-center rounded-[8px] bg-foreground px-[14px] text-[13px] font-medium text-background hover:opacity-90 disabled:opacity-50'
+const SECONDARY_BUTTON_CLASS = 'inline-flex items-center justify-center disabled:opacity-50 ' + clientWorkbenchButtonClassName
+const PRIMARY_BUTTON_CLASS = 'inline-flex items-center justify-center disabled:opacity-50 ' + clientWorkbenchPrimaryClassName
 
 export function CircleReturnPanel({
   state,
@@ -161,7 +160,7 @@ export function CircleReturnPanel({
 
   return (
     <section
-      className="mx-auto w-full max-w-[720px]"
+      className="mx-auto mt-[54px] grid justify-items-center w-full max-w-[640px] rounded-[20px] border border-border bg-surface p-[32px] text-center shadow-middle"
       data-testid="circle-return-panel"
       data-return-kind={state.kind}
       data-return-phase={state.phase}
@@ -170,7 +169,7 @@ export function CircleReturnPanel({
         {t('poo70.c8.eyebrow')}
       </p>
       <h1
-        className="m-0 mt-[6px] text-[26px] font-bold leading-[1.15] tracking-[-0.04em] text-foreground"
+        className="m-0 text-[26px] font-[720] leading-[normal] tracking-[-0.035em] text-foreground"
         data-testid="circle-return-title"
       >
         {state.phase === 'failed'
@@ -180,7 +179,7 @@ export function CircleReturnPanel({
             : title}
       </h1>
       <p
-        className="m-0 mt-[10px] text-[14px] leading-[1.65] text-muted-foreground"
+        className="m-0 mt-[9px] text-[13px] leading-[1.58] text-foreground-60"
         data-testid="circle-return-subtitle"
       >
         {state.phase === 'failed'
@@ -194,7 +193,7 @@ export function CircleReturnPanel({
       The mismatch state renders none of them (no disclosure). */}
       {state.phase !== 'account-mismatch' && (
         <dl
-          className="m-0 mt-[18px] rounded-[13px] border border-border bg-surface px-[16px] py-[6px]"
+          className="m-0 mt-[22px] w-full overflow-hidden rounded-[8px] border border-border bg-surface text-left"
           data-testid="circle-return-facts"
         >
           {isOrder && target.orderId && (
@@ -242,7 +241,7 @@ export function CircleReturnPanel({
       entitlement judgment (G5). */}
       {state.phase === 'verified' && state.orderFacts && (
         <dl
-          className="m-0 mt-[12px] rounded-[13px] border border-border bg-surface px-[16px] py-[6px]"
+          className="m-0 mt-[12px] w-full overflow-hidden rounded-[8px] border border-border bg-surface text-left"
           data-testid="circle-return-order"
         >
           <FactRow label={t('poo70.c8.order.storedStatus')} testId="circle-return-order-status">
@@ -304,7 +303,7 @@ export function CircleReturnPanel({
 
       {/* Actions. The set per phase mirrors the confirmed prototype scenes;
       there is NO join/pay/open-app/enable-skill affordance in any state. */}
-      <div className="mt-[18px] flex flex-wrap gap-[10px]" data-testid="circle-return-actions">
+      <div className="mt-[16px] flex flex-wrap justify-center gap-[8px]" data-testid="circle-return-actions">
         {(state.phase === 'candidate' || state.phase === 'checking') && (
           <button
             type="button"

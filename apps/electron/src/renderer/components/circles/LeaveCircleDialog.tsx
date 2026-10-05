@@ -1,4 +1,7 @@
-import { useEffect, type CSSProperties } from 'react'
+import { useCallback, useRef } from 'react'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { useRegisterModal } from '@/context/ModalContext'
+import { useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName } from '@/components/ui/client-workbench'
 import { useTranslation } from 'react-i18next'
 import type { LeaveCircleDialogState } from '@/hooks/useLeaveCircle'
 
@@ -31,9 +34,9 @@ import type { LeaveCircleDialogState } from '@/hooks/useLeaveCircle'
  * - suspended: the F1 suspended relation is NOT a departure — the dialog
  *   says so explicitly instead of ever presenting 已退出 or a rejoin.
  *
- * Escape routes through `onCancel` (the flow refuses it while the write is
- * in flight). Focus trap / shared Radix dialog-base alignment is a C9
- * integration concern (recorded handoff, see the card notes).
+ * Radix contains keyboard focus and restores the original entry on close.
+ * Escape, outside dismissal and the modal registry all use the same busy
+ * cancel guard; the hook retains its own single-write protection.
  */
 export function LeaveCircleDialog({
   state,
@@ -46,18 +49,17 @@ export function LeaveCircleDialog({
 }) {
   const { t } = useTranslation()
 
-  useEffect(() => {
-    if (!state) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [state, onCancel])
+  const workbenchStyle = useClientWorkbenchStyle()
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const confirming = Boolean(state?.busy && state.phase === 'confirm')
+  const cancel = useCallback(() => {
+    if (!confirming) onCancel()
+  }, [confirming, onCancel])
+  useRegisterModal(Boolean(state), cancel)
 
   if (!state) return null
 
-  const confirming = state.busy && state.phase === 'confirm'
   const rechecking = state.phase === 'recheck'
   // The confirm button is the single write per attempt: enabled in `confirm`
   // and as the deliberate retry after an honest `error`; never during `busy`
@@ -72,37 +74,39 @@ export function LeaveCircleDialog({
   const cancelDisabled = confirming
 
   return (
-    <div
-      className="fixed inset-0 z-[var(--z-modal)] grid place-items-center bg-foreground/40 p-[20px]"
-      data-testid="leave-circle-dialog-overlay"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="leave-circle-dialog-title"
+    <Dialog open onOpenChange={open => { if (!open) cancel() }}>
+      <DialogContent
         data-testid="leave-circle-dialog"
         data-circle-id={state.circleId}
         data-phase={state.phase}
-        className="w-full max-w-[520px] overflow-hidden rounded-[14px] border border-border bg-surface shadow-modal-small"
-        // Map the existing scoped utility to the current client dialog's
-        // panel elevation (DS workbench-base.css --shadow-panel). Other
-        // renderer dialogs retain their own elevation.
-        style={{
-          '--shadow-modal-small': '0 20px 44px rgba(23, 24, 26, .14), 0 3px 9px rgba(23, 24, 26, .06)',
-        } as CSSProperties}
+        style={workbenchStyle}
+        overlayStyle={workbenchStyle}
+        overlayClassName={clientWorkbenchOverlayClassName}
+        showCloseButton={false}
+        className={clientWorkbenchDialogClassName}
+        onOpenAutoFocus={event => {
+          event.preventDefault()
+          returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          cancelRef.current?.focus()
+        }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus()
+        }}
+        onEscapeKeyDown={event => { event.preventDefault(); cancel() }}
+        onInteractOutside={event => { event.preventDefault(); cancel() }}
       >
         <div className="flex items-start justify-between gap-[16px] px-[20px] pb-[14px] pt-[20px]">
           <div>
-            <h2
-              id="leave-circle-dialog-title"
+            <DialogTitle
               data-testid="leave-circle-dialog-title"
               className="m-0 text-[16px] font-semibold leading-[1.4] text-foreground"
             >
               {t('poo70.c7.dialog.title', { name: state.circleName })}
-            </h2>
-            <p className="m-[6px_0_0] text-[13px] leading-[1.5] text-foreground-60" data-testid="leave-circle-dialog-subtitle">
+            </DialogTitle>
+            <DialogDescription className="m-[6px_0_0] text-[13px] leading-[1.5] text-foreground-60" data-testid="leave-circle-dialog-subtitle">
               {t('poo70.c7.dialog.subtitle')}
-            </p>
+            </DialogDescription>
           </div>
         </div>
 
@@ -124,7 +128,7 @@ export function LeaveCircleDialog({
             <>
               {state.failure && (
                 <div
-                  className="mb-[10px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+                  className="mb-[10px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
                   role="alert"
                   data-testid="leave-circle-dialog-error"
                 >
@@ -167,9 +171,10 @@ export function LeaveCircleDialog({
           <button
             type="button"
             data-testid="leave-circle-dialog-cancel"
+            ref={cancelRef}
             disabled={cancelDisabled}
             className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={onCancel}
+            onClick={cancel}
           >
             {t('poo70.c7.dialog.cancel')}
           </button>
@@ -183,7 +188,7 @@ export function LeaveCircleDialog({
             {confirming ? t('poo70.c7.dialog.confirming') : t('poo70.c7.dialog.confirm')}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

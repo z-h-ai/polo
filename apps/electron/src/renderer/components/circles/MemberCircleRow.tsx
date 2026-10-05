@@ -100,7 +100,7 @@ export function MemberCircleRow({ model, onOpen, testId = 'circle-row' }: Member
       </span>
       <div className="block min-w-0">
         <div className="m-0 block">
-          <h2 className="m-0 mb-[4px] text-[18px] font-bold leading-[1.45] tracking-[-0.02em] max-[850px]:text-[17px]">
+          <h2 className="m-0 mb-[4px] text-[18px] font-[650] leading-[1.45] tracking-[-0.02em] max-[850px]:text-[17px]">
             {model.name}
           </h2>
         </div>

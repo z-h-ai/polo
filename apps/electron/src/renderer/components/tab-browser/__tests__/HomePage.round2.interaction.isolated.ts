@@ -16,6 +16,10 @@ import {
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 

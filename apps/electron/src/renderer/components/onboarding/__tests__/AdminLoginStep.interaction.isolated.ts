@@ -5,6 +5,10 @@ import { createElement, useState } from 'react'
 import type { ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 

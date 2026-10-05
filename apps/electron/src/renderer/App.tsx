@@ -1,3 +1,4 @@
+import { ProductSpaceErrorScreen } from '@/components/product-space/ProductSpaceErrorScreen'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18n } from '@polo-ai/shared/i18n'
@@ -3076,46 +3077,18 @@ export default function App() {
       <DismissibleLayerProvider>
         <ModalProvider>
           <WindowCloseHandler />
-          <div
-            className="flex h-full items-center justify-center p-6"
-            data-testid="product-space-error-screen"
-          >
-            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
-              <h2 className="text-lg font-semibold text-foreground">
-                {t('productSpace.error.loadTitle')}
-              </h2>
-              <p className="mt-2 text-sm text-foreground/60">
-                {t('productSpace.error.loadDesc')}
-              </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  data-testid="product-space-error-logout"
-                  onClick={() => {
-                    void handleAdminLogout()
-                  }}
-                >
-                  {t('productSpace.error.logout')}
-                </Button>
-                <Button
-                  type="button"
-                  data-testid="product-space-error-retry"
-                  onClick={() => {
-                    void retryProductSpaceBootstrap().then(next => {
-                      if (next === 'ready') {
-                        continueAfterProductSpace(windowWorkspaceId)
-                      } else if (next === 'contract-blocked') {
-                        setAppState('contract-blocked')
-                      }
-                    }).catch(() => {})
-                  }}
-                >
-                  {t('productSpace.error.retry')}
-                </Button>
-              </div>
-            </div>
-          </div>
+          <ProductSpaceErrorScreen
+            onLogout={() => { void handleAdminLogout() }}
+            onRetry={() => {
+              void retryProductSpaceBootstrap().then(next => {
+                if (next === 'ready') {
+                  continueAfterProductSpace(windowWorkspaceId)
+                } else if (next === 'contract-blocked') {
+                  setAppState('contract-blocked')
+                }
+              }).catch(() => {})
+            }}
+          />
         </ModalProvider>
       </DismissibleLayerProvider>
     )
@@ -3165,46 +3138,18 @@ export default function App() {
       <DismissibleLayerProvider>
         <ModalProvider>
           <WindowCloseHandler />
-          <div
-            className="flex h-full items-center justify-center p-6"
-            data-testid="product-space-error-screen"
-          >
-            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
-              <h2 className="text-lg font-semibold text-foreground">
-                {t('productSpace.error.loadTitle')}
-              </h2>
-              <p className="mt-2 text-sm text-foreground/60">
-                {t('productSpace.error.loadDesc')}
-              </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  data-testid="product-space-error-logout"
-                  onClick={() => {
-                    void handleAdminLogout()
-                  }}
-                >
-                  {t('productSpace.error.logout')}
-                </Button>
-                <Button
-                  type="button"
-                  data-testid="product-space-error-retry"
-                  onClick={() => {
-                    void retryProductSpaceBootstrap().then(next => {
-                      if (next === 'ready') {
-                        continueAfterProductSpace(windowWorkspaceId)
-                      } else if (next === 'contract-blocked') {
-                        setAppState('contract-blocked')
-                      }
-                    }).catch(() => {})
-                  }}
-                >
-                  {t('productSpace.error.retry')}
-                </Button>
-              </div>
-            </div>
-          </div>
+          <ProductSpaceErrorScreen
+            onLogout={() => { void handleAdminLogout() }}
+            onRetry={() => {
+              void retryProductSpaceBootstrap().then(next => {
+                if (next === 'ready') {
+                  continueAfterProductSpace(windowWorkspaceId)
+                } else if (next === 'contract-blocked') {
+                  setAppState('contract-blocked')
+                }
+              }).catch(() => {})
+            }}
+          />
         </ModalProvider>
       </DismissibleLayerProvider>
     )

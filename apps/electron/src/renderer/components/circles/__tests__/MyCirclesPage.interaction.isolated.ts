@@ -11,6 +11,10 @@ import type {
 import type { MemberCirclesResource } from '@/context/MemberCircleResourceContext'
 import type { ClientPageRoute } from '@/context/ClientPageContext'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 // -------------------------------------------------------------------------
 // Isolated-process host (own bun process; same pattern as
 // MemberCircleResourceContext.isolated.ts): the ProductSpace binding is a

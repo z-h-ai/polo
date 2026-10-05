@@ -32,6 +32,10 @@ import type { CircleReturnCandidate } from '@polo-ai/shared/protocol'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 

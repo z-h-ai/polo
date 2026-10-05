@@ -1,3 +1,4 @@
+import { useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName } from '@/components/ui/client-workbench'
 import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -161,6 +162,7 @@ export function circleAppRowUnavailableReason(
 
 export function CircleContentPanel({ circle, context }: CircleContentPanelProps) {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const { directory, catalog, spaceKind, launchHandoff, relationsPhase, onRefreshRelations } = context
 
   // H2 shared actions: open / prepare / permission feedback through the SAME
@@ -238,7 +240,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
         <div
           className={
             relationsState === 'error'
-              ? 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger'
+              ? 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive'
               : 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text'
           }
           data-testid={`circle-content-relations-${relationsState}`}
@@ -260,7 +262,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
     if (relationsState === 'denied') {
       return (
         <div
-          className="mt-[16px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+          className="mt-[16px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
           data-testid="circle-content-relations-denied"
         >
           {t('homeApps.organization.accessError')}
@@ -381,7 +383,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
             )}
             {catalogPhase === 'denied' && (
               <div
-                className="mt-[12px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+                className="mt-[12px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
                 data-testid="circle-content-denied"
               >
                 {t('homeApps.organization.accessError')}
@@ -405,7 +407,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
             )}
             {catalogPhase === 'no-space' && (
               <div
-                className="mt-[12px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+                className="mt-[12px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
                 data-testid="circle-content-no-space"
               >
                 {t('homeApps.errors.unavailable')}
@@ -413,7 +415,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
             )}
             {directoryRejected && (
               <div
-                className="mt-[12px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+                className="mt-[12px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
                 data-testid="circle-content-rejected"
               >
                 <p className="m-0 font-medium">{t('poo70.h3.home.rejectedTitle')}</p>
@@ -509,7 +511,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
       <Dialog open={Boolean(memberActions.prepareTarget)} onOpenChange={(open) => {
         if (!open) memberActions.cancelPrepare()
       }}>
-        <DialogContent>
+        <DialogContent style={workbenchStyle} overlayStyle={workbenchStyle} overlayClassName={clientWorkbenchOverlayClassName} className={clientWorkbenchDialogClassName}>
           <DialogHeader>
             <DialogTitle>
               {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
@@ -524,6 +526,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
               {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
+          <div className="px-[20px] pb-[18px]">
           {prepareTargetApp && memberActions.prepareTarget && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
@@ -563,11 +566,12 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
               </div>
             </div>
           )}
+          </div>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => memberActions.cancelPrepare()}>
+            <Button className={clientWorkbenchButtonClassName} type="button" variant="secondary" onClick={() => memberActions.cancelPrepare()}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" onClick={() => { void memberActions.confirmPrepare() }}>
+            <Button className={clientWorkbenchPrimaryClassName} type="button" onClick={() => { void memberActions.confirmPrepare() }}>
               {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}

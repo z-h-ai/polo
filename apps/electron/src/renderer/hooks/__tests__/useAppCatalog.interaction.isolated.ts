@@ -24,6 +24,9 @@ import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 import { setupI18n, i18n } from '@polo-ai/shared/i18n'
 import type { CatalogApp } from '@polo-ai/shared/admin'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
 GlobalRegistrator.register()
 setupI18n()
 

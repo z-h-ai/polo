@@ -1,3 +1,4 @@
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MemberCircleSnapshot, MemberMembership } from '@polo-ai/shared/admin'
@@ -218,6 +219,7 @@ export function __resetMyCirclesViewPreferencesForTests(): void {
 
 export function MyCirclesPage() {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const resource = useMemberCircles()
   const clientPage = useOptionalClientPage()
 
@@ -295,31 +297,32 @@ export function MyCirclesPage() {
     // viewport-bounded scrolling; C9 (POO-100) registers the main scroller.
     <div className="h-full min-h-0 overflow-y-auto">
       <main
-        className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+        style={workbenchStyle}
+        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
         data-testid="my-circles-page"
       >
         {/* Prototype `.subpage-heading`: back button + eyebrow + THE single
         page title pair (Spec §13.12 文案去重). */}
-        <div className="flex flex-col gap-[16px]">
+        <div className="mb-[18px] flex items-start gap-[18px]">
           <button
             type="button"
             data-testid="my-circles-back"
             onClick={handleBack}
-            className="inline-flex min-h-[32px] w-fit items-center gap-[6px] rounded-[8px] border-0 bg-transparent px-[8px] text-[13px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+            className="inline-flex min-h-[30px] w-fit shrink-0 items-center gap-[5px] rounded-[6px] border-0 bg-transparent px-[8px] text-[11px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
           >
             {t('poo70.c3.page.back')}
           </button>
-          <div>
-            <p className="m-0 text-[12px] font-medium uppercase tracking-[0.04em] text-foreground-50">
+          <div className="min-w-0 flex-1">
+            <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-foreground-50">
               {t('poo70.c3.page.eyebrow')}
             </p>
             <h1
               data-testid="my-circles-title"
-              className="m-0 mt-[6px] text-[30px] font-bold leading-[1.08] tracking-[-0.055em] min-[761px]:text-[36px]"
+              className="m-0 text-[22px] font-bold leading-[1.25] tracking-[-0.03em]"
             >
               {t('poo70.c3.page.title')}
             </h1>
-            <p className="m-0 mt-[10px] text-[15px] leading-[1.65] text-muted-foreground">
+            <p className="m-0 mt-[7px] text-[13px] leading-[1.5] text-foreground-60">
               {t('poo70.c3.page.subtitle')}
             </p>
           </div>
@@ -329,7 +332,7 @@ export function MyCirclesPage() {
 
         {phase === 'denied' && (
           <div
-            className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+            className="mt-[24px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
             data-testid="my-circles-restricted-banner"
           >
             {t('poo70.c3.state.denied')}
@@ -370,7 +373,7 @@ export function MyCirclesPage() {
 
         {phase === 'error' && !rowsAvailable && (
           <div
-            className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-4 text-sm text-danger"
+            className="mt-[24px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-4 text-sm text-destructive"
             data-testid="my-circles-error"
           >
             <p className="m-0">{t('poo70.c3.state.errorTitle')}</p>
@@ -436,7 +439,7 @@ export function MyCirclesPage() {
         legitimate empty-relations phase shows no toolbar (prototype
         P-M07-EMPTY). */}
         {rowsAvailable && phase !== 'empty' && (
-          <div className="mt-[24px] flex flex-wrap items-end gap-[16px]" data-testid="my-circles-toolbar">
+          <div className="mb-[24px] flex flex-wrap items-end gap-[16px]" data-testid="my-circles-toolbar">
             <label className="grid min-w-[220px] flex-1 gap-[6px] text-[12px] text-muted-foreground">
               <span>{t('poo70.c3.search.label')}</span>
               <input
@@ -445,7 +448,7 @@ export function MyCirclesPage() {
                 onChange={event => setQuery(event.target.value)}
                 placeholder={t('poo70.c3.search.placeholder')}
                 data-testid="my-circles-search"
-                className="min-h-[38px] w-full appearance-none rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+                className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
               />
             </label>
             <label className="grid gap-[6px] text-[12px] text-muted-foreground">
@@ -454,7 +457,7 @@ export function MyCirclesPage() {
                 value={filter}
                 onChange={event => setFilter(event.target.value as MyCirclesEntitlementFilter)}
                 data-testid="my-circles-filter"
-                className="min-h-[38px] rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground"
+                className="min-h-[38px] rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground"
               >
                 <option value="all">{t('poo70.c3.filter.all')}</option>
                 <option value="valid">{t('poo70.c3.filter.valid')}</option>

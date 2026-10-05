@@ -1,3 +1,4 @@
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 import { useEffect, useState } from "react"
 import type { FormEvent, ReactNode } from "react"
 import { AlertTriangle, Check, Eye, EyeOff } from "lucide-react"
@@ -42,6 +43,7 @@ export function AdminLoginStep({
   onSubmit,
 }: AdminLoginStepProps) {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -90,7 +92,7 @@ export function AdminLoginStep({
   )
 
   return (
-    <div className="relative w-full max-w-[960px]" aria-label={t("onboarding.adminLogin.ariaLabel")}>
+    <div style={workbenchStyle} className={clientWorkbenchFocusClassName + " relative w-full max-w-[960px]"} aria-label={t("onboarding.adminLogin.ariaLabel")}>
       {/* Ambient glow behind the split card (prototype `.auth-ambient`) */}
       <div
         aria-hidden="true"
@@ -101,9 +103,9 @@ export function AdminLoginStep({
         }}
       />
 
-      <section className="relative grid min-h-[570px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[24px] border border-border bg-background shadow-modal-small max-lg:grid-cols-1 max-lg:min-h-0">
+      <section className="relative grid min-h-[570px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[24px] border border-border bg-surface shadow-modal-small [@media(max-width:760px)]:grid-cols-1 [@media(max-width:760px)]:min-h-0 [@media(max-width:760px)]:rounded-[18px]">
         {/* === LEFT: brand story (prototype `.login-story`) === */}
-        <div className="flex flex-col justify-between gap-10 bg-foreground-3 p-[54px] max-lg:p-8">
+        <div className="flex flex-col justify-between bg-foreground-3 p-[54px] [@media(max-width:760px)]:hidden">
           <div>
             <div className="flex items-center gap-[9px] pb-[16px] pl-[8px] pt-[4px]">
               <span className="grid size-[26px] flex-none place-items-center rounded-[8px] bg-foreground text-[13px] font-extrabold text-background">
@@ -113,14 +115,14 @@ export function AdminLoginStep({
                 Polo AI
               </span>
             </div>
-            <h1 className="mt-[24px] max-w-[460px] text-[36px] font-bold leading-[1.12] tracking-[-0.04em] text-foreground max-lg:mt-5 max-lg:text-[28px]">
+            <h1 className="mt-[24px] max-w-[460px] text-[36px] font-bold leading-[1.12] tracking-[-0.04em] text-foreground">
               {t("onboarding.adminLogin.storyHeadline")}
             </h1>
             <p className="mt-[14px] max-w-[430px] text-[14px] leading-[1.65] text-foreground-50">
               {t("onboarding.adminLogin.storySub")}
             </p>
           </div>
-          <div className="flex flex-col gap-[12px] max-lg:hidden">
+          <div className="flex flex-col gap-[12px]">
             {STORY_POINTS.map(({ key }) => (
               <div key={key} className="flex items-center gap-[10px] text-[12px] text-foreground">
                 <span className="grid size-[21px] flex-none place-items-center rounded-full bg-success/10 text-success">
@@ -133,8 +135,8 @@ export function AdminLoginStep({
         </div>
 
         {/* === RIGHT: login panel (existing auth logic, prototype `.login-panel`) === */}
-        <div className="flex flex-col justify-center p-[46px] max-lg:p-7">
-          <p className="m-0 text-[11px] font-medium tracking-[0.75px] text-foreground-50 uppercase">
+        <div className="flex flex-col justify-center p-[46px] [@media(max-width:760px)]:px-[22px] [@media(max-width:760px)]:py-[28px]">
+          <p className="m-0 mb-[7px] text-[11px] font-medium tracking-[0.75px] text-foreground-50 uppercase">
             {t("onboarding.adminLogin.eyebrow")}
           </p>
 
@@ -163,17 +165,17 @@ export function AdminLoginStep({
             <>
               {/* Prototype password scene: mode title + short lead, fields,
               the 继续 primary, the quiet mode switch, then the trust row. */}
-              <h2 className="m-0 text-[22px] font-semibold text-foreground">
+              <h2 className="m-0 text-[22px] font-bold text-foreground">
                 {t("onboarding.adminLogin.passwordLogin")}
               </h2>
-              <p className="mt-2 text-[12px] leading-[1.55] text-foreground-50">
+              <p className="mt-[8px] text-[12px] leading-[1.55] text-foreground-50">
                 {t("onboarding.adminLogin.subtitle")}
               </p>
               {errorBlock}
               <form
                 data-testid="admin-password-login-form"
                 onSubmit={handleSubmit}
-                className="mt-5 grid gap-[15px]"
+                className="mt-[20px] grid gap-[15px]"
               >
                 <label className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
                   {t("onboarding.adminLogin.identifier")}
@@ -187,7 +189,7 @@ export function AdminLoginStep({
                       onClearError()
                     }}
                     disabled={isLoading}
-                    className="h-11 rounded-[10px] border-border bg-foreground-3"
+                    className="h-[44px] rounded-[10px] border-border bg-foreground-3 px-[12px] text-[11px] md:text-[11px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0"
                   />
                 </label>
 
@@ -207,7 +209,7 @@ export function AdminLoginStep({
                         onClearError()
                       }}
                       disabled={isLoading}
-                      className="h-11 rounded-[10px] border-border bg-foreground-3 pr-11"
+                      className="h-[44px] rounded-[10px] border-border bg-foreground-3 px-[12px] text-[11px] md:text-[11px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0 pr-11"
                     />
                     <button
                       type="button"

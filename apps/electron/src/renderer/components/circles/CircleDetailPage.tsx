@@ -1,3 +1,4 @@
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
@@ -208,7 +209,7 @@ function CircleUnavailableState({
   if (phase === 'denied') {
     return (
       <div
-        className="mt-[16px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+        className="mt-[16px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
         data-testid="circle-detail-unavailable-denied"
       >
         {t('homeApps.organization.accessError')}
@@ -225,7 +226,7 @@ function CircleUnavailableState({
       <div
         className={
           phase === 'error'
-            ? 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger'
+            ? 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive'
             : 'mt-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[13px] border border-info/20 bg-info/8 px-4 py-3 text-xs text-info-text'
         }
         data-testid={`circle-detail-unavailable-${phase}`}
@@ -288,6 +289,7 @@ export function CircleDetailPage({
   onReauthenticateRequest,
 }: CircleDetailPageProps) {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const resource = useMemberCircles()
   const clientPage = useOptionalClientPage()
   const catalog = useMemberCatalog()
@@ -474,7 +476,8 @@ export function CircleDetailPage({
       data-return-active={returnActive ? 'true' : 'false'}
     >
       <main
-        className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+        style={workbenchStyle}
+        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       >
         {/* C8 page takeover: while a return candidate is surfaced this page
         IS the flow-state surface (its own single heading/actions; prototype
@@ -496,30 +499,30 @@ export function CircleDetailPage({
         {!returnActive && (<>
         {/* Prototype `.subpage-heading.circle-detail-heading`: back button +
         eyebrow + THE single identity heading (ready circles only). */}
-        <div className="flex flex-col gap-[16px]">
+        <div className="mb-[18px] flex items-center gap-[18px] border-b border-border pb-[18px]">
           <button
             type="button"
             data-testid="circle-detail-back"
             onClick={handleBack}
-            className="inline-flex min-h-[32px] w-fit items-center gap-[6px] rounded-[8px] border-0 bg-transparent px-[8px] text-[13px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+            className="inline-flex min-h-[30px] w-fit shrink-0 items-center gap-[5px] rounded-[6px] border-0 bg-transparent px-[8px] text-[11px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
           >
             {t('poo70.c9.page.back')}
           </button>
-          <div className="flex flex-wrap items-end justify-between gap-[16px]">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-[16px]">
             <div>
-              <p className="m-0 text-[12px] font-medium uppercase tracking-[0.04em] text-foreground-50">
+              <p className="m-0 mb-[7px] text-[11px] font-medium uppercase tracking-[0.75px] text-foreground-50">
                 {t('poo70.c9.page.eyebrow')}
               </p>
               {circleReady && (
                 <>
                   <h1
                     data-testid="circle-detail-title"
-                    className="m-0 mt-[6px] text-[30px] font-bold leading-[1.08] tracking-[-0.055em] min-[761px]:text-[36px]"
+                    className="m-0 text-[22px] font-bold leading-[1.25] tracking-[-0.03em]"
                   >
                     {detail.circle.circle.name}
                   </h1>
                   <p
-                    className="m-0 mt-[10px] text-[15px] leading-[1.65] text-muted-foreground"
+                    className="m-0 mt-[7px] text-[13px] leading-[1.5] text-foreground-60"
                     data-testid="circle-detail-meta"
                   >
                     {countsLine}
@@ -559,7 +562,7 @@ export function CircleDetailPage({
         section titles (分区不造第二套标题). */}
         <nav
           aria-label={t('poo70.c9.tabs.label')}
-          className="mt-[24px] flex flex-wrap gap-[8px]"
+          className="mb-[24px] flex flex-wrap items-center gap-[8px] border-b border-border pb-[12px]"
           data-testid="circle-detail-tabs"
         >
           {DETAIL_SECTIONS.map(entry => (
@@ -571,8 +574,8 @@ export function CircleDetailPage({
               onClick={() => handleSectionChange(entry)}
               className={
                 section === entry
-                  ? 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] bg-foreground px-[14px] text-[13px] font-medium text-background'
-                  : 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[14px] text-[13px] font-medium text-foreground hover:bg-foreground-5'
+                  ? 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-transparent bg-[var(--accent-soft)] px-[12px] text-[12px] font-medium text-accent'
+                  : 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[12px] text-[12px] font-medium text-foreground hover:bg-foreground-5'
               }
             >
               {t(sectionTabKey(entry))}
@@ -650,7 +653,7 @@ export function CircleDetailPage({
                     type="button"
                     data-testid="circle-detail-exit"
                     onClick={handleRequestLeave}
-                    className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-destructive bg-transparent px-[14px] text-[13px] font-medium text-destructive hover:bg-destructive/8"
+                    className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-destructive bg-transparent px-[12px] text-[12px] font-medium text-destructive hover:bg-destructive/8"
                   >
                     {t('poo70.c9.exit.button')}
                   </button>

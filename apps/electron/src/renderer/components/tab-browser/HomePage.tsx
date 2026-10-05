@@ -1,3 +1,4 @@
+import { clientWorkbenchFocusClassName, useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName, clientWorkbenchDestructiveClassName } from '@/components/ui/client-workbench'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
@@ -186,6 +187,7 @@ export function homeAppMatchesQuery(
 
 export function HomePage() {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const { openApp } = useTabShell()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
   // H3 (card step 4): the catalog instance is owned by the App-level
@@ -453,7 +455,8 @@ export function HomePage() {
     // retired quick-access feature.
     <div className="h-full min-h-0 overflow-y-auto">
     <main
-      className="mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[16px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"
+      style={workbenchStyle}
+        className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       data-testid="home-app-hub"
     >
       {/* Prototype `.r14-home .home-hero`: 我的应用 title + space lead at
@@ -462,18 +465,18 @@ export function HomePage() {
       in the circles entry (P70-HOME-02). The test id is the long-standing
       HOME-SURFACE marker (see the note above). */}
       <div
-        className="flex flex-col items-start justify-between gap-[24px] min-[761px]:flex-row min-[761px]:items-end"
+        className="flex flex-col items-start justify-between mb-[32px] gap-[16px] min-[761px]:flex-row min-[761px]:items-center min-[851px]:gap-[28px]"
         data-testid="home-quick-access-section"
       >
         <div className="min-w-0">
           <h1
             data-testid="home-directory-title"
-            className="m-0 text-[30px] font-bold leading-[1.08] tracking-[-0.055em] min-[761px]:text-[36px]"
+            className="m-0 text-[clamp(30px,3vw,38px)] font-[750] leading-[1.08] tracking-[-0.055em]"
           >
             {t('poo70.h3.home.title')}
           </h1>
           {catalog.productSpace && (
-            <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-muted-foreground">
+            <p className="mt-[13px] max-w-[690px] text-[15px] leading-[1.65] text-foreground-60">
               {spaceKind === 'enterprise'
                 ? t('poo70.h3.home.leadEnterprise')
                 : t('poo70.h3.home.leadPersonal')}
@@ -535,7 +538,7 @@ export function HomePage() {
       stale rows), matching the prototype LOAD-FAIL state. */}
       {catalog.productSpace && (phase !== 'error' || hasCachedCatalog) && (
         <div
-          className="mt-[24px] flex flex-wrap items-end gap-[16px]"
+          className="mb-[24px] flex flex-wrap items-end gap-[16px]"
           data-testid="home-directory-toolbar"
         >
           <label className="grid min-w-[220px] flex-1 gap-[6px] text-[12px] text-muted-foreground">
@@ -546,7 +549,7 @@ export function HomePage() {
               onChange={event => setQuery(event.target.value)}
               placeholder={t('poo70.h3.home.searchPlaceholder')}
               data-testid="home-directory-search"
-              className="min-h-[38px] w-full appearance-none rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
+              className="min-h-[38px] w-full appearance-none rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground outline-none focus-visible:border-accent [&::-webkit-search-cancel-button]:appearance-none"
             />
           </label>
           <label className="grid gap-[6px] text-[12px] text-muted-foreground">
@@ -555,7 +558,7 @@ export function HomePage() {
               value={sourceFilter}
               onChange={event => setSourceFilter(event.target.value)}
               data-testid="home-directory-source"
-              className="min-h-[38px] rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground"
+              className="min-h-[38px] rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground"
             >
               <option value="all">{t('poo70.h3.home.sourceAll')}</option>
               {sourceOptions.map(option => (
@@ -569,7 +572,7 @@ export function HomePage() {
               value={sortMode}
               onChange={event => setSortMode(event.target.value as HomeAppSortMode)}
               data-testid="home-directory-sort"
-              className="min-h-[38px] rounded-[10px] border border-border bg-surface px-[12px] text-[16px] text-foreground"
+              className="min-h-[38px] rounded-[8px] border border-border bg-surface px-[12px] py-[9px] text-[15px] text-foreground"
             >
               <option value="recent">{t('poo70.h3.home.sortRecent')}</option>
               <option value="frequent">{t('poo70.h3.home.sortFrequent')}</option>
@@ -581,7 +584,7 @@ export function HomePage() {
 
       {phase === 'denied' && (
         <div
-          className="mt-[24px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+          className="mt-[24px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
           data-testid="home-restricted-banner"
         >
           {t('homeApps.organization.accessError')}
@@ -615,16 +618,16 @@ export function HomePage() {
         </div>
       )}
 
-      <section className="mt-[34px]">
+      <section>
         <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
           {/* The fixed Polo assistant card always renders — loading, error
           and empty states only occupy the work-App slots beside it. */}
           <article
             data-testid="home-quick-entry-polo"
             onClick={openPoloAssistant}
-            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
+            className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
           >
-            <span className="mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
+            <span className="mb-[24px] min-[1081px]:mb-[26px] grid size-[42px] place-items-center rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
               <Icons.Sparkles className="size-[18px]" aria-hidden="true" />
             </span>
             <h3 className="m-0 text-[16px] font-bold leading-[normal]">{t('homeApps.home.poloTitle')}</h3>
@@ -773,10 +776,10 @@ export function HomePage() {
 
         {directoryRejected && (
           <div
-            className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-danger/30 px-[20px] py-[34px] text-center"
+            className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-destructive/30 px-[20px] py-[34px] text-center"
             data-testid="home-directory-rejected"
           >
-            <span className="grid size-[52px] place-items-center rounded-[14px] bg-danger/10 text-danger">
+            <span className="grid size-[52px] place-items-center rounded-[14px] bg-destructive/10 text-destructive">
               <Icons.ShieldQuestion className="size-[25px]" aria-hidden="true" />
             </span>
             <h2 className="m-0 text-[18px] font-bold tracking-[-0.02em]">
@@ -869,7 +872,7 @@ export function HomePage() {
       <Dialog open={Boolean(memberActions.prepareTarget)} onOpenChange={(open) => {
         if (!open) memberActions.cancelPrepare()
       }}>
-        <DialogContent>
+        <DialogContent style={workbenchStyle} overlayStyle={workbenchStyle} overlayClassName={clientWorkbenchOverlayClassName} className={clientWorkbenchDialogClassName}>
           <DialogHeader>
             <DialogTitle>
               {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
@@ -884,6 +887,7 @@ export function HomePage() {
               {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
+          <div className="px-[20px] pb-[18px]">
           {prepareTargetApp && memberActions.prepareTarget && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
@@ -923,11 +927,12 @@ export function HomePage() {
               </div>
             </div>
           )}
+          </div>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => memberActions.cancelPrepare()}>
+            <Button className={clientWorkbenchButtonClassName} type="button" variant="secondary" onClick={() => memberActions.cancelPrepare()}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" onClick={() => { void memberActions.confirmPrepare() }}>
+            <Button className={clientWorkbenchPrimaryClassName} type="button" onClick={() => { void memberActions.confirmPrepare() }}>
               {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
@@ -942,7 +947,7 @@ export function HomePage() {
           setPreserveData(true)
         }
       }}>
-        <DialogContent>
+        <DialogContent style={workbenchStyle} overlayStyle={workbenchStyle} overlayClassName={clientWorkbenchOverlayClassName} className={clientWorkbenchDialogClassName}>
           <DialogHeader>
             <DialogTitle>
               {t('homeApps.uninstall.title', {
@@ -953,6 +958,7 @@ export function HomePage() {
               {t('homeApps.uninstall.description')}
             </DialogDescription>
           </DialogHeader>
+          <div className="px-[20px] pb-[18px]">
           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-foreground/10 p-3 text-sm">
             <input
               type="checkbox"
@@ -969,11 +975,12 @@ export function HomePage() {
               </span>
             </span>
           </label>
+          </div>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setUninstallTarget(null)}>
+            <Button className={clientWorkbenchButtonClassName} type="button" variant="secondary" onClick={() => setUninstallTarget(null)}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" variant="destructive" onClick={() => { void confirmUninstall() }}>
+            <Button className={clientWorkbenchDestructiveClassName} type="button" variant="destructive" onClick={() => { void confirmUninstall() }}>
               {t('homeApps.actions.uninstall')}
             </Button>
           </DialogFooter>

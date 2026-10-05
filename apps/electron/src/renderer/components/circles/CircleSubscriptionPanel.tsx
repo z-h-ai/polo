@@ -416,7 +416,7 @@ export function CircleSubscriptionPanel({
 
       {suspensionReason && status === 'suspended' && (
         <p
-          className="m-0 mt-[8px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+          className="m-0 mt-[8px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
           data-testid="circle-subscription-suspended-reason"
           role="alert"
         >
@@ -610,7 +610,7 @@ export function CircleSubscriptionPanel({
       {/* Fail-closed handoff banner: the raw URL is NEVER opened. */}
       {isPaid && readyPreview && canRenew && handoff?.state === 'blocked' && (
         <div
-          className="mt-[14px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+          className="mt-[14px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
           data-testid="circle-subscription-handoff-blocked"
           role="alert"
         >

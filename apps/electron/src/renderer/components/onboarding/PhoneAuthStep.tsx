@@ -110,18 +110,18 @@ export function PhoneAuthStep({
     return (
       <>
         {/* Prototype `.login-panel` heading for the code-request scene. */}
-        <h2 className="m-0 text-[22px] font-semibold text-foreground">
+        <h2 className="m-0 text-[22px] font-bold text-foreground">
           {t("onboarding.adminLogin.phoneAuth")}
         </h2>
-        <p className="mt-2 text-[12px] leading-[1.55] text-foreground-50">
+        <p className="mt-[8px] text-[12px] leading-[1.55] text-foreground-50">
           {t("onboarding.adminLogin.phoneAuthSubtitle")}
         </p>
         {errorNode}
-        <form data-testid="phone-auth-entry" onSubmit={handleSend} className="mt-5 grid gap-[15px]">
+        <form data-testid="phone-auth-entry" onSubmit={handleSend} className="mt-[20px] grid gap-[15px]">
           <div className="grid gap-[7px] text-[11px] font-semibold text-foreground-60">
             <label htmlFor="phone-auth-phone">{t("onboarding.adminLogin.phone")}</label>
-            <span className="flex h-11 overflow-hidden rounded-[10px] border border-border bg-foreground-3 focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]">
-              <span className="flex items-center border-r border-border px-[12px] text-[12px] font-medium text-foreground-50">+86</span>
+            <span className="flex h-[44px] overflow-hidden rounded-[10px] border border-border bg-foreground-3 focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
+              <span className="flex w-[54px] shrink-0 items-center justify-center border-r border-border text-[12px] font-medium text-foreground-50">+86</span>
               <Input
                 id="phone-auth-phone"
                 aria-label={t("onboarding.adminLogin.phone")}
@@ -134,7 +134,7 @@ export function PhoneAuthStep({
                   onClearError()
                 }}
                 disabled={isBusy}
-                className="h-11 flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="h-[44px] min-w-0 flex-1 px-[12px] text-[11px] md:text-[11px] rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </span>
           </div>
@@ -181,14 +181,14 @@ export function PhoneAuthStep({
   return (
     <>
       {/* Prototype `.login-panel` heading for the code-entry scene. */}
-      <h2 className="m-0 text-[22px] font-semibold text-foreground">
+      <h2 className="m-0 text-[22px] font-bold text-foreground">
         {t("onboarding.adminLogin.code")}
       </h2>
-      <p className="mt-2 text-[12px] leading-[1.55] text-foreground-50">
+      <p className="mt-[8px] text-[12px] leading-[1.55] text-foreground-50">
         {t("onboarding.adminLogin.codeSubtitle", { phone: maskedPhone })}
       </p>
       {errorNode}
-      <form data-testid="phone-auth-verify" onSubmit={handleVerify} className="mt-5 grid gap-[15px]">
+      <form data-testid="phone-auth-verify" onSubmit={handleVerify} className="mt-[20px] grid gap-[15px]">
         <div className="flex items-center justify-between rounded-[10px] bg-foreground-3 px-3 py-2.5 text-sm">
           <strong className="font-medium text-foreground">{maskedPhone}</strong>
           <button
@@ -215,7 +215,7 @@ export function PhoneAuthStep({
             }}
             disabled={isBusy}
             autoFocus
-            className="h-11 min-w-0 rounded-[10px] border-border bg-foreground-3 tracking-[0.25em]"
+            className="h-[44px] min-w-0 rounded-[10px] border-border bg-foreground-3 px-[12px] text-[11px] md:text-[11px] shadow-none focus-visible:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] focus-visible:ring-0 tracking-[0.25em]"
           />
         </label>
 

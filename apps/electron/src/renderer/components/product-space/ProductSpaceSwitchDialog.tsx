@@ -1,3 +1,4 @@
+import { useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName, clientWorkbenchDestructiveClassName } from '@/components/ui/client-workbench'
 import { useTranslation } from 'react-i18next'
 import type { ExecutionStatus } from '@polo-ai/shared/product-spaces'
 import {
@@ -22,6 +23,7 @@ function executionStatusKey(status: ExecutionStatus): string {
  */
 export function ProductSpaceSwitchDialog() {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const space = useOptionalProductSpaceContext()
   const pending = space?.pendingSwitch ?? null
   const currentName = space?.activeProductSpace?.name ?? ''
@@ -66,7 +68,10 @@ export function ProductSpaceSwitchDialog() {
       <DialogContent
         data-testid="product-space-switch-dialog"
         data-switch-phase={pending.phase}
-        className="max-w-lg"
+        style={workbenchStyle}
+        overlayStyle={workbenchStyle}
+        overlayClassName={clientWorkbenchOverlayClassName}
+        className={clientWorkbenchDialogClassName}
       >
         <DialogHeader>
           <DialogTitle data-testid="product-space-switch-title">
@@ -74,6 +79,7 @@ export function ProductSpaceSwitchDialog() {
           </DialogTitle>
           <DialogDescription>{descriptionByPhase[pending.phase]}</DialogDescription>
         </DialogHeader>
+        <div className="px-[20px] pb-[18px]">
 
         {pending.phase === 'stop-failed' ? (
           <div
@@ -104,20 +110,20 @@ export function ProductSpaceSwitchDialog() {
         ) : null}
 
         {executions.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div>
+            <div className="mb-[8px] mt-[18px] flex items-center justify-between text-[11px] text-foreground-60">
               <span data-testid="product-space-switch-progress-label">
                 {t('productSpace.switch.stoppedCount', { stopped: stoppedCount, total: executions.length })}
               </span>
-              <strong data-testid="product-space-switch-progress-percent">{percent}%</strong>
+              <strong className="text-foreground" data-testid="product-space-switch-progress-percent">{percent}%</strong>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-foreground/10">
+            <div className="mb-[16px] h-[6px] w-full overflow-hidden rounded-full bg-foreground-10">
               <div
-                className="h-full rounded-full bg-foreground/70 transition-all"
+                className="h-full rounded-full bg-accent transition-all"
                 style={{ width: `${percent}%` }}
               />
             </div>
-            <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto" data-testid="product-space-switch-executions">
+            <div className="flex max-h-[224px] flex-col overflow-y-auto rounded-[8px] border border-border" data-testid="product-space-switch-executions">
               {executions.map(execution => {
                 const status = pending.statuses[execution.executionId] ?? execution.status
                 const detailKey = status === 'failed'
@@ -136,19 +142,19 @@ export function ProductSpaceSwitchDialog() {
                     key={execution.executionId}
                     data-testid="product-space-switch-execution-row"
                     data-execution-status={status}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-border/40 px-2.5 py-1.5"
+                    className="flex items-center justify-between gap-[10px] border-b border-border p-[11px] last:border-b-0"
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm">{execution.name}</span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{execution.name}</span>
+                    <span className="text-[10px] text-foreground-50">
                       {detailKey ? t(detailKey) : t(executionStatusKey(status))}
                     </span>
                     <span
                       className={
                         status === 'failed'
-                          ? 'text-xs font-medium text-destructive'
+                          ? 'text-[10px] font-medium text-destructive'
                           : status === 'stopped'
-                            ? 'text-xs font-medium text-success'
-                            : 'text-xs font-medium text-info'
+                            ? 'text-[10px] font-medium text-success'
+                            : 'text-[10px] font-medium text-info'
                       }
                     >
                       {status === 'failed'
@@ -173,15 +179,17 @@ export function ProductSpaceSwitchDialog() {
           </div>
         ) : null}
 
-        <p className="text-xs text-muted-foreground" data-testid="product-space-switch-note">
+        <p className="mt-[11px] text-[11px] leading-[1.45] text-foreground-50" data-testid="product-space-switch-note">
           {t('productSpace.switch.currentSpaceNote', { name: currentName })}
         </p>
 
+        </div>
         <DialogFooter>
           {pending.phase === 'confirm' ? (
             <>
               <Button
                 type="button"
+                className={clientWorkbenchButtonClassName}
                 variant="ghost"
                 data-testid="product-space-cancel-switch"
                 onClick={space.onCancelSwitch}
@@ -191,6 +199,7 @@ export function ProductSpaceSwitchDialog() {
               <Button
                 type="button"
                 variant="destructive"
+                className={clientWorkbenchDestructiveClassName}
                 data-testid="product-space-stop-and-switch"
                 onClick={space.onConfirmStopAndSwitch}
               >
@@ -202,13 +211,14 @@ export function ProductSpaceSwitchDialog() {
             <>
               <Button
                 type="button"
+                className={clientWorkbenchButtonClassName}
                 variant="ghost"
                 data-testid="product-space-cancel-switch"
                 onClick={space.onCancelSwitch}
               >
                 {t('productSpace.switch.cancel')}
               </Button>
-              <Button type="button" disabled data-testid="product-space-switch-busy">
+              <Button className={clientWorkbenchPrimaryClassName} type="button" disabled data-testid="product-space-switch-busy">
                 {pending.phase === 'stopping'
                   ? t('productSpace.switch.stopping')
                   : t('productSpace.switch.preparing')}
@@ -219,6 +229,7 @@ export function ProductSpaceSwitchDialog() {
             <>
               <Button
                 type="button"
+                className={clientWorkbenchButtonClassName}
                 variant="ghost"
                 data-testid="product-space-cancel-switch"
                 onClick={space.onCancelSwitch}
@@ -227,6 +238,7 @@ export function ProductSpaceSwitchDialog() {
               </Button>
               <Button
                 type="button"
+                className={clientWorkbenchPrimaryClassName}
                 data-testid="product-space-retry-failed"
                 onClick={space.onRetryFailedStops}
               >
@@ -238,6 +250,7 @@ export function ProductSpaceSwitchDialog() {
             <>
               <Button
                 type="button"
+                className={clientWorkbenchButtonClassName}
                 variant="ghost"
                 data-testid="product-space-cancel-switch"
                 onClick={space.onCancelSwitch}
@@ -246,6 +259,7 @@ export function ProductSpaceSwitchDialog() {
               </Button>
               <Button
                 type="button"
+                className={clientWorkbenchPrimaryClassName}
                 data-testid="product-space-retry-target-load"
                 onClick={space.onRetryTargetLoad}
               >
@@ -256,6 +270,7 @@ export function ProductSpaceSwitchDialog() {
           {pending.phase === 'target-access-lost' ? (
             <Button
               type="button"
+              className={clientWorkbenchPrimaryClassName}
               data-testid="product-space-cancel-switch"
               onClick={space.onDismissTargetAccessLost}
             >

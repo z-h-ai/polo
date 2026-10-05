@@ -25,6 +25,10 @@ import type {
 import type { CircleContentPanelContextValue } from '../CircleContentPanel'
 import { selectHomeAppDirectory } from '../../../lib/home-app-directory'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 

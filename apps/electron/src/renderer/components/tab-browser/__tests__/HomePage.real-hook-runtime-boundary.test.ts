@@ -18,6 +18,10 @@ import {
 } from '../../../../shared/tab-browser-types'
 import { ProductSpaceProvider } from '@/context/ProductSpaceContext'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 // Register only when no window exists yet (shared bun test process): another
 // test file may have registered Happy DOM first — see
 // TopBar.registry-poller.test.ts for the same shared-process pattern.

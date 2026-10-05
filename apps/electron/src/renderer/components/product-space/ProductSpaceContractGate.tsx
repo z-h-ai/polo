@@ -1,3 +1,4 @@
+import { useClientWorkbenchStyle, clientWorkbenchFocusClassName, clientWorkbenchPrimaryClassName, clientWorkbenchButtonClassName } from '@/components/ui/client-workbench'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -11,6 +12,7 @@ type UpgradeStage = 'required' | 'downloading' | 'failed'
  */
 export function ProductSpaceContractGate() {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const [stage, setStage] = useState<UpgradeStage>('required')
 
   const startUpgrade = async () => {
@@ -29,24 +31,25 @@ export function ProductSpaceContractGate() {
 
   return (
     <div
-      className="flex h-full items-center justify-center p-6"
+      style={workbenchStyle}
+      className={clientWorkbenchFocusClassName + " flex h-full items-center justify-center overflow-y-auto bg-background p-[32px]"}
       data-testid="product-space-contract-gate"
       data-gate-stage={stage}
     >
-      <section className="block w-full max-w-[520px] text-center">
+      <section className="block w-full max-w-[520px] rounded-[20px] border border-border bg-surface p-[30px] text-center shadow-modal-small">
         <span
           aria-hidden="true"
           className={
             stage === 'failed'
-              ? 'mx-auto flex size-10 items-center justify-center rounded-full bg-destructive/10 text-lg text-destructive'
-              : 'mx-auto flex size-10 items-center justify-center rounded-full bg-foreground/5 text-lg text-foreground'
+              ? 'mx-auto mb-[18px] flex size-[52px] items-center justify-center rounded-[14px] bg-[var(--destructive-soft)] text-[25px] text-destructive'
+              : 'mx-auto mb-[18px] flex size-[52px] items-center justify-center rounded-[14px] bg-[var(--info-soft)] text-[25px] text-info'
           }
         >
           {stage === 'required' ? '↑' : stage === 'downloading' ? '↓' : '!'}
         </span>
         <h1
           data-testid="product-space-contract-title"
-          className="mt-[18px] mb-[9px] text-[28px] font-bold tracking-[-0.04em] text-foreground"
+          className="m-0 text-[24px] font-[720] tracking-[-0.035em] text-foreground"
         >
           {stage === 'required'
             ? t('productSpace.contract.requiredTitle')
@@ -54,7 +57,7 @@ export function ProductSpaceContractGate() {
               ? t('productSpace.contract.downloadingTitle')
               : t('productSpace.contract.failedTitle')}
         </h1>
-        <p className="text-[13px] leading-[1.65] text-foreground/60">
+        <p className="mt-[9px] text-[13px] leading-[1.58] text-foreground-60">
           {stage === 'required'
             ? t('productSpace.contract.requiredDesc')
             : stage === 'downloading'
@@ -71,9 +74,10 @@ export function ProductSpaceContractGate() {
             {t('productSpace.contract.help')}
           </button>
         ) : (
-          <div className="mt-5 flex items-center justify-center gap-2">
+          <div className="mt-[22px] flex flex-wrap items-center justify-center gap-[8px]">
             <Button
               type="button"
+              className={clientWorkbenchPrimaryClassName}
               data-testid="product-space-contract-upgrade"
               onClick={() => {
                 void startUpgrade()
@@ -85,6 +89,7 @@ export function ProductSpaceContractGate() {
             </Button>
             <Button
               type="button"
+              className={clientWorkbenchButtonClassName}
               variant="ghost"
               data-testid="product-space-contract-help"
               onClick={() => window.electronAPI.openUrl('https://app.polo.z-h-ai.com/docs')}

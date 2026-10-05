@@ -263,7 +263,7 @@ export function CircleSupportPanel({
 
             {readState.phase === 'failed' && !permissionBlocked && (
               <span
-                className="text-[12px] text-danger"
+                className="text-[12px] text-destructive"
                 data-testid="circle-support-error"
                 role="alert"
               >
@@ -273,7 +273,7 @@ export function CircleSupportPanel({
 
             {permissionBlocked && (
               <span
-                className="block rounded-[10px] border border-danger/25 bg-danger/8 px-3 py-2 text-xs text-danger"
+                className="block rounded-[10px] border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs text-destructive"
                 data-testid="circle-support-forbidden"
                 role="alert"
               >
@@ -295,7 +295,7 @@ export function CircleSupportPanel({
 
             {support?.availability === 'load_failed' && (
               <span
-                className="text-[12px] text-danger"
+                className="text-[12px] text-destructive"
                 data-testid="circle-support-load-failed"
                 role="alert"
               >

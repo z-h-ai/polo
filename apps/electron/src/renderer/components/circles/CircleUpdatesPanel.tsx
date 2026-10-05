@@ -250,7 +250,7 @@ function CircleUpdatesFailure({
   if (isCircleUpdatesPermissionBlocked(error)) {
     return (
       <div
-        className="mt-[14px] rounded-[13px] border border-danger/25 bg-danger/8 px-4 py-3 text-xs text-danger"
+        className="mt-[14px] rounded-[13px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-xs text-destructive"
         data-testid="circle-updates-forbidden"
         role="alert"
       >

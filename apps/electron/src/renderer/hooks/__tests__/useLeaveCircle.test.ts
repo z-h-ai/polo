@@ -1,3 +1,4 @@
+import { ModalProvider } from '@/context/ModalContext'
 /**
  * useLeaveCircle tests (POO-70 C7 / POO-96) — P70-LEAVE-01/02/03.
  *
@@ -27,6 +28,10 @@ import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { MemberCircleSnapshot, MemberMembership } from '@polo-ai/shared/admin'
 import { createProductSpaceContextKey } from '@/lib/product-space-storage'
+
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
 
 GlobalRegistrator.register()
 setupI18n()
@@ -313,7 +318,7 @@ function TestHost({
     i18n,
     children: createElement(MemberCircleResourceProvider, {
       catalog,
-      children: createElement(FlowConsumer, { apiRef }),
+      children: createElement(ModalProvider, { children: createElement(FlowConsumer, { apiRef }) }),
     }),
   })
 }

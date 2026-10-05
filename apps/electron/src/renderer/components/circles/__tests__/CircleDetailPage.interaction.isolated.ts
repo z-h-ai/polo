@@ -1,3 +1,4 @@
+import { ModalProvider } from '@/context/ModalContext'
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement, useState } from 'react'
@@ -12,6 +13,10 @@ import type {
 } from '@polo-ai/shared/admin'
 import type { CircleReturnCandidate, CircleReturnPendingState } from '@polo-ai/shared/protocol'
 import type { ClientPageRoute } from '@/context/ClientPageContext'
+
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
 
 // -------------------------------------------------------------------------
 // Isolated-process host (same model as MyCirclesPage.interaction.isolated.ts
@@ -457,7 +462,7 @@ function tree(options: TreeOptions) {
       { i18n },
       createElement(MemberCatalogProvider, {
         catalog,
-        children: createElement(ClientPageProvider, {
+        children: createElement(ModalProvider, { children: createElement(ClientPageProvider, {
           key: clientPageScopeKey(scope),
           scope,
           children: [
@@ -468,7 +473,7 @@ function tree(options: TreeOptions) {
             }),
             createElement(RouteProbe, { key: 'probe' }),
           ],
-        }),
+        }) }),
       }),
     ),
   })

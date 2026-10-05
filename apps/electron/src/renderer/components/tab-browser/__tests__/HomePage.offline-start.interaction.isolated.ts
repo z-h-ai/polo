@@ -18,6 +18,10 @@ import type {
 } from '@polo-ai/shared/config/product-space-context'
 import { BUILTIN_APP_DEFINITIONS } from '../../../../shared/tab-browser-types'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 
