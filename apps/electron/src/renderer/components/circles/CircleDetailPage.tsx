@@ -91,8 +91,8 @@ import { LeaveCircleDialog } from './LeaveCircleDialog'
  *   `onReauthenticateRequest` is the OPTIONAL App-threaded A1 re-login
  *   entry: unset means the mismatch recovery currently ends at the hook's
  *   fact-drop with the minimal target retained (the user recovers through
- *   the existing account menu); the two-line App/TabShell forward is the
- *   declared minimal change (see the delivery notes).
+ *   the existing account menu). App forwards the entry via TabShell
+ *   (enterAdminLogin); unset only in isolated mounts (degraded note).
  *
  * Upstream-expected: none — C8/POO-99 is integrated as of afb222aa.
  */

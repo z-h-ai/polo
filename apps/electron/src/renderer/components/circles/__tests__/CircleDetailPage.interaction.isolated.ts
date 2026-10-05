@@ -1142,21 +1142,6 @@ describe('account mismatch reauthenticate CTA (P2-2)', () => {
     })
   }
 
-  async function verifyToMismatch() {
-    await renderAssembly()
-    await navigateToDetail('circle-1')
-    await waitFor(() => {
-      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('order')
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('circle-return-check'))
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('account-mismatch')
-    })
-    // No object disclosure on the mismatch state.
-    expect(screen.queryByTestId('circle-return-facts')).toBeNull()
-  }
 
   it('WITH a wired A1 entry: the CTA renders, one click hands over the minimal target and keeps the candidate for re-verification', async () => {
     seedOrderCandidate()

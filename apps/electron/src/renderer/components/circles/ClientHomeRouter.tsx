@@ -36,8 +36,8 @@ import { MyCirclesPage } from './MyCirclesPage'
 export interface ClientHomeRouterProps {
   /**
    * The App-threaded A1 re-login entry for the C8 account-mismatch recovery
-   * (forwarded verbatim to CircleDetailPage; optional — unset today until the
-   * declared TabShell/App forward lands, see TabContent's docblock).
+   * (forwarded verbatim to CircleDetailPage; optional — App forwards it via
+   * TabShell (enterAdminLogin); unset only in isolated mounts (degraded note)).
    */
   onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
 }

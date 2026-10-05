@@ -11,7 +11,7 @@ interface TabContentProps {
   renderPolo: () => ReactNode
   /**
    * The App-threaded A1 re-login entry for the C8 account-mismatch recovery
-   * (POO-100 C8 wiring). OPTIONAL and unset today: TabShell does not forward
+   * (POO-100 C8 wiring). OPTIONAL and App now forwards enterAdminLogin via TabShell; unset only in isolated mounts (degraded note)
    * it yet — the declared minimal owner change is one optional prop on
    * TabShell plus one `enterAdminLogin`-shaped callback at the App call site
    * (see the CircleDetailPage docblock and the POO-100 delivery notes).
