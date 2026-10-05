@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Spinner } from "@polo-ai/ui"
 import { Input } from "@/components/ui/input"
 import { AdminLoginMethodSwitch } from "./AdminLoginMethodSwitch"
+import { LoginAgreementClause } from "./LoginAgreementClause"
 import { LoginTrustRow } from "./LoginTrustRow"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 import {
@@ -169,10 +170,7 @@ export function PhoneAuthStep({
           onCheckedChange={value => dispatch({ type: 'consentChanged', value })}
           disabled={isBusy}
         >
-          {t("onboarding.adminLogin.legalPrefix")}{" "}
-          <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.terms")}</span>
-          {" "}{t("onboarding.adminLogin.legalJoin")}{" "}
-          <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.privacy")}</span>
+          <LoginAgreementClause />
         </LoginTrustRow>
       </>
     )
@@ -265,10 +263,7 @@ export function PhoneAuthStep({
         onCheckedChange={value => dispatch({ type: 'consentChanged', value })}
         disabled={isBusy}
       >
-        {t("onboarding.adminLogin.legalPrefix")}{" "}
-        <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.terms")}</span>
-        {" "}{t("onboarding.adminLogin.legalJoin")}{" "}
-        <span className="text-foreground-80 underline underline-offset-2">{t("onboarding.adminLogin.privacy")}</span>
+        <LoginAgreementClause />
       </LoginTrustRow>
     </>
   )

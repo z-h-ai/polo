@@ -301,6 +301,21 @@
   --muted-foreground: oklch(0.68 0.01 270);
 }
 
+/* The login card (A2/A3 onboarding login, POO-70 visual review R1 F5) is
+   gated against the workbench b82fa1e5 accent like the other gated surfaces:
+   the primary/login buttons, focus rings and the consent checkbox inside the
+   card consume var(--accent) → #6e56cf (workbench-base.css --accent; hover
+   stays on the component's accent 86%+black gradient, disabled on opacity).
+   Scoped here so the rest of the renderer keeps its product accent token —
+   the system-wide oklch→hex convergence stays a design-propagation task. */
+[data-testid='admin-login-step'] {
+  --accent: #6e56cf;
+}
+
+.dark [data-testid='admin-login-step'] {
+  --accent: #a98be1;
+}
+
 /* The accepted card elevation (source-derived two-layer shadow) is scoped to
    the Home and Catalog card regions ONLY — shared textarea/switch/onboarding
    controls outside these regions keep the small global xs shadow. */

@@ -96,3 +96,15 @@ export function useMemberCircles(): MemberCirclesResource {
   }
   return resource
 }
+
+/**
+ * Optional read of THE shared member circle resource: `null` outside a
+ * provider (isolated mounts), the same shared instance as `useMemberCircles`
+ * inside one. Consumed by the home directory projection (POO-70 visual
+ * review R1 F2) so the home grid can degrade rows whose circle authorization
+ * is lost WITHOUT becoming a hard dependency on the C2 provider — a surface
+ * mounted without it simply projects no lost circles instead of throwing.
+ */
+export function useOptionalMemberCircles(): MemberCirclesResource | null {
+  return useContext(MemberCircleResourceContext)
+}

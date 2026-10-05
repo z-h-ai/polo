@@ -748,6 +748,50 @@ describe('leave flow in the subscription section (P70-CIRCLE-DETAIL-02)', () => 
 })
 
 // -------------------------------------------------------------------------
+// Post-leave heading state (POO-70 visual review R1 F3)
+// -------------------------------------------------------------------------
+
+describe('post-leave heading state (POO-70 visual review R1 F3)', () => {
+  it('a leave-ended membership renders ONE restore badge with the ended/rejoin note instead of a duplicated 待恢复', async () => {
+    // F1 leave receipt shape: active→expired while the paid period keeps
+    // running (currentPeriodEnd still ahead).
+    circlesByAccount['account-a'] = [
+      circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '晨星增长圈', billingKind: 'paid', status: 'expired' }),
+    ]
+    membershipsByAccount['account-a'] = [
+      {
+        ...membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid', status: 'expired' }),
+        currentPeriodEnd: '2026-10-25T00:00:00.000Z',
+      },
+    ]
+    await renderAssembly()
+    await navigateToDetail('circle-1', 'content')
+
+    const badge = screen.getByTestId('circle-detail-status')
+    expect(badge.textContent).toBe(i18n.t('poo70.c3.entitlement.restore'))
+    const term = screen.getByTestId('circle-detail-term')
+    expect(term.textContent).toBe(i18n.t('poo70.c9.heading.endedNote'))
+    // The term never repeats the badge word.
+    expect(term.textContent).not.toBe(badge.textContent)
+  })
+
+  it('suppresses the adjacent term when it would repeat the badge word (suspended restore state)', async () => {
+    circlesByAccount['account-a'] = [
+      circleFixture({ circleId: 'circle-1', membershipId: 'ms-1', name: '晨星增长圈', billingKind: 'paid', status: 'suspended' }),
+    ]
+    membershipsByAccount['account-a'] = [
+      membershipFixture({ circleId: 'circle-1', membershipId: 'ms-1', billingKind: 'paid', status: 'suspended' }),
+    ]
+    await renderAssembly()
+    await navigateToDetail('circle-1', 'content')
+
+    expect(screen.getByTestId('circle-detail-status').textContent)
+      .toBe(i18n.t('poo70.c3.entitlement.restore'))
+    expect(screen.queryByTestId('circle-detail-term')).toBeNull()
+  })
+})
+
+// -------------------------------------------------------------------------
 // Unknown circle / denied scope / old-scope isolation
 // -------------------------------------------------------------------------
 

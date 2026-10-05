@@ -167,6 +167,20 @@ function isHomeAppSourceKind(kind: string): kind is HomeAppSourceKind {
 }
 
 /**
+ * True when EVERY recorded source of the entry is an authoritatively lost
+ * circle authorization — the "lost the last source" state of a leave/revoked
+ * circle (POO-70 visual review R1 F2). Such rows stay visible for
+ * explanation but must render as UNAVAILABLE (disabled open + reason +
+ * rejoin guidance), never as a normal launchable card. Rows that still hold
+ * ANY other source (or a non-circle source) keep their current rendering —
+ * the dual-source fallback behavior is intentional and stays untouched.
+ */
+export function hasOnlyLostCircleSources(entry: HomeAppDirectoryEntry): boolean {
+  return entry.sources.length > 0
+    && entry.sources.every(source => source.refusal === 'circle_authorization_lost')
+}
+
+/**
  * Consumer-side source-kind guard: a personal space is granted by Polo and
  * creator circles only, an enterprise space by enterprise imports only. The
  * trusted Catalog boundary already enforces this server-side; a violation

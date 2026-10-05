@@ -544,6 +544,29 @@ describe('P70-SUBSCRIPTION-03: expired recovery, order display, exit region', ()
     expect(validity.textContent).toContain('2026-09-01 到期')
   })
 
+  it('POO-70 visual review R1 F3: a leave-ended membership (period still running) shows the restore badge and the revoked validity fact, and NO projected renewal', async () => {
+    renderPanel({
+      circle: circleFixture({ status: 'expired' }),
+      // F1 leave receipt shape: expired while the paid period (2026-10-25)
+      // is still ahead — the leave/early-termination display state.
+      membership: membershipFixture({ status: 'expired', currentPeriodEnd: '2026-10-25T00:00:00.000Z' }),
+    })
+    const status = await screen.findByTestId('circle-subscription-status')
+    expect(status.getAttribute('data-status')).toBe('expired')
+    // The SAME restore vocabulary as the page heading — never 已到期 next to
+    // a future period date.
+    expect(status.textContent).toBe('待恢复')
+    // The validity row carries the revocation fact, not the contradictory
+    // future date; the 续费恢复 recovery entry stays.
+    const validity = await screen.findByTestId('circle-subscription-validity-revoked')
+    expect(validity.textContent).toContain('授权已撤销')
+    expect(screen.getByTestId('circle-subscription-validity-value').textContent).not.toContain('2026-10-25')
+    const restore = await screen.findByTestId('circle-subscription-renew-restore')
+    expect(restore.textContent).toContain('续费恢复')
+    // The projected 续期 block contradicts the revoked authorization — hidden.
+    expect(screen.queryByTestId('circle-subscription-projected-term')).toBeNull()
+  })
+
   it('an expired membership never shows the purchase-cap state, even when capped (fail closed)', async () => {
     previewResponse = successPreviewPayload({ canRenew: false, capReason: 'any_cap' })
     renderPanel({

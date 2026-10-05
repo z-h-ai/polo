@@ -522,14 +522,17 @@ describe('MyCirclesPage unified list (P70-CIRCLE-LIST-01)', () => {
     }
   })
 
-  it('renders the summary ONLY from the confirmed purpose; absent stays absent; counts come from typed entitlements', async () => {
+  it('renders NO summary line: the internal purpose never surfaces (POO-70 visual review R1 F1); counts come from typed entitlements', async () => {
     await renderReadyPage()
     const rows = screen.getAllByTestId('circle-row')
     const summaries = rows.map(row => row.querySelector('[data-testid="circle-row-summary"]')?.textContent ?? null)
-    expect(summaries[0]).toBe('Playbooks, notes and research skills')
-    // The annual row's purpose is '' — honestly absent, never an invented
-    // update line (P70-CIRCLE-LIST-03).
-    expect(summaries[2]).toBeNull()
+    // The provider's only descriptive field is the INTERNAL purpose — a
+    // user-visible row must not surface it (§13.12), and the provider has no
+    // human-readable content-summary field yet, so the line stays absent on
+    // EVERY row (never the English fixture purpose, never an invented update).
+    for (const summary of summaries) {
+      expect(summary).toBeNull()
+    }
     // Entitlement counts: typed 'web_app' / 'skill' entries only.
     const counts = rows.map(row => row.querySelector('[data-testid="circle-row-count"]')!.textContent)
     expect(counts[0]).toBe('2 apps · 1 skill')
@@ -542,7 +545,7 @@ describe('MyCirclesPage unified list (P70-CIRCLE-LIST-01)', () => {
 // -------------------------------------------------------------------------
 
 describe('MyCirclesPage search and entitlement filter (P70-CIRCLE-LIST-02)', () => {
-  it('narrows rows by confirmed name/purpose and shows the DISTINCT no-match state with a clear action', async () => {
+  it('narrows rows by confirmed name and shows the DISTINCT no-match state with a clear action', async () => {
     await renderReadyPage()
     fireEvent.change(screen.getByTestId('my-circles-search'), { target: { value: 'design' } })
     await waitFor(() => {
