@@ -45,6 +45,14 @@ export interface MemberAppCardProps {
   testId?: string
   /** An authoritative open/prepare action is already in flight. */
   busy?: boolean
+  /**
+   * Visibly UNAVAILABLE row (POO-70 visual review R1 F2): the card is not
+   * clickable and the open action renders disabled — the caller renders the
+   * concrete reason beside the card (the C4 不可用作品说明 pattern). The
+   * fail-closed launch gate stays with the caller either way; this prop only
+   * makes an already-blocked row LOOK blocked instead of silently toasting.
+   */
+  openDisabled?: boolean
 }
 
 export function MemberAppCard({
@@ -55,6 +63,7 @@ export function MemberAppCard({
   identityKey,
   testId = 'member-app-card',
   busy = false,
+  openDisabled = false,
 }: MemberAppCardProps) {
   const { t } = useTranslation()
   // Frozen POO-41 source contract: authoritative catalogSources first, the
@@ -76,6 +85,7 @@ export function MemberAppCard({
   // never a resident status label and never rendered on detail cards.
   const running = variant === 'home' && runtimeStatus?.status === 'running'
   const handleOpen = () => {
+    if (openDisabled) return
     if (!busy) onOpen(app)
   }
   return (
@@ -84,10 +94,17 @@ export function MemberAppCard({
       data-identity-key={identityKey}
       data-variant={variant}
       aria-busy={busy}
+      data-open-disabled={openDisabled ? 'true' : 'false'}
       onClick={handleOpen}
-      className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
+      className={
+        openDisabled
+          ? 'flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col rounded-[20px] border border-foreground/10 bg-surface p-[18px] opacity-70 shadow-xs min-[1081px]:p-[20px]'
+          : 'flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]'
+      }
     >
-      <span className="mb-[26px] grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-success">
+      {/* Prototype `.app-art`: accent-soft fill + accent glyph (POO-70 visual
+      review R1 F7 — the brick-green success tint was a token deviation). */}
+      <span className="mb-[26px] grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-accent">
         {app.iconUrl
           ? <img src={app.iconUrl} alt="" className="size-full object-cover" />
           : <span className="text-[17px] font-semibold">{app.name.slice(0, 1)}</span>}
@@ -113,12 +130,17 @@ export function MemberAppCard({
           </span>
         )}
         {/* Prototype `.home-app-grid .card-action`: borderless quiet label,
-        fg-5 hover fill. The click never navigates by itself — the caller's
-        authorized open flow decides. */}
+        fg-5 hover fill; `:disabled` dims to opacity .48 with a not-allowed
+        cursor. The click never navigates by itself — the caller's authorized
+        open flow decides. */}
         <button
           type="button"
-          disabled={busy}
-          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
+          disabled={busy || openDisabled}
+          className={
+            openDisabled
+              ? 'inline-flex min-h-[30px] cursor-not-allowed items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 opacity-60'
+              : 'inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground'
+          }
           onClick={(event) => {
             event.stopPropagation()
             handleOpen()

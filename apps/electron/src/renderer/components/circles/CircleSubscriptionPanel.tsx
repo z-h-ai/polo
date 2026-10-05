@@ -11,6 +11,7 @@ import {
   toMemberCircleReadError,
   type MemberCircleRenewalPreviewResultPayload,
 } from '@/hooks/useMemberCircles'
+import { isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import {
   selectCirclePurchaseHandoff,
 } from '@/lib/circle-purchase-url'
@@ -346,16 +347,25 @@ export function CircleSubscriptionPanel({
     })()
   }, [latestOrderSummary, resource])
 
-  const statusLabel = status === 'active'
-    ? t('poo70.c6.status.active')
-    : status === 'expired'
-      ? t('poo70.c6.status.expired')
-      : t('poo70.c3.entitlement.restore')
-
   const suspensionReason = resolveSubscriptionSuspensionReason(membership)
 
   const currentPeriodEnd = membership?.currentPeriodEnd ?? circle.currentPeriodEnd
   const validityDate = currentPeriodEnd ? formatSubscriptionDate(currentPeriodEnd) : ''
+  // POO-70 visual review R1 F3: an expired relation whose paid period is
+  // still running is the leave/early-termination shape (F1: a confirmed
+  // leave writes active→expired mid-period). Its display facts unify with
+  // the page heading's restore vocabulary and drop the contradictory
+  // validity date / projected renewal below.
+  const endedBeforePeriodEnd = isMembershipEndedBeforePeriodEnd({
+    status,
+    currentPeriodEnd: currentPeriodEnd ?? null,
+  })
+
+  const statusLabel = status === 'active'
+    ? t('poo70.c6.status.active')
+    : status === 'expired' && !endedBeforePeriodEnd
+      ? t('poo70.c6.status.expired')
+      : t('poo70.c3.entitlement.restore')
 
   // Price rendering follows the resolved i18n language for a stable locale.
   const locale = i18n.resolvedLanguage ?? undefined
@@ -468,7 +478,12 @@ export function CircleSubscriptionPanel({
             data-testid="circle-subscription-validity-value"
           >
             {!isPaid && t('poo70.c6.detail.freeTerm')}
-            {isPaid && validityDate && (status === 'expired'
+            {isPaid && validityDate && endedBeforePeriodEnd && (
+              <span data-testid="circle-subscription-validity-revoked">
+                {t('poo70.c6.detail.validityRevoked')}
+              </span>
+            )}
+            {isPaid && validityDate && !endedBeforePeriodEnd && (status === 'expired'
               ? t('poo70.c6.detail.expiredAt', { date: validityDate })
               : t('poo70.c6.detail.validUntil', { date: validityDate }))}
             {isPaid && !validityDate && t('poo70.c6.detail.termUnknown')}
@@ -486,8 +501,10 @@ export function CircleSubscriptionPanel({
         </p>
       )}
 
-      {/* Paid-only renewal facts — all from the ONE authoritative preview. */}
-      {isPaid && readyPreview && (
+      {/* Paid-only renewal facts — all from the ONE authoritative preview.
+      Suppressed for the leave/early-termination state (POO-70 visual review
+      R1 F3): a projected 续期 would contradict the revoked authorization. */}
+      {isPaid && readyPreview && !endedBeforePeriodEnd && (
         <div className="mt-[14px] rounded-[13px] border border-border bg-surface px-4 py-3 text-xs">
           <p className="m-0 text-muted-foreground">{t('poo70.c6.preview.projectedTermLabel')}</p>
           <p

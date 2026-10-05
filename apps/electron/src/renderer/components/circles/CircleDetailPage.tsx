@@ -19,7 +19,7 @@ import {
   selectHomeAppDirectory,
   type HomeAppDirectory,
 } from '@/lib/home-app-directory'
-import { selectLatestEntitlementJudgment } from '@/lib/member-circle-view'
+import { selectLatestEntitlementJudgment, isMembershipEndedBeforePeriodEnd } from '@/lib/member-circle-view'
 import { CircleContentPanel } from './CircleContentPanel'
 import { CircleSubscriptionPanel } from './CircleSubscriptionPanel'
 import { CircleSupportPanel, type CircleSupportTarget } from './CircleSupportPanel'
@@ -434,15 +434,24 @@ export function CircleDetailPage({
     if (!heading || !circleReady) return ''
     const membershipRow = detail.membership
     const billingKind = membershipRow?.billingKind ?? detail.circle.billingKind
+    const effectiveStatus = membershipRow?.status ?? detail.circle.status
     const currentPeriodEnd = membershipRow?.currentPeriodEnd ?? detail.circle.currentPeriodEnd
-    if (heading.restricted) return t('poo70.c3.entitlement.restore')
+    if (heading.restricted) {
+      // POO-70 visual review R1 F3: an expired relation whose paid period is
+      // STILL running is the leave/early-termination shape — the term slot
+      // carries the honest ended/rejoin note instead of repeating the badge
+      // word (other restricted states keep the restore term).
+      return isMembershipEndedBeforePeriodEnd({ status: effectiveStatus, currentPeriodEnd })
+        ? t('poo70.c9.heading.endedNote')
+        : t('poo70.c3.entitlement.restore')
+    }
     if (billingKind === 'free') return t('poo70.c3.entitlement.free')
     const parsed = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN
     if (!Number.isFinite(parsed)) return t('poo70.c3.entitlement.paidNoDate')
     return t('poo70.c3.entitlement.paidToDate', {
       date: new Date(parsed).toISOString().slice(0, 10),
     })
-  }, [heading, circleReady, detail])
+  }, [heading, circleReady, detail, t])
 
   // ── C8 return verification surface (page takeover while a candidate is
   // surfaced) ────────────────────────────────────────────────────────────────
@@ -527,31 +536,37 @@ export function CircleDetailPage({
                 </>
               )}
             </div>
-            {heading && (
-              <div
-                className="flex items-center gap-[10px]"
-                data-testid="circle-detail-heading-status"
-                data-status={heading.restricted ? 'restore' : 'valid'}
-              >
-                <span
-                  className={`inline-flex min-h-[24px] items-center rounded-full px-[10px] text-[12px] font-medium ${
-                    heading.restricted
-                      ? 'bg-foreground/6 text-muted-foreground'
-                      : 'bg-success/10 text-success-text'
-                  }`}
-                  data-testid="circle-detail-status"
+            {heading && (() => {
+              // POO-70 visual review R1 F3: ONE status label per state — the
+              // adjacent term is suppressed when it would repeat the badge
+              // word (the post-leave page showed 待恢复 twice side by side).
+              const statusLabel = heading.restricted
+                ? t('poo70.c3.entitlement.restore')
+                : t('poo70.c3.filter.valid')
+              return (
+                <div
+                  className="flex items-center gap-[10px]"
+                  data-testid="circle-detail-heading-status"
+                  data-status={heading.restricted ? 'restore' : 'valid'}
                 >
-                  {heading.restricted
-                    ? t('poo70.c3.entitlement.restore')
-                    : t('poo70.c3.filter.valid')}
-                </span>
-                {termText !== '' && (
-                  <small className="text-[12px] text-muted-foreground" data-testid="circle-detail-term">
-                    {termText}
-                  </small>
-                )}
-              </div>
-            )}
+                  <span
+                    className={`inline-flex min-h-[24px] items-center rounded-full px-[10px] text-[12px] font-medium ${
+                      heading.restricted
+                        ? 'bg-foreground/6 text-muted-foreground'
+                        : 'bg-success/10 text-success-text'
+                    }`}
+                    data-testid="circle-detail-status"
+                  >
+                    {statusLabel}
+                  </span>
+                  {termText !== '' && termText !== statusLabel && (
+                    <small className="text-[12px] text-muted-foreground" data-testid="circle-detail-term">
+                      {termText}
+                    </small>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         </div>
 
@@ -571,7 +586,10 @@ export function CircleDetailPage({
               onClick={() => handleSectionChange(entry)}
               className={
                 section === entry
-                  ? 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] bg-foreground px-[14px] text-[13px] font-medium text-background'
+                  // Prototype `.r14-tabs .button.selected`: accent on
+                  // accent-soft, transparent border (POO-70 visual review R1
+                  // F4 — the near-black fill was a token deviation).
+                  ? 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-transparent bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-[14px] text-[13px] font-medium text-accent'
                   : 'inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-border bg-transparent px-[14px] text-[13px] font-medium text-foreground hover:bg-foreground-5'
               }
             >

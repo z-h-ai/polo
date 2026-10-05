@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { PhoneAuthStep } from "./PhoneAuthStep"
 import { AdminLoginMethodSwitch } from "./AdminLoginMethodSwitch"
+import { LoginAgreementClause } from "./LoginAgreementClause"
 import { LoginTrustRow } from "./LoginTrustRow"
 import {
   createPhoneAuthResendDeadline,
@@ -90,7 +91,11 @@ export function AdminLoginStep({
   )
 
   return (
-    <div className="relative w-full max-w-[960px]" aria-label={t("onboarding.adminLogin.ariaLabel")}>
+    <div
+      className="relative w-full max-w-[960px]"
+      aria-label={t("onboarding.adminLogin.ariaLabel")}
+      data-testid="admin-login-step"
+    >
       {/* Ambient glow behind the split card (prototype `.auth-ambient`) */}
       <div
         aria-hidden="true"
@@ -250,12 +255,16 @@ export function AdminLoginStep({
                 ) : null}
               </form>
 
+              {/* THE agreement clause of the login card — the SAME linked
+              form the phone-auth views render (POO-70 visual review R1 F6:
+              the plain 同意协议与隐私政策 wording was the second form of a
+              dual-rendered consent row). */}
               <LoginTrustRow
                 checked={consented}
                 onCheckedChange={setConsented}
                 disabled={isLoading}
               >
-                {t("onboarding.adminLogin.agreement")}
+                <LoginAgreementClause />
               </LoginTrustRow>
             </>
           )}

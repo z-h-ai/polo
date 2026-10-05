@@ -116,6 +116,57 @@ export function isEntitlementJudgmentPaid(
   return judgment.basis === 'projected' && judgment.effectivePaymentStatus === 'paid'
 }
 
+/**
+ * CircleIds whose creator-circle authorization is LOST — the same restricted
+ * rule the C3 list rows apply (lifecycle not `active`, or the G5 projection
+ * says the latest order is no longer paid), so the home directory, the circle
+ * detail and the list can never disagree about one circle's authorization
+ * (POO-70 visual review R1 F2; the H1 directory consumes the result as its
+ * `lostCircleIds` input). A circle absent from the receipts is NOT in the
+ * set: an unread relation is a fact, never a judged loss.
+ */
+export function selectLostCircleAuthorizationIds(
+  circles: ReadonlyArray<MemberCircleSnapshot>,
+  memberships: ReadonlyArray<MemberMembership>,
+): Set<string> {
+  const lost = new Set<string>()
+  for (const circle of circles) {
+    const circleId = circle.circle.circleId
+    const membership = memberships.find(
+      candidate => candidate.circle.circleId === circleId,
+    ) ?? null
+    const status = membership?.status ?? circle.status
+    const judgment = membership ? selectLatestEntitlementJudgment(membership) : null
+    const projectedNotPaid = judgment !== null
+      && judgment.basis === 'projected'
+      && judgment.effectivePaymentStatus !== 'paid'
+    if (status !== 'active' || projectedNotPaid) lost.add(circleId)
+  }
+  return lost
+}
+
+/**
+ * True when an EXPIRED membership ended BEFORE its paid period end
+ * (`currentPeriodEnd` still ahead of `now`) — the leave/early-termination
+ * shape of the F1 contract (a confirmed leave writes active→expired while
+ * the paid period keeps running), as opposed to a natural expiry where the
+ * period end has passed. Display-state projection only — never an
+ * entitlement judgment and never day-math: both facts are verbatim provider
+ * instants, and the lifecycle status stays the authority (POO-70 visual
+ * review R1 F3).
+ */
+export function isMembershipEndedBeforePeriodEnd(
+  membership: Pick<MemberMembership, 'status' | 'currentPeriodEnd'>,
+  now: number = Date.now(),
+): boolean {
+  if (membership.status !== 'expired') return false
+  const periodEnd = membership.currentPeriodEnd
+  if (!periodEnd) return false
+  const parsed = Date.parse(periodEnd)
+  if (!Number.isFinite(parsed)) return false
+  return parsed > now
+}
+
 // ---------------------------------------------------------------------------
 // Detail projection (the member side has NO per-circle detail endpoint — the
 // F1-verified detail surface is the list rows + memberships projection).

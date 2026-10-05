@@ -6,10 +6,12 @@ import type {
 } from '@polo-ai/shared/admin'
 import {
   isEntitlementJudgmentPaid,
+  isMembershipEndedBeforePeriodEnd,
   isRenewalPriceAvailable,
   judgeMembershipPaymentStatus,
   memberCircleCreatorNameField,
   selectLatestEntitlementJudgment,
+  selectLostCircleAuthorizationIds,
   selectMemberCircleDetail,
   selectRenewalHandoff,
 } from '../member-circle-view'
@@ -283,5 +285,81 @@ describe('selectRenewalHandoff', () => {
     })
     // The recovery entry stays open even when the price is unavailable.
     expect(nullPriceHandoff).toMatchObject({ state: 'ready' })
+  })
+})
+
+describe('selectLostCircleAuthorizationIds (POO-70 visual review R1 F2)', () => {
+  it('marks lifecycle-restricted and projection-unpaid circles as lost', () => {
+    const circles = [
+      circleSnapshot('c-active'),
+      circleSnapshot('c-left', { status: 'expired' }),
+      circleSnapshot('c-suspended', { status: 'suspended' }),
+    ]
+    const memberships = [
+      membership('c-active'),
+      membership('c-left', { status: 'expired' }),
+      // G5: a stored `paid` order with a refunded projection stays NOT paid.
+      membership('c-refunded', {
+        paymentOrders: [paymentOrder({
+          storedStatus: 'paid',
+          effectivePaymentStatus: 'refunded',
+        })],
+      }),
+    ]
+    // The refund-only circle appears in the circles receipt too.
+    circles.push(circleSnapshot('c-refunded'))
+    const lost = selectLostCircleAuthorizationIds(circles, memberships)
+    expect(lost.has('c-active')).toBe(false)
+    expect(lost.has('c-left')).toBe(true)
+    expect(lost.has('c-suspended')).toBe(true)
+    expect(lost.has('c-refunded')).toBe(true)
+  })
+
+  it('keeps an unjudged membership (no orders) OUT of the set — unknown is a fact', () => {
+    const circles = [circleSnapshot('c-unjudged')]
+    const memberships = [membership('c-unjudged', { paymentOrders: [] })]
+    const lost = selectLostCircleAuthorizationIds(circles, memberships)
+    expect(lost.size).toBe(0)
+  })
+
+  it('never judges a circle absent from the receipts', () => {
+    expect(selectLostCircleAuthorizationIds([], []).size).toBe(0)
+  })
+})
+
+describe('isMembershipEndedBeforePeriodEnd (POO-70 visual review R1 F3)', () => {
+  const NOW = Date.parse('2026-10-05T00:00:00.000Z')
+
+  it('reads an expired relation with a still-running period as ended early (leave)', () => {
+    expect(isMembershipEndedBeforePeriodEnd({
+      status: 'expired',
+      currentPeriodEnd: '2026-10-25T00:00:00.000Z',
+    }, NOW)).toBe(true)
+  })
+
+  it('reads an expired relation with a passed period end as natural expiry', () => {
+    expect(isMembershipEndedBeforePeriodEnd({
+      status: 'expired',
+      currentPeriodEnd: '2026-09-01T00:00:00.000Z',
+    }, NOW)).toBe(false)
+  })
+
+  it('is false for active/suspended relations and for absent/unparsable period ends', () => {
+    expect(isMembershipEndedBeforePeriodEnd({
+      status: 'active',
+      currentPeriodEnd: '2026-10-25T00:00:00.000Z',
+    }, NOW)).toBe(false)
+    expect(isMembershipEndedBeforePeriodEnd({
+      status: 'suspended',
+      currentPeriodEnd: '2026-10-25T00:00:00.000Z',
+    }, NOW)).toBe(false)
+    expect(isMembershipEndedBeforePeriodEnd({
+      status: 'expired',
+      currentPeriodEnd: null,
+    }, NOW)).toBe(false)
+    expect(isMembershipEndedBeforePeriodEnd({
+      status: 'expired',
+      currentPeriodEnd: 'not-a-date',
+    }, NOW)).toBe(false)
   })
 })
