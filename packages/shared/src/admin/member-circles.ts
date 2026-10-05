@@ -169,8 +169,14 @@ const MemberCircleEntitlementArtifactSchema = z.object({
   id: uuidString,
   type: z.string().min(1),
   slug: z.string().min(1),
-  name: z.string(),
-  summary: z.string(),
+  // Artifact.name / Artifact.summary are nullable DB columns
+  // (pol114@17477dbf prisma/schema.prisma model Artifact) and the
+  // entitlements projection passes them through verbatim
+  // (distributions.ts L38 `summary: string | null`, L51 raw SELECT,
+  // L171 passthrough). A NULL is a fact to preserve, not a contract
+  // violation — POO-79 API-CIRCLE-02-SUMMARY-NULL.
+  name: z.string().nullable(),
+  summary: z.string().nullable(),
   status: z.string().min(1),
   currentStableVersionId: uuidString.nullable(),
 });
@@ -194,8 +200,10 @@ export interface MemberCircleEntitlement {
     id: string;
     type: string;
     slug: string;
-    name: string;
-    summary: string;
+    /** Nullable upstream (Artifact.name String?); consumers render as not-provided. */
+    name: string | null;
+    /** Nullable upstream (Artifact.summary String?); consumers render as not-provided. */
+    summary: string | null;
     status: string;
     currentStableVersionId: string | null;
   };
@@ -595,8 +603,8 @@ export interface OriginalCircleOrder {
   storedStatus: string;
   amountMinor: number;
   currency: string;
-  /** Raw provider checkout URL. Untrusted for direct opening in the client. */
-  checkoutUrl: string;
+  /** Nullable upstream (CirclePaymentOrder.checkoutUrl String?) — null before a code was issued. */
+  checkoutUrl: string | null;
   periodEndAt: string | null;
   circle: {
     circleId: string;
@@ -612,7 +620,8 @@ const OriginalCircleOrderResponseSchema = z.object({
     status: z.string().min(1),
     amountMinor: minorAmount,
     currency: z.string().min(3).max(3),
-    checkoutUrl: z.string().min(1),
+    // Nullable upstream DB column (CirclePaymentOrder.checkoutUrl String?).
+    checkoutUrl: z.string().min(1).nullable(),
     periodEndAt: isoTimestamp.nullable(),
     circle: z.object({
       id: uuidString,
