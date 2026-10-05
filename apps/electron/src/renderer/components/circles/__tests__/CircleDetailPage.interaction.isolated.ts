@@ -10,6 +10,7 @@ import type {
   MemberCircleSnapshot,
   MemberMembership,
 } from '@polo-ai/shared/admin'
+import type { CircleReturnCandidate, CircleReturnPendingState } from '@polo-ai/shared/protocol'
 import type { ClientPageRoute } from '@/context/ClientPageContext'
 
 // -------------------------------------------------------------------------
@@ -119,10 +120,37 @@ let membershipsCalls = 0
 let getUpdatesCalls = 0
 let leaveCalls: string[] = []
 
+// C8 bridge double (the useCircleReturn test model): a pending queue feeds
+// getPending once, ack/cancel are recorded, and the typed event subscriber is
+// captured for direct deliveries.
+let returnPendingQueue: Array<CircleReturnPendingState> = []
+const returnAckedIds: string[] = []
+const returnCancelledIds: string[] = []
+let returnEventSubscriber: ((candidate: CircleReturnCandidate) => void) | null = null
+
 function installBridge() {
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
+      circleReturn: {
+        getPending: () => {
+          return Promise.resolve(returnPendingQueue.shift() ?? { status: 'none' })
+        },
+        ack: (candidateId: string) => {
+          returnAckedIds.push(candidateId)
+          return Promise.resolve({ status: 'acked' })
+        },
+        cancel: (candidateId: string) => {
+          returnCancelledIds.push(candidateId)
+          return Promise.resolve({ status: 'cancelled' })
+        },
+      },
+      onCircleReturnCandidate: (callback: (candidate: CircleReturnCandidate) => void) => {
+        returnEventSubscriber = callback
+        return () => {
+          returnEventSubscriber = null
+        }
+      },
       memberCircles: {
         list: () => {
           listCalls += 1
@@ -478,6 +506,10 @@ beforeEach(() => {
   getUpdatesCalls = 0
   leaveCalls = []
   leaveImpl = () => Promise.resolve({ success: false, errorCode: 'conflict', message: 'stub default' })
+  returnPendingQueue = []
+  returnAckedIds.length = 0
+  returnCancelledIds.length = 0
+  returnEventSubscriber = null
   catalogLogicalState = { errorCode: null, catalog: personalCatalog(catalogAppsFixture()) }
   observedRoute = null
   probeClientPage = null
@@ -927,5 +959,76 @@ describe('main-scroller registration (P70-CIRCLE-DETAIL-03)', () => {
     // Unmount disposes: the probe stops observing (provider gone).
     view.unmount()
     expect(document.querySelector('[data-testid="client-home-router"]')).toBeNull()
+  })
+})
+
+// -------------------------------------------------------------------------
+// C8 return verification assembly (P70-CIRCLE-DETAIL-02, afb222aa contract):
+// candidate 呈现 → 面板接管 → ONE checkOnce round → 事实渲染 → ack/release
+// -------------------------------------------------------------------------
+
+describe('circle return verification assembly (C8 wiring)', () => {
+  it('consumes the B1 candidate on mount, takes the page over with the flow panel, runs ONE authoritative round to the verified fact, acks, and releases on back', async () => {
+    // The bridge target must address a REAL row by strict UUID; the fixture
+    // circle ids are symbolic, so the return test seeds its own UUID row.
+    const returnCircleId = 'c8c8c8c8-0000-4000-8000-00000000c801'
+    circlesByAccount['account-a'] = [
+      ...(circlesByAccount['account-a'] ?? []),
+      circleFixture({ circleId: returnCircleId, membershipId: 'ms-return', name: '回归圈', billingKind: 'free' }),
+    ]
+    membershipsByAccount['account-a'] = [
+      ...(membershipsByAccount['account-a'] ?? []),
+      membershipFixture({ circleId: returnCircleId, membershipId: 'ms-return', billingKind: 'free' }),
+    ]
+    returnPendingQueue.push({
+      status: 'pending',
+      candidate: {
+        candidateId: 'cand-c8-assembly',
+        protocolVersion: 1,
+        target: { circleId: returnCircleId },
+        createdAt: '2026-10-04T00:00:00.000Z',
+      },
+    })
+
+    await renderAssembly()
+    // Consumption happens on the detail page mount (the C8 hook lives there).
+    await navigateToDetail('circle-1')
+
+    // The candidate is surfaced: the flow panel takes the page over.
+    await waitFor(() => {
+      const panel = screen.getByTestId('circle-return-panel')
+      expect(panel.getAttribute('data-return-kind')).toBe('circle')
+      expect(panel.getAttribute('data-return-phase')).toBe('candidate')
+    })
+    expect(screen.getByTestId('circle-detail-page').getAttribute('data-return-active')).toBe('true')
+    // Single flow-state surface: the detail heading/tabs are NOT rendered
+    // beside it (不造第二套标题).
+    expect(screen.queryByTestId('circle-detail-title')).toBeNull()
+    expect(screen.queryByTestId('circle-detail-tabs')).toBeNull()
+    // The target circle's confirmed name comes from the C2 rows.
+    expect(screen.getByTestId('circle-return-fact-target').textContent).toContain('回归圈')
+
+    // ONE authoritative round per click: the C2 invalidation refresh runs
+    // (list re-read) and the verdict renders from the refreshed receipt.
+    const listBefore = listCalls
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-check'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('verified')
+    })
+    expect(listCalls).toBeGreaterThan(listBefore)
+    expect(returnAckedIds).toEqual(['cand-c8-assembly'])
+    // The entitlement fact renders from the refreshed authoritative row.
+    expect(screen.getByTestId('circle-return-fact-entitlement-value').textContent).toBe('Valid')
+    // The takeover persists until the user leaves the flow surface.
+    expect(screen.queryByTestId('circle-detail-title')).toBeNull()
+
+    // 返回我的圈子 releases the candidate (bridge cancel) and routes to circles.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-back'))
+    })
+    expect(observedRoute).toEqual({ kind: 'circles' })
+    expect(returnCancelledIds).toEqual(['cand-c8-assembly'])
   })
 })

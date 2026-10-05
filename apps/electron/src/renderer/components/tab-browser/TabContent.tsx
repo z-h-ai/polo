@@ -2,12 +2,23 @@ import type { ReactNode } from 'react'
 import { ClientHomeRouter } from '@/components/circles/ClientHomeRouter'
 import { useMemberCatalog } from '@/context/MemberCatalogContext'
 import { MemberCircleResourceProvider } from '@/context/MemberCircleResourceContext'
+import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { WebAppView } from './WebAppView'
 import { useTabShell } from '@/context/TabShellContext'
 import type { TabInstance } from '../../../shared/tab-browser-types'
 
 interface TabContentProps {
   renderPolo: () => ReactNode
+  /**
+   * The App-threaded A1 re-login entry for the C8 account-mismatch recovery
+   * (POO-100 C8 wiring). OPTIONAL and unset today: TabShell does not forward
+   * it yet — the declared minimal owner change is one optional prop on
+   * TabShell plus one `enterAdminLogin`-shaped callback at the App call site
+   * (see the CircleDetailPage docblock and the POO-100 delivery notes).
+   * Unset, the mismatch recovery keeps the minimal target and the user
+   * recovers through the existing account menu.
+   */
+  onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
 }
 
 function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
@@ -30,16 +41,20 @@ function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
  * in the App-level ClientPageProvider (outside TabShell), so the route and
  * its depth survive the tab switch.
  */
-function ClientHomeSurface() {
+function ClientHomeSurface({
+  onReauthenticateRequest,
+}: {
+  onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
+}) {
   const catalog = useMemberCatalog()
   return (
     <MemberCircleResourceProvider catalog={catalog}>
-      <ClientHomeRouter />
+      <ClientHomeRouter onReauthenticateRequest={onReauthenticateRequest} />
     </MemberCircleResourceProvider>
   )
 }
 
-export function TabContent({ renderPolo }: TabContentProps) {
+export function TabContent({ renderPolo, onReauthenticateRequest }: TabContentProps) {
   const { activeTab, openTabs } = useTabShell()
   const activeType = activeTab.type
 
@@ -49,7 +64,7 @@ export function TabContent({ renderPolo }: TabContentProps) {
         {renderPolo()}
       </div>
 
-      {activeType === 'home' && <ClientHomeSurface />}
+      {activeType === 'home' && <ClientHomeSurface onReauthenticateRequest={onReauthenticateRequest} />}
 
       {openTabs
         .filter((tab) => tab.type === 'webapp')

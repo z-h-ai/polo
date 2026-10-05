@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { HomePage } from '@/components/tab-browser/HomePage'
 import { CircleDetailPage } from './CircleDetailPage'
@@ -32,7 +33,16 @@ import { MyCirclesPage } from './MyCirclesPage'
  * circle-detail route can never survive into another account/space/epoch.
  */
 
-export function ClientHomeRouter() {
+export interface ClientHomeRouterProps {
+  /**
+   * The App-threaded A1 re-login entry for the C8 account-mismatch recovery
+   * (forwarded verbatim to CircleDetailPage; optional — unset today until the
+   * declared TabShell/App forward lands, see TabContent's docblock).
+   */
+  onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
+}
+
+export function ClientHomeRouter({ onReauthenticateRequest }: ClientHomeRouterProps = {}) {
   const clientPage = useOptionalClientPage()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const route = clientPage?.route ?? { kind: 'home' as const }
@@ -65,7 +75,12 @@ export function ClientHomeRouter() {
         // Keyed by circleId: a different circle remounts the page (identity
         // hygiene), a section switch keeps it mounted (the panels own their
         // per-identity reset contracts).
-        <CircleDetailPage key={route.circleId} circleId={route.circleId} section={route.section} />
+        <CircleDetailPage
+          key={route.circleId}
+          circleId={route.circleId}
+          section={route.section}
+          onReauthenticateRequest={onReauthenticateRequest}
+        />
       )}
     </div>
   )
