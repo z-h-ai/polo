@@ -2258,5 +2258,13 @@
   "poo70.c7.result.leftTitle": "Left {{name}}",
   "poo70.c7.result.recheckPending": "Circle relations or the app catalog are still being verified; what you see may not be the latest.",
   "poo70.c7.result.rejoinHint": "Rejoining happens in the system browser (join and pay there); access is restored only after this app re-verifies it.",
-  "poo70.c7.result.reverify": "Re-check"
+  "poo70.c7.result.reverify": "Re-check",
+  "poo70.c9.exit.button": "Leave circle",
+  "poo70.c9.page.back": "Back to my circles",
+  "poo70.c9.page.eyebrow": "My space · Verified creator circles",
+  "poo70.c9.support.entry": "Get help with this problem",
+  "poo70.c9.tab.content": "Content",
+  "poo70.c9.tab.subscription": "Subscription",
+  "poo70.c9.tab.updates": "Updates",
+  "poo70.c9.tabs.label": "Circle detail"
 }

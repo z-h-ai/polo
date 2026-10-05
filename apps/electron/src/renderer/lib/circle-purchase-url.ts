@@ -25,7 +25,13 @@
  * (P70-SUBSCRIPTION-03). No order is ever created here and no payment SDK
  * exists on this surface; the browser page owns the actual payment.
  */
-import { resolveMemberCirclePurchaseUrl } from '@polo-ai/shared/admin'
+// C9/POO-100 integration fix (one-line, owner C6/POO-95 notified via the
+// assembly commit): DEEP import instead of the `@polo-ai/shared/admin`
+// barrel. The barrel re-exports main-only modules (node:crypto/fs), which
+// breaks the renderer build the moment this panel enters the Vite module
+// graph — the same deep-import convention the renderer already uses
+// (admin/schemas, admin/authorization, admin/catalog-view).
+import { resolveMemberCirclePurchaseUrl } from '@polo-ai/shared/admin/member-circles'
 
 /**
  * The controlled creator origin (POL-112 target domain). Both C1's main-side

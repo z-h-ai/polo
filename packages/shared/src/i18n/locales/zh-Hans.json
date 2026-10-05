@@ -2258,5 +2258,13 @@
   "poo70.c7.result.leftTitle": "已退出{{name}}",
   "poo70.c7.result.recheckPending": "圈子关系或应用目录还在核对，当前显示可能不是最新。",
   "poo70.c7.result.rejoinHint": "重新加入需在系统浏览器完成加入与支付；本端核对后才恢复授权。",
-  "poo70.c7.result.reverify": "重新核对"
+  "poo70.c7.result.reverify": "重新核对",
+  "poo70.c9.exit.button": "退出圈子",
+  "poo70.c9.page.back": "返回我的圈子",
+  "poo70.c9.page.eyebrow": "我的空间 · 认证创作者圈子",
+  "poo70.c9.support.entry": "遇到问题，获取帮助",
+  "poo70.c9.tab.content": "内容",
+  "poo70.c9.tab.subscription": "订阅",
+  "poo70.c9.tab.updates": "更新",
+  "poo70.c9.tabs.label": "圈子详情"
 }

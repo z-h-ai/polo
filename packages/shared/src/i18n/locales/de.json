@@ -2258,5 +2258,13 @@
   "poo70.c7.result.leftTitle": "{{name}} verlassen",
   "poo70.c7.result.recheckPending": "Circle-Beziehungen oder der App-Katalog werden noch geprüft; die Anzeige ist möglicherweise nicht aktuell.",
   "poo70.c7.result.rejoinHint": "Das erneute Beitreten erfolgt im Systembrowser (Beitritt und Zahlung dort); der Zugriff wird erst nach erneuter Prüfung in dieser App wiederhergestellt.",
-  "poo70.c7.result.reverify": "Erneut prüfen"
+  "poo70.c7.result.reverify": "Erneut prüfen",
+  "poo70.c9.exit.button": "Kreis verlassen",
+  "poo70.c9.page.back": "Zurück zu meinen Kreisen",
+  "poo70.c9.page.eyebrow": "Mein Bereich · Verifizierte Creator-Kreise",
+  "poo70.c9.support.entry": "Hilfe zu diesem Problem anfordern",
+  "poo70.c9.tab.content": "Inhalte",
+  "poo70.c9.tab.subscription": "Abonnement",
+  "poo70.c9.tab.updates": "Updates",
+  "poo70.c9.tabs.label": "Kreisdetails"
 }

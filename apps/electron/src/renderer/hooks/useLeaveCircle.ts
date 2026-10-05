@@ -699,6 +699,15 @@ export function useLeaveCircle(): UseLeaveCircleResult {
 
   const reverify = useCallback(() => {
     if (reverifyInFlightRef.current || pendingJudgmentRef.current) return
+    // C9/POO-100 review hardening (landed here by integration-owner
+    // authorization; the file is C7/POO-96-owned): a read-only
+    // re-verification must never start while a confirm WRITE is in flight —
+    // the write's own continuation judges this flow, and a racing reverify()
+    // would bump the flow token out from under it.
+    if (
+      confirmInFlightRef.current
+      || (dialogRef.current?.busy === true && dialogRef.current?.phase === 'confirm')
+    ) return
     // P2-2: the read-only recovery targets the still-open flow — an existing
     // left outcome (re-freshen) OR an unresolved recheck (result unknown,
     // including after the dialog was dismissed). Without a target there is

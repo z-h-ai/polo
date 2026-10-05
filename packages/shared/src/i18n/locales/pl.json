@@ -2258,5 +2258,13 @@
   "poo70.c7.result.leftTitle": "Opuszczono {{name}}",
   "poo70.c7.result.recheckPending": "Relacje koła lub katalog aplikacji są jeszcze weryfikowane; widoczny stan może nie być aktualny.",
   "poo70.c7.result.rejoinHint": "Ponowne dołączenie odbywa się w przeglądarce systemowej (dołączenie i płatność tam); dostęp zostanie przywrócony dopiero po ponownej weryfikacji w tej aplikacji.",
-  "poo70.c7.result.reverify": "Sprawdź ponownie"
+  "poo70.c7.result.reverify": "Sprawdź ponownie",
+  "poo70.c9.exit.button": "Opuść koło",
+  "poo70.c9.page.back": "Wróć do moich kół",
+  "poo70.c9.page.eyebrow": "Moja przestrzeń · Zweryfikowane koła twórców",
+  "poo70.c9.support.entry": "Pomoc dotycząca tego problemu",
+  "poo70.c9.tab.content": "Treści",
+  "poo70.c9.tab.subscription": "Subskrypcja",
+  "poo70.c9.tab.updates": "Aktualizacje",
+  "poo70.c9.tabs.label": "Szczegóły koła"
 }

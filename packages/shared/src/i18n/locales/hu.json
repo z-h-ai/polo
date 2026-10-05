@@ -2258,5 +2258,13 @@
   "poo70.c7.result.leftTitle": "Kiléptél: {{name}}",
   "poo70.c7.result.recheckPending": "A köri kapcsolatok vagy az alkalmazáskatalógus ellenőrzése még folyamatban van; az, amit láts, lehet, hogy nem a legfrissebb.",
   "poo70.c7.result.rejoinHint": "Az újracsatlakozás a rendszerböngészőben történik (csatlakozás és fizetés ott); a hozzáférés csak azután áll helyre, hogy ez az alkalmazás újra ellenőrizte.",
-  "poo70.c7.result.reverify": "Újraellenőrzés"
+  "poo70.c7.result.reverify": "Újraellenőrzés",
+  "poo70.c9.exit.button": "Kör elhagyása",
+  "poo70.c9.page.back": "Vissza a köreimhez",
+  "poo70.c9.page.eyebrow": "Saját tér · Hitelesített alkotói körök",
+  "poo70.c9.support.entry": "Segítség kérése ehhez a problémához",
+  "poo70.c9.tab.content": "Tartalmak",
+  "poo70.c9.tab.subscription": "Előfizetés",
+  "poo70.c9.tab.updates": "Frissítések",
+  "poo70.c9.tabs.label": "Kör részletei"
 }

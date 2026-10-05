@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
-import { HomePage } from './HomePage'
+import { ClientHomeRouter } from '@/components/circles/ClientHomeRouter'
+import { useMemberCatalog } from '@/context/MemberCatalogContext'
+import { MemberCircleResourceProvider } from '@/context/MemberCircleResourceContext'
 import { WebAppView } from './WebAppView'
 import { useTabShell } from '@/context/TabShellContext'
 import type { TabInstance } from '../../../shared/tab-browser-types'
@@ -16,6 +18,27 @@ function WebTabLayer({ tab, active }: { tab: TabInstance; active: boolean }) {
   )
 }
 
+/**
+ * The home-branch surface (POO-70 C9 / POO-100): the C2 member-circle
+ * resource provider mounted OUTSIDE ClientHomeRouter on the App-level H1
+ * catalog instance, so the my-circles list, circle detail, leave flow and
+ * support entry all read ONE shared relations/catalog context (a row click's
+ * invalidation refreshes both list and detail — never two instances).
+ *
+ * Lifecycle unchanged from the pre-C9 home branch: the surface mounts with
+ * the home tab and unmounts on Polo/web app tabs; the N1 route stack lives
+ * in the App-level ClientPageProvider (outside TabShell), so the route and
+ * its depth survive the tab switch.
+ */
+function ClientHomeSurface() {
+  const catalog = useMemberCatalog()
+  return (
+    <MemberCircleResourceProvider catalog={catalog}>
+      <ClientHomeRouter />
+    </MemberCircleResourceProvider>
+  )
+}
+
 export function TabContent({ renderPolo }: TabContentProps) {
   const { activeTab, openTabs } = useTabShell()
   const activeType = activeTab.type
@@ -26,7 +49,7 @@ export function TabContent({ renderPolo }: TabContentProps) {
         {renderPolo()}
       </div>
 
-      {activeType === 'home' && <HomePage />}
+      {activeType === 'home' && <ClientHomeSurface />}
 
       {openTabs
         .filter((tab) => tab.type === 'webapp')

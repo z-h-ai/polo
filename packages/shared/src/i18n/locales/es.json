@@ -2258,5 +2258,13 @@
   "poo70.c7.result.leftTitle": "Saliste de {{name}}",
   "poo70.c7.result.recheckPending": "Las relaciones del círculo o el catálogo de apps aún se están verificando; lo que ves puede no estar actualizado.",
   "poo70.c7.result.rejoinHint": "Volver a unirte se hace en el navegador del sistema (unirse y pagar allí); el acceso se restaura solo cuando esta app lo verifique de nuevo.",
-  "poo70.c7.result.reverify": "Comprobar de nuevo"
+  "poo70.c7.result.reverify": "Comprobar de nuevo",
+  "poo70.c9.exit.button": "Salir del círculo",
+  "poo70.c9.page.back": "Volver a mis círculos",
+  "poo70.c9.page.eyebrow": "Mi espacio · Círculos de creadores verificados",
+  "poo70.c9.support.entry": "Obtener ayuda con este problema",
+  "poo70.c9.tab.content": "Contenido",
+  "poo70.c9.tab.subscription": "Suscripción",
+  "poo70.c9.tab.updates": "Novedades",
+  "poo70.c9.tabs.label": "Detalle del círculo"
 }
