@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { TabContent } from './TabContent'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { useTabShell } from '@/context/TabShellContext'
@@ -7,6 +8,13 @@ import { HOME_TAB_ID } from '../../../shared/tab-browser-types'
 
 interface TabShellProps {
   renderPolo: () => ReactNode
+  /**
+   * POO-100 C8 (P2-2, integration-owner authorized): the App-threaded A1
+   * re-login entry for the circle-return account-mismatch recovery,
+   * forwarded verbatim to TabContent → ClientHomeRouter → CircleDetailPage.
+   * Strictly optional; unset keeps the panel's honest manual-recovery note.
+   */
+  onReauthenticateRequest?: (target: CircleReturnTargetIds | null) => void
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -16,7 +24,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
-export function TabShell({ renderPolo }: TabShellProps) {
+export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
   const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab } = useTabShell()
   // Frozen narrow-window boundary (Review R38, restores the POO-41 contract):
   // at/below the frozen 640px line EVERY route fails closed to the frozen
@@ -132,7 +140,10 @@ export function TabShell({ renderPolo }: TabShellProps) {
           Rendered inside the hydration gate: pre-hydration the boundary above
           returns first, so a stale previous-scope bar never surfaces. */}
       <TopBar />
-      <TabContent renderPolo={renderPolo} />
+      <TabContent
+        renderPolo={renderPolo}
+        onReauthenticateRequest={onReauthenticateRequest}
+      />
     </div>
   )
 }

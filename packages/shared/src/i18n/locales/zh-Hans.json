@@ -1322,6 +1322,7 @@
   "poo70.c8.fail.sessionBody": "当前没有可用的登录会话，暂不能核对。登录后再查原对象。",
   "poo70.c8.fail.subtitle": "网络恢复后再查询。网页已经完成的加入或付款不因此撤销，不需要再加入或付款。",
   "poo70.c8.fail.title": "暂时无法刷新圈子资格",
+  "poo70.c8.mismatch.noReloginEntry": "应用内重新登录入口尚未接入；请从账号菜单退出后，用完成加入的账号重新登录。",
   "poo70.c8.mismatch.subtitle": "请核对网页完成加入时的账号，换回后再查。圈子链接可转发，没有指定受邀身份限制。",
   "poo70.c8.mismatch.title": "当前账号没有这次加入记录",
   "poo70.c8.order.amount": "金额",

@@ -484,7 +484,10 @@ export function CircleDetailPage({
           <CircleReturnPanel
             state={circleReturn.state}
             onCheck={() => { void circleReturn.checkOnce() }}
-            onReauthenticate={circleReturn.reauthenticate}
+            // P2-2 (POO-100 review): the mismatch CTA renders ONLY when an
+            // A1 re-login entry is actually wired — undefined keeps the
+            // honest manual-recovery note instead of a dead button.
+            onReauthenticate={onReauthenticateRequest ? circleReturn.reauthenticate : undefined}
             onCancel={() => { void circleReturn.cancel() }}
             targetCircleName={returnTargetCircleName}
             spaceName={spaceName}

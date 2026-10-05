@@ -1322,6 +1322,7 @@
   "poo70.c8.fail.sessionBody": "Ahora mismo no hay una sesión iniciada disponible, así que no se puede comprobar nada. Inicia sesión y vuelve a comprobar el objeto original.",
   "poo70.c8.fail.subtitle": "Vuelve a intentarlo cuando se restablezca la red. La incorporación o el pago ya completados en la web no se deshacen; no hace falta volver a incorporarte ni pagar.",
   "poo70.c8.fail.title": "No se puede actualizar el acceso al círculo ahora mismo",
+  "poo70.c8.mismatch.noReloginEntry": "Aquí aún no hay acceso de reinicio de sesión en la app. Cierra sesión desde el menú de cuenta y vuelve a entrar con la cuenta que completó la incorporación.",
   "poo70.c8.mismatch.subtitle": "Comprueba con qué cuenta se completó la incorporación en la web, vuelve a esa cuenta e inténtalo de nuevo. Los enlaces de círculo se pueden reenviar y no están limitados a un invitado concreto.",
   "poo70.c8.mismatch.title": "Esta cuenta no tiene ese registro de incorporación",
   "poo70.c8.order.amount": "Importe",

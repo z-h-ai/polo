@@ -1322,6 +1322,7 @@
   "poo70.c8.fail.sessionBody": "Jelenleg nincs elérhető bejelentkezett munkamenet, ezért most nem lehet ellenőrizni. Jelentkezzen be, majd ellenőrizze újra az eredeti objektumot.",
   "poo70.c8.fail.subtitle": "Próbálja újra, ha a hálózat helyreállt. A weben már befejezett csatlakozás vagy fizetés nem vonható vissza; újbóli csatlakozás vagy fizetés nem szükséges.",
   "poo70.c8.fail.title": "A kör hozzáférése most nem frissíthető",
+  "poo70.c8.mismatch.noReloginEntry": "Itt még nincs alkalmazáson belüli újrabejelentkezési belépő. Jelentkezz ki a fiókménüből, majd jelentkezz újra azzal a fiókkal, amellyel a csatlakozás történt.",
   "poo70.c8.mismatch.subtitle": "Ellenőrizze, melyik fiókkal fejeződött be a csatlakozás a weben, váltson vissza arra, majd ellenőrizzen újra. A körhivatkozások továbbíthatók, és nem egy adott meghívotthoz kötöttek.",
   "poo70.c8.mismatch.title": "Ennek a fióknak nincs ilyen csatlakozási bejegyzése",
   "poo70.c8.order.amount": "Összeg",

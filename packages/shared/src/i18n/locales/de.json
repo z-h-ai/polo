@@ -1322,6 +1322,7 @@
   "poo70.c8.fail.sessionBody": "Derzeit ist keine angemeldete Sitzung verfügbar, daher kann nichts geprüft werden. Melden Sie sich an und prüfen Sie das Originalobjekt erneut.",
   "poo70.c8.fail.subtitle": "Versuchen Sie es erneut, sobald das Netz wieder funktioniert. Der im Web abgeschlossene Beitritt oder die Zahlung wird dadurch nicht rückgängig gemacht; ein erneuter Beitritt oder eine erneute Zahlung ist nicht nötig.",
   "poo70.c8.fail.title": "Kreisberechtigung kann gerade nicht aktualisiert werden",
+  "poo70.c8.mismatch.noReloginEntry": "Hier ist noch kein In-App-Login-Zugang angebunden. Bitte über das Kontomenü abmelden und mit dem Konto neu anmelden, mit dem der Beitritt abgeschlossen wurde.",
   "poo70.c8.mismatch.subtitle": "Prüfen Sie, mit welchem Konto der Beitritt im Web abgeschlossen wurde, wechseln Sie zurück und prüfen Sie erneut. Kreislinks können weitergeleitet werden und sind nicht an eine bestimmte eingeladene Person gebunden.",
   "poo70.c8.mismatch.title": "Dieses Konto hat keinen solchen Beitrittseintrag",
   "poo70.c8.order.amount": "Betrag",

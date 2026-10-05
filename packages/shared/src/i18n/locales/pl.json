@@ -1322,6 +1322,7 @@
   "poo70.c8.fail.sessionBody": "Obecnie nie ma dostępnej zalogowanej sesji, więc niczego nie można sprawdzić. Zaloguj się i sprawdź ponownie oryginalny obiekt.",
   "poo70.c8.fail.subtitle": "Spróbuj ponownie po przywróceniu sieci. Dołączenie lub płatność zakończone już w przeglądarce nie są cofane; nie trzeba dołączać ani płacić drugi raz.",
   "poo70.c8.fail.title": "Nie można teraz odświeżyć dostępu do kręgu",
+  "poo70.c8.mismatch.noReloginEntry": "W tym miejscu nie ma jeszcze połączonego ponownego logowania w aplikacji. Wyloguj się z menu konta i zaloguj ponownie kontem, którym ukończono dołączanie.",
   "poo70.c8.mismatch.subtitle": "Sprawdź, na jakim kontu zakończono dołączenie w przeglądarce, przełącz się na nie i sprawdź ponownie. Linki do kręgów można przekazywać dalej; nie są ograniczone do konkretnego zaproszonego konta.",
   "poo70.c8.mismatch.title": "To konto nie ma takiego wpisu o dołączeniu",
   "poo70.c8.order.amount": "Kwota",

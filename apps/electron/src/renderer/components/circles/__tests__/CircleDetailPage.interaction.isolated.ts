@@ -435,6 +435,7 @@ interface TreeOptions {
   accountId: string
   contextVersion?: number
   enterprise?: boolean
+  onReauthenticateRequest?: (target: unknown) => void
 }
 
 function tree(options: TreeOptions) {
@@ -460,7 +461,11 @@ function tree(options: TreeOptions) {
           key: clientPageScopeKey(scope),
           scope,
           children: [
-            createElement(TabContent, { key: 'content', renderPolo: () => null }),
+            createElement(TabContent, {
+              key: 'content',
+              renderPolo: () => null,
+              onReauthenticateRequest: options.onReauthenticateRequest as never,
+            }),
             createElement(RouteProbe, { key: 'probe' }),
           ],
         }),
@@ -1030,5 +1035,175 @@ describe('circle return verification assembly (C8 wiring)', () => {
     })
     expect(observedRoute).toEqual({ kind: 'circles' })
     expect(returnCancelledIds).toEqual(['cand-c8-assembly'])
+  })
+})
+
+// -------------------------------------------------------------------------
+// P2-1 (POO-100 review): open-original never dead-ends the verified takeover
+// -------------------------------------------------------------------------
+
+describe('return panel open-original (P2-1)', () => {
+  const returnCircleId = 'c8c8c8c8-0000-4000-8000-00000000c802'
+
+  function seedReturnCircleAndCandidate() {
+    circlesByAccount['account-a'] = [
+      ...(circlesByAccount['account-a'] ?? []),
+      circleFixture({ circleId: returnCircleId, membershipId: 'ms-return', name: '回归圈', billingKind: 'free' }),
+    ]
+    membershipsByAccount['account-a'] = [
+      ...(membershipsByAccount['account-a'] ?? []),
+      membershipFixture({ circleId: returnCircleId, membershipId: 'ms-return', billingKind: 'free' }),
+    ]
+    returnPendingQueue.push({
+      status: 'pending',
+      candidate: {
+        candidateId: 'cand-p2-1',
+        protocolVersion: 1,
+        target: { circleId: returnCircleId },
+        createdAt: '2026-10-04T00:00:00.000Z',
+      },
+    })
+  }
+
+  async function verifyCandidateOnPage(circleId: string) {
+    await renderAssembly()
+    await navigateToDetail(circleId)
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('candidate')
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-check'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('verified')
+    })
+    expect(returnAckedIds).toContain('cand-p2-1')
+  }
+
+  it('SAME route: opening the original releases the verified takeover so the click lands on the object (no dead CTA)', async () => {
+    seedReturnCircleAndCandidate()
+    // The candidate's derived route IS the current route (circle detail,
+    // content section) — the pre-fix dead-button case.
+    await verifyCandidateOnPage(returnCircleId)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-open'))
+    })
+    // The route navigation is a no-op (same route) — the RELEASE is the
+    // feedback: the flow surface is gone, the object's detail body renders.
+    expect(observedRoute).toEqual({ kind: 'circle-detail', circleId: returnCircleId, section: 'content' })
+    await waitFor(() => {
+      expect(screen.queryByTestId('circle-return-panel')).toBeNull()
+      expect(screen.getByTestId('circle-detail-title').textContent).toBe('回归圈')
+    })
+    expect(screen.getByTestId('circle-detail-page').getAttribute('data-return-active')).toBe('false')
+    // The release ran the bridge cancel (harmless not_found for an acked id).
+    expect(returnCancelledIds).toEqual(['cand-p2-1'])
+  })
+
+  it('DIFFERENT circle: opening the original navigates, the remount consumes nothing, and the target object renders', async () => {
+    seedReturnCircleAndCandidate()
+    // The user is on ANOTHER circle's detail; the candidate targets 回归圈.
+    await verifyCandidateOnPage('circle-1')
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-open'))
+    })
+    // The route CHANGES to the target's detail; the keyed page remounts,
+    // the new hook consumes nothing (acked candidate), and the target's
+    // own detail renders normally.
+    expect(observedRoute).toEqual({ kind: 'circle-detail', circleId: returnCircleId, section: 'content' })
+    await waitFor(() => {
+      expect(screen.queryByTestId('circle-return-panel')).toBeNull()
+      expect(screen.getByTestId('circle-detail-title').textContent).toBe('回归圈')
+    })
+    expect(screen.getByTestId('circle-detail-page').getAttribute('data-return-active')).toBe('false')
+  })
+})
+
+// -------------------------------------------------------------------------
+// P2-2 (POO-100 review): the mismatch CTA is gated on a wired A1 entry
+// -------------------------------------------------------------------------
+
+describe('account mismatch reauthenticate CTA (P2-2)', () => {
+  const orderUuid = 'c8c8c8c8-0000-4000-8000-00000000c803'
+
+  function seedOrderCandidate() {
+    // getOrder/getCheckoutResult stubs fail with not_found (the F1 same-shape
+    // negative) → the round lands on the definitive account-mismatch verdict.
+    returnPendingQueue.push({
+      status: 'pending',
+      candidate: {
+        candidateId: 'cand-p2-2',
+        protocolVersion: 1,
+        target: { orderId: orderUuid },
+        createdAt: '2026-10-04T00:00:00.000Z',
+      },
+    })
+  }
+
+  async function verifyToMismatch() {
+    await renderAssembly()
+    await navigateToDetail('circle-1')
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('order')
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-check'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('account-mismatch')
+    })
+    // No object disclosure on the mismatch state.
+    expect(screen.queryByTestId('circle-return-facts')).toBeNull()
+  }
+
+  it('WITH a wired A1 entry: the CTA renders, one click hands over the minimal target and keeps the candidate for re-verification', async () => {
+    seedOrderCandidate()
+    const reauthenticateSpy = jest.fn()
+    await renderAssembly({ accountId: 'account-a', onReauthenticateRequest: reauthenticateSpy })
+    await navigateToDetail('circle-1')
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('order')
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-check'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('account-mismatch')
+    })
+
+    const button = screen.getByTestId('circle-return-reauthenticate')
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(reauthenticateSpy).toHaveBeenCalledTimes(1)
+    expect(reauthenticateSpy.mock.calls[0]![0]).toEqual({ orderId: orderUuid })
+    // The hook drops the previous account's facts and KEEPS the minimal
+    // target so the same object re-verifies after re-login.
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('candidate')
+    })
+    expect(screen.queryByTestId('circle-return-mismatch-no-entry')).toBeNull()
+    expect(returnCancelledIds).toEqual([])
+  })
+
+  it('WITHOUT a wired entry: no dead CTA — the honest manual-recovery note replaces it', async () => {
+    seedOrderCandidate()
+    await renderAssembly()
+    await navigateToDetail('circle-1')
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-kind')).toBe('order')
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('circle-return-check'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-return-panel').getAttribute('data-return-phase')).toBe('account-mismatch')
+    })
+
+    expect(screen.queryByTestId('circle-return-reauthenticate')).toBeNull()
+    const note = screen.getByTestId('circle-return-mismatch-no-entry')
+    expect(note.textContent).toContain('account menu')
   })
 })

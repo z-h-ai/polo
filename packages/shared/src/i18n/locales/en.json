@@ -1322,6 +1322,7 @@
   "poo70.c8.fail.sessionBody": "No signed-in session is available right now, so nothing can be checked. Sign in and check the original object again.",
   "poo70.c8.fail.subtitle": "Try again once the network recovers. The join or payment already completed on the web is not undone, and there is no need to join or pay again.",
   "poo70.c8.fail.title": "Circle access cannot be refreshed right now",
+  "poo70.c8.mismatch.noReloginEntry": "No in-app re-login entry is wired here yet. Sign out from the account menu and sign back in with the account that completed the join.",
   "poo70.c8.mismatch.subtitle": "Check which account completed the join on the web, switch back, and verify again. Circle links can be forwarded and are not restricted to a specific invitee.",
   "poo70.c8.mismatch.title": "This account has no such join record",
   "poo70.c8.order.amount": "Amount",
