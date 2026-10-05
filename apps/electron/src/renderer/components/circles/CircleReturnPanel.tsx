@@ -46,8 +46,13 @@ export interface CircleReturnPanelProps {
   state: CircleReturnState
   /** ONE authoritative verification round (hook.checkOnce). */
   onCheck: () => void
-  /** Existing A1 auth-chain entry (hook.reauthenticate; C9 wires the target). */
-  onReauthenticate: () => void
+  /**
+   * Existing A1 auth-chain entry (hook.reauthenticate; C9 wires the target).
+   * OPTIONAL (P2-2, POO-100 review): unset means NO re-login entry is wired
+   * in this mount — the mismatch CTA does NOT render (never a dead button)
+   * and an honest manual-recovery note renders instead.
+   */
+  onReauthenticate?: () => void
   /** Decline the candidate: hook.cancel + navigate back to circles. */
   onCancel: () => void
   /** Display-only: the target circle's confirmed name when already known. */
@@ -125,8 +130,15 @@ export function CircleReturnPanel({
 
   const handleOpenOriginal = useCallback(() => {
     if (!returnRoute) return
+    // P2-1 (POO-100 review): release the flow state BEFORE navigating. When
+    // the target route equals the CURRENT route the N1 navigate is a no-op —
+    // without the release the verified takeover would never end and this CTA
+    // would give no feedback. cancel() on an already-acked candidate is an
+    // idempotent `not_found` (bridge contract) and resets the local state to
+    // idle; a different-circle target remounts fresh and consumes nothing.
+    onCancel()
     clientPage?.navigate(returnRoute)
-  }, [clientPage, returnRoute])
+  }, [onCancel, clientPage, returnRoute])
 
   if (state.phase === 'idle' || !target || !state.kind) {
     // No surfaced candidate — render nothing; C9 mounts the panel
@@ -316,7 +328,7 @@ export function CircleReturnPanel({
           </button>
         )}
 
-        {state.phase === 'account-mismatch' && (
+        {state.phase === 'account-mismatch' && onReauthenticate && (
           <button
             type="button"
             className={PRIMARY_BUTTON_CLASS}
@@ -325,6 +337,18 @@ export function CircleReturnPanel({
           >
             {t('poo70.c8.action.reauthenticate')}
           </button>
+        )}
+
+        {/* P2-2 (POO-100 review): with NO wired re-login entry the mismatch
+        CTA must not render as a dead button — the honest manual-recovery
+        note replaces it. */}
+        {state.phase === 'account-mismatch' && !onReauthenticate && (
+          <p
+            className="m-0 max-w-[460px] text-[12px] leading-[1.6] text-muted-foreground"
+            data-testid="circle-return-mismatch-no-entry"
+          >
+            {t('poo70.c8.mismatch.noReloginEntry')}
+          </p>
         )}
 
         {state.phase === 'verified' && state.entitlement === 'unknown' && (

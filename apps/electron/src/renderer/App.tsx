@@ -3283,7 +3283,8 @@ export default function App() {
               }
             >
               <TabShell
-              renderPolo={() => (
+                onReauthenticateRequest={() => { enterAdminLogin() }}
+                renderPolo={() => (
                 <NavigationProvider
                   workspaceId={windowWorkspaceId}
                   workspaceSlug={windowWorkspaceSlug}

@@ -241,6 +241,23 @@ const electronApiExplicit: Record<string, unknown> = {
   adminAcquirePhoneAuthChallenge: async () => ({}),
   debugLog: () => {},
   unwatchSessionFiles: async () => {},
+
+  // POO-100 (C9) fixture declaration: the home branch now mounts the C2
+  // member-circle resource provider, whose trusted bridge access is
+  // `window.electronAPI.memberCircles`. This fixture does not exercise
+  // circle reads; the deterministic empty-receipt bridge keeps the
+  // fail-closed fixture complete without changing what it verifies.
+  memberCircles: {
+    list: async () => ({ success: true, circles: [] }),
+    listMemberships: async () => ({ success: true, memberships: [] }),
+    previewRenewal: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    leave: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getOrder: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getCheckoutResult: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getUpdates: async () => ({ success: true, updates: { availability: 'upstream_pending', contractGap: 'G2' } }),
+    getProfile: async () => ({ success: true, profile: { availability: 'upstream_pending', contractGap: 'G3' } }),
+    getSupport: async () => ({ success: true, support: { availability: 'upstream_pending', contractGap: 'G4' } }),
+  },
 }
 
 // Known event subscriptions: each returns its unsubscribe function.
