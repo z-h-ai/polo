@@ -672,7 +672,7 @@ describe('member circle client surface', () => {
       expect(requests).toHaveLength(1)
       expect(requests[0]!.url).toBe('https://admin.example.com/api/auth/login')
       const headers = new Headers(requests[0]!.init.headers)
-      expect(headers.get('x-client')).toBe('organization-console')
+      expect(headers.get('x-client')).toBe('polo-webui')
       // A declared boundary is a business surface: staff-only alternatives
       // (admin-console / polo-operations) must never be selected.
       expect(['admin-console', 'polo-operations']).not.toContain(headers.get('x-client'))

@@ -270,16 +270,15 @@ export const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
  * before any token is signed.
  *
  * The Electron desktop is a business member consumption surface, so it
- * declares `organization-console`: the same business-only boundary the
- * provider's phone-auth chain already assigns to header-less callers
- * (`src/app/api/auth/phone/verify/route.ts` resolvePhoneSessionClient —
- * "every other caller keeps the consumption-grade default"), keeping both
- * desktop login paths in one boundary family. The value must stay inside
+ * declares `polo-webui`: the existing business-only provider boundary that
+ * returns body tokens for the desktop credential store. The management
+ * organization-console password boundary remains cookie-only. Phone auth
+ * retains its separate provider contract. The value must stay inside
  * the provider's six-value SessionClient set (`src/lib/auth.ts`); unknown
  * values are rejected with 400 before credential checks.
  */
 export const ADMIN_LOGIN_CLIENT_HEADER_NAME = 'x-client' as const;
-export const ADMIN_LOGIN_CLIENT = 'organization-console' as const;
+export const ADMIN_LOGIN_CLIENT = 'polo-webui' as const;
 
 export function getSafeAdminErrorMessage(
   errorCode: AdminErrorCode,

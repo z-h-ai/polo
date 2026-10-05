@@ -404,10 +404,10 @@ describe('HomePage complete directory (POO-70 H3)', () => {
 
     // Same name, two identities: both render.
     expect(screen.getAllByText('Alpha App')).toHaveLength(2)
-    // The authoritative order is the default display order.
+    // Names order unused works; equal names retain their distinct identities.
     const identities = screen.getAllByTestId('home-directory-app')
       .map(card => card.getAttribute('data-identity-key'))
-    expect(identities).toEqual(apps.map(app => dirKeyFor(app)))
+    expect(identities).toEqual([0, 1, 2, 4, 5, 3, 6].map(index => dirKeyFor(apps[index]!)))
     // The retired quick-access surface is gone from the page.
     expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
     expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
@@ -476,7 +476,7 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(screen.getByText('Design App')).toBeTruthy()
   })
 
-  it('P70-HOME-01: recent sort ranks REAL opens first, name sort sorts by name, and a first run without history keeps the authoritative order', async () => {
+  it('P70-HOME-01: recent sort refreshes on return and unused works sort by name', async () => {
     const apps = [
       workApp('sort-a', 'Charlie App', 0),
       workApp('sort-b', 'alpha App', 1),
@@ -484,25 +484,27 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     ]
     const resolveLaunch = jest.fn(async () => resolvedLaunch(apps[2]!))
     appCatalogHook = hookWithCatalog(enterpriseCatalogWith(apps), { resolveLaunch })
-    renderHome()
+    const visit = renderHome()
     await waitFor(() => {
       expect(screen.getAllByTestId('home-directory-app')).toHaveLength(3)
     })
 
-    // Default (recent) WITHOUT any history: authoritative Catalog order.
+    // Default (recent) WITHOUT any history: stable name fallback.
     expect(screen.getAllByTestId('home-directory-app').map(card => card.textContent))
       .toEqual([
-        expect.stringContaining('Charlie App'),
         expect.stringContaining('alpha App'),
         expect.stringContaining('Bravo App'),
+        expect.stringContaining('Charlie App'),
       ])
 
-    // Opening an App records a REAL usage fact: recent sort lifts it, the
-    // rest keep the authoritative order.
+    // A successful open records use but keeps cards still during this visit.
     fireEvent.click(directoryCard(dirKeyFor(apps[2]!)))
     await waitFor(() => {
       expect(storePublish).toHaveBeenCalled()
     })
+    expect(screen.getAllByTestId('home-directory-app')[0]?.textContent).toContain('alpha App')
+    visit.unmount()
+    renderHome()
     await waitFor(() => {
       const cards = screen.getAllByTestId('home-directory-app')
       if (!cards[0]?.textContent?.includes('Bravo App')) {

@@ -34,15 +34,16 @@ export function formatBytes(t: TFunction, sizeBytes: number): string {
  * SAME stable contract — Spec line "圈子打开也更新最近记录" — instead of
  * importing a page component.
  *
- * - One record is UI-level usage evidence (the member pressed open on THIS
- *   device), never an authorization or entitlement fact — sort-only.
+ * - One record is a successfully authorized launch handoff on THIS device,
+ *   never an authorization or entitlement fact — sort-only. Refused opens
+ *   and cancelled preparation do not count as use.
  * - Records are keyed by the SAME ProductSpace context-key convention as the
  *   retired quick-access registry (`v1:account|space`), so personal and
  *   enterprise usage never mix and an account switch cannot leak records
  *   across accounts.
  * - Records persist in the renderer's localStorage (best-effort, bounded);
  *   a corrupted or unavailable store fails closed to an empty record set and
- *   the sort simply degrades to the authoritative Catalog order.
+ *   the sort simply degrades to the stable name fallback.
  */
 
 export interface HomeAppUsageRecord {

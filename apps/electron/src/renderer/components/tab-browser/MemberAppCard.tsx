@@ -43,6 +43,8 @@ export interface MemberAppCardProps {
   identityKey?: string
   /** DOM test id; consumers with an established contract pass their own. */
   testId?: string
+  /** An authoritative open/prepare action is already in flight. */
+  busy?: boolean
 }
 
 export function MemberAppCard({
@@ -52,6 +54,7 @@ export function MemberAppCard({
   runtimeStatus = null,
   identityKey,
   testId = 'member-app-card',
+  busy = false,
 }: MemberAppCardProps) {
   const { t } = useTranslation()
   // Frozen POO-41 source contract: authoritative catalogSources first, the
@@ -73,13 +76,14 @@ export function MemberAppCard({
   // never a resident status label and never rendered on detail cards.
   const running = variant === 'home' && runtimeStatus?.status === 'running'
   const handleOpen = () => {
-    onOpen(app)
+    if (!busy) onOpen(app)
   }
   return (
     <article
       data-testid={testId}
       data-identity-key={identityKey}
       data-variant={variant}
+      aria-busy={busy}
       onClick={handleOpen}
       className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[17px] border border-foreground/10 bg-surface p-[18px] shadow-xs transition-shadow hover:shadow-minimal min-[1081px]:p-[20px]"
     >
@@ -113,13 +117,14 @@ export function MemberAppCard({
         authorized open flow decides. */}
         <button
           type="button"
+          disabled={busy}
           className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[6px] border-0 bg-transparent px-[9px] text-[12px] font-medium text-foreground-60 hover:bg-foreground-5 hover:text-foreground"
           onClick={(event) => {
             event.stopPropagation()
             handleOpen()
           }}
         >
-          {t('common.open')}
+          {busy ? t('common.loading') : t('common.open')}
         </button>
       </div>
     </article>

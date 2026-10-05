@@ -12,11 +12,13 @@ import { createElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { CatalogApp } from '@polo-ai/shared/admin'
+import { getCatalogAppIdentityKey } from '@polo-ai/shared/admin/catalog-view'
 import type { LocalAppRuntimeStatus } from '@polo-ai/shared/protocol'
 import type { AppCatalogInstance } from '../../../hooks/useAppCatalog'
 import type { ProductSpaceAppLaunchHandoff } from '../../../context/ProductSpaceContext'
 import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import type { MemberAppBundleLaunch } from '../../../hooks/useMemberAppActions'
+import { loadHomeAppUsage, __resetHomeAppUsageForTests } from '../../../lib/home-app-usage'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -41,6 +43,8 @@ const { useMemberAppActions, isMemberAppBundleLaunch } = await import(
 
 const accountId = 'account-a'
 const spaceId = 'organization-a'
+
+const actionKey = (app: CatalogApp) => getCatalogAppIdentityKey({ accountId, organizationId: spaceId }, app)
 
 function makeApp(overrides: Partial<CatalogApp> = {}): CatalogApp {
   return {
@@ -170,6 +174,8 @@ function cardTree(app: CatalogApp, props: Record<string, unknown> = {}) {
 }
 
 beforeEach(async () => {
+  __resetHomeAppUsageForTests()
+  localStorage.clear()
   toastErrorSpy.mockClear()
   toastSuccessSpy.mockClear()
   await i18n.changeLanguage('en')
@@ -214,6 +220,21 @@ describe('MemberAppCard (P70-CARD-01 shared card)', () => {
     const card = screen.getByTestId('home-quick-entry')
     expect(card.getAttribute('data-identity-key')).toBe('ui:app-a')
     expect(card.getAttribute('data-variant')).toBe('home')
+  })
+
+  it('blocks button and card-body opens while busy and restores the action', () => {
+    const onOpen = jest.fn()
+    const app = makeApp()
+    const view = render(cardTree(app, { onOpen, busy: true }))
+    const button = screen.getByRole('button', { name: 'Loading…' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.getByTestId('member-app-card').getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(button)
+    fireEvent.click(screen.getByTestId('member-app-card'))
+    expect(onOpen).not.toHaveBeenCalled()
+    view.rerender(cardTree(app, { onOpen, busy: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
   it('home variant: no resident status badge; the running badge only while actually running', () => {
@@ -271,6 +292,83 @@ describe('useMemberAppActions (P70-CARD-02/03 extracted actions, injected catalo
     await act(async () => { await api().open(app) })
     expect(catalog.resolveLaunch).toHaveBeenCalledTimes(2)
     expect(handoff.publish).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces concurrent opens, releases after a failure and allows a fresh retry', async () => {
+    const app = makeApp()
+    let reject!: (reason: Error) => void
+    const pending = new Promise<ResolveLaunchResponse>((_, fail) => { reject = fail })
+    const resolveLaunch = jest.fn(() => pending)
+    const catalog = fakeCatalog({ resolveLaunch })
+    const handoff = fakeHandoff()
+    const { api } = renderActions(catalog, handoff)
+    let first!: Promise<void>
+    let second!: Promise<void>
+    await act(async () => {
+      first = api().open(app)
+      second = api().open(app)
+    })
+    expect(resolveLaunch).toHaveBeenCalledTimes(1)
+    expect(api().operationStates[actionKey(app)]?.operation).toBe('open')
+    await act(async () => { reject(new Error('offline')); await Promise.all([first, second]) })
+    expect(handoff.publish).not.toHaveBeenCalled()
+    expect(api().operationStates).toEqual({})
+    resolveLaunch.mockImplementation(async () => resolvedLaunch(app))
+    await act(async () => { await api().open(app) })
+    expect(resolveLaunch).toHaveBeenCalledTimes(2)
+    expect(handoff.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps different works concurrent and records each successful shared open once', async () => {
+    const first = makeApp()
+    const second = makeApp({ id: 'app-b' })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const resolveLaunch = jest.fn(async (app: CatalogApp) => { await gate; return resolvedLaunch(app) })
+    const catalog = fakeCatalog({ resolveLaunch, productSpace: { productSpaceContextKey: 'account-a|organization-a' } })
+    const handoff = fakeHandoff()
+    const { api } = renderActions(catalog, handoff)
+    let opens!: Promise<void>[]
+    await act(async () => { opens = [api().open(first), api().open(second), api().open(first)] })
+    expect(resolveLaunch).toHaveBeenCalledTimes(2)
+    await act(async () => { release(); await Promise.all(opens) })
+    expect(handoff.publish).toHaveBeenCalledTimes(2)
+    const usage = loadHomeAppUsage('v1:account-a|organization-a')
+    expect(usage.get(actionKey(first))?.openCount).toBe(1)
+    expect(usage.get(actionKey(second))?.openCount).toBe(1)
+    expect(loadHomeAppUsage('v1:account-b|organization-a').size).toBe(0)
+  })
+
+  it('does not record refused opens or cancelled preparation', async () => {
+    const app = makeApp()
+    const resolveLaunch = jest.fn(async (): Promise<ResolveLaunchResponse> => { throw new Error('denied') })
+    const catalog = fakeCatalog({ resolveLaunch, productSpace: { productSpaceContextKey: 'account-a|organization-a' } })
+    const handoff = fakeHandoff()
+    const { api } = renderActions(catalog, handoff)
+    await act(async () => { await api().open(app) })
+    resolveLaunch.mockImplementation(async () => resolvedBundleLaunch(app))
+    await act(async () => { await api().open(app) })
+    expect(api().prepareTarget).not.toBeNull()
+    await act(async () => { api().cancelPrepare() })
+    expect(handoff.publish).not.toHaveBeenCalled()
+    expect(loadHomeAppUsage('v1:account-a|organization-a').size).toBe(0)
+  })
+
+  it('confirms a prepared grant only once even through the same stale callback', async () => {
+    const app = makeApp()
+    const catalog = fakeCatalog({
+      resolveLaunch: jest.fn(async () => resolvedBundleLaunch(app)),
+      productSpace: { productSpaceContextKey: 'account-a|organization-a' },
+    })
+    const handoff = fakeHandoff()
+    const { api } = renderActions(catalog, handoff)
+    await act(async () => { await api().open(app) })
+    const confirm = api().confirmPrepare
+    await act(async () => { await Promise.all([confirm(), confirm()]) })
+    expect(catalog.installProductSpaceBundle).toHaveBeenCalledTimes(1)
+    expect(catalog.resolveLaunch).toHaveBeenCalledTimes(2)
+    expect(handoff.publish).toHaveBeenCalledTimes(1)
+    expect(loadHomeAppUsage('v1:account-a|organization-a').get(actionKey(app))?.openCount).toBe(1)
   })
 
   it('refuses to start a non-available App and never touches resolve-launch', async () => {
@@ -348,15 +446,15 @@ describe('useMemberAppActions (P70-CARD-02/03 extracted actions, injected catalo
       inner = api().open(app)
     })
     // The open is still awaiting the gated resolveLaunch: the marker is up.
-    expect(api().operationStates['ui:app-a']).toEqual({
-      identityKey: 'ui:app-a',
+    expect(api().operationStates[actionKey(app)]).toEqual({
+      identityKey: actionKey(app),
       operation: 'open',
     })
     await act(async () => {
       releaseResolve()
       await inner
     })
-    expect(api().operationStates['ui:app-a']).toBeUndefined()
+    expect(api().operationStates[actionKey(app)]).toBeUndefined()
   })
 
   it('confirmPrepare installs and re-publishes the freshly re-resolved fixed version', async () => {

@@ -34,7 +34,6 @@ import {
 import {
   formatBytes,
   loadHomeAppUsage,
-  recordHomeAppUsage,
 } from '@/lib/home-app-usage'
 import {
   hideHomeApp,
@@ -99,10 +98,8 @@ export type HomeAppSortMode = 'recent' | 'frequent' | 'name'
 /**
  * Sorts directory entries using ONLY fields that actually exist: `recent`
  * and `frequent` rank the page's REAL open records (never invented data),
- * and entries without records keep the authoritative Catalog order after
- * the used ones (H1 contract: the default order IS the authoritative
- * order). The sort is stable — ties always resolve to the authoritative
- * order.
+ * and entries without records use the confirmed stable name fallback.
+ * Equal usage ranks also sort by name; equal names preserve catalog order.
  */
 export function sortHomeAppDirectory(
   entries: readonly HomeAppDirectoryEntry[],
@@ -127,7 +124,7 @@ export function sortHomeAppDirectory(
       const rightCount = rightRecord?.openCount ?? 0
       if (leftCount !== rightCount) return rightCount - leftCount
     }
-    return left.index - right.index
+    return left.entry.app.name.localeCompare(right.entry.app.name) || left.index - right.index
   })
   return decorated.map(item => item.entry)
 }
@@ -206,9 +203,8 @@ export function HomePage() {
   const [query, setQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [sortMode, setSortMode] = useState<HomeAppSortMode>('recent')
-  // Bumped after every recorded open or local hide/restore so the directory
-  // re-derives from the mutated module-level record caches.
-  const [usageVersion, setUsageVersion] = useState(0)
+  // Local hide/restore updates the current directory immediately; usage
+  // ranking stays fixed until the member returns to Home.
   const [hiddenVersion, setHiddenVersion] = useState(0)
 
   const activeProductSpace = catalog.productSpace?.activeProductSpace
@@ -258,7 +254,10 @@ export function HomePage() {
   })
   const prepareTargetApp = memberActions.prepareTarget?.app ?? null
 
-  const usage = loadHomeAppUsage(usageContextKey)
+  const usage = useMemo(
+    () => new Map(loadHomeAppUsage(usageContextKey)),
+    [usageContextKey],
+  )
   // Local hidden set (本机隐藏): the display preference of THIS device for
   // THIS account+space context. Hidden works drop out of the grid and appear
   // in the in-page restore section (P70-HOME-01 保留本机隐藏恢复).
@@ -286,9 +285,9 @@ export function HomePage() {
   )
   const visibleEntries = useMemo(
     () => sortHomeAppDirectory(filteredEntries, sortMode, usage),
-    // `usageVersion` re-ranks after a recorded open; `usage` is the stable
-    // module-level record cache the mutation writes into.
-    [filteredEntries, sortMode, usage, usageVersion],
+    // Take a stable ordering for this visit. Successful shared opens update
+    // the stored records; returning to Home mounts a fresh directory order.
+    [filteredEntries, sortMode, usage],
   )
 
   // Open handler: the fail-closed gate demanded by the H1 reviewer contract.
@@ -309,8 +308,6 @@ export function HomePage() {
       toast.error(t('homeApps.errors.unavailable'))
       return
     }
-    recordHomeAppUsage(usageContextKeyRef.current, entry.identityKey)
-    setUsageVersion(version => version + 1)
     void memberActions.open(entry.app)
   }, [memberActions, phase, t])
 
@@ -686,6 +683,7 @@ export function HomePage() {
                     app={entry.app}
                     runtimeStatus={runtimeStatusFor(entry.app)}
                     identityKey={entry.identityKey}
+                    busy={Boolean(memberActions.operationStates[entry.identityKey])}
                     testId="home-directory-app"
                     onOpen={() => handleOpenApp(entry)}
                   />

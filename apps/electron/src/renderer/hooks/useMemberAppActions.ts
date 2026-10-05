@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CatalogApp } from '@polo-ai/shared/admin'
+import { getCatalogAppIdentityKey } from '@polo-ai/shared/admin/catalog-view'
 import type { ResolveLaunchResponse } from '@polo-ai/shared/product-spaces'
 import type { ProductSpaceAppLaunchHandoff } from '@/context/ProductSpaceContext'
 import type { AppCatalogInstance } from '@/hooks/useAppCatalog'
@@ -9,6 +10,8 @@ import {
   getHomeAppErrorCode,
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
+import { createHomeQuickAccessContextKey } from '@/lib/home-quick-access'
+import { recordHomeAppUsage } from '@/lib/home-app-usage'
 
 /**
  * POO-70 H2 (P70-CARD-02/03): the open / prepare / permission-feedback
@@ -105,25 +108,27 @@ export function useMemberAppActions({
   const { t } = useTranslation()
   const { spaceKind, launchHandoff } = context
   const [prepareTarget, setPrepareTarget] = useState<MemberAppPrepareTarget | null>(null)
+  const prepareTargetRef = useRef<MemberAppPrepareTarget | null>(null)
+  const inFlight = useRef(new Set<string>())
   const [operationStates, setOperationStates] = useState<
     Record<string, MemberAppOperationState>
   >({})
 
-  // UI identity key of the CURRENT catalog instance; a failed derivation is
-  // not fatal for an in-flight marker, it only degrades to the raw id.
+  // Match directory rows and persistent usage records. Runtime UI keys use
+  // a different tuple prefix and cannot address these consumers' cards.
   const identityKeyFor = useCallback((app: CatalogApp): string => {
-    try {
-      return catalog.uiIdentityKeyForApp(app)
-    } catch {
-      return app.id
-    }
+    const snapshot = catalog.state.catalog
+    return snapshot ? getCatalogAppIdentityKey(snapshot, app) : app.id
   }, [catalog])
 
   const beginOperation = useCallback((
     app: CatalogApp,
     operation: MemberAppOperationKind,
-  ): string => {
+  ): string | null => {
     const identityKey = identityKeyFor(app)
+    // React state is presentation only: two events can arrive before render.
+    if (inFlight.current.has(identityKey)) return null
+    inFlight.current.add(identityKey)
     setOperationStates(previous => ({
       ...previous,
       [identityKey]: { identityKey, operation },
@@ -132,6 +137,7 @@ export function useMemberAppActions({
   }, [identityKeyFor])
 
   const endOperation = useCallback((identityKey: string): void => {
+    inFlight.current.delete(identityKey)
     setOperationStates(previous => {
       if (!(identityKey in previous)) return previous
       const next = { ...previous }
@@ -146,7 +152,12 @@ export function useMemberAppActions({
       return
     }
     const identityKey = beginOperation(app, 'open')
+    if (!identityKey) return
+    const usageContextKey = catalog.productSpace?.productSpaceContextKey
     try {
+      // A pending confirmation owns its grant; repeated opens cannot replace
+      // it or create another confirmation while the modal is already shown.
+      if (prepareTargetRef.current) return
       const accountId = catalog.state.catalog?.accountId
       if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
       const launch = await catalog.resolveLaunch(app)
@@ -156,11 +167,17 @@ export function useMemberAppActions({
           installState?.state !== 'installed'
           || installState.currentVersion !== launch.subject.version
         ) {
-          setPrepareTarget({ app, launch })
+          if (!prepareTargetRef.current) {
+            prepareTargetRef.current = { app, launch }
+            setPrepareTarget(prepareTargetRef.current)
+          }
           return
         }
       }
       launchHandoff.publish(accountId, launch)
+      if (usageContextKey) {
+        recordHomeAppUsage(createHomeQuickAccessContextKey(usageContextKey), identityKey)
+      }
     } catch (error) {
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
         description: homeAppOperationErrorText(t, error, 'open', spaceKind),
@@ -171,11 +188,14 @@ export function useMemberAppActions({
   }, [beginOperation, catalog, endOperation, launchHandoff, spaceKind, t])
 
   const confirmPrepare = useCallback(async (): Promise<void> => {
-    const target = prepareTarget
+    const target = prepareTargetRef.current
     if (!target) return
+    const identityKey = beginOperation(target.app, 'prepare')
+    if (!identityKey) return
+    prepareTargetRef.current = null
     setPrepareTarget(null)
     const { app } = target
-    const identityKey = beginOperation(app, 'prepare')
+    const usageContextKey = catalog.productSpace?.productSpaceContextKey
     try {
       await catalog.installProductSpaceBundle(app)
       toast.success(t('homeApps.toast.installed', { name: app.name }))
@@ -186,6 +206,9 @@ export function useMemberAppActions({
         throw new Error(t('homeApps.errors.staleContext'))
       }
       launchHandoff.publish(accountId, launch)
+      if (usageContextKey) {
+        recordHomeAppUsage(createHomeQuickAccessContextKey(usageContextKey), identityKey)
+      }
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
@@ -195,9 +218,10 @@ export function useMemberAppActions({
     } finally {
       endOperation(identityKey)
     }
-  }, [beginOperation, catalog, endOperation, launchHandoff, prepareTarget, spaceKind, t])
+  }, [beginOperation, catalog, endOperation, launchHandoff, spaceKind, t])
 
   const cancelPrepare = useCallback((): void => {
+    prepareTargetRef.current = null
     setPrepareTarget(null)
   }, [])
 

@@ -455,6 +455,7 @@ export function CircleContentPanel({ circle, context }: CircleContentPanelProps)
                         variant="detail"
                         app={row.entry.app}
                         identityKey={row.entry.identityKey}
+                        busy={Boolean(memberActions.operationStates[row.entry.identityKey])}
                         testId="circle-content-app-card"
                         onOpen={() => handleOpenApp(row)}
                       />

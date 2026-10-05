@@ -55,7 +55,7 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.headers).toEqual({
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'x-client': 'organization-console',
+      'x-client': 'polo-webui',
     });
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
       identifier: 'admin',

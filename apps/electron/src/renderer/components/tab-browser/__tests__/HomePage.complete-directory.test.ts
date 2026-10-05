@@ -275,14 +275,14 @@ describe('sortHomeAppDirectory (P70-HOME-01, real fields only)', () => {
     directoryEntry('e3', 'Bravo', 2),
   ]
 
-  it('keeps the authoritative Catalog order when no usage records exist', () => {
+  it('uses stable name order when no usage records exist', () => {
     expect(sortHomeAppDirectory(entries, 'recent', new Map()).map(entry => entry.app.name))
-      .toEqual(['Charlie', 'alpha', 'Bravo'])
+      .toEqual(['alpha', 'Bravo', 'Charlie'])
     expect(sortHomeAppDirectory(entries, 'frequent', new Map()).map(entry => entry.app.name))
-      .toEqual(['Charlie', 'alpha', 'Bravo'])
+      .toEqual(['alpha', 'Bravo', 'Charlie'])
   })
 
-  it('recent ranks REAL opens newest-first, unused entries keep the authoritative order after them', () => {
+  it('recent ranks REAL opens newest-first and sorts unused works by name', () => {
     const usage = new Map([
       [entries[2]!.identityKey, { lastUsedAt: 100, openCount: 1 }],
       [entries[0]!.identityKey, { lastUsedAt: 200, openCount: 1 }],
@@ -291,13 +291,24 @@ describe('sortHomeAppDirectory (P70-HOME-01, real fields only)', () => {
       .toEqual(['Charlie', 'Bravo', 'alpha'])
   })
 
-  it('frequent ranks by open count, ties resolve to the authoritative order', () => {
+  it('frequent ranks by open count, ties resolve by name', () => {
     const usage = new Map([
       [entries[1]!.identityKey, { lastUsedAt: 300, openCount: 5 }],
       [entries[2]!.identityKey, { lastUsedAt: 100, openCount: 5 }],
     ])
     expect(sortHomeAppDirectory(entries, 'frequent', usage).map(entry => entry.app.name))
       .toEqual(['alpha', 'Bravo', 'Charlie'])
+  })
+
+  it('uses name fallback for unused works and tied real usage ranks', () => {
+    const onlyBravo = new Map([[entries[2]!.identityKey, { lastUsedAt: 100, openCount: 1 }]])
+    for (const mode of ['recent', 'frequent'] as const) {
+      expect(sortHomeAppDirectory(entries, mode, onlyBravo).map(entry => entry.app.name))
+        .toEqual(['Bravo', 'alpha', 'Charlie'])
+      const tied = new Map(entries.map(entry => [entry.identityKey, { lastUsedAt: 100, openCount: 2 }]))
+      expect(sortHomeAppDirectory(entries, mode, tied).map(entry => entry.app.name))
+        .toEqual(['alpha', 'Bravo', 'Charlie'])
+    }
   })
 
   it('name sorts locale-wise and stays stable for equal names', () => {
@@ -592,6 +603,13 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
       remoteUrl: 'https://usage.example.com',
       sources: [{ kind: 'enterprise_import' as const, name: 'Organization A' }],
     }]
+    stubCatalogEntries.push({
+      ...stubCatalogEntries[0] as Record<string, unknown>,
+      catalogEntryId: 'alpha-app',
+      artifactInstanceId: 'artifact-alpha-app',
+      name: 'Alpha App',
+      version: { versionId: 'version-alpha', version: '1.0.0' },
+    })
     const providerValue = {
       accountId: 'account-a',
       activeProductSpaceId: 'organization-a',
@@ -624,12 +642,19 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     )
     const view = render(tree)
     await waitFor(() => {
-      expect(screen.getByTestId('home-directory-app')).toBeTruthy()
+      expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
     })
-    fireEvent.click(screen.getByTestId('home-directory-app'))
+    expect(screen.getAllByTestId('home-directory-app').map(card => card.querySelector('h3')?.textContent))
+      .toEqual(['Alpha App', 'Usage App'])
+    fireEvent.click(screen.getAllByTestId('home-directory-app')[1]!)
     await waitFor(() => {
       expect(storePublish).toHaveBeenCalled()
     })
+    // Recompute the directory during this visit without moving the opened
+    // card. The successful usage becomes visible only on the next visit.
+    fireEvent.change(screen.getByTestId('home-directory-source'), { target: { value: 'Organization A' } })
+    expect(screen.getAllByTestId('home-directory-app').map(card => card.querySelector('h3')?.textContent))
+      .toEqual(['Alpha App', 'Usage App'])
     view.unmount()
 
     // REAL remount: the record was persisted, the cache re-reads it.
@@ -638,5 +663,10 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     expect(records.size).toBe(1)
     const [record] = [...records.values()]
     expect(record?.openCount).toBe(1)
+    render(tree)
+    await waitFor(() => {
+      expect(screen.getAllByTestId('home-directory-app').map(card => card.querySelector('h3')?.textContent))
+        .toEqual(['Usage App', 'Alpha App'])
+    })
   })
 })

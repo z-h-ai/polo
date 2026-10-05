@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LeaveCircleDialogState } from '@/hooks/useLeaveCircle'
 
@@ -83,7 +83,13 @@ export function LeaveCircleDialog({
         data-testid="leave-circle-dialog"
         data-circle-id={state.circleId}
         data-phase={state.phase}
-        className="w-full max-w-[520px] overflow-hidden rounded-[14px] border border-border bg-surface shadow-[0_20px_44px_rgba(23,24,26,0.14),0_3px_9px_rgba(23,24,26,0.06)]"
+        className="w-full max-w-[520px] overflow-hidden rounded-[14px] border border-border bg-surface shadow-modal-small"
+        // Map the existing scoped utility to the current client dialog's
+        // panel elevation (DS workbench-base.css --shadow-panel). Other
+        // renderer dialogs retain their own elevation.
+        style={{
+          '--shadow-modal-small': '0 20px 44px rgba(23, 24, 26, .14), 0 3px 9px rgba(23, 24, 26, .06)',
+        } as CSSProperties}
       >
         <div className="flex items-start justify-between gap-[16px] px-[20px] pb-[14px] pt-[20px]">
           <div>
