@@ -5,9 +5,10 @@
  * Flow:
  * 1. Welcome
  * 2. Git Bash (Windows only, if not found)
- * 3. Complete
+ * 3. Complete (local configuration); admin authentication hands off to App initialization.
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
+import type { AdminAuthCompletionIntent } from './useAdminAuthCompletion'
 import { i18n } from '@polo-ai/shared/i18n'
 import type {
   OnboardingState,
@@ -27,6 +28,8 @@ import type {
 interface UseOnboardingOptions {
   /** Called when onboarding is complete */
   onComplete: () => void
+  /** Auth success enters App initialization without the generic configuration checkpoint. */
+  onAdminAuthenticated?: (intent: AdminAuthCompletionIntent) => void
   /** Initial setup needs from auth state check */
   initialSetupNeeds?: SetupNeeds
   /** Start the wizard at a specific step (default: 'welcome') */
@@ -265,9 +268,9 @@ export function resolveAdminLoginSuccessState(state: OnboardingState): Onboardin
   return {
     ...state,
     loginStatus: 'success',
-    completionStatus: 'complete',
+    completionStatus: 'saving',
     errorMessage: undefined,
-    step: 'complete',
+    step: 'admin-login',
   }
 }
 
@@ -421,6 +424,7 @@ export function apiSetupMethodToConnectionSetup(
 
 export function useOnboarding({
   onComplete,
+  onAdminAuthenticated,
   initialSetupNeeds,
   initialStep = 'welcome',
   initialApiSetupMethod,
@@ -438,6 +442,7 @@ export function useOnboarding({
   // the code, the raw phone number nor any token is ever logged here.
   const authGateRef = useRef<AuthRequestGate>(createAuthRequestGate())
   const authInFlightRef = useRef(false)
+  const authCompletedEpochRef = useRef<number | null>(null)
 
   // Cancel/supersede any in-flight auth request: its epoch stops being
   // current, so its late receipt can never land. Also releases the single
@@ -445,7 +450,22 @@ export function useOnboarding({
   const cancelInFlightAuth = useCallback(() => {
     authGateRef.current.cancel()
     authInFlightRef.current = false
+    authCompletedEpochRef.current = null
   }, [])
+  useEffect(() => cancelInFlightAuth, [cancelInFlightAuth])
+
+  const finishAdminAuthentication = useCallback((epoch: number, accountId: string) => {
+    if (!authGateRef.current.isCurrent(epoch) || authCompletedEpochRef.current === epoch) return
+    authCompletedEpochRef.current = epoch
+    setState(resolveAdminLoginSuccessState)
+    // Run outside a React state updater/effect: StrictMode replay cannot finish twice.
+    if (onAdminAuthenticated) {
+      onAdminAuthenticated({ accountId, isCurrent: () => authGateRef.current.isCurrent(epoch) })
+    } else {
+      onComplete()
+    }
+    onConfigSaved?.()
+  }, [onAdminAuthenticated, onComplete, onConfigSaved])
 
   // Main wizard state
   const [state, setState] = useState<OnboardingState>({
@@ -684,7 +704,7 @@ export function useOnboarding({
   const handleAdminLogin = useCallback(async (identifier: string, password: string) => {
     // Single-flight (P70-AUTH-03): a repeated submit while one request is
     // already waiting must not fire a second RPC.
-    if (authInFlightRef.current) return
+    if (authInFlightRef.current || authCompletedEpochRef.current === authGateRef.current.begin()) return
     authInFlightRef.current = true
     const epoch = authGateRef.current.begin()
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
@@ -695,8 +715,7 @@ export function useOnboarding({
       // overwrite newer state or a newer account with an old auth result.
       if (!authGateRef.current.isCurrent(epoch)) return
       if (result.success) {
-        setState(resolveAdminLoginSuccessState)
-        onConfigSaved?.()
+        finishAdminAuthentication(epoch, result.user.id)
         return
       }
 
@@ -711,14 +730,14 @@ export function useOnboarding({
         authInFlightRef.current = false
       }
     }
-  }, [onConfigSaved])
+  }, [finishAdminAuthentication])
 
   const handleAdminSendPhoneCode = useCallback(async (
     phone: string,
   ): Promise<AdminSendPhoneAuthCodeResult> => {
     // Single-flight: a repeated submit never fires a second send RPC. The
     // existing server-safe code keeps the contract without touching the UI.
-    if (authInFlightRef.current) {
+    if (authInFlightRef.current || authCompletedEpochRef.current === authGateRef.current.begin()) {
       return { success: false, errorCode: 'duplicate_request' }
     }
     authInFlightRef.current = true
@@ -764,7 +783,7 @@ export function useOnboarding({
 
   const handleAdminVerifyPhoneCode = useCallback(async (phone: string, code: string): Promise<boolean> => {
     // Single-flight: a repeated submit never fires a second verify RPC.
-    if (authInFlightRef.current) return false
+    if (authInFlightRef.current || authCompletedEpochRef.current === authGateRef.current.begin()) return false
     authInFlightRef.current = true
     const epoch = authGateRef.current.begin()
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
@@ -775,8 +794,7 @@ export function useOnboarding({
       // never establish a session for (or overwrite) a newer account.
       if (!authGateRef.current.isCurrent(epoch)) return false
       if (result.success) {
-        setState(resolveAdminLoginSuccessState)
-        onConfigSaved?.()
+        finishAdminAuthentication(epoch, result.user.id)
         return true
       }
       setState(s => ({
@@ -798,7 +816,7 @@ export function useOnboarding({
         authInFlightRef.current = false
       }
     }
-  }, [onConfigSaved])
+  }, [finishAdminAuthentication])
 
   const handleAdminRelogin = useCallback(() => {
     cancelInFlightAuth()
@@ -1228,13 +1246,15 @@ export function useOnboarding({
 
   // Finish onboarding
   const handleFinish = useCallback(() => {
+    if (authCompletedEpochRef.current === authGateRef.current.begin()) return
     onComplete()
   }, [onComplete])
 
   // Cancel onboarding
   const handleCancel = useCallback(() => {
+    cancelInFlightAuth()
     setState(s => ({ ...s, step: 'welcome' }))
-  }, [])
+  }, [cancelInFlightAuth])
 
   // Jump directly to credentials step with a pre-set method (for editing existing connections)
   const jumpToCredentials = useCallback((method: ApiSetupMethod) => {

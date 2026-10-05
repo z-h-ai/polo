@@ -1,5 +1,6 @@
 import { describe, it, expect, mock, afterEach } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { createElement, StrictMode } from 'react'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import {
   resolveSlugForMethod,
@@ -41,7 +42,7 @@ if (typeof window === 'undefined') {
     },
   })
 }
-const { renderHook, act } = await import('@testing-library/react')
+const { renderHook, act, cleanup } = await import('@testing-library/react')
 
 setupI18n()
 // Pin the language: these assertions expect English strings, but the i18n
@@ -242,12 +243,12 @@ describe('admin onboarding flow', () => {
     expect(resolveInitialStep(setupNeeds, 'provider-select')).toBe('admin-login')
   })
 
-  it('moves to complete after admin login succeeds', () => {
+  it('keeps authentication success separate from application readiness', () => {
     const next = resolveAdminLoginSuccessState(adminState({ loginStatus: 'waiting' }))
 
-    expect(next.step).toBe('complete')
+    expect(next.step).toBe('admin-login')
     expect(next.loginStatus).toBe('success')
-    expect(next.completionStatus).toBe('complete')
+    expect(next.completionStatus).toBe('saving')
     expect(next.errorMessage).toBeUndefined()
   })
 
@@ -554,7 +555,69 @@ function renderAdminLoginHooks(
 
 describe('admin login session fencing (hook)', () => {
   afterEach(() => {
+    cleanup()
     delete (window as unknown as { electronAPI?: unknown }).electronAPI
+  })
+
+  for (const method of ['password', 'phone'] as const) {
+    it(`${method} hands off once in StrictMode without a finish click or another auth write`, async () => {
+      const adminLogin = mock(async () => ({ success: true, user: adminUser('user-a') }))
+      const adminVerifyPhoneAuthCode = mock(async () => ({ success: true, user: adminUser('user-a'), isNewUser: true }))
+      installElectronApi({ adminLogin, adminVerifyPhoneAuthCode })
+      const onComplete = mock(() => {})
+      const onAdminAuthenticated = mock((_intent: { accountId: string; isCurrent: () => boolean }) => {})
+      const { result } = renderHook(() => useOnboarding({
+        onComplete,
+        onAdminAuthenticated,
+        initialSetupNeeds: ADMIN_SETUP_NEEDS,
+      }), { wrapper: ({ children }) => createElement(StrictMode, null, children) })
+      const submit = () => method === 'password'
+        ? result.current.handleAdminLogin('user-a', 'pw')
+        : result.current.handleAdminVerifyPhoneCode('13800138000', '123456')
+      await act(async () => { await submit() })
+      expect(onAdminAuthenticated).toHaveBeenCalledTimes(1)
+      const intent = onAdminAuthenticated.mock.calls[0]![0]
+      expect(intent.accountId).toBe('user-a')
+      expect(intent.isCurrent()).toBe(true)
+      expect(result.current.state.step).toBe('admin-login')
+      expect(result.current.state.completionStatus).toBe('saving')
+      await act(async () => { await submit(); result.current.handleFinish() })
+      expect(onAdminAuthenticated).toHaveBeenCalledTimes(1)
+      expect(onComplete).not.toHaveBeenCalled()
+      expect(method === 'password' ? adminLogin : adminVerifyPhoneAuthCode).toHaveBeenCalledTimes(1)
+      act(() => result.current.handleAdminRelogin())
+      expect(intent.isCurrent()).toBe(false)
+      await act(async () => { await submit() })
+      expect(onAdminAuthenticated).toHaveBeenCalledTimes(2)
+      // Same account after relogin is a new intent; the old receipt stays stale (ABA).
+      expect(intent.isCurrent()).toBe(false)
+    })
+  }
+
+  it('retains the manual completion checkpoint for a non-admin welcome flow', async () => {
+    installElectronApi()
+    const onComplete = mock(() => {})
+    const onAdminAuthenticated = mock(() => {})
+    const { result } = renderHook(() => useOnboarding({ onComplete, onAdminAuthenticated }))
+    await act(async () => {})
+    await act(async () => { await result.current.handleContinue() })
+    expect(result.current.state.step).toBe('complete')
+    expect(result.current.state.completionStatus).toBe('complete')
+    expect(onComplete).not.toHaveBeenCalled()
+    act(() => result.current.handleFinish())
+    expect(onComplete).toHaveBeenCalledTimes(1)
+    expect(onAdminAuthenticated).not.toHaveBeenCalled()
+  })
+
+  it('rejects a receipt after the hook unmounts', async () => {
+    const pending = makeDeferred<AdminLoginResult>()
+    installElectronApi({ adminLogin: () => pending.promise })
+    const onComplete = mock(() => {})
+    const { result, unmount } = renderAdminLoginHooks({ onComplete })
+    await act(async () => { void result.current.handleAdminLogin('user-a', 'pw') })
+    unmount()
+    await act(async () => { pending.resolve({ success: true, user: adminUser('user-a') }); await pending.promise })
+    expect(onComplete).not.toHaveBeenCalled()
   })
 
   it('keeps a typed password timeout failed until an explicit same-account retry succeeds', async () => {
@@ -573,7 +636,7 @@ describe('admin login session fencing (hook)', () => {
     await act(async () => { await result.current.handleAdminLogin('user-a', 'pw') })
     expect(retry).toHaveBeenCalledTimes(1)
     expect(retry).toHaveBeenCalledWith('user-a', 'pw')
-    expect(result.current.state.step).toBe('complete')
+    expect(result.current.state.step).toBe('admin-login')
     expect(onConfigSaved).toHaveBeenCalledTimes(1)
   })
 
@@ -620,7 +683,7 @@ describe('admin login session fencing (hook)', () => {
       await deferred.promise
     })
 
-    expect(result.current.state.step).toBe('complete')
+    expect(result.current.state.step).toBe('admin-login')
     expect(onConfigSaved).toHaveBeenCalledTimes(1)
   })
 
@@ -706,7 +769,7 @@ describe('admin login session fencing (hook)', () => {
       void result.current.handleAdminLogin('user-b', 'pw2')
     })
 
-    expect(result.current.state.step).toBe('complete')
+    expect(result.current.state.step).toBe('admin-login')
     expect(onConfigSaved).toHaveBeenCalledTimes(1)
 
     await act(async () => {
@@ -715,7 +778,7 @@ describe('admin login session fencing (hook)', () => {
     })
 
     expect(onConfigSaved).toHaveBeenCalledTimes(1)
-    expect(result.current.state.step).toBe('complete')
+    expect(result.current.state.step).toBe('admin-login')
   })
 
   it('fires exactly one verify RPC for a double submit; the repeat resolves false', async () => {
@@ -745,7 +808,7 @@ describe('admin login session fencing (hook)', () => {
     })
 
     expect(firstOutcome).toBe(true)
-    expect(result.current.state.step).toBe('complete')
+    expect(result.current.state.step).toBe('admin-login')
     expect(onConfigSaved).toHaveBeenCalledTimes(1)
   })
 

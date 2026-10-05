@@ -1,4 +1,5 @@
 import { ProductSpaceErrorScreen } from '@/components/product-space/ProductSpaceErrorScreen'
+import { ProductSpacePreparationScreen } from '@/components/product-space/ProductSpacePreparationScreen'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18n } from '@polo-ai/shared/i18n'
@@ -24,6 +25,7 @@ import { ModalProvider } from '@/context/ModalContext'
 import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { useWindowCloseHandler } from '@/hooks/useWindowCloseHandler'
 import { useOnboarding } from '@/hooks/useOnboarding'
+import { useAdminAuthCompletion, type AdminAuthCompletionIntent } from '@/hooks/useAdminAuthCompletion'
 import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
@@ -112,6 +114,7 @@ import { onTargetProjectionFailure } from '@/lib/target-projection'
 type AppState =
   | 'loading'
   | 'onboarding'
+  | 'auth-preparing'
   | 'reauth'
   | 'contract-blocked'
   | 'space-error'
@@ -991,13 +994,14 @@ export default function App() {
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
-  const refreshAdminUser = useCallback(async () => {
+  const refreshAdminUser = useCallback(async (intent?: AdminAuthCompletionIntent) => {
     // P3-5 (P70-BOOT-03): the status receipt is fenced to the account session
     // that started it — when a logout/auth failure resolves first, the stale
     // refresh returns nothing instead of re-committing the old user.
     const capturedEpoch = accountSessionEpochRef.current
     try {
       const status = await window.electronAPI.adminGetStatus()
+      if (accountSessionEpochRef.current !== capturedEpoch || (intent && !intent.isCurrent())) return null
       const user = status.loggedIn && status.userId
         ? {
             userId: status.userId,
@@ -1005,14 +1009,20 @@ export default function App() {
             displayName: status.displayName,
           }
         : null
+      // A different account receipt cannot inherit this authentication's completion.
+      if (intent && user?.userId !== intent.accountId) return null
       if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
         invalidateProductSpaceDeepLinkRefresh()
       }
       if (accountSessionEpochRef.current !== capturedEpoch) return null
       commitCurrentAdminUser(user)
       return user
-    } catch {
+    } catch (error) {
       if (accountSessionEpochRef.current !== capturedEpoch) return null
+      if (intent) {
+        if (!intent.isCurrent()) return null
+        throw error
+      }
       if (currentAdminUserIdRef.current !== null) {
         invalidateProductSpaceDeepLinkRefresh()
       }
@@ -1028,7 +1038,9 @@ export default function App() {
   const routeThroughProductSpace = useCallback(async (
     accountId: string | null,
     workspaceId: string | null,
+    isCurrent: () => boolean = () => true,
   ) => {
+    if (!isCurrent()) return
     if (!accountId) {
       continueAfterProductSpace(workspaceId)
       return
@@ -1036,7 +1048,7 @@ export default function App() {
 
     try {
       const next = await bootstrapProductSpace(accountId)
-      if (currentAdminUserIdRef.current !== accountId || next === null) return
+      if (!isCurrent() || currentAdminUserIdRef.current !== accountId || next === null) return
       if (next === 'ready') {
         continueAfterProductSpace(workspaceId)
       } else if (next === 'contract-blocked') {
@@ -1045,7 +1057,7 @@ export default function App() {
         setAppState('space-error')
       }
     } catch (error) {
-      if (currentAdminUserIdRef.current !== accountId) return
+      if (!isCurrent() || currentAdminUserIdRef.current !== accountId) return
       if (isAdminAuthFailureResult(error as AdminErrorLike)) {
         invalidateProductSpaceDeepLinkRefresh()
         commitCurrentAdminUser(null)
@@ -1111,10 +1123,36 @@ export default function App() {
     return result.success ? result.challengeToken : null
   }, [])
 
+  const adminAuthCompletion = useAdminAuthCompletion({
+    getSessionEpoch: () => accountSessionEpochRef.current,
+    refreshUser: refreshAdminUser,
+    loadWorkspaces: () => window.electronAPI.getWorkspaces(),
+    switchWorkspace: id => window.electronAPI.switchWorkspace(id),
+    publishWorkspaces: (ws, selectedId) => {
+      setWorkspaces(ws)
+      setWindowWorkspaceId(selectedId)
+    },
+    route: routeThroughProductSpace,
+    onPreparing: () => {
+      invalidateProductSpaceDeepLinkRefresh()
+      setAppState('auth-preparing')
+    },
+    onSessionMissing: () => handleAdminAuthFailure({ errorCode: 'SESSION_EXPIRED' }),
+    onFailure: error => {
+      console.error('[App] Failed to initialize authenticated session:', error)
+      if (isAdminAuthFailureResult(error as AdminErrorLike)) {
+        handleAdminAuthFailure(error as AdminErrorLike)
+      } else {
+        setAppState('space-error')
+      }
+    },
+  })
+
   // Onboarding hook — onConfigSaved fires immediately when billing is saved,
   // ensuring connection state updates before the wizard closes.
   const onboarding = useOnboarding({
     onComplete: handleOnboardingComplete,
+    onAdminAuthenticated: adminAuthCompletion.start,
     onConfigSaved: refreshLlmConnections,
     initialSetupNeeds: setupNeeds || undefined,
     phoneAuthChallengeProvider: acquirePhoneAuthChallenge,
@@ -2999,6 +3037,23 @@ export default function App() {
     return <SplashScreen isExiting={false} />
   }
 
+  if (appState === 'auth-preparing') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ProductSpacePreparationScreen onCancel={() => {
+            adminAuthCompletion.cancel()
+            onboarding.handleAdminRelogin()
+            // If trusted logout/revocation fails, keep recovery available.
+            setAppState('space-error')
+            void handleAdminLogout()
+          }} />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Reauth state - session expired, need to re-login
   // ModalProvider + WindowCloseHandler ensures X button works on Windows
   if (appState === 'reauth') {
@@ -3080,6 +3135,7 @@ export default function App() {
           <ProductSpaceErrorScreen
             onLogout={() => { void handleAdminLogout() }}
             onRetry={() => {
+              if (adminAuthCompletion.retry()) return
               void retryProductSpaceBootstrap().then(next => {
                 if (next === 'ready') {
                   continueAfterProductSpace(windowWorkspaceId)
