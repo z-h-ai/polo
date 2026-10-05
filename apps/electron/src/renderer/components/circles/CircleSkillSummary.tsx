@@ -30,8 +30,14 @@ export interface CircleSkillSummaryEntry {
   entitlementId: string
   /** Verbatim receipt identifiers, kept for tests; never used as identity. */
   artifactId: string
-  name: string
-  summary: string
+  /**
+   * Nullable per the verified provider shape (C1 ab9df8d8: Artifact.name /
+   * Artifact.summary are nullable DB columns passed through verbatim).
+   * Presentation is null-safe: a null renders as empty — never a fabricated
+   * fallback value.
+   */
+  name: string | null
+  summary: string | null
   /** Raw provider artifact status, carried verbatim — never interpreted. */
   artifactStatus: string
   /** The receipt's stable-version fact (may be null while none is published). */
@@ -97,7 +103,7 @@ export function CircleSkillSummary({ skills }: CircleSkillSummaryProps) {
             aria-hidden="true"
             className="mt-[2px] grid size-[38px] flex-none place-items-center rounded-[12px] bg-[color-mix(in_srgb,var(--success)_11%,transparent)] text-[15px] font-semibold text-success"
           >
-            {skill.name.slice(0, 1)}
+            {(skill.name ?? '').slice(0, 1)}
           </span>
           <div className="min-w-0">
             <h3 className="m-0 text-[14px] font-bold leading-[1.4]">{skill.name}</h3>

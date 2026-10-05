@@ -97,10 +97,17 @@ function directoryContext(
 
 let entitlementSeq = 0
 function skillEntitlement(
-  overrides: Partial<MemberCircleEntitlement> = {},
+  overrides: Partial<Omit<MemberCircleEntitlement, 'artifact' | 'artifactVersion'>> & {
+    artifact?: Partial<MemberCircleEntitlement['artifact']>
+    artifactVersion?: Partial<MemberCircleEntitlement['artifactVersion']>
+  } = {},
 ): MemberCircleEntitlement {
   entitlementSeq += 1
   const id = overrides.id ?? `ent-skill-${entitlementSeq}`
+  // artifact / artifactVersion are merged per-field; the remaining top-level
+  // overrides apply verbatim (a trailing full spread would clobber the
+  // merged artifact object and drop its `type`).
+  const { artifact, artifactVersion, ...restOverrides } = overrides
   return {
     id,
     circleId: 'circle-1',
@@ -115,16 +122,16 @@ function skillEntitlement(
       summary: '检索打法与案例',
       status: 'published',
       currentStableVersionId: `stable-version-${entitlementSeq}`,
-      ...overrides.artifact,
+      ...artifact,
     },
     artifactVersion: {
       id: `stable-version-${entitlementSeq}`,
       version: '1.0.0',
       status: 'published',
       publishedAt: '2026-09-01T00:00:00.000Z',
-      ...overrides.artifactVersion,
+      ...artifactVersion,
     },
-    ...overrides,
+    ...restOverrides,
   } as MemberCircleEntitlement
 }
 
@@ -490,6 +497,42 @@ describe('CircleContentPanel (P70-CIRCLE-CONTENT-02 read-only skill boundary)', 
     expect(skills).toHaveLength(1)
     expect(skills[0]!.name).toBe('资料研究')
     expect(skills[0]!.version).toBe('1.0.0')
+  })
+
+  it('renders a null-safe skill row when the receipt artifact name/summary are null (C1 nullable provider shape)', () => {
+    // C1 ab9df8d8: Artifact.name / Artifact.summary are nullable DB columns
+    // passed through verbatim. Null stays null — no fabricated fallback.
+    const catalog = fakeCatalog({
+      state: {
+        catalog: personalCatalog([]),
+        loading: false,
+        refreshing: false,
+        warningCode: null,
+        errorCode: null,
+        accessMode: 'online',
+        statuses: {},
+        installStates: {},
+      },
+    })
+    const skill = skillEntitlement({
+      artifact: { name: null, summary: null },
+    })
+    renderPanel(
+      readyCircle({ circleId: 'circle-1', entitlements: [skill] }),
+      panelContext(catalog),
+    )
+    const row = screen.getByTestId(`circle-content-skill-${skill.id}`)
+    // Null name/summary render as empty — the row still exists with its
+    // version + purpose meta line, and nothing crashes.
+    expect(row.textContent).not.toContain('资料研究')
+    expect(row.textContent).toContain('After it is installed on this device')
+    expect(screen.queryByText('检索打法与案例')).toBeNull()
+    expect(screen.queryAllByTestId('circle-content-app-card')).toHaveLength(0)
+    // Projection passes the nulls through verbatim.
+    const skills = selectCircleSkillSummaries([skill])
+    expect(skills).toHaveLength(1)
+    expect(skills[0]!.name).toBeNull()
+    expect(skills[0]!.summary).toBeNull()
   })
 })
 
