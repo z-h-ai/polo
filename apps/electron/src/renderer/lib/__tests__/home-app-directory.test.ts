@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
-import { selectHomeAppDirectory } from '../home-app-directory'
+import { hasOnlyLostCircleSources, selectHomeAppDirectory } from '../home-app-directory'
 
 /**
  * Fixtures mirror the shape `mapProductSpaceCatalogToCacheEntry` projects
@@ -196,6 +196,41 @@ describe('selectHomeAppDirectory — P70-CATALOG-02 sources and availability', (
     })
     expect(directory.entries[0]!.launchBlocked).toBe(false)
     expect(directory.entries[0]!.sources[0]!.valid).toBe(true)
+  })
+
+  it('hasOnlyLostCircleSources separates the lost-everything row from surviving rows (R1 F2)', () => {
+    const catalog = personalCatalog([
+      catalogApp({
+        id: 'entry-only-circle',
+        catalogEntryId: 'entry-only-circle',
+        artifactInstanceId: 'artifact-only-circle',
+        name: '乙独占',
+        catalogSources: [{ kind: 'creator_circle', circleId: 'circle-1', name: '乙圈' }],
+      }),
+      catalogApp({
+        id: 'entry-dual-source',
+        catalogEntryId: 'entry-dual-source',
+        artifactInstanceId: 'artifact-dual-source',
+        name: '双源样例',
+        catalogSources: [
+          { kind: 'creator_circle', circleId: 'circle-1', name: '乙圈' },
+          { kind: 'polo', name: 'Polo' },
+        ],
+      }),
+    ])
+    const allLost = selectHomeAppDirectory(catalog, {
+      ...memberContext,
+      lostCircleIds: new Set(['circle-1']),
+    })
+    const onlyCircle = allLost.entries.find(entry => entry.app.id === 'entry-only-circle')!
+    const dualSource = allLost.entries.find(entry => entry.app.id === 'entry-dual-source')!
+    // The single-source row: every source is a lost circle authorization —
+    // the UNAVAILABLE presentation state.
+    expect(hasOnlyLostCircleSources(onlyCircle)).toBe(true)
+    expect(onlyCircle.launchBlocked).toBe(true)
+    // The dual-source row keeps a valid Polo source: still a normal card.
+    expect(hasOnlyLostCircleSources(dualSource)).toBe(false)
+    expect(dualSource.launchBlocked).toBe(false)
   })
 
   it('refuses a creator_circle source without a circleId instead of using the name', () => {

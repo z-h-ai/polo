@@ -61,10 +61,11 @@ export function filterMemberCircleRows(
 }
 
 /**
- * Search over CONFIRMED fields only: circle name and purpose. The creator
- * display name is G1 `upstream_pending` — promising creator-name search would
- * fabricate a capability the trusted receipts do not have, so the creator
- * line is NOT searchable (and never matches on the raw ownerUserId uuid).
+ * Search over CONFIRMED fields only: the circle name (and a human-readable
+ * summary when one exists). The creator display name is G1 `upstream_pending`
+ * — promising creator-name search would fabricate a capability the trusted
+ * receipts do not have, so the creator line is NOT searchable (and never
+ * matches on the raw ownerUserId uuid).
  */
 export function searchMemberCircleRows(
   rows: ReadonlyArray<MemberCircleRowModel>,
@@ -156,7 +157,12 @@ export function normalizeMemberCircleRow(
         ? 'free' as MemberCircleAvatarTone
         : 'paid' as MemberCircleAvatarTone,
     creatorName: memberCircleCreatorNameField(circle.circle),
-    summary: circle.circle.purpose.trim() ? circle.circle.purpose : null,
+    // POO-70 visual review R1 F2/C2: the provider's only descriptive field is
+    // the INTERNAL `purpose` (fixture copy like "poo79 acceptance …") — a
+    // user-visible row must not surface it (§13.12 用户可见文案规则). The
+    // provider has no human-readable content-summary field yet, so the
+    // summary line stays honestly absent until one lands upstream.
+    summary: null,
     termText,
     entitlementState,
     appsCount: circle.entitlements.filter(e => e.artifact.type === 'web_app').length,

@@ -933,6 +933,93 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(screen.queryByTestId('home-all-apps-open')).toBeNull()
     expect(screen.queryByTestId('home-manage-quick-access')).toBeNull()
   })
+
+  it('POO-70 visual review R1 F2: a work whose LAST circle source was lost renders UNAVAILABLE (disabled open + reason), dual-source rows stay normal', async () => {
+    // Personal space: the leave/revocation projection lives in creator circles.
+    const onlyCircleApp = workApp('only-circle-app', '乙独占看板', 0, {
+      catalogSources: [{ kind: 'creator_circle', circleId: 'circle-b', name: '乙圈' }],
+    })
+    const dualSourceApp = workApp('dual-source-app', '双源样例', 1, {
+      catalogSources: [
+        { kind: 'creator_circle', circleId: 'circle-b', name: '乙圈' },
+        { kind: 'polo', name: 'Polo' },
+      ],
+    })
+    const personalHook = hookWithCatalog(enterpriseCatalogWith([onlyCircleApp, dualSourceApp]))
+    personalHook.productSpace.activeProductSpace = {
+      id: 'organization-a',
+      kind: 'personal',
+      name: 'My Space',
+    }
+    appCatalogHook = personalHook
+
+    // C2 relations: circle-b is LEFT (expired) — its authorization is lost.
+    const { MemberCircleResourceProvider } = await import('@/context/MemberCircleResourceContext')
+    const circlesResource = {
+      circles: [{
+        membershipId: 'ms-b',
+        status: 'expired',
+        billingKind: 'paid',
+        modeTransitionEndsAt: null,
+        currentPeriodEnd: '2026-10-25T00:00:00.000Z',
+        joinSource: 'share_link',
+        joinedAt: '2026-09-01T00:00:00.000Z',
+        circle: {
+          circleId: 'circle-b',
+          name: '乙圈',
+          purpose: '',
+          status: 'active',
+          ownerUserId: '00000000-0000-4000-8000-0000000000aa',
+        },
+        entitlements: [],
+      }],
+      memberships: [],
+    }
+    const view = render(createElement(
+      ProductSpaceProvider,
+      {
+        value: {
+          accountId: 'account-a',
+          activeProductSpaceId: 'organization-a',
+          activeProductSpace: personalHook.productSpace.activeProductSpace,
+          productSpaces: [],
+          allProductSpaces: [],
+          personalProductSpaceId: 'organization-a',
+          productSpaceContextKey: 'account-a|organization-a',
+          contextVersion: 7,
+          pendingSwitch: null,
+        } as never,
+        children: createElement(
+          I18nextProvider,
+          { i18n },
+          createElement(
+            MemberCatalogProvider,
+            null,
+            createElement(MemberCircleResourceProvider, {
+              resource: circlesResource as never,
+              children: createElement(HomePage),
+            }),
+          ),
+        ),
+      },
+    ))
+
+    await waitFor(() => {
+      expect(screen.getByText('乙独占看板')).toBeTruthy()
+    })
+    // The lost-source row renders UNAVAILABLE: disabled open + the reason.
+    const lostCard = directoryCard(dirKeyFor(onlyCircleApp))
+    expect(lostCard.getAttribute('data-open-disabled')).toBe('true')
+    const lostOpen = lostCard.querySelector('button')
+    expect((lostOpen as HTMLButtonElement | null)?.disabled).toBe(true)
+    expect(screen.getByTestId(`home-directory-app-unavailable-${dirKeyFor(onlyCircleApp)}`).textContent)
+      .toBe('Authorization was withdrawn. Rejoin the circle to restore it.')
+    // The dual-source row keeps a NORMAL, openable card (no reason line).
+    const dualCard = directoryCard(dirKeyFor(dualSourceApp))
+    expect(dualCard.getAttribute('data-open-disabled')).toBe('false')
+    expect(screen.queryByTestId(`home-directory-app-unavailable-${dirKeyFor(dualSourceApp)}`)).toBeNull()
+    view.unmount()
+  })
 })
 
 describe('HomePage A→B ProductSpace isolation (R39)', () => {

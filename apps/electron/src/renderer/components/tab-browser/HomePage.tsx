@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useMemberCatalog } from '@/context/MemberCatalogContext'
+import { useOptionalMemberCircles } from '@/context/MemberCircleResourceContext'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { useMemberAppActions } from '@/hooks/useMemberAppActions'
 import { HomeSpaceContext } from '@/components/product-space/HomeSpaceContext'
@@ -28,10 +29,12 @@ import {
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
 import {
+  hasOnlyLostCircleSources,
   selectHomeAppDirectory,
   type HomeAppDirectory,
   type HomeAppDirectoryEntry,
 } from '@/lib/home-app-directory'
+import { selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import {
   formatBytes,
   loadHomeAppUsage,
@@ -194,6 +197,12 @@ export function HomePage() {
   // MemberCatalogProvider — this page CONSUMES the shared surface instead of
   // creating its own useAppCatalog instance.
   const catalog = useMemberCatalog()
+  // POO-70 visual review R1 F2: the C2 relations (optional — isolated mounts
+  // without the provider simply project no lost circles) feed the H1
+  // directory's `lostCircleIds`, so a work whose EVERY circle source was
+  // lost to a leave/revocation renders as UNAVAILABLE here instead of as a
+  // normal launchable card. Same authority the circle list/detail read.
+  const circlesResource = useOptionalMemberCircles()
   // N1 navigation contract: the personal "my circles" entry navigates the
   // client-page route stack. Optional: surfaces mounted without the App's
   // provider tree (isolated tests) fall back to the local circles card.
@@ -218,7 +227,17 @@ export function HomePage() {
   usageContextKeyRef.current = usageContextKey
 
   // H1 projection: the authoritative full directory of the CURRENT space,
-  // with loading/vacuum/error/denied/offline as distinct phases.
+  // with loading/vacuum/error/denied/offline as distinct phases. F2: the C2
+  // restricted-circle ids mark the corresponding creator_circle sources lost
+  // (the leave/revocation projection of §13.5: only the LAST valid source
+  // failing blocks a work).
+  const lostCircleIds = useMemo(
+    () => selectLostCircleAuthorizationIds(
+      circlesResource?.circles ?? [],
+      circlesResource?.memberships ?? [],
+    ),
+    [circlesResource?.circles, circlesResource?.memberships],
+  )
   const directory = useMemo<HomeAppDirectory>(
     () => selectHomeAppDirectory(catalog.state.catalog, {
       accountId: catalog.productSpace?.accountId ?? null,
@@ -227,6 +246,7 @@ export function HomePage() {
       loading: catalog.state.loading,
       errorCode: catalog.state.errorCode,
       accessMode: catalog.state.accessMode,
+      lostCircleIds,
     }),
     [
       catalog.productSpace?.accountId,
@@ -235,6 +255,7 @@ export function HomePage() {
       catalog.state.catalog,
       catalog.state.errorCode,
       catalog.state.loading,
+      lostCircleIds,
       spaceKind,
     ],
   )
@@ -656,14 +677,14 @@ export function HomePage() {
           </article>
           {phase === 'loading' && !catalog.state.catalog ? (
             <div
-              className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[17px] border border-foreground/10 bg-surface"
+              className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface"
               data-testid="home-directory-loading"
             >
               <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : phase === 'error' && !catalog.state.catalog ? (
             <div
-              className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[17px] border border-foreground/10 bg-surface px-[24px] text-center"
+              className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col items-center justify-center rounded-[20px] border border-foreground/10 bg-surface px-[24px] text-center"
               data-testid="home-directory-load-failed"
             >
               <Icons.CloudOff className="mb-2 size-5 text-muted-foreground" />
@@ -682,58 +703,75 @@ export function HomePage() {
             </div>
           ) : (
             <>
-              {showDirectoryRows && visibleEntries.map((entry) => (
-                <div key={entry.identityKey} className="group relative">
-                  <MemberAppCard
-                    variant="home"
-                    app={entry.app}
-                    runtimeStatus={runtimeStatusFor(entry.app)}
-                    identityKey={entry.identityKey}
-                    busy={Boolean(memberActions.operationStates[entry.identityKey])}
-                    testId="home-directory-app"
-                    onOpen={() => handleOpenApp(entry)}
-                  />
-                  {/* P70-HOME-01 保留本机隐藏恢复: a local hide control on
-                  every row — a display preference of THIS device, never an
-                  uninstall or an authorization change. The work moves to the
-                  in-page restore section below the grid. Rendered on ready
-                  rows only (a cached denied/offline/error row must not invite
-                  preference writes over a non-authoritative view). */}
-                  {phase === 'ready' && (
-                    <button
-                      type="button"
-                      data-testid={`home-directory-hide-${entry.identityKey}`}
-                      aria-label={t('poo70.h3.home.hideAction')}
-                      title={t('poo70.h3.home.hideAction')}
-                      onClick={() => handleHideApp(entry)}
-                      className="absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                    >
-                      <Icons.EyeOff className="size-[13px]" aria-hidden="true" />
-                    </button>
-                  )}
-                  {/* Retained local management: a work App installed on THIS
-                  device keeps its uninstall entry even when the directory row
-                  is not launchable (withdrawn tombstone / blocked row). The
-                  entry is page-level UI on the existing uninstall flow; it
-                  sits beside the hide control when both are present. */}
-                  {catalog.getInstallState(entry.app)?.state === 'installed' && (
-                    <button
-                      type="button"
-                      data-testid={`home-directory-uninstall-${entry.identityKey}`}
-                      aria-label={t('homeApps.actions.uninstall')}
-                      title={t('homeApps.actions.uninstall')}
-                      onClick={() => setUninstallTarget(entry.app)}
-                      className={
-                        phase === 'ready'
-                          ? 'absolute right-[40px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
-                          : 'absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
-                      }
-                    >
-                      <Icons.Trash2 className="size-[13px]" aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              ))}
+              {showDirectoryRows && visibleEntries.map((entry) => {
+                // POO-70 visual review R1 F2: a work whose every recorded
+                // source is a lost circle authorization renders UNAVAILABLE —
+                // disabled open (§13.11 不可用需明确原因) + the reason/rejoin
+                // guidance under the card (the C4 不可用作品说明 pattern).
+                // Rows with any remaining valid source keep the normal card.
+                const sourceLost = hasOnlyLostCircleSources(entry)
+                return (
+                  <div key={entry.identityKey} className="group relative">
+                    <MemberAppCard
+                      variant="home"
+                      app={entry.app}
+                      runtimeStatus={runtimeStatusFor(entry.app)}
+                      identityKey={entry.identityKey}
+                      busy={Boolean(memberActions.operationStates[entry.identityKey])}
+                      testId="home-directory-app"
+                      openDisabled={sourceLost}
+                      onOpen={() => handleOpenApp(entry)}
+                    />
+                    {sourceLost && (
+                      <p
+                        className="m-0 mt-[6px] px-[2px] text-[11px] leading-[1.5] text-muted-foreground"
+                        data-testid={`home-directory-app-unavailable-${entry.identityKey}`}
+                      >
+                        {t('poo70.h3.home.sourceLostReason')}
+                      </p>
+                    )}
+                    {/* P70-HOME-01 保留本机隐藏恢复: a local hide control on
+                    every row — a display preference of THIS device, never an
+                    uninstall or an authorization change. The work moves to the
+                    in-page restore section below the grid. Rendered on ready
+                    rows only (a cached denied/offline/error row must not invite
+                    preference writes over a non-authoritative view). */}
+                    {phase === 'ready' && (
+                      <button
+                        type="button"
+                        data-testid={`home-directory-hide-${entry.identityKey}`}
+                        aria-label={t('poo70.h3.home.hideAction')}
+                        title={t('poo70.h3.home.hideAction')}
+                        onClick={() => handleHideApp(entry)}
+                        className="absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <Icons.EyeOff className="size-[13px]" aria-hidden="true" />
+                      </button>
+                    )}
+                    {/* Retained local management: a work App installed on THIS
+                    device keeps its uninstall entry even when the directory row
+                    is not launchable (withdrawn tombstone / blocked row). The
+                    entry is page-level UI on the existing uninstall flow; it
+                    sits beside the hide control when both are present. */}
+                    {catalog.getInstallState(entry.app)?.state === 'installed' && (
+                      <button
+                        type="button"
+                        data-testid={`home-directory-uninstall-${entry.identityKey}`}
+                        aria-label={t('homeApps.actions.uninstall')}
+                        title={t('homeApps.actions.uninstall')}
+                        onClick={() => setUninstallTarget(entry.app)}
+                        className={
+                          phase === 'ready'
+                            ? 'absolute right-[40px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+                            : 'absolute right-[10px] top-[10px] grid size-[26px] place-items-center rounded-[7px] text-foreground-40 opacity-0 transition-opacity hover:bg-foreground-5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+                        }
+                      >
+                        <Icons.Trash2 className="size-[13px]" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </>
           )}
         </div>

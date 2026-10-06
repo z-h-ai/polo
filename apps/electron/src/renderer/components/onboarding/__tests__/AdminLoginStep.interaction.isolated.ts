@@ -266,7 +266,13 @@ describe('AdminLoginStep password form interactions', () => {
       screen.getByRole('button', { name: '显示密码' }),
     ).toBeTruthy()
     expect(screen.getByRole('button', { name: '继续' })).toBeTruthy()
-    expect(screen.getByText('同意协议与隐私政策')).toBeTruthy()
+    // POO-70 visual review R1 F6: the password view renders the SAME linked
+    // agreement clause as the phone-auth views (never the plain 同意协议与隐私政策).
+    expect(screen.getByText('用户协议')).toBeTruthy()
+    expect(screen.getByText('隐私政策')).toBeTruthy()
+    expect(screen.queryByText('同意协议与隐私政策')).toBeNull()
+    const consentLabel = screen.getByTestId('login-trust-consent').closest('label')
+    expect(consentLabel?.textContent).toContain('我已阅读并同意')
 
     // Password-only fallback: no method switch renders.
     expect(screen.queryByTestId('admin-login-method-phone')).toBeNull()
