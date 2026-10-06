@@ -322,6 +322,64 @@ async function assertHome() {
 }
 
 describe('authenticated onboarding × real App initialization', () => {
+  it('cold status read failure has retry/logout, and retry initializes without another authentication', async () => {
+    authenticated = true
+    let fail = true
+    electronApiExplicit.adminGetStatus = async () => {
+      if (fail) throw new Error('unit secure-storage status read unavailable')
+      return (defaultStatus as () => Promise<unknown>)()
+    }
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: failFastElectronApi() })
+    renderApp()
+    await waitFor(() => expect(screen.getByTestId('product-space-error-screen')).toBeTruthy())
+    expect(screen.queryByLabelText('Phone number or username')).toBeNull()
+    expect(productSpaceState.bootstrap).not.toHaveBeenCalled()
+    fail = false
+    const retry = screen.getByTestId('product-space-error-retry')
+    await act(async () => { fireEvent.click(retry); fireEvent.click(retry) })
+    await assertHome()
+    expect(productSpaceState.bootstrap).toHaveBeenCalledTimes(1)
+    expect(electronApiExplicit.adminLogin).not.toHaveBeenCalled()
+    expect(electronApiExplicit.adminVerifyPhoneAuthCode).not.toHaveBeenCalled()
+    expect(electronApiExplicit.adminSendPhoneAuthCode).not.toHaveBeenCalled()
+  })
+
+  it('logout from a cold read error returns to definitive unauthenticated onboarding without auth writes', async () => {
+    authenticated = true
+    electronApiExplicit.adminGetStatus = async () => { throw new Error('unit cold read unavailable') }
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: failFastElectronApi() })
+    renderApp()
+    await waitFor(() => expect(screen.getByTestId('product-space-error-screen')).toBeTruthy())
+    await act(async () => { fireEvent.click(screen.getByTestId('product-space-error-logout')) })
+    await waitFor(() => expect(screen.getByLabelText('Phone number or username')).toBeTruthy())
+    expect(authenticated).toBe(false)
+    expect(productSpaceState.bootstrap).not.toHaveBeenCalled()
+    expect(electronApiExplicit.adminLogin).not.toHaveBeenCalled()
+  })
+
+  it('a legal authenticated cold boot goes directly through ProductSpace to Home', async () => {
+    authenticated = true
+    renderApp()
+    await assertHome()
+    expect(productSpaceState.bootstrap).toHaveBeenCalledTimes(1)
+    expect(electronApiExplicit.adminLogin).not.toHaveBeenCalled()
+  })
+
+  it('expiry during cold status read rejects its late authenticated receipt', async () => {
+    authenticated = true
+    const status = deferred<unknown>()
+    const read = mock(() => status.promise)
+    electronApiExplicit.adminGetStatus = read
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: failFastElectronApi() })
+    renderApp()
+    await waitFor(() => expect(read).toHaveBeenCalled())
+    await act(async () => { reauthListener?.({ loggedIn: false, errorCode: 'TOKEN_EXPIRED' }) })
+    await waitFor(() => expect(screen.getByLabelText('Phone number or username')).toBeTruthy())
+    await act(async () => { status.resolve({ adminUrl: 'https://unit.example', loggedIn: true, userId: FIXTURE_ACCOUNT_ID }); await status.promise })
+    expect(productSpaceState.bootstrap).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Phone number or username')).toBeTruthy()
+  })
+
   it('password success immediately shows pending through status and space reads, then Home without a finish click', async () => {
     const status = deferred<{ loggedIn: boolean; userId: string }>()
     electronApiExplicit.adminGetStatus = () => authenticated ? status.promise : (defaultStatus as () => Promise<unknown>)()

@@ -1,5 +1,5 @@
 import { useClientWorkbenchStyle, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import type {
@@ -295,6 +295,7 @@ export function CircleDetailPage({
   const catalog = useMemberCatalog()
   const launchHandoff = useProductSpaceAppLaunchHandoff()
   const leave = useLeaveCircle()
+  const detailMainRef = useRef<HTMLElement>(null)
   // C8 return verification on the SAME C2 resource: the B1 candidate is
   // consumed on mount (event-first, deduped; `unavailable` mirror retries
   // the read), one authoritative round per click, ack only after locate.
@@ -485,6 +486,9 @@ export function CircleDetailPage({
       data-return-active={returnActive ? 'true' : 'false'}
     >
       <main
+        ref={detailMainRef}
+        tabIndex={-1}
+        data-circle-id={circleId}
         style={workbenchStyle}
         className={clientWorkbenchFocusClassName + " mx-auto w-full max-w-[1260px] bg-background px-[18px] pb-[50px] pt-[30px] text-[15px] text-foreground min-[761px]:px-[26px] min-[761px]:pb-[58px] min-[761px]:pt-[36px] min-[1081px]:px-[44px] min-[1081px]:pb-[72px] min-[1081px]:pt-[46px]"}
       >
@@ -724,6 +728,7 @@ export function CircleDetailPage({
       survives section switches while the dialog is open; the hook refuses
       cancel-while-writing. */}
       <LeaveCircleDialog
+        fallbackFocusRef={detailMainRef}
         state={leave.state.dialog}
         onConfirm={leave.confirm}
         onCancel={leave.cancel}

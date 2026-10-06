@@ -417,6 +417,7 @@ function CatalogHost({ children }: { children: (catalog: CatalogDouble) => any }
 // -------------------------------------------------------------------------
 
 const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
+const userEvent = (await import('@testing-library/user-event')).default
 const { ClientPageProvider, clientPageScopeKey, useOptionalClientPage } = await import('@/context/ClientPageContext')
 const { MemberCatalogProvider } = await import('@/context/MemberCatalogContext')
 const { TabContent } = await import('@/components/tab-browser/TabContent')
@@ -681,7 +682,10 @@ describe('leave flow in the subscription section (P70-CIRCLE-DETAIL-02)', () => 
 
     // The ONLY exit entry lives in the subscription section.
     expect(screen.getByTestId('circle-subscription-exit-region')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('circle-detail-exit'))
+    const user = userEvent.setup()
+    const exitTrigger = screen.getByTestId('circle-detail-exit')
+    const detailMain = exitTrigger.closest('main')!
+    await user.click(exitTrigger)
 
     const dialog = await waitFor(() => screen.getByTestId('leave-circle-dialog'))
     expect(dialog.getAttribute('data-phase')).toBe('confirm')
@@ -706,6 +710,9 @@ describe('leave flow in the subscription section (P70-CIRCLE-DETAIL-02)', () => 
       expect(screen.getByTestId('circle-detail-leave-outcome')).toBeTruthy()
     })
     expect(screen.queryByTestId('leave-circle-dialog')).toBeNull()
+    expect(exitTrigger.isConnected).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(detailMain))
+    expect(detailMain.dataset.circleId).toBe('circle-1')
     // The page keeps the CORRECT object: the expired relation renders the
     // restricted heading state from the refreshed C2 receipt.
     await waitFor(() => {

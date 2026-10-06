@@ -338,6 +338,7 @@ export default function App() {
 
   // App state: loading -> check auth -> onboarding or ready
   const [appState, setAppState] = useState<AppState>('loading')
+  const [startupRetryGeneration, setStartupRetryGeneration] = useState(0)
   const appStateRef = useRef<AppState>(appState)
   appStateRef.current = appState
   // Space scope mirror for callbacks that must read the active ProductSpace
@@ -430,8 +431,10 @@ export default function App() {
    * state (same gate pattern as the A1 login session owner fence).
    */
   const accountSessionEpochRef = useRef(0)
+  const startupReadRecoveryRef = useRef<'idle' | 'pending' | 'failed'>('idle')
   const invalidateAccountSession = useCallback(() => {
     accountSessionEpochRef.current += 1
+    startupReadRecoveryRef.current = 'idle'
   }, [])
 
   // Narrow-viewport surface boundary (Review R31/R32): the route-scoped
@@ -1273,13 +1276,16 @@ export default function App() {
   // generation prevents a StrictMode/unmount cleanup from committing stale async work.
   useEffect(() => {
     const generation = ++startupInitializationGenerationRef.current
+    const sessionEpoch = accountSessionEpochRef.current
     let cancelled = false
     const isCurrentInitialization = () => (
       !cancelled
       && generation === startupInitializationGenerationRef.current
+      && sessionEpoch === accountSessionEpochRef.current
     )
 
     const initialize = async () => {
+      startupReadRecoveryRef.current = 'pending'
       try {
         // Get this window's workspace ID (passed via URL query param from main process)
         const wsId = await window.electronAPI.getWindowWorkspace()
@@ -1294,6 +1300,7 @@ export default function App() {
 
         if (adminStatus.adminUrl) {
           let validation = await window.electronAPI.adminValidate()
+          if (!isCurrentInitialization()) return
           if (isAdminSessionChangedResult(validation)) {
             validation = await window.electronAPI.adminValidate()
           }
@@ -1337,12 +1344,19 @@ export default function App() {
         await startupInitializationHandlersRef.current.routeThroughProductSpace(
           signedInAccountId,
           wsId,
+          isCurrentInitialization,
         )
       } catch (error) {
         if (!isCurrentInitialization()) return
         console.error('Failed to check auth state:', error)
-        // If check fails, show onboarding to be safe
-        setAppState('onboarding')
+        // A failed read cannot establish that credentials are absent. Keep
+        // the true startup transaction retryable without another auth write.
+        startupReadRecoveryRef.current = 'failed'
+        setAppState('space-error')
+      } finally {
+        if (isCurrentInitialization() && startupReadRecoveryRef.current === 'pending') {
+          startupReadRecoveryRef.current = 'idle'
+        }
       }
     }
 
@@ -1353,7 +1367,7 @@ export default function App() {
         startupInitializationGenerationRef.current += 1
       }
     }
-  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
+  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh, startupRetryGeneration])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
@@ -3135,6 +3149,13 @@ export default function App() {
           <ProductSpaceErrorScreen
             onLogout={() => { void handleAdminLogout() }}
             onRetry={() => {
+              if (startupReadRecoveryRef.current === 'pending') return
+              if (startupReadRecoveryRef.current === 'failed') {
+                startupReadRecoveryRef.current = 'pending'
+                setAppState('loading')
+                setStartupRetryGeneration(value => value + 1)
+                return
+              }
               if (adminAuthCompletion.retry()) return
               void retryProductSpaceBootstrap().then(next => {
                 if (next === 'ready') {

@@ -219,6 +219,13 @@ export function useProductSpaceContextState() {
     && accountScopeGenerationRef.current === scope.generation
   ), [])
 
+  const isCurrentSwitchOperation = useCallback((operation: SwitchOperation, generation: number) => (
+    activeSwitchOpRef.current === operation
+    && operation.generation === generation
+    && switchGenerationRef.current === generation
+    && accountIdRef.current === operation.accountId
+  ), [])
+
   const persistVerifiedContext = useCallback((
     accountId: string,
     list: ProductSpaceSummary[],
@@ -306,10 +313,11 @@ export function useProductSpaceContextState() {
     errorCode?: string
     statuses: Record<string, ExecutionSummary['status']>
   }> => {
+    const generation = operation.generation
     const result = await window.electronAPI.productSpacePrepareSwitch(targetId)
     const statuses: Record<string, ExecutionSummary['status']> = {}
     if (result.success) {
-      if (activeSwitchOpRef.current === operation) {
+      if (isCurrentSwitchOperation(operation, generation)) {
         // The one-time token is owned by THIS operation only.
         operation.token = result.token
       } else {
@@ -328,11 +336,11 @@ export function useProductSpaceContextState() {
     // A PREPARE that revalidated the target against an incompatible server
     // contract must fail closed into contract-blocked — never into the
     // retryable target-failed dialog that keeps the business UI usable.
-    if (result.errorCode === 'product_space_contract_unsupported') {
+    if (isCurrentSwitchOperation(operation, generation) && result.errorCode === 'product_space_contract_unsupported') {
       enterContractBlocked(accountIdRef.current)
     }
     return { ok: false, errorCode: result.errorCode, statuses }
-  }, [enterContractBlocked])
+  }, [enterContractBlocked, isCurrentSwitchOperation])
 
   /**
    * Phase 1b: dispatch the terminations covered by the prepared token. Main
@@ -876,11 +884,12 @@ export function useProductSpaceContextState() {
 
   const verifyTargetStillAccessible = useCallback(async (
     scope: AccountScope,
-    targetId: string,
+    operation: SwitchOperation,
+    generation: number,
   ): Promise<'ok' | 'access-lost' | 'unavailable' | 'contract-blocked' | null> => {
     try {
       const result = await window.electronAPI.productSpaceList()
-      if (!isCurrentAccountScope(scope)) return null
+      if (!isCurrentAccountScope(scope) || !isCurrentSwitchOperation(operation, generation)) return null
       if (!result.success) {
         if (result.contractUnsupported) {
           throw { code: 'product_space_contract_unsupported' }
@@ -892,7 +901,7 @@ export function useProductSpaceContextState() {
         personalProductSpaceId: string
       }
       applyListResponse(parsed)
-      const target = parsed.productSpaces.find(space => space.id === targetId)
+      const target = parsed.productSpaces.find(space => space.id === operation.targetId)
       // A read-only (restricted) target stays enterable so its restriction
       // reason and history entry remain visible; only a missing entry means
       // the access was lost.
@@ -905,6 +914,7 @@ export function useProductSpaceContextState() {
       )
       return 'ok'
     } catch (caught) {
+      if (!isCurrentAccountScope(scope) || !isCurrentSwitchOperation(operation, generation)) return null
       const record = (caught ?? {}) as Record<string, unknown>
       // An incompatible contract discovered while re-validating the target
       // must enter the existing contract-blocked path (revoke the Main
@@ -917,15 +927,21 @@ export function useProductSpaceContextState() {
       }
       return 'unavailable'
     }
-  }, [applyListResponse, enterContractBlocked, isCurrentAccountScope, persistVerifiedContext])
+  }, [applyListResponse, enterContractBlocked, isCurrentAccountScope, isCurrentSwitchOperation, persistVerifiedContext])
 
   const finishSwitchAfterStop = useCallback(async (
     operation: SwitchOperation,
     scope: AccountScope,
   ): Promise<void> => {
     const targetId = operation.targetId
-    const verification = await verifyTargetStillAccessible(scope, targetId)
+    const generation = operation.generation
+    const isCurrent = () => isCurrentAccountScope(scope) && isCurrentSwitchOperation(operation, generation)
+    const verification = await verifyTargetStillAccessible(scope, operation, generation)
+    // A retry can renew this SAME operation object. Its old stage may neither
+    // publish nor cancel the newer stage's token.
+    if (operation.generation !== generation) return
     if (await abandonSwitchIfStale(operation)) return
+    if (!isCurrent()) return
     if (verification === 'contract-blocked') {
       // enterContractBlocked already revoked the fence, cleared every
       // business projection and bumped the generation (so the abandon check
@@ -957,10 +973,18 @@ export function useProductSpaceContextState() {
     // is still on the origin space if it fails.
     try {
       const catalog = await window.electronAPI.productSpaceGetCatalog(targetId)
+      if (!isCurrent()) {
+        if (operation.generation === generation) await abandonSwitchIfStale(operation)
+        return
+      }
       if (!catalog.success) {
         throw { code: catalog.errorCode }
       }
     } catch (caught) {
+      if (!isCurrent()) {
+        if (operation.generation === generation) await abandonSwitchIfStale(operation)
+        return
+      }
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'catalog_load_failed'
       if (errorCode === 'product_space_contract_unsupported') {
@@ -979,6 +1003,10 @@ export function useProductSpaceContextState() {
     try {
       await commitPreparedSwitch(operation, targetId)
     } catch (caught) {
+      if (!isCurrent()) {
+        if (operation.generation === generation) await abandonSwitchIfStale(operation)
+        return
+      }
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'runtime_commit_failed'
       if (errorCode === 'product_space_contract_unsupported') {
@@ -1011,7 +1039,8 @@ export function useProductSpaceContextState() {
         if (isCurrentAccountScope(scope)) {
           const resolved = await lateCancel.outcome.catch(() => null)
           if (
-            resolved?.outcome === 'already_committed'
+            isCurrentAccountScope(scope)
+            && resolved?.outcome === 'already_committed'
             && resolved.committedTargetProductSpaceId === targetId
             // The committed target must still be the CURRENT authoritative
             // fence: a newer commit elsewhere keeps the renderer put.
@@ -1032,6 +1061,7 @@ export function useProductSpaceContextState() {
       }
       return
     }
+    if (!isCurrent()) return
     switchGenerationRef.current += 1
     if (activeSwitchOpRef.current === operation) {
       pendingTargetRef.current = null
@@ -1043,7 +1073,7 @@ export function useProductSpaceContextState() {
       personalProductSpaceIdRef.current ?? targetId,
       targetId,
     )
-  }, [abandonSwitchIfStale, commitPreparedSwitch, enterContractBlocked, isCurrentAccountScope, publishCommittedSelection, verifyTargetStillAccessible])
+  }, [abandonSwitchIfStale, commitPreparedSwitch, enterContractBlocked, isCurrentAccountScope, isCurrentSwitchOperation, publishCommittedSelection, verifyTargetStillAccessible])
 
   const requestSwitch = useCallback(async (targetId: string): Promise<void> => {
     const accountId = accountIdRef.current

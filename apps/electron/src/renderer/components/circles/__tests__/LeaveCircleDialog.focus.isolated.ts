@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { createElement, useState } from 'react'
+import { createElement, useState, useRef } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { LeaveCircleDialogState } from '@/hooks/useLeaveCircle'
@@ -19,16 +19,22 @@ const initial: LeaveCircleDialogState = {
 }
 let registry: ReturnType<typeof useModalRegistry>
 let update: (state: LeaveCircleDialogState) => void
+let finish: () => void
 const confirms = mock(() => {})
 const cancels = mock(() => {})
 function Host() {
   const [state, setState] = useState<LeaveCircleDialogState | null>(null)
+  const [left, setLeft] = useState(false)
+  const mainRef = useRef<HTMLElement>(null)
   registry = useModalRegistry()
   update = setState
+  finish = () => { setLeft(true); setState(null) }
   return createElement('div', null,
-    createElement('button', { 'data-testid': 'subscription-leave', onClick: () => setState(initial) }, '退出圈子'),
+    createElement('main', { ref: mainRef, tabIndex: -1, 'data-circle-id': initial.circleId, 'data-testid': 'current-circle-main' },
+      left ? createElement('button', { key: 'reverify', 'data-testid': 'post-leave-reverify' }, '重新核对')
+        : createElement('button', { key: 'leave', 'data-testid': 'subscription-leave', onClick: () => setState(initial) }, '退出圈子')),
     createElement('button', { 'data-testid': 'background-neighbor' }, '其他操作'),
-    createElement(LeaveCircleDialog, { state, onConfirm: confirms, onCancel: () => { cancels(); setState(null) } }),
+    createElement(LeaveCircleDialog, { state, fallbackFocusRef: mainRef, onConfirm: confirms, onCancel: () => { cancels(); setState(null) } }),
   )
 }
 function mount() {
@@ -37,6 +43,34 @@ function mount() {
 afterEach(() => { cleanup(); confirms.mockClear(); cancels.mockClear() })
 
 describe('real Radix leave dialog focus and modal guard', () => {
+  for (const invalid of ['hidden', 'other-circle'] as const) {
+    it(`does not transfer success focus to an ${invalid} fallback`, async () => {
+      mount()
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('subscription-leave'))
+      const main = screen.getByTestId('current-circle-main')
+      if (invalid === 'hidden') main.hidden = true
+      else main.dataset.circleId = 'other-circle'
+      await act(async () => finish())
+      await waitFor(() => expect(screen.queryByTestId('leave-circle-dialog')).toBeNull())
+      expect(document.activeElement).not.toBe(main)
+    })
+  }
+
+  it('restores success focus to the explicit current circle main after its trigger unmounts', async () => {
+    mount()
+    const user = userEvent.setup()
+    const trigger = screen.getByTestId('subscription-leave')
+    await user.click(trigger)
+    await user.click(screen.getByTestId('leave-circle-dialog-confirm'))
+    await act(async () => finish())
+    await waitFor(() => expect(screen.queryByTestId('leave-circle-dialog')).toBeNull())
+    expect(trigger.isConnected).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('current-circle-main')))
+    expect(confirms).toHaveBeenCalledTimes(1)
+    expect(cancels).not.toHaveBeenCalled()
+  })
+
   it('starts on Cancel, contains Tab/Shift-Tab, then restores the subscription entry', async () => {
     await i18n.changeLanguage('zh-Hans')
     mount()

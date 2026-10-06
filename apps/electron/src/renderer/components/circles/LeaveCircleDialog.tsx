@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import type { RefObject } from 'react'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useRegisterModal } from '@/context/ModalContext'
 import { useClientWorkbenchStyle, clientWorkbenchDialogClassName, clientWorkbenchOverlayClassName } from '@/components/ui/client-workbench'
@@ -42,10 +43,13 @@ export function LeaveCircleDialog({
   state,
   onConfirm,
   onCancel,
+  fallbackFocusRef,
 }: {
   state: LeaveCircleDialogState | null
   onConfirm: () => void
   onCancel: () => void
+  /** Owned by the current circle page; never search other tabs for a target. */
+  fallbackFocusRef?: RefObject<HTMLElement | null>
 }) {
   const { t } = useTranslation()
 
@@ -91,7 +95,22 @@ export function LeaveCircleDialog({
         }}
         onCloseAutoFocus={event => {
           event.preventDefault()
-          if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus()
+          const isVisible = (target: HTMLElement) => {
+            for (let node: HTMLElement | null = target; node; node = node.parentElement) {
+              if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true'
+                || getComputedStyle(node).display === 'none' || getComputedStyle(node).visibility === 'hidden') return false
+            }
+            return target.isConnected
+          }
+          const trigger = returnFocusRef.current
+          if (trigger && isVisible(trigger)) {
+            trigger.focus()
+            return
+          }
+          const fallback = fallbackFocusRef?.current
+          if (fallback?.dataset.circleId === state.circleId && isVisible(fallback)) {
+            fallback.focus({ preventScroll: true })
+          }
         }}
         onEscapeKeyDown={event => { event.preventDefault(); cancel() }}
         onInteractOutside={event => { event.preventDefault(); cancel() }}

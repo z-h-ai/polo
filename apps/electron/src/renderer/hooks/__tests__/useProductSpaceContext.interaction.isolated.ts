@@ -911,6 +911,56 @@ describe('useProductSpaceContextState cancel race', () => {
 })
 
 describe('useProductSpaceContextState contract fail-closed during switch (R26)', () => {
+  for (const newer of ['bootstrap', 'switch', 'account-ABA'] as const) {
+    for (const late of ['valid-list', 'unsupported-contract', 'rejected-contract'] as const) {
+      it(`ignores cancelled A ${late} receipt after same-account B ${newer}`, async () => {
+        const { result } = renderHook(useHarness)
+        listResult = { ...bothSpaces(), productSpaces: [personalSpace, enterpriseSpace('space-ent', 'Enterprise A'), enterpriseSpace('space-b', 'Previously available B')] } as ListResult
+        await boot(result)
+        let resolveA!: (receipt: ListResult) => void
+        let rejectA!: (reason: unknown) => void
+        const pendingA = new Promise<ListResult>((resolve, reject) => { resolveA = resolve; rejectA = reject })
+        let first = true
+        const fresh: ListResult = {
+          success: true, personalProductSpaceId: personalId,
+          productSpaces: [personalSpace, enterpriseSpace('space-b', 'Current B')],
+        }
+        const list = mock(() => {
+          if (first) { first = false; return pendingA }
+          return Promise.resolve(fresh)
+        })
+        const revoke = mock(async () => ({ success: true }))
+        Object.assign(window.electronAPI, { productSpaceList: list, productSpaceRevokeActiveContext: revoke })
+        let switchingA!: Promise<void>
+        await act(async () => { switchingA = result.current.requestSwitch('space-ent') })
+        await waitFor(() => expect(list).toHaveBeenCalledTimes(1))
+        await act(async () => { result.current.cancelSwitch() })
+        await act(async () => {
+          if (newer === 'account-ABA') {
+            // This fixture's trusted restriction read rejects the other account.
+            expect(await result.current.bootstrap('other-account')).toBe('error')
+            expect(await result.current.bootstrap(accountId)).toBe('ready')
+          } else if (newer === 'bootstrap') expect(await result.current.bootstrap(accountId)).toBe('ready')
+          else await result.current.requestSwitch('space-b')
+        })
+        const activeB = newer === 'switch' ? 'space-b' : personalId
+        const persistedB = JSON.stringify(productSpaceContextStorage)
+        await act(async () => {
+          if (late === 'rejected-contract') rejectA({ code: 'product_space_contract_unsupported' })
+          else resolveA(late === 'valid-list' ? bothSpaces() : {
+            success: false, errorCode: 'product_space_contract_unsupported', message: 'old A', contractUnsupported: true,
+          })
+          await switchingA
+        })
+        expect(result.current.flowState).toBe('ready')
+        expect(result.current.activeProductSpaceId).toBe(activeB)
+        expect(result.current.productSpaces.map(space => String(space.id))).toEqual([personalId, 'space-b'])
+        expect(JSON.stringify(productSpaceContextStorage)).toBe(persistedB)
+        expect(revoke).not.toHaveBeenCalled()
+      })
+    }
+  }
+
   it('enters contract-blocked when the switch-time target revalidation finds an incompatible contract', async () => {
     const { result } = renderHook(useHarness)
     await boot(result)
