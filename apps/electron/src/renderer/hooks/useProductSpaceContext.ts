@@ -1085,17 +1085,32 @@ export function useProductSpaceContextState() {
     if (pendingTargetRef.current) return
     if (!productSpacesRef.current.some(space => space.id === targetId)) return
 
+    const scope = { accountId, generation: accountScopeGenerationRef.current }
+    // Reading executions does not yet own a switch. Capture, but do not
+    // advance, the generation: an in-flight committed rollback must finish.
+    const switchGeneration = switchGenerationRef.current
+    const isCurrentRequest = () => (
+      isCurrentAccountScope(scope)
+      && activeProductSpaceIdRef.current === activeId
+      && switchGenerationRef.current === switchGeneration
+      && pendingTargetRef.current === null
+      && productSpacesRef.current.some(space => space.id === targetId)
+    )
+
     setError(null)
     let executions: ExecutionSummary[] = []
     try {
       executions = (await listActiveExecutions()) ?? []
     } catch (caught) {
+      if (!isCurrentRequest()) return
       const record = (caught ?? {}) as Record<string, unknown>
       setError({
         code: typeof record.code === 'string' ? record.code : 'runtime_list_failed',
       })
       return
     }
+
+    if (!isCurrentRequest()) return
 
     const statuses: Record<string, ExecutionSummary['status']> = {}
     for (const execution of executions) {
@@ -1137,13 +1152,9 @@ export function useProductSpaceContextState() {
         ))
         return
       }
-      const scope = {
-        accountId,
-        generation: accountScopeGenerationRef.current,
-      }
       await finishSwitchAfterStop(operation, scope)
     }
-  }, [abandonSwitchIfStale, beginSwitchOperation, finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch, stopPreparedSwitchExecutions])
+  }, [abandonSwitchIfStale, beginSwitchOperation, finishSwitchAfterStop, isCurrentAccountScope, listActiveExecutions, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const confirmStopAndSwitch = useCallback(async (): Promise<void> => {
     const accountId = accountIdRef.current
