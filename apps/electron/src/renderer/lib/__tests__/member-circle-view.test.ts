@@ -353,10 +353,13 @@ describe('isMembershipEndedBeforePeriodEnd (POO-70 visual review R1 F3)', () => 
       status: 'suspended',
       currentPeriodEnd: '2026-10-25T00:00:00.000Z',
     }, NOW)).toBe(false)
+    // R2-D3: a leave on a relation WITHOUT any period record (free-circle
+    // membership) is the early-termination shape — restore vocabulary, not
+    // 已到期; no period ever existed to run out.
     expect(isMembershipEndedBeforePeriodEnd({
       status: 'expired',
       currentPeriodEnd: null,
-    }, NOW)).toBe(false)
+    }, NOW)).toBe(true)
     expect(isMembershipEndedBeforePeriodEnd({
       status: 'expired',
       currentPeriodEnd: 'not-a-date',

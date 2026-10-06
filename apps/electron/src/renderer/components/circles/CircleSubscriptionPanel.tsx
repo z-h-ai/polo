@@ -601,7 +601,7 @@ export function CircleSubscriptionPanel({
           <button
             type="button"
             data-testid={status === 'expired' ? 'circle-subscription-renew-restore' : 'circle-subscription-renew'}
-            className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] bg-foreground px-[16px] text-[13px] font-medium text-background hover:opacity-90 disabled:opacity-60"
+            className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] border border-accent/35 bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] px-[16px] text-[13px] font-medium text-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] disabled:opacity-60"
             disabled={launch.phase === 'opening'}
             onClick={handleRenew}
           >

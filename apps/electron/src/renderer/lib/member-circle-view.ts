@@ -150,10 +150,13 @@ export function selectLostCircleAuthorizationIds(
  * (`currentPeriodEnd` still ahead of `now`) — the leave/early-termination
  * shape of the F1 contract (a confirmed leave writes active→expired while
  * the paid period keeps running), as opposed to a natural expiry where the
- * period end has passed. Display-state projection only — never an
- * entitlement judgment and never day-math: both facts are verbatim provider
- * instants, and the lifecycle status stays the authority (POO-70 visual
- * review R1 F3).
+ * period end has passed. A leave on a relation WITHOUT any period record
+ * (free-circle membership, `currentPeriodEnd` null) is the same
+ * early-termination shape for display: it can never be a natural expiry
+ * because no period existed to run out. Display-state projection only —
+ * never an entitlement judgment and never day-math: both facts are verbatim
+ * provider instants, and the lifecycle status stays the authority (POO-70
+ * visual review R1 F3, R2-D3 follow-up).
  */
 export function isMembershipEndedBeforePeriodEnd(
   membership: Pick<MemberMembership, 'status' | 'currentPeriodEnd'>,
@@ -161,7 +164,9 @@ export function isMembershipEndedBeforePeriodEnd(
 ): boolean {
   if (membership.status !== 'expired') return false
   const periodEnd = membership.currentPeriodEnd
-  if (!periodEnd) return false
+  // No period record → no period could have "run out"; the expired status
+  // itself is the leave fact, so the restore vocabulary applies (R2-D3).
+  if (!periodEnd) return true
   const parsed = Date.parse(periodEnd)
   if (!Number.isFinite(parsed)) return false
   return parsed > now
