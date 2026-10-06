@@ -7,6 +7,7 @@ import type {
   OriginalCircleOrder,
 } from '@polo-ai/shared/admin'
 import { useMemberCircles } from '@/context/MemberCircleResourceContext'
+import { clientWorkbenchButtonClassName } from '@/components/ui/client-workbench'
 import {
   toMemberCircleReadError,
   type MemberCircleRenewalPreviewResultPayload,
@@ -601,7 +602,7 @@ export function CircleSubscriptionPanel({
           <button
             type="button"
             data-testid={status === 'expired' ? 'circle-subscription-renew-restore' : 'circle-subscription-renew'}
-            className="inline-flex min-h-[32px] items-center justify-center rounded-[8px] bg-foreground px-[16px] text-[13px] font-medium text-background hover:opacity-90 disabled:opacity-60"
+            className={`${clientWorkbenchButtonClassName} inline-flex items-center justify-center whitespace-nowrap disabled:hover:bg-transparent`}
             disabled={launch.phase === 'opening'}
             onClick={handleRenew}
           >

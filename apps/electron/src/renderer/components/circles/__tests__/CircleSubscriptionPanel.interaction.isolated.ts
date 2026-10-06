@@ -63,6 +63,10 @@ mock.module('@/context/ProductSpaceContext', () => ({
   useProductSpaceContext: () => productSpaceContextState,
 }))
 
+// The shared workbench styles use the Vite-only theme loader outside this
+// interaction contract; keep the same light-mode host as the detail tests.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
 const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
 const { MemberCircleResourceProvider } = await import('@/context/MemberCircleResourceContext')
 const {
