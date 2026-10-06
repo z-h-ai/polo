@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "Cargando información de soporte…",
   "poo70.s1.pendingUpstreamBody": "La plataforma aún no ofrece configuración de soporte para miembros. Cuando esté disponible, se mostrará aquí.",
   "poo70.s1.pendingUpstreamTitle": "La configuración de soporte aún no está disponible",
+  "poo70.s1.qrAlt": "Código QR de soporte de la plataforma",
   "poo70.s1.recheck": "Verificar de nuevo el objeto original",
   "poo70.s1.reload": "Recargar información de soporte",
   "poo70.s1.statusLabel": "Estado del manejo",

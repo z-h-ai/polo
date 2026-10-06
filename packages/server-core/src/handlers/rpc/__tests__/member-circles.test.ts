@@ -73,6 +73,12 @@ class FakeMemberCircleAdminClient {
   listMemberCirclesGate: (() => Promise<unknown>) | null = null
   leaveMemberCircleResult: unknown = {}
 
+  supportResult: unknown = { configured: false, guidance: '当前未配置外部客服二维码' }
+  async getSupportConfiguration(accessToken: string): Promise<unknown> {
+    this.calls.push({ method: 'getSupportConfiguration', accessToken })
+    return this.supportResult
+  }
+
   async listMemberCircles(accessToken: string): Promise<unknown> {
     this.calls.push({ method: 'listMemberCircles', accessToken })
     if (this.listMemberCirclesGate) return await this.listMemberCirclesGate()
@@ -500,8 +506,8 @@ describe('registerMemberCircleHandlers', () => {
     })
   })
 
-  describe('upstream-pending capabilities (G2/G3/G4)', () => {
-    it('answers getUpdates/getProfile/getSupport with explicit unsupported states', async () => {
+  describe('upstream-pending capabilities (G2/G3)', () => {
+    it('keeps G2/G3 pending and reads real unconfigured G4', async () => {
       const updates = await harness.invoke(RPC_CHANNELS.memberCircles.GET_UPDATES, CIRCLE_ID) as Record<string, unknown>
       expect(updates).toEqual({
         success: true,
@@ -515,10 +521,9 @@ describe('registerMemberCircleHandlers', () => {
       const support = await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT) as Record<string, unknown>
       expect(support).toEqual({
         success: true,
-        support: { availability: 'upstream_pending', contractGap: 'G4' },
+        support: { availability: 'available', configured: false, guidance: '当前未配置外部客服二维码' },
       })
-      // Capability facts never call the Admin bridge.
-      expect(harness.client.calls).toHaveLength(0)
+      expect(harness.client.calls).toEqual([{ method: 'getSupportConfiguration', accessToken: 'access-token-1' }])
     })
 
     it('still validates the addressing id for future re-pin implementations', async () => {
@@ -526,4 +531,87 @@ describe('registerMemberCircleHandlers', () => {
       expect(bad).toMatchObject({ success: false, errorCode: 'validation_error' })
     })
   })
+  describe('support reader admission', () => {
+    it('uses the actual configured reader and returns its validated image', async () => {
+      const sharp = (await import('sharp')).default
+      const bytes = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#000000' } }).png().toBuffer()
+      const { createHash } = await import('node:crypto')
+      const qrSha256 = createHash('sha256').update(bytes).digest('hex')
+      Object.assign(harness.client, { getSupportConfiguration: async () => ({
+        configured: true, qrSha256, qrContentType: 'image/png',
+        updatedAt: '2026-10-05T00:00:00.000Z', qrImageUrl: '/api/support/configuration?image=1', bytes,
+      }) })
+      expect(await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)).toMatchObject({
+        success: true, support: { availability: 'available', configured: true,
+          qrDataUri: `data:image/png;base64,${bytes.toString('base64')}`, qrSha256 },
+      })
+    })
+    it('does not read or disclose support for a definitively signed-out actor', async () => {
+      setSyncTrustedProductSpaceAccountState({ status: 'signed_out' })
+      expect(await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)).toMatchObject({
+        success: false, errorCode: 'unauthorized',
+      })
+      expect(harness.client.calls).toHaveLength(0)
+    })
+  })
+
+  describe('support image and trusted receipt boundaries', () => {
+    async function receipt(format: 'png' | 'jpeg' = 'png', width = 2, height = 2) {
+      const sharp = (await import('sharp')).default
+      const bytes = await sharp({ create: { width, height, channels: 3, background: '#000000' } })[format]().toBuffer()
+      const { createHash } = await import('node:crypto')
+      return { configured: true, qrSha256: createHash('sha256').update(bytes).digest('hex'),
+        qrContentType: format === 'png' ? 'image/png' : 'image/jpeg', updatedAt: '2026-10-05T00:00:00.000Z',
+        qrImageUrl: '/api/support/configuration?image=1', bytes }
+    }
+    it('decodes a legitimate JPEG while preserving exact original bytes', async () => {
+      const data = await receipt('jpeg')
+      harness.client.supportResult = data
+      expect(await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)).toMatchObject({ success: true,
+        support: { configured: true, qrDataUri: `data:image/jpeg;base64,${data.bytes.toString('base64')}` } })
+    })
+    for (const kind of ['truncated', 'digest', 'mime', 'oversized', 'pixel-bomb'] as const) {
+      it(`rejects ${kind} without publishing a QR or configuration`, async () => {
+        const data = await receipt('png', kind === 'pixel-bomb' ? 4097 : 2, kind === 'pixel-bomb' ? 4097 : 2)
+        const { createHash } = await import('node:crypto')
+        if (kind === 'truncated') {
+          data.bytes = data.bytes.subarray(0, 40)
+          data.qrSha256 = createHash('sha256').update(data.bytes).digest('hex')
+        }
+        if (kind === 'digest') data.qrSha256 = '0'.repeat(64)
+        if (kind === 'mime') data.qrContentType = 'image/jpeg'
+        if (kind === 'oversized') data.bytes = Buffer.alloc(512 * 1024 + 1)
+        harness.client.supportResult = data
+        expect(await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)).toMatchObject({ success: false, errorCode: 'invalid_response' })
+      })
+    }
+    for (const transition of ['account', 'account-ABA', 'space'] as const) {
+      for (const rejection of [false, true]) {
+        it(`discards late support ${rejection ? 'failure' : 'QR'} after ${transition}`, async () => {
+          const data = await receipt()
+          let resolve!: (value: unknown) => void
+          let reject!: (error: unknown) => void
+          const wait = new Promise((yes, no) => { resolve = yes; reject = no })
+          Object.assign(harness.client, { getSupportConfiguration: async () => wait })
+          const request = harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)
+          await new Promise(done => setTimeout(done, 0))
+          if (transition === 'space') setRuntimeActiveProductSpace('new-space')
+          else {
+            setSyncTrustedProductSpaceAccountId(OTHER_ACCOUNT_ID)
+            if (transition === 'account-ABA') setSyncTrustedProductSpaceAccountId(ACCOUNT_ID)
+          }
+          if (rejection) reject(new RealProviderAdminError('Forbidden', 'FORBIDDEN', { status: 403 }))
+          else resolve(data)
+          expect(await request).toMatchObject({ success: false, errorCode: 'session_changed' })
+        })
+      }
+    }
+    it('retains a current permission denial and requires genuine tokens', async () => {
+      Object.assign(harness.client, { getSupportConfiguration: async () => { throw new RealProviderAdminError('Forbidden', 'FORBIDDEN', { status: 403 }) } })
+      expect(await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)).toMatchObject({ success: false, errorCode: 'forbidden' })
+      harness.managerState.tokens = null
+      expect(await harness.invoke(RPC_CHANNELS.memberCircles.GET_SUPPORT)).toMatchObject({ success: false, errorCode: 'unauthorized' })
+    })
+  })
+
 })

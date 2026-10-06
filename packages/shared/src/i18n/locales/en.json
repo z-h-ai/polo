@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "Loading support information…",
   "poo70.s1.pendingUpstreamBody": "The platform does not offer member-side support configuration yet. It will appear here once available.",
   "poo70.s1.pendingUpstreamTitle": "Support configuration is not available yet",
+  "poo70.s1.qrAlt": "Platform support QR code",
   "poo70.s1.recheck": "Re-verify the original object",
   "poo70.s1.reload": "Reload support information",
   "poo70.s1.statusLabel": "Handling status",

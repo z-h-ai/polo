@@ -113,6 +113,13 @@ import type {
 } from '../product-spaces/schemas.ts';
 import {
   MEMBER_CIRCLE_LEAVE_COMMAND,
+  MemberCircleInvalidResponseError,
+  parseSupportConfiguration,
+  hasSupportImageSignature,
+  SUPPORT_CONFIGURATION_PATH,
+  SUPPORT_IMAGE_PATH,
+  SUPPORT_MAX_IMAGE_BYTES,
+  type SupportConfigurationReceipt,
   parseMemberCirclesResponse,
   parseMemberCheckoutResultResponse,
   parseMemberLeaveResponse,
@@ -398,10 +405,14 @@ export class AdminClient {
     return this.readSuccessResponse(response, SetAdminPasswordResponseSchema);
   }
 
-  async refresh(refreshToken: string): Promise<AdminRefreshResponse> {
+  async refresh(refreshToken: string, requestContext?: {
+    deadlineAt: number; signal?: AbortSignal; redirect: 'manual';
+  }): Promise<AdminRefreshResponse> {
     const response = await this.request<unknown>('/api/auth/refresh', {
       method: 'POST',
       body: { refreshToken },
+      ...requestContext,
+      ...(requestContext ? { readResponse: this.readBoundedSupportJson } : {}),
     });
     return this.readSuccessResponse(response, AdminRefreshResponseSchema);
   }
@@ -1244,6 +1255,75 @@ export class AdminClient {
     return parseMemberCheckoutResultResponse(response);
   }
 
+  /** Fixed authenticated origin/path, one deadline for metadata, refresh and bytes. */
+  async getSupportConfiguration(accessToken: string): Promise<SupportConfigurationReceipt> {
+    let origin: URL;
+    try { origin = new URL(this.adminUrl); } catch { throw new MemberCircleInvalidResponseError(); }
+    if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
+      || origin.pathname !== '/' || origin.search || origin.hash) throw new MemberCircleInvalidResponseError();
+    const deadlineAt = Date.now() + this.requestTimeoutMs;
+    let currentAccessToken = accessToken;
+    const context = { method: 'GET' as const, accessToken, deadlineAt, redirect: 'manual' as const,
+      onAccessTokenRefreshed: (token: string) => { currentAccessToken = token; } };
+    const configuration = parseSupportConfiguration(await this.request<unknown>(SUPPORT_CONFIGURATION_PATH, {
+      ...context, readResponse: this.readBoundedSupportJson,
+    }));
+    if (!configuration.configured) return configuration;
+    const bytes = await this.request<Uint8Array>(SUPPORT_IMAGE_PATH, {
+      ...context, accessToken: currentAccessToken, headers: { Accept: configuration.qrContentType },
+      readResponse: async (response, signal) => {
+        if (!response.ok) return this.readBoundedSupportJson(response, signal);
+        if (response.headers.get('content-type') !== configuration.qrContentType
+          || response.headers.get('content-sha256') !== configuration.qrSha256) throw new MemberCircleInvalidResponseError();
+        const bytes = await this.readSupportBytes(response, signal);
+        if (!hasSupportImageSignature(bytes, configuration.qrContentType)) throw new MemberCircleInvalidResponseError();
+        const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes).buffer);
+        const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        if (signal.aborted) throw signal.reason;
+        if (actual !== configuration.qrSha256) throw new MemberCircleInvalidResponseError();
+        return bytes;
+      },
+    });
+    return { ...configuration, bytes };
+  }
+
+  private readBoundedSupportJson = async (response: Response, signal: AbortSignal): Promise<unknown> => {
+    const bytes = await this.readSupportBytes(response, signal);
+    try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+    catch { throw new MemberCircleInvalidResponseError(); }
+  };
+
+  /** Bounds actual chunks, not Content-Length; abort always cancels the reader. */
+  private async readSupportBytes(response: Response, signal: AbortSignal): Promise<Uint8Array> {
+    const reader = response.body?.getReader();
+    if (!reader) throw new MemberCircleInvalidResponseError();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', cancel, { once: true });
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      if (signal.aborted) throw signal.reason;
+      while (true) {
+        const chunk = await reader.read();
+        if (signal.aborted) throw signal.reason;
+        if (chunk.done) break;
+        length += chunk.value.byteLength;
+        if (length > SUPPORT_MAX_IMAGE_BYTES) throw new MemberCircleInvalidResponseError();
+        chunks.push(chunk.value);
+      }
+      if (!length) throw new MemberCircleInvalidResponseError();
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return bytes;
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      // Do not await a hostile source's cancellation promise.
+      void reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+
   private async request<T>(path: string, options: {
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     accessToken?: string;
@@ -1252,7 +1332,14 @@ export class AdminClient {
     retryingAfterRefresh?: boolean;
     allowNotModified?: boolean;
     signal?: AbortSignal;
+    deadlineAt?: number;
+    redirect?: 'manual';
+    readResponse?: (response: Response, signal: AbortSignal) => Promise<unknown>;
+    onAccessTokenRefreshed?: (token: string) => void;
   }): Promise<T> {
+    if (options.deadlineAt !== undefined && options.deadlineAt <= Date.now()) {
+      throw new AdminError('Admin request timed out', 'TIMEOUT');
+    }
     const headers: Record<string, string> = {
       Accept: 'application/json',
       ...options.headers,
@@ -1281,7 +1368,7 @@ export class AdminClient {
         timedOut = true;
         controller.abort(timeoutError);
         reject(timeoutError);
-      }, this.requestTimeoutMs);
+      }, options.deadlineAt === undefined ? this.requestTimeoutMs : Math.max(1, options.deadlineAt - Date.now()));
     });
 
     let response: Response | undefined;
@@ -1294,27 +1381,35 @@ export class AdminClient {
             headers,
             body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
             signal: controller.signal,
+            ...(options.redirect ? { redirect: options.redirect } : {}),
           });
           // Preserve a definitive authorization status as soon as the response
           // headers arrive. The body remains deadline-bounded, but a half-open
           // 401/403 body must not be reclassified as a transport timeout.
           response = fetchedResponse;
+          if (options.redirect && (fetchedResponse.redirected || (fetchedResponse.status >= 300 && fetchedResponse.status < 400))) {
+            void fetchedResponse.body?.cancel().catch(() => {});
+            throw new MemberCircleInvalidResponseError();
+          }
           return {
             response: fetchedResponse,
-            data: await this.readJson(fetchedResponse),
+            data: options.readResponse ? await options.readResponse(fetchedResponse, controller.signal) : await this.readJson(fetchedResponse),
           };
         })(),
         timeoutPromise,
       ]));
     } catch (error) {
-      if (response?.status === 401 || response?.status === 403) {
+      if (response?.status === 401 || response?.status === 403
+        || (options.readResponse && response && response.status >= 400)) {
         data = undefined;
       } else {
         if (timedOut || error === timeoutError) throw timeoutError;
+        if (error instanceof MemberCircleInvalidResponseError) throw error;
         throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
       }
     } finally {
       if (timeout) clearTimeout(timeout);
+      if (options.readResponse && response?.body && !response.body.locked) void response.body.cancel().catch(() => {});
       callerSignal?.removeEventListener('abort', abortFromCaller);
     }
 
@@ -1333,24 +1428,20 @@ export class AdminClient {
       path !== '/api/auth/refresh' &&
       this.tokenStore
     ) {
-      const refreshToken = await this.tokenStore.getRefreshToken();
-      if (refreshToken) {
-        const originalAuthenticationError = this.createError(response, data);
-        let refreshed: AdminRefreshResponse;
-        try {
-          refreshed = await this.refresh(refreshToken);
-          await this.tokenStore.onTokensRefreshed?.(refreshed);
-        } catch {
-          // A protected endpoint has already provided a definitive
-          // authentication result. A refresh transport/service failure must
-          // not overwrite that 401 and turn it into restricted offline access.
-          throw originalAuthenticationError;
+      const originalAuthenticationError = this.createError(response, data);
+      try {
+        const refreshToken = await this.withRequestDeadline(Promise.resolve(this.tokenStore.getRefreshToken()), options.deadlineAt);
+        if (refreshToken) {
+          const refreshed = await this.refresh(refreshToken, options.deadlineAt !== undefined ? {
+            deadlineAt: options.deadlineAt, signal: options.signal, redirect: 'manual',
+          } : undefined);
+          await this.withRequestDeadline(Promise.resolve(this.tokenStore.onTokensRefreshed?.(refreshed)), options.deadlineAt);
+          options.onAccessTokenRefreshed?.(refreshed.accessToken);
+          return this.request<T>(path, { ...options, accessToken: refreshed.accessToken, retryingAfterRefresh: true });
         }
-        return this.request<T>(path, {
-          ...options,
-          accessToken: refreshed.accessToken,
-          retryingAfterRefresh: true,
-        });
+      } catch {
+        // Never downgrade an observed 401 because refresh/storage later failed.
+        throw originalAuthenticationError;
       }
     }
 
@@ -1359,6 +1450,16 @@ export class AdminClient {
     }
 
     return data as T;
+  }
+
+  private async withRequestDeadline<T>(promise: Promise<T>, deadlineAt?: number): Promise<T> {
+    if (deadlineAt === undefined) return promise;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([promise, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new AdminError('Admin request timed out', 'TIMEOUT')), Math.max(0, deadlineAt - Date.now()));
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
   }
 
   private async readJson(response: Response): Promise<unknown> {

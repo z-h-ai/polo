@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "Ügyfélszolgálati információk betöltése…",
   "poo70.s1.pendingUpstreamBody": "A platform még nem kínál tagsági ügyfélszolgálati beállításokat. Amint elérhetővé válik, itt jelenik meg.",
   "poo70.s1.pendingUpstreamTitle": "Az ügyfélszolgálati beállítások még nem érhetők el",
+  "poo70.s1.qrAlt": "A platform ügyfélszolgálati QR-kódja",
   "poo70.s1.recheck": "Eredeti objektum újraellenőrzése",
   "poo70.s1.reload": "Ügyfélszolgálati információk újratöltése",
   "poo70.s1.statusLabel": "Kezelés állapota",

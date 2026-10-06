@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MemberCircleSupportState } from '@polo-ai/shared/admin'
 import { useMemberCircles } from '@/context/MemberCircleResourceContext'
@@ -17,13 +17,10 @@ import type { MemberCircleReadError, MemberCircleSupportReadState } from '@/hook
  *   `refreshSupport`). Unconfigured (`availability: 'available'` with
  *   `configured: false`), read-failed (`availability: 'load_failed'`, or a
  *   failed C2 bridge read) and awaiting-upstream
- *   (`availability: 'upstream_pending'`, G4 — the member-side endpoint does
- *   not exist yet) are DISTINCT real states, never merged and never faked
- *   into each other. No sample QR code is ever rendered: the confirmed G4
- *   DTO carries no QR asset, so even the configured arm renders the fact and
- *   the provider's `guidance` text — never a scannable placeholder. A failed
- *   support read does not touch the order/membership facts — the panel holds
- *   no such state at all and issues no write.
+ *   (`availability: 'upstream_pending'`, a legacy bridge without G4) are DISTINCT real states, never merged and never faked
+ *   into each other. Configured reads carry Main-validated original PNG/JPEG
+ *   bytes in a bounded data URI, never a remote authenticated URL or sample.
+ *   A failed read leaves the original order/membership facts untouched.
  *
  * - P70-SUPPORT-02: copyable information is limited to the user's OWN
  *   circle/order facts assembled by C9 into `target` — order number, circle
@@ -222,6 +219,12 @@ export function CircleSupportPanel({
   const support: MemberCircleSupportState | null = readState.phase === 'ready'
     ? readState.state
     : null
+  const currentSupportRef = useRef(support)
+  const imageReceiptVersionRef = useRef(0)
+  if (currentSupportRef.current !== support) imageReceiptVersionRef.current += 1
+  currentSupportRef.current = support
+  const [failedImageReceipt, setFailedImageReceipt] = useState<MemberCircleSupportState | null>(null)
+  const imageFailed = support !== null && failedImageReceipt === support
   const permissionBlocked = readState.phase === 'failed'
     && isSupportPermissionBlocked(readState.error)
   // The reload action is an explicit click in every readable state; hidden
@@ -314,12 +317,25 @@ export function CircleSupportPanel({
             )}
 
             {support?.availability === 'available' && support.configured && (
-              <span data-testid="circle-support-configured" className="text-[12px]">
-                {support.guidance !== null
-                  ? // The provider's own guidance text — shown verbatim.
-                  support.guidance
-                  : t('poo70.s1.configuredDefault')}
-              </span>
+              imageFailed ? (
+                <span data-testid="circle-support-load-failed" className="text-[12px] text-destructive" role="alert">
+                  {t('poo70.s1.loadFailed')}
+                </span>
+              ) : (
+                <span data-testid="circle-support-configured" className="block text-[12px]">
+                  <img
+                    key={imageReceiptVersionRef.current}
+                    src={support.qrDataUri}
+                    alt={t('poo70.s1.qrAlt')}
+                    className="my-[12px] block h-auto max-w-full rounded-[10px] border border-border"
+                    width={192}
+                    onError={() => {
+                      if (currentSupportRef.current === support) setFailedImageReceipt(support)
+                    }}
+                  />
+                  {t('poo70.s1.configuredDefault')}
+                </span>
+              )
             )}
           </dd>
         </div>

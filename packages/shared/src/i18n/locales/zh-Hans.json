@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "正在获取客服信息…",
   "poo70.s1.pendingUpstreamBody": "平台尚未提供成员侧客服配置，开放后会在这里显示。",
   "poo70.s1.pendingUpstreamTitle": "客服配置暂不可读",
+  "poo70.s1.qrAlt": "平台客服二维码",
   "poo70.s1.recheck": "重新核对原对象",
   "poo70.s1.reload": "重新加载客服信息",
   "poo70.s1.statusLabel": "处理状态",

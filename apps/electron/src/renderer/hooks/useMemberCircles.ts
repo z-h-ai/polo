@@ -1,3 +1,4 @@
+import { parseMemberCircleSupportState, MemberCircleInvalidResponseError } from '@polo-ai/shared/admin/member-circles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   MemberCircleApiErrorCode,
@@ -355,6 +356,14 @@ export function useMemberCirclesResource(
   const [profileStates, setProfileStates] = useState<Record<string, MemberCircleUpstreamReadState>>({})
   const [supportState, setSupportState] = useState<MemberCircleSupportReadState | null>(null)
 
+  const supportGenerationRef = useRef(0)
+  const supportFlightRef = useRef<{
+    fence: MemberCircleScopeKey
+    generation: number
+    refresh: boolean
+    promise: Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>>
+  } | null>(null)
+
   // The published scope fence. Set synchronously by the scope effect; command
   // closures capture this object and compare by identity after their await.
   const scopeFenceRef = useRef<MemberCircleScopeKey | null>(null)
@@ -429,6 +438,8 @@ export function useMemberCirclesResource(
   // semantics by design (no terminal guard — the advisory on the outcome type
   // already states the result is never proof of catalog currency).
   useEffect(() => () => {
+    supportGenerationRef.current += 1
+    supportFlightRef.current = null
     const pending = catalogSettleRef.current
     if (pending) {
       catalogSettleRef.current = null
@@ -438,6 +449,8 @@ export function useMemberCirclesResource(
   }, [])
 
   const resetToScopelessState = useCallback((scopeKind: MemberCircleScopeKind) => {
+    supportGenerationRef.current += 1
+    supportFlightRef.current = null
     scopeFenceRef.current = null
     setRelations({ ...EMPTY_RELATIONS_STATE, scopeKind })
     setUpdateStates({})
@@ -532,6 +545,8 @@ export function useMemberCirclesResource(
       contextKey,
       epoch,
     }
+    supportGenerationRef.current += 1
+    supportFlightRef.current = null
     scopeFenceRef.current = fence
     setRelations({
       ...EMPTY_RELATIONS_STATE,
@@ -742,24 +757,38 @@ export function useMemberCirclesResource(
     return result
   }, [runScopedCommand, isScopeCurrent])
 
-  const fetchSupport = useCallback(async (): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>> => {
+  const fetchSupport = useCallback((refresh: boolean): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>> => {
     const fence = scopeFenceRef.current
-    if (!fence) return commandFailure('session_unavailable')
+    if (!fence) return Promise.resolve(commandFailure('session_unavailable'))
+    const active = supportFlightRef.current
+    if (active?.fence === fence && (!refresh || active.refresh)) return active.promise
+    const generation = ++supportGenerationRef.current
     setSupportState({ phase: 'loading' })
-    const result = await runScopedCommand(api => api.getSupport())
-    if (!isScopeCurrent(fence)) return result
-    if (result.success) {
-      // G4: `upstream_pending` / `unconfigured` / `load_failed` are distinct
-      // real states — cached verbatim for S1, never faked into each other.
-      setSupportState({ phase: 'ready', state: result.support })
-    } else {
-      setSupportState({ phase: 'failed', error: toMemberCircleReadError(result) })
-    }
-    return result
+    const isCurrent = () => isScopeCurrent(fence) && supportGenerationRef.current === generation
+    const promise = (async (): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>> => {
+      let result: MemberCircleRpcResult<{ support: MemberCircleSupportState }>
+      try {
+        result = await runScopedCommand(api => api.getSupport())
+        if (!isCurrent()) return commandFailure('session_changed')
+        if (result.success) result = { success: true, support: parseMemberCircleSupportState(result.support) }
+      } catch (error) {
+        result = { success: false, errorCode: error instanceof MemberCircleInvalidResponseError ? 'invalid_response' : 'network_error',
+          message: 'Member support read failed' }
+      }
+      if (!isCurrent()) return commandFailure('session_changed')
+      if (result.success) setSupportState({ phase: 'ready', state: result.support })
+      else setSupportState({ phase: 'failed', error: toMemberCircleReadError(result) })
+      return result
+    })()
+    supportFlightRef.current = { fence, generation, refresh, promise }
+    void promise.finally(() => {
+      if (supportFlightRef.current?.generation === generation) supportFlightRef.current = null
+    })
+    return promise
   }, [runScopedCommand, isScopeCurrent])
 
-  const getSupport = fetchSupport
-  const refreshSupport = fetchSupport
+  const getSupport = useCallback(() => fetchSupport(false), [fetchSupport])
+  const refreshSupport = useCallback(() => fetchSupport(true), [fetchSupport])
 
   const getCircle = useCallback((circleId: string): MemberCircleDetailView => (
     selectMemberCircleDetail(relations.circles ?? [], relations.memberships ?? [], circleId)

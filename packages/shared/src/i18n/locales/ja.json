@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "サポート情報を取得しています…",
   "poo70.s1.pendingUpstreamBody": "プラットフォームにはまだメンバー側のサポート設定が用意されていません。提供開始後にここに表示されます。",
   "poo70.s1.pendingUpstreamTitle": "サポート設定はまだ利用できません",
+  "poo70.s1.qrAlt": "プラットフォームサポートのQRコード",
   "poo70.s1.recheck": "元のオブジェクトを再確認",
   "poo70.s1.reload": "サポート情報を再読み込み",
   "poo70.s1.statusLabel": "対応状況",

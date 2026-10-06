@@ -164,7 +164,11 @@ function orderTargetFixture(): CircleSupportTarget {
 const CONFIGURED_SUPPORT: MemberCircleSupportState = {
   availability: 'available',
   configured: true,
-  guidance: 'Scan the QR code in your bank app to contact support.',
+  guidance: null,
+  qrSha256: 'a'.repeat(64),
+  qrContentType: 'image/png', updatedAt: '2026-10-05T00:00:00.000Z',
+  // Explicit unit image fixture, never a real contact or native screenshot.
+  qrDataUri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEtcAAAAASUVORK5CYII=',
 }
 
 // -------------------------------------------------------------------------
@@ -295,9 +299,9 @@ describe('CircleSupportPanel mount read and configured support (P70-SUPPORT-01)'
     await waitFor(() => {
       expect(screen.getByTestId('circle-support-configured')).toBeTruthy()
     })
-    // The provider's guidance text renders verbatim — no fabricated QR asset.
+    // The typed fixture image is rendered, without renderer network access.
     expect(screen.getByTestId('circle-support-configured').textContent)
-      .toBe('Scan the QR code in your bank app to contact support.')
+      .toBe('A support QR code is configured on the platform. Follow the support guidance to get in touch.')
     // The ready receipt stops the mount effect from re-reading: exactly one
     // authoritative getSupport, no polling (P70-SUPPORT-03: no auto recheck).
     expect(supportCalls).toBe(1)
@@ -305,17 +309,18 @@ describe('CircleSupportPanel mount read and configured support (P70-SUPPORT-01)'
     view.unmount()
   })
 
-  it('renders configured-without-guidance as the platform fact, never a sample code', async () => {
+  it('renders only the validated bridge image and its translated alt', async () => {
     supportResultByAccount['account-a-fixture'] = {
       success: true,
-      support: { availability: 'available', configured: true, guidance: null },
+      support: CONFIGURED_SUPPORT,
     }
     render(providerTree({ accountId: 'account-a-fixture', target: orderTargetFixture() }))
     const configured = await waitFor(() => screen.getByTestId('circle-support-configured'))
     expect(configured.textContent).toBe(
       'A support QR code is configured on the platform. Follow the support guidance to get in touch.',
     )
-    expect(configured.querySelector('img')).toBeNull()
+    expect(configured.querySelector('img')?.getAttribute('src')).toBe(CONFIGURED_SUPPORT.availability === 'available' && CONFIGURED_SUPPORT.configured ? CONFIGURED_SUPPORT.qrDataUri : '')
+    expect(configured.querySelector('img')?.getAttribute('alt')).toBe('Platform support QR code')
   })
 })
 
@@ -542,7 +547,7 @@ describe('CircleSupportPanel return to the original object (P70-SUPPORT-03)', ()
     const onBack = () => { backCalls += 1 }
     installClipboard('missing')
     renderInjected({
-      supportState: { phase: 'ready', state: { availability: 'available', configured: true, guidance: 'g' } },
+      supportState: { phase: 'ready', state: CONFIGURED_SUPPORT },
       target,
       onBack,
     })
@@ -619,5 +624,41 @@ describe('CircleSupportPanel return to the original object (P70-SUPPORT-03)', ()
     expect(calledMethods.length).toBeGreaterThan(0)
     expect(calledMethods.every(name => allowed.has(name))).toBe(true)
     expect(fetchCalls.length).toBe(0)
+  })
+})
+
+
+describe('support image recovery without stale image events', () => {
+  it('shows honest unreadable state, permits retry, and never lets an old image hide a newer receipt', async () => {
+    supportResultByAccount['account-a-fixture'] = { success: true, support: CONFIGURED_SUPPORT }
+    render(providerTree({ accountId: 'account-a-fixture', target: orderTargetFixture() }))
+    const first = await screen.findByAltText('Platform support QR code')
+    fireEvent.error(first)
+    expect(screen.queryByAltText('Platform support QR code')).toBeNull()
+    expect(screen.getByTestId('circle-support-load-failed')).toBeTruthy()
+    expect(screen.getByTestId('circle-support-info-text').textContent).toContain('SUB-20261002-0182')
+    fireEvent.click(screen.getByTestId('circle-support-reload'))
+    const newer = await screen.findByAltText('Platform support QR code')
+    expect(newer).not.toBe(first)
+    fireEvent.error(first)
+    expect(screen.getByAltText('Platform support QR code')).toBe(newer)
+    expect(screen.queryByTestId('circle-support-load-failed')).toBeNull()
+    expect(fetchCalls).toHaveLength(0)
+    expect(calledMethods.filter(name => name !== 'getSupport' && name !== 'list' && name !== 'listMemberships')).toEqual([])
+  })
+  it('discards the old image on reload to an unconfigured or denied receipt', async () => {
+    supportResultByAccount['account-a-fixture'] = { success: true, support: CONFIGURED_SUPPORT }
+    render(providerTree({ accountId: 'account-a-fixture', target: orderTargetFixture() }))
+    await screen.findByAltText('Platform support QR code')
+    supportResultByAccount['account-a-fixture'] = { success: true, support: { availability: 'available', configured: false, guidance: '未配置' } }
+    fireEvent.click(screen.getByTestId('circle-support-reload'))
+    await screen.findByTestId('circle-support-unconfigured')
+    expect(screen.queryByAltText('Platform support QR code')).toBeNull()
+    supportResultByAccount['account-a-fixture'] = { success: false, errorCode: 'forbidden', message: 'forbidden' }
+    fireEvent.click(screen.getByTestId('circle-support-reload'))
+    await screen.findByTestId('circle-support-forbidden')
+    expect(screen.queryByTestId('circle-support-unconfigured')).toBeNull()
+    expect(screen.queryByAltText('Platform support QR code')).toBeNull()
+    expect(screen.queryByTestId('circle-support-reload')).toBeNull()
   })
 })

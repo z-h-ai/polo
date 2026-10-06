@@ -17,12 +17,14 @@
  * the request discards the response fail-closed (`session_changed`) — stale
  * data from a dead identity/space is never published.
  *
- * Gaps G2 (updates), G3 (public profile by circleId) and G4 (member-side
- * support configuration) have no member-side endpoint upstream (F1 contract,
+ * Gaps G2 (updates) and G3 (public profile by circleId) have no member-side endpoint upstream (F1 contract,
  * upstream-expected). Their channels answer with the explicit
  * `upstream_pending` capability state — never fabricated content, never an
- * empty-list success, and never a creator-management API substitute.
+ * empty-list success, and never a creator-management API substitute. G4 now
+ * uses the authenticated POL-115 global reader and Main-validated image bytes.
  */
+import sharp from 'sharp'
+import { createHash } from 'node:crypto'
 import {
   AdminClient,
   AdminError,
@@ -39,6 +41,12 @@ import {
   mapMemberCircleApiError,
   resolveMemberCirclePurchaseUrl,
   MemberCircleUuidSchema,
+  MemberCircleInvalidResponseError,
+  parseSupportConfiguration,
+  parseMemberCircleSupportState,
+  hasSupportImageSignature,
+  SUPPORT_MAX_IMAGE_BYTES,
+  SUPPORT_MAX_IMAGE_PIXELS,
 } from '@polo-ai/shared/admin'
 import { getAdminUrl } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
@@ -74,6 +82,7 @@ export type MemberCircleAdminClient = Pick<
   | 'leaveMemberCircle'
   | 'getMemberCircleOriginalOrder'
   | 'getMemberCircleCheckoutResult'
+  | 'getSupportConfiguration'
 >
 
 export type MemberCircleRpcErrorCode =
@@ -297,6 +306,7 @@ export function registerMemberCircleHandlers(
     if (!capture.ok) return memberCircleGateFailure(capture.errorCode)
     try {
       const tokens = await manager.getAdminTokens()
+      if (!isMemberCircleRequestFenceCurrent(capture.fence)) return memberCircleGateFailure('session_changed')
       if (!tokens) return memberCircleGateFailure('unauthorized')
       if (tokens.userId !== capture.fence.accountId) {
         // Stored credentials disagree with the trusted mirror: a transition
@@ -324,6 +334,7 @@ export function registerMemberCircleHandlers(
       }
       return result
     } catch (error) {
+      if (!isMemberCircleRequestFenceCurrent(capture.fence)) return memberCircleGateFailure('session_changed')
       const failure = toMemberCircleRpcFailure(error)
       log?.warn(`[MemberCircles] ${operation} failed:`, failure.message)
       return failure
@@ -447,11 +458,31 @@ export function registerMemberCircleHandlers(
   server.handle(
     RPC_CHANNELS.memberCircles.GET_SUPPORT,
     async (): Promise<MemberCircleSupportResult> => {
-      const support: MemberCircleSupportState = {
-        availability: 'upstream_pending',
-        contractGap: 'G4',
-      }
-      return { success: true, support }
+      return runInTrustedSession('getSupport', async (client, accessToken) => {
+        const receipt = await client.getSupportConfiguration(accessToken)
+        const metadata = parseSupportConfiguration(receipt)
+        let support: MemberCircleSupportState
+        if (!metadata.configured) {
+          support = { availability: 'available', configured: false, guidance: metadata.guidance }
+        } else {
+          const bytes = 'bytes' in receipt ? receipt.bytes : undefined
+          if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > SUPPORT_MAX_IMAGE_BYTES
+            || !hasSupportImageSignature(bytes, metadata.qrContentType)
+            || createHash('sha256').update(bytes).digest('hex') !== metadata.qrSha256) {
+            throw new MemberCircleInvalidResponseError()
+          }
+          try {
+            // Same full-decoding boundary as the POL-115 writer. Keep original bytes.
+            await sharp(bytes, { failOn: 'warning', limitInputPixels: SUPPORT_MAX_IMAGE_PIXELS }).stats()
+          } catch { throw new MemberCircleInvalidResponseError() }
+          support = parseMemberCircleSupportState({
+            availability: 'available', configured: true, guidance: null,
+            qrSha256: metadata.qrSha256, qrContentType: metadata.qrContentType, updatedAt: metadata.updatedAt,
+            qrDataUri: `data:${metadata.qrContentType};base64,${Buffer.from(bytes).toString('base64')}`,
+          })
+        }
+        return { success: true as const, support }
+      })
     },
   )
 }

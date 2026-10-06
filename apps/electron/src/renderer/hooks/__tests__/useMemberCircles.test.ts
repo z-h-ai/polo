@@ -1148,3 +1148,107 @@ describe('useMemberCirclesResource — getCircle detail projection', () => {
     expect(hook.result.current.getCircle('not-in-this-scope')).toEqual({ availability: 'unknown_circle' })
   })
 })
+
+
+describe('support receipt ordering', () => {
+  for (const oldReceipt of [
+    success({ support: { availability: 'available', configured: false, guidance: 'older configuration' } }),
+    failure('network_error'),
+  ]) {
+    it(`keeps newer refresh after an older get settles (${oldReceipt.success})`, async () => {
+      const old = deferred<unknown>()
+      let calls = 0
+      getSupportImpl = () => ++calls === 1 ? old.promise : Promise.resolve(failure('forbidden'))
+      const hook = renderResource()
+      await waitForPhase(hook, 'ready')
+      let first!: Promise<unknown>
+      await act(async () => { first = hook.result.current.getSupport() })
+      await act(async () => { await hook.result.current.refreshSupport() })
+      expect(hook.result.current.supportState).toMatchObject({ phase: 'failed', error: { code: 'forbidden' } })
+      await act(async () => { old.resolve(oldReceipt); await first })
+      expect(hook.result.current.supportState).toMatchObject({ phase: 'failed', error: { code: 'forbidden' } })
+    })
+  }
+})
+
+
+describe('support single flight and scope isolation', () => {
+  it('deduplicates current gets and refreshes, while explicit refresh supersedes a get', async () => {
+    const first = deferred<unknown>()
+    const second = deferred<unknown>()
+    let calls = 0
+    getSupportImpl = () => ++calls === 1 ? first.promise : second.promise
+    const hook = renderResource()
+    await waitForPhase(hook, 'ready')
+    let old!: ReturnType<typeof hook.result.current.getSupport>, newer!: ReturnType<typeof hook.result.current.refreshSupport>
+    await act(async () => {
+      old = hook.result.current.getSupport()
+      expect(hook.result.current.getSupport()).toBe(old)
+      newer = hook.result.current.refreshSupport()
+      expect(hook.result.current.refreshSupport()).toBe(newer)
+      expect(hook.result.current.getSupport()).toBe(newer)
+    })
+    expect(calls).toBe(2)
+    await act(async () => { second.resolve(success({ support: { availability: 'available', configured: false, guidance: 'new actual receipt' } })); await newer })
+    await act(async () => { first.resolve(failure('forbidden')); expect(await old).toMatchObject({ success: false, errorCode: 'session_changed' }) })
+    expect(hook.result.current.supportState).toMatchObject({ phase: 'ready', state: { guidance: 'new actual receipt' } })
+  })
+  for (const transition of ['account-ABA', 'space-ABA'] as const) {
+    for (const rejects of [false, true]) {
+      it(`discards an old ${rejects ? 'rejection' : 'receipt'} over ${transition}`, async () => {
+        const old = deferred<unknown>()
+        let calls = 0
+        getSupportImpl = () => ++calls === 1 ? old.promise : Promise.resolve(success({ support: { availability: 'available', configured: false, guidance: 'current' } }))
+        const hook = renderResource()
+        await waitForPhase(hook, 'ready')
+        let pending!: Promise<unknown>
+        await act(async () => { pending = hook.result.current.getSupport() })
+        productSpaceContextState = spaceContext(transition === 'account-ABA' ? { accountId: 'account-b', contextVersion: 2 } : { spaceKind: 'enterprise', contextVersion: 2 })
+        await act(async () => { hook.rerender({ catalog: null }) })
+        productSpaceContextState = spaceContext({ contextVersion: 3 })
+        await act(async () => { hook.rerender({ catalog: null }) })
+        await waitForPhase(hook, 'ready')
+        await act(async () => { await hook.result.current.refreshSupport() })
+        await act(async () => {
+          if (rejects) old.reject(new Error('old transport rejection'))
+          else old.resolve(success({ support: { availability: 'available', configured: false, guidance: 'stale' } }))
+          expect(await pending).toMatchObject({ success: false, errorCode: 'session_changed' })
+        })
+        expect(hook.result.current.supportState).toMatchObject({ phase: 'ready', state: { guidance: 'current' } })
+      })
+    }
+  }
+  it('rejects malformed configured receipts and supports a current network retry', async () => {
+    getSupportImpl = async () => success({ support: { availability: 'available', configured: true, guidance: null, qrDataUri: 'https://foreign.example' } })
+    const hook = renderResource()
+    await waitForPhase(hook, 'ready')
+    await act(async () => { await hook.result.current.getSupport() })
+    expect(hook.result.current.supportState).toMatchObject({ phase: 'failed', error: { code: 'invalid_response' } })
+    getSupportImpl = async () => { throw new Error('transport') }
+    await act(async () => { await hook.result.current.refreshSupport() })
+    expect(hook.result.current.supportState).toMatchObject({ phase: 'failed', error: { code: 'network_error' } })
+    getSupportImpl = async () => success({ support: { availability: 'available', configured: false, guidance: 'unconfigured' } })
+    await act(async () => { await hook.result.current.refreshSupport() })
+    expect(hook.result.current.supportState).toMatchObject({ phase: 'ready', state: { configured: false } })
+  })
+})
+
+
+it('keeps the newest validated QR and unconfigured receipt over an older same-account QR', async () => {
+  const fixture = { availability: 'available', configured: true, guidance: null,
+    qrSha256: 'a'.repeat(64), qrContentType: 'image/png', updatedAt: '2026-10-05T00:00:00.000Z',
+    qrDataUri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEtcAAAAASUVORK5CYII=' }
+  for (const newest of [{ ...fixture, qrSha256: 'b'.repeat(64) }, { availability: 'available', configured: false, guidance: 'unconfigured' }]) {
+    const old = deferred<unknown>()
+    let calls = 0
+    getSupportImpl = () => ++calls === 1 ? old.promise : Promise.resolve(success({ support: newest }))
+    const hook = renderResource()
+    await waitForPhase(hook, 'ready')
+    let first!: Promise<unknown>
+    await act(async () => { first = hook.result.current.getSupport() })
+    await act(async () => { await hook.result.current.refreshSupport() })
+    await act(async () => { old.resolve(success({ support: fixture })); await first })
+    expect(hook.result.current.supportState).toMatchObject({ phase: 'ready', state: newest })
+    hook.unmount()
+  }
+})

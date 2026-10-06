@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "Support-Informationen werden geladen …",
   "poo70.s1.pendingUpstreamBody": "Die Plattform bietet noch keine Support-Konfiguration für Mitglieder an. Sobald verfügbar, erscheint sie hier.",
   "poo70.s1.pendingUpstreamTitle": "Support-Konfiguration noch nicht verfügbar",
+  "poo70.s1.qrAlt": "QR-Code des Plattform-Supports",
   "poo70.s1.recheck": "Originalobjekt erneut prüfen",
   "poo70.s1.reload": "Support-Informationen neu laden",
   "poo70.s1.statusLabel": "Bearbeitungsstatus",

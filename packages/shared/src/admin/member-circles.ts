@@ -770,19 +770,74 @@ export function parseMemberCheckoutResultResponse(data: unknown): MemberCircleCh
  * Explicit "no member-side endpoint upstream yet" state. Distinct from both
  * an empty-list success (real data, legitimately empty) and a transport
  * failure — consumers must render it as pending/awaiting-upstream, never
- * fabricate content (contract gaps G2 updates, G3 public profile, G4 support).
+ * fabricate content (G2 updates, G3 public profile; G4 only on legacy bridges).
  */
 export interface MemberCircleUpstreamPendingState {
   availability: 'upstream_pending';
   contractGap: 'G2' | 'G3' | 'G4';
 }
 
-/**
- * Support bridge state (G4). `unconfigured` and `load_failed` are distinct
- * real states for the re-pin once the member-side endpoint exists; neither
- * may be faked today.
- */
-export type MemberCircleSupportState =
-  | { availability: 'available'; configured: boolean; guidance: string | null }
-  | { availability: 'load_failed' }
-  | { availability: 'upstream_pending'; contractGap: 'G4' };
+/** Producer POL-115 support boundary; shared parsers remain renderer-safe. */
+export const SUPPORT_CONFIGURATION_PATH = '/api/support/configuration';
+export const SUPPORT_IMAGE_PATH = '/api/support/configuration?image=1';
+export const SUPPORT_MAX_IMAGE_BYTES = 512 * 1024;
+export const SUPPORT_MAX_IMAGE_PIXELS = 16_777_216;
+const supportMime = z.enum(['image/png', 'image/jpeg']);
+const supportDigest = z.string().regex(/^[a-f0-9]{64}$/);
+const supportGuidance = z.string().min(1).max(2000);
+const supportImageFacts = {
+  qrSha256: supportDigest,
+  qrContentType: supportMime,
+  updatedAt: isoTimestamp,
+};
+
+export const SupportConfigurationSchema = z.discriminatedUnion('configured', [
+  z.object({ configured: z.literal(false), guidance: supportGuidance }),
+  z.object({ configured: z.literal(true), ...supportImageFacts, qrImageUrl: z.literal(SUPPORT_IMAGE_PATH) }),
+]);
+export type SupportConfiguration = z.infer<typeof SupportConfigurationSchema>;
+export type SupportConfigurationReceipt =
+  | Extract<SupportConfiguration, { configured: false }>
+  | (Extract<SupportConfiguration, { configured: true }> & { bytes: Uint8Array });
+
+export function parseSupportConfiguration(data: unknown): SupportConfiguration {
+  const parsed = SupportConfigurationSchema.safeParse(data);
+  if (!parsed.success) throw new MemberCircleInvalidResponseError();
+  return parsed.data;
+}
+
+export function hasSupportImageSignature(bytes: Uint8Array, mime: string): boolean {
+  if (mime !== 'image/png' && mime !== 'image/jpeg') return false;
+  const magic = mime === 'image/png' ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255];
+  return bytes.length >= magic.length && magic.every((value, index) => bytes[index] === value);
+}
+
+const supportDataUri = z.string().max(Math.ceil(SUPPORT_MAX_IMAGE_BYTES / 3) * 4 + 32);
+const SupportBridgeStateSchema = z.union([
+  z.object({ availability: z.literal('available'), configured: z.literal(false), guidance: supportGuidance.nullable() }),
+  z.object({ availability: z.literal('available'), configured: z.literal(true), guidance: z.null(),
+    ...supportImageFacts, qrDataUri: supportDataUri }),
+  z.object({ availability: z.literal('load_failed') }),
+  z.object({ availability: z.literal('upstream_pending'), contractGap: z.literal('G4') }),
+]).superRefine((state, context) => {
+  if (state.availability !== 'available' || !state.configured) return;
+  const prefix = `data:${state.qrContentType};base64,`;
+  try {
+    if (!state.qrDataUri.startsWith(prefix)) throw new Error();
+    const base64 = state.qrDataUri.slice(prefix.length);
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) throw new Error();
+    const decoded = atob(base64);
+    if (!decoded.length || decoded.length > SUPPORT_MAX_IMAGE_BYTES || btoa(decoded) !== base64) throw new Error();
+    if (!hasSupportImageSignature(Uint8Array.from(decoded, char => char.charCodeAt(0)), state.qrContentType)) throw new Error();
+  } catch {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid support image' });
+  }
+});
+
+/** Only Main-validated original image bytes can cross this typed bridge. */
+export type MemberCircleSupportState = z.infer<typeof SupportBridgeStateSchema>;
+export function parseMemberCircleSupportState(data: unknown): MemberCircleSupportState {
+  const parsed = SupportBridgeStateSchema.safeParse(data);
+  if (!parsed.success) throw new MemberCircleInvalidResponseError();
+  return parsed.data;
+}

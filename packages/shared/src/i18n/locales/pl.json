@@ -1384,6 +1384,7 @@
   "poo70.s1.loading": "Wczytywanie informacji wsparcia…",
   "poo70.s1.pendingUpstreamBody": "Platforma nie udostępnia jeszcze konfiguracji wsparcia po stronie członka. Gdy będzie dostępna, pojawi się tutaj.",
   "poo70.s1.pendingUpstreamTitle": "Konfiguracja wsparcia jeszcze niedostępna",
+  "poo70.s1.qrAlt": "Kod QR wsparcia platformy",
   "poo70.s1.recheck": "Ponownie sprawdź oryginalny obiekt",
   "poo70.s1.reload": "Wczytaj ponownie informacje wsparcia",
   "poo70.s1.statusLabel": "Status obsługi",
