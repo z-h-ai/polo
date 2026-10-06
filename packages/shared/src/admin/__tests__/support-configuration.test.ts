@@ -3,13 +3,14 @@ import { AdminClient } from '../client';
 import {
   MemberCircleInvalidResponseError, parseSupportConfiguration, parseMemberCircleSupportState,
   SUPPORT_IMAGE_PATH, SUPPORT_MAX_IMAGE_BYTES,
+  type SupportConfiguration, type MemberCircleSupportState,
 } from '../member-circles';
 
 // Unit image bytes, never a platform contact configuration.
 const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEtcAAAAASUVORK5CYII='), c => c.charCodeAt(0));
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
-async function metadata(bytes = png) {
+async function metadata(bytes = png): Promise<Extract<SupportConfiguration, { configured: true }>> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return { configured: true as const, qrSha256: Buffer.from(digest).toString('hex'), qrContentType: 'image/png' as const,
     updatedAt: '2026-10-05T00:00:00.000Z', qrImageUrl: SUPPORT_IMAGE_PATH };
@@ -33,7 +34,7 @@ describe('support pure boundary', () => {
     const meta = await metadata();
     expect(parseSupportConfiguration({ ...meta, updatedBy: 'staff-secret' })).toEqual(meta);
     const state = { availability: 'available', configured: true, guidance: null, qrSha256: meta.qrSha256,
-      qrContentType: meta.qrContentType, updatedAt: meta.updatedAt, qrDataUri: `data:image/png;base64,${Buffer.from(png).toString('base64')}` };
+      qrContentType: meta.qrContentType, updatedAt: meta.updatedAt, qrDataUri: `data:image/png;base64,${Buffer.from(png).toString('base64')}` } satisfies MemberCircleSupportState;
     expect(parseMemberCircleSupportState({ ...state, accessToken: 'secret' })).toEqual(state);
     for (const qrDataUri of ['https://foreign.example/qr', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,AAAA', state.qrDataUri + ' ']) {
       expect(() => parseMemberCircleSupportState({ ...state, qrDataUri })).toThrow(MemberCircleInvalidResponseError);
@@ -127,6 +128,7 @@ describe('AdminClient real support transport', () => {
   it('uses one total deadline across metadata and binary body, not a fresh image budget', async () => {
     const meta = await metadata();
     let calls = 0, cancelled = false;
+    // Unit-only fetch stub: Bun's additional preconnect member is never called.
     globalThis.fetch = (async () => {
       calls++;
       if (calls === 1) {
@@ -137,7 +139,7 @@ describe('AdminClient real support transport', () => {
         start(controller) { setTimeout(() => { if (!cancelled) { controller.enqueue(png); controller.close(); } }, 30); },
         cancel() { cancelled = true; },
       }), { headers: { 'content-type': 'image/png', 'content-sha256': meta.qrSha256 } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     await expect(new AdminClient('https://admin.example', { requestTimeoutMs: 45 }).getSupportConfiguration('unit-token')).rejects.toMatchObject({ errorCode: 'TIMEOUT' });
     expect(calls).toBe(2);
     expect(cancelled).toBe(true);
