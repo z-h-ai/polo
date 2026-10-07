@@ -1535,23 +1535,11 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 }
 
 /* ==========================================================================
-   Tab browser and TopBar heights.
+   Unified workbench bar height (single global bar: brand + tabs + actions).
    ========================================================================== */
 :root {
-  --tabbar-height: 36px;
   --topbar-height: 64px;
-  --content-top-offset: var(--tabbar-height);
-}
-
-:root[data-active-tab="polo"],
-:root[data-active-tab="home"] {
-  --content-top-offset: calc(var(--tabbar-height) + var(--topbar-height));
-}
-
-/* The global workbench bar belongs to the Polo shell surfaces (home +
-   workbench). App tabs render their own full-height canvas. */
-:root[data-active-tab="webapp"] [data-testid="workbench-topbar"] {
-  display: none;
+  --content-top-offset: var(--topbar-height);
 }
 
 @media (max-width: 768px) {

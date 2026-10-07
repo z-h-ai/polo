@@ -1,0 +1,88 @@
+[
+  {
+    "step": "revoked-switcher",
+    "text": "P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用频率\n名称\nPolo 助手\n\nPolo 内置\n\n使用当前企业空间中的会话与资料。\n\n管理技能\n打开助手\n报价整理\n\n晨星科技\n\n把零散报价整理成汇总表。\n\n打开\n合同审查\n\n晨星科技\n\n找出合同中需要核对的条款。\n\n打开\n客户资料核验\n\n晨星科技\n\n检查客户资料中的不一致。\n\n查看原因\n你已经不能访问晨星科技了\n\n停止这台电脑上的企业任务，然后选择返回位置\n\n已停止\n报价整理\n任务已停止；重新打开不会自动执行\n停止中\n助手 · Q2 报价汇总\n正在停止下一段生成\n已停止\n数据报表生成器\n后台任务 · 已停止\n\n个人空间不受影响；企业内容会按公司规定保留。\n\n返回我的空间\n回到空间切换",
+    "controls": [
+      {
+        "text": "P\nPolo",
+        "disabled": true,
+        "go": "P-M03-HOME-ENT"
+      },
+      {
+        "text": "首页",
+        "disabled": true,
+        "go": "P-M03-HOME-ENT"
+      },
+      {
+        "text": "后台任务",
+        "disabled": true,
+        "go": "P-M04-RUNTIME"
+      },
+      {
+        "text": "",
+        "disabled": true,
+        "go": "P-M04-NOTIFY-ENT"
+      },
+      {
+        "text": "王",
+        "disabled": true,
+        "go": "P-M10-MENU-ENT"
+      },
+      {
+        "text": "管理技能",
+        "disabled": true,
+        "go": "A-enterprise-skills"
+      },
+      {
+        "text": "打开助手",
+        "disabled": true,
+        "go": "A-enterprise-new"
+      },
+      {
+        "text": "打开",
+        "disabled": true,
+        "go": "P-M04-APP-VIEW"
+      },
+      {
+        "text": "打开",
+        "disabled": true,
+        "go": "P-M04-APP-CONTRACT"
+      },
+      {
+        "text": "查看原因",
+        "disabled": true,
+        "go": "P-M11-BLOCKED-VERSION"
+      },
+      {
+        "text": "返回我的空间",
+        "disabled": false,
+        "go": "P-M03-HOME-PERSONAL"
+      },
+      {
+        "text": "回到空间切换",
+        "disabled": false,
+        "go": "P-M02-SWITCHER-PERSONAL"
+      }
+    ]
+  },
+  {
+    "case": "revoke",
+    "error": "Locator.click: Timeout 4000ms exceeded.\nCall log:\n  - waiting for locator(\"[data-go=\\\"P-M03-HOME-ENT\\\"]:visible\").first\n    - locator resolved to <button disabled data-tab=\"home\" title=\"已失去晨星科技访问资格\" class=\"brand-lockup\" aria-label=\"返回 Polo 首页\" data-go=\"P-M03-HOME-ENT\" data-enterprise-revoked=\"true\" data-transition=\"P-M11-REVOKE-R14-C-0\">…</button>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is not enabled\n    - retrying click action\n    - waiting 20ms\n    2 × waiting for element to be visible, enabled and stable\n      - element is not enabled\n    - retrying click action\n      - waiting 100ms\n    7 × waiting for element to be visible, enabled and stable\n      - element is not enabled\n    - retrying click action\n      - waiting 500ms\n"
+  },
+  {
+    "step": "member-billing-handoff",
+    "text": "系统浏览器 · 企业积分\n\n企业积分与账单\n积分来源\n企业管理员统一分配\n成员申请\n在 App 内通知管理员\n账单查看\n系统浏览器完成\n生效方式\n管理员分配后即时生效\n取消\n在浏览器查看账单",
+    "controls": [
+      {
+        "text": "取消",
+        "disabled": false,
+        "go": "P-M03-HOME-ENT"
+      },
+      {
+        "text": "在浏览器查看账单",
+        "disabled": false,
+        "go": "P-M03-HOME-ENT"
+      }
+    ]
+  }
+]

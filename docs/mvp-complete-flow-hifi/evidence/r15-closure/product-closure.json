@@ -1,0 +1,1388 @@
+{
+  "revision": "poo70-workbench-r15-closure",
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47",
+    "docs/mvp-complete-flow-hifi/prototype.html": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4",
+    "docs/mvp-complete-flow-hifi/review.html": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3",
+    "design-demos/polo-client-source-baseline/prototype.html": "2677f79495c15c1da170d4c45af407b5f34023774bd801e4d433f5716e98b05d"
+  },
+  "checks": [
+    {
+      "name": "personal revoked source survives home return",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal revoked skill cannot enable",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal same-name builtin remains disabled",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal source skill unaffected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise revoked source survives home return",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise revoked skill cannot enable",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise same-name builtin remains disabled",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise source skill unaffected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU 创作者工作台 correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU 创作者工作台 cancel retains origin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU 企业管理后台 correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU 企业管理后台 cancel retains origin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-ENT 创作者工作台 correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-ENT 创作者工作台 cancel retains origin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-ENT 企业管理后台 correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-ENT 企业管理后台 cancel retains origin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "design sole-source app blocked after leave",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "design shared app remains enabled",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "design then growth last source blocks shared app",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "growth sole-source app blocked after leave",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "growth shared app remains enabled",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "growth then design last source blocks shared app",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "stopped report stays stopped in runtime",
+      "passed": true,
+      "detail": "数据报表生成器任务已停止；重新打开不会自动执行\n已停止\n打开\n停止"
+    },
+    {
+      "name": "P-M11-OFFLINE-HOME no new app startup",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-OFFLINE-HOME no new assistant startup",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-OFFLINE-HOME reconnect returns eligibility only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-OFFLINE-HOME verified catalog allows explicit open",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M03-HOME-OFFLINE no new app startup",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M03-HOME-OFFLINE no new assistant startup",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M03-HOME-OFFLINE reconnect returns eligibility only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M03-HOME-OFFLINE verified catalog allows explicit open",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-CONTRACT cancellation remains gated",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-CONTRACT no personal downgrade",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-CONTRACT-DL cancellation remains gated",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-CONTRACT-DL no personal downgrade",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-CONTRACT-FAIL cancellation remains gated",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-CONTRACT-FAIL no personal downgrade",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal uninstall cancellation retains installed version",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise uninstall cancellation retains installed version",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel circle exit leaves sole-source app usable",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "last circle source also revokes assistant skill",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M02-CONFIRM-PERSONAL enters stop progress",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M02-CONFIRM-PERSONAL commits only after progress",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M02-CONFIRM enters stop progress",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M02-CONFIRM commits only after progress",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "partial stop cancellation never revives quote",
+      "passed": true,
+      "detail": "报价整理任务已停止；重新打开不会自动执行\n已停止\n停止\n打开"
+    },
+    {
+      "name": "upgrade verified result has safe entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "offline via skills still blocks send",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal preferences cancel stays with input",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal preferences explicit discard leaves",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise preferences cancel stays with input",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise preferences explicit discard leaves",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "report running close has choice",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "report stop close retains same object stopped",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "contract running close has choice",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "contract stop close retains same object stopped",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal export excludes credentials and references",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal invalid import creates no result",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal import previews selected content",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal cancel import keeps original conversation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal import creates new nonrunning object",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal result belongs to selected file",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise export excludes credentials and references",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise invalid import creates no result",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise import previews selected content",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise cancel import keeps original conversation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise import creates new nonrunning object",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise result belongs to selected file",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "revoked enterprise absent from usable targets",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "revocation recovers into personal space",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "renewal result reaches everyday list",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "renewed detail is circle content",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "renewal survives home roundtrip",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "rejoin opens browser without granting membership",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "last-source confirmation uses current facts",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "last-source result uses current facts",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "App insufficient credit stops AI request",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "App notify stays with contract",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "App credit block survives reopening",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "App credit block follows assistant consumer",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "opening new assistant does not reuse imported object",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "same-name imported object 1 remains recoverable",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "same-name imported object 2 remains recoverable",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "unqualified settings preserve account facts",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "unqualified settings offer no management handoff",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "create opens browser without changing space",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "create return requires explicit query",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "created enterprise binds owner before entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "explicit entry consumes verified owner",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M01-CREATE-PENDING safe recovery",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M01-CREATE-QUERY-FAILED safe recovery",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired relation retains its actual expiry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired relation appears in recovery filter",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired relation survives filter roundtrip",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired relation opens expired detail",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel rejoin preserves exited state",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M03-INSPECTOR App content responsibility is explicit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M03-INSPECTOR-PERSONAL App content responsibility is explicit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-BLOCKED-WITHDRAWN App content responsibility is explicit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-BLOCKED-VERSION App content responsibility is explicit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-OFFLINE-RUNNING App content responsibility is explicit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "valid long transfer content stays readable",
+      "passed": true,
+      "detail": "[720, 720]"
+    },
+    {
+      "name": "long import cancellation leaves no object",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired purchase updates all entitlement consumers",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired purchase also updates everyday list",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M07-EXPIRED same skill identity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M07-DETAIL-PAID-AFTER-LEAVE same skill identity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M07-RENEW same skill identity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M07-RENEW-EXPIRED same skill identity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M07-LEAVE same skill identity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M07-LEAVE-PAID same skill identity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel at 0 has no fabricated failure",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel at 0 count follows actual stopped objects",
+      "passed": true,
+      "detail": "('0 / 3', 0)"
+    },
+    {
+      "name": "cancel at 0 invalidates delayed switch",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel at 420 has no fabricated failure",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel at 420 count follows actual stopped objects",
+      "passed": true,
+      "detail": "('1 / 3', 1)"
+    },
+    {
+      "name": "cancel at 420 invalidates delayed switch",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel at 820 has no fabricated failure",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel at 820 count follows actual stopped objects",
+      "passed": true,
+      "detail": "('2 / 3', 2)"
+    },
+    {
+      "name": "cancel at 820 invalidates delayed switch",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "confirmed stop failure remains factual after cancellation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-ENT lacks current-enterprise finance entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-NOPRIV lacks current-enterprise finance entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "verified enterprise owner has financial handoff",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "owner account menu agrees with verified role",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "owner handoff binds current enterprise",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "finance return retains original menu",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MEMBER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MEMBER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MEMBER contact shares only relevant problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MEMBER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MANAGER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MANAGER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MANAGER contact shares only relevant problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-MANAGER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-OWNER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-OWNER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-OWNER Browser retains target and cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-OWNER cancel keeps restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PAUSED-OWNER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MEMBER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MEMBER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MEMBER contact shares only relevant problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MEMBER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MANAGER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MANAGER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MANAGER contact shares only relevant problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-MANAGER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-OWNER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-OWNER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-OWNER Browser retains target and cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-OWNER cancel keeps restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-CLOSING-OWNER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MEMBER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MEMBER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MEMBER contact shares only relevant problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MEMBER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MANAGER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MANAGER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MANAGER contact shares only relevant problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-MANAGER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-OWNER preserves governance cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-OWNER role controls Browser responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-OWNER Browser retains target and cause",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-OWNER cancel keeps restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-ARREARS-OWNER safe return cannot bypass enterprise restriction",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "governance Browser return remains blocked",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "verified governance result clears only governance",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "governance recovery does not restart stopped App tasks",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PENDING unknown result remains blocked",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-PENDING safe personal recovery",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-FAILED unknown result remains blocked",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M11-GOVERNANCE-FAILED safe personal recovery",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "governance recovery never restores revoked membership",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal request assistant not stopped before confirmation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal request missing confirmation keeps assistant visible",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal request confirmed App stop remains separate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal request explicit retry commits verified target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal ack assistant not stopped before confirmation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal ack missing confirmation keeps assistant visible",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal ack confirmed App stop remains separate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "personal ack explicit retry commits verified target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise request assistant not stopped before confirmation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise request missing confirmation keeps assistant visible",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise request confirmed App stop remains separate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise request explicit retry commits verified target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise ack assistant not stopped before confirmation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise ack missing confirmation keeps assistant visible",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise ack confirmed App stop remains separate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "enterprise ack explicit retry commits verified target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel after stop request retains unknown confirmation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel with missing confirmation never commits target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "first renewal consumes current period",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "first renewal current entitlement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "same paid order query is idempotent",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second renewal uses latest verified entitlement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel second quote preserves purchased rights",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second browser handoff consumes same new quote",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel browser handoff leaves entitlement unchanged",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second order is distinct and updates same circle",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "original second order retained on return",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "rechecking second order does not purchase another month",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second entitlement reaches ordinary subscription",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-02-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-03-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-04-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-05-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-06-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-07-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-08-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-09-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "authoritative monthly quote remains bound through 2027-10-02",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "monthly limit blocks new payment",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "limit preserves original last order and entitlement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "restored membership next quote uses restored expiry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "annual paid next period stays owned after list return",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-return independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-preblock independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-cut independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-checking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-notyet independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-queryfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-return independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerreturn independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-preblock independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-cut independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-checking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-notyet independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-queryfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-notify independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-notified independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budget independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetowner independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerblock independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-returnstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-checkingstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-notyetstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-personal-failedstream independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerchecking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerpending independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-ownerfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetreturn independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetchecking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetpending independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetnotified independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetmemberchecking independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetmemberpending independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "A-enterprise-budgetmemberfailed independent blocked state survives ordinary navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY hides write creator entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY shows responsibility only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "responsibility cancels into original P-M10-MENU-RESPONSIBILITY",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-SETTINGS consumes same read-only qualification",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY return does not grant creator write",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY verified result remains read-only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY ordinary consumers retain responsibility state",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY BROWSER-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY QUERY-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT hides write creator entry",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT shows responsibility only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "responsibility cancels into original P-M10-MENU-RESPONSIBILITY-ENT",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-SETTINGS-ENT consumes same read-only qualification",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT return does not grant creator write",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT verified result remains read-only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT ordinary consumers retain responsibility state",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT BROWSER-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-RESPONSIBILITY-ENT QUERY-FAILED recovers correct target",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU does not invent former creator responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "P-M10-MENU-NOPRIV does not invent former creator responsibility",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired notification chooses restore not monthly renewal",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "expired notification does not claim purchase limit",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel expired notification recovery leaves source expired",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "notification recovery now receives active latest quote",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "left circle notification offers explicit rejoin",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "cancel notification rejoin preserves revoked sole source",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "passed": true
+}

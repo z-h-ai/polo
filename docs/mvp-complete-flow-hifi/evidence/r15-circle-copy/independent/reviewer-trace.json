@@ -1,0 +1,19 @@
+{
+  "reviewer": "/root/classic_style_review",
+  "input_policy": "Current Spec §13.12, final artifact inventory, actual rendered final product pages and own screenshots only; no author quality/README/conclusions read.",
+  "actions": [
+    "Read current authoritative section and manifest revision.",
+    "Ran own Python Playwright two list scenes at 1440x900,1024x768,800x600; asserted single title/subtitle and removed two redundant lines.",
+    "Exercised search, no-result status filter, clearing/restoration, data-circle detail entry, circle return and home return at all 6 scene-viewports.",
+    "Opened four other pages read-only and captured visible copy; selected three concrete repetition examples as suggestions, not defects in this authorized edit.",
+    "Inspected five screenshots with view_image and recorded source/evidence hashes."
+  ],
+  "not_changed": "No product or other-page source was edited by reviewer.",
+  "reviewed_images": [
+    "P-M07-LIST-1440.png",
+    "P-M07-LIST-RENEWED-800.png",
+    "example-P-M07-DETAIL-DATA-SUBSCRIPTION.png",
+    "example-P-M07-DETAIL-PAID-SUBSCRIPTION.png",
+    "example-P-M07-YEAR-RESULT.png"
+  ]
+}

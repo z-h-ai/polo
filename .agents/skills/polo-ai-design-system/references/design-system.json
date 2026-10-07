@@ -1,0 +1,636 @@
+{
+  "schema_version": 2,
+  "skill_name": "polo-ai-design-system",
+  "repository": {
+    "name": "polo-ai",
+    "paths": [
+      "apps/electron/src/renderer",
+      "apps/electron/src/main",
+      "apps/electron/src/preload",
+      "docs/mvp-complete-flow-hifi",
+      ".agents/skills/polo-ai-design-system"
+    ],
+    "platforms": [
+      "desktop-electron"
+    ],
+    "modules": [
+      "登录与自动注册、外层顶栏、首页应用目录、我的圈子及圈子详情；main/preload仅对应受信交接，不定义业务页视觉"
+    ]
+  },
+  "mode": "extracted",
+  "revision": "poo70-client-design-r2-20261004",
+  "sources": [
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "sha256": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6",
+      "role": "authority",
+      "scope": "当前产品唯一来源 master-r15-closure；§13.8—13.13 覆盖旧设计指令"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "sha256": "1b6e8a4c4fed83dd0451709f2ccb1e24c47e5cefb7fb9ae8d38b2184dfe43d9d",
+      "role": "authority",
+      "scope": "本次原型提取与消费边界；明确确认/实现事实/待复看范围"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "sha256": "fe5bfc320c7345ee5f22c400c51dd9f69049b6a9090b286ee31de5f7b244a20a",
+      "role": "authority",
+      "scope": "b82fa1e5 基础样式，按最新原型逐字节提取；当前外层工作台样式维护源"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "sha256": "75e75333fb309f5ffb3262082dbddbffd3ee7e6a08f4503b1f3a22dbf120f591",
+      "role": "authority",
+      "scope": "导航/Header、首页和统一圈子列表已明确增量；按最终CSS cascade消费"
+    },
+    {
+      "path": "apps/electron/src/renderer/index.css",
+      "sha256": "91fb77782a6d5dadb2cff70f05a88fa2ec67672e50dc2362020aa5b393d13449",
+      "role": "implementation",
+      "scope": "本轮工作树Renderer样式事实；不是发布版或新的产品设计授权"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/g4-product.css",
+      "sha256": "fe62101ae60d6a11021f98af04e20b1eba97920eb41d7f49d4f9751dd6bb0218",
+      "role": "implementation",
+      "scope": "POO-41 ef3528ef 历史冻结样式；不覆盖当前Spec"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/g4-review-record.md",
+      "sha256": "56fdd07ddaf3f5525736b124cac3cdc14ecb6953703283f0a09730effdbd7843",
+      "role": "implementation",
+      "scope": "2026-08-11 历史冻结范围记录，非当前全页Acceptance"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/renderer-index.css",
+      "sha256": "964e3744691aeea9aa3f94f5084c4405a97ac046a0e8f348b13241fe4c2bbfaf",
+      "role": "implementation",
+      "scope": "01f4447c固定Renderer快照，只作历史比较"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/workbench-header-scroll.js",
+      "sha256": "56eb0f05806951543eaaf4c0033c7fcc08eae3336ca6010794776f6ca97ab409",
+      "role": "implementation",
+      "scope": "原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js",
+      "sha256": "a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73",
+      "role": "implementation",
+      "scope": "原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js",
+      "sha256": "dda528141636c0253fe70afaeeb23a9919aa8264e562d63235c77316a6248de7",
+      "role": "implementation",
+      "scope": "原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js",
+      "sha256": "b26fcc98fb62dc2d9ee91ddbed21a5bd83a23f830b9acea9028a40f747934808",
+      "role": "implementation",
+      "scope": "原型共享行为脚本；生产须接真实状态/服务，不移植模拟结果"
+    }
+  ],
+  "themes": [
+    "light"
+  ],
+  "viewports": [
+    {
+      "id": "desktop-1440x900",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "id": "desktop-1024x768",
+      "width": 1024,
+      "height": 768
+    },
+    {
+      "id": "desktop-800x600",
+      "width": 800,
+      "height": 600
+    }
+  ],
+  "tokens": [
+    {
+      "family": "颜色与语义派生色（完整CSS color）",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css"
+    },
+    {
+      "family": "系统字体栈与字号/字重/行高",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css"
+    },
+    {
+      "family": "圆角/阴影/层级",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css"
+    },
+    {
+      "family": "工作区尺寸/间距/密度/桌面断点",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css"
+    },
+    {
+      "family": "当前导航与首页/圈子增量样式",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css"
+    }
+  ],
+  "components": [
+    {
+      "name": "登录表单",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reuse": "密码/验证码切换及手机号自动注册，复用真实认证；不新增独立注册页"
+    },
+    {
+      "name": "工作台顶栏",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "reuse": "顶部首页与已打开App标签，账号菜单切换空间，主体滚离顶部才出现边线；无第二排资源Tab"
+    },
+    {
+      "name": "工作区布局",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reuse": "读取最大宽度/内边距及断点；工作区纵向滚动，主内容不出现非预期横向溢出"
+    },
+    {
+      "name": "应用卡",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reuse": "首页/圈子复用同一结构，创作者来源保留，省略常驻状态与来源数量；稳定作品ID去重"
+    },
+    {
+      "name": "首页目录",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "reuse": "标题我的应用，完整目录搜索/排序及空失败态，个人圈子普通入口；助手仅保留已有打开动作"
+    },
+    {
+      "name": "圈子统一列表",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "reuse": "免费/月度/年度统一头像/身份/摘要/权益/详情入口；不增加桌面分享链接输入"
+    },
+    {
+      "name": "圈子详情分区",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "reuse": "内容/更新/订阅；退出仅订阅区，价格周期有效期各一次；技能本批只读"
+    },
+    {
+      "name": "确认对话框",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reuse": "明确原对象的确认/取消及失败恢复；用edge圆角/panel阴影，不以模拟按钮选择业务结果"
+    },
+    {
+      "name": "系统态与恢复",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reuse": "准备/加载/错误/离线/失权/主动重试，各自保留真实事实和最小恢复操作"
+    },
+    {
+      "name": "浏览器交接",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reuse": "只承接原对象并主动核对，不复制网页支付/管理，不自动重复业务写"
+    }
+  ],
+  "interaction_states": [
+    "loading/preparing/submitting",
+    "empty/search-no-results",
+    "hover/focus-visible/disabled",
+    "error/retry/offline",
+    "expired/revoked/multi-source fallback",
+    "success/cancel/interruption",
+    "return to original circle/order with manual recheck"
+  ],
+  "prototype_guidance": [
+    "先读 references/foundations.md，产品行为读Spec；UI消费最新 docs/mvp-complete-flow-hifi/prototype.html 与主manifest，逐卡按scene定位。",
+    "最新原型是目标呈现；已确认风格/入口/文案与待复看整页布局分别记录。",
+    "仅维护Skill模板与样式；文档原型、消费manifest与兼容adoption是生成产物，不独立手改。",
+    "管理技能页面和Polo助手内部代码暂缓；真实助手UI继续复用Renderer，转译示意不能成为重写标准。",
+    "仅产品页面可进入客户端；review-shell按钮、模拟结果、虚构账号金额订单及第三方应用内部内容不进入生产。",
+    "未建立完整政策注册或生产parity绑定；来源/结构检查不证明execution_ready或业务验收。"
+  ],
+  "checks": [
+    "python3 docs/mvp-complete-flow-hifi/tools/check_design_system.py",
+    "python3 docs/mvp-complete-flow-hifi/tools/build_review.py",
+    "POLO_REVIEW_EVIDENCE=/tmp/poo70-design-structure python3 docs/mvp-complete-flow-hifi/tools/validate_unified.py"
+  ],
+  "decisions": [
+    {
+      "id": "D-CURRENT-STYLE",
+      "status": "confirmed",
+      "scope": "Spec §13.10：b82fa1e5配色/风格替代初始r15灰黑方案；当前第一段CSS与该版本一致",
+      "source": "docs/client-journey-review/spec.md"
+    },
+    {
+      "id": "D-NAV-HEADER",
+      "status": "confirmed",
+      "scope": "Spec §13.9：去第二排资源Tab，圈子个人首页入口，管理技能在助手卡内，Header仅主体滚动后显示细线",
+      "source": "docs/client-journey-review/spec.md"
+    },
+    {
+      "id": "D-HOME-CIRCLE",
+      "status": "confirmed",
+      "scope": "Spec §13.11—13.13：我的应用标题、共享应用卡、圈子统一列表与详情文案去重、退出仅订阅区",
+      "source": "docs/client-journey-review/spec.md"
+    },
+    {
+      "id": "D-ASSISTANT-REUSE",
+      "status": "confirmed",
+      "scope": "Spec §13.11：真实助手UI复用当前Renderer；本批暂缓技能管理及助手内部应用代码",
+      "source": ".agents/skills/polo-ai-design-system/references/foundations.md"
+    },
+    {
+      "id": "D-PAGE-VISUAL",
+      "status": "suggested",
+      "scope": "整页布局待复看；当前提取只是目标实现事实；集中visual smoke不升级parity",
+      "source": ".agents/skills/polo-ai-design-system/references/foundations.md"
+    }
+  ],
+  "coverage": [
+    {
+      "dimension": "color",
+      "status": "explicit",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "已确认b82fa1e5色彩与当前增量cascade；使用实际CSS颜色"
+    },
+    {
+      "dimension": "typography",
+      "status": "explicit",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "源CSS定义字体/字号/行高阶梯；不能套全局新字体覆盖助手"
+    },
+    {
+      "dimension": "layout",
+      "status": "derived",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "原型提取几何为目标实现事实，具体新组合布局待复看"
+    },
+    {
+      "dimension": "size",
+      "status": "derived",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "控件/头像/工作区实际尺寸来自源CSS和最终cascade"
+    },
+    {
+      "dimension": "spacing",
+      "status": "derived",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "组件内外间距读取源CSS/断点，不建立第二份数值表"
+    },
+    {
+      "dimension": "radius",
+      "status": "explicit",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "源CSS radius与组件例外分别使用"
+    },
+    {
+      "dimension": "density",
+      "status": "derived",
+      "source": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-base.css",
+      "reason": "目录/卡片/统一圈子列表沿实际CSS；不恢复紧凑灰黑方案"
+    },
+    {
+      "dimension": "states",
+      "status": "explicit",
+      "source": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "reason": "loading/empty/error/recovery/focus/disabled与恢复合同明确"
+    },
+    {
+      "dimension": "responsive",
+      "status": "derived",
+      "source": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "reason": "1440×900及1024×768目标，800×600额外回归；媒体查询按最终规则"
+    }
+  ],
+  "component_contracts": [
+    {
+      "name": "登录表单",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-LOGIN-PASSWORD"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-LOGIN-PHONE"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-LOGIN-CODE"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-LOGIN-CANCEL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LOGIN"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LOGIN-PHONE"
+        }
+      ]
+    },
+    {
+      "name": "工作台顶栏",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-PERSONAL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-ENT"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LIST"
+        }
+      ]
+    },
+    {
+      "name": "工作区布局",
+      "kind": "foundation",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-PERSONAL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LIST"
+        }
+      ]
+    },
+    {
+      "name": "应用卡",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-PERSONAL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-FOCUS"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-ALL-APPS"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-MANAGE-HOME"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-DATA"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-SOURCE-FALLBACK"
+        }
+      ]
+    },
+    {
+      "name": "首页目录",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-PERSONAL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-ZERO"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-EMPTY-DIR"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-LOAD-FAIL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-ALL-APPS"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-HOME-OFFLINE"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M03-MANAGE-HOME"
+        }
+      ]
+    },
+    {
+      "name": "圈子统一列表",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LIST"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-EMPTY"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LIST-RENEWED"
+        }
+      ]
+    },
+    {
+      "name": "圈子详情分区",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-FOCUS"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-PAID"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-DATA"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-FOCUS-UPDATES"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-PAID-AFTER-LEAVE"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-DETAIL-PAID-UPDATES"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-YEAR-RESULT"
+        }
+      ]
+    },
+    {
+      "name": "确认对话框",
+      "kind": "foundation",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LEAVE"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LEAVE-DATA"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LEAVE-PAID"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-LEAVE-YEAR"
+        }
+      ]
+    },
+    {
+      "name": "系统态与恢复",
+      "kind": "foundation",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-PERSONAL-PREP"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-PERSONAL-PREP-FAIL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-PAY-RETURN-FAIL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-COLD-START"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M01-REOPEN"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-ACCOUNT-MISMATCH"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-EXPIRED"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-PAY-RETURN"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RENEW-LIMIT"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RENEW-RETURN"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RETURN"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RETURN-FAIL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-SUPPORT"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-SUPPORT-LOAD-FAIL"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-YEAR-RETURN"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-SOURCE-FALLBACK"
+        }
+      ]
+    },
+    {
+      "name": "浏览器交接",
+      "kind": "business",
+      "contract": ".agents/skills/polo-ai-design-system/references/foundations.md",
+      "status": "current",
+      "replacement": null,
+      "consumers": [
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RENEW"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RENEW-EXPIRED"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-REJOIN-BROWSER"
+        },
+        {
+          "manifest": ".agents/skills/polo-ai-design-system/assets/prototypes/client-entry/prototype-manifest.json",
+          "scene": "P-M07-RENEW-YEAR"
+        }
+      ]
+    }
+  ]
+}

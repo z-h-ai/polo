@@ -70,6 +70,7 @@ const themeContextStub = {
 mock.module('@/context/ThemeContext', () => ({
   ThemeProvider: ({ children }: { children?: unknown }) => children ?? null,
   useTheme: () => themeContextStub,
+  useOptionalTheme: () => themeContextStub,
 }))
 mock.module('@/hooks/useTheme', () => ({
   useTheme: () => ({
@@ -240,6 +241,23 @@ const electronApiExplicit: Record<string, unknown> = {
   adminAcquirePhoneAuthChallenge: async () => ({}),
   debugLog: () => {},
   unwatchSessionFiles: async () => {},
+
+  // POO-100 (C9) fixture declaration: the home branch now mounts the C2
+  // member-circle resource provider, whose trusted bridge access is
+  // `window.electronAPI.memberCircles`. This fixture does not exercise
+  // circle reads; the deterministic empty-receipt bridge keeps the
+  // fail-closed fixture complete without changing what it verifies.
+  memberCircles: {
+    list: async () => ({ success: true, circles: [] }),
+    listMemberships: async () => ({ success: true, memberships: [] }),
+    previewRenewal: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    leave: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getOrder: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getCheckoutResult: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getUpdates: async () => ({ success: true, updates: { availability: 'upstream_pending', contractGap: 'G2' } }),
+    getProfile: async () => ({ success: true, profile: { availability: 'upstream_pending', contractGap: 'G3' } }),
+    getSupport: async () => ({ success: true, support: { availability: 'upstream_pending', contractGap: 'G4' } }),
+  },
 }
 
 // Known event subscriptions: each returns its unsubscribe function.
@@ -413,22 +431,15 @@ describe('App × frozen narrow-window guard at 390x844 (Review R38 restores the 
     )
     assertHomeRestored()
 
-    // ROUTE: Catalog — entered through the production All Apps control.
-    fireEvent.click(screen.getByTestId('home-all-apps-open'))
-    await waitFor(
-      () => {
-        if (!screen.getByTestId('all-apps-view')) throw new Error('Catalog surface missing after widening')
-      },
-      { timeout: 10_000 },
-    )
-    // The narrow fixture's Catalog fails closed into its error tile —
-    // the route itself (the All Apps view) is the assertion target here.
+    // H3/POO-91 collapsed the old All-Apps entry into the home directory
+    // (the home IS the complete directory now), so the route matrix walks
+    // the guard round-trip on the HOME route itself before the Polo route.
     await act(async () => {
       resizeViewport(390)
     })
     await waitFor(
       () => {
-        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing over Catalog after re-narrowing')
+        if (!screen.getByTestId('window-width-guard')) throw new Error('guard missing after re-narrowing')
       },
       { timeout: 10_000 },
     )
@@ -436,9 +447,7 @@ describe('App × frozen narrow-window guard at 390x844 (Review R38 restores the 
 
     // Back to 641px+: the production Home surface returns. The launcher VIEW
     // state itself resets on the guarded remount (the Home component
-    // unmounted under the guard), which is the production remount behavior —
-    // the ROUTE coverage above (Catalog visible at 641px+) is what the route
-    // matrix pins.
+    // unmounted under the guard), which is the production remount behavior.
     await act(async () => {
       resizeViewport(1000)
     })

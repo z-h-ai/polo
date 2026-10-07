@@ -1,0 +1,16 @@
+[
+  {
+    "step": "offline-to-skills",
+    "scene": "A-personal-skills"
+  },
+  {
+    "step": "offline-send-control",
+    "enabled": true,
+    "scene": "A-personal-conversation"
+  },
+  {
+    "step": "after-send",
+    "scene": "A-personal-generating",
+    "text": "P\nPolo\n首页\nPolo 助手\n×\n后台任务\n我的空间\n王\n我的空间\n新建会话\n技能\n数据源\n所有会话\n个人资料整理\n个人资料整理\n离线时不应发送的新任务\n正在整理你发送的材料…\n查看会话文件\n附加文件\n当前空间\n助手偏好"
+  }
+]

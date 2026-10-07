@@ -1,0 +1,2150 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:,">
+  <title>Polo 工作台 · POO-71 原型</title>
+  <style>
+  /* =====================================================================
+     G4 设计系统 —— 内联自 POO-41 冻结稿 design-demos/polo-client-g4-ui/assets/product.css
+     （artifactCommit ef3528ef，2026-08-11 产品确认冻结；POO-71 按此重做 UI）
+     ===================================================================== */
+:root {
+  --background: #fbfbfa;
+  --surface: #ffffff;
+  --foreground: #17181a;
+  --accent: #6e56cf;
+  --info: #3275d8;
+  --success: #2d8a5b;
+  --destructive: #c84646;
+  --on-accent: #ffffff;
+  --bg-elevated: var(--surface);
+  --surface-strong: #f3f4f5;
+  --border: #e6e7e9;
+  --fg-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --fg-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+  --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+  --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+  --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+  --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+  --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  --success-soft: color-mix(in srgb, var(--success) 10%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 10%, transparent);
+  --destructive-soft: color-mix(in srgb, var(--destructive) 10%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --overlay: color-mix(in srgb, var(--foreground) 42%, transparent);
+  --shadow-minimal: 0 1px 2px rgba(23, 24, 26, .06), 0 1px 4px rgba(23, 24, 26, .03);
+  --shadow-middle: 0 14px 34px rgba(23, 24, 26, .10), 0 2px 7px rgba(23, 24, 26, .04);
+  --shadow-panel: 0 20px 44px rgba(23, 24, 26, .14), 0 3px 9px rgba(23, 24, 26, .06);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-inner: 10px;
+  --radius-lg: 12px;
+  --radius-edge: 14px;
+  --radius-card: 20px;
+  --radius-pill: 9999px;
+  --transition-fast: 0.14s ease-out;
+  --transition-state: 0.28s ease-out;
+}
+
+[data-theme="dark"] {
+  --background: #18191b;
+  --surface: #222326;
+  --foreground: #f4f3f1;
+  --accent: #8c78df;
+  --info: #6da3ec;
+  --success: #5aae80;
+  --destructive: #e06a6a;
+  --surface-strong: #252629;
+  --border: #34363b;
+  --shadow-minimal: 0 1px 3px rgba(0, 0, 0, .24);
+  --shadow-middle: 0 20px 44px rgba(0, 0, 0, .34);
+  --shadow-panel: 0 24px 56px rgba(0, 0, 0, .42);
+}
+
+* { box-sizing: border-box; }
+html { min-width: 320px; font-size: 15px; font-optical-sizing: auto; }
+body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--foreground); background: var(--background); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, textarea, select { color: inherit; font: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 24%, transparent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.icon { display: inline-block; width: 16px; height: 16px; flex: 0 0 auto; }
+
+.app-shell { display: grid; height: 100vh; min-height: 0; grid-template-rows: 64px auto minmax(0, 1fr); overflow: hidden; }
+.workbench-bar { position: sticky; z-index: 20; top: 0; display: flex; grid-row: 1; align-items: center; gap: 12px; height: 64px; padding: 0 28px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--background) 92%, transparent); backdrop-filter: blur(18px); }
+.brand-lockup { display: flex; min-width: 82px; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: var(--foreground); font-size: 14px; font-weight: 720; letter-spacing: -.03em; }
+.brand-mark { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 8px; background: var(--foreground); color: var(--background); font-size: 13px; font-weight: 800; }
+.space-control { position: relative; flex: 0 0 auto; }
+.space-trigger { display: flex; min-width: 130px; max-width: 190px; height: 36px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); text-align: left; }
+.space-trigger:hover, .space-trigger[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: var(--surface); }
+.space-dot { width: 8px; height: 8px; flex: 0 0 auto; overflow: hidden; border-radius: 50%; background: var(--accent); color: transparent; font-size: 0; }
+.space-avatar { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; }
+.space-copy { display: grid; min-width: 0; gap: 2px; flex: 1; }
+.space-copy strong { overflow: hidden; color: var(--foreground); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.space-copy small { display: none; }
+.icon-chevron { width: 13px; height: 13px; }
+.tabs { display: flex; min-width: 0; height: 100%; flex: 1 1 auto; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { display: inline-flex; min-width: 98px; max-width: 190px; height: 36px; flex: 0 0 auto; align-items: center; border-radius: 9px; color: var(--fg-50); font-size: 12px; white-space: nowrap; }
+.tab:hover { background: var(--surface-strong); color: var(--foreground); }
+.tab.active { background: var(--surface); color: var(--foreground); box-shadow: var(--shadow-minimal); }
+.tab-activate { display: inline-flex; min-width: 0; height: 36px; flex: 1; align-items: center; gap: 7px; padding: 0 4px 0 10px; overflow: hidden; border: 0; background: transparent; color: inherit; }
+.tab-activate > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; }
+.tab .tab-icon { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+.tab .tab-icon .icon { width: 13px; height: 13px; }
+.tab-run-dot { width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px var(--success-soft); }
+.tab-close { display: grid; width: 18px; height: 18px; flex: 0 0 auto; margin-right: 5px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--fg-40); font-size: 15px; line-height: 1; }
+.tab-close:hover { background: var(--fg-10); color: var(--foreground); }
+.home-tab { display: inline-flex; width: auto; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--fg-50); font-size: 12px; font-weight: 620; }
+.home-tab:hover { background: var(--surface-strong); color: var(--foreground); }
+.home-tab.active { background: var(--surface); color: var(--foreground); box-shadow: var(--shadow-minimal); }
+.bar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.bar-button, .icon-button, .avatar-button { border: 0; background: transparent; }
+.bar-button { display: flex; height: 34px; align-items: center; gap: 7px; padding: 0 9px; border-radius: 9px; color: var(--fg-60); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.bar-button:hover { background: var(--surface-strong); color: var(--foreground); }
+.icon-button { position: relative; display: inline-grid; width: 32px; height: 32px; place-items: center; border-radius: var(--radius-sm); color: var(--fg-50); }
+.icon-button:hover { background: var(--fg-5); color: var(--foreground); }
+.avatar-button { display: grid; width: 28px; height: 28px; place-items: center; margin-left: 3px; border-radius: var(--radius-pill); background: var(--foreground); color: var(--background); font-size: 11px; font-weight: 600; }
+.status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-40); }
+.status-dot.running { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+.notification-dot { position: absolute; top: 6px; right: 6px; width: 5px; height: 5px; border: 1px solid var(--background); border-radius: 50%; background: var(--info); }
+.popover { position: absolute; top: calc(100% + 8px); border: 1px solid var(--border); border-radius: var(--radius-inner); background: var(--background); box-shadow: var(--shadow-panel); }
+.space-menu { right: 0; left: auto; width: min(306px, calc(100vw - 24px)); padding: 6px; background: var(--surface); }
+.account-menu { right: 20px; width: min(294px, calc(100vw - 24px)); padding: 6px; background: var(--surface); }
+.menu-label, .menu-section-title { padding: 8px 9px 5px; color: var(--fg-40); font-size: 11px; font-weight: 500; letter-spacing: .75px; text-transform: uppercase; }
+.space-row, .menu-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
+.space-row:hover, .space-row.active, .menu-row:hover { background: var(--fg-5); }
+.space-row > span:nth-child(2), .menu-row .menu-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.space-row b, .menu-row b { font-size: 13px; font-weight: 500; }
+.space-row small, .menu-row small { color: var(--fg-50); font-size: 11px; line-height: 1.35; }
+.space-row .check { width: 15px; height: 15px; color: var(--success); }
+.menu-divider { height: 1px; margin: 5px 3px; background: var(--border); }
+.menu-row .menu-icon { display: grid; width: 26px; height: 26px; place-items: center; border-radius: var(--radius-sm); background: var(--fg-5); color: var(--fg-60); }
+.menu-row .menu-icon .icon { width: 14px; height: 14px; }
+.menu-row .menu-arrow { width: 13px; height: 13px; color: var(--fg-40); }
+.connection-banner { display: grid; width: calc(100% - 24px); max-width: 1236px; grid-row: 2; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; margin: 8px auto 0; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--info) 42%, var(--border)); border-radius: var(--radius-md); background: var(--info-soft); color: var(--foreground); box-shadow: var(--shadow-minimal); }
+.connection-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--radius-sm); background: var(--surface); color: var(--info); }
+.connection-copy { display: grid; min-width: 0; gap: 2px; }
+.connection-copy strong { font-size: 12px; font-weight: 650; }
+.connection-copy small { color: var(--fg-60); font-size: 10px; line-height: 1.4; }
+
+.workspace-main { width: 100%; max-width: 1260px; min-height: 0; grid-row: 3; margin: 0 auto; padding: 46px 44px 72px; overflow-y: auto; }
+.eyebrow { margin: 0 0 7px; color: var(--fg-50); font-size: 11px; font-weight: 500; letter-spacing: .75px; text-transform: uppercase; }
+.app-page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.app-page-heading h1, .subpage-heading h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.03em; line-height: 1.25; }
+.app-page-heading > div > p:last-child, .subpage-heading > div > p:last-child { max-width: 690px; margin: 7px 0 0; color: var(--fg-60); font-size: 13px; line-height: 1.5; }
+.page-meta { margin: 5px 0 0 !important; color: var(--fg-50) !important; font-size: 11px !important; line-height: 1.4 !important; }
+.home-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.home-hero > div {
+  min-width: 0;
+}
+
+.home-hero h1 {
+  margin: 0;
+  font-size: clamp(30px, 3vw, 38px);
+  font-weight: 750;
+  letter-spacing: -.055em;
+  line-height: 1.08;
+}
+
+.home-hero p:last-child {
+  max-width: 690px;
+  margin: 13px 0 0;
+  color: var(--fg-60);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.home-hero strong {
+  color: var(--foreground);
+}
+
+.home-context-link {
+  display: grid;
+  min-width: 210px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--fg-70);
+  box-shadow: none;
+  text-align: left;
+}
+
+.home-context-link:hover {
+  border-color: transparent;
+  background: var(--fg-5);
+  color: var(--foreground);
+  box-shadow: none;
+}
+
+.home-context-link > .icon:first-child {
+  color: var(--accent);
+}
+
+.home-context-link > .icon:last-child {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-40);
+}
+
+.home-context-link span {
+  display: grid;
+  gap: 3px;
+}
+
+.home-context-link strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.home-context-link small {
+  color: var(--fg-50);
+  font-size: 11px;
+}
+
+.section {
+  margin-top: 34px;
+}
+
+.section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.section-header > div {
+  min-width: 0;
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 720;
+  letter-spacing: -.03em;
+}
+
+.section-header p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--fg-60);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.section-link,
+.text-button {
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.section-link:hover,
+.text-button:hover {
+  text-decoration: underline;
+}
+
+.home-section-action {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-60);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.home-section-action:hover {
+  background: var(--fg-5);
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.product-card,
+.result-card,
+.detail-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--surface);
+  box-shadow: var(--shadow-minimal);
+}
+
+.product-card {
+  display: flex;
+  min-height: 222px;
+  flex-direction: column;
+  transition:
+    transform .2s ease,
+    border-color .2s ease,
+    box-shadow .2s ease;
+}
+
+.product-card:hover,
+.result-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-middle);
+}
+
+.home-app-grid .product-card:hover {
+  border-color: var(--fg-20);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-middle);
+}
+
+.highlighted-card {
+  border-color: var(--accent) !important;
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    var(--shadow-middle) !important;
+}
+
+.home-app-grid .card-heading {
+  display: grid;
+  gap: 0;
+}
+
+.home-app-grid .app-art {
+  width: 42px;
+  height: 42px;
+  margin-bottom: 26px;
+  border-radius: 13px;
+}
+
+.assistant-card {
+  border-color: var(--border);
+}
+
+.assistant-card .app-art {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.assistant-card .card-action + .card-action {
+  margin-left: 0;
+}
+
+.placement-card { min-height: 210px; }
+.placement-card .status-line { flex-wrap: wrap; }
+.placement-card .card-action + .card-action { margin-left: 0; }
+.home-placement { color: var(--fg-50); font-size: 10px; white-space: nowrap; }
+.home-placement.on { color: var(--accent); }
+
+.card-kicker {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 720;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.card-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.app-art {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.app-art.compact {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+}
+
+.app-art.teal {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.app-art.amber {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.app-art.ink {
+  background: var(--fg-10);
+  color: var(--foreground);
+}
+
+.app-art .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.app-art.compact .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.card-title {
+  min-width: 0;
+}
+
+.card-title h3 {
+  overflow: hidden;
+  margin: 1px 0 3px;
+  font-size: 15px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-app-grid .card-title h3 {
+  font-size: 16px;
+}
+
+.source-line {
+  overflow: hidden;
+  margin: 0;
+  color: var(--fg-50);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-app-grid .source-line {
+  font-size: 12px;
+}
+
+.product-description,
+.result-card p {
+  margin: 18px 0 0;
+  color: var(--fg-60);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.home-app-grid .product-description {
+  max-width: 34rem;
+  margin-top: 17px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.card-meta {
+  margin-top: 9px;
+  color: var(--fg-50);
+  font-size: 10px;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.status-line.actions-only {
+  justify-content: flex-end;
+}
+
+.status {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.status::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.status.good {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.status.info {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.status.bad {
+  background: var(--destructive-soft);
+  color: var(--destructive);
+}
+
+.status.neutral {
+  background: var(--fg-5);
+  color: var(--fg-60);
+}
+
+.card-action {
+  min-height: 30px;
+  margin-left: auto;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.card-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.card-action:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.card-action:disabled:hover {
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.card-action.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.home-app-grid .card-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-60);
+  font-weight: 500;
+}
+
+.home-app-grid .card-action:hover {
+  border-color: transparent;
+  background: var(--fg-5);
+  color: var(--foreground);
+}
+
+.home-app-grid .assistant-card .home-primary-action {
+  min-height: 32px;
+  padding: 0 12px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+  box-shadow: var(--shadow-minimal);
+}
+
+.home-app-grid .assistant-card .home-primary-action:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-middle);
+  transform: translateY(-1px);
+}
+
+.utility-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.utility-card {
+  display: grid;
+  min-height: 82px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-minimal);
+  text-align: left;
+  transition:
+    transform .18s ease,
+    border-color .18s ease,
+    box-shadow .18s ease;
+}
+
+.utility-card:hover {
+  border-color: var(--fg-20);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-middle);
+}
+
+.utility-card > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.utility-card strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.utility-card small {
+  color: var(--fg-60);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.utility-card em {
+  margin-top: 3px;
+  color: var(--fg-50);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.utility-card > .icon:last-child {
+  color: var(--fg-40);
+}
+.circle-app-list { display: grid; gap: 32px; }
+.circle-app-section + .circle-app-section { padding-top: 30px; border-top: 1px solid var(--border); }
+.circle-app-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; margin-bottom: 12px; }
+.circle-app-header > div { min-width: 0; }
+.circle-app-title { display: flex; align-items: center; gap: 8px; }
+.circle-app-title h3 { margin: 0; font-size: 16px; font-weight: 680; letter-spacing: -.02em; }
+.circle-app-header p { margin: 4px 0 0; color: var(--fg-50); font-size: 11px; }
+.circle-app-section.highlighted-section .circle-app-title h3 { color: var(--accent); }
+.results-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.result-card { min-height: 118px; }
+.result-card h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.result-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 13px; color: var(--fg-50); font-size: 10px; }
+
+.button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--foreground); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.button:hover { background: var(--fg-5); }
+.button:disabled { cursor: not-allowed; opacity: .48; }
+.button:disabled:hover { background: transparent; }
+.button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.button.danger { border-color: var(--destructive); background: var(--destructive); color: #fff; }
+.button.quiet { min-height: 28px; }
+.heading-actions, .assistant-header-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; }
+.app-page-heading { margin-bottom: 18px; }
+.app-workspace { display: grid; min-height: 450px; place-items: center; align-content: center; padding: 30px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg-elevated); text-align: center; }
+.app-workspace-icon { display: grid; width: 58px; height: 58px; place-items: center; margin-bottom: 18px; border-radius: var(--radius-edge); background: var(--accent-soft); color: var(--accent); }
+.app-workspace-icon .icon { width: 27px; height: 27px; }
+.app-workspace h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.app-workspace > p:not(.eyebrow) { max-width: 620px; margin: 8px 0 0; color: var(--fg-60); font-size: 13px; line-height: 1.55; }
+.app-actions { display: flex; gap: 8px; margin-top: 20px; }
+
+.workspace-main.assistant-mode { display: grid; width: 100%; max-width: none; height: 100%; grid-template-rows: auto minmax(0, 1fr); gap: 6px; margin: 0; padding: 6px; overflow: hidden; }
+.prototype-boundary-note { display: inline-flex; min-height: 22px; align-items: center; justify-self: start; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border)); border-radius: 999px; background: var(--accent-soft); color: var(--fg-60); font-size: 10px; line-height: 1.4; }
+.prototype-boundary-note strong { flex: 0 0 auto; color: var(--accent); font-size: 10px; }
+.assistant-shell { display: grid; width: 100%; min-height: 0; grid-template-columns: 220px 300px minmax(440px, 1fr); gap: 6px; overflow: hidden; background: var(--background); }
+.assistant-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 8px; background: var(--background); }
+.assistant-new-session { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 8px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); box-shadow: var(--shadow-minimal); font-size: 12px; text-align: left; }
+.assistant-new-session .icon { width: 14px; height: 14px; }
+.assistant-nav { display: grid; align-content: start; gap: 2px; min-height: 0; overflow-y: auto; padding: 4px 0 16px; }
+.assistant-nav-item { display: flex; width: 100%; min-height: 30px; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-70); font-size: 12px; text-align: left; }
+.assistant-nav-item:hover, .assistant-nav-item.active { background: var(--fg-5); color: var(--foreground); }
+.assistant-nav-item .icon { width: 14px; height: 14px; color: var(--fg-50); }
+.assistant-nav-nested { position: relative; display: grid; gap: 2px; padding-left: 20px; }
+.assistant-nav-nested::before { position: absolute; top: 4px; bottom: 4px; left: 13px; width: 1px; background: var(--fg-10); content: ""; }
+.assistant-nav-divider { height: 1px; margin: 5px 8px; background: var(--border); }
+.assistant-navigator, .assistant-main { min-width: 0; min-height: 0; overflow: hidden; border-radius: var(--radius-inner); background: var(--surface); box-shadow: var(--shadow-middle); }
+.assistant-navigator { display: flex; flex-direction: column; padding: 8px; }
+.assistant-navigator > header { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 4px 8px; }
+.assistant-navigator > header > div { display: grid; min-width: 0; gap: 2px; }
+.assistant-navigator > header strong { font-size: 13px; font-weight: 620; }
+.assistant-navigator > header span { overflow: hidden; color: var(--fg-50); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-list-label { margin: 9px 9px 4px; color: var(--fg-40); font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.session-row { display: grid; gap: 3px; width: 100%; padding: 9px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
+.session-row:hover, .session-row.active { background: var(--fg-5); }
+.session-row.muted { opacity: .68; }
+.session-row strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.session-row span { color: var(--fg-50); font-size: 10px; }
+.sidebar-foot { display: grid; gap: 3px; margin-top: auto; padding: 12px 8px 4px; border-top: 1px solid var(--border); }
+.sidebar-foot span { font-size: 11px; font-weight: 600; }
+.sidebar-foot small { color: var(--fg-50); font-size: 10px; line-height: 1.4; }
+.assistant-main { display: grid; min-width: 0; grid-template-rows: auto minmax(0, 1fr); }
+.assistant-header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 20px; padding: 7px 9px 7px 14px; border-bottom: 1px solid var(--border); }
+.assistant-header h1 { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 14px; font-weight: 600; }
+.assistant-header h1 .icon { width: 13px; height: 13px; transform: rotate(90deg); color: var(--fg-50); }
+.assistant-header p { margin: 3px 0 0; color: var(--fg-50); font-size: 9px; }
+.assistant-header-actions { display: flex; align-items: center; gap: 4px; }
+.chat-panel { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.message-list { display: grid; width: 100%; max-width: 840px; align-content: start; gap: 22px; margin: 0 auto; overflow-y: auto; padding: 34px 20px; mask-image: linear-gradient(to bottom, transparent 0, black 28px, black calc(100% - 28px), transparent 100%); }
+.message { display: grid; width: min(100%, 700px); grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+.message.user { margin-left: auto; grid-template-columns: minmax(0, 1fr) auto; }
+.message.user .message-avatar { order: 2; }
+.message.user > div { order: 1; padding: 10px 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--fg-5); }
+.message.assistant > div { padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.message-avatar { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); font-size: 10px; font-weight: 600; }
+.message small { color: var(--fg-50); font-size: 10px; }
+.message p { margin: 5px 0 0; font-size: 13px; line-height: 1.58; }
+.tool-call { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.tool-call > .icon { color: var(--accent); }
+.tool-call > span:nth-child(2) { display: grid; flex: 1; gap: 2px; }
+.tool-call strong { font-size: 11px; }
+.tool-call small { font-size: 9px; }
+.tool-actions { display: flex; align-items: center; gap: 6px; }
+.permission-call { align-items: flex-start; }
+.composer-wrap { width: 100%; max-width: 840px; margin: 3px auto 0; padding: 0 16px 16px; }
+.composer-mode { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; padding: 0 2px; color: var(--fg-50); font-size: 9px; }
+.assistant-mode-badge { display: inline-flex; height: 30px; align-items: center; gap: 6px; padding: 0 9px; border: 0; border-radius: var(--radius-md); background: var(--info-soft); color: var(--info); box-shadow: var(--shadow-minimal); font-size: 11px; font-weight: 600; }
+.assistant-mode-badge .icon { width: 13px; height: 13px; }
+.assistant-mode-badge .icon:last-child { width: 11px; height: 11px; transform: rotate(90deg); opacity: .62; }
+.chat-composer { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-middle); }
+.chat-composer > textarea { display: block; width: 100%; min-height: 84px; max-height: 260px; padding: 15px 18px 11px; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 1.5; }
+.composer-footer { display: grid; min-height: 44px; grid-template-columns: auto minmax(0, auto) 1fr auto; align-items: center; gap: 4px; padding: 7px 8px; border-top: 1px solid var(--border); }
+.composer-tool { display: inline-flex; min-width: 0; height: 28px; align-items: center; gap: 6px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-60); font-size: 10px; white-space: nowrap; }
+.composer-tool:hover { background: var(--fg-5); color: var(--foreground); }
+.composer-tool .icon { width: 14px; height: 14px; }
+.composer-tool select { max-width: 210px; border: 0; outline: 0; background: transparent; color: inherit; font-size: 10px; }
+.composer-send { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; background: var(--foreground); color: var(--background); }
+.composer-send .icon { width: 15px; height: 15px; transform: rotate(-90deg); }
+.skills-panel { overflow-y: auto; padding: 22px; }
+.panel-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.panel-intro h2 { margin: 0; font-size: 16px; }
+.panel-intro p { margin: 5px 0 0; color: var(--fg-60); font-size: 12px; }
+.skill-list { display: grid; gap: 8px; }
+.skill-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(220px, .65fr); align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.skill-row h3 { margin: 0; font-size: 13px; }
+.skill-row p { margin: 3px 0; color: var(--fg-60); font-size: 11px; }
+.skill-row small { color: var(--fg-50); font-size: 10px; }
+.skill-permission { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.skill-permission > span { max-width: 180px; color: var(--fg-50); font-size: 10px; line-height: 1.35; text-align: right; }
+
+.file-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.file-toolbar label { display: grid; gap: 5px; color: var(--fg-50); font-size: 10px; }
+.file-toolbar input { width: min(360px, 54vw); height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.file-toolbar > span { color: var(--fg-50); font-size: 11px; }
+.file-toolbar strong { color: var(--foreground); }
+.table-card { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-minimal); }
+.table-card table { min-width: 900px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { padding: 10px 12px; background: var(--bg-elevated); color: var(--fg-50); font-size: 10px; font-weight: 500; text-align: left; white-space: nowrap; }
+td { padding: 12px; border-top: 1px solid var(--border); color: var(--fg-60); white-space: nowrap; }
+.file-name { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--foreground); text-align: left; }
+.file-name:hover { background: var(--fg-5); color: var(--accent); }
+.file-name:hover strong { text-decoration: underline; text-underline-offset: 2px; }
+.file-name .icon { color: var(--accent); }
+.local-path { display: block; max-width: 280px; overflow: hidden; padding: 3px 4px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-50); font-family: var(--font-mono); font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.local-path:hover { background: var(--fg-5); color: var(--accent); text-decoration: underline; }
+.task-list { display: grid; gap: 8px; }
+.task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-minimal); }
+.task-row h3 { margin: 0; font-size: 13px; }
+.task-row p { margin: 3px 0; color: var(--fg-60); font-size: 11px; }
+.task-row small { color: var(--fg-50); font-size: 10px; }
+.task-row.finished { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+
+.subpage-heading { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 18px; }
+.subpage-heading > div { min-width: 0; flex: 1; }
+.subpage-heading > .button { flex: 0 0 auto; }
+.back-button { display: inline-flex; min-height: 30px; align-items: center; gap: 5px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-60); font-size: 11px; }
+.back-button:hover { background: var(--fg-5); color: var(--foreground); }
+.circle-browser-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.circle-browser-toolbar label { display: grid; gap: 5px; color: var(--fg-50); font-size: 10px; }
+.circle-browser-toolbar input { width: min(480px, 58vw); height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--foreground); outline: none; }
+.circle-browser-toolbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.circle-browser-toolbar > span { color: var(--fg-50); font-size: 11px; white-space: nowrap; }
+.circle-browser-toolbar strong { color: var(--foreground); }
+.circle-filter-row { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+.circle-filter { min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg-60); font-size: 11px; }
+.circle-filter:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--foreground); }
+.circle-filter.active { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.circle-filter span { margin-left: 4px; color: var(--fg-50); font-size: 9px; }
+.circle-browser-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.circle-browser-grid > .empty-note { grid-column: 1 / -1; }
+.circle-browser-card { display: flex; min-width: 0; min-height: 218px; flex-direction: column; padding: 17px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-minimal); transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.circle-browser-card:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); transform: translateY(-2px); box-shadow: var(--shadow-middle); }
+.circle-browser-heading { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.circle-browser-heading > div { min-width: 0; }
+.circle-browser-heading h3 { overflow: hidden; margin: 1px 0 5px; font-size: 14px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.circle-source-pill { display: inline-flex; max-width: 100%; padding: 3px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-weight: 600; line-height: 1.3; }
+.circle-browser-card > p { margin: 14px 0 0; color: var(--fg-60); font-size: 11px; line-height: 1.5; }
+.circle-browser-card > small { margin-top: 7px; color: var(--fg-50); font-size: 9px; }
+.circle-browser-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: auto; padding-top: 13px; }
+.circle-browser-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.circle-browser-actions .button { min-height: 29px; padding-inline: 10px; font-size: 11px; }
+.circle-list { display: grid; gap: 12px; }
+.circle-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 15px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-minimal); }
+.circle-card:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); box-shadow: var(--shadow-middle); }
+.circle-avatar { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 14px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700; }
+.circle-card-copy { display: grid; min-width: 0; gap: 9px; }
+.circle-card-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.circle-card-title h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.circle-card-title p, .circle-update { margin: 3px 0 0; color: var(--fg-50); font-size: 11px; }
+.circle-update { margin: 0; color: var(--fg-60); }
+.circle-stats { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--fg-50); font-size: 10px; }
+.circle-stats b { color: var(--foreground); font-weight: 600; }
+.circle-detail-heading { align-items: center; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.circle-heading-meta { display: grid; flex: 0 0 auto !important; justify-items: end; gap: 6px; }
+.circle-heading-meta small { max-width: 280px; color: var(--fg-50); font-size: 10px; line-height: 1.4; text-align: right; }
+.circle-work-list { display: grid; gap: 8px; }
+.circle-work-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-minimal); }
+.circle-work-row h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.circle-work-row p { margin: 3px 0; color: var(--fg-60); font-size: 11px; line-height: 1.45; }
+.circle-work-row small, .circle-work-row em { display: block; color: var(--fg-50); font-size: 10px; font-style: normal; line-height: 1.4; }
+.circle-work-row em { margin-top: 3px; color: var(--accent); }
+.circle-work-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.detail-card h3 { margin: 0; font-size: 14px; }
+.detail-card ul { display: grid; gap: 7px; margin: 13px 0 18px; padding-left: 18px; color: var(--fg-60); font-size: 12px; }
+.detail-card dl { margin: 13px 0 18px; }
+.detail-card dl div { display: flex; justify-content: space-between; gap: 20px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.detail-card dt { color: var(--fg-50); }
+.detail-card dd { margin: 0; font-weight: 500; }
+
+.empty-note { padding: 18px; border: 1px dashed var(--border); border-radius: var(--radius-lg); color: var(--fg-60); font-size: 12px; }
+.empty-state { display: grid; justify-items: center; gap: 10px; padding: 28px 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); color: var(--fg-60); text-align: center; }
+.empty-state h2 { margin: 0; color: var(--foreground); font-size: 18px; }
+.empty-state p { max-width: 440px; margin: 0; font-size: 12px; }
+.modal-layer { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--overlay); }
+.dialog { width: min(520px, 100%); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-edge); background: var(--surface); box-shadow: var(--shadow-panel); animation: dialog-in var(--transition-fast); }
+.dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 20px 14px; }
+.dialog-header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.dialog-header p { margin: 6px 0 0; color: var(--fg-60); font-size: 13px; line-height: 1.5; }
+.dialog-body { padding: 0 20px 18px; }
+.dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 13px 20px; border-top: 1px solid var(--border); }
+.close-button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-50); }
+.close-button:hover { background: var(--fg-5); color: var(--foreground); }
+.dialog-list { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.dialog-row { display: flex; align-items: center; gap: 10px; padding: 11px; border-bottom: 1px solid var(--border); }
+.dialog-row:last-child { border-bottom: 0; }
+.row-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.row-copy strong { font-size: 12px; font-weight: 500; }
+.row-copy small { color: var(--fg-50); font-size: 10px; }
+.row-state { color: var(--info); font-size: 10px; }
+.dialog-note { margin: 11px 0 0; color: var(--fg-50); font-size: 11px; line-height: 1.45; }
+.impact-card { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.impact-card > .icon { color: var(--info); }
+.impact-card span { display: grid; gap: 3px; }
+.impact-card strong { font-size: 12px; }
+.impact-card small { color: var(--fg-50); font-size: 10px; line-height: 1.4; }
+.permission-summary { display: grid; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.permission-summary span { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.permission-summary span:last-child { border-bottom: 0; }
+.permission-summary b { color: var(--fg-50); font-weight: 500; }
+.permission-summary code { overflow-wrap: anywhere; color: var(--foreground); font-family: var(--font-mono); font-size: 11px; }
+.notice-list { display: grid; gap: 3px; }
+.notice { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 9px; padding: 10px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
+.notice:hover { background: var(--fg-5); }
+.notice-mark { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--info); }
+.notice.success .notice-mark { background: var(--success); }
+.notice strong { display: block; font-size: 12px; font-weight: 500; }
+.notice p { margin: 3px 0 0; color: var(--fg-60); font-size: 12px; line-height: 1.4; }
+.notice small { display: inline-block; margin-top: 4px; color: var(--fg-50); font-size: 10px; }
+.toast { position: fixed; z-index: 80; right: 20px; bottom: 20px; max-width: 390px; padding: 10px 13px; border-left: 3px solid var(--accent); border-radius: var(--radius-md); background: var(--foreground); color: var(--background); box-shadow: var(--shadow-middle); font-size: 12px; line-height: 1.4; animation: toast-in var(--transition-fast); }
+.system-screen { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 32px; background: var(--background); }
+.auth-root { position: absolute; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 48px 24px 32px; }
+.auth-ambient { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(circle at 20% 16%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 33%), radial-gradient(circle at 86% 84%, color-mix(in srgb, var(--success) 8%, transparent), transparent 36%); }
+.login-split { position: relative; display: grid; width: min(960px, 100%); min-height: 570px; grid-template-columns: 1.08fr .92fr; overflow: hidden; border: 1px solid var(--border); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow-panel); }
+.login-story { display: flex; flex-direction: column; justify-content: space-between; padding: 54px; background: var(--fg-3); }
+.auth-brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 16px; font-size: 14px; font-weight: 700; }
+.login-story h1 { max-width: 460px; margin: 24px 0 0; font-size: 36px; line-height: 1.12; letter-spacing: -.04em; }
+.login-story p { max-width: 430px; color: var(--fg-50); font-size: 14px; line-height: 1.65; }
+.value-points { display: grid; gap: 12px; }
+.value-point { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.value-point > span { display: grid; width: 21px; height: 21px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--success-soft); color: var(--success); }
+.login-panel { display: flex; flex-direction: column; justify-content: center; padding: 46px; }
+.login-panel h2 { margin: 0; font-size: 22px; }
+.login-panel > p:not(.eyebrow) { margin: 8px 0 0; color: var(--fg-50); font-size: 12px; line-height: 1.55; }
+.auth-form { display: grid; gap: 15px; margin-top: 20px; }
+.auth-field { display: grid; gap: 7px; color: var(--fg-60); font-size: 11px; font-weight: 600; }
+.auth-field > input, .auth-phone-input { width: 100%; height: 44px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; outline: 0; background: var(--fg-3); }
+.auth-field > input { padding: 0 12px; }
+.auth-phone-input { display: grid; grid-template-columns: 54px minmax(0, 1fr); }
+.auth-phone-input b { display: grid; place-items: center; border-right: 1px solid var(--border); color: var(--fg-50); font-size: 12px; font-weight: 500; }
+.auth-phone-input input { min-width: 0; padding: 0 12px; border: 0; outline: 0; background: transparent; }
+.auth-field > input:focus, .auth-phone-input:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.auth-primary { min-height: 40px; }
+.trust-row { margin-top: 18px; padding: 10px 12px; border-radius: 9px; background: var(--fg-3); color: var(--fg-50); font-size: 10px; line-height: 1.5; }
+.system-state-card { width: min(520px, 100%); padding: 30px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel); text-align: center; }
+.system-state-card h1, .restricted-workspace h1 { margin: 0; color: var(--foreground); font-size: 24px; font-weight: 720; letter-spacing: -.035em; }
+.state-description, .restricted-workspace > p:not(.eyebrow), .recovery-card > p { margin: 9px 0 0; color: var(--fg-60); font-size: 13px; line-height: 1.58; }
+.state-icon { display: grid; width: 52px; height: 52px; place-items: center; margin: 0 auto 18px; border-radius: var(--radius-edge); background: var(--info-soft); color: var(--info); }
+.state-icon.bad { background: var(--destructive-soft); color: var(--destructive); }
+.state-icon.info { background: var(--info-soft); color: var(--info); }
+.state-icon .icon { width: 25px; height: 25px; }
+.state-facts { display: grid; overflow: hidden; margin: 22px 0 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); text-align: left; }
+.state-facts div { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.state-facts div:last-child { border-bottom: 0; }
+.state-facts dt { color: var(--fg-50); }
+.state-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 22px; }
+.inline-alert { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 9px; margin-top: 18px; padding: 11px 12px; border-radius: var(--radius-md); background: var(--info-soft); color: var(--fg-70); font-size: 12px; line-height: 1.45; text-align: left; }
+.inline-alert.bad { background: var(--destructive-soft); }
+.inline-alert i { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--info); }
+.inline-alert.bad i { background: var(--destructive); }
+.blocker-checks { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.blocker-checks span { padding: 3px 7px; border-radius: 999px; background: var(--fg-5); color: var(--foreground); font-size: 10px; }
+.system-progress { height: 7px; overflow: hidden; margin-top: 24px; border-radius: var(--radius-pill); background: var(--fg-10); }
+.system-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--transition-state); }
+.system-progress-label { margin: 8px 0 0; color: var(--fg-50); font-size: 10px; }
+.state-spinning .icon, .spinner { animation: state-spin .7s linear infinite; }
+.recovery-card, .restricted-workspace { display: grid; max-width: 620px; justify-items: center; margin: 80px auto 0; padding: 30px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-middle); text-align: center; }
+.recovery-card h2 { margin: 0; font-size: 20px; }
+.restricted-workspace { max-width: 680px; }
+.restricted-workspace .state-facts { width: 100%; }
+.switch-dialog { width: min(620px, 100%); }
+.switch-progress-summary { display: flex; justify-content: space-between; margin: 18px 0 8px; color: var(--fg-60); font-size: 11px; }
+.switch-progress-summary strong { color: var(--foreground); }
+.progress-track { height: 6px; overflow: hidden; margin-bottom: 16px; border-radius: var(--radius-pill); background: var(--fg-10); }
+.progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--transition-state); }
+.row-state { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.row-state.good { color: var(--success); }
+.row-state.bad { color: var(--destructive); }
+.row-state.stopping { color: var(--info); }
+.spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, currentColor 24%, transparent); border-top-color: currentColor; border-radius: 50%; }
+.chat-composer.offline { opacity: .58; }
+.chat-composer :disabled { cursor: not-allowed; }
+.window-guard { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--background); }
+.guard-card { max-width: 330px; text-align: center; }
+.guard-icon { display: grid; width: 52px; height: 52px; place-items: center; margin: 0 auto 18px; border-radius: var(--radius-edge); background: var(--info-soft); color: var(--info); }
+.guard-icon svg { width: 26px; height: 26px; }
+.guard-card h1 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
+.guard-card p:last-child { margin: 0; color: var(--fg-60); font-size: 13px; line-height: 1.55; }
+
+.flow-state-page { display: grid; max-width: 640px; justify-items: center; margin: 54px auto 0; padding: 32px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-middle); text-align: center; }
+.flow-state-page h1 { margin: 0; color: var(--foreground); font-size: 26px; font-weight: 720; letter-spacing: -.035em; }
+.flow-state-page .state-facts { width: 100%; }
+.settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; align-items: start; margin-top: 26px; }
+.settings-nav-card { position: sticky; top: 74px; display: grid; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-soft); }
+.settings-nav-card button { min-height: 36px; padding: 0 11px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--fg-60); text-align: left; }
+.settings-nav-card button.active { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+.settings-content { min-width: 0; }
+.settings-content > .section:first-child { margin-top: 0; }
+.settings-row { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.settings-row + .settings-row { margin-top: 8px; }
+.settings-row > span { display: grid; gap: 3px; min-width: 0; }
+.settings-row strong { color: var(--foreground); font-size: 12px; }
+.settings-row small { color: var(--fg-50); font-size: 10px; line-height: 1.45; }
+.settings-row.danger-row { border-color: color-mix(in srgb, var(--destructive) 22%, var(--border)); }
+
+@keyframes dialog-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes state-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1080px) {
+  .bar-button span:last-child { display: none; }
+  .workspace-main { padding: 36px 26px 58px; }
+  .app-page-heading { align-items: flex-start; }
+  .section { margin-top: 28px; }
+  .product-card { min-height: 210px; padding: 18px; }
+  .home-app-grid .product-card {
+    min-height: 210px;
+    padding: 18px;
+  }
+  .home-app-grid .app-art {
+    margin-bottom: 24px;
+  }
+  .card-grid, .results-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .assistant-shell { grid-template-columns: 190px 250px minmax(0, 1fr); }
+  .message-list { padding: 28px 20px; }
+  .skill-row { grid-template-columns: auto minmax(0, 1fr); }
+  .skill-permission { grid-column: 2; justify-content: space-between; }
+  .skill-permission > span { text-align: left; }
+  .task-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .task-row > .button { grid-column: auto; }
+  .home-hero { align-items: flex-start; }
+  .circle-browser-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .circle-work-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .circle-work-actions { grid-column: 2 / -1; }
+  .placement-card { min-height: 205px; }
+}
+
+@media (max-width: 760px) {
+  .system-screen { padding: 18px; }
+  .auth-root { padding: 20px 16px; }
+  .login-split { min-height: 0; grid-template-columns: minmax(0, 1fr); border-radius: 18px; }
+  .login-story { display: none; }
+  .login-panel { padding: 28px 22px; }
+  .system-state-card { padding: 24px 22px; }
+  .workbench-bar { gap: 6px; padding-inline: 12px; }
+  .brand-lockup { min-width: 34px; }
+  .brand-lockup span:last-child, .home-tab-label { display: none; }
+  .home-tab { width: 36px; padding: 0; }
+  .tab { min-width: 96px; max-width: 140px; }
+  .bar-actions { gap: 4px; }
+  .space-trigger { min-width: 0; max-width: 110px; }
+  .connection-banner { grid-template-columns: auto minmax(0, 1fr); }
+  .connection-banner > .button { grid-column: 2; justify-self: start; }
+  .workspace-main { padding: 32px 18px 50px; }
+  .home-hero { display: grid; }
+  .home-context-link { min-width: 0; width: 100%; }
+  .home-context-link.home-context-secondary {
+    width: auto;
+    max-width: 100%;
+    justify-self: start;
+  }
+  .home-hero h1 { font-size: 30px; }
+  .section-header { flex-wrap: wrap; }
+  .home-app-grid .product-card {
+    min-height: 204px;
+  }
+  .home-app-grid .product-description {
+    font-size: 13px;
+  }
+  .home-section-action {
+    margin-left: auto;
+  }
+  .app-page-heading { display: grid; }
+  .heading-actions, .assistant-header-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .card-grid, .results-grid, .detail-grid, .utility-grid { grid-template-columns: minmax(0, 1fr); }
+  .circle-browser-toolbar { align-items: stretch; flex-direction: column; gap: 8px; }
+  .circle-browser-toolbar input { width: 100%; }
+  .circle-browser-grid { grid-template-columns: minmax(0, 1fr); }
+  .circle-browser-card { min-height: 200px; }
+  .circle-browser-actions { justify-content: flex-start; }
+  .circle-card { grid-template-columns: auto minmax(0, 1fr); }
+  .circle-card > .button { grid-column: 2; justify-self: start; }
+  .circle-work-row { grid-template-columns: auto minmax(0, 1fr); }
+  .circle-work-row > .status { grid-column: 2; justify-self: start; }
+  .circle-work-actions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav-card { position: static; grid-template-columns: repeat(5, minmax(max-content, 1fr)); overflow-x: auto; }
+  .settings-row { align-items: flex-start; flex-direction: column; }
+  .circle-app-list { gap: 28px; }
+  .circle-app-section + .circle-app-section { padding-top: 26px; }
+  .circle-app-header { grid-template-columns: auto minmax(0, 1fr); }
+  .circle-app-header > .section-link { grid-column: 2; justify-self: start; }
+  .circle-detail-heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: flex-start; }
+  .circle-heading-meta { width: 100%; justify-items: start; }
+  .circle-heading-meta small { max-width: none; text-align: left; }
+  .assistant-sidebar { display: none; }
+  .assistant-shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .switch-dialog .dialog-footer { justify-content: stretch; }
+  .switch-dialog .dialog-footer .button { flex: 1 1 auto; }
+}
+
+@media (max-width: 640px) {
+  .app-shell, .system-screen { display: none !important; }
+  .window-guard { display: grid !important; }
+}
+
+  /* =====================================================================
+     POO-71 演示层（非产品界面）：演示控制区 / 本页标注 / 页面索引 / 故事条
+     全部使用 G4 token，虚线边框与产品界面明确区分
+     ===================================================================== */
+  :root { --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .class-chip { display: inline-flex; align-items: center; font-size: 10px; font-weight: 500; border-radius: var(--radius-xs); padding: 1px 5px; white-space: nowrap; }
+  .class-chip.reuse { background: var(--success-soft); color: var(--success); }
+  .class-chip.adjust { background: var(--info-soft); color: var(--info); }
+  .class-chip.new { background: var(--destructive-soft); color: var(--destructive); }
+  .class-chip.integ { background: var(--accent-soft); color: var(--accent); }
+  .class-chip.state, .class-chip.cross { background: var(--fg-5); color: var(--fg-60); }
+
+  #demo-rail {
+    position: fixed; left: 12px; bottom: 12px; z-index: 220;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    max-width: calc(100vw - 24px); padding: 8px 12px;
+    border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+    border-radius: var(--radius-edge);
+    background: color-mix(in srgb, var(--background) 92%, transparent);
+    backdrop-filter: blur(18px) saturate(140%);
+    box-shadow: var(--shadow-panel);
+  }
+  .demo-tag { font-size: 10px; font-weight: 600; letter-spacing: .75px; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border-radius: var(--radius-xs); padding: 2px 6px; white-space: nowrap; }
+  .demo-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--foreground); font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .demo-btn:hover { background: var(--fg-5); }
+  .demo-btn.active { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+  .demo-btn:disabled { opacity: .4; cursor: default; }
+  .demo-sep { width: 1px; height: 18px; background: var(--fg-20); }
+  .demo-narrator { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 520px; font-size: 12px; color: var(--fg-70); }
+  .demo-narrator b { color: var(--foreground); font-weight: 600; white-space: nowrap; }
+  .demo-narrator span { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .demo-viewsize { font-size: 11px; color: var(--fg-50); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  #note-panel {
+    position: fixed; right: 12px; top: 76px; z-index: 210;
+    width: 300px; max-height: calc(100vh - 160px); overflow: auto;
+    border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+    border-radius: var(--radius-edge); padding: 12px 14px;
+    background: color-mix(in srgb, var(--background) 94%, transparent);
+    backdrop-filter: blur(16px); box-shadow: var(--shadow-panel);
+  }
+  #note-panel .np-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  #note-panel .np-head b { font-size: 12px; font-weight: 650; }
+  #note-panel .np-id { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--fg-50); }
+  #note-panel .np-close { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-50); font-size: 12px; }
+  #note-panel .np-close:hover { background: var(--fg-5); color: var(--foreground); }
+  #note-panel p { margin: 0; color: var(--fg-70); font-size: 12px; line-height: 1.55; }
+  #note-panel .np-foot { margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--border); color: var(--fg-50); font-size: 10px; line-height: 1.5; }
+
+  #overlay-root { display: none; }
+  #overlay-root:not(:empty) { display: block; }
+  .overlay-backdrop { position: fixed; inset: 0; z-index: 215; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--overlay); }
+  .overlay-card { width: min(880px, 94vw); max-height: 86vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--background); box-shadow: var(--shadow-panel); padding: 24px 26px 20px; }
+  .ov-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .ov-head b { font-size: 18px; font-weight: 700; letter-spacing: -.03em; }
+  .ov-sub { flex: 1; font-size: 12px; color: var(--fg-50); }
+  .overlay-close { display: grid; width: 28px; height: 28px; flex: 0 0 auto; align-self: flex-start; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-50); font-size: 13px; }
+  .overlay-close:hover { background: var(--fg-5); color: var(--foreground); }
+  .idx-group { margin-top: 16px; }
+  .idx-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--fg-40); font-size: 11px; font-weight: 500; letter-spacing: .75px; text-transform: uppercase; }
+  .idx-group h3 .cnt { color: var(--fg-40); font-weight: 400; }
+  .idx-items { display: flex; flex-wrap: wrap; gap: 6px; }
+  .idx-item { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-height: 30px; padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--foreground); font-size: 12px; text-align: left; }
+  .idx-item:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+  .idx-item .sid { font-family: var(--font-mono); font-size: 10px; color: var(--fg-50); }
+  .idx-item.current { border-color: var(--accent); background: var(--accent-soft); }
+  .idx-item .ii-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 1024×768 预览（评审用，非产品行为） */
+  body.preview-1024 { background: var(--fg-40); }
+  body.preview-1024 .app-shell, body.preview-1024 .system-screen {
+    position: fixed; inset: 0; margin: auto; width: 1024px; height: 768px;
+    overflow: hidden; border-radius: var(--radius-edge);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .28);
+  }
+  body.preview-1024 .app-shell { display: grid; grid-template-rows: 64px auto minmax(0, 1fr); height: 768px; }
+  body.preview-1024 .workbench-bar { padding: 0 16px; }
+  body.preview-1024 .workspace-main { padding: 36px 26px 58px; }
+
+  body.clean #demo-rail, body.clean #note-panel { display: none !important; }
+
+  /* POO-71 需要的少量 G4 语言补充组件（参考稿未覆盖的状态） */
+  .credits-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border)); border-radius: var(--radius-md); background: var(--destructive-soft); color: var(--fg-70); font-size: 12px; line-height: 1.45; }
+  .credits-banner .icon { color: var(--destructive); }
+  .credits-banner b { color: var(--foreground); }
+  .credits-banner .button { margin-left: auto; flex: 0 0 auto; }
+  .credits-banner.info { border-color: color-mix(in srgb, var(--info) 35%, var(--border)); background: var(--info-soft); }
+  .credits-banner.info .icon { color: var(--info); }
+  .question-card { display: grid; gap: 10px; margin-top: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: var(--radius-md); background: var(--accent-soft); }
+  .question-card strong { font-size: 13px; }
+  .question-card .question-actions { display: flex; gap: 8px; }
+  .partial-note { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 9px; border-radius: 999px; background: var(--fg-5); color: var(--fg-60); font-size: 10px; }
+  .chat-file-row { display: flex; align-items: center; gap: 9px; margin-top: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); }
+  .chat-file-row .icon { color: var(--accent); }
+  .chat-file-row > div { display: grid; min-width: 0; flex: 1; gap: 2px; }
+  .chat-file-row strong { font-size: 12px; font-weight: 500; }
+  .chat-file-row small { color: var(--fg-50); font-size: 10px; }
+  .chat-file-row.missing { border-color: color-mix(in srgb, var(--destructive) 30%, var(--border)); }
+  .chat-file-row.missing .icon { color: var(--destructive); }
+  .composer-block-note { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--destructive); font-size: 11px; }
+  .runtime-popover { right: 0; width: min(360px, calc(100vw - 24px)); padding: 6px; }
+  .runtime-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 8px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
+  .runtime-row:hover { background: var(--fg-5); }
+  .runtime-row .menu-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .popover .dialog-list { margin: 4px; border: 0; }
+  .inspector-facts { margin-top: 0; }
+  .home-zero-guide { display: grid; justify-items: center; gap: 10px; padding: 34px 20px; border: 1px dashed var(--border); border-radius: var(--radius-card); text-align: center; }
+  .home-zero-guide p { max-width: 460px; margin: 0; color: var(--fg-60); font-size: 12px; }
+  .gate-wrap { width: min(680px, 100%); margin: 0 auto; }
+  .handoff-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; margin-top: 4px; color: var(--fg-50); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="window-guard" id="window-guard" hidden>
+    <div class="guard-card" role="status">
+      <div class="guard-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.5 2.6 17a2 2 0 0 0 1.8 3h15.2a2 2 0 0 0 1.8-3L13.7 3.5a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+      <p class="eyebrow">窗口保护</p>
+      <h1>窗口过窄</h1>
+      <p>请放大 Polo 窗口后继续使用工作台。Polo 客户端面向桌面窗口，不提供移动端工作台布局。</p>
+    </div>
+  </div>
+
+  <main class="system-screen" id="system-screen" hidden></main>
+
+  <div class="app-shell" id="app-shell">
+    <header class="workbench-bar">
+      <button class="brand-lockup" data-tab="home" aria-label="返回 Polo 首页"><span class="brand-mark" aria-hidden="true">P</span><span>Polo</span></button>
+      <nav class="tabs" id="tabs" aria-label="应用标签"></nav>
+      <div class="bar-actions">
+        <button class="bar-button" id="runtime-button" data-pop="runtime" aria-haspopup="dialog" aria-expanded="false"><span class="status-dot" id="runtime-dot"></span><span id="runtime-label">无运行项</span></button>
+        <div class="space-control">
+          <button class="space-trigger" id="space-trigger" data-pop="space" aria-expanded="false" aria-haspopup="menu">
+            <span class="space-avatar" id="space-avatar" aria-hidden="true">我</span>
+            <span class="space-copy"><strong id="space-name">我的空间</strong><small id="space-type">个人空间 · 个人</small></span>
+            <svg class="icon icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+          </button>
+          <div class="popover space-menu" id="space-menu" role="menu" hidden></div>
+        </div>
+        <button class="icon-button" id="notification-button" data-pop="notification" aria-label="通知" aria-haspopup="dialog" aria-expanded="false"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><span class="notification-dot" aria-hidden="true"></span></button>
+        <button class="avatar-button" id="account-button" data-pop="account" aria-label="打开账号菜单" aria-haspopup="menu" aria-expanded="false">王</button>
+      </div>
+      <div class="popover account-menu" id="account-menu" role="menu" hidden></div>
+      <div class="popover runtime-popover" id="runtime-menu" role="dialog" hidden></div>
+      <div class="popover runtime-popover" id="notification-menu" role="dialog" hidden></div>
+    </header>
+
+    <div class="connection-banner" id="connection-banner" role="status" hidden></div>
+    <main class="workspace-main" id="workspace-main"></main>
+  </div>
+
+  <div class="modal-layer" id="modal-layer" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div id="demo-rail" role="toolbar" aria-label="演示控制区（非产品界面）">
+    <span class="demo-tag">POO-71 演示</span>
+    <button class="demo-btn" id="dm-index">页面索引</button>
+    <button class="demo-btn" id="dm-note">本页标注</button>
+    <button class="demo-btn" id="dm-compact">1024×768 预览</button>
+    <span class="demo-sep"></span>
+    <button class="demo-btn" id="dm-story1">故事 1</button>
+    <button class="demo-btn" id="dm-story2">故事 2</button>
+    <button class="demo-btn" id="dm-story3">故事 3</button>
+    <span class="demo-sep"></span>
+    <span class="demo-narrator" id="dm-narrator" hidden><b id="dn-step"></b><span id="dn-text"></span></span>
+    <button class="demo-btn" id="dm-next" hidden>下一步 ▸</button>
+    <button class="demo-btn" id="dm-exit-story" hidden>退出故事</button>
+    <span class="demo-viewsize" id="dm-viewsize"></span>
+  </div>
+  <div id="note-panel" hidden></div>
+  <div id="overlay-root"></div>
+<script>
+/* =====================================================================
+   POO-71 · MVP 完整流程高保真原型
+   UI 体系 = POO-41 G4 冻结稿（artifactCommit ef3528ef）
+   页面/状态清单 = POO-70 已确认结论（90 屏，M01—M11）
+   演示数据均为虚构；浏览器交接页只表达桌面侧职责。
+   ===================================================================== */
+'use strict';
+
+/* ---------- 图标（G4 图集 + 少量补充） ---------- */
+const ICONS = {
+  home: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-8.5Z',
+  spark: ['m12 3-1.6 5.4L5 10l5.4 1.6L12 17l1.6-5.4L19 10l-5.4-1.6L12 3Z', 'm19 16-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7L19 16Z'],
+  grid: ['M4 4h6v6H4z', 'M14 4h6v6h-6z', 'M4 14h6v6H4z', 'M14 14h6v6h-6z'],
+  file: ['M6 3h8l4 4v14H6z', 'M14 3v5h5', 'M9 13h6M9 17h6'],
+  folder: ['M3 6h6l2 2h10v11H3z', 'M3 8V5h7l2 3'],
+  task: ['M5 4h14v16H5z', 'm8 9 1.5 1.5L12 8', 'M13 10h3', 'm8 15 1.5 1.5L12 14', 'M13 16h3'],
+  bell: ['M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9', 'M10 21h4'],
+  play: 'M8 5v14l11-7z',
+  settings: ['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z', 'M4.9 4.9 7 7', 'M17 17l2.1 2.1', 'M4 12H2', 'M22 12h-2', 'M12 4V2', 'M12 22v-2'],
+  moon: 'M21 12.7A9 9 0 1 1 11.3 3 7 7 0 0 0 21 12.7Z',
+  sun: ['M12 4V2', 'M12 22v-2', 'm4.93 4.93-1.41-1.41', 'm20.48 20.48-1.41-1.41', 'M4 12H2', 'M22 12h-2', 'm4.93 19.07-1.41 1.41', 'm20.48 3.52-1.41 1.41', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z'],
+  arrow: 'm9 18 6-6-6-6',
+  left: 'm15 18-6-6 6-6',
+  close: ['M18 6 6 18', 'M6 6l12 12'],
+  check: 'm5 12 4 4L19 6',
+  clock: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M12 7v5l3 2'],
+  shield: ['M12 3 5 6v5c0 4.8 2.9 8.3 7 10 4.1-1.7 7-5.2 7-10V6l-7-3Z', 'm9 12 2 2 4-5'],
+  external: ['M14 4h6v6', 'm20 4-9 9', 'M18 13v6H5V6h6'],
+  app: ['M4 5h16v14H4z', 'M8 9h8M8 13h5'],
+  circle: ['M16 11a4 4 0 1 0-8 0', 'M4 21a8 8 0 0 1 16 0', 'M18 4v4M16 6h4'],
+  info: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 10v6M12 7h.01'],
+  upload: ['M12 16V4', 'm7 9 5-5 5 5', 'M4 20h16'],
+  plus: 'M12 5v14M5 12h14',
+  more: ['M5 12h.01M12 12h.01M19 12h.01'],
+  stop: 'M7 7h10v10H7z',
+  wifi: ['M5 12.5a10 10 0 0 1 14 0', 'M8.5 16a5 5 0 0 1 7 0', 'M12 20h.01'],
+  refresh: ['M20 7v5h-5', 'M4 17v-5h5', 'M6.1 9A7 7 0 0 1 18 7l2 5', 'M17.9 15A7 7 0 0 1 6 17l-2-5'],
+  lock: ['M6 10h12v10H6z', 'M8 10V7a4 4 0 0 1 8 0v3'],
+  wallet: ['M3 7h18v12H3z', 'M16 13h3', 'M3 7l3-3h12l3 3'],
+  users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M2 21a7 7 0 0 1 14 0', 'M16 3.5a4 4 0 0 1 0 7.4', 'M17 14.5a7 7 0 0 1 5 6.5'],
+  alert: ['M10.3 3.5 2.6 17a2 2 0 0 0 1.8 3h15.2a2 2 0 0 0 1.8-3L13.7 3.5a2 2 0 0 0-3.4 0Z', 'M12 9v4M12 17h.01'],
+  download: ['M12 4v12', 'm7 11 5 5 5-5', 'M4 20h16']
+};
+const icon = (name, cls) => {
+  const paths = Array.isArray(ICONS[name]) ? ICONS[name] : [ICONS[name]];
+  return '<svg class="icon ' + (cls || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths.map(p => '<path d="' + p + '"></path>').join('') + '</svg>';
+};
+
+/* ---------- 演示数据（虚构） ---------- */
+const SPACES = {
+  personal: { id: 'personal', name: '我的空间', type: '个人空间', role: '个人', short: '我', user: '小王' },
+  chenxing: { id: 'chenxing', name: '晨星科技', type: '企业空间', role: 'Member', short: '晨', user: '小王' },
+  northern: { id: 'northern', name: '北方贸易', type: '企业空间', role: 'Owner', short: '北', user: '小王' }
+};
+
+const APPS = {
+  assistant: { name: 'Polo 助手', icon: 'spark', source: 'Polo 内置', version: '由 Polo 维护', builtin: true },
+  quote: { name: '报价整理', icon: 'app', source: '企业内部导入 · 晨星科技', version: 'v2.3.1', description: '整理与汇总报价材料', available: true },
+  contract: { name: '合同审查', icon: 'shield', source: '企业内部导入 · 晨星科技', version: 'v1.8.0', next: 'v1.9.0', description: '扫描合同条款风险', available: true, update: true },
+  customer: { name: '客户资料核验', icon: 'shield', source: '企业内部导入 · 晨星科技', version: 'v0.9.4', description: '核验客户资料一致性', available: false, block: 'version', blockNote: '版本被企业紧急阻断' },
+  report: { name: '数据报表生成器', icon: 'grid', source: '认证创作者 · 林可 · 数据工坊', version: 'v1.2.0', description: '从数据源生成周期报表', available: true },
+  minutes: { name: '会议纪要整理', icon: 'file', source: '认证创作者 · 陈默 · 设计蓝图', version: 'v0.6.1', description: '把会议录音变成纪要', available: true },
+  growth: { name: '增长打法手册', icon: 'grid', source: '认证创作者 · 晨星增长工作室', version: 'v3.0.2', description: '查阅增长打法与案例', available: true },
+  brand: { name: '品牌语气分析', icon: 'grid', source: '认证创作者 · 北极星设计工作室', version: 'v1.4.0', description: '分析对外文案语气', available: true }
+};
+const appMeta = id => APPS[id] || { name: id, icon: 'grid' };
+
+const CIRCLES = {
+  growth: { id: 'growth', name: '晨星增长圈', creator: '晨星增长工作室', initials: '增', price: '免费', renewal: '长期有效', apps: ['growth'], skills: ['growth_skill'], update: '本周新增打法案例 2 篇' },
+  north: { id: 'north', name: '北极星设计圈', creator: '北极星设计工作室', initials: '北', price: '¥39 / 月', renewal: '2026-10-01', apps: ['brand', 'minutes'], skills: ['minutes_skill'], update: '品牌语气分析 v1.4.0 已更新' }
+};
+
+const SKILLS = {
+  report_summary: { name: '报价汇总', source: '企业内部导入 · 晨星科技', description: '按客户分组汇总报价', permissions: '读取会话附件', enabled: true },
+  contract_check: { name: '合同条款核对', source: '企业内部导入 · 晨星科技', description: '核对条款与风险清单', permissions: '读取会话附件', enabled: true },
+  growth_skill: { name: '增长案例检索', source: '认证创作者 · 晨星增长工作室', description: '检索打法与案例', permissions: '读取提问内容', enabled: false },
+  minutes_skill: { name: '会议纪要', source: '认证创作者 · 北极星设计工作室', description: '生成会议纪要', permissions: '读取会议文件', enabled: false },
+  research: { name: '资料研究', source: 'Polo 内置', description: '检索资料与出处', permissions: '读取已选文件', enabled: true }
+};
+
+const EXEC = {
+  chenxing: [
+    { id: 'x1', app: 'quote', name: '报价整理', detail: '正在汇总 3 个客户的报价', status: 'running', bg: false },
+    { id: 'x2', app: 'assistant', name: '助手 · Q2 报价汇总', detail: '正在生成回答', status: 'running', bg: false },
+    { id: 'x3', app: 'report', name: '数据报表生成器', detail: '同空间后台运行', status: 'running', bg: true }
+  ],
+  personal: [
+    { id: 'p1', app: 'report', name: '数据报表生成器', detail: '后台运行', status: 'running', bg: true }
+  ]
+};
+
+const CREDIT = { balance: 12, need: 60, personalQuota: '1,280 / 2,000 积分' };
+const STATUS_LABEL = { preparing: '准备中', running: '运行中', stopping: '停止中', stopped: '已终止', failed: '失败', waiting: '等待网络', unknown: '结果待确认' };
+
+/* ---------- 通用组件（G4 语言） ---------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function section(title, subtitle, content, action) {
+  return '<section class="section"><div class="section-header"><div><h2>' + title + '</h2>' + (subtitle ? '<p>' + subtitle + '</p>' : '') + '</div>' + (action || '') + '</div>' + content + '</section>';
+}
+function subpageHeader(title, desc, action) {
+  return '<div class="subpage-heading"><button class="back-button" data-go="P-M03-HOME-PERSONAL">' + icon('left') + '返回首页</button><div><p class="eyebrow">我的空间</p><h1>' + title + '</h1><p>' + desc + '</p></div>' + (action || '') + '</div>';
+}
+function appArt(id, cls) {
+  const m = appMeta(id);
+  const tone = m.builtin ? '' : id === 'contract' || id === 'customer' ? '' : 'teal';
+  return '<span class="app-art ' + (cls || '') + '">' + icon(m.icon) + '</span>';
+}
+function statusChip(label, tone) { return '<span class="status ' + (tone || 'neutral') + '">' + label + '</span>'; }
+function appAvail(app) {
+  if (app.update) return statusChip('有更新', 'info');
+  if (app.available) return statusChip('可使用', 'good');
+  return statusChip('已阻断', 'bad');
+}
+function appCard(id, mode) {
+  const m = appMeta(id);
+  const running = (EXEC.chenxing.concat(EXEC.personal)).find(x => x.app === id);
+  const isHome = mode !== 'manage' && mode !== 'add';
+  let action = '';
+  if (mode === 'manage') {
+    action = (m.available ? '' : '<button class="card-action" data-go="P-M03-INSPECTOR">查看原因</button>') + '<button class="card-action" data-go="P-M03-MANAGE-HOME">移出首页</button>';
+  } else if (mode === 'add') {
+    action = '<button class="card-action primary" data-go="P-M03-MANAGE-HOME">添加到首页</button>';
+  } else {
+    action = m.available ? '<button class="card-action" data-go="P-M04-APP-VIEW">打开</button>' : '<button class="card-action" data-go="P-M03-INSPECTOR">查看原因</button>';
+  }
+  const badge = isHome ? (m.update ? statusChip('有更新', 'info') : m.available ? '' : statusChip('已阻断', 'bad')) : appAvail(m);
+  const runBadge = running && isHome ? statusChip(STATUS_LABEL[running.status], 'info') : '';
+  const ver = isHome ? '' : '<div class="card-meta">' + m.version + '</div>';
+  return '<article class="product-card"><div class="card-heading">' + appArt(id) + '<div class="card-title"><h3>' + m.name + '</h3><p class="source-line">' + m.source + '</p></div></div><p class="product-description">' + m.description + '</p>' + ver + '<div class="status-line ' + (badge + runBadge ? '' : 'actions-only') + '">' + badge + runBadge + action + '</div></article>';
+}
+function assistantHomeCard() {
+  const n = Object.values(SKILLS).filter(s => s.enabled).length;
+  return '<article class="product-card assistant-card"><div class="card-heading"><span class="app-art">' + icon('spark') + '</span><div class="card-title"><h3>Polo 助手</h3><p class="source-line">Polo 内置 · ' + n + ' 个 Skill 已启用</p></div></div><p class="product-description">调用已启用的 Skills</p><div class="status-line actions-only"><button class="card-action" data-go="P-M06-SKILLS">管理 Skills</button><button class="card-action primary" data-go="P-M05-CHAT">打开助手</button></div></article>';
+}
+function assistantManageCard() {
+  const n = Object.values(SKILLS).filter(s => s.enabled).length;
+  return '<article class="product-card assistant-card"><div class="card-heading"><span class="app-art">' + icon('spark') + '</span><div class="card-title"><p class="card-kicker">内置 App</p><h3>Polo 助手</h3><p class="source-line">Polo 内置 · ' + n + ' 个 Skill 已启用</p></div></div><p class="product-description">管理助手 Skills</p><div class="status-line">' + statusChip('固定在首页', 'good') + '</div></article>';
+}
+function utilityCard(id, title, desc, meta, go) {
+  return '<button class="utility-card" data-go="' + go + '"><span class="app-art compact ' + (id === 'files' ? 'teal' : 'amber') + '">' + icon(id === 'files' ? 'folder' : 'task') + '</span><span><strong>' + title + '</strong><small>' + desc + '</small><em>' + meta + '</em></span>' + icon('arrow') + '</button>';
+}
+function flowPage(o) {
+  const facts = (o.facts || []).map(f => '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>').join('');
+  return '<section class="flow-state-page"><span class="state-icon ' + (o.tone === 'bad' ? 'bad' : 'info') + '">' + icon(o.tone === 'bad' ? 'shield' : (o.glyph || 'info')) + '</span><p class="eyebrow">' + o.eyebrow + '</p><h1>' + o.title + '</h1><p class="state-description">' + o.desc + '</p>' + (facts ? '<dl class="state-facts">' + facts + '</dl>' : '') + (o.note ? '<div class="inline-alert"><i></i><span>' + o.note + '</span></div>' : '') + '<div class="state-actions">' + o.actions + '</div></section>';
+}
+function systemCard(o) {
+  const facts = (o.facts || []).map(f => '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>').join('');
+  return '<section class="system-state-card"><span class="state-icon ' + (o.tone || 'info') + (o.spin ? ' state-spinning' : '') + '">' + icon(o.glyph || 'info') + '</span><p class="eyebrow">' + o.eyebrow + '</p><h1>' + o.title + '</h1><p class="state-description">' + o.desc + '</p>' + (facts ? '<dl class="state-facts">' + facts + '</dl>' : '') + (o.progress != null ? '<div class="system-progress"><span style="width:' + o.progress + '%"></span></div><p class="system-progress-label">' + o.progressLabel + '</p>' : '') + '<div class="state-actions">' + o.actions + '</div></section>';
+}
+function dialog(o) {
+  return '<div class="dialog ' + (o.wide ? 'switch-dialog' : '') + '"><div class="dialog-header"><div><h2>' + o.title + '</h2>' + (o.desc ? '<p>' + o.desc + '</p>' : '') + '</div><button class="close-button" data-close-modal aria-label="关闭">' + icon('close') + '</button></div>' + (o.body ? '<div class="dialog-body">' + o.body + '</div>' : '') + (o.foot ? '<div class="dialog-footer">' + o.foot + '</div>' : '') + '</div>';
+}
+function dialogRow(name, note, state) {
+  const tone = state === 'ok' ? 'good' : state === 'fail' ? 'bad' : state === 'stop' ? 'stopping' : '';
+  const label = state === 'ok' ? '已终止' : state === 'fail' ? '失败' : state === 'stop' ? '停止中' : '运行中';
+  return '<div class="dialog-row"><span class="row-state ' + tone + '">' + (state === 'stop' ? '<span class="spinner"></span>' : '') + label + '</span><span class="row-copy"><strong>' + name + '</strong><small>' + note + '</small></span></div>';
+}
+function switchProgress(done, total) {
+  return '<div class="switch-progress-summary"><span>已终止 <strong>' + done + ' / ' + total + '</strong></span><strong>' + Math.round(done / total * 100) + '%</strong></div><div class="progress-track"><span style="width:' + Math.round(done / total * 100) + '%"></span></div>';
+}
+</script>
+<script>
+/* =====================================================================
+   视图函数：登录 / 助手三栏 / 会话文件 / 圈子 / 设置 / 顶栏 chrome
+   ===================================================================== */
+function loginView(variant) {
+  const v = variant || {};
+  const isCode = v.mode === 'code', isPhone = v.mode === 'phone';
+  const title = isCode ? '验证码' : isPhone ? '手机号' : '密码登录';
+  const desc = isCode ? '输入 +86 138••••8000 收到的验证码' : isPhone ? '验证手机号' : '输入账号密码';
+  const field = isCode
+    ? '<label class="auth-field"><span>验证码</span><input inputmode="numeric" maxlength="6" placeholder="6 位数字" value="' + (v.filled ? '824193' : '') + '"></label>'
+    : '<label class="auth-field"><span>手机号</span><span class="auth-phone-input"><b>+86</b><input type="tel" maxlength="11" value="13800008000"></span></label>' + (isPhone ? '' : '<label class="auth-field"><span>密码</span><input type="password" value="' + (v.pw ? '••••••••••' : '') + '" placeholder="请输入密码"></label>');
+  const err = v.error ? '<div class="inline-alert bad" role="alert"><i></i><span>' + v.error + '</span></div>' : '';
+  const expired = v.expired ? '<div class="inline-alert bad" role="alert"><i></i><span>会话已失效，请重新登录</span></div>' : '';
+  const agree = v.cancel ? '<div class="inline-alert" role="status"><i></i><span>已取消登录：未产生任何副作用，可随时重新登录</span></div>' : '';
+  return '<div class="auth-root"><div class="auth-ambient" aria-hidden="true"></div><section class="login-split"><div class="login-story"><div><div class="auth-brand"><span class="brand-mark">P</span><span>Polo AI</span></div><h1>开始使用 Polo</h1><p>打开 Apps，完成工作</p></div><div class="value-points"><div class="value-point"><span>✓</span>切换工作空间</div><div class="value-point"><span>✓</span>使用 Apps 与 Skills</div><div class="value-point"><span>✓</span>查看运行状态</div></div></div><div class="login-panel"><p class="eyebrow">登录与注册</p><h2>' + title + '</h2><p>' + desc + '</p>' + err + expired + agree + '<form class="auth-form" onsubmit="return false">' + field + '<button class="button primary auth-primary" data-go="' + (v.next || 'P-M01-PERSONAL-PREP') + '">' + (isCode || !isPhone ? '继续' : '获取验证码') + '</button><button class="button quiet" type="button" data-go="' + (isPhone ? 'P-M01-LOGIN-PASSWORD' : 'P-M01-LOGIN-PHONE') + '">' + (isPhone ? '密码登录' : '验证码登录') + '</button></form>' + (isCode ? '<p class="page-meta">5 分钟内有效 · ' + (v.filled ? '可点击重发' : '60 秒后可重发') + '</p>' : '') + '<div class="trust-row">✓ 同意协议与隐私政策<br>✓ 首次登录创建我的空间</div></div></section></div>';
+}
+
+/* ---------- 助手三栏（G4 assistant-shell） ---------- */
+function assistantChat(opt) {
+  opt = opt || {};
+  const msgs = [];
+  if (opt.empty) {
+    msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>Polo 助手</small><p>新对话已就绪。你可以让我整理文件、汇总信息，或调用已启用的 Skill。</p><div class="question-actions"><button class="button" data-go="P-M05-CHAT">汇总 Q2 报价（示例）</button><button class="button" data-go="P-M06-SKILLS">浏览 Skills</button></div></div></div>');
+  } else {
+    msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>Polo 助手</small><p>收到，我会按客户分组整理 Q2 报价汇总。已读取会话里的 3 个附件。</p></div></div>');
+  }
+  if (opt.working) {
+    msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>Polo 助手</small><p>正在整理「华东区」分组……</p><span class="partial-note"><span class="spinner"></span> 生成中 · 可随时停止</span></div></div>');
+  }
+  if (opt.question) {
+    msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>Polo 助手</small><p>整理前确认一个口径：</p><div class="question-card"><strong>「未含税价」是否需要同时给出含税参考值？</strong><div class="question-actions"><button class="button primary" data-go="' + (opt.qNext || 'P-M05-QUESTION') + '">回答问题</button><button class="button" data-go="' + (opt.qNext || 'P-M05-QUESTION') + '">暂不回答</button></div></div></div></div>');
+  }
+  if (opt.partial) {
+    msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>Polo 助手</small><p>已完成「华东区」分组……<br>（生成中断，以上为已生成部分）</p><span class="partial-note">' + icon('alert') + ' 积分不足，生成已暂停 · 已生成部分已保留</span></div></div>');
+  }
+  if (opt.stopped) {
+    msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>Polo 助手</small><p>已完成「华东区」与「华南区」分组。</p><span class="partial-note">' + icon('info') + ' 你已停止生成 · 已生成部分与输入内容已保留</span></div></div>');
+  }
+  if (opt.files) {
+    (opt.missing ? [
+      { n: 'Q2-报价底稿.xlsx', m: '附件 · 2.1 MB · 会话内可预览', miss: true },
+      { n: '客户联系人清单.csv', m: '附件 · 368 KB', miss: true }
+    ] : [
+      { n: 'Q2-报价底稿.xlsx', m: '附件 · 2.1 MB · 会话内可预览' },
+      { n: '报价汇总-Q2.docx', m: '生成文件 · 刚刚 · 会话内可导出' }
+    ]).forEach(f => {
+      msgs.push('<div class="message assistant"><span class="message-avatar">P</span><div><small>' + (f.n.indexOf('生成') === 0 ? '生成文件' : '会话文件') + '</small><div class="chat-file-row' + (f.miss ? ' missing' : '') + '">' + icon('file') + '<div><strong>' + f.n + '</strong><small>' + (f.miss ? '原文件已移动或删除 · 可重新选择路径' : f.m) + '</small></div>' + (f.miss ? '<button class="button quiet" data-go="P-M08-FILE-MISSING">重选路径</button>' : '<button class="icon-button" aria-label="更多">' + icon('more') + '</button>') + '</div></div></div>');
+    });
+  }
+  if (opt.userMsg) msgs.push('<div class="message user"><span class="message-avatar">王</span><div><small>小王</small><p>' + opt.userMsg + '</p></div></div>');
+  const credits = opt.credit ? '<div class="credits-banner">' + icon('wallet') + '<span><b>积分不足</b> · 本次发送需要 ' + CREDIT.need + ' 积分，当前余额 ' + CREDIT.balance + ' 积分。输入内容已保留。</span><button class="button" data-go="P-M09-BROWSER">去充值</button></div>' : '';
+  const entNote = opt.entNote ? '<div class="credits-banner info">' + icon('info') + '<span><b>企业额度不足</b> · Member 不能自费充值，已通知企业管理员（Owner）处理。</span><button class="button" data-go="P-M05-CHAT">知道了</button></div>' : '';
+  const resumedNote = opt.resumed ? '<div class="credits-banner info">' + icon('check') + '<span><b>积分已到账</b> · 发送已恢复；是否继续由你决定，不会自动发送或续写。</span></div>' : '';
+  const blocked = opt.credit ? '<div class="composer-block-note">' + icon('lock') + ' 积分不足，暂时无法发送 · 充值到账后由你决定是否发送</div>' : '';
+  const placeholder = opt.offline ? '离线时无法发送' : opt.credit ? '输入内容已保留' : '你想让 Polo 助手做什么？';
+  const sendBtn = opt.working
+    ? '<button class="composer-send stop" type="button" data-go="P-M05-STOPPED" aria-label="停止生成">' + icon('stop') + '</button>'
+    : '<button class="composer-send" type="submit" aria-label="发送消息"' + (opt.offline || opt.credit ? ' disabled' : '') + '>' + icon('arrow') + '</button>';
+  return '<div class="chat-panel"><div class="message-list">' + msgs.join('') + '</div><div class="composer-wrap">' + credits + entNote + resumedNote + '<div class="composer-mode"><button type="button" class="assistant-mode-badge">' + icon('info') + 'Ask ' + icon('arrow') + '</button><span>晨星科技</span></div><form class="chat-composer' + (opt.offline ? ' offline' : '') + '" onsubmit="return false"><textarea rows="3" placeholder="' + placeholder + '"' + (opt.offline ? ' disabled' : '') + '>' + (opt.draft ? '把 Q2 报价按客户分组汇总，标出与上季度的差异。' : '') + '</textarea><div class="composer-footer"><button type="button" class="composer-tool" data-go="P-M08-FILES">' + icon('plus') + '添加文件</button><label class="composer-tool">' + icon('spark') + '<select><option>不调用 Skill</option><option>报价汇总 · 晨星科技</option></select></label><span></span>' + sendBtn + '</div></form>' + blocked + '</div></div>';
+}
+function assistantShell(panel) {
+  const skillItems = Object.entries(SKILLS).map(([id, s]) => {
+    const en = s.enabled;
+    return '<article class="skill-row"><span class="app-art compact' + (en ? ' teal' : '') + '">' + icon('spark') + '</span><div><h3>' + s.name + '</h3><p>' + s.description + '</p><small>' + s.source + '</small></div><div class="skill-permission"><span>' + s.permissions + '</span><button class="button ' + (en ? '' : 'primary') + '" data-go="' + (id === 'growth_skill' ? 'P-M06-SKILL-DENIED' : 'P-M06-SKILLS') + '">' + (en ? '停用' : '启用') + '</button></div></article>';
+  }).join('');
+  const main = panel === 'skills'
+    ? '<div class="skills-panel"><div class="panel-intro"><div><h2>当前空间可用 Skills</h2><p>同名 Skill 按来源区分，不合并</p></div>' + statusChip(Object.values(SKILLS).filter(s => s.enabled).length + ' 个已启用', 'good') + '</div><div class="skill-list">' + skillItems + '</div></div>'
+    : panel === 'tools'
+      ? toolsPanel()
+      : panel === 'files'
+      ? '<div class="skills-panel"><div class="panel-intro"><div><h2>本会话文件</h2><p>附件与生成文件留在会话内，不建统一汇总页</p></div></div><div class="skill-list">' +
+        '<div class="chat-file-row">' + icon('file') + '<div><strong>Q2-报价底稿.xlsx</strong><small>附件 · 2.1 MB · 会话内可预览</small></div><button class="icon-button" aria-label="更多">' + icon('more') + '</button></div>' +
+        '<div class="chat-file-row">' + icon('file') + '<div><strong>客户联系人清单.csv</strong><small>附件 · 368 KB</small></div><button class="icon-button" aria-label="更多">' + icon('more') + '</button></div>' +
+        '<div class="chat-file-row">' + icon('file') + '<div><strong>报价汇总-Q2.docx</strong><small>生成文件 · 刚刚 · 会话内可导出</small></div><button class="icon-button" aria-label="更多">' + icon('more') + '</button></div></div></div>'
+      : assistantChat(panel);
+  const navItem = (label, ic, active, go) => '<button class="assistant-nav-item' + (active ? ' active' : '') + '" data-go="' + go + '">' + icon(ic) + '<span>' + label + '</span></button>';
+  return '<div class="prototype-boundary-note" role="note"><strong>界面示意</strong></div><div class="assistant-shell"><aside class="assistant-sidebar"><button class="assistant-new-session" data-go="P-M05-NEW">' + icon('plus') + '新建对话</button><nav class="assistant-nav">' + navItem('全部对话', 'app', panel !== 'skills' && panel !== 'files', 'P-M05-CHAT') + '<div class="assistant-nav-nested"><button class="assistant-nav-item muted">' + icon('info') + '<span>已标记</span></button><button class="assistant-nav-item muted">' + icon('folder') + '<span>已归档</span></button></div><div class="assistant-nav-divider"></div>' + navItem('会话文件', 'folder', panel === 'files', 'P-M08-FILES') + navItem('Skills', 'spark', panel === 'skills', 'P-M06-SKILLS') + navItem('数据源 / 自动化', 'task', panel === 'tools', 'P-M06-TOOLS') + '</nav><div class="sidebar-foot"><span>晨星科技</span><small>使用当前空间内容</small></div></aside><section class="assistant-navigator"><header><div><strong>对话</strong><span>晨星科技</span></div><button class="icon-button" data-go="P-M05-NEW" aria-label="新建对话">' + icon('plus') + '</button></header><p class="assistant-list-label">最近对话</p><button class="session-row active" data-go="P-M05-CHAT"><strong>Q2 报价汇总</strong><span>刚刚</span></button><button class="session-row"><strong>整理客户访谈</strong><span>昨天</span></button><button class="session-row"><strong>品牌语气分析</strong><span>周一</span></button></section><section class="assistant-main"><header class="assistant-header"><div><h1>' + (panel === 'skills' ? 'Skills' : panel === 'files' ? '会话文件' : panel === 'tools' ? '数据源 / 自动化' : 'Q2 报价汇总') + '</h1><p>晨星科技 · ' + Object.values(SKILLS).filter(s => s.enabled).length + ' 个 Skill 已启用</p></div><div class="assistant-header-actions"><button class="button quiet" data-go="P-M04-PERM-DENIED">' + icon('shield') + '权限</button></div></header>' + main + '</section></div>';
+}
+function toolsPanel() {
+  return '<div class="skills-panel"><div class="panel-intro"><div><h2>数据源 / 自动化 / Browser</h2><p>均为助手现有入口：会话内可挂数据源、配置自动化、内嵌 Browser</p></div></div><div class="skill-list">' +
+    '<article class="skill-row"><span class="app-art compact teal">' + icon('folder') + '</span><div><h3>数据源</h3><p>挂载企业知识库与本机文件夹</p><small>现有入口</small></div><div class="skill-permission"><span>按数据源授权</span><button class="button">管理</button></div></article>' +
+    '<article class="skill-row"><span class="app-art compact teal">' + icon('task') + '</span><div><h3>自动化</h3><p>定时或事件触发的助手任务</p><small>现有入口</small></div><div class="skill-permission"><span>运行记录可审计</span><button class="button">管理</button></div></article>' +
+    '<article class="skill-row"><span class="app-art compact teal">' + icon('external') + '</span><div><h3>Browser</h3><p>助手内嵌浏览器工具</p><small>现有入口</small></div><div class="skill-permission"><span>按会话授权</span><button class="button">管理</button></div></article></div></div>';
+}
+
+/* ---------- 圈子 ---------- */
+function circleRow(id, circle, extra) {
+  const m = appMeta(id);
+  return '<article class="circle-work-row">' + appArt(id) + '<div><h3>' + m.name + '</h3><p>' + m.description + '</p><small>' + m.source + ' · ' + m.version + '</small><em>来自 ' + circle.name + '</em></div>' + appAvail(m) + '<div class="circle-work-actions">' + (extra || '<button class="button" data-go="P-M04-APP-VIEW">打开</button>') + '</div></article>';
+}
+function circleListCards() {
+  return Object.values(CIRCLES).map(c => '<article class="circle-card"><span class="circle-avatar">' + c.initials + '</span><div class="circle-card-copy"><div class="circle-card-title"><div><h2>' + c.name + '</h2><p>' + c.creator + '</p></div>' + statusChip(c.id === 'north' ? '付费订阅' : '有效', c.id === 'north' ? 'info' : 'good') + '</div><p class="circle-update">' + c.update + '</p><div class="circle-stats"><span><b>' + c.apps.length + '</b> Apps</span><span><b>' + c.skills.length + '</b> Skills</span><span>' + c.price + '</span><span>' + c.renewal + '</span></div></div><button class="button" data-go="' + (c.id === 'north' ? 'P-M07-DETAIL-PAID' : 'P-M07-DETAIL-FOCUS') + '">查看圈子' + icon('arrow') + '</button></article>').join('');
+}
+function circleDetail(c, opt) {
+  opt = opt || {};
+  const skillRows = c.skills.map(sid => {
+    const s = SKILLS[sid];
+    return '<article class="circle-work-row"><span class="app-art teal">' + icon('spark') + '</span><div><h3>' + s.name + '</h3><p>' + s.description + '</p><small>' + s.source + '</small><em>在 Polo 助手中运行</em></div>' + statusChip(s.enabled ? '已启用' : '未启用', s.enabled ? 'good' : 'neutral') + '<div class="circle-work-actions"><button class="button" data-go="P-M06-SKILLS">在助手中管理</button></div></article>';
+  }).join('');
+  return '<div class="subpage-heading circle-detail-heading"><button class="back-button" data-go="P-M07-LIST">' + icon('left') + '返回我的圈子</button><div><p class="eyebrow">我的空间 · 认证创作者圈子</p><h1>' + c.name + '</h1><p>' + c.creator + ' · ' + c.apps.length + ' 个 Apps · ' + c.skills.length + ' 个 Skills</p></div><div class="circle-heading-meta">' + statusChip(opt.status || '有效', opt.tone || 'good') + '<small>' + c.price + ' · ' + (opt.renewal || c.renewal) + '</small><button class="button quiet" data-go="' + (c.id === 'north' ? 'P-M07-RENEW' : 'P-M07-LEAVE') + '">管理成员资格</button></div></div>' +
+    section('这个圈子的 Apps', opt.appsNote || '打开或加入首页', '<div class="circle-work-list">' + c.apps.map(id => circleRow(id, c, opt.appAction)).join('') + '</div>', '<button class="section-link" data-go="P-M03-ALL-APPS">查看全部 Apps</button>') +
+    section('这个圈子的 Skills', '在助手中管理 Skills', '<div class="circle-work-list">' + skillRows + '</div>', '<button class="section-link" data-go="P-M06-SKILLS">打开助手 Skills</button>');
+}
+</script>
+<script>
+/* =====================================================================
+   首页 / 全部 Apps / App 容器 / 设置
+   ===================================================================== */
+function homeView(space, opt) {
+  opt = opt || {};
+  const sp = SPACES[space];
+  const added = space === 'chenxing' ? ['quote', 'contract', 'customer'] : space === 'northern' ? ['quote'] : (opt.zero ? [] : ['report', 'minutes']);
+  const runCount = opt.runtime != null ? opt.runtime : (EXEC[space] || []).length;
+  const homeGo = space === 'personal' ? 'P-M03-HOME-PERSONAL' : 'P-M03-HOME-ENT';
+  const hero = '<section class="home-hero"><div><h1>下午好，小王</h1><p>继续 <strong>' + sp.name + '</strong> 的工作</p></div>' +
+    (space === 'personal' ? '<button class="home-context-link" data-go="P-M07-LIST">' + icon('circle') + '<span><strong>我的圈子</strong><small>' + Object.keys(CIRCLES).length + ' 个圈子</small></span>' + icon('arrow') + '</button>' : '') + '</section>';
+  let common = '<div class="card-grid home-app-grid">' + assistantHomeCard() + added.map(id => appCard(id)).join('') + '</div>';
+  if (opt.zero) common = '<div class="card-grid home-app-grid">' + assistantHomeCard() + '</div><div class="home-zero-guide" style="margin-top:16px;"><span class="state-icon info" style="margin:0 auto 6px;">' + icon('grid') + '</span><h2 style="margin:0;font-size:18px;">还没有常用 App</h2><p>从全部 Apps 里把常用的工作 App 显示在首页（最多 5 个）。Polo 助手已固定，随时可用。</p><button class="button primary" data-go="P-M03-ALL-APPS">去全部 Apps 挑选</button></div>';
+  if (opt.emptyDir) common += '<div class="empty-note" style="margin-top:16px;">企业还没有向你分发 App，加入的圈子也没有作品。出现内容后，这里会按来源分组展示。</div>';
+  if (opt.offline) common = '<div class="inline-alert" style="margin-bottom:14px;"><i></i><span>当前显示缓存目录（获取于 今天 09:12）· 已安装的 App 可打开；未安装或待更新的 App 暂不可用</span></div>' + common;
+  if (opt.loadFail) common = '<section class="recovery-card" style="margin:0;"><span class="state-icon bad">' + icon('info') + '</span><h2>目录暂时无法加载</h2><p>文件与结果继续保留 · 助手不受影响 · 重试不会产生重复内容</p><div class="state-actions"><button class="button primary" data-go="P-M03-HOME-PERSONAL">' + icon('refresh') + '重新加载目录</button></div></section>';
+  const utils = section('系统工具', '查看文件与执行结果', '<div class="utility-grid">' +
+    utilityCard('files', '文件', '查看最近文件', '3 个最近文件', 'P-M08-FILES') +
+    utilityCard('tasks', '任务与结果', '查看执行与结果', runCount + ' 项运行中', 'P-M04-RUNTIME') + '</div>');
+  return hero + section('常用 Apps', opt.offline ? '打开常用 Apps · 缓存目录' : '打开常用 Apps', common,
+    '<button class="section-link home-section-action" data-go="P-M03-ALL-APPS">全部 Apps</button>') + utils;
+}
+
+function circleAppGroup(c, opt) {
+  return '<section class="circle-app-section"><header class="circle-app-header"><span class="circle-avatar">' + c.initials + '</span><div><div class="circle-app-title"><h3>' + c.name + '</h3>' + statusChip(c.id === 'north' ? '付费订阅' : '有效', c.id === 'north' ? 'info' : 'good') + '</div><p>' + c.creator + ' · ' + c.apps.length + ' 个 Apps</p></div><button class="section-link" data-go="' + (c.id === 'north' ? 'P-M07-DETAIL-PAID' : 'P-M07-DETAIL-FOCUS') + '">查看圈子详情</button></header><div class="card-grid">' + c.apps.map(id => appCard(id)).join('') + '</div></section>';
+}
+
+function allAppsView(opt) {
+  opt = opt || {};
+  const homeSec = section('首页快捷入口', '管理 3 / 5 个工作 App · 助手固定不占名额', '<div class="card-grid">' + assistantManageCard() + ['report', 'minutes'].map(id => appCard(id, 'manage')).join('') + '</div>');
+  let body;
+  if (opt.entEmpty) {
+    body = section('企业分发', '晨星科技 · 企业目录', '<div class="empty-note">企业还没有向你分发 App。管理员分发后，这里会按企业目录分组展示。</div>');
+  } else {
+    body = section('圈子作品', '按 2 个圈子查看 3 个 Apps · 同名 App 靠来源区分，不合并', '<div class="circle-app-list">' + Object.values(CIRCLES).map(c => circleAppGroup(c)).join('') + '</div>');
+  }
+  return subpageHeader('全部 Apps', '搜索、打开或加入首页（演示数据未含搜索框交互）') + homeSec + body;
+}
+
+function manageHomeView(opt) {
+  const hidden = opt && opt.hidden;
+  const cards = ['report', 'minutes'].map(id => appCard(id, 'manage')).join('') +
+    (hidden ? '<article class="product-card"><div class="card-heading"><span class="app-art">' + icon('grid') + '</span><div class="card-title"><h3>品牌语气分析</h3><p class="source-line">认证创作者 · 北极星设计工作室</p></div></div><p class="product-description">已在本设备隐藏 · 只影响这台设备的显示</p><div class="status-line">' + statusChip('已隐藏', 'neutral') + '<button class="card-action" data-go="P-M03-CONTROLS">恢复显示</button></div></article>' : '');
+  return subpageHeader('管理常用 Apps', '上限 5 个 · Polo 助手固定在首页，不占名额', '<span class="status neutral">3 / 5</span>') +
+    section('首页快捷入口', '移出首页不会卸载 App，也不会影响运行中的任务', '<div class="card-grid">' + assistantManageCard() + cards + '</div>') +
+    (hidden ? '' : section('个人隐藏 / 恢复显示', '只影响本设备的显示；与来源侧撤下、到期分开', '<div class="settings-row"><span><strong>品牌语气分析</strong><small>已在本设备隐藏 · 恢复后回到全部 Apps 列表</small></span><button class="button" data-go="P-M03-CONTROLS">查看隐藏项</button></div>'));
+}
+
+function appViewPage(id, opt) {
+  opt = opt || {};
+  const m = appMeta(id);
+  const running = opt.running;
+  const blocked = opt.block;
+  const head = '<div class="app-page-heading"><div><p class="eyebrow">工作 App</p><h1>' + m.name + '</h1><p class="page-meta">' + m.source + ' · ' + m.version + (opt.nextVer ? ' · 可更新到 ' + opt.nextVer : '') + '</p><p>' + m.description + '</p></div><div class="heading-actions">' +
+    (blocked ? statusChip(blocked.label, 'bad') : running ? statusChip(STATUS_LABEL[running], 'info') : statusChip('可使用', 'good')) +
+    '<button class="button quiet" data-go="P-M03-INSPECTOR">' + icon('shield') + '权限</button></div></div>';
+  let workspace;
+  if (blocked) {
+    workspace = '<div class="app-workspace"><div class="app-workspace-icon" style="background:var(--destructive-soft);color:var(--destructive);">' + icon('shield') + '</div><p class="eyebrow">' + SPACES.chenxing.name + ' · App 工作区</p><h2>' + blocked.title + '</h2><p>' + blocked.desc + '</p><div class="app-actions"><button class="button" data-go="P-M04-RUNTIME">查看历史结果</button><button class="button primary" data-go="' + blocked.go + '">' + blocked.action + '</button></div></div>';
+  } else if (opt.offlineWait) {
+    workspace = '<div class="app-workspace"><div class="app-workspace-icon">' + icon('wifi') + '</div><p class="eyebrow">' + SPACES.chenxing.name + ' · App 工作区</p><h2>联网步骤等待网络</h2><p>本地步骤可继续；联网后自动续上，也可以选择终止（结果保留）。</p><div class="app-actions"><button class="button" data-go="P-M04-RUNTIME">查看执行</button><button class="button" data-go="P-M04-CLOSE-ACTIVE">' + icon('stop') + '终止执行</button></div></div>';
+  } else {
+    workspace = '<div class="app-workspace"><div class="app-workspace-icon">' + icon(m.icon) + '</div><p class="eyebrow">' + SPACES.chenxing.name + ' · App 工作区</p><h2>' + (running ? appMeta(id).name + ' 正在运行' : 'FDE 工作区（界面示意）') + '</h2><p>' + (running ? '使用 ' + m.version + ' · 切换标签不中断' : 'App 占满主内容工作区；内部界面归 App 开发者（FDE），原型用中性占位表达容器边界。') + '</p><div class="app-actions">' + (running ? '<button class="button" data-go="P-M04-RUNTIME">查看执行</button><button class="button" data-go="P-M04-CLOSE-ACTIVE">' + icon('stop') + '终止执行</button>' : '<button class="button primary" data-go="P-M04-PREPARE">' + icon('play') + '开始使用</button>') + '</div></div>';
+  }
+  return head + (opt.banner || '') + workspace;
+}
+
+function settingsView(tab) {
+  const appearance = tab === 'appearance';
+  return subpageHeader('账号与偏好', '管理账号与客户端偏好 · 偏好随账号，不随空间', statusChip('账号正常', 'good')) +
+    '<div class="settings-layout"><section class="settings-nav-card"><button class="' + (!appearance ? 'active' : '') + '" data-go="P-M10-SETTINGS">账号概览</button><button>安全</button><button class="' + (appearance ? 'active' : '') + '" data-go="P-M10-SETTINGS-APPEARANCE">外观与通知</button><button>本机存储</button><button>授权记录</button></section><div class="settings-content">' +
+    (appearance
+      ? section('外观与通知', '个人偏好随账号，不随空间', '<div class="settings-row"><span><strong>主题</strong><small>当前：浅色 · 深色主题跟随系统</small></span><button class="button">切换主题</button></div><div class="settings-row"><span><strong>通知</strong><small>重要通知已开启 · 运行完成、积分不足</small></span><button class="button">管理</button></div>')
+      : section('账号概览', '查看账号与身份', '<div class="permission-summary"><span><b>账号</b>小王 · 138••••8000</span><span><b>账号状态</b>正常</span><span><b>身份摘要</b>北方贸易 Owner · 有效创作者</span><span><b>当前设备</b>这台 Mac · 已验证</span></div>') +
+        section('客户端偏好', '设置当前设备', '<div class="settings-row"><span><strong>外观与通知</strong><small>浅色主题 · 重要通知已开启</small></span><button class="button" data-go="P-M10-SETTINGS-APPEARANCE">前往设置</button></div><div class="settings-row"><span><strong>本机存储</strong><small>查看文件索引与下载位置</small></span><button class="button">查看</button></div><div class="settings-row"><span><strong>App 与 Skill 授权记录</strong><small>查看当前空间授权</small></span><button class="button">查看</button></div>') +
+        section('管理入口', '按资格出现 · 独立登录', '<div class="settings-row"><span><strong>企业组织管理端</strong><small>成员、目录、企业账单和 Owner 责任</small></span><button class="button" data-go="P-M10-ADMIN-BROWSER">在浏览器打开</button></div><div class="settings-row"><span><strong>创作者工作台</strong><small>作品、圈子和收入</small></span><button class="button" data-go="P-M10-ADMIN-BROWSER">在浏览器打开</button></div>') +
+        section('账号操作', '退出只影响这台设备', '<div class="settings-row danger-row"><span><strong>退出登录</strong><small>保留本机文件 · 运行任务原地等待</small></span><button class="button danger" data-go="P-M01-LOGIN-PASSWORD">退出登录</button></div>')) +
+    '</div></div>';
+}
+
+/* =====================================================================
+   顶栏 chrome（G4 workbench-bar）
+   ===================================================================== */
+let menuState = null;
+function spaceGoId(target) {
+  if (target === 'personal') return 'P-M03-HOME-PERSONAL';
+  if (target === 'northern') return 'P-M02-ACCESS-LOST';
+  return 'P-M03-HOME-ENT';
+}
+function renderSpaceMenu(st, id) {
+  const cur = st.space || 'personal';
+  if (id === 'P-M02-SWITCHER') {
+    return '<div class="menu-label">切换空间</div>' + Object.values(SPACES).map(s => {
+      const active = s.id === cur;
+      return '<button class="space-row' + (active ? ' active' : '') + '" ' + (active ? '' : 'data-go="P-M02-CONFIRM"') + '><span class="space-avatar">' + s.short + '</span><span><b>' + s.name + '</b><small>' + s.type + ' · ' + s.role + '</small></span>' + (active ? icon('check', 'check') : '') + '</button>';
+    }).join('');
+  }
+  return '<div class="menu-label">切换空间</div>' + Object.values(SPACES).map(s => {
+    const active = s.id === cur;
+    const go = s.id === 'northern' && !st.adminOwner ? '' : 'data-go="' + spaceGoId(s.id) + '"';
+    return '<button class="space-row' + (active ? ' active' : '') + '" ' + (active ? '' : go) + '><span class="space-avatar">' + s.short + '</span><span><b>' + s.name + '</b><small>' + s.type + ' · ' + s.role + '</small></span>' + (active ? icon('check', 'check') : '') + '</button>';
+  }).join('');
+}
+function renderAccountMenu(st, id) {
+  const priv = id === 'P-M10-MENU';
+  return '<div class="menu-section-title">小王 · 普通账号</div>' +
+    '<button class="menu-row" data-go="P-M10-SETTINGS"><span class="menu-icon">' + icon('settings') + '</span><span class="menu-copy"><b>账号与偏好</b><small>管理客户端设置</small></span>' + icon('arrow', 'menu-arrow') + '</button>' +
+    '<button class="menu-row" data-go="P-M09-BROWSER"><span class="menu-icon">' + icon('wallet') + '</span><span class="menu-copy"><b>充值与账单</b><small>在系统浏览器打开</small></span>' + icon('external', 'menu-arrow') + '</button>' +
+    (priv ? '<div class="menu-divider"></div><div class="menu-section-title">管理入口</div>' +
+      '<button class="menu-row" data-go="P-M10-ADMIN-BROWSER"><span class="menu-icon">' + icon('grid') + '</span><span class="menu-copy"><b>企业管理</b><small>北方贸易 · Owner · 打开浏览器</small></span>' + icon('external', 'menu-arrow') + '</button>' +
+      '<button class="menu-row" data-go="P-M10-ADMIN-BROWSER"><span class="menu-icon">' + icon('spark') + '</span><span class="menu-copy"><b>创作者工作台</b><small>资格有效 · 打开浏览器</small></span>' + icon('external', 'menu-arrow') + '</button>' : '') +
+    '<div class="menu-divider"></div><button class="menu-row" data-go="P-M01-LOGIN-PASSWORD"><span class="menu-icon">' + icon('lock') + '</span><span class="menu-copy"><b>退出登录</b><small>保留本机文件</small></span></button>';
+}
+function renderRuntimeMenu(st, id) {
+  const execs = EXEC[st.space || 'personal'] || [];
+  const detailed = id === 'P-M04-RUNTIME';
+  const rows = execs.map(x => '<div class="runtime-row">' + appArt(x.app, 'compact') + '<span class="menu-copy"><b>' + x.name + '</b><small>' + x.detail + '</small></span>' + statusChip(STATUS_LABEL[x.status], 'info') + (detailed ? '<button class="button quiet" data-go="P-M04-CLOSE-ACTIVE">进入</button>' : '') + '</div>').join('');
+  return '<div class="menu-label">运行状态 · ' + SPACES[st.space || 'personal'].name + '</div>' + rows +
+    (detailed ? '<div class="menu-divider"></div><button class="menu-row" data-go="P-M02-SWITCHER"><span class="menu-icon">' + icon('refresh') + '</span><span class="menu-copy"><b>全部终止并切换空间</b><small>逐项终止后才会提交切换</small></span></button>' : '');
+}
+function renderNotificationMenu(st, id) {
+  return '<div class="menu-label">通知</div>' +
+    '<button class="menu-row" data-go="P-M07-DETAIL-PAID"><span class="menu-icon">' + icon('circle') + '</span><span class="menu-copy"><b>北极星设计圈有更新</b><small>品牌语气分析 v1.4.0 · 下次使用生效</small></span></button>' +
+    '<button class="menu-row" data-go="P-M04-RUNTIME"><span class="menu-icon">' + icon('task') + '</span><span class="menu-copy"><b>数据报表生成器已在后台完成</b><small>结果在「任务与结果」查看</small></span></button>';
+}
+function renderTabsEl(st) {
+  const homeGo = st.space !== 'personal' ? 'P-M03-HOME-ENT' : 'P-M03-HOME-PERSONAL';
+  let h = '<button class="home-tab' + (st.tab === 'home' ? ' active' : '') + '" data-go="' + homeGo + '">' + icon('home') + '<span class="home-tab-label">首页</span></button>';
+  const tab = (label, ic, active, go, running) => '<div class="tab' + (active ? ' active' : '') + '"><button class="tab-activate" data-go="' + go + '"><span class="tab-icon">' + icon(ic) + '</span><span>' + label + '</span>' + (running ? '<span class="tab-run-dot"></span>' : '') + '</button><button class="tab-close" data-go="' + homeGo + '" aria-label="关闭">−</button></div>';
+  if (st.tab === 'polo') h += tab('Polo 助手', 'spark', true, 'P-M05-CHAT', st.tabRunning);
+  else if (st.tab === 'app') { const m = appMeta(st.app); h += tab(m.name, m.icon, true, 'P-M04-APP-VIEW', st.tabRunning); }
+  return h;
+}
+function renderChrome(st, id) {
+  const sp = SPACES[st.space || 'personal'];
+  $('#space-avatar').textContent = sp.short;
+  $('#space-name').textContent = sp.name;
+  $('#space-type').textContent = sp.type + ' · ' + sp.role;
+  $('#account-button').textContent = '王';
+  const runN = st.runtime != null ? st.runtime : ((EXEC[st.space || 'personal'] || []).length ? (EXEC[st.space || 'personal']).length : 0);
+  $('#runtime-label').textContent = runN ? runN + ' 项运行中' : '无运行项';
+  $('#runtime-dot').className = 'status-dot' + (runN ? ' running' : '');
+  $('#tabs').innerHTML = renderTabsEl(st);
+  $('#space-menu').innerHTML = renderSpaceMenu(st, id);
+  $('#account-menu').innerHTML = renderAccountMenu(st, id);
+  $('#runtime-menu').innerHTML = renderRuntimeMenu(st, id);
+  $('#notification-menu').innerHTML = renderNotificationMenu(st, id);
+  menuState = st.menu || null;
+  syncPopovers();
+}
+const POPOVER_OF = { space: '#space-menu', account: '#account-menu', runtime: '#runtime-menu', notification: '#notification-menu' };
+const TRIGGER_OF = { space: '#space-trigger', account: '#account-button', runtime: '#runtime-button', notification: '#notification-button' };
+function syncPopovers() {
+  Object.keys(POPOVER_OF).forEach(k => {
+    const pop = $(POPOVER_OF[k]), trg = $(TRIGGER_OF[k]);
+    const open = menuState === k;
+    pop.hidden = !open;
+    trg.setAttribute('aria-expanded', String(open));
+  });
+}
+function showOfflineBanner(st) {
+  const b = $('#connection-banner');
+  const waiting = st.offline === 'wait';
+  b.hidden = false;
+  b.innerHTML = waiting
+    ? '<span class="connection-icon">' + icon('wifi') + '</span><span class="connection-copy"><strong>等待网络</strong><small>本地步骤可继续 · 联网步骤等待恢复</small></span><button class="button quiet" data-go="P-M11-OFFLINE-RUNNING">重试连接</button>'
+    : '<span class="connection-icon">' + icon('wifi') + '</span><span class="connection-copy"><strong>当前离线</strong><small>缓存非最新授权</small><small>已安装 App 可打开 · 禁止启动新的 App、Skill 与助手</small></span><button class="button quiet" data-go="P-M11-OFFLINE-HOME">重试连接</button>';
+}
+</script>
+<script>
+/* =====================================================================
+   90 屏注册表（M01—M11 · 来源分类 cls：reuse 复用 / adjust 调整 / new 新增 / integ 集成候选 / state 状态 / cross 跨端）
+   ===================================================================== */
+const SCREENS = {
+  /* M01 */
+  'P-M01-LOGIN-PASSWORD': { m: 'M01', t: '登录 · 密码登录', cls: 'reuse', chrome: 'login', note: 'G4 登录卡：品牌故事 + 分段登录方式 + 协议勾选，为冻结稿复用样式。' },
+  'P-M01-LOGIN-PHONE': { m: 'M01', t: '登录 · 验证码登录', cls: 'reuse', chrome: 'login', note: '手机号 +86 分段输入；「获取验证码」为现有行为。' },
+  'P-M01-LOGIN-CODE': { m: 'M01', t: '登录 · 验证码已发送', cls: 'reuse', chrome: 'login', note: '倒计时重发属于现有行为；验证码错误会内联提示，不弹窗。' },
+  'P-M01-LOGIN-CANCEL': { m: 'M01', t: '登录 · 用户取消', cls: 'state', chrome: 'login', note: '取消后留在登录入口并可重试；不产生副作用（C-R08）。' },
+  'P-M01-PERSONAL-PREP': { m: 'M01', t: '我的空间 · 准备中', cls: 'adjust', chrome: 'login', note: '唯一「我的空间」幂等创建；重试不产生第二个空间（PC-F01）。' },
+  'P-M01-PERSONAL-PREP-FAIL': { m: 'M01', t: '我的空间 · 准备失败', cls: 'adjust', chrome: 'login', note: '准备失败给出重试入口并说明幂等；不阻塞重新登录。' },
+  'P-M01-REOPEN': { m: 'M01', t: '重开 · 登录恢复', cls: 'state', chrome: 'login', note: '过期会话要求重新登录；恢复后核对访问权，不自动重做业务动作。' },
+  'P-M01-INVITE-BROWSER': { m: 'M01', t: '邀请确认（浏览器交接）', cls: 'cross', chrome: 'bridge', note: '浏览器端只画交接卡；加入成功仅作为桌面刷新的输入（PC-F05）。' },
+  'P-M01-INVITE-MISMATCH': { m: 'M01', t: '邀请 · 账号不匹配', cls: 'cross', chrome: 'bridge', note: '邀请不交给错误账号；改用受邀账号后才能接受。' },
+  'P-M01-INVITE-PENDING': { m: 'M01', t: '共享邀请 · 待审批', cls: 'cross', chrome: 'bridge', note: '共享邀请需 Owner/Manager 审批；批准前企业不出现在可用空间。' },
+  'P-M01-REFRESH-FAIL': { m: 'M01', t: '加入后 · 企业列表刷新失败', cls: 'state', chrome: 'gate', note: '成员关系已保留；核对同账号后重试，不需要重新接受邀请（C-R01）。' },
+  'P-M01-NOT-INSTALLED': { m: 'M01', t: '未安装 · 下载指引', cls: 'cross', chrome: 'bridge', note: '同账号登录后企业出现在空间列表；不强制立即安装。' },
+  'P-M01-CREATE-ENT': { m: 'M01', t: '创建企业（浏览器交接）', cls: 'cross', chrome: 'bridge', note: '创建在浏览器端完成且幂等；进入与否由用户在桌面端决定（PC-F07）。' },
+  'P-M01-COLD-START': { m: 'M01', t: '冷启动 · 候选目标重验', cls: 'state', chrome: 'gate', note: '冷启动重验账号/邀请/空间列表；不自动切换空间。' },
+  /* M02 */
+  'P-M02-SWITCHER': { m: 'M02', t: '空间切换器（下拉）', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: 'G4 顶栏空间切换器：无活动直切，有活动进入确认；切换只影响本机。' },
+  'P-M02-CONFIRM': { m: 'M02', t: '切换确认 · 终止 3 项', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '展示将终止的 App 与助手任务；取消留在原空间（C-R04）。' },
+  'P-M02-STOPPING': { m: 'M02', t: '终止进度', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '逐项展示已终止/停止中；全部停止后才提交切换（PC-F06）。' },
+  'P-M02-STOP-FAILED': { m: 'M02', t: '部分停止失败', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '1 项失败：重试失败项或取消；已终止项不自动复活（C-R04）。' },
+  'P-M02-STOP-CANCEL': { m: 'M02', t: '取消切换 · 仍在原空间', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '取消的是切换，不撤销已完成的停止——这是关键规则。' },
+  'P-M02-TARGET-LOADING': { m: 'M02', t: '目标空间加载中', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '目录、权限、计量与助手集合一起切换；不展示混合内容。' },
+  'P-M02-TARGET-FAILED': { m: 'M02', t: '目标空间加载失败', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '重试加载或留在原空间；已停止任务保持停止。' },
+  'P-M02-ACCESS-LOST': { m: 'M02', t: '目标无权访问', cls: 'integ', chrome: 'desktop', space: 'ent', tab: 'home', note: '已从切换器移除并说明原因；联系管理员恢复（C-R05）。' },
+  /* M03 */
+  'P-M03-HOME-PERSONAL': { m: 'M03', t: '首页 · 个人空间（有常用）', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', runtime: 1, note: '固定 Polo 助手 + 最多 5 个常用 App；「我的圈子」与「全部 Apps」并列（D-PC-07 · D-PC-01）。' },
+  'P-M03-HOME-ZERO': { m: 'M03', t: '首页 · 首登零常用', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '零常用引导去全部 Apps；助手卡始终可用，不强迫先配置。' },
+  'P-M03-HOME-EMPTY-DIR': { m: 'M03', t: '首页 · 真空目录', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '企业未分发且圈子无作品时的诚实空态，说明何时会出现内容。' },
+  'P-M03-HOME-LOAD-FAIL': { m: 'M03', t: '首页 · 目录加载失败', cls: 'state', chrome: 'desktop', space: 'personal', tab: 'home', note: '目录失败不阻塞助手；重试幂等（C-R01）。' },
+  'P-M03-HOME-OFFLINE': { m: 'M03', t: '首页 · 离线缓存目录', cls: 'state', chrome: 'desktop', space: 'personal', tab: 'home', offline: true, note: '缓存目录标注获取时间；已安装可打开，未安装/更新不可用（C-R07）。' },
+  'P-M03-HOME-ENT': { m: 'M03', t: '首页 · 企业空间（晨星科技）', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'home', runtime: 3, note: '企业首页按 D-PC-07 不放管理卡（现状差异见待裁决清单）。' },
+  'P-M03-ALL-APPS': { m: 'M03', t: '全部 Apps · 来源分组', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '企业/圈子/个人来源分组；同名 App 靠来源区分，不合并。' },
+  'P-M03-ALL-APPS-ENT-EMPTY': { m: 'M03', t: '全部 Apps · 企业目录为空', cls: 'state', chrome: 'desktop', space: 'personal', tab: 'home', note: '企业未分发时的空态；与个人隐藏、来源撤下区分展示。' },
+  'P-M03-INSPECTOR': { m: 'M03', t: 'App 详情（inspector）', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '来源/版本/状态原因/权限说明；「为何阻断」不归因，只给路径。' },
+  'P-M03-MANAGE-HOME': { m: 'M03', t: '管理常用 Apps（上限 5）', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '上限 5 个在这里生效；Polo 助手固定不占名额（D-PC-07 收口首页方案）。' },
+  'P-M03-CONTROLS': { m: 'M03', t: '个人隐藏 / 恢复显示', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '只影响本设备的显示；与来源侧撤下/到期分开说明。' },
+  /* M04 */
+  'P-M04-APP-VIEW': { m: 'M04', t: 'App 容器 · 全屏 FDE 占位', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'app', app: 'quote', note: 'App 占满主内容工作区，内部界面归 FDE；原型用中性占位（D-PC-05 容器边界）。' },
+  'P-M04-PREPARE': { m: 'M04', t: '准备与权限确认', cls: 'state', chrome: 'desktop', space: 'ent', tab: 'home', note: '安装对话框复用 G4 结构：权限说明 + 下载进度 + 确认打开。' },
+  'P-M04-PREP-FAILED': { m: 'M04', t: '准备失败', cls: 'state', chrome: 'desktop', space: 'ent', tab: 'home', note: '失败不影响已安装版本；重试幂等，可先用当前版本（C-R02）。' },
+  'P-M04-CLOSE-ACTIVE': { m: 'M04', t: '关闭 · 三选项', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'app', app: 'quote', note: '取消 / 后台继续 / 终止并关闭；展示正在运行的任务（D-PC-07 收口关闭方案）。' },
+  'P-M04-TERM-FAILED': { m: 'M04', t: '终止失败 · 标签保留', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'app', app: 'quote', note: '终止失败保留标签并可重试；不出现「看似关了、后台还在跑」（C-R03）。' },
+  'P-M04-BACKGROUND': { m: 'M04', t: '后台继续', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'home', runtime: 1, note: '后台任务有持续入口（顶栏运行 pill → 运行状态）。' },
+  'P-M04-RUNTIME': { m: 'M04', t: '运行状态中心', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'home', runtime: 3, note: '按空间列出本机运行项：进入 / 停止 / 全部终止并切换。' },
+  'P-M04-PERM-DENIED': { m: 'M04', t: 'OS 权限被拒', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'app', app: 'report', note: '给系统设置路径后由用户主动重试；不自动反复请求（C-R06）。' },
+  /* M05 助手（G4 三栏 assistant-shell） */
+  'P-M05-CHAT': { m: 'M05', t: '助手 · 对话生成中', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '三栏结构、会话行、活动行、停止按钮均为冻结稿样式（D-PC-06）。' },
+  'P-M05-NEW': { m: 'M05', t: '助手 · 新会话', cls: 'reuse', chrome: 'desktop', space: 'personal', tab: 'polo', layout: 'assist', note: '空会话占位与建议 chips 复用现有样式。' },
+  'P-M05-STOPPED': { m: 'M05', t: '助手 · 停止生成', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '停止保留已生成部分与输入内容（PC-F02）。' },
+  'P-M05-QUESTION': { m: 'M05', t: '助手 · 追问待回答', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '问题卡 + 回答/暂不回答；会话状态跨重开保留。' },
+  'P-M05-QUESTION-REOPEN': { m: 'M05', t: '助手 · 重开后问题恢复', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '重开恢复问题与草稿；不替用户重复提交（PC-F10）。' },
+  /* M06 技能 */
+  'P-M06-SKILLS': { m: 'M06', t: '技能 · 授权/已启用/设备准备', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '技能三态 + 同名来源区分；侧栏 Skills 列表直接复用。' },
+  'P-M06-SKILL-DENIED': { m: 'M06', t: '技能 · 启用失败（无授权）', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '无授权给联系作者路径；不影响会话其余部分。' },
+  'P-M06-TOOLS': { m: 'M06', t: '数据源 / 自动化 / Browser', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '侧栏数据源/自动化与助手内 Browser 均为现有入口。' },
+  /* M08 文件 */
+  'P-M08-FILES': { m: 'M08', t: '原对话文件', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '附件与生成文件留在会话内；不建统一文件汇总页（D-PC-03）。' },
+  'P-M08-FILE-MISSING': { m: 'M08', t: '文件缺失', cls: 'reuse', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: '缺失给重选路径；会话其余内容不受影响（C-R02）。' },
+  /* M07 圈子 */
+  'P-M07-LIST': { m: 'M07', t: '我的圈子 · 列表', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '个人空间稳定入口，与「全部 Apps」并列（D-PC-07 收口 M07 入口）；本轮新增页。' },
+  'P-M07-EMPTY': { m: 'M07', t: '我的圈子 · 空态', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '说明圈子来源（作者邀请）与作品获得路径。' },
+  'P-M07-DETAIL-FOCUS': { m: 'M07', t: '圈子详情 · 已加入', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '已获得作品 + 订阅信息 + 到期规则；续费/退出都在这里。' },
+  'P-M07-JOIN-FREE': { m: 'M07', t: '加入免费圈子', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '免费即时生效；作品自动出现在 Apps。' },
+  'P-M07-JOIN-PENDING': { m: 'M07', t: '圈子 · 待审批', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '共享圈子需 Owner/Manager 审批；批准前不出现作品。' },
+  'P-M07-DETAIL-PAID': { m: 'M07', t: '付费订阅详情', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '价格/周期/手动续费/12 个月上限/支付渠道（浏览器）全在此说明。' },
+  'P-M07-PAY-BROWSER': { m: 'M07', t: '圈子支付（浏览器交接）', cls: 'cross', chrome: 'bridge', note: '支付在浏览器完成；桌面端只发起并确认结果。' },
+  'P-M07-PAY-RETURN-FAIL': { m: 'M07', t: '已支付 · 刷新失败', cls: 'new', chrome: 'gate', note: '订单已在，不重复扣款；确认前不显示已到期（C-R01）。' },
+  'P-M07-RENEW': { m: 'M07', t: '手动续费', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '从到期日起算、上限 12 个月；不自动扣款。' },
+  'P-M07-EXPIRED': { m: 'M07', t: '圈子到期', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '作品保留但标记到期，不能再启动；续费后立即恢复。' },
+  'P-M07-LEAVE': { m: 'M07', t: '退出圈子', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '退出先停运行任务；已获得作品按来源策略处理。' },
+  /* M09 积分 */
+  'P-M09-PRE-BLOCK': { m: 'M09', t: '发送前积分不足', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'polo', layout: 'assist', note: '输入保留、发送不可用；充值走浏览器（PC-N03）。' },
+  'P-M09-STREAM-CUT': { m: 'M09', t: '生成中不足 · 部分输出', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'polo', layout: 'assist', note: '已生成部分保留并如实标注；不假装完成（PC-N03）。' },
+  'P-M09-APP-BANNER': { m: 'M09', t: 'App 内平台提示（非模态）', cls: 'new', chrome: 'desktop', space: 'ent', tab: 'app', app: 'report', note: 'App 内只用非模态横幅；不接管 App 自身界面。' },
+  'P-M09-ENT-NOTIFY': { m: 'M09', t: '企业积分 · 通知 Owner', cls: 'new', chrome: 'desktop', space: 'ent', tab: 'polo', layout: 'assist', note: 'Member 不能充值：通知 Owner；额度裁决不在客户端。' },
+  'P-M09-USER-STOP': { m: 'M09', t: '用户主动停止 ≠ 积分不足', cls: 'state', chrome: 'desktop', space: 'personal', tab: 'polo', layout: 'assist', note: '两种停止原因分开展示，避免误导。' },
+  'P-M09-BROWSER': { m: 'M09', t: '充值（浏览器交接）', cls: 'cross', chrome: 'bridge', note: '浏览器完成支付；到账以桌面端核对为准。' },
+  'P-M09-CHECKING': { m: 'M09', t: '返回后 · 单次查询中', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '返回只做一次查询；会话与草稿保留，不自动发送（PC-N03）。' },
+  'P-M09-NOT-YET': { m: 'M09', t: '未到账 / 查询失败', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'home', note: '保持阻断并保留重试；不重复发起多次查询。' },
+  'P-M09-RESUMED': { m: 'M09', t: '到账解除 · 由用户决定', cls: 'new', chrome: 'desktop', space: 'personal', tab: 'polo', layout: 'assist', note: '解除后不自动发送/续写；是否继续由用户决定（已冻结）。' },
+  /* M10 账号 */
+  'P-M10-MENU': { m: 'M10', t: '账号菜单 · 有管理资格', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '管理入口（企业管理/创作者工作台/充值账单）统一收口在账号菜单（D-PC-07）。' },
+  'P-M10-MENU-NOPRIV': { m: 'M10', t: '账号菜单 · 无资格', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', note: '无资格时不显示管理入口，而不是灰置。' },
+  'P-M10-SETTINGS': { m: 'M10', t: '设置 · 账号安全', cls: 'reuse', chrome: 'desktop', space: 'personal', tab: 'home', note: '设置页复用现有结构与导航。' },
+  'P-M10-SETTINGS-APPEARANCE': { m: 'M10', t: '设置 · 外观', cls: 'reuse', chrome: 'desktop', space: 'personal', tab: 'home', note: '主题等个人偏好随账号，不随空间。' },
+  'P-M10-ADMIN-BROWSER': { m: 'M10', t: '企业管理后台（浏览器交接）', cls: 'cross', chrome: 'bridge', note: '后台独立登录；桌面端只保留入口（D-PC-07）。' },
+  'P-M10-ADMIN-RETURN': { m: 'M10', t: '返回后 · 资格刷新', cls: 'state', chrome: 'desktop', space: 'personal', tab: 'home', note: '返回重新核对资格；责任以后台数据为准。' },
+  /* M11 异常 */
+  'P-M11-REAUTH': { m: 'M11', t: '会话过期 · 重新登录', cls: 'state', chrome: 'login', note: '登录后回到上次空间与页面；运行任务原地等待（C-R08）。' },
+  'P-M11-REVOKE': { m: 'M11', t: '运行中被移除', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'home', runtime: 3, note: '终止本机企业活动后回安全入口；个人空间仍可用（PC-F11）。' },
+  'P-M11-PERSONAL-RESTRICTED': { m: 'M11', t: '个人也受限 · 安全页', cls: 'adjust', chrome: 'gate', note: '最小操作集：联系管理员 / 退出登录；不归因。' },
+  'P-M11-BLOCKED-WITHDRAWN': { m: 'M11', t: '作品 · 分发被撤下', cls: 'state', chrome: 'desktop', space: 'ent', tab: 'app', app: 'customer', note: '保留安装但不可启动；状态原因如实展示。' },
+  'P-M11-BLOCKED-EXPIRED': { m: 'M11', t: '作品 · 圈子订阅到期', cls: 'state', chrome: 'desktop', space: 'ent', tab: 'app', app: 'report', note: '续费后立即恢复，不需要重新安装。' },
+  'P-M11-BLOCKED-VERSION': { m: 'M11', t: '作品 · 版本紧急阻断', cls: 'state', chrome: 'desktop', space: 'ent', tab: 'app', app: 'customer', note: '安全问题紧急阻断；升级路径可见（PC-F08）。' },
+  'P-M11-OFFLINE-HOME': { m: 'M11', t: '离线打开', cls: 'state', chrome: 'desktop', space: 'personal', tab: 'home', offline: true, note: '缓存可用范围如实标注；联网自动续上（C-R07）。' },
+  'P-M11-OFFLINE-RUNNING': { m: 'M11', t: '运行中断网', cls: 'adjust', chrome: 'desktop', space: 'ent', tab: 'app', app: 'quote', offline: true, note: '本地可继续、联网步骤等待；用户可选择终止（C-R07）。' },
+  'P-M11-CONTRACT': { m: 'M11', t: '需要升级 Polo', cls: 'integ', chrome: 'gate', note: 'ContractGate：最低版本阻断企业空间，个人空间不受影响。' },
+  'P-M11-CONTRACT-DL': { m: 'M11', t: '正在下载更新', cls: 'integ', chrome: 'gate', note: '后台下载；可用个人空间，不被强制等待。' },
+  'P-M11-CONTRACT-FAIL': { m: 'M11', t: '更新没有完成', cls: 'integ', chrome: 'gate', note: '幂等重试，不出现半更新状态；重试/帮助路径可见。' },
+  'P-M11-SPACE-ERROR': { m: 'M11', t: '空间列表加载失败', cls: 'integ', chrome: 'gate', note: 'space-error 卡：重试或离线继续（缓存）。' },
+  'P-M11-REOPEN-RECOVERY': { m: 'M11', t: '重开恢复', cls: 'adjust', chrome: 'desktop', space: 'personal', tab: 'home', runtime: 1, note: '恢复会话与标签；运行任务核对状态，不假装完成（PC-F10）。' }
+};
+const DEFAULT_SCREEN = 'P-M01-LOGIN-PASSWORD';
+const MODULE_TITLES = { M01: 'M01 登录与空间承接', M02: 'M02 空间切换', M03: 'M03 首页与全部 Apps', M04: 'M04 App 容器', M05: 'M05 助手 · 会话', M06: 'M06 助手 · 技能与数据源', M07: 'M07 我的圈子', M08: 'M08 会话文件', M09: 'M09 积分不足', M10: 'M10 账号菜单与设置', M11: 'M11 异常与恢复' };
+const CLS_LABEL = { reuse: '复用', adjust: '调整', new: '新增', integ: '集成候选', state: '状态', cross: '跨端' };
+
+/* =====================================================================
+   90 屏内容（B 注册表）
+   ===================================================================== */
+const B = {};
+/* ----- M01 ----- */
+B['P-M01-LOGIN-PASSWORD'] = () => loginView({ mode: 'password', pw: 1 });
+B['P-M01-LOGIN-PHONE'] = () => loginView({ mode: 'phone' });
+B['P-M01-LOGIN-CODE'] = () => loginView({ mode: 'code', filled: 1 });
+B['P-M01-LOGIN-CANCEL'] = () => loginView({ mode: 'password', pw: 1, cancel: 1, next: 'P-M01-LOGIN-CODE' });
+B['P-M01-PERSONAL-PREP'] = () => systemCard({ glyph: 'refresh', spin: 1, eyebrow: '首次使用', title: '正在准备我的空间', desc: '幂等创建：重试不会产生第二个空间', facts: [['账号', '小王'], ['进度', '正在准备内容'], ['下一步', '进入首页']], actions: '<button class="button primary" data-go="P-M03-HOME-ZERO">完成准备</button>' });
+B['P-M01-PERSONAL-PREP-FAIL'] = () => systemCard({ tone: 'bad', glyph: 'alert', eyebrow: '首次使用', title: '我的空间准备失败', desc: '重试是幂等的；已写入的内容不会重复创建', facts: [['账号', '小王'], ['状态', '准备失败'], ['已产生', '无副作用']], actions: '<button class="button" data-go="P-M01-LOGIN-PASSWORD">重新登录</button><button class="button primary" data-go="P-M01-PERSONAL-PREP">' + icon('refresh') + '重试准备</button>' });
+B['P-M01-REOPEN'] = () => loginView({ mode: 'password', pw: 1, expired: 1 });
+B['P-M01-INVITE-BROWSER'] = () => flowPage({ eyebrow: '系统浏览器 · 圈子邀请', title: '晨星增长圈邀请你加入', desc: '确认圈子与可用内容后，回到 Polo 打开', facts: [['创作者', '晨星增长工作室'], ['加入方式', '邀请链接'], ['可获得', '1 个 App · 1 个 Skill'], ['加入后', '进入我的空间']], actions: '<button class="button" data-go="P-M07-LIST">暂不加入</button><button class="button primary" data-go="P-M07-JOIN-FREE">继续确认加入</button>' });
+B['P-M01-INVITE-MISMATCH'] = () => flowPage({ tone: 'bad', eyebrow: '系统浏览器 · 企业邀请', title: '请使用收到邀请的账号', desc: '邀请与账号绑定，不交给错误账号', facts: [['当前账号', '138••••8000'], ['受邀账号', 'xiaowang@chenxing.com'], ['企业空间', '未添加']], actions: '<button class="button" data-go="P-M01-COLD-START">返回</button><button class="button primary" data-go="P-M11-REAUTH">切换账号</button>' });
+B['P-M01-INVITE-PENDING'] = () => flowPage({ eyebrow: '系统浏览器 · 共享邀请', title: '加入申请等待审批', desc: '批准前企业不会出现在可用空间', facts: [['申请状态', '等待 Owner / Manager 审批'], ['我的空间', '可以使用'], ['企业空间', '尚不可见']], actions: '<button class="button primary" data-go="P-M01-COLD-START">进入我的空间</button>' });
+B['P-M01-REFRESH-FAIL'] = () => systemCard({ tone: 'bad', glyph: 'refresh', eyebrow: '加入后', title: '企业已加入，但列表暂时无法加载', desc: '成员关系已保留；核对同账号后重试', facts: [['成员关系', '已生效'], ['目录状态', '加载失败'], ['当前页面', '我的空间']], actions: '<button class="button" data-go="P-M03-HOME-ZERO">暂时留在我的空间</button><button class="button primary" data-go="P-M01-COLD-START">' + icon('refresh') + '重新加载</button>' });
+B['P-M01-NOT-INSTALLED'] = () => flowPage({ eyebrow: '系统浏览器 · 下载指引', title: '你还没有安装 Polo 桌面端', desc: '同账号登录后，企业会出现在空间列表', facts: [['平台', 'macOS'], ['版本', '最新稳定版'], ['安装', '不强制立即完成']], actions: '<button class="button primary" data-go="P-M01-COLD-START">下载安装包</button>' });
+B['P-M01-CREATE-ENT'] = () => flowPage({ eyebrow: '系统浏览器 · 创建企业', title: '在企业组织管理端继续', desc: '创建在浏览器端完成且幂等；是否进入由你在桌面端决定', facts: [['当前账号', '小王'], ['创建位置', '企业组织管理端'], ['完成后', '刷新空间列表']], actions: '<button class="button" data-go="P-M03-HOME-PERSONAL">取消</button><button class="button primary" data-go="P-M10-ADMIN-RETURN">打开企业组织管理端</button>' });
+B['P-M01-COLD-START'] = () => systemCard({ glyph: 'refresh', spin: 1, eyebrow: '冷启动', title: '正在重验账号与空间列表', desc: '重验账号、邀请与空间列表；不自动切换空间', facts: [['账号', '有效'], ['邀请', '1 个待确认'], ['空间列表', '已获取 3 个']], actions: '<button class="button primary" data-go="P-M03-HOME-PERSONAL">进入 Polo</button>' });
+/* ----- M02 ----- */
+B['P-M02-SWITCHER'] = () => ({ main: homeView('chenxing'), menu: 'space' });
+const confirmRows = (state) => dialogRow('报价整理', '运行中 · 前台', state === 'stop' ? 'stop' : state === 'fail' ? 'ok' : state) +
+  dialogRow('助手 · Q2 报价汇总', '正在生成回答', state === 'fail' ? 'fail' : state === 'stop' ? 'stop' : state) +
+  dialogRow('数据报表生成器', '同空间后台运行', state === 'fail' || state === 'stop' ? 'ok' : state);
+B['P-M02-CONFIRM'] = () => ({ main: homeView('chenxing'), modal: dialog({ wide: 1, title: '切换到 我的空间', desc: '终止 3 项任务后切换', body: '<div class="dialog-list">' + confirmRows('run') + '</div><p class="dialog-note">当前仍在 晨星科技。切换只影响这台设备；已终止的项不会自动恢复。</p>', foot: '<button class="button" data-go="P-M02-SWITCHER">取消切换</button><button class="button danger" data-go="P-M02-STOPPING">终止全部并切换</button>' }) });
+B['P-M02-STOPPING'] = () => ({ main: homeView('chenxing'), modal: dialog({ wide: 1, title: '正在终止运行项', desc: '全部停止后才提交切换', body: switchProgress(2, 3) + '<div class="dialog-list">' + confirmRows('mixed') + '</div>', foot: '<button class="button" data-go="P-M02-STOP-FAILED">取消切换</button><button class="button primary" disabled><span class="spinner"></span>正在终止…</button>' }) });
+B['P-M02-STOP-FAILED'] = () => ({ main: homeView('chenxing'), modal: dialog({ wide: 1, title: '未能切换空间', desc: '重试失败项或取消切换', body: switchProgress(2, 3) + '<div class="inline-alert bad"><i></i><span>1 项未能终止，请重试；已终止的项不会自动恢复运行。</span></div><div class="dialog-list">' + confirmRows('fail') + '</div>', foot: '<button class="button" data-go="P-M02-STOP-CANCEL">取消切换</button><button class="button primary" data-go="P-M02-STOPPING">重试失败项</button>' }) });
+B['P-M02-STOP-CANCEL'] = () => ({ main: homeView('chenxing'), modal: dialog({ wide: 1, title: '已取消切换', desc: '你仍在 晨星科技。已停止的任务保持停止，不会自动恢复。', body: switchProgress(2, 3) + '<div class="dialog-list">' + confirmRows('fail') + '</div><p class="dialog-note">取消的是切换，不撤销已经完成的停止。</p>', foot: '<button class="button" data-go="P-M04-BACKGROUND">返回首页</button><button class="button primary" data-go="P-M02-SWITCHER">重新选择空间</button>' }) });
+B['P-M02-TARGET-LOADING'] = () => ({ main: homeView('chenxing'), modal: dialog({ wide: 1, title: '正在切换到 我的空间', desc: '目录、权限、计量与助手集合一起加载；不展示混合内容', body: switchProgress(3, 3) + '<div class="dialog-list">' + confirmRows('ok') + '</div>', foot: '<button class="button primary" disabled><span class="spinner"></span>正在加载…</button>' }) });
+B['P-M02-TARGET-FAILED'] = () => ({ main: homeView('chenxing'), modal: dialog({ wide: 1, title: '未能加载 我的空间', desc: '可以重试，或留在当前空间', body: '<div class="inline-alert bad"><i></i><span>目标空间加载失败 · 你仍在 晨星科技；刚才已停止的任务保持停止。</span></div>', foot: '<button class="button" data-go="P-M03-HOME-ENT">留在晨星科技</button><button class="button primary" data-go="P-M02-TARGET-LOADING">' + icon('refresh') + '重试加载</button>' }) });
+B['P-M02-ACCESS-LOST'] = () => ({ main: homeView('chenxing'), modal: dialog({ title: '无法切换到 北方贸易', desc: '这个空间已从切换器移除', body: '<dl class="state-facts inspector-facts"><div><dt>原因</dt><dd>你的成员资格已被移除</dd></div><div><dt>当前空间</dt><dd>晨星科技 · 不受影响</dd></div><div><dt>恢复方式</dt><dd>联系企业管理员重新邀请</dd></div></dl>', foot: '<button class="button" data-go="P-M03-HOME-ENT">知道了</button></div>' }) });
+/* ----- M03 ----- */
+B['P-M03-HOME-PERSONAL'] = () => homeView('personal');
+B['P-M03-HOME-ZERO'] = () => homeView('personal', { zero: 1 });
+B['P-M03-HOME-EMPTY-DIR'] = () => homeView('personal', { zero: 1, emptyDir: 1 });
+B['P-M03-HOME-LOAD-FAIL'] = () => homeView('personal', { loadFail: 1, runtime: 0 });
+B['P-M03-HOME-OFFLINE'] = () => homeView('personal', { offline: 1 });
+B['P-M03-HOME-ENT'] = () => homeView('chenxing');
+B['P-M03-ALL-APPS'] = () => allAppsView();
+B['P-M03-ALL-APPS-ENT-EMPTY'] = () => allAppsView({ entEmpty: 1 });
+B['P-M03-INSPECTOR'] = () => ({ main: homeView('personal'), modal: dialog({ title: '客户资料核验 · 详情', desc: '来源、版本与状态原因都在这里核对', body: '<dl class="state-facts inspector-facts"><div><dt>来源</dt><dd>企业内部导入 · 晨星科技</dd></div><div><dt>版本</dt><dd>v0.9.4</dd></div><div><dt>状态原因</dt><dd>版本被企业紧急阻断 · 新执行不可用</dd></div><div><dt>权限说明</dt><dd>读取客户资料并保存核验结果</dd></div><div><dt>历史结果</dt><dd>继续保留，可随时查看</dd></div></dl><p class="dialog-note">「为何阻断」不归因；升级或恢复路径由企业管理员提供。</p>', foot: '<button class="button" data-go="P-M04-RUNTIME">查看历史结果</button><button class="button primary" data-close-modal>关闭</button>' }) });
+B['P-M03-MANAGE-HOME'] = () => manageHomeView();
+B['P-M03-CONTROLS'] = () => manageHomeView({ hidden: 1 });
+/* ----- M04 ----- */
+B['P-M04-APP-VIEW'] = () => appViewPage('quote', { running: 'running' });
+B['P-M04-PREPARE'] = () => ({ main: homeView('chenxing'), modal: dialog({ title: '准备「合同审查」v1.9.0', desc: '确认权限后下载并打开', body: '<div class="impact-card">' + icon('shield') + '<span><strong>权限说明</strong><small>读取合同文件并保存风险清单 · 授权记录可查看</small></span></div><div class="switch-progress-summary"><span>下载进度</span><strong>68%</strong></div><div class="progress-track"><span style="width:68%"></span></div>', foot: '<button class="button" data-go="P-M04-PREP-FAILED">模拟下载失败</button><button class="button primary" data-go="P-M04-APP-VIEW">确认并打开</button>' }) });
+B['P-M04-PREP-FAILED'] = () => ({ main: homeView('chenxing'), modal: dialog({ title: '准备失败', desc: '已安装的 v1.8.0 不受影响', body: '<div class="inline-alert bad"><i></i><span>更新包下载失败 · 重试是幂等的，也可以先继续使用当前版本。</span></div>', foot: '<button class="button" data-go="P-M04-APP-VIEW">先用当前版本</button><button class="button primary" data-go="P-M04-PREPARE">' + icon('refresh') + '重试</button>' }) });
+const closeDialogBody = () => '<div class="impact-card">' + icon('clock') + '<span><strong>报价整理正在运行</strong><small>晨星科技 · 运行中 · 关闭前选择处理方式</small></span></div>';
+B['P-M04-CLOSE-ACTIVE'] = () => ({ main: appViewPage('quote', { running: 'running' }), modal: dialog({ title: '关闭「报价整理」？', desc: '选择后台继续或终止', body: closeDialogBody(), foot: '<button class="button" data-go="P-M04-APP-VIEW">取消</button><button class="button" data-go="P-M04-BACKGROUND">后台继续</button><button class="button danger" data-go="P-M04-TERM-FAILED">终止并关闭</button>' }) });
+B['P-M04-TERM-FAILED'] = () => ({ main: appViewPage('quote', { running: 'running' }), modal: dialog({ title: '终止失败 · 标签已保留', desc: '不会出现「看似关了、后台还在跑」', body: '<div class="inline-alert bad"><i></i><span>终止请求未完成 · 标签保留并可重试；App 仍处于运行状态。</span></div>' + closeDialogBody(), foot: '<button class="button" data-go="P-M04-APP-VIEW">返回标签</button><button class="button primary" data-go="P-M04-BACKGROUND">重试终止</button>' }) });
+B['P-M04-BACKGROUND'] = () => ({ main: homeView('chenxing', { runtime: 1 }), toast: '已在后台继续运行 · 顶栏运行入口可随时查看' });
+B['P-M04-RUNTIME'] = () => ({ main: homeView('chenxing'), menu: 'runtime' });
+B['P-M04-PERM-DENIED'] = () => ({ main: appViewPage('report'), modal: dialog({ title: '需要「文件与文件夹」权限', desc: 'OS 权限被拒后由你主动重试', body: '<dl class="state-facts inspector-facts"><div><dt>所需权限</dt><dd>文件与文件夹（读取下载目录）</dd></div><div><dt>当前状态</dt><dd>已被拒绝</dd></div><div><dt>设置路径</dt><dd>系统设置 → 隐私与安全性 → 文件与文件夹</dd></div></dl><p class="dialog-note">Polo 不会自动反复请求权限；在系统设置里放行后，回到这里重试。</p>', foot: '<button class="button" data-close-modal>稍后再说</button><button class="button primary" data-go="P-M04-APP-VIEW">' + icon('refresh') + '重试请求</button>' }) });
+/* ----- M05 / M06 / M08 ----- */
+B['P-M05-CHAT'] = () => assistantShell({ working: 1 });
+B['P-M05-NEW'] = () => assistantShell({ empty: 1 });
+B['P-M05-STOPPED'] = () => assistantShell({ stopped: 1, draft: 1 });
+B['P-M05-QUESTION'] = () => assistantShell({ question: 1 });
+B['P-M05-QUESTION-REOPEN'] = () => assistantShell({ question: 1, draft: 1, reopened: 1 });
+B['P-M06-SKILLS'] = () => assistantShell('skills');
+B['P-M06-SKILL-DENIED'] = () => ({ main: assistantShell('skills'), modal: dialog({ title: '无法启用「增长案例检索」', desc: '当前账号没有这个 Skill 的授权', body: '<div class="impact-card">' + icon('shield') + '<span><strong>授权不足</strong><small>来源：晨星增长工作室 · 需要圈子授权</small></span></div><p class="dialog-note">不影响会话其余部分；可联系创作者获取授权，或先用已启用的 Skills。</p>', foot: '<button class="button" data-close-modal>先用已启用的</button><button class="button primary" data-go="P-M07-DETAIL-FOCUS">联系作者</button>' }) });
+B['P-M06-TOOLS'] = () => assistantShell('tools');
+B['P-M08-FILES'] = () => assistantShell('files');
+B['P-M08-FILE-MISSING'] = () => assistantShell({ files: 1, missing: 1 });
+/* ----- M07 ----- */
+const circleListBody = () => subpageHeader('我的圈子', '个人空间稳定入口 · 与「全部 Apps」并列', '<button class="button" data-go="P-M07-JOIN-FREE">使用邀请链接加入</button>') + section('已加入的圈子', '查看 Apps、Skills 与成员资格', '<div class="circle-list">' + circleListCards() + '</div>');
+B['P-M07-LIST'] = () => circleListBody();
+B['P-M07-EMPTY'] = () => subpageHeader('我的圈子', '圈子作品来自认证创作者的邀请或订阅') + '<div class="empty-state"><h2>还没有加入圈子</h2><p>使用创作者分享的邀请链接加入圈子；加入后，圈子的 Apps 与 Skills 会出现在你的空间里。</p><button class="button primary" data-go="P-M01-INVITE-BROWSER">打开邀请链接（演示）</button></div>';
+B['P-M07-DETAIL-FOCUS'] = () => circleDetail(CIRCLES.growth);
+B['P-M07-JOIN-FREE'] = () => ({ main: circleListBody(), modal: dialog({ title: '加入「晨星增长圈」', desc: '免费圈子 · 确认后立即生效', body: '<dl class="state-facts inspector-facts"><div><dt>内容价格</dt><dd>免费</dd></div><div><dt>可获得</dt><dd>1 个 App · 1 个 Skill</dd></div><div><dt>加入后</dt><dd>作品出现在「全部 Apps」</dd></div></dl>', foot: '<button class="button" data-close-modal>暂不加入</button><button class="button primary" data-go="P-M07-DETAIL-FOCUS">确认加入</button>' }) });
+B['P-M07-JOIN-PENDING'] = () => ({ main: circleListBody(), modal: dialog({ title: '加入申请已提交', desc: '共享圈子需要 Owner / Manager 审批', body: '<div class="impact-card">' + icon('clock') + '<span><strong>等待审批</strong><small>批准前，这个圈子的作品不会出现；不影响现有空间</small></span></div>', foot: '<button class="button primary" data-close-modal>知道了</button>' }) });
+B['P-M07-DETAIL-PAID'] = () => circleDetail(CIRCLES.north, { status: '付费订阅', tone: 'info', renewal: '下次续费 2026-10-01' });
+B['P-M07-PAY-BROWSER'] = () => flowPage({ eyebrow: '系统浏览器 · 圈子订阅', title: '北极星设计圈 · ¥39 / 月', desc: '支付在系统浏览器完成；桌面端只发起并确认结果', facts: [['订阅价格', '¥39 / 月'], ['续费规则', '手动续费 · 上限 12 个月'], ['支付渠道', '系统浏览器完成'], ['完成后', '回到 Polo 核对结果']], actions: '<button class="button" data-go="P-M07-DETAIL-PAID">取消</button><button class="button primary" data-go="P-M07-PAY-RETURN-FAIL">在浏览器继续</button>' });
+B['P-M07-PAY-RETURN-FAIL'] = () => systemCard({ tone: 'bad', glyph: 'refresh', eyebrow: '已支付', title: '订单已提交，订阅状态暂时无法确认', desc: '订单已在，不会重复扣款；确认前不会显示「已到期」', facts: [['订单状态', '已提交'], ['成员资格', '确认中'], ['下一步', '重新核对']], actions: '<button class="button" data-go="P-M07-LIST">返回我的圈子</button><button class="button primary" data-go="P-M07-DETAIL-PAID">' + icon('refresh') + '重新核对</button>' });
+B['P-M07-RENEW'] = () => ({ main: circleDetail(CIRCLES.north, { status: '付费订阅', tone: 'info', renewal: '到期 2026-10-01' }), modal: dialog({ title: '手动续费 · 北极星设计圈', desc: '从到期日起算，上限 12 个月', body: '<dl class="state-facts inspector-facts"><div><dt>续费时长</dt><dd>1 个月（¥39）</dd></div><div><dt>起算日</dt><dd>2026-10-01（当前到期日）</dd></div><div><dt>自动扣款</dt><dd>无 · 到期前需手动续费</dd></div><div><dt>支付位置</dt><dd>系统浏览器</dd></div></dl>', foot: '<button class="button" data-close-modal>取消</button><button class="button primary" data-go="P-M07-PAY-BROWSER">去浏览器支付</button>' }) });
+B['P-M07-EXPIRED'] = () => circleDetail(CIRCLES.north, { status: '已到期', tone: 'bad', renewal: '2026-09-01 到期', appsNote: '作品保留并标记到期 · 续费后立即恢复，不需要重新安装', appAction: '<button class="button" disabled>已到期</button><button class="button primary" data-go="P-M07-RENEW">续费恢复</button>' });
+B['P-M07-LEAVE'] = () => ({ main: circleDetail(CIRCLES.growth), modal: dialog({ title: '退出「晨星增长圈」？', desc: '退出前会先停止运行中的圈子任务', body: '<div class="impact-card">' + icon('alert') + '<span><strong>当前没有运行中的圈子任务</strong><small>已获得的作品将按来源策略处理；退出后不可再启动</small></span></div>', foot: '<button class="button" data-close-modal>取消</button><button class="button danger" data-go="P-M07-EMPTY">确认退出</button>' }) });
+/* ----- M09 ----- */
+B['P-M09-PRE-BLOCK'] = () => assistantShell({ credit: 1, draft: 1 });
+B['P-M09-STREAM-CUT'] = () => assistantShell({ partial: 1 });
+B['P-M09-APP-BANNER'] = () => appViewPage('report', { banner: '<div class="credits-banner info" style="margin:0 0 14px;">' + icon('info') + '<span><b>平台额度提醒</b> · 本月企业积分额度即将用尽；App 内操作不受影响。</span><button class="button" data-go="P-M09-ENT-NOTIFY">通知管理员</button></div>' });
+B['P-M09-ENT-NOTIFY'] = () => assistantShell({ entNote: 1 });
+B['P-M09-USER-STOP'] = () => assistantShell({ stopped: 1, draft: 1, userStop: 1 });
+B['P-M09-BROWSER'] = () => flowPage({ eyebrow: '系统浏览器 · 积分充值', title: '为我的空间充值积分', desc: '充值在系统浏览器完成；到账以桌面端核对为准', facts: [['当前余额', CREDIT.balance + ' 积分'], ['本次需要', CREDIT.need + ' 积分'], ['充值渠道', '系统浏览器完成'], ['到账确认', '回到 Polo 单次查询']], actions: '<button class="button" data-go="P-M09-PRE-BLOCK">取消</button><button class="button primary" data-go="P-M09-CHECKING">在浏览器继续</button>' });
+B['P-M09-CHECKING'] = () => ({ main: homeView('personal', { runtime: 0 }), modal: dialog({ title: '正在核对充值结果', desc: '返回只做一次查询 · 会话与草稿已保留', body: '<div class="impact-card"><span class="spinner"></span><span><strong>正在向服务端确认到账状态</strong><small>不会自动发送会话草稿</small></span></div>', foot: '<button class="button primary" data-go="P-M09-NOT-YET">查看结果</button>' }) });
+B['P-M09-NOT-YET'] = () => ({ main: homeView('personal', { runtime: 0 }), modal: dialog({ title: '暂时没有查到到账', desc: '保持阻断并保留一次重试', body: '<div class="inline-alert bad"><i></i><span>未查询到新余额 · 支付可能仍在处理；不重复发起多次查询。</span></div><p class="dialog-note">会话与草稿继续保留；到账后由你决定是否发送。</p>', foot: '<button class="button" data-go="P-M03-HOME-PERSONAL">稍后再查</button><button class="button primary" data-go="P-M09-RESUMED">' + icon('refresh') + '再查一次</button>' }) });
+B['P-M09-RESUMED'] = () => assistantShell({ resumed: 1, draft: 1 });
+/* ----- M10 ----- */
+B['P-M10-MENU'] = () => ({ main: homeView('personal'), menu: 'account' });
+B['P-M10-MENU-NOPRIV'] = () => ({ main: homeView('personal'), menu: 'account' });
+B['P-M10-SETTINGS'] = () => settingsView();
+B['P-M10-SETTINGS-APPEARANCE'] = () => settingsView('appearance');
+B['P-M10-ADMIN-BROWSER'] = () => flowPage({ eyebrow: '系统浏览器 · 企业管理后台', title: '北方贸易 · 企业组织管理端', desc: '后台独立登录；桌面端只保留入口', facts: [['你的角色', 'Owner'], ['管理范围', '成员、目录、企业账单'], ['完成后', '回到 Polo 刷新资格']], actions: '<button class="button primary" data-go="P-M10-ADMIN-RETURN">在浏览器打开</button>' });
+B['P-M10-ADMIN-RETURN'] = () => ({ main: homeView('personal'), toast: '已重新核对管理资格 · 责任以后台数据为准' });
+/* ----- M11 ----- */
+B['P-M11-REAUTH'] = () => loginView({ mode: 'password', pw: 1, expired: 1, next: 'P-M11-REOPEN-RECOVERY' });
+B['P-M11-REVOKE'] = () => ({ main: homeView('chenxing'), modal: dialog({ title: '你在晨星科技的访问已被移除', desc: '终止本机企业活动后回到安全入口', body: '<div class="dialog-list">' + dialogRow('报价整理', '正在终止 · 结果保留在原空间', 'stop') + dialogRow('助手 · Q2 报价汇总', '正在停止下一段生成', 'stop') + dialogRow('数据报表生成器', '后台任务 · 已终止', 'ok') + '</div><p class="dialog-note">个人空间不受影响；企业内容将按企业策略保留。</p>', foot: '<button class="button" data-go="P-M03-HOME-PERSONAL">返回我的空间</button><button class="button primary" data-go="P-M02-SWITCHER">查看切换进度</button>' }) });
+B['P-M11-PERSONAL-RESTRICTED'] = () => systemCard({ tone: 'bad', glyph: 'shield', eyebrow: '账号受限', title: '暂时无法进入 Polo', desc: '账号当前受限；不归因，只提供最小操作', facts: [['账号', '小王'], ['状态', '受限'], ['参考编号', 'ACC-0182']], actions: '<button class="button" data-go="P-M01-LOGIN-PASSWORD">退出登录</button><button class="button primary" data-go="P-M01-REFRESH-FAIL">联系管理员</button>' });
+B['P-M11-BLOCKED-WITHDRAWN'] = () => appViewPage('customer', { block: { label: '不可用', title: '客户资料核验已被撤下分发', desc: '来源：晨星科技 · 新执行不可用；已保存结果继续保留，可随时查看。', action: '返回全部 Apps', go: 'P-M03-ALL-APPS' } });
+B['P-M11-BLOCKED-EXPIRED'] = () => appViewPage('report', { block: { label: '已到期', title: '圈子订阅已到期', desc: '来源：北极星设计圈 · 续费后立即恢复，不需要重新安装；历史结果继续保留。', action: '去续费', go: 'P-M07-RENEW' } });
+B['P-M11-BLOCKED-VERSION'] = () => appViewPage('customer', { block: { label: '已阻断', title: 'v0.9.4 被紧急阻断', desc: '企业对安全问题执行紧急阻断 · 升级或恢复路径由企业管理员提供；历史结果保留版本信息。', action: '查看历史结果', go: 'P-M04-RUNTIME' } });
+B['P-M11-OFFLINE-HOME'] = () => homeView('personal', { offline: 1 });
+B['P-M11-OFFLINE-RUNNING'] = () => ({ main: appViewPage('quote', { running: 'running', offlineWait: 1 }), offlineMode: 'wait' });
+B['P-M11-CONTRACT'] = () => systemCard({ glyph: 'shield', eyebrow: '需要升级', title: '升级后继续使用企业空间', desc: '最低版本阻断企业空间；个人空间不受影响', facts: [['当前版本', 'v0.16'], ['可用版本', 'v0.17'], ['个人空间', '可继续使用']], actions: '<button class="button" data-go="P-M03-HOME-PERSONAL">先用个人空间</button><button class="button primary" data-go="P-M11-CONTRACT-DL">下载并安装</button>' });
+B['P-M11-CONTRACT-DL'] = () => systemCard({ glyph: 'download', spin: 1, eyebrow: '正在升级', title: '正在下载新版本', desc: '后台下载 · 不强制等待', progress: 68, progressLabel: '验证更新包 · 68%', actions: '<button class="button primary" data-go="P-M11-CONTRACT-FAIL">模拟下载失败</button>' });
+B['P-M11-CONTRACT-FAIL'] = () => systemCard({ tone: 'bad', glyph: 'alert', eyebrow: '更新没有完成', title: '下载未完成，可安全重试', desc: '幂等重试，不会出现半更新状态', facts: [['已下载', '已回滚'], ['本机状态', 'v0.16 完整可用']], actions: '<button class="button" data-go="P-M01-LOGIN-PASSWORD">退出登录</button><button class="button primary" data-go="P-M11-CONTRACT-DL">' + icon('refresh') + '重试下载</button>' });
+B['P-M11-SPACE-ERROR'] = () => systemCard({ tone: 'bad', glyph: 'refresh', eyebrow: '空间列表', title: '空间列表暂时无法加载', desc: '可以重试，或先用缓存内容离线继续', facts: [['缓存', '3 个空间（今天 09:12）'], ['在线核对', '失败 · 可重试']], actions: '<button class="button" data-go="P-M11-OFFLINE-HOME">离线继续</button><button class="button primary" data-go="P-M01-COLD-START">' + icon('refresh') + '重试</button>' });
+B['P-M11-REOPEN-RECOVERY'] = () => ({ main: homeView('personal', { runtime: 1 }), toast: '已恢复上次会话与标签 · 运行任务已核对状态（不假装完成）' });
+</script>
+<script>
+const $ = (s) => document.querySelector(s);
+/* =====================================================================
+   三条代表故事
+   ===================================================================== */
+const STORIES = [
+  { name: '故事 1 · 首登加入企业并使用', steps: [
+    { s: 'P-M01-LOGIN-PASSWORD', n: '小王首次使用 Polo，用账号密码登录。' },
+    { s: 'P-M01-PERSONAL-PREP', n: '登录成功，系统为它准备唯一的「我的空间」。' },
+    { s: 'P-M03-HOME-ZERO', n: '首登还没有常用 App：助手始终可用，引导去全部 Apps。' },
+    { s: 'P-M03-ALL-APPS', n: '在全部 Apps 里按来源浏览：企业分发、圈子作品。' },
+    { s: 'P-M03-INSPECTOR', n: '查看详情：来源、版本与状态原因都在这里核对。' },
+    { s: 'P-M04-PREPARE', n: '准备「合同审查」更新：确认权限后下载。' },
+    { s: 'P-M04-APP-VIEW', n: 'App 占满主内容工作区，内部界面归 FDE（原型为中性占位）。' },
+    { s: 'P-M05-CHAT', n: '回到 Polo 助手，让助手基于附件整理报价汇总。' },
+    { s: 'P-M08-FILES', n: '附件与生成文件都留在会话里，重开后可继续。' }
+  ] },
+  { name: '故事 2 · 日常切换空间（部分停止失败）', steps: [
+    { s: 'P-M03-HOME-ENT', n: '小王在晨星科技工作，首页显示 3 项运行中。' },
+    { s: 'P-M04-RUNTIME', n: '运行状态中心按空间列出本机任务：App 与助手生成。' },
+    { s: 'P-M02-SWITCHER', n: '从顶栏空间切换器发起切换；有活动任务时会先确认。' },
+    { s: 'P-M02-CONFIRM', n: '确认框列出将被终止的 3 项任务。' },
+    { s: 'P-M02-STOPPING', n: '逐项终止中；全部停止后才提交切换。' },
+    { s: 'P-M02-STOP-FAILED', n: '1 项未能终止：重试失败项，或取消切换。' },
+    { s: 'P-M02-STOP-CANCEL', n: '小王取消切换：留在晨星科技，已终止的项不会自动复活。' },
+    { s: 'P-M04-BACKGROUND', n: '改为后台继续：顶栏保留运行入口，随时可查看。' }
+  ] },
+  { name: '故事 3 · 积分不足 → 浏览器 → 单次查询', steps: [
+    { s: 'P-M05-CHAT', n: '小王正在让助手按客户分组整理报价汇总。' },
+    { s: 'P-M09-PRE-BLOCK', n: '发送前发现积分不足：输入保留，发送不可用。' },
+    { s: 'P-M09-BROWSER', n: '去浏览器完成充值；桌面端只发起与确认结果。' },
+    { s: 'P-M09-CHECKING', n: '回到 Polo：只做一次到账查询，会话与草稿保留。' },
+    { s: 'P-M09-NOT-YET', n: '第一次查询未到账：保持阻断，可再查一次。' },
+    { s: 'P-M09-RESUMED', n: '积分到账：解除阻断，但不自动发送——由小王决定。' },
+    { s: 'P-M05-CHAT', n: '小王自己点下发送，继续刚才的整理。' }
+  ] }
+];
+
+/* =====================================================================
+   路由与渲染
+   ===================================================================== */
+let story = null; // { idx, step }
+const overlayEl = $('#overlay-root');
+
+function currentId() {
+  const m = location.hash.match(/s=([A-Za-z0-9-]+)/);
+  return (m && SCREENS[m[1]]) ? m[1] : DEFAULT_SCREEN;
+}
+function go(id) { if (SCREENS[id]) location.hash = '#s=' + id; }
+
+function openModal(html) { const layer = $('#modal-layer'); layer.innerHTML = html; layer.hidden = false; }
+function closeModal() { const layer = $('#modal-layer'); layer.hidden = true; layer.innerHTML = ''; }
+let toastTimer = null;
+function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3000); }
+
+function render() {
+  const id = currentId();
+  const meta = SCREENS[id] || SCREENS[DEFAULT_SCREEN];
+  const out = B[id] ? B[id]() : '';
+  const o = (out && typeof out === 'object') ? out : { main: out };
+  const st = Object.assign({}, meta, { menu: o.menu || null });
+  if (st.space === 'ent') st.space = 'chenxing'; // SCREENS 元数据用 'ent'，数据模型用具体企业 id
+  if (o.offlineMode) st.offline = o.offlineMode;
+
+  const isSystem = meta.chrome !== 'desktop';
+  $('#app-shell').hidden = isSystem;
+  $('#system-screen').hidden = !isSystem;
+  $('#connection-banner').hidden = true;
+  if (isSystem) {
+    $('#system-screen').innerHTML = o.main || '';
+  } else {
+    renderChrome(st, id);
+    const wm = $('#workspace-main');
+    wm.innerHTML = o.main || '';
+    wm.classList.toggle('assistant-mode', meta.layout === 'assist');
+    if (meta.offline) showOfflineBanner(st);
+  }
+
+  if (o.modal) openModal(o.modal); else closeModal();
+  if (o.toast) showToast(o.toast);
+  if (!story) { menuState = st.menu; syncPopovers(); }
+
+  renderNote(meta, id);
+  renderStoryBar(meta, id);
+  document.title = meta.t + ' · POO-71 原型';
+  window.scrollTo(0, 0);
+}
+
+/* ---------- 本页标注 ---------- */
+function renderNote(st, id) {
+  const p = $('#note-panel');
+  p.innerHTML =
+    '<div class="np-head"><span class="class-chip ' + st.cls + '">' + (CLS_LABEL[st.cls] || st.cls) + '</span>' +
+    '<b>' + MODULE_TITLES[st.m] + '</b><span class="np-id">' + id + '</span>' +
+    '<button class="np-close" data-close-note>✕</button></div>' +
+    '<p>' + st.note + '</p>' +
+    '<div class="np-foot">演示数据均为虚构；浏览器交接页为「另一端负责」的示意。</div>';
+}
+
+/* ---------- 故事播放 ---------- */
+function startStory(idx) { story = { idx, step: 0 }; go(STORIES[idx].steps[0].s); }
+function stopStory() { story = null; $('#dm-narrator').hidden = true; $('#dm-next').hidden = true; $('#dm-exit-story').hidden = true; }
+function storyStep(delta) {
+  if (!story) return;
+  const steps = STORIES[story.idx].steps;
+  const next = Math.min(Math.max(story.step + delta, 0), steps.length - 1);
+  story.step = next; go(steps[next].s);
+}
+function renderStoryBar(st, id) {
+  const nar = $('#dm-narrator'), nxt = $('#dm-next'), exit = $('#dm-exit-story');
+  if (!story) { nar.hidden = true; nxt.hidden = true; exit.hidden = true; return; }
+  const steps = STORIES[story.idx].steps;
+  let i = steps.findIndex(x => x.s === id);
+  if (i < 0) i = story.step;
+  story.step = i;
+  $('#dn-step').textContent = STORIES[story.idx].name + ' · ' + (i + 1) + '/' + steps.length;
+  $('#dn-text').textContent = steps[i].n;
+  nar.hidden = false; nxt.hidden = false; exit.hidden = false;
+  nxt.textContent = i >= steps.length - 1 ? '结束故事 ▸' : '下一步 ▸';
+}
+
+/* ---------- 页面索引 ---------- */
+function buildIndex() {
+  const groups = {};
+  Object.keys(SCREENS).forEach(k => { (groups[SCREENS[k].m] = groups[SCREENS[k].m] || []).push(k); });
+  let h = '<div class="overlay-backdrop" data-close-overlay><div class="overlay-card">' +
+    '<div class="ov-head"><b>页面索引 · ' + Object.keys(SCREENS).length + ' 个页面 / 状态</b>' +
+    '<span class="ov-sub">每屏一个 hash 路由，可直达；角标为来源分类</span>' +
+    '<button class="overlay-close" data-close-overlay>✕</button></div><div class="ov-body">';
+  Object.keys(groups).forEach(m => {
+    h += '<div class="idx-group"><h3>' + MODULE_TITLES[m] + ' <span class="cnt">' + groups[m].length + '</span></h3><div class="idx-items">';
+    groups[m].forEach(k => {
+      const s = SCREENS[k];
+      h += '<button class="idx-item" data-go="' + k + '"><span class="sid">' + k.replace('P-', '') + '</span>' +
+        '<span class="ii-t">' + s.t + '</span><span class="class-chip ' + s.cls + '">' + CLS_LABEL[s.cls] + '</span></button>';
+    });
+    h += '</div></div>';
+  });
+  h += '</div></div></div>';
+  return h;
+}
+function toggleIndex(force) {
+  const open = force !== undefined ? force : !overlayEl.innerHTML;
+  overlayEl.innerHTML = open ? buildIndex() : '';
+}
+
+/* ---------- 事件（委托） ---------- */
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close-modal]')) { closeModal(); return; }
+  // modal 空白处点击关闭
+  if (e.target.closest('#modal-layer') && !e.target.closest('.dialog')) { closeModal(); return; }
+  const goEl = e.target.closest('[data-go]');
+  if (goEl) { const id = goEl.getAttribute('data-go'); if (id && SCREENS[id]) { go(id); return; } }
+  // 顶栏弹出层触发钮
+  const popEl = e.target.closest('[data-pop]');
+  if (popEl) {
+    const key = popEl.getAttribute('data-pop');
+    menuState = menuState === key ? null : key;
+    syncPopovers();
+    return;
+  }
+  // 点击 popover / 顶栏以外区域 → 关闭菜单
+  if (!e.target.closest('.popover') && !e.target.closest('.workbench-bar')) {
+    if (menuState) { menuState = null; syncPopovers(); }
+  }
+  if (e.target.closest('[data-close-overlay]')) {
+    if (e.target.closest('.overlay-card') && !e.target.closest('.overlay-close')) return;
+    toggleIndex(false); return;
+  }
+  if (e.target.closest('[data-close-note]')) { $('#note-panel').hidden = true; return; }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (overlayEl.innerHTML) { toggleIndex(false); return; }
+    if (!$('#modal-layer').hidden) { closeModal(); return; }
+    if (menuState) { menuState = null; syncPopovers(); return; }
+  }
+  if (story && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) storyStep(e.key === 'ArrowRight' ? 1 : -1);
+});
+window.addEventListener('hashchange', () => { toggleIndex(false); render(); });
+window.addEventListener('resize', () => { $('#window-guard').hidden = window.innerWidth > 640; viewSize(); });
+
+/* ---------- 演示控制区 ---------- */
+$('#dm-index').addEventListener('click', () => toggleIndex());
+$('#dm-note').addEventListener('click', () => { const p = $('#note-panel'); p.hidden = !p.hidden; });
+$('#dm-compact').addEventListener('click', () => {
+  const on = document.body.classList.toggle('preview-1024');
+  $('#dm-compact').textContent = on ? '退出 1024 预览' : '1024×768 预览';
+  viewSize();
+});
+$('#dm-story1').addEventListener('click', () => startStory(0));
+$('#dm-story2').addEventListener('click', () => startStory(1));
+$('#dm-story3').addEventListener('click', () => startStory(2));
+$('#dm-exit-story').addEventListener('click', stopStory);
+$('#dm-next').addEventListener('click', () => {
+  if (!story) return;
+  const steps = STORIES[story.idx].steps;
+  if (story.step >= steps.length - 1) { stopStory(); return; }
+  storyStep(1);
+});
+function viewSize() { $('#dm-viewsize').textContent = '视口 ' + window.innerWidth + '×' + window.innerHeight + (document.body.classList.contains('preview-1024') ? ' · 预览 1024×768' : ''); }
+
+/* ---------- init ---------- */
+(function init() {
+  if (new URLSearchParams(location.search).has('clean')) document.body.classList.add('clean');
+  $('#window-guard').hidden = window.innerWidth > 640;
+  viewSize();
+  if (!location.hash) location.replace('#s=' + DEFAULT_SCREEN);
+  render();
+})();
+
+/* ---------- 溢出审计（仅 ?audit=1 时激活，供截图脚本读取，不影响正常使用） ---------- */
+(function audit() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('audit')) return;
+  if (q.has('all')) {
+    // 单次会话遍历全部屏（重写 currentId 绑定，不触发 hash 导航）：[id, 横向溢出 px, 是否空渲染]
+    const real = currentId;
+    const out = [];
+    try {
+      Object.keys(SCREENS).forEach(id => {
+        currentId = () => id;
+        render();
+        const doc = document.documentElement;
+        const filled = ['#workspace-main', '#system-screen'].some(sel => { const el = $(sel); return el && el.innerHTML.trim(); });
+        out.push([id, Math.max(doc.scrollWidth, document.body.scrollWidth) - window.innerWidth,
+          filled ? 0 : 1]);
+      });
+    } finally { currentId = real; }
+    document.title = 'AUDIT:' + JSON.stringify(out);
+    try {
+      // 上报给本地审计接收器（fire-and-forget；无接收器时静默失败，不影响使用）
+      fetch('http://127.0.0.1:8765/audit?vp=' + encodeURIComponent(q.get('vp') || ''), { method: 'POST', mode: 'no-cors', body: JSON.stringify({ vp: q.get('vp') || '', out }) });
+    } catch (e) { /* 忽略 */ }
+    return;
+  }
+  requestAnimationFrame(() => {
+    try {
+      const doc = document.documentElement;
+      const overflowX = Math.max(doc.scrollWidth, document.body.scrollWidth) - window.innerWidth;
+      document.body.setAttribute('data-audit-screen', currentId());
+      document.body.setAttribute('data-audit-overflow-x', String(overflowX));
+      document.body.setAttribute('data-audit-blank', ['#workspace-main', '#system-screen'].some(sel => { const el = document.querySelector(sel); return el && el.innerHTML.trim(); }) ? '0' : '1');
+      document.body.setAttribute('data-audit-scrollh', String(Math.max(doc.scrollHeight, document.body.scrollHeight)));
+      const stack = document.elementsFromPoint(window.innerWidth / 2, window.innerHeight - 4)
+        .map(e => e.tagName + (e.id ? '#' + e.id : '')).slice(0, 5).join(' | ');
+      document.body.setAttribute('data-audit-bottom', stack);
+    } catch (e) { /* 调试探测失败不影响页面 */ }
+  });
+})();
+</script>
+</body>
+</html>

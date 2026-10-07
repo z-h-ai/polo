@@ -1,0 +1,411 @@
+{
+ "cycles": [
+  {
+   "cycle": 1,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2026-11-02",
+    "2026-12-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0183",
+   "query": true,
+   "valid_to": "2026-12-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 2,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2026-12-02",
+    "2027-01-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0184",
+   "query": true,
+   "valid_to": "2027-01-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 3,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-01-02",
+    "2027-02-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0185",
+   "query": true,
+   "valid_to": "2027-02-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 4,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-02-02",
+    "2027-03-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0186",
+   "query": true,
+   "valid_to": "2027-03-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 5,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-03-02",
+    "2027-04-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0187",
+   "query": true,
+   "valid_to": "2027-04-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 6,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-04-02",
+    "2027-05-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0188",
+   "query": true,
+   "valid_to": "2027-05-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 7,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-05-02",
+    "2027-06-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0189",
+   "query": true,
+   "valid_to": "2027-06-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 8,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-06-02",
+    "2027-07-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0190",
+   "query": true,
+   "valid_to": "2027-07-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 9,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-07-02",
+    "2027-08-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0191",
+   "query": true,
+   "valid_to": "2027-08-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 10,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-08-02",
+    "2027-09-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0192",
+   "query": true,
+   "valid_to": "2027-09-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  },
+  {
+   "cycle": 11,
+   "renew_scene": {
+    "scene": "P-M07-RENEW",
+    "limit_entry": {
+     "hiddenAttr": true,
+     "display": "none",
+     "disabled": false,
+     "visible": false
+    },
+    "pay_button": {
+     "hiddenAttr": false,
+     "display": "flex",
+     "disabled": false,
+     "visible": true
+    }
+   },
+   "quote_window": [
+    "2027-09-02",
+    "2027-10-02"
+   ],
+   "to_web": true,
+   "web_return": true,
+   "order_no": "SUB-20261002-0193",
+   "query": true,
+   "valid_to": "2027-10-02",
+   "to_list": true,
+   "list_scene": true,
+   "to_detail": true,
+   "detail_scene": "P-M07-DETAIL-PAID",
+   "to_sub_tab": true,
+   "sub_scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+   "to_renew": true,
+   "renew_again": true
+  }
+ ],
+ "cap_state": {
+  "scene": "P-M07-RENEW",
+  "text": "P\nPolo\n首页\n后台任务\n我\n我的空间\n王\n返回我的圈子\n\n我的空间 · 认证创作者圈子\n\n晨星设计圈\n\n晨星增长工作室 · 2 个 App · 1 项技能\n\n付费订阅\n¥39 / 月 · 到期 2027-10-02\n管理成员资格\n应用\n品牌语气分析\n\n晨星增长工作室\n\n分析对外文案的表达与语气。\n\n打开\n会议纪要整理\n\n晨星增长工作室\n\n把会议材料整理为清晰的纪要。\n\n打开\n技能\n资料研究\n\n检索增长方法和可参考的案例\n\n同一技能 · 晨星增长圈、晨星设计圈\n同一技能保留晨星增长圈、晨星设计圈两个有效来源\n可使用\n查看并安装\n手动续费 · 晨星设计圈\n\n月付：从当前到期时刻顺延；剩余权益最多 12 个日历月\n\n续费时长\n1 个日历月（¥39）\n起算日\n当前权益已达提前购买上限\n自动扣款\n无 · 到期前需手动续费\n支付位置\n系统浏览器\n取消\n去浏览器支付\n查看续费限制",
+  "limit_entry": {
+   "hiddenAttr": false,
+   "display": "flex",
+   "disabled": false,
+   "visible": true
+  },
+  "pay_button": {
+   "hiddenAttr": false,
+   "display": "flex",
+   "disabled": true,
+   "visible": true
+  }
+ },
+ "notes": [],
+ "cap_scene": {
+  "clicked": true,
+  "arrived": true,
+  "text": "POLO · 当前账号\n暂时不能提前续费\n\n当前权益已达提前购买上限，本次没有创建新订单或支付码；仍可查原订单。\n\n月付\n续费后剩余权益最多 12 个日历月\n年付\n当前周期外最多提前买下一年度\n查看原订单\n返回我的圈子"
+ }
+}

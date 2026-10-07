@@ -1,0 +1,188 @@
+{"kind": "step", "chain": "first-use", "step": "login-continue", "action": "click 继续", "target": "P-M01-PERSONAL-PREP", "observed": "scene=P-M01-PERSONAL-PREP"}
+{"kind": "check", "id": "F01-login-to-prep", "ok": true, "observed": "登录后进入 我的空间·准备中: P-M01-PERSONAL-PREP"}
+{"kind": "step", "chain": "first-use", "step": "enter-home", "action": "click 进入首页", "target": "P-M03-HOME-ZERO", "observed": "scene=P-M03-HOME-ZERO"}
+{"kind": "check", "id": "N01-home-complete-catalog", "ok": true, "observed": "无使用记录首页直接展示完整目录（我的应用+四个作品+打开按钮）"}
+{"kind": "check", "id": "DPC11-no-pinned-config", "ok": true, "observed": "首页无 常用配置/5 个上限/添加或移出首页 文案"}
+{"kind": "check", "id": "DPC12-assistant-first", "ok": true, "observed": "目录第一张卡为固定 Polo 助手: ['Polo 助手', '会议纪要整理', '品牌语气分析']"}
+{"kind": "check", "id": "DPC13-assistant-card-entries", "ok": true, "observed": "助手卡片内并列为「管理技能」「打开助手」: ['打开助手', '管理技能']"}
+{"kind": "step", "chain": "first-use", "step": "open-report", "action": "click 打开(数据报表生成器)", "target": "P-M04-APP-REPORT", "observed": "scene=P-M04-APP-REPORT"}
+{"kind": "check", "id": "F02-open-report-container", "ok": true, "observed": "打开后 App 容器展示同一作品: P-M04-APP-REPORT"}
+{"kind": "check", "id": "F02-personal-space-context", "ok": true, "observed": "运行中空间标识仍为 我的空间: {'found': True, 'disabled': False, 'hidden': False, 'title': '', 'text': '我的空间', 'value': None}"}
+{"kind": "chain", "chain": "first-use", "status": "done"}
+{"kind": "step", "chain": "ent-handoff", "step": "return", "action": "click 返回 Polo 核对企业", "target": "P-M01-RETURN", "observed": "scene=P-M01-RETURN"}
+{"kind": "step", "chain": "ent-handoff", "step": "refresh", "action": "click 刷新企业列表", "target": "P-M01-ENTERPRISE-READY", "observed": "scene=P-M01-ENTERPRISE-READY"}
+{"kind": "check", "id": "F05-enterprise-ready", "ok": true, "observed": "刷新后出现可进入企业（成员事实保留）: P-M01-ENTERPRISE-READY"}
+{"kind": "step", "chain": "ent-handoff", "step": "enter", "action": "click 进入晨星科技", "target": "P-M03-HOME-ENT", "observed": "scene=P-M03-HOME-ENT"}
+{"kind": "check", "id": "F05-active-enter", "ok": true, "observed": "用户主动进入企业首页，空间名=晨星科技"}
+{"kind": "check", "id": "F07-enterprise-app-identity", "ok": true, "observed": "企业目录打开 报价整理，App 容器身份一致: P-M04-APP-VIEW"}
+{"kind": "check", "id": "F07-stays-enterprise", "ok": true, "observed": "App 内空间仍为企业: 晨星科技"}
+{"kind": "check", "id": "F05-pending-not-space", "ok": true, "observed": "共享邀请待审批不视为有效空间：批准前不出现在空间列表；无进入企业动作（仅可回到我的空间）: []"}
+{"kind": "chain", "chain": "ent-handoff", "status": "done"}
+{"kind": "step", "chain": "switch-ok", "step": "open-assistant", "action": "click 打开助手", "target": "A-enterprise-new", "observed": "scene=A-enterprise-new"}
+{"kind": "step", "chain": "switch-ok", "step": "assistant-run", "action": "click 发送消息(已输入文本)", "target": "A-enterprise-generating", "observed": "scene=A-enterprise-generating"}
+{"kind": "step", "chain": "switch-ok", "step": "back-home", "action": "click 首页", "target": "P-M03-HOME-ENT", "observed": "scene=P-M03-HOME-ENT"}
+{"kind": "step", "chain": "switch-ok", "step": "open-menu", "action": "click 打开账号菜单", "target": "P-M10-MENU-ENT", "observed": "scene=P-M10-MENU-ENT"}
+{"kind": "step", "chain": "switch-ok", "step": "open-switcher", "action": "click 切换空间", "target": "P-M02-SWITCHER", "observed": "scene=P-M02-SWITCHER"}
+{"kind": "step", "chain": "switch-ok", "step": "pick-personal", "action": "click 我的空间", "target": "P-M02-CONFIRM", "observed": "scene=P-M02-CONFIRM"}
+{"kind": "check", "id": "F06-single-confirm", "ok": true, "observed": "仅一次确认（停止全部并切换）：['停止全部并切换']；可见按钮数=13"}
+{"kind": "check", "id": "F06-confirm-lists-tasks", "ok": true, "observed": "确认页列出须终止的运行项（App/助手）"}
+{"kind": "check", "id": "F06-progress-no-reconfirm", "ok": true, "observed": "进度页无 选择成功/失败 或再次确认按钮: ['P\\nPolo', '首页', '后台任务', '', '王', '管理技能', '打开助手', '打开', '打开', '查看原因', '', '取消切换']"}
+{"kind": "check", "id": "F06-progress-zero-state", "ok": true, "observed": "点击确认后进入「正在停止任务」进度（n / N 计数与逐项状态）: scene=P-M02-STOPPING, text_head=P\nPolo\n首页\n后台任务\n晨\n晨星科技\n王\n我的应用\n\n企业分发给你的工作应用。\n\n搜索应用\n来源\n全部来源\nPolo 内置\n晨星科技\n排序\n最近使用\n使用"}
+{"kind": "step", "chain": "switch-ok", "step": "auto-switch", "action": "等待自动切换", "target": "P-M03-HOME-PERSONAL", "observed": "final=P-M03-HOME-PERSONAL"}
+{"kind": "check", "id": "F06-auto-enter-target", "ok": true, "observed": "全停后自动进入目标首页（个人空间）: P-M03-HOME-PERSONAL, space=我的空间"}
+{"kind": "chain", "chain": "switch-ok", "status": "done"}
+{"kind": "check", "id": "F06-stopfailed-shows-state", "ok": true, "observed": "部分停止失败页展示逐项状态与保留原空间说明"}
+{"kind": "step", "chain": "switch-cancel", "step": "cancel", "action": "click 取消切换", "target": "P-M02-STOP-CANCEL", "observed": "scene=P-M02-STOP-CANCEL"}
+{"kind": "check", "id": "CR04-cancel-preserves-stopped", "ok": true, "observed": "取消的是切换，不撤销已经完成的停止；已停止项保持已停止并注明重新打开不会自动执行"}
+{"kind": "check", "id": "F06-cancel-stays-original", "ok": true, "observed": "取消后返回原企业首页（无半切）: P-M03-HOME-ENT-AFTER-CANCEL, space=晨星科技"}
+{"kind": "chain", "chain": "switch-cancel", "status": "done"}
+{"kind": "check", "id": "N03-presend-block", "ok": "汇总上周会议要点", "observed": "发送前阻断：输入可编辑且保留(汇总上周会议要点)、发送禁用(True)、输入框上方提示积分不足"}
+{"kind": "step", "chain": "credit", "step": "to-browser", "action": "click 去充值", "target": "P-M09-BROWSER", "observed": "scene=P-M09-BROWSER"}
+{"kind": "check", "id": "N03-browser-handoff", "ok": true, "observed": "Browser 端充值交接卡，桌面不复制支付后台"}
+{"kind": "step", "chain": "credit", "step": "return", "action": "click 返回 Polo", "target": "A-personal-return", "observed": "scene=A-personal-return"}
+{"kind": "check", "id": "N03-return-asks-user", "ok": true, "observed": "返回桌面后需用户主动点击「已完成，查询结果」"}
+{"kind": "check", "id": "N03-no-auto-query", "ok": true, "observed": "等待 2.2s 无任何自动查询/自动跳转: A-personal-return==A-personal-return"}
+{"kind": "step", "chain": "credit", "step": "query-once", "action": "click 已完成，查询结果", "target": "A-personal-checking", "observed": "scene=A-personal-checking"}
+{"kind": "check", "id": "N03-single-query-landing", "ok": true, "observed": "一次点击只发起一次查询（进入查询中状态）"}
+{"kind": "check", "id": "N03-no-polling", "ok": true, "observed": "查询中状态无自动轮询/自动推进"}
+{"kind": "check", "id": "N03-blocked-during-query", "ok": true, "observed": "查询期间发送保持不可用（阻断未解除）"}
+{"kind": "check", "id": "N03-requery-manual-only", "ok": true, "observed": "未到账后再次查询仍需用户主动点击（各点击一次查询）"}
+{"kind": "check", "id": "N03-notyet-close-only", "ok": true, "observed": "「还没有」仅关闭询问并保持阻断（未到账不解除）"}
+{"kind": "step", "chain": "credit", "step": "resume-send", "action": "click 发送消息(已输入文本)", "target": "A-personal-generating", "observed": "scene=A-personal-generating"}
+{"kind": "check", "id": "N03-success-no-auto-resend", "ok": true, "observed": "到账仅解除阻断，由用户正常发送继续，无一键自动继续"}
+{"kind": "check", "id": "N03-user-stop-not-credit", "ok": true, "observed": "用户主动停止显示「已停止生成」而非积分耗尽: A-personal-stopped"}
+{"kind": "check", "id": "N03-cut-partial-kept", "ok": true, "observed": "生成中停止下一段：保留已产出部分并在消息末尾提示（无重复输入框提示）"}
+{"kind": "chain", "chain": "credit", "status": "done"}
+{"kind": "check", "id": "DPC09-dedup-one-card", "ok": true, "observed": "同一作品在目录只出现一次（会议纪要整理 x1）"}
+{"kind": "step", "chain": "circle-exit", "step": "open-circles", "action": "click 我的圈子", "target": "P-M07-LIST", "observed": "scene=P-M07-LIST"}
+{"kind": "check", "id": "F03-circle-list", "ok": true, "observed": "统一圈子列表：标题+搜索筛选+右侧统一「查看详情」"}
+{"kind": "step", "chain": "circle-exit", "step": "detail", "action": "click 查看详情(增长圈)", "target": "P-M07-DETAIL-FOCUS", "observed": "scene=P-M07-DETAIL-FOCUS"}
+{"kind": "check", "id": "F03-exit-only-in-subscription", "ok": true, "observed": "退出仅放在「订阅」区域"}
+{"kind": "check", "id": "F03-exit-impact-statement", "ok": true, "observed": "退出前说明逐来源影响（只撤销该圈来源）"}
+{"kind": "step", "chain": "circle-exit", "step": "confirm-exit", "action": "click 确认退出", "target": "P-M07-SOURCE-FALLBACK", "observed": "scene=P-M07-SOURCE-FALLBACK"}
+{"kind": "check", "id": "DPC09-other-source-still-works", "ok": true, "observed": "退出增长圈后会议纪要整理仍由设计圈授权可打开（按钮非禁用）"}
+{"kind": "check", "id": "F08-last-source-blocks", "ok": true, "observed": "最后来源失效才进入不可用与恢复路径；打开按钮状态={'found': False}"}
+{"kind": "chain", "chain": "circle-exit", "status": "done"}
+{"kind": "check", "id": "F03-renew-quote-calendar", "ok": true, "observed": "续费确认展示固定日历月周期（2026-11-02 至 2026-12-02）"}
+{"kind": "step", "chain": "renewal", "step": "to-web", "action": "click 去浏览器支付", "target": "P-M07-RENEW-WEB", "observed": "scene=P-M07-RENEW-WEB"}
+{"kind": "step", "chain": "renewal", "step": "web-return", "action": "click 返回 Polo", "target": "P-M07-RENEW-RETURN", "observed": "scene=P-M07-RENEW-RETURN"}
+{"kind": "step", "chain": "renewal", "step": "query-order", "action": "click 查询原订单和资格", "target": "P-M07-RENEW-RESULT", "observed": "scene=P-M07-RENEW-RESULT"}
+{"kind": "check", "id": "F03-renewal-original-order", "ok": true, "observed": "续费经原订单核对：订单号 SUB-20261002-0183"}
+{"kind": "check", "id": "F03-expiry-extended", "ok": true, "observed": "续费后有效期自原到期时刻延长至 2026-12-02"}
+{"kind": "check", "id": "F03-list-same-fact", "ok": true, "observed": "普通列表与订阅显示同一到期事实"}
+{"kind": "check", "id": "F03-second-renew-quote", "ok": true, "observed": "有效期内第二次续费基于最新已核对权益出具新报价（2026-12-02 至 2027-01-02）"}
+{"kind": "check", "id": "F03-second-renew-new-order", "ok": true, "observed": "第二次续费建新单：返回核对页展示的订单身份 SUB-20261002-0184，与首单 SUB-20261002-0183 独立"}
+{"kind": "check", "id": "F03-limit-no-new-order", "ok": true, "observed": "达月度提前购买上限不建新单，仍展示原单与说明；去支付按钮={'found': False, 'disabled': None, 'hidden': None}"}
+{"kind": "check", "id": "F03-annual-protect", "ok": true, "observed": "年度已购周期与「进入下一年度周期后才可继续」的提前续费边界如实展示"}
+{"kind": "chain", "chain": "renewal", "status": "done"}
+{"kind": "step", "chain": "support", "step": "open", "action": "click 联系客服", "target": "P-M07-SUPPORT", "observed": "scene=P-M07-SUPPORT"}
+{"kind": "check", "id": "OPS17-no-fake-qr", "ok": true, "observed": "客服页不展示可扫描的样例二维码；未配置/加载失败状态如实提示"}
+{"kind": "check", "id": "OPS17-copy-minimal-info", "ok": true, "observed": "仅含本人可看的订单/圈子/错误摘要: 订单：SUB-20261002-0182\n圈子：晨星设计圈\n空间：我的空间\n问题：查询原订单与资格失败"}
+{"kind": "check", "id": "OPS17-copy-or-fallback", "ok": true, "observed": "复制成功提示或失败时选中信息转手动复制（不伪造成功）"}
+{"kind": "step", "chain": "support", "step": "return", "action": "click 返回原页面", "target": "P-M07-PAY-RETURN-FAIL", "observed": "scene=P-M07-PAY-RETURN-FAIL"}
+{"kind": "check", "id": "OPS17-return-original-object", "ok": true, "observed": "返回原订单/权益异常页，未伪装已受理"}
+{"kind": "check", "id": "OPS17-reverify-original", "ok": true, "observed": "从原对象主动复验"}
+{"kind": "check", "id": "OPS17-loadfail-retry", "ok": true, "observed": "二维码加载失败可重试/返回，不用样例码冒充"}
+{"kind": "check", "id": "OPS17-member-no-finance", "ok": true, "observed": "企业成员从受限页只复制企业/错误摘要，不含 Owner 财务金额"}
+{"kind": "check", "id": "OPS17-account-returns-own-page", "ok": true, "observed": "账号受限按原对象返回账号受限页（参考编号 ACC-0182），仅提供本人可看信息"}
+{"kind": "chain", "chain": "support", "status": "done"}
+{"kind": "step", "chain": "skills", "step": "manage-entry", "action": "click 管理技能(首页助手卡片)", "target": "A-personal-skills", "observed": "scene=A-personal-skills"}
+{"kind": "check", "id": "DPC13-entry-from-home-card", "ok": true, "observed": "技能管理从首页助手卡片进入，无需先开会话"}
+{"kind": "check", "id": "PCF04-samename-distinct-rows", "ok": [{"text": "资料研究\n\n晨星增长圈 / 晨星设计圈\n\n未启用 · 未安装 · 1.0.0", "disabled": false, "hidden": false}], "observed": "内置与圈子同名技能分别成行展示（内置 1 行 / 圈子 1 行）"}
+{"kind": "check", "id": "PCF04-builtin-off-samename-intact", "ok": true, "observed": "内置技能停用后往返仍在，同名圈子技能不受影响（分别展示）"}
+{"kind": "check", "id": "PCF04-re-enable", "ok": true, "observed": "可重新启用内置技能"}
+{"kind": "step", "chain": "skills", "step": "enable-personal", "action": "click 为我启用(来源有效)", "target": "A-personal-enabledpending", "observed": "scene=A-personal-enabledpending"}
+{"kind": "check", "id": "PCF04-enable-vs-device", "ok": true, "observed": "启用成功进入待设备准备（授权≠设备准备）"}
+{"kind": "check", "id": "PCF04-device-prep", "ok": true, "observed": "设备准备独立呈现（准备中）"}
+{"kind": "check", "id": "PCF04-no-enable-on-failed-sources", "ok": true, "observed": "圈子来源失效后不再提供「为我启用」动作，行内如实标注来源状态: enable_visible=False"}
+{"kind": "check", "id": "DPC14-update-fail-keeps-old", "ok": true, "observed": "更新失败保留旧验证版本并提供重试"}
+{"kind": "check", "id": "M06-uninstall-title", "ok": true, "observed": "卸载保留明确操作标题并完成卸载"}
+{"kind": "check", "id": "F08-skill-source-fail", "ok": true, "observed": "圈子技能失权展示具体来源与受限状态"}
+{"kind": "check", "id": "S1313-detail-single-name", "ok": true, "observed": "详情只保留一处名称与用途（文本命中 4 处）"}
+{"kind": "chain", "chain": "skills", "status": "done"}
+{"kind": "step", "chain": "question", "step": "answer", "action": "click 提交回答(已输入)", "target": "A-personal-answered", "observed": "scene=A-personal-answered"}
+{"kind": "check", "id": "N04-single-answer-message", "ok": true, "observed": "回答只形成一条可读消息并在原会话续答"}
+{"kind": "check", "id": "N04-reopen-draft-kept", "ok": true, "observed": "重开后问题状态与已有草稿保留"}
+{"kind": "check", "id": "N04-reopen-answer-once", "ok": true, "observed": "重开提交后仍只提交一次"}
+{"kind": "check", "id": "N04-defer-no-answer", "ok": true, "observed": "暂不回答不产生回答消息"}
+{"kind": "check", "id": "N04-expired-no-repost", "ok": true, "observed": "过期问题不重复提交，提示在原会话重新提问"}
+{"kind": "check", "id": "N04-deleted-no-misroute", "ok": true, "observed": "原会话删除/无权不误投新会话"}
+{"kind": "check", "id": "N04-retry-no-duplicate", "ok": true, "observed": "瞬时失败重试核对真实状态，不产生重复消息"}
+{"kind": "chain", "chain": "question", "status": "done"}
+{"kind": "check", "id": "CR06-first-permission-explains", "ok": true, "observed": "首次权限请求说明用途并需用户同意"}
+{"kind": "step", "chain": "permission", "step": "deny", "action": "click 不允许", "target": "P-M04-APP-CONTRACT", "observed": "scene=P-M04-APP-CONTRACT"}
+{"kind": "check", "id": "CR06-deny-no-start", "ok": true, "observed": "拒绝后留在应用原页面、依赖该权限的动作未启动（回到 App 页而非执行结果）"}
+{"kind": "check", "id": "CR06-os-denied-settings-path", "ok": true, "observed": "OS 已拒绝时给出设置路径（系统设置 → 隐私与安全性 → 文件与文件夹）与主动重试按钮: ['P\\nPolo', '首页', '合同审查', '×', '后台任务', '', '王', '', '稍后再说', '重试请求']"}
+{"kind": "check", "id": "CR06-retry-user-initiated", "ok": true, "observed": "授权后由用户主动重试: P-M04-APP-CONTRACT"}
+{"kind": "step", "chain": "close", "step": "open-dialog", "action": "click 关闭标签", "target": "P-M04-CLOSE-ACTIVE", "observed": "scene=P-M04-CLOSE-ACTIVE"}
+{"kind": "check", "id": "J07-close-three-options", "ok": true, "observed": "关闭对话框提供 取消/后台继续/停止并关闭: ['P\\nPolo', '首页', '报价整理', '×', '后台任务', '', '王', '', '取消', '后台继续', '停止并关闭']"}
+{"kind": "check", "id": "CR04-close-cancel-stays", "ok": true, "observed": "取消关闭留在原应用视图"}
+{"kind": "check", "id": "J07-background-continues", "ok": true, "observed": "后台继续后应用进入后台，顶栏可返回"}
+{"kind": "check", "id": "PCF02-stopfail-keeps-view", "ok": true, "observed": "终止失败保留当前视图，可重试或取消"}
+{"kind": "chain", "chain": "permission", "status": "done"}
+{"kind": "check", "id": "F10-offline-blocks-start", "ok": true, "observed": "离线页新开 App/助手被阻止（title=联网并重新验证后才能打开）"}
+{"kind": "step", "chain": "offline", "step": "retry", "action": "click 重试连接", "target": "P-M03-HOME-PERSONAL", "observed": "scene=P-M03-HOME-PERSONAL"}
+{"kind": "check", "id": "F10-recovery-reverify", "ok": true, "observed": "恢复先重验（联网重试），资格恢复后由用户决定"}
+{"kind": "check", "id": "CR01-reopen-reverify", "ok": true, "observed": "重开先恢复身份与空间并重验，不自动执行原动作"}
+{"kind": "check", "id": "CR05-reopen-no-autoreplay", "ok": true, "observed": "恢复后进入安全首页，不重发旧 Prompt"}
+{"kind": "check", "id": "F11-contract-blocks", "ok": true, "observed": "契约不兼容阻止业务，提供升级与帮助"}
+{"kind": "check", "id": "F11-later-still-blocked", "ok": true, "observed": "稍后处理保持业务阻断"}
+{"kind": "step", "chain": "contract", "step": "download", "action": "click 下载并安装", "target": "P-M11-CONTRACT-DL", "observed": "scene=P-M11-CONTRACT-DL"}
+{"kind": "check", "id": "F11-downloading-blocked", "ok": true, "observed": "下载中/失败保持业务阻断，不开放业务"}
+{"kind": "check", "id": "F11-ready-after-check", "ok": true, "observed": "升级检查通过后才提供进入入口"}
+{"kind": "chain", "chain": "offline", "status": "done"}
+{"kind": "check", "id": "F08-revoke-reason", "ok": true, "observed": "被移除给出明确原因（不能访问企业）与安全回个人入口（返回我的空间），企业任务全停"}
+{"kind": "check", "id": "F08-revoked-not-enterable", "ok": true, "observed": "撤权后个人侧切换器中企业入口被禁用: {'text': '晨\\n晨星科技\\n已失去访问资格', 'disabled': True, 'hidden': False}"}
+{"kind": "check", "id": "F08-member-sees-contact", "ok": true, "observed": "治理暂停成员角色看到联系渠道，无 Browser 后台入口"}
+{"kind": "check", "id": "F08-owner-sees-browser", "ok": true, "observed": "Owner 角色展示 Browser 处理入口（账单/导出/申诉）"}
+{"kind": "check", "id": "F08-ready-reverify", "ok": true, "observed": "治理解除后要求回原对象主动复验，不自动恢复任务"}
+{"kind": "check", "id": "F08-ready-reenter-after-verify", "ok": true, "observed": "复验通过后用户主动进入原企业空间"}
+{"kind": "check", "id": "F08-version-block-specific", "ok": true, "observed": "版本阻断展示具体版本（v0.9.4 已被企业管理员暂停）与恢复路径，不与普通到期/积分混为同一弹窗"}
+{"kind": "chain", "chain": "revocation", "status": "done"}
+{"kind": "check", "id": "F09-menu-entries", "ok": true, "observed": "账号菜单含 切换空间 与 Polo 设置"}
+{"kind": "check", "id": "F09-settings-global-scope", "ok": true, "observed": "Polo 设置为全局设置入口"}
+{"kind": "check", "id": "F09-no-priv-menu", "ok": true, "observed": "无资格账号的账号菜单不显示企业管理/创作者后台入口"}
+{"kind": "check", "id": "F09-no-priv-no-write-entries", "ok": true, "observed": "无资格账号设置页（P-M10-SETTINGS-ENT）不显示可写管理动作: has_admin=False"}
+{"kind": "check", "id": "F09-owner-finance-entry", "ok": true, "observed": "当前企业 Owner 核验后显示账单/充值交接"}
+{"kind": "check", "id": "F09-unsaved-marked", "ok": true, "observed": "修改后保存状态=尚未保存"}
+{"kind": "check", "id": "F09-unsaved-leave-guard", "ok": true, "observed": "未保存离开出现确认（放弃/取消）并留在原页: dialog=有未保存的 Polo 设置。离开将放弃修改；选择取消继续编辑"}
+{"kind": "check", "id": "F09-settings-save", "ok": true, "observed": "保存后状态=设置已保存。"}
+{"kind": "check", "id": "F09-saved-leave-no-guard", "ok": true, "observed": "已保存后离开不再拦截"}
+{"kind": "check", "id": "F09-assistant-pref-guard", "ok": true, "observed": "助手偏好未保存离开被同一未保存处理拦截（留在原页）: scene=A-personal-preferences, dialogs=['有未保存的助手偏好。离开将放弃修改；选择取消继续编辑']"}
+{"kind": "chain", "chain": "account", "status": "done"}
+{"kind": "check", "id": "S133-search-matches", "ok": true, "observed": "搜索「会议」只显示匹配应用: ['会议纪要整理']"}
+{"kind": "check", "id": "S133-assistant-not-dominating", "ok": true, "observed": "不匹配时助手不霸占搜索结果"}
+{"kind": "check", "id": "S133-empty-clear-filter", "ok": true, "observed": "搜不到时提供清空筛选入口"}
+{"kind": "check", "id": "S133-search-single-object", "ok": true, "observed": "搜索「报表」仅命中该对象: ['数据报表生成器']"}
+{"kind": "chain", "chain": "search", "status": "done"}
+{"kind": "check", "id": "CR02-empty-dir-explains", "ok": true, "observed": "真空目录说明尚未获得应用、加入圈子并取得授权后显示（不伪造失败，不拿缓存填充）"}
+{"kind": "check", "id": "CR02-loadfail-retry", "ok": true, "observed": "目录失败明确失败并可重试，不当作「没有应用」"}
+{"kind": "check", "id": "CR02-ent-empty-admin", "ok": true, "observed": "企业空目录提示尚未分发并联系管理员，不混入个人作品"}
+{"kind": "check", "id": "CR02-skills-empty", "ok": true, "observed": "无额外技能时不虚构推荐"}
+{"kind": "check", "id": "PCF02-hidden-restore", "ok": true, "observed": "个人控制：本机隐藏可恢复（不退出圈子）"}
+{"kind": "chain", "chain": "empty-fail", "status": "done"}
+{"kind": "step", "chain": "transfer", "step": "seed-session", "action": "click 发送消息", "target": "A-personal-generating", "observed": "scene=A-personal-generating"}
+{"kind": "step", "chain": "transfer", "step": "open-files", "action": "click 查看会话文件", "target": "A-personal-files", "observed": "scene=A-personal-files"}
+{"kind": "check", "id": "CR07-files-area-entry", "ok": true, "observed": "转移入口位于原对话文件区域（导出允许内容/导入对话内容）"}
+{"kind": "step", "chain": "transfer", "step": "export-page", "action": "click 导出允许内容", "target": "A-personal-transfer-export", "observed": "scene=A-personal-transfer-export"}
+{"kind": "check", "id": "CR07-export-explicit", "ok": true, "observed": "导出页说明仅允许内容（消息文本），不含凭证/工具授权/隐藏上下文"}
+{"kind": "step", "chain": "transfer", "step": "download", "action": "click 下载允许内容", "target": "A-personal-transfer-exported", "observed": "scene=A-personal-transfer-exported"}
+{"kind": "check", "id": "CR07-exported-object", "ok": true, "observed": "导出生成内容包（原对话保持不变）"}
+{"kind": "step", "chain": "transfer", "step": "import-page", "action": "click 导入对话内容", "target": "A-personal-transfer-import", "observed": "scene=A-personal-transfer-import"}
+{"kind": "check", "id": "CR07-import-preview", "ok": true, "observed": "选择导出文件后进入核对预览，需明确确认导入"}
+{"kind": "check", "id": "CR07-import-creates-new-object", "ok": true, "observed": "明确确认后建立独立新对话，打开结果属于所选文件"}
+{"kind": "check", "id": "CR07-invalid-no-object", "ok": true, "observed": "格式失败/取消不建立对象"}
+{"kind": "check", "id": "CR07-invalid-recover", "ok": true, "observed": "失败后可重新选择文件"}
+{"kind": "chain", "chain": "transfer", "status": "done"}
+{"kind": "step", "chain": "circle-join", "step": "to-web", "action": "click 打开圈子网页", "target": "P-M07-PUBLIC-WEB", "observed": "scene=P-M07-PUBLIC-WEB"}
+{"kind": "check", "id": "F03-public-web-join", "ok": true, "observed": "公开页自助加入（无圈主审批）"}
+{"kind": "check", "id": "F03-desktop-verify-join", "ok": true, "observed": "桌面同账号核对成员与有效来源，不重复确认加入"}
+{"kind": "check", "id": "F03-no-paste-entry", "ok": true, "observed": "桌面无输入/粘贴分享链接的加入按钮"}
+{"kind": "chain", "chain": "circle-join", "status": "done"}
+{"kind": "step", "chain": "runtime", "step": "stop-assistant", "action": "click 停止(助手)", "target": "A-enterprise-stopped", "observed": "scene=A-enterprise-stopped"}
+{"kind": "check", "id": "PCF02-stopped-consistent", "ok": true, "observed": "停止成功后 App 页如实显示后台请求已停止（非运行中）"}
+{"kind": "check", "id": "PCF02-close-idle-tab", "ok": true, "observed": "无活动直接关闭标签回到首页"}
+{"kind": "chain", "chain": "runtime", "status": "done"}
+{"kind": "check", "id": "N03-ent-member-notifies", "ok": true, "observed": "企业 Member 仅通知 Owner，不暴露私人信息"}
+{"kind": "check", "id": "N03-ent-owner-resume", "ok": true, "observed": "Owner 处理后对应阻断解除，其他限制独立"}
+{"kind": "chain", "chain": "owner-credit", "status": "done"}

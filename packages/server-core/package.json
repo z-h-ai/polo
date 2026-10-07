@@ -23,6 +23,7 @@
     "./handlers/rpc/files": "./src/handlers/rpc/files.ts",
     "./handlers/rpc/labels": "./src/handlers/rpc/labels.ts",
     "./handlers/rpc/llm-connections": "./src/handlers/rpc/llm-connections.ts",
+    "./handlers/rpc/member-circles": "./src/handlers/rpc/member-circles.ts",
     "./handlers/rpc/oauth": "./src/handlers/rpc/oauth.ts",
     "./handlers/rpc/onboarding": "./src/handlers/rpc/onboarding.ts",
     "./handlers/rpc/product-space": "./src/handlers/rpc/product-space.ts",

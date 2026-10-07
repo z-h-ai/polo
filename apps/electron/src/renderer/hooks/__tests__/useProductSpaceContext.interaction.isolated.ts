@@ -13,7 +13,7 @@ import type {
   ProductSpaceContextStorage,
   ProductSpaceContextStoragePatch,
 } from '@polo-ai/shared/config/product-space-context'
-import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
+import { ExecutionSummarySchema, type ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -910,7 +910,237 @@ describe('useProductSpaceContextState cancel race', () => {
   })
 })
 
+describe('initial execution-read switch admission (P70-R3-001)', () => {
+  type ExecutionReadResult = Awaited<ReturnType<typeof window.electronAPI.productSpaceListActiveExecutions>>
+  const runningExecution = ExecutionSummarySchema.parse({
+    executionId: 'current-execution', name: 'Current work', status: 'running',
+    scope: {
+      contractVersion: 1, executionId: 'current-execution', accountId,
+      productSpaceId: personalId, workspaceId: 'unit-workspace',
+      subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'unit-app', versionId: 'unit-version', version: '1.0.0' },
+    },
+  })
+
+  for (const transition of [
+    'different-account', 'same-account-bootstrap', 'account-ABA', 'changed-origin',
+    'selection-ABA', 'new-pending-selection', 'cancelled-new-selection', 'removed-target',
+  ] as const) {
+    for (const receipt of ['empty', 'running', 'rejected'] as const) {
+      it(`ignores old initial ${receipt} receipt after ${transition}, without touching the newer transaction`, async () => {
+        const { result } = renderHook(useHarness)
+        listResult = {
+          success: true, personalProductSpaceId: personalId,
+          productSpaces: [personalSpace, enterpriseSpace('space-ent', 'Old target'), enterpriseSpace('space-b', 'Current target')],
+        }
+        await boot(result)
+        let actor = accountId
+        // The unit bridge admits only the current fixture actor. A new
+        // account's trusted bootstrap must be successful to test its isolation.
+        window.electronAPI.productSpaceGetRestrictionState = async (queryAccountId) => queryAccountId === actor
+          ? { success: true, restricted: false }
+          : { success: false, errorCode: 'FORBIDDEN' }
+        const prepare = mock(window.electronAPI.productSpacePrepareSwitch)
+        const stop = mock(window.electronAPI.productSpaceStopSwitchExecutions)
+        const commit = mock(window.electronAPI.productSpaceCommitSwitch)
+        const persist = mock(window.electronAPI.updateProductSpaceContextStorage)
+        Object.assign(window.electronAPI, {
+          productSpacePrepareSwitch: prepare, productSpaceStopSwitchExecutions: stop,
+          productSpaceCommitSwitch: commit, updateProductSpaceContextStorage: persist,
+        })
+        let resolveRead!: (value: ExecutionReadResult) => void
+        let rejectRead!: (error: unknown) => void
+        const oldRead = new Promise<ExecutionReadResult>((resolve, reject) => { resolveRead = resolve; rejectRead = reject })
+        const read = mock(window.electronAPI.productSpaceListActiveExecutions)
+        read.mockImplementationOnce(() => oldRead)
+        if (transition === 'new-pending-selection' || transition === 'cancelled-new-selection') {
+          read.mockImplementationOnce(async () => ({ success: true, executions: [runningExecution] }))
+        }
+        window.electronAPI.productSpaceListActiveExecutions = read
+        let events = 0
+        const onChange = () => { events += 1 }
+        window.addEventListener('polo:product-space-changed', onChange)
+        try {
+          let oldRequest!: Promise<void>
+          await act(async () => { oldRequest = result.current.requestSwitch('space-ent') })
+          expect(read).toHaveBeenCalledTimes(1)
+          expect(read.mock.calls[0]).toEqual([accountId, personalId])
+          expect(result.current.pendingSwitch).toBeNull()
+          expect(prepare).not.toHaveBeenCalled()
+          await act(async () => {
+            if (transition === 'different-account' || transition === 'account-ABA') {
+              actor = 'current-other-account'
+              expect(await result.current.bootstrap(actor)).toBe('ready')
+              if (transition === 'account-ABA') {
+                actor = accountId
+                expect(await result.current.bootstrap(actor)).toBe('ready')
+              }
+            } else if (transition === 'same-account-bootstrap') {
+              expect(await result.current.bootstrap(accountId)).toBe('ready')
+            } else if (transition === 'removed-target') {
+              listResult = { success: true, personalProductSpaceId: personalId, productSpaces: [personalSpace, enterpriseSpace('space-b', 'Current target')] }
+              await result.current.refreshProductSpaces()
+            } else {
+              await result.current.requestSwitch('space-b')
+              if (transition === 'selection-ABA') await result.current.requestSwitch(personalId)
+              if (transition === 'cancelled-new-selection') result.current.cancelSwitch()
+            }
+          })
+          if (transition === 'new-pending-selection') {
+            expect(result.current.pendingSwitch?.targetId).toBe('space-b')
+            expect(result.current.pendingSwitch?.phase).toBe('confirm')
+          }
+          const visibleBefore = {
+            active: result.current.activeProductSpaceId, version: result.current.contextVersion,
+            spaces: result.current.productSpaces, pending: result.current.pendingSwitch,
+            error: result.current.error, flow: result.current.flowState, key: result.current.productSpaceContextKey,
+          }
+          const callsBefore = [prepare.mock.calls.length, stop.mock.calls.length, commit.mock.calls.length, persist.mock.calls.length, events]
+          const storageBefore = JSON.stringify(productSpaceContextStorage)
+          const declaredBefore = declaredActiveSpace
+          await act(async () => {
+            if (receipt === 'rejected') rejectRead({ code: 'old_execution_read_failed' })
+            else resolveRead({ success: true, executions: receipt === 'running' ? [runningExecution] : [] })
+            await oldRequest
+          })
+          expect({
+            active: result.current.activeProductSpaceId, version: result.current.contextVersion,
+            spaces: result.current.productSpaces, pending: result.current.pendingSwitch,
+            error: result.current.error, flow: result.current.flowState, key: result.current.productSpaceContextKey,
+          }).toEqual(visibleBefore)
+          expect([prepare.mock.calls.length, stop.mock.calls.length, commit.mock.calls.length, persist.mock.calls.length, events]).toEqual(callsBefore)
+          expect(JSON.stringify(productSpaceContextStorage)).toBe(storageBefore)
+          expect(declaredActiveSpace).toBe(declaredBefore)
+          if (transition === 'new-pending-selection') {
+            await act(async () => { await result.current.confirmStopAndSwitch() })
+            expect(result.current.activeProductSpaceId).toBe('space-b')
+            expect(declaredActiveSpace).toBe('space-b')
+            expect(result.current.pendingSwitch).toBeNull()
+          }
+        } finally {
+          window.removeEventListener('polo:product-space-changed', onChange)
+        }
+      })
+    }
+  }
+
+  for (const failure of ['typed-result', 'rejected-promise'] as const) {
+    it(`retains a current ${failure} execution read error without preparing or changing the space`, async () => {
+      const { result } = renderHook(useHarness)
+      await boot(result)
+      const prepare = mock(window.electronAPI.productSpacePrepareSwitch)
+      window.electronAPI.productSpacePrepareSwitch = prepare
+      window.electronAPI.productSpaceListActiveExecutions = async () => {
+        if (failure === 'rejected-promise') throw new Error('unit current transport read failure')
+        return { success: false, errorCode: 'current_read_denied', message: 'unit current denial' }
+      }
+      await act(async () => { await result.current.requestSwitch('space-ent') })
+      expect(result.current.error?.code).toBe(failure === 'typed-result' ? 'current_read_denied' : 'runtime_list_failed')
+      expect(result.current.activeProductSpaceId).toBe(personalId)
+      expect(result.current.pendingSwitch).toBeNull()
+      expect(prepare).not.toHaveBeenCalled()
+    })
+  }
+
+  for (const responseOrder of ['before-rollback-reply', 'after-rollback-reply'] as const) {
+    it(`an initial read failure ${responseOrder} cannot invalidate a successful Main rollback`, async () => {
+      const { result } = renderHook(useHarness)
+      listResult = { success: true, personalProductSpaceId: personalId, productSpaces: [personalSpace, enterpriseSpace('space-ent', 'Origin'), enterpriseSpace('space-b', 'New target')] }
+      await boot(result)
+      await act(async () => { await result.current.requestSwitch('space-ent') })
+      let resolveCommit!: (value: { success: true; from: string; to: string }) => void
+      const commitReply = new Promise<{ success: true; from: string; to: string }>(resolve => { resolveCommit = resolve })
+      const commit = mock(async (_token: string, target: string) => {
+        // Explicit unit Main fact: COMMIT moved the fence, but its reply waits.
+        declaredActiveSpace = target
+        return commitReply
+      })
+      window.electronAPI.productSpaceCommitSwitch = commit
+      let rollback!: Promise<boolean>
+      await act(async () => { rollback = result.current.rollbackToOrigin(personalId) })
+      await waitFor(() => expect(commit).toHaveBeenCalledTimes(1))
+      expect(declaredActiveSpace).toBe(personalId)
+      expect(result.current.activeProductSpaceId).toBe('space-ent')
+      let rejectRead!: (error: unknown) => void
+      const newRead = new Promise<ExecutionReadResult>((_resolve, reject) => { rejectRead = reject })
+      const read = mock(() => newRead)
+      window.electronAPI.productSpaceListActiveExecutions = read
+      const prepare = mock(window.electronAPI.productSpacePrepareSwitch)
+      window.electronAPI.productSpacePrepareSwitch = prepare
+      let newRequest!: Promise<void>
+      await act(async () => { newRequest = result.current.requestSwitch('space-b') })
+      expect(read).toHaveBeenCalledTimes(1)
+      if (responseOrder === 'before-rollback-reply') {
+        await act(async () => { rejectRead({ code: 'new_read_failed' }); await newRequest })
+        expect(result.current.error?.code).toBe('new_read_failed')
+      }
+      await act(async () => {
+        resolveCommit({ success: true, from: 'space-ent', to: personalId })
+        expect(await rollback).toBe(true)
+      })
+      if (responseOrder === 'after-rollback-reply') {
+        await act(async () => { rejectRead({ code: 'new_read_failed' }); await newRequest })
+      }
+      expect(prepare).not.toHaveBeenCalled()
+      expect(result.current.activeProductSpaceId).toBe(personalId)
+      expect(declaredActiveSpace).toBe(personalId)
+      expect(getStoredActiveProductSpaceId(accountId)).toBe(personalId)
+      expect(result.current.error).toBeNull()
+      expect(result.current.flowState).toBe('ready')
+    })
+  }
+})
+
 describe('useProductSpaceContextState contract fail-closed during switch (R26)', () => {
+  for (const newer of ['bootstrap', 'switch', 'account-ABA'] as const) {
+    for (const late of ['valid-list', 'unsupported-contract', 'rejected-contract'] as const) {
+      it(`ignores cancelled A ${late} receipt after same-account B ${newer}`, async () => {
+        const { result } = renderHook(useHarness)
+        listResult = { ...bothSpaces(), productSpaces: [personalSpace, enterpriseSpace('space-ent', 'Enterprise A'), enterpriseSpace('space-b', 'Previously available B')] } as ListResult
+        await boot(result)
+        let resolveA!: (receipt: ListResult) => void
+        let rejectA!: (reason: unknown) => void
+        const pendingA = new Promise<ListResult>((resolve, reject) => { resolveA = resolve; rejectA = reject })
+        let first = true
+        const fresh: ListResult = {
+          success: true, personalProductSpaceId: personalId,
+          productSpaces: [personalSpace, enterpriseSpace('space-b', 'Current B')],
+        }
+        const list = mock(() => {
+          if (first) { first = false; return pendingA }
+          return Promise.resolve(fresh)
+        })
+        const revoke = mock(async () => ({ success: true }))
+        Object.assign(window.electronAPI, { productSpaceList: list, productSpaceRevokeActiveContext: revoke })
+        let switchingA!: Promise<void>
+        await act(async () => { switchingA = result.current.requestSwitch('space-ent') })
+        await waitFor(() => expect(list).toHaveBeenCalledTimes(1))
+        await act(async () => { result.current.cancelSwitch() })
+        await act(async () => {
+          if (newer === 'account-ABA') {
+            // This fixture's trusted restriction read rejects the other account.
+            expect(await result.current.bootstrap('other-account')).toBe('error')
+            expect(await result.current.bootstrap(accountId)).toBe('ready')
+          } else if (newer === 'bootstrap') expect(await result.current.bootstrap(accountId)).toBe('ready')
+          else await result.current.requestSwitch('space-b')
+        })
+        const activeB = newer === 'switch' ? 'space-b' : personalId
+        const persistedB = JSON.stringify(productSpaceContextStorage)
+        await act(async () => {
+          if (late === 'rejected-contract') rejectA({ code: 'product_space_contract_unsupported' })
+          else resolveA(late === 'valid-list' ? bothSpaces() : {
+            success: false, errorCode: 'product_space_contract_unsupported', message: 'old A', contractUnsupported: true,
+          })
+          await switchingA
+        })
+        expect(result.current.flowState).toBe('ready')
+        expect(result.current.activeProductSpaceId).toBe(activeB)
+        expect(result.current.productSpaces.map(space => String(space.id))).toEqual([personalId, 'space-b'])
+        expect(JSON.stringify(productSpaceContextStorage)).toBe(persistedB)
+        expect(revoke).not.toHaveBeenCalled()
+      })
+    }
+  }
+
   it('enters contract-blocked when the switch-time target revalidation finds an incompatible contract', async () => {
     const { result } = renderHook(useHarness)
     await boot(result)
@@ -1780,5 +2010,248 @@ describe('useProductSpaceContextState bootstrap restriction recovery (R35-2)', (
     // The renderer fence memory still tracks Main's authoritative state for
     // the read-only space.
     expect(result.current.flowState).toBe('ready')
+  })
+})
+
+describe('useProductSpaceContextState boot entry & reopen recovery (P70-BOOT-01/02)', () => {
+  it('a first entry with no enterprise lands in the unique personal space without a second fetch', async () => {
+    // P-M01-PERSONAL-PREP / P70-BOOT-01: a personal-only account is not
+    // blocked — the server-declared personal space is the one authority, and
+    // the renderer never asks for (or creates) a second one.
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    let listCalls = 0
+    Object.defineProperty(window.electronAPI, 'productSpaceList', {
+      configurable: true,
+      value: async () => {
+        listCalls += 1
+        return listResult
+      },
+    })
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('ready')
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(result.current.personalProductSpaceId).toBe(personalId)
+    expect(result.current.allProductSpaces).toHaveLength(1)
+    expect(result.current.allProductSpaces[0].kind).toBe('personal')
+    expect(result.current.productSpaceContextKey).toContain(personalId)
+    expect(getStoredActiveProductSpaceId(accountId)).toBe(personalId)
+    // Exactly one authoritative read for the whole preparation.
+    expect(listCalls).toBe(1)
+    expect(restoreOfflineViewCalls).toBe(0)
+  })
+
+  it('a same-account reopen revalidates membership and the restriction fence from the server', async () => {
+    // P-M01-REOPEN / P70-BOOT-02: reopening re-runs the authoritative checks
+    // (fresh membership list, fresh restriction query) instead of trusting
+    // the device snapshot or the stored selection.
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const first = renderHook(useHarness)
+    expect(await boot(first.result)).toBe('ready')
+    expect(first.result.current.activeProductSpaceId).toBe('space-ent')
+    first.unmount()
+
+    // While the app is closed, the enterprise membership is lost server-side.
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    let executionProbes = 0
+    let restrictionQueries = 0
+    Object.defineProperty(window.electronAPI, 'productSpaceListActiveExecutions', {
+      configurable: true,
+      value: async () => {
+        executionProbes += 1
+        return { success: true as const, executions: [] }
+      },
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceGetRestrictionState', {
+      configurable: true,
+      value: async (_queryAccountId: string, querySpaceId: string) => {
+        restrictionQueries += 1
+        return {
+          success: true as const,
+          restricted: mainRestrictedSpaces.has(querySpaceId),
+        }
+      },
+    })
+    const second = renderHook(useHarness)
+    expect(await boot(second.result)).toBe('ready')
+    // The reopen revalidated membership: the lost enterprise is not revived
+    // from the stored selection — the trusted fallback commits the personal
+    // space.
+    expect(second.result.current.activeProductSpaceId).toBe(personalId)
+    expect(declaredActiveSpace).toBe(personalId)
+    // The authoritative list was read again (never the device snapshot), and
+    // Main's restriction fence was re-queried for the reopened session.
+    expect(restoreOfflineViewCalls).toBe(0)
+    expect(restrictionQueries).toBeGreaterThanOrEqual(1)
+    // A reopen never re-dispatches executions.
+    expect(executionProbes).toBe(0)
+  })
+
+  it('an unknown (invalid) membership payload is never published as success', async () => {
+    // P70-BOOT-02: the server answered, but the payload carries no usable
+    // membership — the unknown response itself must never become a ready
+    // projection; only Main's verified restore could (absent here).
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [],
+    }
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('error')
+    expect(result.current.flowState).toBe('error')
+    expect(result.current.activeProductSpaceId).toBeNull()
+    expect(result.current.allProductSpaces).toHaveLength(0)
+    // The trusted restore was consulted and found nothing verified.
+    expect(restoreOfflineViewCalls).toBe(1)
+  })
+
+  it('preparing, failure and retry are distinct states and the retry reuses the one-time cleanup ledger', async () => {
+    // P-M01-PERSONAL-PREP-FAIL / P70-BOOT-01: loading → error → retry →
+    // ready, each state distinct, with the legacy cleanup staying a one-time
+    // step across the retry.
+    let listCalls = 0
+    let releaseList!: () => void
+    const gatedFailure = new Promise<ListResult>(resolve => {
+      releaseList = () => resolve({ success: false, errorCode: 'NETWORK_ERROR', message: 'offline' })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceList', {
+      configurable: true,
+      value: async () => {
+        listCalls += 1
+        return listCalls === 1 ? gatedFailure : listResult
+      },
+    })
+    const { result } = renderHook(useHarness)
+    let firstBoot: Promise<string | null> = Promise.resolve(null)
+    await act(async () => {
+      firstBoot = result.current.bootstrap(accountId)
+    })
+    // Wait until the bootstrap is parked on its (gated) list fetch.
+    await waitFor(() => {
+      expect(listCalls).toBe(1)
+    })
+    // Preparing: loading, nothing published.
+    expect(result.current.flowState).toBe('loading')
+    expect(result.current.activeProductSpaceId).toBeNull()
+
+    await act(async () => {
+      releaseList()
+      expect(await firstBoot).toBe('error')
+    })
+    // Failure: fail-closed error state, no business projection, the offline
+    // fallback was attempted and found no verified snapshot.
+    expect(result.current.flowState).toBe('error')
+    expect(result.current.activeProductSpaceId).toBeNull()
+    expect(restoreOfflineViewCalls).toBe(1)
+
+    // Retry: recovery through the same bootstrap path.
+    listResult = bothSpaces()
+    await act(async () => {
+      expect(await result.current.retryBootstrap()).toBe('ready')
+    })
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(listCalls).toBe(2)
+    expect(cleanupCalls).toBe(1)
+  })
+})
+
+describe('useProductSpaceContextState superseded account receipts (P70-BOOT-03)', () => {
+  it('a superseded account bootstrap receipt never publishes over the newer account', async () => {
+    // Epoch fencing at the account scope: account A's bootstrap is parked on
+    // its list fetch when account B's bootstrap starts. A's late receipt is
+    // invalidated by the newer account scope — it publishes nothing, persists
+    // nothing and emits no commit event.
+    const personalA = {
+      id: 'space-personal-a',
+      kind: 'personal',
+      name: 'A 的空间',
+      accessMode: 'active',
+      payer: { kind: 'account' },
+    } as unknown as ProductSpaceSummary
+    const personalB = {
+      id: 'space-personal-b',
+      kind: 'personal',
+      name: 'B 的空间',
+      accessMode: 'active',
+      payer: { kind: 'account' },
+    } as unknown as ProductSpaceSummary
+    const spaceEvents: Array<{ accountId?: string; productSpaceId?: string }> = []
+    const onSpaceChanged = (event: Event) => {
+      spaceEvents.push((event as CustomEvent).detail ?? {})
+    }
+    window.addEventListener('polo:product-space-changed', onSpaceChanged)
+    let listCalls = 0
+    let releaseA!: () => void
+    const gatedListA = new Promise<ListResult>(resolve => {
+      releaseA = () => resolve({
+        success: true,
+        personalProductSpaceId: 'space-personal-a',
+        productSpaces: [personalA],
+      })
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceList', {
+      configurable: true,
+      value: async () => {
+        listCalls += 1
+        return listCalls === 1
+          ? gatedListA
+          : {
+              success: true as const,
+              personalProductSpaceId: 'space-personal-b',
+              productSpaces: [personalB],
+            }
+      },
+    })
+    // The restriction fence accepts both accounts in this scenario.
+    Object.defineProperty(window.electronAPI, 'productSpaceGetRestrictionState', {
+      configurable: true,
+      value: async (_queryAccountId: string, querySpaceId: string) => ({
+        success: true as const,
+        restricted: mainRestrictedSpaces.has(querySpaceId),
+      }),
+    })
+
+    const { result } = renderHook(useHarness)
+    let bootA: Promise<string | null> = Promise.resolve(null)
+    await act(async () => {
+      bootA = result.current.bootstrap('account-a')
+    })
+    // Wait until A's bootstrap is parked on its (gated) list fetch.
+    await waitFor(() => {
+      expect(listCalls).toBe(1)
+    })
+    expect(result.current.flowState).toBe('loading')
+
+    // The account switches while A's bootstrap is still parked.
+    await act(async () => {
+      expect(await result.current.bootstrap('account-b')).toBe('ready')
+    })
+    expect(result.current.accountId).toBe('account-b')
+    expect(result.current.activeProductSpaceId).toBe('space-personal-b')
+    expect(result.current.flowState).toBe('ready')
+    expect(getStoredActiveProductSpaceId('account-b')).toBe('space-personal-b')
+
+    // A's receipt arrives late: the post-await scope CAS aborts it.
+    await act(async () => {
+      releaseA()
+      expect(await bootA).toBeNull()
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-personal-b')
+    expect(result.current.flowState).toBe('ready')
+    expect(result.current.allProductSpaces.map(space => space.id as string)).toEqual(['space-personal-b'])
+    expect(getStoredActiveProductSpaceId('account-b')).toBe('space-personal-b')
+    // No commit event for the superseded account was ever emitted.
+    expect(spaceEvents.map(event => event.accountId)).toEqual(['account-b'])
+    // P3-7 hygiene: the probe listener does not leak into later tests.
+    window.removeEventListener('polo:product-space-changed', onSpaceChanged)
   })
 })

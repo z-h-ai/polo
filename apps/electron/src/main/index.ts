@@ -75,7 +75,7 @@ Sentry.setUser({ id: machineId })
 
 import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS, LEGACY_OPEN_DEEP_LINK_SCHEME } from '@polo-ai/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
 import {
@@ -88,6 +88,7 @@ import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
 import { endAccountProductSpaceRuntimes } from './account-lifecycle'
+import { getCircleReturnCandidateStore } from './circle-return-candidate-store'
 import { whenInitialSyncTrustedProductSpaceAccountRestored } from '@polo-ai/server-core/handlers/rpc'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
@@ -418,10 +419,26 @@ if (process.defaultApp) {
   // Development mode: need to pass the app path
   if (process.argv.length >= 2) {
     app.setAsDefaultProtocolClient(DEEPLINK_SCHEME, process.execPath, [process.argv[1]])
+    // Legacy published provider entry (polo://open, F1 G6): best-effort
+    // registration keeps the already-published browser "打开 Polo" entry
+    // launching the desktop app. Launch compat ONLY — parseDeepLink never
+    // derives a navigation target from the legacy scheme
+    // (P70-RETURN-BRIDGE-01).
+    try {
+      app.setAsDefaultProtocolClient(LEGACY_OPEN_DEEP_LINK_SCHEME, process.execPath, [process.argv[1]])
+    } catch (error) {
+      mainLog.warn('[DeepLink] Legacy scheme registration failed:', error instanceof Error ? error.message : String(error))
+    }
   }
 } else {
   // Production mode
   app.setAsDefaultProtocolClient(DEEPLINK_SCHEME)
+  // Legacy published provider entry (polo://open) — see the dev branch above.
+  try {
+    app.setAsDefaultProtocolClient(LEGACY_OPEN_DEEP_LINK_SCHEME)
+  } catch (error) {
+    mainLog.warn('[DeepLink] Legacy scheme registration failed:', error instanceof Error ? error.message : String(error))
+  }
 }
 
 // Apply network proxy settings early (Node-level only — Electron sessions require app.whenReady)
@@ -960,6 +977,13 @@ app.whenReady().then(async () => {
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
             onAdminSessionEnding: (accountId: string) => {
+              // Circle-return candidate (P70-RETURN-BRIDGE-03): mark the
+              // account session end. Main cannot distinguish logout from a
+              // replacement here — the store only detaches the candidate's
+              // account anchor; a following session start converts it into a
+              // retained account-switch candidate, a missing start is a full
+              // logout and the candidate is cleared at the next pending read.
+              getCircleReturnCandidateStore().noteAccountSessionEnding(accountId)
               // Fence FIRST (synchronously blocks new starts via the deny
               // gate + lifecycle generation), then coordinator revoke/abort/
               // bounded cleanup, then the slow exact-generation stops.
@@ -971,6 +995,10 @@ app.whenReady().then(async () => {
                 ))
             },
             onAdminSessionStarted: (accountId: string) => {
+              // Deliberate account switch / re-login: retain the circle-return
+              // navigation candidate for re-verification under the new account
+              // (P70-RETURN-BRIDGE-03, vs. full-logout clearing).
+              getCircleReturnCandidateStore().noteAccountSessionStarted(accountId)
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
             onAdminCatalogScopeDenied: (

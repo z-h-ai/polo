@@ -1,0 +1,29 @@
+{
+ "chains": [
+  "first-use",
+  "ent-handoff",
+  "switch-ok",
+  "switch-cancel",
+  "credit",
+  "circle-exit",
+  "renewal",
+  "support",
+  "skills",
+  "question",
+  "permission",
+  "offline",
+  "revocation",
+  "account",
+  "search",
+  "empty-fail",
+  "transfer",
+  "circle-join",
+  "runtime",
+  "owner-credit"
+ ],
+ "checks_total": 128,
+ "checks_passed": 128,
+ "findings": [],
+ "page_errors": [],
+ "external_requests": []
+}

@@ -1,0 +1,15 @@
+{
+ "kind": "main-session reconciliation",
+ "revision": "poo70-workbench-r15-closure",
+ "subject": "round11-object-review finding OBJ-R15C-01",
+ "claim": "manifest 声明转场 P-M07-RENEW → P-M07-RENEW-LIMIT（label=查看续费限制）在 424×3 普查中零命中且真实点击不可达；声明与渲染不一致。",
+ "main_session_replay": {
+  "method": "与 tools/check_product_closure.py 相同的真实点击方式；每链独立页面，先 Reset",
+  "sequence": "P-M07-DETAIL-PAID-SUBSCRIPTION 起，11 个完整续费循环（续费→去浏览器支付→返回 Polo→查询原订单和资格→返回我的圈子→设计圈查看详情→订阅），第 12 次点击续费",
+  "observed": "去浏览器支付 disabled=True；查看续费限制 visible=True；点击后 currentScene=P-M07-RENEW-LIMIT；场景文案「当前权益已达提前购买上限，本次没有创建新订单或支付码；仍可查原订单。」正确",
+  "mechanism": "circle-membership-feedback.js:38 由会话内已达上限状态解除 hidden；:71 每次以 action 进入 P-M07-RENEW 重新取报价；月度报价固定 11 段",
+  "conclusion": "转场对真实用户动作可达；静态普查默认态与单跳探测无法覆盖会话内 11 轮序列，属评审方法盲区，不构成产品缺口。维护链 check_product_closure.py at-limit 链亦实际点击该入口并全部通过。"
+ },
+ "disposition": "OBJ-R15C-01 建议判定为非有效缺口；待 round11-object 评审员独立复验后由其更新自己的 semantic.json 与 report.md。",
+ "independence_note": "主会话只提供回放证据，不代替评审员改判。"
+}

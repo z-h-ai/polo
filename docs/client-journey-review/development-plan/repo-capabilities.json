@@ -1,0 +1,772 @@
+{
+  "schema_version": 1,
+  "repository": {
+    "path": "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview",
+    "revision": "ac831ea71a798030806f4e0906bdc93292bc918b",
+    "scope": "apps/electron/src"
+  },
+  "request": {
+    "summary": "POO-70 登录注册首页圈子分批开发计划及当前客户端Design System传播",
+    "stage": "plan"
+  },
+  "capabilities": [
+    {
+      "id": "CAP-01",
+      "kind": "instructions",
+      "status": "missing",
+      "scope": "apps/electron/src",
+      "sources": [],
+      "recommended_action": "No instructions evidence found; treat as a gap only if the current task requires it."
+    },
+    {
+      "id": "CAP-02",
+      "kind": "repository_skills",
+      "status": "evidence_pending",
+      "scope": "apps/electron/src",
+      "sources": [
+        {
+          "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+          "sha256": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+          "role": "authority"
+        }
+      ],
+      "recommended_action": "Inspect each repository Skill declaration and mark only task- and path-matched entries reusable."
+    },
+    {
+      "id": "CAP-03",
+      "kind": "design_system",
+      "status": "evidence_pending",
+      "scope": "apps/electron/src",
+      "sources": [
+        {
+          "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+          "sha256": "4c61b0844fd39cb2fa8aaa0ba56785cbde9e20945a0397a8cdce706e4a11a0a2",
+          "role": "authority"
+        },
+        {
+          "path": "apps/electron/src/renderer/index.css",
+          "sha256": "91fb77782a6d5dadb2cff70f05a88fa2ec67672e50dc2362020aa5b393d13449",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/viewer/src/index.css",
+          "sha256": "fd957c8505f43fd21567fccd2e439f55f4c0a8a7aa2bc9983f2b63390706c990",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/webui/src/index.css",
+          "sha256": "628199c8dc54c3db7f3425a9e972f7e5d4b67bbfb60bc4f2d7f67f7fc99c675d",
+          "role": "implementation"
+        },
+        {
+          "path": "design-demos/polo-client-source-baseline/src/styles/tokens.css",
+          "sha256": "fc65cb14f4e4d23caa3815f2fe38b85d054bfa6e43172fd4e827ddfb0620fb08",
+          "role": "implementation"
+        },
+        {
+          "path": "docs/DESIGN.md",
+          "sha256": "214e90085d7d1f9dfb9cc45a81de182a92bbb85523d4d726929419844b21efdf",
+          "role": "evidence"
+        },
+        {
+          "path": "packages/shared/src/config/theme.ts",
+          "sha256": "910d8d7e24d21aba3b8da184c17037fb4115e1addbf0a40646070b00d149d1b5",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/ui/src/styles/index.css",
+          "sha256": "255b11d49846e7149df8f85b9f10135fd3c4b0ecc46b324d2364a6fd9c5aa037",
+          "role": "implementation"
+        }
+      ],
+      "recommended_action": "A design-named Skill was found; verify scope, current authority, generated bindings and prototype using policy_readiness.py before reuse."
+    },
+    {
+      "id": "CAP-04",
+      "kind": "ui_components",
+      "status": "evidence_pending",
+      "scope": "apps/electron/src",
+      "sources": [
+        {
+          "path": "apps/electron/src/renderer/components/AppMenu.tsx",
+          "sha256": "d1cea87cf31cecbcfaa58649fcdd1de82e606b0a46f1f1542b596fe80b917429",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/KeyboardShortcuts.tsx",
+          "sha256": "9c6b3e3059a17ba539af68178f5af3931bbc2ca9d4750eddf199c24002a7a5fe",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/KeyboardShortcutsDialog.tsx",
+          "sha256": "2eaf86beff87b31c9b9c52da5654dcdbe1a3a2349eb02cefbd05b26f5d1c3b13",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ResetConfirmationDialog.tsx",
+          "sha256": "290e12fdee5c03bff2e5fafabcaae81cfcda95c724333cf06d73609ffe23a835",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ServerDirectoryBrowser.tsx",
+          "sha256": "36c04ca72639e3dd2f7fa4707daa75db6d23395c9b5c66639912003d40b77316",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/SplashScreen.tsx",
+          "sha256": "807433f1487d1193cfefd21e0311728ebeda25e996ef3149115bf6c245266376",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/CompactSourceSelector.tsx",
+          "sha256": "6adbf0d986dde48193e58a30f9a76ab1560d808db63722a853b2a359da8f6f6f",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/CompactWorkingDirectorySelector.tsx",
+          "sha256": "599a3d21693950ca557914f666e8ea22364224e7305c6ed50be5d8be7a95c41e",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/EditPopover.tsx",
+          "sha256": "8980a01cd5d29048f9178734da25815a22aa55cde72c6a68842211228f669b99",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/HeaderIconButton.tsx",
+          "sha256": "b29861ad2b84d26e48c820f3c5caccdd53891f60c9c24faef4f2c4e374f0c255",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/HeaderMenu.tsx",
+          "sha256": "b05ab3f874ab3f59c5d8705e4dfda32cc208b1521693400302efc45ad557daa7",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/PanelHeaderCenterButton.tsx",
+          "sha256": "158aa546c207a29fe2594a7d1c5cb2fd6f744a8faaf4636fcbcbd373548fcf53",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/SourceSelectorPopover.tsx",
+          "sha256": "bfb0490a9c1aa0e73cbf085068bd143068dcf9b7f68c73b0a362f65988ce7ba4",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/TopBarButton.tsx",
+          "sha256": "02fc3f186eb702f289142dd31fe920b86c992c5a96c1c26c5b8f28d637400715",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/action-menu-item.tsx",
+          "sha256": "c031e0873f962df06a608c6854b824341e1f1b04ee37a90048d9645468790be6",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/action-tooltip.tsx",
+          "sha256": "7dbc7295d7f3d1344f6511851c4f2d98d075ec52532c4cc479d8b479dd7f8c9a",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/avatar-group.tsx",
+          "sha256": "40904146a5a1f418f68e3dfb9c09c3c6d853d256439a84599d6017d3a5e18d30",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/avatar.tsx",
+          "sha256": "d8edb706fd8e17ad9e515f823ee70601a14f085c54f06ba6f41e60f42957a22a",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/badge.tsx",
+          "sha256": "52ba43a94bc57bfcd0f9499a86ff5895fcf3ff9fa7810c3eb51d29f36131974e",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/button.tsx",
+          "sha256": "e56add5b1f26ed895240de77465af39a6979bb7e5b37b3a321508ea591a30ff4",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/calendar.tsx",
+          "sha256": "ffdeb97813a0c2c672b22f06f66a50329dc4cdcd482dba3823de432d1bb177df",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/collapsible.tsx",
+          "sha256": "65e8ba8b82da0507a95d8d559ea617da3a08aad0b483e4fea81f51535143436e",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/command.tsx",
+          "sha256": "4a9c311d150f165eccccb095c370953d11a8c75ce2c36937d9a6f526a75d9303",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/context-menu.tsx",
+          "sha256": "d42e51dada3c5a63a4f8839990426d102fb1d6c3d070b86be5d09907c80f8e49",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/data-table.tsx",
+          "sha256": "62e6558af9eed7b2820cf6625c1ee2b0132f8654db6bc72b376b3a83f43ab6af",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/dialog.tsx",
+          "sha256": "d4bdd018aa44956acc2a4c26eda8e8b749df351d7eed3742cd8e896834f09a43",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/drawer.tsx",
+          "sha256": "063de83dc89d79525bd00a9ee4e0b383a69f6abd838ba4fe03f83c7f67199ac3",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/dropdown-menu.tsx",
+          "sha256": "33058b7d576826cf0b7b8a7a62b1e71ddf8453e73447ac66e85f307b3eeb1e0d",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/empty.tsx",
+          "sha256": "6df8b3ff578a32d25b19ff8a2de4a0bf0f73dcda577dfe0cbfae6444e7be77e2",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-icon.tsx",
+          "sha256": "efd24e9ee9b3d24cb2d1718ce384bd2fe2de57ba2aa4c78859d473a4bed3d359",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-list-badge.tsx",
+          "sha256": "180cae49aad572ac21d7830233edd2fe26d9b8dd74ce0da438a8bb4aac53ec1e",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-list-empty.tsx",
+          "sha256": "4b7e228eb5b83ca7125477acf4b5d087c441fd7d577544ed3cbd3fa8bc2d5675",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-list-label-badge.tsx",
+          "sha256": "f8c315aef729238c6e3cd73fb7b1f5bda4cf4cf8a609fdb9014b15d5dbda7836",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-list.tsx",
+          "sha256": "6265497569f15acda586a13fc6ec11bc7ae5723587009cb5c552e731b2676b41",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-panel.tsx",
+          "sha256": "ab51913c0364266fe22a66b368669f00123355fe3019306549d788369b432883",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/entity-row.tsx",
+          "sha256": "ab24d125d0924ad47cae4a32453abc46e36e33dedf2b3a2b5bef0812ae7ad621",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/fading-text.tsx",
+          "sha256": "8d02dc9947432b65bb765b29704b3840a95d03be8bac043749ed6cc120e0b231",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/gradient-resize-handle.tsx",
+          "sha256": "9cbd12837256a3a027657972b35969c7148d71e2b255c2471fbe564428a7c918",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/horizontal-resize-handle.tsx",
+          "sha256": "7c635f6eded736a7d908bcfd8ded526f7795858d4ce0203c26457c865cf62dbb",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/src/renderer/components/ui/input.tsx",
+          "sha256": "0a6e49bf01196a7c25c3bae99fa89434d5f420731dce4af47889feafb36787cb",
+          "role": "implementation"
+        }
+      ],
+      "recommended_action": "Reuse established components and patterns before proposing new primitives."
+    },
+    {
+      "id": "CAP-05",
+      "kind": "domain_model",
+      "status": "evidence_pending",
+      "scope": "apps/electron/src",
+      "sources": [
+        {
+          "path": "docs/adr/0001-model-published-work-as-creator-artifacts.md",
+          "sha256": "a4e9100c258dce478ffbe38f544e384e0916f4b6f34d78fcdd8cfd1a44d5eca8",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0001-run-cli-execution-independently-from-electron.md",
+          "sha256": "a30d5da02e949669ffa0e086364dd3409a316f621d3c12d67587358c7036d8a2",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0002-limit-creator-skills-to-static-packages.md",
+          "sha256": "b8af30077713ba899772367fc2b29670f27da9ae770a7a8feef5f629f67087ad",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0002-separate-cli-configuration-workspace-from-execution-directory.md",
+          "sha256": "492b731eddd75df96ddafe774dd29bf43090b9215848676792896692a260d76d",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0003-keep-cli-execution-overrides-out-of-shared-configuration.md",
+          "sha256": "e6c7452f8c853be81ec220909f32e050630982165ce4a9ca3bdcf0bd5f310c47",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0003-use-one-slug-for-skill-identity.md",
+          "sha256": "b037d2df09ca68a32ff9b28431dec57fcaa41fa9ccc7b932aa2a92fa57efffe6",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0004-ship-minimal-exec-resume-with-persistent-cli-sessions.md",
+          "sha256": "6976d0b2d577c21ff0798645ad408dd04017e68a9fd1b8dd717f43c2402482e6",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0004-treat-required-sources-as-advisory-metadata.md",
+          "sha256": "34925267581287bccf434db50f0b4cc083f17a52076c8ac1f777fae2db5d60e9",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0005-retain-installable-version-history-across-archival.md",
+          "sha256": "7bcaab6def6728e949af887c3d1b304ac3619f02e41bbdd04214fff978a92f20",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0005-stop-cli-runtime-when-its-owner-disappears.md",
+          "sha256": "4865905e9c46c36ee0c49db632fce2ce70c957991b542d067ca770641af0ad63",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0006-model-a-cli-call-as-one-thread.md",
+          "sha256": "6a386a42c11e63ded66d2fb25d979e3518b8cad28db602eafb47a9156465ddf7",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0006-scope-skill-installations-to-the-polo-workspace.md",
+          "sha256": "2dd16b2bec05536b23a6bb853bc7e542f6fc8c1f3944c2d4bea9dd155ed19b28",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0007-bind-validation-to-immutable-version-uploads.md",
+          "sha256": "cca43e28a51cd9fd063a11bccaa141dbeb81109acb7e79271c8915754921399d",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0007-default-non-interactive-exec-to-safe-mode.md",
+          "sha256": "5bc7c7413afd1e0d4cebdf29b71b133112e45f01d3cb1b032cc98e453befdc20",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0008-project-skill-artifact-metadata-from-published-content.md",
+          "sha256": "b4c10bfc8bf56c88b1fa0180008038c6a8cef3e2db7f2ca8d55da2f9d804b2ea",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0008-publish-a-stable-codex-core-jsonl-subset.md",
+          "sha256": "3ca79b08800515d93e45d8168651ec2cc2d16f7d8950fc229c18cedf6c54597b",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0009-allow-inert-reference-files-without-an-extension-allowlist.md",
+          "sha256": "a20791ac65ed778afa7bf0fed70d0c394a85fef8b1192894741e0e16f2426f75",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0009-store-polo-owned-cli-artifacts-under-thread-roots.md",
+          "sha256": "7a9b9c6721180740ad26b30990e9e67a3ba9cfd44e4e16126a6a5e71a530b0d8",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0010-resume-cli-sessions-in-place-with-an-exclusive-lease.md",
+          "sha256": "f8358e6c390df5a2d831d47c816cd2182e239f65eff66d885c0e4e46f428a51c",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0010-snapshot-admin-archive-policy-per-validated-version.md",
+          "sha256": "5b8909ebc3524b6174e724a726af2c6cdf2d425a2e88341518df73819d504fa8",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0011-use-journaled-workspace-skill-installation-transactions.md",
+          "sha256": "c86e0d638a3f0e1b88f94d5587b17b49f9eb1ad05635d80263355a40c16f7612",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0012-revoke-unsafe-versions-without-remote-uninstallation.md",
+          "sha256": "78e7aa5c18eb930590056e6ca365df5f7ce4d5cdfce73dd75b4d5795b11d7847",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0013-decouple-installed-version-safety-status-from-catalog-membership.md",
+          "sha256": "a8452546cae0fd05de2096323437f15cd494dfbf77560bc1b3b241e11504dac0",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0014-unify-artifact-reads-without-migrating-web-app-writes.md",
+          "sha256": "ac39edc3b07d28187dbe83dbb3df763ea9ad8d4c46a05718f5a848f587413829",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0015-snapshot-download-access-but-recheck-revocation-before-install.md",
+          "sha256": "87928835311ce9dc5212d7b35b3bd0ebf9b96c2f1f28714eff316eb1220017ae",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0016-identify-skill-updates-by-artifact-not-slug.md",
+          "sha256": "94f3d0aeda7894b6de3a14c4ae49c6942043283dbb09314470c5bd00f42e1195",
+          "role": "evidence"
+        },
+        {
+          "path": "docs/adr/0017-retain-safety-tombstones-after-package-purge.md",
+          "sha256": "57e47369801cb1a7c4aa061a961fe4bce4bb6527e82405479d63026ee36ffc8f",
+          "role": "evidence"
+        }
+      ],
+      "recommended_action": "Reuse the vocabulary and invariants; adopt domain-modeling only when durable definitions are missing."
+    },
+    {
+      "id": "CAP-06",
+      "kind": "access_policy",
+      "status": "evidence_pending",
+      "scope": "apps/electron/src",
+      "sources": [
+        {
+          "path": ".pipeline/sdlc/POO-70/create-high-fidelity-task/repair_visual_policy.py",
+          "sha256": "90bfe5b0721c6fe545343d1826f278cb630a5022b764a544f3009a5275a8c81f",
+          "role": "authority"
+        },
+        {
+          "path": "apps/electron/resources/docs/permissions.md",
+          "sha256": "b427111a810574101d938615fda9229bffd6e6c808779e245bdc4bb54ad7f902",
+          "role": "authority"
+        },
+        {
+          "path": "apps/electron/src/renderer/event-processor/handlers/permission-mode-changed.test.ts",
+          "sha256": "76b9ca1311dbe1290f5eb34e5ef9f02bd8e914033d44787339d14846c8f9742a",
+          "role": "authority"
+        },
+        {
+          "path": "docs/adr/0010-snapshot-admin-archive-policy-per-validated-version.md",
+          "sha256": "5b8909ebc3524b6174e724a726af2c6cdf2d425a2e88341518df73819d504fa8",
+          "role": "authority"
+        },
+        {
+          "path": "packages/messaging-gateway/src/access-control.ts",
+          "sha256": "5a9d6892a4b1cac1a12b722c4b911d598cfe1b78b10b71de8a3005ad3fc0534b",
+          "role": "authority"
+        },
+        {
+          "path": "packages/messaging-gateway/src/__tests__/access-control.test.ts",
+          "sha256": "4598214ce7993f0ed020d6a72e181aec8fa74b83ab3c85ce6ac95569f4ff9f5d",
+          "role": "authority"
+        },
+        {
+          "path": "packages/pi-agent-server/src/host-completion-policy.test.ts",
+          "sha256": "466ed9cf6436582adf428d6dee932d042fae3dea20b14ab1568f10b104712b5b",
+          "role": "authority"
+        },
+        {
+          "path": "packages/pi-agent-server/src/host-completion-policy.ts",
+          "sha256": "0e27bc57923c518385d27985f19f9350ac82b19046ea07e8101e86278d8c76bd",
+          "role": "authority"
+        },
+        {
+          "path": "packages/server-core/src/sessions/session-sidecar-permissions.test.ts",
+          "sha256": "d30ae379ef9c4382615d11c2a4a82cb6f7685600f5f3ae176a90b7577303e4e9",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/admin/authorization-failure.ts",
+          "sha256": "429d3e58265fac81b5f601041ecdeab92fdef719a9a61c113d976bdcf5f2ad1b",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/admin/__tests__/authorization-failure.test.ts",
+          "sha256": "ed09aafd61a2c298bea42a09cb6f8eae88c62218abd34f1b59d73065ec670087",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/permissions-config.ts",
+          "sha256": "99c7f97e82d420ff3909b5e222b06bc8020093d82e3470c91240bfc71ee76e77",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/__tests__/browser-tools-permissions.test.ts",
+          "sha256": "77f54c9818d5131e76076f2cb8a424bd4ee1bd63ea1303a32e1dc4de4a5d4356",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/__tests__/call-llm-permissions.test.ts",
+          "sha256": "a9250ca43857b122c43491666ee2a33f6a4651308341793f58cc6ce2935a69a3",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/__tests__/permissions-config-migration.test.ts",
+          "sha256": "21fe2c99bd3fc441c8f45ade850413b8c1335568c0d9027896296e022913470d",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/__tests__/permissions-config-polo-ai-cli-flag.test.ts",
+          "sha256": "0232ce54b3f0acf000b6e656db76e0e31a829070af27c1227077ab7fb509e092",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/__tests__/send-developer-feedback-permissions.test.ts",
+          "sha256": "be71e70386d00cae8e026882593f136345c95479a98bf1e49a5be706e9d3c33e",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/__tests__/session-tool-safe-mode-permissions.test.ts",
+          "sha256": "894dfd43e3c4333fdf1ef144b529c971195a363008220e86faea215b2904cb34",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/backend/__tests__/host-executor-policy.test.ts",
+          "sha256": "091341ae4000991f4ee64ecb39fc979fc4a2c66a53990ed798f381143021777b",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/core/permission-manager.ts",
+          "sha256": "7c95fa9f8511f5e60e129c04f1af9f6298a8077ce0583b240c4f5be794e945cf",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/agent/core/__tests__/permission-manager.test.ts",
+          "sha256": "c41e4bf4ff26ce27271feb893396d1760d801bfafe58e8cbcb9eaaaf4e86bb9d",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/sessions/__tests__/jsonl-permission-mode-normalization.test.ts",
+          "sha256": "00900870bb76a32dac9bebd57abc0e756a7f7203554341049ff8d2f44adedf86",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/sessions/__tests__/previous-permission-mode.test.ts",
+          "sha256": "a078cd061a143d22c99d9e91b0b6d199f39db07c28ae48c4a3ded4fb82a83a36",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/src/workspaces/__tests__/storage-permission-mode-normalization.test.ts",
+          "sha256": "36c67c9e0fa6c229cd98b49e06a076913ca13b91ce095a1ce5e6c127d5c873ca",
+          "role": "authority"
+        },
+        {
+          "path": "packages/shared/tests/permissions-polo-ai-sync.test.ts",
+          "sha256": "a21427fefb36f5fbd0a079d504f8eabd5c579f7cdd942a4822967fe9474bad6d",
+          "role": "authority"
+        },
+        {
+          "path": "packages/ui/src/components/annotations/interaction-policy.ts",
+          "sha256": "bdd767ad10938e95e8a65f763b44690fa060b6adb471199ef238176388c68b6d",
+          "role": "authority"
+        },
+        {
+          "path": "packages/ui/src/components/annotations/island-dismiss-policy.ts",
+          "sha256": "90f72c58e4314d657bd0a66443218c2ac8cf9f7294d5a9b66773d3f2fc98b9f7",
+          "role": "authority"
+        },
+        {
+          "path": "packages/ui/src/components/annotations/__tests__/interaction-policy.test.ts",
+          "sha256": "544f31664eb3a6362ddda20e68061fe5d96e2f7fec8ed0822d0f6fffe0dfae41",
+          "role": "authority"
+        },
+        {
+          "path": "packages/ui/src/components/annotations/__tests__/island-dismiss-policy.test.ts",
+          "sha256": "857401fd160014927148172c7676699819aa6c94a2b7bed0f474be3ff82460a1",
+          "role": "authority"
+        }
+      ],
+      "recommended_action": "Apply the owning policy; unresolved user-visible access boundaries belong in the Spec."
+    },
+    {
+      "id": "CAP-07",
+      "kind": "acceptance",
+      "status": "evidence_pending",
+      "scope": "apps/electron/src",
+      "sources": [
+        {
+          "path": "apps/electron/e2e/creator-skill/main.ts",
+          "sha256": "2037d33db14adf860962b6244d0558275a18eeefc9d5c1032f9812997b2d7c83",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/creator-skill/renderer.ts",
+          "sha256": "5ffb2f87d965436bb14e382a8f7bb2ab7912e902693dc2897cb3c421d529a646",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/creator-skill/tsconfig.json",
+          "sha256": "5d4165679db3e21c787d5844bc8de3f49cf227bd4ee6414c577f46e4bf5fefcb",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/phone-auth/main.ts",
+          "sha256": "6eb79a05c43a1815cd61f9760fe849b2261bf127388e30b223cb21af13da5075",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/phone-auth/tsconfig.json",
+          "sha256": "5de39538b243cdf25c1c2abd7a60abf36ae5de660ab9c49dff26b08c8469efe1",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/product-space-app-runtime/fixture-app.ts",
+          "sha256": "72efa99a7d85438be0ce6428dab5d832912668627197a2ecf6e2b44185296301",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/product-space-app-runtime/main.ts",
+          "sha256": "440bf1b8265322728a2bb391600d9d676f2dfb8517f40e3319e81d959cbc536d",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/e2e/release-v012/main.ts",
+          "sha256": "870d169f60cef79c69b8f80f34e55fe605877d38ecac794c6860dea2357b538c",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/README.md",
+          "sha256": "396ace0c239fa1fd98aabd07a1f8b163e7b60f53c1d0cc61bd9b0625fc99f5cd",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/_tool_test_harness.py",
+          "sha256": "73ad8126c0835fda7beb7e5667fd6692a62e323029398b1dc726abec66815c0b",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_doc_diff_smoke.py",
+          "sha256": "371c46026b7897e1256080bb137b6a0b9f66a1ac61affb22cbb487e9aa364244",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_docx_tool_smoke.py",
+          "sha256": "80739c006a5361e6b0bae4124026861b9f85b776c60eb8e31e88aafc2fdd68fb",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_ical_tool_smoke.py",
+          "sha256": "3c4a093e8389306c1cb466e6b09d1b019bb2d85d9a85fefb922752e465d2f8b3",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_img_tool_smoke.py",
+          "sha256": "d4c86eadb4953b6959491ea29ec18fb32fca0c5a60e82364f3b1542c241643df",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_markitdown_smoke.py",
+          "sha256": "b94b6971d636b5dd7f62d5a992e03b6a5e99945c56d8c60459f9dacd395a4c7d",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_pdf_tool_smoke.py",
+          "sha256": "53d75f23fc434a493f3cbdc9957c1ae0caffa4be2f35f59ea374c19211770c3c",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_polo_wrapper_smoke.py",
+          "sha256": "7fb93477894c4faa98644feaf8f91a08f0864112c3a0149f2fd0607701be551b",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_pptx_tool_smoke.py",
+          "sha256": "cc06d95cafccf1100e55475a23f629add1dfb0c56685b1a140db84ffc3311b47",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/test_xlsx_tool_smoke.py",
+          "sha256": "5d301752969dd5f656321120f6a5e3b3445a8f67f22294f6fc110d0a1c603865",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/windows-terminal-integration-race.test.ps1",
+          "sha256": "cac1c93c140e67da23b707c3dd7ff1ab298b1262cc499bdb9fba3ebb992b3e01",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1",
+          "sha256": "ab61e0a2d0a3925bc7cb0d96abecefd4c073423a14b60f65bba0ebcfd7643dfd",
+          "role": "implementation"
+        },
+        {
+          "path": "apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1",
+          "sha256": "b64eae74c86153ecdb76ae2bf555e1606b41195f299efc059ea7e8885aab69c3",
+          "role": "implementation"
+        },
+        {
+          "path": "design-demos/polo-chat-options/playwright.config.ts",
+          "sha256": "319f0cde0f7f20105af5ed50db4a4356cbcb1cd823dc88329d039dae29bf01c5",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/content-validators.test.ts",
+          "sha256": "0277f897afdf91764391d0ca2447031059ab517c5da95182e5c9957ec64ada29",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/llm-connections.test.ts",
+          "sha256": "115c605c64477f027a86d941060672049b378bc7696c6ce67646ec4ee95ea345",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/mcp-pool.test.ts",
+          "sha256": "f5ff9bd10d73c9f1768f88d499117b44a652990921c56abf48523121be135aa8",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/mode-manager.test.ts",
+          "sha256": "3073081a30d789a94bf7e06c5e42f0c766898b6a975b47580588a5261818d3cd",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/models-pi.test.ts",
+          "sha256": "77eefc95c489b9b66feb1206521da9840f67b292892c4e99c1e066e425d1f2f7",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/models.test.ts",
+          "sha256": "13eba0f7c555c7a3da0eac6c231eb9d5b3251e8a242039f2fe2ad33add7dc1c3",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/permissions-polo-ai-sync.test.ts",
+          "sha256": "a21427fefb36f5fbd0a079d504f8eabd5c579f7cdd942a4822967fe9474bad6d",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/persistence-queue.test.ts",
+          "sha256": "35cdd460c69f1a6a6f067309bc4d099a0257815e0cb254be87de70baa0d64788",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/session-validation.test.ts",
+          "sha256": "a4db7ad7e0b135e8b67253d1d32d861e0914652d33df061ff8f43a5a3f06018c",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/shellguard-corpus.test.ts",
+          "sha256": "03a74771fda32a51f6e56386cdcaafb2cc56e5008e380d9512eeac2abeea9503",
+          "role": "implementation"
+        },
+        {
+          "path": "packages/shared/tests/setup/register-pi-model-resolver.ts",
+          "sha256": "6c0a77b4b320f8cdc187f15eb6f4d1caadf7c6d89e8e9ae7b99599b46ebb02b0",
+          "role": "implementation"
+        }
+      ],
+      "recommended_action": "Reuse the repository checks and bind scenario evidence to the current revision."
+    }
+  ],
+  "conflicts": []
+}

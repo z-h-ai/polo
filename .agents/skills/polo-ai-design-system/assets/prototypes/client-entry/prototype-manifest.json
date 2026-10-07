@@ -1,0 +1,4942 @@
+{
+  "schema_version": 1,
+  "kind": "client-entry-consumer-index",
+  "revision": "poo70-workbench-r15-closure",
+  "design_revision": "poo70-client-design-r2-20261004",
+  "source_manifest": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+  "source_manifest_sha256": "84a1b5c07626e9cf5ee09b49495f36fa29d550d8c05817f6810f0ffe3a8575f0",
+  "product_export": "docs/mvp-complete-flow-hifi/prototype.html",
+  "target": {
+    "languages": [
+      "zh-CN"
+    ],
+    "themes": [
+      "light"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-1440x900",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "desktop-1024x768",
+        "width": 1024,
+        "height": 768
+      },
+      {
+        "id": "desktop-800x600",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "annotation": "G4 登录卡：品牌故事 + 分段登录方式 + 协议勾选，为冻结稿复用样式。",
+      "category": "复用",
+      "id": "P-M01-LOGIN-PASSWORD",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-LOGIN-PASSWORD",
+      "state": "default",
+      "status": "suggested",
+      "title": "登录 · 密码登录",
+      "transitions": [
+        {
+          "feedback": "切换到「我的空间 · 准备中」",
+          "id": "T-P-M01-LOGIN-PASSWORD-001-P-M01-PERSONAL-PREP",
+          "label": "继续",
+          "to": "P-M01-PERSONAL-PREP"
+        },
+        {
+          "feedback": "切换到「登录 · 验证码登录」",
+          "id": "T-P-M01-LOGIN-PASSWORD-002-P-M01-LOGIN-PHONE",
+          "label": "验证码登录",
+          "to": "P-M01-LOGIN-PHONE"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "登录表单"
+      ]
+    },
+    {
+      "annotation": "手机号 +86 分段输入；「获取验证码」为现有行为。",
+      "category": "复用",
+      "id": "P-M01-LOGIN-PHONE",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-LOGIN-PHONE",
+      "state": "default",
+      "status": "suggested",
+      "title": "登录 · 验证码登录",
+      "transitions": [
+        {
+          "feedback": "切换到「登录 · 验证码已发送」",
+          "id": "T-P-M01-LOGIN-PHONE-001-P-M01-LOGIN-CODE",
+          "label": "获取验证码",
+          "to": "P-M01-LOGIN-CODE"
+        },
+        {
+          "feedback": "切换到「登录 · 密码登录」",
+          "id": "T-P-M01-LOGIN-PHONE-002-P-M01-LOGIN-PASSWORD",
+          "label": "密码登录",
+          "to": "P-M01-LOGIN-PASSWORD"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "登录表单"
+      ]
+    },
+    {
+      "annotation": "倒计时重发属于现有行为；验证码错误会内联提示，不弹窗。",
+      "category": "复用",
+      "id": "P-M01-LOGIN-CODE",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-LOGIN-CODE",
+      "state": "default",
+      "status": "suggested",
+      "title": "登录 · 验证码已发送",
+      "transitions": [
+        {
+          "feedback": "切换到「我的空间 · 准备中」",
+          "id": "T-P-M01-LOGIN-CODE-001-P-M01-PERSONAL-PREP",
+          "label": "继续",
+          "to": "P-M01-PERSONAL-PREP"
+        },
+        {
+          "feedback": "切换到「登录 · 密码登录」",
+          "id": "T-P-M01-LOGIN-CODE-002-P-M01-LOGIN-PASSWORD",
+          "label": "切换为密码登录",
+          "to": "P-M01-LOGIN-PASSWORD"
+        },
+        {
+          "feedback": "切换到「登录 · 验证码已发送」",
+          "id": "T-P-M01-LOGIN-CODE-003-P-M01-LOGIN-CODE",
+          "label": "重新发送",
+          "to": "P-M01-LOGIN-CODE"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "登录表单"
+      ]
+    },
+    {
+      "annotation": "取消后留在登录入口并可重试；不产生副作用（C-R08）。登录取消无副作用，可随时重新登录（C-R01）。",
+      "category": "状态",
+      "id": "P-M01-LOGIN-CANCEL",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-LOGIN-CANCEL",
+      "state": "default",
+      "status": "suggested",
+      "title": "登录 · 用户取消",
+      "transitions": [
+        {
+          "feedback": "切换到「我的空间 · 准备中」",
+          "id": "T-P-M01-LOGIN-CANCEL-001-P-M01-PERSONAL-PREP",
+          "label": "继续",
+          "to": "P-M01-PERSONAL-PREP"
+        },
+        {
+          "feedback": "切换到「登录 · 验证码登录」",
+          "id": "T-P-M01-LOGIN-CANCEL-002-P-M01-LOGIN-PHONE",
+          "label": "验证码登录",
+          "to": "P-M01-LOGIN-PHONE"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "登录表单"
+      ]
+    },
+    {
+      "annotation": "唯一「我的空间」幂等创建；重试不产生第二个空间（PC-F01）。准备流程对已写入内容幂等，重试不重复创建（C-R01）。",
+      "category": "调整",
+      "id": "P-M01-PERSONAL-PREP",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-PERSONAL-PREP",
+      "state": "default",
+      "status": "suggested",
+      "title": "我的空间 · 准备中",
+      "transitions": [
+        {
+          "feedback": "进入首次使用的完整应用目录",
+          "id": "T-P-M01-PERSONAL-PREP-001-P-M03-HOME-ZERO",
+          "label": "进入首页",
+          "to": "P-M03-HOME-ZERO"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "准备失败给出重试入口并说明幂等；不阻塞重新登录。准备失败无副作用、已写入内容不重复创建（C-R01）。",
+      "category": "调整",
+      "id": "P-M01-PERSONAL-PREP-FAIL",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-PERSONAL-PREP-FAIL",
+      "state": "default",
+      "status": "suggested",
+      "title": "我的空间 · 准备失败",
+      "transitions": [
+        {
+          "feedback": "切换到「登录 · 密码登录」",
+          "id": "T-P-M01-PERSONAL-PREP-FAIL-001-P-M01-LOGIN-PASSWORD",
+          "label": "重新登录",
+          "to": "P-M01-LOGIN-PASSWORD"
+        },
+        {
+          "feedback": "切换到「我的空间 · 准备中」",
+          "id": "T-P-M01-PERSONAL-PREP-FAIL-002-P-M01-PERSONAL-PREP",
+          "label": "重试准备",
+          "to": "P-M01-PERSONAL-PREP"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "过期会话要求重新登录；恢复后核对访问权，不自动重做业务动作。",
+      "category": "状态",
+      "id": "P-M01-REOPEN",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-REOPEN",
+      "state": "default",
+      "status": "suggested",
+      "title": "重开 · 登录恢复",
+      "transitions": [
+        {
+          "feedback": "切换到「重开恢复」",
+          "id": "T-P-M01-REOPEN-001-P-M11-REOPEN-RECOVERY",
+          "label": "继续",
+          "to": "P-M11-REOPEN-RECOVERY"
+        },
+        {
+          "feedback": "切换到「登录 · 验证码登录」",
+          "id": "T-P-M01-REOPEN-002-P-M01-LOGIN-PHONE",
+          "label": "验证码登录",
+          "to": "P-M01-LOGIN-PHONE"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "冷启动重验账号/邀请/空间列表；不自动切换空间。冷启动不自动切换空间，需用户确认目标。",
+      "category": "状态",
+      "id": "P-M01-COLD-START",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M01-COLD-START",
+      "state": "default",
+      "status": "suggested",
+      "title": "冷启动 · 候选目标重验",
+      "transitions": [
+        {
+          "feedback": "切换到「首页 · 个人空间（有常用）」",
+          "id": "T-P-M01-COLD-START-001-P-M03-HOME-PERSONAL",
+          "label": "进入 Polo",
+          "to": "P-M03-HOME-PERSONAL"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "annotations": [],
+      "category": "调整",
+      "id": "P-M03-HOME-PERSONAL",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-HOME-PERSONAL",
+      "state": "default",
+      "status": "suggested",
+      "title": "首页 · 我的空间",
+      "transitions": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "label": "管理技能",
+          "to": "A-personal-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "label": "打开助手",
+          "to": "A-personal-new",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "label": "打开",
+          "to": "P-M04-APP-REPORT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "显示对应页面；保留当前空间"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "工作台顶栏",
+        "工作区布局",
+        "应用卡",
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "首次使用展示完整应用目录；助手卡始终可用，无需配置常用项。",
+      "annotations": [],
+      "category": "调整",
+      "id": "P-M03-HOME-ZERO",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-HOME-ZERO",
+      "state": "default",
+      "status": "suggested",
+      "title": "首页 · 首次使用",
+      "transitions": [
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-2",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-3",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-4",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-5",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-6",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-7",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-8",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-9",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-12",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-11",
+          "label": "管理技能",
+          "to": "A-personal-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-13",
+          "label": "打开助手",
+          "to": "A-personal-new",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-14",
+          "label": "打开",
+          "to": "P-M04-APP-REPORT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-15",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-16",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-ZERO-R14-C-17",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "保留当前空间，打开对应页面"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "个人目录为空时说明尚未加入提供 App 的圈子，或已加入圈子尚未分发；不混入企业目录。",
+      "category": "调整",
+      "id": "P-M03-HOME-EMPTY-DIR",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-HOME-EMPTY-DIR",
+      "state": "default",
+      "status": "suggested",
+      "title": "首页 · 真空目录",
+      "transitions": [
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-2",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-3",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-4",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-5",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-6",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-7",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-8",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-9",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-12",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-11",
+          "label": "管理技能",
+          "to": "A-personal-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M03-HOME-EMPTY-DIR-R14-C-13",
+          "label": "打开助手",
+          "to": "A-personal-new",
+          "feedback": "保留当前空间，打开对应页面"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "目录失败不阻塞助手；重试幂等（C-R01）。重试不产生重复内容（C-R01）。",
+      "category": "状态",
+      "id": "P-M03-HOME-LOAD-FAIL",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-HOME-LOAD-FAIL",
+      "state": "default",
+      "status": "suggested",
+      "title": "首页 · 目录加载失败",
+      "transitions": [
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-2",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-3",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-4",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-5",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-6",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-7",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-8",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-9",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-10",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-13",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-LOAD-FAIL-R14-C-14",
+          "label": "重新加载列表",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "缓存目录标注获取时间；已安装可打开，未安装/更新不可用（C-R07）。",
+      "category": "状态",
+      "id": "P-M03-HOME-OFFLINE",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-HOME-OFFLINE",
+      "state": "default",
+      "status": "suggested",
+      "title": "首页 · 离线缓存目录",
+      "transitions": [
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-OFFLINE",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-2",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-3",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-4",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-5",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-6",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-7",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-8",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-9",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-10",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-11",
+          "label": "重试连接",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-14",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-13",
+          "label": "管理技能",
+          "to": "A-personal-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-15",
+          "label": "打开助手",
+          "to": "A-personal-new",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-16",
+          "label": "打开",
+          "to": "P-M04-APP-REPORT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-17",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-18",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M03-HOME-OFFLINE-R14-C-19",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "保留当前空间，打开对应页面"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "调整",
+      "id": "P-M03-HOME-ENT",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-HOME-ENT",
+      "state": "default",
+      "status": "suggested",
+      "title": "首页 · 企业空间（晨星科技）",
+      "transitions": [
+        {
+          "id": "T-P-M03-HOME-ENT-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-ENT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-001-P-M03-HOME-ENT",
+          "label": "首页",
+          "to": "P-M03-HOME-ENT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-002-P-M04-RUNTIME",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-005-P-M04-NOTIFY-ENT",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-ENT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-006-P-M10-MENU-ENT",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU-ENT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-003-P-M02-SWITCHER",
+          "label": "切换空间当前：晨星科技",
+          "to": "P-M02-SWITCHER",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-007-P-M10-SETTINGS-ENT",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS-ENT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-008-P-M09-BROWSER-MENU-ENT",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU-ENT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-010-P-M04-RUNTIME",
+          "label": "数据报表生成器已在后台完成点顶栏「3 项运行中」查看",
+          "to": "P-M04-RUNTIME",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-HOME-ENT-011-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-ENT-R14-12",
+          "label": "管理技能",
+          "to": "A-enterprise-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M03-HOME-ENT-R14-13",
+          "label": "打开助手",
+          "to": "A-enterprise-new",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-ENT-R14-14",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-ENT-R14-15",
+          "label": "打开",
+          "to": "P-M04-APP-CONTRACT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-HOME-ENT-R14-16",
+          "label": "查看原因",
+          "to": "P-M11-BLOCKED-VERSION",
+          "feedback": "显示对应页面；保留当前空间"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "工作台顶栏"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "annotations": [],
+      "category": "调整",
+      "id": "P-M03-ALL-APPS",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-ALL-APPS",
+      "state": "default",
+      "status": "suggested",
+      "title": "全部 Apps · 作品去重与授权来源",
+      "transitions": [
+        {
+          "id": "T-P-M03-ALL-APPS-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "T-P-M03-ALL-APPS-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-14",
+          "label": "我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-13",
+          "label": "管理技能",
+          "to": "A-personal-skills",
+          "feedback": "打开当前空间的技能管理"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-15",
+          "label": "打开助手",
+          "to": "A-personal-new",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-16",
+          "label": "打开",
+          "to": "P-M04-APP-REPORT",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-17",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-18",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M03-ALL-APPS-R14-19",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "显示对应页面；保留当前空间"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "应用卡",
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "退出晨星增长圈只撤销该来源；晨星设计圈仍有效，因此会议纪要整理继续可用（D-PC-09）。",
+      "annotations": [
+        {
+          "anchor": "multi-circle-dedupe",
+          "body": "作品仍只显示一次；来源行更新为晨星设计圈有效，并明确晨星增长圈来源已撤销。",
+          "id": "a-m07-source-fallback",
+          "title": "一个来源失效仍可使用"
+        },
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "category": "调整",
+      "id": "P-M07-SOURCE-FALLBACK",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-SOURCE-FALLBACK",
+      "state": "default",
+      "status": "suggested",
+      "title": "授权来源更新 · 仍可使用",
+      "transitions": [
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-SOURCE-FALLBACK-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-0",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "feedback": "我的圈子"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-1",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "feedback": "管理技能"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-2",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "feedback": "打开助手"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-3",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "feedback": "打开"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-4",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "feedback": "打开"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-5",
+          "to": "P-M07-JOIN-FREE",
+          "label": "重新加入",
+          "feedback": "重新加入"
+        },
+        {
+          "id": "P-M07-SOURCE-FALLBACK-CLEANUP-6",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "feedback": "打开"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "应用卡",
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "沿用完整应用目录，无手动常用配置或数量限制；保留本机隐藏恢复和企业空态边界。见 Spec §13.13。",
+      "annotations": [
+        {
+          "anchor": null,
+          "body": "沿用完整应用目录，无手动常用配置或数量限制；保留本机隐藏恢复和企业空态边界。见 Spec §13.13。",
+          "id": "a-m03-manage-limit",
+          "title": "完整目录与本机显示"
+        },
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "category": "调整",
+      "id": "P-M03-MANAGE-HOME",
+      "journey": "J3 首页与目录",
+      "module": "M03",
+      "node": "P-M03-MANAGE-HOME",
+      "state": "default",
+      "status": "suggested",
+      "title": "我的应用 · 本机隐藏项",
+      "transitions": [
+        {
+          "id": "T-P-M03-MANAGE-HOME-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M03-MANAGE-HOME-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-0",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "feedback": "我的圈子"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-1",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "feedback": "管理技能"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-2",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "feedback": "打开助手"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-3",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "feedback": "打开"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-4",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "feedback": "打开"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-5",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "feedback": "打开"
+        },
+        {
+          "id": "P-M03-MANAGE-HOME-CLEANUP-6",
+          "to": "P-M03-CONTROLS",
+          "label": "查看隐藏项",
+          "feedback": "查看隐藏项"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "应用卡",
+        "首页目录"
+      ]
+    },
+    {
+      "annotation": "统一圈子列表；免费/月度/年度权益位置一致，查看详情进入对应圈子。加入在系统浏览器完成，桌面不输入分享链接。 本页仅保留一组标题和用途说明，搜索/筛选直接接圈子列表（Spec §13.12）。",
+      "annotations": [],
+      "category": "新增",
+      "id": "P-M07-LIST",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-LIST",
+      "state": "default",
+      "status": "suggested",
+      "title": "我的圈子 · 列表",
+      "transitions": [
+        {
+          "id": "P-M07-LIST-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-2",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-3",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-4",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-5",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-6",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-7",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-8",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-9",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-10",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-14",
+          "label": "返回首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-16",
+          "label": "查看详情",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17",
+          "label": "查看详情",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-18",
+          "label": "查看详情",
+          "to": "P-M07-DETAIL-DATA",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-19",
+          "label": "查看详情",
+          "to": "P-M07-YEAR-RESULT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-R14-C-17-expired",
+          "label": "查看到期圈子详情",
+          "to": "P-M07-EXPIRED",
+          "feedback": "保留到期关系并提供恢复入口"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "工作台顶栏",
+        "工作区布局",
+        "圈子统一列表"
+      ]
+    },
+    {
+      "annotation": "在浏览器打开分享 URL 或二维码完成加入，桌面仅承接已建立的关系；无桌面粘贴链接入口。",
+      "category": "新增",
+      "id": "P-M07-EMPTY",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-EMPTY",
+      "state": "default",
+      "status": "suggested",
+      "title": "我的圈子 · 空态",
+      "transitions": [
+        {
+          "id": "T-P-M07-EMPTY-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页；显示首页 · 个人空间（有常用）"
+        },
+        {
+          "id": "T-P-M07-EMPTY-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页；显示首页 · 个人空间（有常用）"
+        },
+        {
+          "id": "T-P-M07-EMPTY-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务；显示运行状态 · 我的空间"
+        },
+        {
+          "id": "T-P-M07-EMPTY-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知；显示通知 · 我的空间"
+        },
+        {
+          "id": "T-P-M07-EMPTY-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单；显示账号菜单 · 有管理资格"
+        },
+        {
+          "id": "T-P-M07-EMPTY-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "打开可进入的空间列表"
+        },
+        {
+          "id": "T-P-M07-EMPTY-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "账号与偏好 管理 Polo 设置；显示设置 · 账号安全"
+        },
+        {
+          "id": "T-P-M07-EMPTY-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单 在系统浏览器打开；显示充值与账单（浏览器交接）"
+        },
+        {
+          "id": "T-P-M07-EMPTY-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录 保留本机文件；显示登录 · 密码登录"
+        },
+        {
+          "id": "T-P-M07-EMPTY-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本 品牌语气分析 v1.4.0 · 下次使用生效；显示付费订阅详情"
+        },
+        {
+          "id": "T-P-M07-EMPTY-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成 点顶栏「1 项运行中」查看；显示运行状态 · 我的空间"
+        },
+        {
+          "id": "T-P-M07-EMPTY-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接；显示离线打开"
+        },
+        {
+          "id": "T-P-M07-EMPTY-013-P-M03-HOME-PERSONAL",
+          "label": "返回首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回首页；显示首页 · 个人空间（有常用）"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "圈子统一列表"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-FOCUS",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-FOCUS",
+      "state": "default",
+      "status": "suggested",
+      "title": "圈子详情 · 已加入",
+      "transitions": [
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-004-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-005-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-002-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-006-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-007-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-008-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-009-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-010-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-011-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-012-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-R14-13",
+          "label": "内容",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-R14-14",
+          "label": "更新",
+          "to": "P-M07-DETAIL-FOCUS-UPDATES",
+          "feedback": "更新"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-R14-15",
+          "label": "订阅",
+          "to": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+          "feedback": "订阅"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-015-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "打开"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UI-MEETING",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-027",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-028",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-029",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-030",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-031",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-FOCUS-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "应用卡",
+        "圈子详情分区"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-PAID",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-PAID",
+      "state": "default",
+      "status": "suggested",
+      "title": "付费订阅详情",
+      "transitions": [
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW",
+          "label": "续费",
+          "to": "P-M07-RENEW",
+          "feedback": "续费"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-R14-15",
+          "label": "内容",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-R14-16",
+          "label": "更新",
+          "to": "P-M07-DETAIL-PAID-UPDATES",
+          "feedback": "更新"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-R14-17",
+          "label": "订阅",
+          "to": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+          "feedback": "订阅"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-018-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-019-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-030",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-031",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-039",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-R6-040",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-014-P-M07-RENEW-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "annotation": "退出后账目：独有作品不可用并给重新加入路径；共同授权作品继续可用（D-PC-09 · PC-F03）。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+      "state": "default",
+      "status": "suggested",
+      "title": "圈子详情 · 已退出",
+      "transitions": [
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-014-P-M07-DETAIL-PAID",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-016-P-M07-DETAIL-PAID",
+          "label": "重新加入",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-017-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-029",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-030",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-031",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-DETAIL-PAID-AFTER-LEAVE-R6-039",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "category": "新增",
+      "id": "P-M07-PAY-RETURN-FAIL",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-PAY-RETURN-FAIL",
+      "state": "default",
+      "status": "suggested",
+      "title": "订单与资格暂时无法核对",
+      "transitions": [
+        {
+          "id": "P-M07-PAY-RETURN-FAIL-R13-1",
+          "label": "查询原订单和资格",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "查询原订单和资格"
+        },
+        {
+          "id": "P-M07-PAY-RETURN-FAIL-R13-2",
+          "label": "联系客服",
+          "to": "P-M07-SUPPORT",
+          "feedback": "联系客服"
+        },
+        {
+          "id": "P-M07-PAY-RETURN-FAIL-R13-3",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "有效期内月付续费样例：预计 2026-11-02 至 2026-12-02，实际起止以网页确认与权威支付结果为准。",
+      "category": "新增",
+      "id": "P-M07-RENEW",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-RENEW",
+      "state": "default",
+      "status": "suggested",
+      "title": "手动续费",
+      "transitions": [
+        {
+          "id": "T-P-M07-RENEW-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-RENEW-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-RENEW-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-RENEW-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-RENEW-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-RENEW-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-RENEW-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-RENEW-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-RENEW-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-RENEW-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-RENEW-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-RENEW-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-RENEW-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-RENEW-014-P-M07-RENEW",
+          "label": "管理成员资格",
+          "to": "P-M07-RENEW",
+          "feedback": "管理成员资格"
+        },
+        {
+          "id": "T-P-M07-RENEW-016-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-RENEW-017-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-029",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-030",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-031",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-R6-039",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-020-P-M07-DETAIL-PAID",
+          "label": "关闭",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "关闭"
+        },
+        {
+          "id": "T-P-M07-RENEW-021-P-M07-DETAIL-PAID",
+          "label": "取消",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "取消"
+        },
+        {
+          "id": "T-P-M07-RENEW-022-P-M07-PAY-BROWSER",
+          "label": "去浏览器支付",
+          "to": "P-M07-RENEW-WEB",
+          "feedback": "去浏览器支付"
+        },
+        {
+          "id": "P-M07-RENEW-R8-LIMIT",
+          "label": "查看续费限制",
+          "to": "P-M07-RENEW-LIMIT",
+          "feedback": "查看续费限制"
+        },
+        {
+          "id": "T-P-M07-RENEW-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-RENEW-014-P-M07-RENEW-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        },
+        {
+          "id": "P-M07-RENEW-R9-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "P-M07-RENEW-R9-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "浏览器交接"
+      ]
+    },
+    {
+      "annotation": "到期后重新购买：起算日为支付日并立即生效，与有效期内续费（从到期日起算）区分（PC-F03 · A-PAY）。",
+      "category": "新增",
+      "id": "P-M07-RENEW-EXPIRED",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-RENEW-EXPIRED",
+      "state": "default",
+      "status": "suggested",
+      "title": "手动续费 · 到期恢复",
+      "transitions": [
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-016-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-017-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-029",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-030",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-031",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-R6-039",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-020-P-M07-EXPIRED",
+          "label": "关闭",
+          "to": "P-M07-EXPIRED",
+          "feedback": "关闭"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-021-P-M07-EXPIRED",
+          "label": "取消",
+          "to": "P-M07-EXPIRED",
+          "feedback": "取消"
+        },
+        {
+          "id": "T-P-M07-RENEW-EXPIRED-022-P-M07-PAY-BROWSER-EXPIRED",
+          "label": "去浏览器支付",
+          "to": "P-M07-PAY-BROWSER-EXPIRED",
+          "feedback": "去浏览器支付"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "浏览器交接"
+      ]
+    },
+    {
+      "annotation": "晨星设计圈来源到期只撤销该来源；会议纪要整理仍由晨星增长圈授权并可打开，独有作品进入续费恢复（D-PC-09）。",
+      "category": "新增",
+      "id": "P-M07-EXPIRED",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-EXPIRED",
+      "state": "default",
+      "status": "suggested",
+      "title": "圈子到期",
+      "transitions": [
+        {
+          "id": "T-P-M07-EXPIRED-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-016-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-017-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-029",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-030",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-031",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-EXPIRED-R6-039",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "退出只撤销当前圈子的授权来源；其他圈子仍有效的同一作品继续可用（D-PC-09）。",
+      "category": "新增",
+      "id": "P-M07-LEAVE",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-LEAVE",
+      "state": "default",
+      "status": "suggested",
+      "title": "退出圈子",
+      "transitions": [
+        {
+          "id": "T-P-M07-LEAVE-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-LEAVE-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-LEAVE-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-LEAVE-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-LEAVE-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-LEAVE-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-LEAVE-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-LEAVE-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-LEAVE-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-LEAVE-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-LEAVE-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-LEAVE-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-LEAVE-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-LEAVE-016-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-GROWTH",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-028",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-029",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-030",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-031",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-019-P-M07-DETAIL-FOCUS",
+          "label": "关闭",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "关闭"
+        },
+        {
+          "id": "T-P-M07-LEAVE-020-P-M07-DETAIL-FOCUS",
+          "label": "取消",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "取消"
+        },
+        {
+          "id": "T-P-M07-LEAVE-021-P-M07-SOURCE-FALLBACK",
+          "label": "确认退出",
+          "to": "P-M07-SOURCE-FALLBACK",
+          "feedback": "确认退出"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "确认对话框"
+      ]
+    },
+    {
+      "annotation": "付费圈退出确认：只撤销本圈来源；独有作品将不可用，共同授权作品不受影响（PC-F03 · D-PC-09）。",
+      "category": "新增",
+      "id": "P-M07-LEAVE-PAID",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-LEAVE-PAID",
+      "state": "default",
+      "status": "suggested",
+      "title": "退出圈子 · 晨星设计圈",
+      "transitions": [
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-000",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-001-P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-002-P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-005-P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-006-P-M10-MENU",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-003-P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-007-P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-008-P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-009-P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-010-P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-011-P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-012-P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-013-P-M07-LIST",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW",
+          "label": "续费",
+          "to": "P-M07-RENEW",
+          "feedback": "续费"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-018-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-BRAND",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-019-P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "feedback": "打开"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-030",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-031",
+          "label": "查看并安装",
+          "to": "A-personal-acquire",
+          "feedback": "查看并安装"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-032",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-033",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-034",
+          "label": "管理本机版本",
+          "to": "A-personal-detail",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-035",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-100-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-036",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-037",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-0-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-038",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-039",
+          "label": "管理本机版本",
+          "to": "A-personal-legacy-detail-110-1-0",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-R6-040",
+          "label": "管理本机版本",
+          "to": "A-personal-restricted",
+          "feedback": "管理本机版本"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-022-P-M07-DETAIL-PAID",
+          "label": "关闭",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "关闭"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-023-P-M07-DETAIL-PAID",
+          "label": "取消",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "取消"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-024-P-M07-DETAIL-PAID-AFTER-LEAVE",
+          "label": "确认退出",
+          "to": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+          "feedback": "确认退出"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "T-P-M07-LEAVE-PAID-014-P-M07-RENEW-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        },
+        {
+          "id": "space-entry-account-r9",
+          "anchor": null,
+          "title": "空间切换入口",
+          "body": "顶栏持续显示当前空间；头像菜单的「切换空间」打开目标列表。使用同一账号，运行中仍先完成安全切换确认。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "确认对话框"
+      ]
+    },
+    {
+      "id": "P-M07-RETURN",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-RETURN",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "核对圈子加入结果",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-RETURN-R13-1",
+          "label": "核对我的资格",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "核对我的资格"
+        },
+        {
+          "id": "P-M07-RETURN-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "id": "P-M07-RETURN-FAIL",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-RETURN-FAIL",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "暂时无法刷新圈子资格",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-RETURN-FAIL-R13-1",
+          "label": "重新核对资格",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "重新核对资格"
+        },
+        {
+          "id": "P-M07-RETURN-FAIL-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "id": "P-M07-ACCOUNT-MISMATCH",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-ACCOUNT-MISMATCH",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "当前账号没有这次加入记录",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-ACCOUNT-MISMATCH-R13-1",
+          "label": "切换登录账号",
+          "to": "P-M07-LOGIN",
+          "feedback": "切换登录账号"
+        },
+        {
+          "id": "P-M07-ACCOUNT-MISMATCH-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "复用现有登录界面与认证方式；两种登录均保留原圈子目标，登录成功后先核对，不重复加入或执行。",
+      "category": "复用",
+      "id": "P-M07-LOGIN",
+      "journey": "J-PC-05",
+      "module": "M07",
+      "node": "N-CIRCLE-JOIN",
+      "state": "default",
+      "status": "suggested",
+      "title": "切回完成加入的账号",
+      "transitions": [
+        {
+          "feedback": "继续；保留原圈子待核对目标",
+          "id": "P-M07-LOGIN-R13-0",
+          "label": "继续",
+          "to": "P-M07-RETURN"
+        },
+        {
+          "feedback": "验证码登录；保留原圈子待核对目标",
+          "id": "P-M07-LOGIN-R13-1",
+          "label": "验证码登录",
+          "to": "P-M07-LOGIN-PHONE"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "登录表单"
+      ]
+    },
+    {
+      "id": "P-M07-PAY-RETURN",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-PAY-RETURN",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "返回后核对原订阅订单",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-PAY-RETURN-R13-1",
+          "label": "查询原订单和资格",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "查询原订单和资格"
+        },
+        {
+          "id": "P-M07-PAY-RETURN-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "id": "P-M07-SUPPORT",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-SUPPORT",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "联系客服",
+      "annotation": "D-OPS-17：真实二维码待运营提供，本页不伪造码。重试无配置仍保持无配置；复制失败手动复制；不建工单，不改原业务状态。",
+      "transitions": [
+        {
+          "id": "P-M07-SUPPORT-R13-1",
+          "label": "重新加载客服信息",
+          "to": "P-M07-SUPPORT",
+          "feedback": "重新加载客服信息"
+        },
+        {
+          "id": "P-M07-SUPPORT-R13-2",
+          "label": "复制问题信息",
+          "to": "P-M07-SUPPORT",
+          "feedback": "复制问题信息"
+        },
+        {
+          "id": "P-M07-SUPPORT-R13-3",
+          "label": "返回原页面",
+          "to": "P-M07-PAY-RETURN-FAIL",
+          "feedback": "返回原页面"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "id": "P-M07-SUPPORT-LOAD-FAIL",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-SUPPORT-LOAD-FAIL",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "联系客服",
+      "annotation": "D-OPS-17：真实二维码待运营提供，本页不伪造码。重试无配置仍保持无配置；复制失败手动复制；不建工单，不改原业务状态。",
+      "transitions": [
+        {
+          "id": "P-M07-SUPPORT-LOAD-FAIL-R13-1",
+          "label": "重新加载客服信息",
+          "to": "P-M07-SUPPORT-LOAD-FAIL",
+          "feedback": "重新加载客服信息"
+        },
+        {
+          "id": "P-M07-SUPPORT-LOAD-FAIL-R13-2",
+          "label": "复制问题信息",
+          "to": "P-M07-SUPPORT-LOAD-FAIL",
+          "feedback": "复制问题信息"
+        },
+        {
+          "id": "P-M07-SUPPORT-LOAD-FAIL-R13-3",
+          "label": "返回原页面",
+          "to": "P-M07-PAY-RETURN-FAIL",
+          "feedback": "返回原页面"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "id": "P-M07-RENEW-YEAR",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-RENEW-YEAR",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "年度订阅续费",
+      "annotation": "独立年付样例；不允许切换已创建圈子的固定周期。",
+      "transitions": [
+        {
+          "id": "P-M07-RENEW-YEAR-R13-1",
+          "label": "前往年度圈续费网页",
+          "to": "P-M07-YEAR-WEB",
+          "feedback": "前往年度圈续费网页"
+        },
+        {
+          "id": "P-M07-RENEW-YEAR-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "浏览器交接"
+      ]
+    },
+    {
+      "id": "P-M07-YEAR-RETURN",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-YEAR-RETURN",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "核对年度圈的原订单",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-YEAR-RETURN-R13-1",
+          "label": "查询年度权益",
+          "to": "P-M07-YEAR-RESULT",
+          "feedback": "查询年度权益"
+        },
+        {
+          "id": "P-M07-YEAR-RETURN-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "id": "P-M07-YEAR-RESULT",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-YEAR-RESULT",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "星河年度圈 · 订阅权益",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-YEAR-RESULT-UI-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回 Polo 首页",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-3",
+          "to": "P-M10-MENU",
+          "label": "打开账号菜单",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-11",
+          "to": "P-M07-LIST",
+          "label": "返回我的圈子",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-YEAR-RESULT-UI-12",
+          "to": "P-M07-LEAVE-YEAR",
+          "label": "退出圈子",
+          "feedback": "退出圈子"
+        }
+      ],
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "id": "P-M07-RENEW-LIMIT",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-RENEW-LIMIT",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "暂时不能提前续费",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-RENEW-LIMIT-R13-1",
+          "label": "查看原订单",
+          "to": "P-M07-RENEW-RETURN",
+          "feedback": "查看原订单"
+        },
+        {
+          "id": "P-M07-RENEW-LIMIT-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "复用现有登录界面与认证方式；两种登录均保留原圈子目标，登录成功后先核对，不重复加入或执行。",
+      "category": "复用",
+      "id": "P-M07-LOGIN-PHONE",
+      "journey": "J1 登录与空间承接",
+      "module": "M01",
+      "node": "P-M07-LOGIN-PHONE",
+      "state": "default",
+      "status": "suggested",
+      "title": "切回加入账号 · 验证码登录",
+      "transitions": [
+        {
+          "feedback": "获取验证码",
+          "id": "P-M07-LOGIN-PHONE-R13-1",
+          "label": "获取验证码",
+          "to": "P-M07-LOGIN-CODE"
+        },
+        {
+          "feedback": "密码登录",
+          "id": "P-M07-LOGIN-PHONE-R13-2",
+          "label": "密码登录",
+          "to": "P-M07-LOGIN"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "mac-window-controls",
+          "anchor": null,
+          "title": "Mac 窗口外观",
+          "body": "左上角红、黄、绿窗口控制采用 macOS 外观；原型仅展示，不触发浏览器关闭、最小化或全屏。"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "登录表单"
+      ]
+    },
+    {
+      "id": "P-M07-RENEW-RETURN",
+      "module": "M07",
+      "journey": "J-PC-05",
+      "node": "P-M07-RENEW-RETURN",
+      "state": "default",
+      "category": "跨端接收",
+      "status": "suggested",
+      "surface": "mvp",
+      "title": "返回后核对原续费订单",
+      "annotation": "消费已确认跨端规则；本次页面呈现待复看。",
+      "transitions": [
+        {
+          "id": "P-M07-RENEW-RETURN-R13-1",
+          "label": "查询原订单和资格",
+          "to": "P-M07-RENEW-RESULT",
+          "feedback": "查询原订单和资格"
+        },
+        {
+          "id": "P-M07-RENEW-RETURN-R13-2",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        }
+      ],
+      "components": [
+        "系统态与恢复"
+      ]
+    },
+    {
+      "annotation": "统一圈子列表；免费/月度/年度权益位置一致，查看详情进入对应圈子。加入在系统浏览器完成，桌面不输入分享链接。 本页仅保留一组标题和用途说明，搜索/筛选直接接圈子列表（Spec §13.12）。",
+      "annotations": [],
+      "category": "新增",
+      "id": "P-M07-LIST-RENEWED",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-LIST-RENEWED",
+      "state": "default",
+      "status": "suggested",
+      "title": "我的圈子 · 月付续费后",
+      "transitions": [
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-2",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-3",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-4",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-5",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-6",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-7",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-8",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-RENEW-RESULT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-9",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-10",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-14",
+          "label": "返回首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-16",
+          "label": "查看详情",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17",
+          "label": "查看详情",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-18",
+          "label": "查看详情",
+          "to": "P-M07-DETAIL-DATA",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-19",
+          "label": "查看详情",
+          "to": "P-M07-YEAR-RESULT",
+          "feedback": "保留当前空间，打开对应页面"
+        },
+        {
+          "id": "P-M07-LIST-RENEWED-R14-C-17-expired",
+          "label": "查看到期圈子详情",
+          "to": "P-M07-EXPIRED",
+          "feedback": "保留到期关系并提供恢复入口"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "圈子统一列表"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-FOCUS-UPDATES",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-FOCUS",
+      "state": "updates",
+      "status": "suggested",
+      "title": "晨星增长圈",
+      "transitions": [
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-2",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-3",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-4",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-5",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-6",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-7",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-8",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-9",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-10",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-11",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-13",
+          "label": "内容",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-14",
+          "label": "更新",
+          "to": "P-M07-DETAIL-FOCUS-UPDATES",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-15",
+          "label": "订阅",
+          "to": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-UPDATES-R14-16",
+          "label": "查看技能更新",
+          "to": "A-personal-detail",
+          "feedback": "显示对应页面；保留当前空间"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-FOCUS",
+      "state": "subscription",
+      "status": "suggested",
+      "title": "晨星增长圈",
+      "transitions": [
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-2",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-3",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-4",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-5",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-6",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-7",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-8",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-9",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-10",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-11",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-13",
+          "label": "内容",
+          "to": "P-M07-DETAIL-FOCUS",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-14",
+          "label": "更新",
+          "to": "P-M07-DETAIL-FOCUS-UPDATES",
+          "feedback": "更新"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-15",
+          "label": "订阅",
+          "to": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+          "feedback": "订阅"
+        },
+        {
+          "id": "P-M07-DETAIL-FOCUS-SUBSCRIPTION-R14-16",
+          "label": "退出圈子",
+          "to": "P-M07-LEAVE",
+          "feedback": "退出圈子"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-PAID-UPDATES",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-PAID",
+      "state": "updates",
+      "status": "suggested",
+      "title": "晨星设计圈",
+      "transitions": [
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-2",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-3",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-4",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-5",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-6",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-7",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-8",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-9",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-10",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-11",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-12",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-13",
+          "label": "续费",
+          "to": "P-M07-RENEW",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-15",
+          "label": "内容",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-16",
+          "label": "更新",
+          "to": "P-M07-DETAIL-PAID-UPDATES",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-17",
+          "label": "订阅",
+          "to": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-18",
+          "label": "查看技能更新",
+          "to": "A-personal-detail",
+          "feedback": "显示对应页面；保留当前空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-13-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-UPDATES-R14-13-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "annotation": "r14 产品构想：依照已确认的容器、资源入口与设置分层调整；演示数据，页面待复看。",
+      "category": "新增",
+      "id": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+      "journey": "J7 圈子加入与订阅",
+      "module": "M07",
+      "node": "P-M07-DETAIL-PAID",
+      "state": "subscription",
+      "status": "suggested",
+      "title": "晨星设计圈",
+      "transitions": [
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-0",
+          "label": "返回 Polo 首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-1",
+          "label": "首页",
+          "to": "P-M03-HOME-PERSONAL",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-2",
+          "label": "后台任务",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "后台任务"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-3",
+          "label": "通知",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-4",
+          "label": "打开账号菜单",
+          "to": "P-M10-MENU",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-5",
+          "label": "切换空间当前：我的空间",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-6",
+          "label": "Polo 设置管理 Polo 设置",
+          "to": "P-M10-SETTINGS",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-7",
+          "label": "充值与账单在系统浏览器打开",
+          "to": "P-M09-BROWSER-MENU",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-8",
+          "label": "退出登录保留本机文件",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-9",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-10",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-11",
+          "label": "重试连接",
+          "to": "P-M11-OFFLINE-HOME",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-12",
+          "label": "返回我的圈子",
+          "to": "P-M07-LIST",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-15",
+          "label": "内容",
+          "to": "P-M07-DETAIL-PAID",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-16",
+          "label": "更新",
+          "to": "P-M07-DETAIL-PAID-UPDATES",
+          "feedback": "更新"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-17",
+          "label": "订阅",
+          "to": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+          "feedback": "订阅"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18",
+          "label": "续费",
+          "to": "P-M07-RENEW",
+          "feedback": "续费"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-19",
+          "label": "退出圈子",
+          "to": "P-M07-LEAVE-PAID",
+          "feedback": "退出圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18-EXPIRED",
+          "label": "续费恢复",
+          "to": "P-M07-RENEW-EXPIRED",
+          "feedback": "续费恢复"
+        },
+        {
+          "id": "P-M07-DETAIL-PAID-SUBSCRIPTION-R14-18-LEFT",
+          "label": "重新加入圈子",
+          "to": "P-M07-REJOIN-BROWSER",
+          "feedback": "重新加入圈子"
+        }
+      ],
+      "annotations": [],
+      "surface": "mvp",
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "id": "P-M07-DETAIL-DATA",
+      "module": "M07",
+      "surface": "mvp",
+      "journey": "J-PC-05",
+      "node": "P-M07-DETAIL-DATA",
+      "state": "content",
+      "status": "proposed",
+      "category": "圈子内容",
+      "title": "数据工坊圈",
+      "annotation": "展示已分发的报表应用，与首页使用相同卡片。",
+      "transitions": [
+        {
+          "id": "P-M07-DETAIL-DATA-UI-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回 Polo 首页",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-3",
+          "to": "P-M10-MENU",
+          "label": "打开账号菜单",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-11",
+          "to": "P-M07-LIST",
+          "label": "返回我的圈子",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-12",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "内容",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-13",
+          "to": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+          "label": "订阅",
+          "feedback": "订阅"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-UI-14",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "feedback": "打开"
+        }
+      ],
+      "annotations": [],
+      "components": [
+        "应用卡",
+        "圈子详情分区"
+      ]
+    },
+    {
+      "id": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+      "module": "M07",
+      "surface": "mvp",
+      "journey": "J-PC-05",
+      "node": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+      "state": "subscription",
+      "status": "proposed",
+      "category": "圈子订阅",
+      "title": "数据工坊圈 · 订阅",
+      "annotation": "退出放订阅内，确认后只撤销当前圈子来源；其他圈子仍有效的同作品继续可用。",
+      "annotations": [],
+      "transitions": [
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回 Polo 首页",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-3",
+          "to": "P-M10-MENU",
+          "label": "打开账号菜单",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-11",
+          "to": "P-M07-LIST",
+          "label": "返回我的圈子",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-12",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "内容",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-13",
+          "to": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+          "label": "订阅",
+          "feedback": "订阅"
+        },
+        {
+          "id": "P-M07-DETAIL-DATA-SUBSCRIPTION-UI-14",
+          "to": "P-M07-LEAVE-DATA",
+          "label": "退出圈子",
+          "feedback": "退出圈子"
+        }
+      ],
+      "components": [
+        "圈子详情分区"
+      ]
+    },
+    {
+      "id": "P-M07-LEAVE-DATA",
+      "module": "M07",
+      "surface": "mvp",
+      "journey": "J-PC-05",
+      "node": "P-M07-LEAVE-DATA",
+      "state": "leave-confirmation",
+      "status": "proposed",
+      "category": "圈子订阅",
+      "title": "退出数据工坊圈",
+      "annotation": "退出放订阅内，确认后只撤销当前圈子来源；其他圈子仍有效的同作品继续可用。",
+      "annotations": [],
+      "transitions": [
+        {
+          "id": "P-M07-LEAVE-DATA-UI-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回 Polo 首页",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-3",
+          "to": "P-M10-MENU",
+          "label": "打开账号菜单",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-11",
+          "to": "P-M07-LIST",
+          "label": "返回我的圈子",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-12",
+          "to": "P-M07-DETAIL-DATA",
+          "label": "内容",
+          "feedback": "内容"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-13",
+          "to": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+          "label": "订阅",
+          "feedback": "订阅"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-14",
+          "to": "P-M07-LEAVE-DATA",
+          "label": "退出圈子",
+          "feedback": "退出圈子"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-15",
+          "to": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+          "label": "取消",
+          "feedback": "取消"
+        },
+        {
+          "id": "P-M07-LEAVE-DATA-UI-16",
+          "to": "P-M07-LIST",
+          "label": "确认退出",
+          "feedback": "确认退出"
+        }
+      ],
+      "components": [
+        "确认对话框"
+      ]
+    },
+    {
+      "id": "P-M07-LEAVE-YEAR",
+      "module": "M07",
+      "surface": "mvp",
+      "journey": "J-PC-05",
+      "node": "P-M07-LEAVE-YEAR",
+      "state": "leave-confirmation",
+      "status": "proposed",
+      "category": "圈子订阅",
+      "title": "退出星河年度圈",
+      "annotation": "退出放订阅内，确认后只撤销当前圈子来源；其他圈子仍有效的同作品继续可用。",
+      "annotations": [],
+      "transitions": [
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-0",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "返回 Polo 首页",
+          "feedback": "返回 Polo 首页"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-1",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "feedback": "首页"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-2",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "通知",
+          "feedback": "通知"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-3",
+          "to": "P-M10-MENU",
+          "label": "打开账号菜单",
+          "feedback": "打开账号菜单"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-4",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "feedback": "切换空间当前：我的空间"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-5",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "feedback": "Polo 设置管理 Polo 设置"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-6",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "feedback": "充值与账单在系统浏览器打开"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-7",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "feedback": "退出登录保留本机文件"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-8",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "feedback": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-9",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "feedback": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-10",
+          "to": "P-M11-OFFLINE-HOME",
+          "label": "重试连接",
+          "feedback": "重试连接"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-11",
+          "to": "P-M07-LIST",
+          "label": "返回我的圈子",
+          "feedback": "返回我的圈子"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-12",
+          "to": "P-M07-LEAVE-YEAR",
+          "label": "退出圈子",
+          "feedback": "退出圈子"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-13",
+          "to": "P-M07-YEAR-RESULT",
+          "label": "取消",
+          "feedback": "取消"
+        },
+        {
+          "id": "P-M07-LEAVE-YEAR-UI-14",
+          "to": "P-M07-LIST",
+          "label": "确认退出",
+          "feedback": "确认退出"
+        }
+      ],
+      "components": [
+        "确认对话框"
+      ]
+    },
+    {
+      "id": "P-M07-REJOIN-BROWSER",
+      "journey": "J7 圈子加入与订阅",
+      "node": "P-M07-PAY-BROWSER-EXPIRED",
+      "state": "rejoin-browser",
+      "title": "重新加入晨星设计圈",
+      "status": "suggested",
+      "module": "M07",
+      "category": "跨端",
+      "annotation": "POL-114 支付交接，不复制支付码。返回不执行查询、续费或任务。",
+      "transitions": [
+        {
+          "id": "P-M07-REJOIN-BROWSER-0",
+          "label": "返回 Polo",
+          "to": "P-M07-PAY-RETURN",
+          "feedback": "返回 Polo"
+        },
+        {
+          "id": "P-M07-REJOIN-BROWSER-1",
+          "label": "取消本次前往",
+          "to": "P-M07-DETAIL-PAID-AFTER-LEAVE",
+          "feedback": "取消本次前往"
+        }
+      ],
+      "surface": "mvp",
+      "components": [
+        "浏览器交接"
+      ]
+    }
+  ]
+}

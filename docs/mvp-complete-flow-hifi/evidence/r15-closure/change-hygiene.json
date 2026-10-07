@@ -1,0 +1,8 @@
+{
+  "baseline": "6d66263a0e72d1404f3d75875ff7ffbf61931e9c",
+  "scope": "Maintained source and generated products, excluding raw evidence and historical source archives",
+  "files": 23,
+  "passed": true,
+  "output": "",
+  "raw_evidence_note": "Preserved raw historical logs contain final blank lines; evidence bytes and concurrent commit retained."
+}

@@ -1,0 +1,79 @@
+{
+  "role": "immutable historical documents; not current product requirements",
+  "sot": "docs/client-journey-review/spec.md",
+  "archive": "docs/mvp-complete-flow-hifi/sources/document-history-20261002.tar.gz",
+  "archive_sha256": "600ef7e6f52acfe8e445799e18143fa8e1dab39fdff0bf6f3f352ac242ba18bb",
+  "task_revision": "1c31b5e82bb3c8b3c9dc2c66f1ec49b2f2d6e7cf6d7c7d008a37fc22723bc60b",
+  "files": [
+    {
+      "path": "docs/client-journey-review/module-m02.md",
+      "sha256": "b64232d02f2ee4140d00ca2b76c9c56d9c9c2ee47a5b808972628cb251588ca4",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/client-journey-review/module-review.md",
+      "sha256": "cf905ef07eb2e88e70cafab78d53bce48534111040cae90043b168e5d14d724b",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/review.md",
+      "sha256": "45d1a4be43590fc2c5bfa4ffab3c70319fb880da4902c6e16f7de0b46094e31c",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/feature-map.md",
+      "sha256": "fdbefad2cd4c1fb17c6c6e5955aea37410b2f7bd6b7346c037b44b45e39c9e94",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/visual-acceptance.md",
+      "sha256": "223135150699c8c7166d68c30677c98d84fd01fa34290e90cccf70e29a30dc76",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/copy-optimization.md",
+      "sha256": "422c4adde5916be5dc1382145222902b9e61cfd62ee2235e8443091c079bddb1",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/sync_master_r9_docs.py",
+      "sha256": "431764f9ecdb40dce57e65a7a0bfe1f4452c9f5860118adc58f58acc88000c11",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/sync_master_r10_docs.py",
+      "sha256": "dbdb6b6c88c788c1aaf9bb0015dc451499949f80cd9462eb0e8bbfa90675ba74",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/report_desktop_r6.py",
+      "sha256": "7b3dec31a2889962b82fbcc483093e4aeb64b9e4a75800ebfcda9140f7b3e364",
+      "disposition": "remove duplicate/history from active docs"
+    },
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "sha256": "ccf9861aa56a1a685c27d50272039fd522dd8db96698ad4ffd550f4421b23324",
+      "disposition": "before-cleanup snapshot"
+    },
+    {
+      "path": "docs/client-journey-review/evidence-manifest.json",
+      "sha256": "5a1aee1c18115c927d72b447c06dda92f265e9bbf1ba66f72f2172da7719a77d",
+      "disposition": "before-cleanup snapshot"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/tools/build_review.py",
+      "sha256": "fe613aad9e6a9f6c16de7811bd1fee4821f550c4efc7502c91d4714a4cebce7b",
+      "disposition": "before-cleanup snapshot"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md",
+      "sha256": "fc8d04d58c93b4025f3c5ae1c2f5042b6f8bbf114c33fbc296ba3e91d15262ae",
+      "disposition": "before-cleanup snapshot"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs",
+      "sha256": "5eedc0f722f4cc9b8b36c10ddb4e60d243eb6b6fbfba9d903504cdd176c096bd",
+      "disposition": "before-cleanup snapshot"
+    }
+  ]
+}

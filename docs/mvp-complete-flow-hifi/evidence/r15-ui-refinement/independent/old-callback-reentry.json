@@ -1,0 +1,16 @@
+[
+  {
+    "after_click": "P-M02-STOPPING"
+  },
+  {
+    "review_jump": "P-M02-TARGET-LOADING",
+    "actual": "P-M02-TARGET-LOADING"
+  },
+  {
+    "review_jump": "P-M02-STOPPING",
+    "actual": "P-M02-STOPPING"
+  },
+  {
+    "after_wait": "P-M03-HOME-PERSONAL"
+  }
+]

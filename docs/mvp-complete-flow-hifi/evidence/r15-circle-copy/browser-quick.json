@@ -1,0 +1,6214 @@
+{
+  "revision": "poo70-workbench-r15-circle-copy",
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9342037ca2d8bd70745b4ba6e713f0881e145799159bee2837606e5f8453df1e",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a2c75eea2658b49d6f72699c4900565a2655a14569e5e59eb79687d876fad59b",
+    "docs/mvp-complete-flow-hifi/review.html": "dcf1e3c70f6a215b1f0976f53048f4b1cb9e74d3fa7fda615b6df1b423f491be",
+    "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a"
+  },
+  "scenes": [
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "P-M03-HOME-PERSONAL",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-new-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-send",
+          "to": "A-personal-generating",
+          "label": "",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-new",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-question-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-answer",
+          "to": "A-personal-answered",
+          "label": "提交回答",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-defer",
+          "to": "A-personal-deferred",
+          "label": "暂不回答",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-question",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-detail-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-assistant",
+          "to": "A-personal-conversation",
+          "label": "打开 Polo 助手",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-disable",
+          "to": "A-personal-legacy-local-100-0-1",
+          "label": "为我停用",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-update",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "label": "更新到 1.1.0",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-remove",
+          "to": "A-personal-legacy-remove-100-1-1",
+          "label": "卸载本机副本",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-enablebuiltin",
+          "to": "A-personal-builtinon",
+          "label": "启用内置技能",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-detail-disablebuiltin",
+          "to": "A-personal-builtinoff",
+          "label": "停用内置技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-new",
+          "to": "A-personal-new",
+          "label": "新建助手会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sessions",
+          "to": "A-personal-conversation",
+          "label": "所有会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-skills",
+          "to": "A-personal-legacy-local-100-1-1",
+          "label": "返回完整技能列表",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sources",
+          "to": "A-personal-sources",
+          "label": "助手数据源",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-detail",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-preblock-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-preblock-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-recharge",
+          "to": "P-M09-BROWSER",
+          "label": "去充值",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-query",
+          "to": "A-personal-checking",
+          "label": "已完成，查询结果",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-preblock",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+          "to": "A-personal-preblock",
+          "label": "取消",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+          "to": "A-personal-return",
+          "label": "返回 Polo",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "P-M09-BROWSER",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-enterprise-budgetowner-home",
+          "to": "P-M03-HOME-ENT",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeidle",
+          "to": "P-M03-HOME-ENT",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeactive",
+          "to": "A-enterprise-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-enterprise-budgetowner-runtime",
+          "to": "A-enterprise-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-notification",
+          "to": "P-M04-NOTIFY-ENT",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-account",
+          "to": "P-M10-MENU-ENT",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-new",
+          "to": "A-enterprise-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-skills",
+          "to": "A-enterprise-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sources",
+          "to": "A-enterprise-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sessions",
+          "to": "A-enterprise-conversation",
+          "label": "企业周报",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-files",
+          "to": "A-enterprise-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-manage",
+          "to": "P-M09-BROWSER-BUDGET",
+          "label": "调整预算",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-preferences",
+          "to": "A-enterprise-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-enterprise-budgetowner",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "P-M03-HOME-PERSONAL",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-new-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-send",
+          "to": "A-personal-generating",
+          "label": "",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-new",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-question-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-answer",
+          "to": "A-personal-answered",
+          "label": "提交回答",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-defer",
+          "to": "A-personal-deferred",
+          "label": "暂不回答",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-question",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-detail-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-assistant",
+          "to": "A-personal-conversation",
+          "label": "打开 Polo 助手",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-disable",
+          "to": "A-personal-legacy-local-100-0-1",
+          "label": "为我停用",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-update",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "label": "更新到 1.1.0",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-remove",
+          "to": "A-personal-legacy-remove-100-1-1",
+          "label": "卸载本机副本",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-enablebuiltin",
+          "to": "A-personal-builtinon",
+          "label": "启用内置技能",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-detail-disablebuiltin",
+          "to": "A-personal-builtinoff",
+          "label": "停用内置技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-new",
+          "to": "A-personal-new",
+          "label": "新建助手会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sessions",
+          "to": "A-personal-conversation",
+          "label": "所有会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-skills",
+          "to": "A-personal-legacy-local-100-1-1",
+          "label": "返回完整技能列表",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sources",
+          "to": "A-personal-sources",
+          "label": "助手数据源",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-detail",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-preblock-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-preblock-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-recharge",
+          "to": "P-M09-BROWSER",
+          "label": "去充值",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-query",
+          "to": "A-personal-checking",
+          "label": "已完成，查询结果",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-preblock",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+          "to": "A-personal-preblock",
+          "label": "取消",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+          "to": "A-personal-return",
+          "label": "返回 Polo",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "P-M09-BROWSER",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-enterprise-budgetowner-home",
+          "to": "P-M03-HOME-ENT",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeidle",
+          "to": "P-M03-HOME-ENT",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeactive",
+          "to": "A-enterprise-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-enterprise-budgetowner-runtime",
+          "to": "A-enterprise-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-notification",
+          "to": "P-M04-NOTIFY-ENT",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-account",
+          "to": "P-M10-MENU-ENT",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-new",
+          "to": "A-enterprise-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-skills",
+          "to": "A-enterprise-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sources",
+          "to": "A-enterprise-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sessions",
+          "to": "A-enterprise-conversation",
+          "label": "企业周报",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-files",
+          "to": "A-enterprise-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-manage",
+          "to": "P-M09-BROWSER-BUDGET",
+          "label": "调整预算",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-preferences",
+          "to": "A-enterprise-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-enterprise-budgetowner",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "P-M03-HOME-PERSONAL",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-new-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-send",
+          "to": "A-personal-generating",
+          "label": "",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-new",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-question-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-answer",
+          "to": "A-personal-answered",
+          "label": "提交回答",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-defer",
+          "to": "A-personal-deferred",
+          "label": "暂不回答",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-question",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-detail-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-assistant",
+          "to": "A-personal-conversation",
+          "label": "打开 Polo 助手",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-disable",
+          "to": "A-personal-legacy-local-100-0-1",
+          "label": "为我停用",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-update",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "label": "更新到 1.1.0",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-remove",
+          "to": "A-personal-legacy-remove-100-1-1",
+          "label": "卸载本机副本",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-enablebuiltin",
+          "to": "A-personal-builtinon",
+          "label": "启用内置技能",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-detail-disablebuiltin",
+          "to": "A-personal-builtinoff",
+          "label": "停用内置技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-new",
+          "to": "A-personal-new",
+          "label": "新建助手会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sessions",
+          "to": "A-personal-conversation",
+          "label": "所有会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-skills",
+          "to": "A-personal-legacy-local-100-1-1",
+          "label": "返回完整技能列表",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sources",
+          "to": "A-personal-sources",
+          "label": "助手数据源",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-detail",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-preblock-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-preblock-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-recharge",
+          "to": "P-M09-BROWSER",
+          "label": "去充值",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-query",
+          "to": "A-personal-checking",
+          "label": "已完成，查询结果",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-personal-preblock",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+          "to": "A-personal-preblock",
+          "label": "取消",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+          "to": "A-personal-return",
+          "label": "返回 Polo",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "P-M09-BROWSER",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-enterprise-budgetowner-home",
+          "to": "P-M03-HOME-ENT",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeidle",
+          "to": "P-M03-HOME-ENT",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeactive",
+          "to": "A-enterprise-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-enterprise-budgetowner-runtime",
+          "to": "A-enterprise-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-notification",
+          "to": "P-M04-NOTIFY-ENT",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-account",
+          "to": "P-M10-MENU-ENT",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-new",
+          "to": "A-enterprise-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-skills",
+          "to": "A-enterprise-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sources",
+          "to": "A-enterprise-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sessions",
+          "to": "A-enterprise-conversation",
+          "label": "企业周报",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-files",
+          "to": "A-enterprise-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-manage",
+          "to": "P-M09-BROWSER-BUDGET",
+          "label": "调整预算",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-preferences",
+          "to": "A-enterprise-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "file",
+      "scene": "A-enterprise-budgetowner",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "P-M03-HOME-PERSONAL",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-new-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-send",
+          "to": "A-personal-generating",
+          "label": "",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-new",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-question-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-answer",
+          "to": "A-personal-answered",
+          "label": "提交回答",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-defer",
+          "to": "A-personal-deferred",
+          "label": "暂不回答",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-question",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-detail-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-assistant",
+          "to": "A-personal-conversation",
+          "label": "打开 Polo 助手",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-disable",
+          "to": "A-personal-legacy-local-100-0-1",
+          "label": "为我停用",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-update",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "label": "更新到 1.1.0",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-remove",
+          "to": "A-personal-legacy-remove-100-1-1",
+          "label": "卸载本机副本",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-enablebuiltin",
+          "to": "A-personal-builtinon",
+          "label": "启用内置技能",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-detail-disablebuiltin",
+          "to": "A-personal-builtinoff",
+          "label": "停用内置技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-new",
+          "to": "A-personal-new",
+          "label": "新建助手会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sessions",
+          "to": "A-personal-conversation",
+          "label": "所有会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-skills",
+          "to": "A-personal-legacy-local-100-1-1",
+          "label": "返回完整技能列表",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sources",
+          "to": "A-personal-sources",
+          "label": "助手数据源",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-detail",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-preblock-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-preblock-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-recharge",
+          "to": "P-M09-BROWSER",
+          "label": "去充值",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-query",
+          "to": "A-personal-checking",
+          "label": "已完成，查询结果",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-preblock",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+          "to": "A-personal-preblock",
+          "label": "取消",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+          "to": "A-personal-return",
+          "label": "返回 Polo",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "P-M09-BROWSER",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-enterprise-budgetowner-home",
+          "to": "P-M03-HOME-ENT",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeidle",
+          "to": "P-M03-HOME-ENT",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeactive",
+          "to": "A-enterprise-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-enterprise-budgetowner-runtime",
+          "to": "A-enterprise-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-notification",
+          "to": "P-M04-NOTIFY-ENT",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-account",
+          "to": "P-M10-MENU-ENT",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-new",
+          "to": "A-enterprise-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-skills",
+          "to": "A-enterprise-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sources",
+          "to": "A-enterprise-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sessions",
+          "to": "A-enterprise-conversation",
+          "label": "企业周报",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-files",
+          "to": "A-enterprise-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-manage",
+          "to": "P-M09-BROWSER-BUDGET",
+          "label": "调整预算",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-preferences",
+          "to": "A-enterprise-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-enterprise-budgetowner",
+      "viewport_id": "desktop-1440x900",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "P-M03-HOME-PERSONAL",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-new-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-send",
+          "to": "A-personal-generating",
+          "label": "",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-new",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-question-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-answer",
+          "to": "A-personal-answered",
+          "label": "提交回答",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-defer",
+          "to": "A-personal-deferred",
+          "label": "暂不回答",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-question",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-detail-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-assistant",
+          "to": "A-personal-conversation",
+          "label": "打开 Polo 助手",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-disable",
+          "to": "A-personal-legacy-local-100-0-1",
+          "label": "为我停用",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-update",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "label": "更新到 1.1.0",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-remove",
+          "to": "A-personal-legacy-remove-100-1-1",
+          "label": "卸载本机副本",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-enablebuiltin",
+          "to": "A-personal-builtinon",
+          "label": "启用内置技能",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-detail-disablebuiltin",
+          "to": "A-personal-builtinoff",
+          "label": "停用内置技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-new",
+          "to": "A-personal-new",
+          "label": "新建助手会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sessions",
+          "to": "A-personal-conversation",
+          "label": "所有会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-skills",
+          "to": "A-personal-legacy-local-100-1-1",
+          "label": "返回完整技能列表",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sources",
+          "to": "A-personal-sources",
+          "label": "助手数据源",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-detail",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-preblock-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-preblock-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-recharge",
+          "to": "P-M09-BROWSER",
+          "label": "去充值",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-query",
+          "to": "A-personal-checking",
+          "label": "已完成，查询结果",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-preblock",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+          "to": "A-personal-preblock",
+          "label": "取消",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+          "to": "A-personal-return",
+          "label": "返回 Polo",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "P-M09-BROWSER",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        1024,
+        768
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-enterprise-budgetowner-home",
+          "to": "P-M03-HOME-ENT",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeidle",
+          "to": "P-M03-HOME-ENT",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeactive",
+          "to": "A-enterprise-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-enterprise-budgetowner-runtime",
+          "to": "A-enterprise-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-notification",
+          "to": "P-M04-NOTIFY-ENT",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-account",
+          "to": "P-M10-MENU-ENT",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-new",
+          "to": "A-enterprise-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-skills",
+          "to": "A-enterprise-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sources",
+          "to": "A-enterprise-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sessions",
+          "to": "A-enterprise-conversation",
+          "label": "企业周报",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-files",
+          "to": "A-enterprise-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-manage",
+          "to": "P-M09-BROWSER-BUDGET",
+          "label": "调整预算",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-preferences",
+          "to": "A-enterprise-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-enterprise-budgetowner",
+      "viewport_id": "desktop-1024x768",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M03-HOME-PERSONAL-R6-000",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "PPolo",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-001-P-M03-HOME-PERSONAL",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-002-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-005-P-M04-NOTIFY-PERSONAL",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-006-P-M10-MENU",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-003-P-M02-SWITCHER-PERSONAL",
+          "to": "P-M02-SWITCHER-PERSONAL",
+          "label": "切换空间当前：我的空间",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-007-P-M10-SETTINGS",
+          "to": "P-M10-SETTINGS",
+          "label": "Polo 设置管理 Polo 设置",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-008-P-M09-BROWSER-MENU",
+          "to": "P-M09-BROWSER-MENU",
+          "label": "充值与账单在系统浏览器打开",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-009-P-M01-LOGIN-PASSWORD",
+          "to": "P-M01-LOGIN-PASSWORD",
+          "label": "退出登录保留本机文件",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-010-P-M07-DETAIL-PAID",
+          "to": "P-M07-DETAIL-PAID",
+          "label": "晨星设计圈有新版本品牌语气分析 v1.4.0 · 下次使用生效",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M03-HOME-PERSONAL-011-P-M04-RUNTIME-PERSONAL",
+          "to": "P-M04-RUNTIME-PERSONAL",
+          "label": "数据报表生成器已在后台完成点顶栏「1 项运行中」查看",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-13",
+          "to": "P-M07-LIST",
+          "label": "我的圈子",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-12",
+          "to": "A-personal-skills",
+          "label": "管理技能",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-14",
+          "to": "A-personal-new",
+          "label": "打开助手",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-16",
+          "to": "P-M04-APP-VIEW-PERSONAL",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-18",
+          "to": "P-M04-APP-BRAND",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-15",
+          "to": "P-M04-APP-REPORT",
+          "label": "打开",
+          "disabled": false
+        },
+        {
+          "id": "P-M03-HOME-PERSONAL-R14-17",
+          "to": "P-M04-APP-GROWTH",
+          "label": "打开",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "P-M03-HOME-PERSONAL",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-new-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-new-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-send",
+          "to": "A-personal-generating",
+          "label": "",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-new-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-new",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-question-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-answer",
+          "to": "A-personal-answered",
+          "label": "提交回答",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-defer",
+          "to": "A-personal-deferred",
+          "label": "暂不回答",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-question-recovery",
+          "to": "A-personal-availability",
+          "label": "恢复发送",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-question-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-question",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-detail-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-assistant",
+          "to": "A-personal-conversation",
+          "label": "打开 Polo 助手",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-disable",
+          "to": "A-personal-legacy-local-100-0-1",
+          "label": "为我停用",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-update",
+          "to": "A-personal-legacy-detail-110-1-1",
+          "label": "更新到 1.1.0",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-remove",
+          "to": "A-personal-legacy-remove-100-1-1",
+          "label": "卸载本机副本",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-enablebuiltin",
+          "to": "A-personal-builtinon",
+          "label": "启用内置技能",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-detail-disablebuiltin",
+          "to": "A-personal-builtinoff",
+          "label": "停用内置技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-new",
+          "to": "A-personal-new",
+          "label": "新建助手会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sessions",
+          "to": "A-personal-conversation",
+          "label": "所有会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-skills",
+          "to": "A-personal-legacy-local-100-1-1",
+          "label": "返回完整技能列表",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-detail-sources",
+          "to": "A-personal-sources",
+          "label": "助手数据源",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-detail",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-personal-preblock-home",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeidle",
+          "to": "P-M03-HOME-PERSONAL",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-closeactive",
+          "to": "A-personal-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-personal-preblock-runtime",
+          "to": "A-personal-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-notification",
+          "to": "P-M04-NOTIFY-PERSONAL",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-account",
+          "to": "P-M10-MENU",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-new",
+          "to": "A-personal-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-skills",
+          "to": "A-personal-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sources",
+          "to": "A-personal-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-sessions",
+          "to": "A-personal-conversation",
+          "label": "个人资料整理",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-files",
+          "to": "A-personal-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-recharge",
+          "to": "P-M09-BROWSER",
+          "label": "去充值",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-query",
+          "to": "A-personal-checking",
+          "label": "已完成，查询结果",
+          "disabled": false
+        },
+        {
+          "id": "A-personal-preblock-preferences",
+          "to": "A-personal-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-personal-preblock",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "T-P-M09-BROWSER-001-P-M09-PRE-BLOCK",
+          "to": "A-personal-preblock",
+          "label": "取消",
+          "disabled": false
+        },
+        {
+          "id": "T-P-M09-BROWSER-002-P-M09-CHECKING",
+          "to": "A-personal-return",
+          "label": "返回 Polo",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "P-M09-BROWSER",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    },
+    {
+      "present": true,
+      "viewport": [
+        800,
+        600
+      ],
+      "overflow": false,
+      "controls": [
+        {
+          "id": "A-enterprise-budgetowner-home",
+          "to": "P-M03-HOME-ENT",
+          "label": "首页",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeidle",
+          "to": "P-M03-HOME-ENT",
+          "label": "×",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-closeactive",
+          "to": "A-enterprise-close",
+          "label": "×",
+          "disabled": true
+        },
+        {
+          "id": "A-enterprise-budgetowner-runtime",
+          "to": "A-enterprise-activity",
+          "label": "后台任务",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-notification",
+          "to": "P-M04-NOTIFY-ENT",
+          "label": "",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-account",
+          "to": "P-M10-MENU-ENT",
+          "label": "王",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-new",
+          "to": "A-enterprise-new",
+          "label": "新建会话",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-skills",
+          "to": "A-enterprise-skills",
+          "label": "技能",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sources",
+          "to": "A-enterprise-sources",
+          "label": "数据源",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-sessions",
+          "to": "A-enterprise-conversation",
+          "label": "企业周报",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-files",
+          "to": "A-enterprise-files",
+          "label": "查看会话文件",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-manage",
+          "to": "P-M09-BROWSER-BUDGET",
+          "label": "调整预算",
+          "disabled": false
+        },
+        {
+          "id": "A-enterprise-budgetowner-preferences",
+          "to": "A-enterprise-preferences",
+          "label": "助手偏好",
+          "disabled": false
+        }
+      ],
+      "protocol": "http",
+      "scene": "A-enterprise-budgetowner",
+      "viewport_id": "desktop-800x600",
+      "pass": true
+    }
+  ],
+  "actions": [
+    {
+      "protocol": "file",
+      "id": "A-personal-new-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-send",
+      "to": "A-personal-generating",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-closeidle",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-new-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-answer",
+      "to": "A-personal-answered",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-defer",
+      "to": "A-personal-deferred",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-closeidle",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-closeactive",
+      "to": "A-personal-close",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-question-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-query",
+      "to": "A-personal-checking",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-notnow",
+      "to": "A-personal-preblock",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-closeidle",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-return-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-recharge",
+      "to": "P-M09-BROWSER",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-query",
+      "to": "A-personal-checking",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-closeidle",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-preblock-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-skills",
+      "to": "A-personal-legacy-local-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-disable",
+      "to": "A-personal-legacy-local-100-0-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-update",
+      "to": "A-personal-legacy-detail-110-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-remove",
+      "to": "A-personal-legacy-remove-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-disablebuiltin",
+      "to": "A-personal-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-detail-assistant",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-remove",
+      "to": "A-personal-restricted-remove",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-recheck",
+      "to": "A-personal-restricted",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-source",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-disablebuiltin",
+      "to": "A-personal-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-personal-restricted-assistant",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-send",
+      "to": "A-enterprise-generating",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-closeidle",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-new-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-answer",
+      "to": "A-enterprise-answered",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-defer",
+      "to": "A-enterprise-deferred",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-closeidle",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-closeactive",
+      "to": "A-enterprise-close",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-question-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-query",
+      "to": "A-enterprise-checking",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-notnow",
+      "to": "A-enterprise-preblock",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-closeidle",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-return-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-notify",
+      "to": "A-enterprise-notified",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-query",
+      "to": "A-enterprise-checking",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-closeidle",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-preblock-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-skills",
+      "to": "A-enterprise-legacy-local-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-disable",
+      "to": "A-enterprise-legacy-local-100-0-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-update",
+      "to": "A-enterprise-legacy-detail-110-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-remove",
+      "to": "A-enterprise-legacy-remove-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-disablebuiltin",
+      "to": "A-enterprise-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-detail-assistant",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-remove",
+      "to": "A-enterprise-restricted-remove",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-recheck",
+      "to": "A-enterprise-restricted",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-source",
+      "to": "A-enterprise-denied",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-disablebuiltin",
+      "to": "A-enterprise-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "file",
+      "id": "A-enterprise-restricted-assistant",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-send",
+      "to": "A-personal-generating",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-closeidle",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-new-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-answer",
+      "to": "A-personal-answered",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-defer",
+      "to": "A-personal-deferred",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-closeidle",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-closeactive",
+      "to": "A-personal-close",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-question-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-query",
+      "to": "A-personal-checking",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-notnow",
+      "to": "A-personal-preblock",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-closeidle",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-return-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-files",
+      "to": "A-personal-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-recharge",
+      "to": "P-M09-BROWSER",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-query",
+      "to": "A-personal-checking",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-closeidle",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-preblock-preferences",
+      "to": "A-personal-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-skills",
+      "to": "A-personal-legacy-local-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-disable",
+      "to": "A-personal-legacy-local-100-0-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-update",
+      "to": "A-personal-legacy-detail-110-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-remove",
+      "to": "A-personal-legacy-remove-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-disablebuiltin",
+      "to": "A-personal-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-detail-assistant",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-home",
+      "to": "P-M03-HOME-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-new",
+      "to": "A-personal-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-sessions",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-skills",
+      "to": "A-personal-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-sources",
+      "to": "A-personal-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-remove",
+      "to": "A-personal-restricted-remove",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-recheck",
+      "to": "A-personal-restricted",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-source",
+      "to": "P-M07-DETAIL-FOCUS",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-account",
+      "to": "P-M10-MENU",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-runtime",
+      "to": "A-personal-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-notification",
+      "to": "P-M04-NOTIFY-PERSONAL",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-disablebuiltin",
+      "to": "A-personal-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-personal-restricted-assistant",
+      "to": "A-personal-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-send",
+      "to": "A-enterprise-generating",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-closeidle",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-new-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-answer",
+      "to": "A-enterprise-answered",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-defer",
+      "to": "A-enterprise-deferred",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-recovery",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-closeidle",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-closeactive",
+      "to": "A-enterprise-close",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-question-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-query",
+      "to": "A-enterprise-checking",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-notnow",
+      "to": "A-enterprise-preblock",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-closeidle",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-return-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-files",
+      "to": "A-enterprise-files",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-notify",
+      "to": "A-enterprise-notified",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-query",
+      "to": "A-enterprise-checking",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-closeidle",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-closeactive",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-preblock-preferences",
+      "to": "A-enterprise-preferences",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-skills",
+      "to": "A-enterprise-legacy-local-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-disable",
+      "to": "A-enterprise-legacy-local-100-0-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-update",
+      "to": "A-enterprise-legacy-detail-110-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-remove",
+      "to": "A-enterprise-legacy-remove-100-1-1",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-disablebuiltin",
+      "to": "A-enterprise-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-detail-assistant",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-home",
+      "to": "P-M03-HOME-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-new",
+      "to": "A-enterprise-new",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-sessions",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-skills",
+      "to": "A-enterprise-skills",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-sources",
+      "to": "A-enterprise-sources",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-remove",
+      "to": "A-enterprise-restricted-remove",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-recheck",
+      "to": "A-enterprise-restricted",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-source",
+      "to": "A-enterprise-denied",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-account",
+      "to": "P-M10-MENU-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-runtime",
+      "to": "A-enterprise-activity",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-notification",
+      "to": "P-M04-NOTIFY-ENT",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-enablebuiltin",
+      "passed": true,
+      "observation": "disabled in this fixture; recovery availability separately tested"
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-disablebuiltin",
+      "to": "A-enterprise-builtinoff",
+      "passed": true
+    },
+    {
+      "protocol": "http",
+      "id": "A-enterprise-restricted-assistant",
+      "to": "A-enterprise-conversation",
+      "passed": true
+    }
+  ],
+  "stories": [
+    "file:UI-refinement",
+    "file:R15-all-ui",
+    "file:R14-workbench",
+    "file:S-DESKTOP",
+    "file:S-TEAM-SKILLS",
+    "file:S-CAPABILITY",
+    "file:S1",
+    "file:S2",
+    "file:S3",
+    "file:S4",
+    "file:R13-circle-handoff",
+    "file:R13-enterprise-handoff",
+    "file:R13-support",
+    "file:AS-personal",
+    "file:AS-enterprise",
+    "file:AS-skills-personal",
+    "file:AS-skills-enterprise",
+    "file:AS-credits",
+    "http:UI-refinement",
+    "http:R15-all-ui",
+    "http:R14-workbench",
+    "http:S-DESKTOP",
+    "http:S-TEAM-SKILLS",
+    "http:S-CAPABILITY",
+    "http:S1",
+    "http:S2",
+    "http:S3",
+    "http:S4",
+    "http:R13-circle-handoff",
+    "http:R13-enterprise-handoff",
+    "http:R13-support",
+    "http:AS-personal",
+    "http:AS-enterprise",
+    "http:AS-skills-personal",
+    "http:AS-skills-enterprise",
+    "http:AS-credits"
+  ],
+  "checks": [
+    {
+      "name": "file story UI-refinement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story R15-all-ui",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story R14-workbench",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S-DESKTOP",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S-TEAM-SKILLS",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S-CAPABILITY",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S2",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S3",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story S4",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story R13-circle-handoff",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story R13-enterprise-handoff",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story R13-support",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story AS-personal",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story AS-enterprise",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story AS-skills-personal",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story AS-skills-enterprise",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file story AS-credits",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file return keeps draft",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file return does not query",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file resumed no auto send",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file scope isolation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file question draft recovery",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file two mounted surfaces",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file reject wrong source",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file explicit reset",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file alias P-M05-CHAT",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file alias P-M06-DETAIL-PERSONAL-110-0-1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "file alias P-M09-PRE-BLOCK",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story UI-refinement",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story R15-all-ui",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story R14-workbench",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S-DESKTOP",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S-TEAM-SKILLS",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S-CAPABILITY",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S2",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S3",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story S4",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story R13-circle-handoff",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story R13-enterprise-handoff",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story R13-support",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story AS-personal",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story AS-enterprise",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story AS-skills-personal",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story AS-skills-enterprise",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http story AS-credits",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http return keeps draft",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http return does not query",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http resumed no auto send",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http scope isolation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http question draft recovery",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http two mounted surfaces",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http reject wrong source",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http explicit reset",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http alias P-M05-CHAT",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http alias P-M06-DETAIL-PERSONAL-110-0-1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "http alias P-M09-PRE-BLOCK",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "requests": [],
+  "passed": true
+}

@@ -795,3 +795,86 @@ export interface PoloaiProtocolMessage {
   event?: PoloaiProtocolEvent
   error?: PoloaiProtocolError
 }
+
+// ---------------------------------------------------------------------------
+// poloai://circle-return — F1 versioned web→desktop return target protocol
+// (POO-70 B1, P70-RETURN-BRIDGE-02/03)
+//
+// Wire format (implementation plan, bound here and in the F1 contract
+// docs/client-journey-review/development-plan/member-circle-contract.json —
+// NOT an existing provider fact, see G6):
+//   poloai://circle-return?v=1&circleId=<uuid>&membershipId=<uuid>&orderId=<uuid>
+// The three ids are optional but at least one must be present. The provider
+// (POL-114) has not adopted this yet — until then the ONLY provider link is
+// the parameter-less legacy launch entry polo://open, which is handled as a
+// no-target launch and never guessed into an order/circle.
+// ---------------------------------------------------------------------------
+
+/** Wire protocol version. Links advertising a different version fail closed. */
+export const CIRCLE_RETURN_PROTOCOL_VERSION = 1 as const
+
+/** The only host that carries a circle-return target. */
+export const CIRCLE_RETURN_DEEP_LINK_HOST = 'circle-return' as const
+
+/**
+ * Legacy published launch entry scheme (public-circle provider, F1 G6):
+ * `polo://open` — scheme mismatch with the registered `poloai`, no params.
+ * Registered best-effort for launch compatibility ONLY; it never carries a
+ * return target.
+ */
+export const LEGACY_OPEN_DEEP_LINK_SCHEME = 'polo' as const
+
+/** The only host accepted under the legacy scheme. */
+export const LEGACY_OPEN_DEEP_LINK_HOST = 'open' as const
+
+const POLO_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Strict UUID validation for circle-return target ids (fail closed). */
+export function isValidPoloUuid(value: unknown): value is string {
+  return typeof value === 'string' && POLO_UUID_PATTERN.test(value)
+}
+
+/**
+ * The navigation target carried by a circle-return link. Ids only ADDRESS a
+ * page — this is never an authorization, membership evidence or an order
+ * receipt. Consumers re-verify every object/permission through the C1
+ * memberCircles trusted bridge before rendering anything.
+ */
+export interface CircleReturnTargetIds {
+  circleId?: string
+  membershipId?: string
+  orderId?: string
+}
+
+/**
+ * A single pending web→desktop return candidate held by the Main process.
+ * `candidateId` is Main-generated and is the dedup/consume handle for both
+ * the typed event and the get/ack/cancel RPCs.
+ */
+export interface CircleReturnCandidate {
+  candidateId: string
+  protocolVersion: number
+  target: CircleReturnTargetIds
+  /** ISO timestamp of when Main recorded the candidate. */
+  createdAt: string
+}
+
+/**
+ * Result of circleReturn.getPending(). Delivery is gated on the trusted
+ * account mirror: `unavailable` (startup not settled) never delivers and
+ * never mutates; a signed-out viewer gets `none` (an account-bound candidate
+ * is cleared — logout cleanup — while a pre-login candidate is retained for
+ * delivery after the pending login verification).
+ */
+export type CircleReturnPendingState =
+  | { status: 'pending'; candidate: CircleReturnCandidate }
+  | { status: 'none' }
+  | { status: 'unavailable'; reason: 'session_unavailable' }
+
+export type CircleReturnAckResult =
+  | { status: 'acked' }
+  | { status: 'not_found' }
+
+export type CircleReturnCancelResult =
+  | { status: 'cancelled' }
+  | { status: 'not_found' }

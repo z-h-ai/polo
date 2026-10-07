@@ -1,0 +1,845 @@
+{
+  "revision": "poo70-workbench-r15-copy-cleanup",
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "35dab681265bdd5d49e9056d394389a14706f21915cc3792241b02f0392a2597",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a1d6d28d39414799d3f266a37cc25328a124581c5bc1f146e579a794d1ea9c87",
+    "docs/mvp-complete-flow-hifi/review.html": "6cf5cac8e865474f8ceea3edb84743af4e89693dd61c35f88fa1d8351f0aa468",
+    "design-demos/polo-client-source-baseline/prototype.html": "fc013de26e2f7e4ee6bbe4eb2bc835b693cdf7c601f84b956c2057782b3a6339"
+  },
+  "checks": [
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ZERO no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ZERO full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ZERO viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ZERO header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-MANAGE-HOME no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-MANAGE-HOME full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-MANAGE-HOME viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-MANAGE-HOME header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-CONTROLS no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-CONTROLS full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-CONTROLS viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-CONTROLS header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY enterprise empty isolation",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK remaining source usable",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK revoked source cannot open",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1440x900 P-M07-SOURCE-FALLBACK valid source filter",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1440x900P-M07-DETAIL-FOCUS concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1440x900P-M07-DETAIL-PAID concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1440x900P-M07-DETAIL-DATA concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1440x900personal one detail title",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1440x900enterprise one detail title",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ZERO no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ZERO full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ZERO viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ZERO header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-MANAGE-HOME no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-MANAGE-HOME full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-MANAGE-HOME viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-MANAGE-HOME header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-CONTROLS no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-CONTROLS full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-CONTROLS viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-CONTROLS header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY enterprise empty isolation",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK remaining source usable",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK revoked source cannot open",
+      "passed": true
+    },
+    {
+      "name": "file desktop-1024x768 P-M07-SOURCE-FALLBACK valid source filter",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1024x768P-M07-DETAIL-FOCUS concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1024x768P-M07-DETAIL-PAID concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1024x768P-M07-DETAIL-DATA concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1024x768personal one detail title",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-1024x768enterprise one detail title",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ZERO no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ZERO full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ZERO viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ZERO header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-MANAGE-HOME no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-MANAGE-HOME full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-MANAGE-HOME viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-MANAGE-HOME header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-CONTROLS no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-CONTROLS full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-CONTROLS viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-CONTROLS header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY enterprise empty isolation",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK full library controls",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK viewport fits",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK header controls fit",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK remaining source usable",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK revoked source cannot open",
+      "passed": true
+    },
+    {
+      "name": "file desktop-800x600 P-M07-SOURCE-FALLBACK valid source filter",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-800x600P-M07-DETAIL-FOCUS concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-800x600P-M07-DETAIL-PAID concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-800x600P-M07-DETAIL-DATA concise sections",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-800x600personal one detail title",
+      "passed": true
+    },
+    {
+      "name": "filedesktop-800x600enterprise one detail title",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-DETAIL-FOCUS-SUBSCRIPTION subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-DETAIL-FOCUS-SUBSCRIPTION exit retained",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-DETAIL-DATA-SUBSCRIPTION subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-DETAIL-DATA-SUBSCRIPTION exit retained",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-DETAIL-PAID-SUBSCRIPTION subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-DETAIL-PAID-SUBSCRIPTION exit retained",
+      "passed": true
+    },
+    {
+      "name": "file monthly price retained",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-YEAR-RESULT subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "fileP-M07-YEAR-RESULT exit retained",
+      "passed": true
+    },
+    {
+      "name": "file annual policy retained",
+      "passed": true
+    },
+    {
+      "name": "file hidden restoration returns usable app",
+      "passed": true
+    },
+    {
+      "name": "fileP-M10-SETTINGS useful settings boundaries retained",
+      "passed": true
+    },
+    {
+      "name": "fileP-M10-SETTINGS-ENT useful settings boundaries retained",
+      "passed": true
+    },
+    {
+      "name": "file review holds initial progress",
+      "passed": true
+    },
+    {
+      "name": "file stop counts reflect completed rows",
+      "passed": true
+    },
+    {
+      "name": "file full stop sequence observed",
+      "passed": true
+    },
+    {
+      "name": "file revisit clears stale progress",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ZERO no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ZERO full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ZERO viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ZERO header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-MANAGE-HOME no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-MANAGE-HOME full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-MANAGE-HOME viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-MANAGE-HOME header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-CONTROLS no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-CONTROLS full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-CONTROLS viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-CONTROLS header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M03-ALL-APPS-ENT-EMPTY enterprise empty isolation",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK remaining source usable",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK revoked source cannot open",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1440x900 P-M07-SOURCE-FALLBACK valid source filter",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1440x900P-M07-DETAIL-FOCUS concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1440x900P-M07-DETAIL-PAID concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1440x900P-M07-DETAIL-DATA concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1440x900personal one detail title",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1440x900enterprise one detail title",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ZERO no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ZERO full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ZERO viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ZERO header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-MANAGE-HOME no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-MANAGE-HOME full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-MANAGE-HOME viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-MANAGE-HOME header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-CONTROLS no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-CONTROLS full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-CONTROLS viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-CONTROLS header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M03-ALL-APPS-ENT-EMPTY enterprise empty isolation",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK remaining source usable",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK revoked source cannot open",
+      "passed": true
+    },
+    {
+      "name": "http desktop-1024x768 P-M07-SOURCE-FALLBACK valid source filter",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1024x768P-M07-DETAIL-FOCUS concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1024x768P-M07-DETAIL-PAID concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1024x768P-M07-DETAIL-DATA concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1024x768personal one detail title",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-1024x768enterprise one detail title",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ZERO no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ZERO full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ZERO viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ZERO header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-MANAGE-HOME no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-MANAGE-HOME full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-MANAGE-HOME viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-MANAGE-HOME header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-CONTROLS no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-CONTROLS full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-CONTROLS viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-CONTROLS header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M03-ALL-APPS-ENT-EMPTY enterprise empty isolation",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK no favorites configuration",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK full library controls",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK viewport fits",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK header controls fit",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK remaining source usable",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK revoked source cannot open",
+      "passed": true
+    },
+    {
+      "name": "http desktop-800x600 P-M07-SOURCE-FALLBACK valid source filter",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-800x600P-M07-DETAIL-FOCUS concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-800x600P-M07-DETAIL-PAID concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-800x600P-M07-DETAIL-DATA concise sections",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-800x600personal one detail title",
+      "passed": true
+    },
+    {
+      "name": "httpdesktop-800x600enterprise one detail title",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-DETAIL-FOCUS-SUBSCRIPTION subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-DETAIL-FOCUS-SUBSCRIPTION exit retained",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-DETAIL-DATA-SUBSCRIPTION subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-DETAIL-DATA-SUBSCRIPTION exit retained",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-DETAIL-PAID-SUBSCRIPTION subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-DETAIL-PAID-SUBSCRIPTION exit retained",
+      "passed": true
+    },
+    {
+      "name": "http monthly price retained",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-YEAR-RESULT subscription fact once",
+      "passed": true
+    },
+    {
+      "name": "httpP-M07-YEAR-RESULT exit retained",
+      "passed": true
+    },
+    {
+      "name": "http annual policy retained",
+      "passed": true
+    },
+    {
+      "name": "http hidden restoration returns usable app",
+      "passed": true
+    },
+    {
+      "name": "httpP-M10-SETTINGS useful settings boundaries retained",
+      "passed": true
+    },
+    {
+      "name": "httpP-M10-SETTINGS-ENT useful settings boundaries retained",
+      "passed": true
+    },
+    {
+      "name": "http review holds initial progress",
+      "passed": true
+    },
+    {
+      "name": "http stop counts reflect completed rows",
+      "passed": true
+    },
+    {
+      "name": "http full stop sequence observed",
+      "passed": true
+    },
+    {
+      "name": "http revisit clears stale progress",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "passed": true
+}

@@ -228,6 +228,10 @@ import type {
   ProductSpaceBundleInstallRequest,
   LocalAppLifecycleRequest,
   ProductSpaceAppRuntimeStartResult,
+  CircleReturnAckResult,
+  CircleReturnCancelResult,
+  CircleReturnCandidate,
+  CircleReturnPendingState,
 } from '@polo-ai/shared/protocol'
 import type {
   AcceptOrganizationJoinResponse,
@@ -247,6 +251,28 @@ import type {
   AppCatalogSyncResult,
   UpdateOrganizationMemberInput,
 } from '@polo-ai/shared/admin/types'
+
+// Member circle DTOs (POO-70 C1) — member-side contract from the F1 snapshot.
+import type {
+  MemberCircleCheckoutResult,
+  MemberCircleLeaveMembership,
+  MemberCircleRenewalPreview,
+  MemberCircleSnapshot,
+  MemberCircleSupportState,
+  MemberCircleUpstreamPendingState,
+  MemberMembership,
+  OriginalCircleOrder,
+} from '@polo-ai/shared/admin/member-circles'
+export type {
+  MemberCircleCheckoutResult,
+  MemberCircleLeaveMembership,
+  MemberCircleRenewalPreview,
+  MemberCircleSnapshot,
+  MemberCircleSupportState,
+  MemberCircleUpstreamPendingState,
+  MemberMembership,
+  OriginalCircleOrder,
+}
 import type {
   CreatorArtifact,
   CreatorArtifactCapability,
@@ -364,6 +390,18 @@ export type AdminSyncConnectionsResult =
   | ({ success: false } & AdminRpcErrorPayload)
 
 export type OrganizationRpcResult<T extends object> =
+  | ({ success: true } & T)
+  | ({ success: false } & AdminRpcErrorPayload)
+
+/**
+ * Member circle RPC result (POO-70 C1). errorCode uses the member-circle
+ * contract vocabulary: validation_error / unauthorized / forbidden /
+ * not_found / conflict / rate_limited / service_unavailable / timeout /
+ * network_error / invalid_response / unknown, plus the trusted-gate codes
+ * session_changed (stale identity/space — refetch) and session_unavailable
+ * (trusted session not settled yet).
+ */
+export type MemberCircleRpcResult<T extends object> =
   | ({ success: true } & T)
   | ({ success: false } & AdminRpcErrorPayload)
 
@@ -848,6 +886,66 @@ export interface ElectronAPI {
   onCreatorSkillProgress(
     callback: (progress: CreatorSkillOperationProgress) => void,
   ): () => void
+
+  // Member circles (POO-70 C1): trusted-session member reads/writes. The
+  // Main process derives the permission subject from the Admin session —
+  // resource ids only address a request. Deliberately NO purchase /
+  // createOrder / grant method: the client never creates circle orders.
+  memberCircles: {
+    /** GET /api/me/circles — "My circles" snapshots (empty is a valid result). */
+    list(): Promise<MemberCircleRpcResult<{ circles: MemberCircleSnapshot[] }>>
+    /** GET /api/me/circle-memberships — memberships with payment projections. */
+    listMemberships(): Promise<MemberCircleRpcResult<{ memberships: MemberMembership[] }>>
+    /**
+     * Authoritative renewal preview. preview.priceMinor may be null (price
+     * unavailable upstream) — never substitute an amount. resolvedPurchaseUrl
+     * is the raw purchaseUrl resolved against the confirmed Admin origin, or
+     * null when that fails closed.
+     */
+    previewRenewal(membershipId: string): Promise<MemberCircleRpcResult<{
+      purchaseUrl: string
+      resolvedPurchaseUrl: string | null
+      purchaseUrlResolutionError: 'invalid_purchase_url' | 'untrusted_purchase_url_origin' | null
+      preview: MemberCircleRenewalPreview
+    }>>
+    /** leave_now on the caller's own membership (the only member write). */
+    leave(membershipId: string): Promise<MemberCircleRpcResult<{ membership: MemberCircleLeaveMembership }>>
+    /** Original order receipt; storedStatus is display history, never an entitlement. */
+    getOrder(orderId: string): Promise<MemberCircleRpcResult<{ order: OriginalCircleOrder }>>
+    /** Authoritative checkout/cycle read — the entitlement judgment source (G5). */
+    getCheckoutResult(orderId: string): Promise<MemberCircleRpcResult<{ checkout: MemberCircleCheckoutResult }>>
+    /** Circle updates list: upstream_pending (G2) until the provider lands it. */
+    getUpdates(circleId: string): Promise<MemberCircleRpcResult<{ updates: MemberCircleUpstreamPendingState }>>
+    /** Public profile by circleId: upstream_pending (G3) — no circleId→shareId bridge. */
+    getProfile(circleId: string): Promise<MemberCircleRpcResult<{ profile: MemberCircleUpstreamPendingState }>>
+    /** Support config: upstream_pending (G4) until the member-side endpoint exists. */
+    getSupport(): Promise<MemberCircleRpcResult<{ support: MemberCircleSupportState }>>
+  }
+
+  // Circle web→desktop return bridge (POO-70 B1). The Main candidate store
+  // holds ONE pending navigation candidate (ids only, never an authorization);
+  // consumption is event-or-read exactly once via candidateId dedup. B1 does
+  // not navigate routes itself — C8/C9 consume the candidate.
+  circleReturn: {
+    /**
+     * Read the pending candidate. Delivery is gated on the trusted account
+     * mirror: `unavailable` (startup not settled / account transition in
+     * flight) delivers nothing and mutates nothing; a signed-out caller gets
+     * `none` (an account-bound candidate is cleared — logout cleanup — while
+     * a pre-login candidate is retained for delivery after login).
+     */
+    getPending(): Promise<CircleReturnPendingState>
+    /** Consumption confirmation; clears the candidate. Idempotent. */
+    ack(candidateId: string): Promise<CircleReturnAckResult>
+    /** Renderer-declined navigation; clears the candidate. Idempotent. */
+    cancel(candidateId: string): Promise<CircleReturnCancelResult>
+  }
+  /**
+   * Main→renderer push of a pending circle-return candidate (P70-RETURN-BRIDGE-03).
+   * Register BEFORE reading getPending (event-first), dedup by candidateId;
+   * any event/read interleaving must consume exactly once.
+   */
+  onCircleReturnCandidate(callback: (candidate: CircleReturnCandidate) => void): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>

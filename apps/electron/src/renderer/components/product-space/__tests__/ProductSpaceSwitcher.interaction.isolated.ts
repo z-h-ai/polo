@@ -6,6 +6,10 @@ import type { ReactElement, ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import type { ProductSpaceSummary } from '@polo-ai/shared/product-spaces'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 
@@ -14,10 +18,10 @@ function passthrough({ children }: { children?: ReactNode }) {
 }
 
 mock.module('@/components/ui/styled-dropdown', () => ({
-  DropdownMenu: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
-  DropdownMenuTrigger: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  DropdownMenuSub: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  StyledDropdownMenuSubTrigger: ({ children, ...props }: { children?: ReactNode }) => createElement('div', props, children),
   DropdownMenuContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
-  StyledDropdownMenuContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  StyledDropdownMenuSubContent: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   StyledDropdownMenuItem: ({ children, ...props }: { children?: ReactNode }) =>
     createElement('button', { type: 'button', ...props }, children),
   StyledDropdownMenuSeparator: () => createElement('hr'),

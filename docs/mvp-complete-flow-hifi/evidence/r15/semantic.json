@@ -1,0 +1,752 @@
+{
+  "schema_version": 1,
+  "review_id": "POO-70-workbench-r15-independent",
+  "reviewed_at": "2026-10-02",
+  "status": "passed",
+  "passed": true,
+  "reviewer_context": {
+    "agent": "/root/closure_semantic_review",
+    "independent": true,
+    "review_kind": "r14 behavior revision and r15 shared UI/UX semantic and representative visual review",
+    "prior_context": "同一独立 reviewer 先完成 r13/单 SoT 复核，再独立检查本轮 Spec §13、允许的产品表面与 mvp 场景源码；本轮不使用生成器或作者质量自评作为通过依据。",
+    "delivery_boundary": "仅绑定当前原型检查。用户已接受行为调整并要求重新优化 UI/UX；本报告不作用户视觉批准或真实服务 Acceptance。"
+  },
+  "independence": {
+    "allowed_inputs_only": true,
+    "allowed_semantic_inputs": [
+      "docs/client-journey-review/spec.md",
+      "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json",
+      ".agents/skills/polo-ai-design-system/SKILL.md",
+      ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "design-demos/polo-client-source-baseline/src/mvp/Assistant.jsx",
+      "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs",
+      "design-demos/polo-client-source-baseline/src/mvp/runtime.js",
+      "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md",
+      "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "docs/mvp-complete-flow-hifi/prototype.html",
+      "docs/mvp-complete-flow-hifi/review.html",
+      "design-demos/polo-client-source-baseline/prototype.html",
+      "docs/mvp-complete-flow-hifi/evidence/r15/independent/browser-observations.json"
+    ],
+    "workflow_instruction": "/Users/wow/.agents/skills/product-ui-prototype/SKILL.md（仅阅读独立评审协议）",
+    "schema_only_read": "本 reviewer 自己的 evidence/sot-cleanup/semantic.json 仅核对报告字段；没有继承其旧版通过结论。",
+    "browser_inputs": "本 reviewer 实际打开最终双表面与 review.html；查看允许的 r14/r15 代表截图并自截取 36 张最终图片。",
+    "not_read": [
+      "生成器实现",
+      "作者 quality-report 或自评",
+      "旧原型快照",
+      "其他工作树",
+      "真实产品服务实现"
+    ],
+    "writes": [
+      "docs/mvp-complete-flow-hifi/evidence/r15/semantic.json",
+      "docs/mvp-complete-flow-hifi/evidence/r15/independent/"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "docs/client-journey-review/spec.md",
+      "sha256": "66802d5942ce67fad5e43020d0333d4f8762cbd5ea80483c5b223005a4d3ccbb"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json",
+      "sha256": "c3034f48e94a64f04a4cb7937c5aff27c1dcaa2aa884cd45aefc4fa48b30965e"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/SKILL.md",
+      "sha256": "9f993cc85cd8e491f33a69ecd3ec0c6b74074aacd7c205c5c9cca9b7d1b717b6"
+    },
+    {
+      "path": ".agents/skills/polo-ai-design-system/assets/tokens/workbench-review.css",
+      "sha256": "04b5e623833d90a8f21de6cea1c52f6d81bced6dda051cce8d5ca0663486f87e"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/src/mvp/Assistant.jsx",
+      "sha256": "ae5c0baaf93886a1097634b8474a8e5c9daf03f669a4cca2d186284f54929ae5"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs",
+      "sha256": "d85a843fd333893c31dd8f0f73406b574462a0e26e5b37b7eb73941a3ad47af1"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/src/mvp/runtime.js",
+      "sha256": "231220e81b8c38c6f522dd97e09b17794194363a43d00e59e8b27aae54479874"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/SCENE-TRACEABILITY.md",
+      "sha256": "6695ac58a40ec4b022585b646c7e88d0fa3a654d4904dcc3d0c5d67456fd923c"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "sha256": "75c9f5ebd94007d3a470fb3e74f5ecf58f74abb186e3d7e9ec42bd3d54126816"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/prototype.html",
+      "sha256": "fbbfd14f84976e39d749228f9e7122fe21f7229d7002c46d10d0b41fb5ce94e5"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/review.html",
+      "sha256": "90009b9745119b0eae5e154d0f8105b1a58ce3c36aa4e82785b34d12d0423c36"
+    },
+    {
+      "path": "design-demos/polo-client-source-baseline/prototype.html",
+      "sha256": "77a88a3c9eff60f436e72c06603bef3975c740ea54b9eaf37850c74b1fac8559"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/browser-observations.json",
+      "sha256": "daba8ad2dcfd40ba3cb5169a6d254fa2379b44f12b7be4616de125c0326e57e1"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-new-800x600.png",
+      "sha256": "730ac43876a14966478e18b1405dbf2f90f5a8958d1b291290ba0599cffd2434"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-preferences-800x600.png",
+      "sha256": "b155431dceb610507c5d7b5b2380c389048728f5359a75bb43c8bb009824fbfa"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-skills-1024x768.png",
+      "sha256": "f6259e5e155cacb8bb3af69498cf158a9abda4b7e12f0839b16b6ef405890576"
+    },
+    {
+      "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M07-DETAIL-PAID-SUBSCRIPTION-1024x768.png",
+      "sha256": "45975e1d572650be84aacc6ebed1d24fbaa6f72354ab158efa249aa512b132c4"
+    }
+  ],
+  "artifacts": {
+    "manifest": {
+      "path": "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+      "sha256": "75c9f5ebd94007d3a470fb3e74f5ecf58f74abb186e3d7e9ec42bd3d54126816"
+    },
+    "prototype": {
+      "path": "docs/mvp-complete-flow-hifi/prototype.html",
+      "sha256": "fbbfd14f84976e39d749228f9e7122fe21f7229d7002c46d10d0b41fb5ce94e5"
+    },
+    "review": {
+      "path": "docs/mvp-complete-flow-hifi/review.html",
+      "sha256": "90009b9745119b0eae5e154d0f8105b1a58ce3c36aa4e82785b34d12d0423c36"
+    },
+    "assistant_prototype": {
+      "path": "design-demos/polo-client-source-baseline/prototype.html",
+      "sha256": "77a88a3c9eff60f436e72c06603bef3975c740ea54b9eaf37850c74b1fac8559"
+    }
+  },
+  "scope": {
+    "current_sot": "docs/client-journey-review/spec.md",
+    "reviewed_sections": [
+      "§13.1—13.8",
+      "原 PC-F/PC-N/C-R 关闭、隔离、恢复边界"
+    ],
+    "revision": "poo70-workbench-r15",
+    "scene_count": 361,
+    "surface_scene_counts": {
+      "mvp": 139,
+      "assistant": 222
+    },
+    "areas": [
+      "统一顶栏与关闭执行语义",
+      "首页完整目录、最近/频率及名称兜底",
+      "个人/企业授权与记录隔离",
+      "一级技能及内置/来源分离、版本和失权",
+      "圈子有效筛选、内容/更新/订阅和原对象退出",
+      "全局设置与助手偏好保存、草稿和作用域",
+      "后台任务回原会话",
+      "跨表面空间切换停止回执及取消保持任务",
+      "M01—M11代表页面视觉与窄窗操作"
+    ],
+    "representative_pages": [
+      "A-personal-files",
+      "A-personal-new",
+      "A-personal-preferences",
+      "A-personal-skills",
+      "P-M01-LOGIN-PASSWORD",
+      "P-M02-STOP-FAILED",
+      "P-M03-HOME-PERSONAL",
+      "P-M04-CLOSE-ACTIVE",
+      "P-M07-DETAIL-PAID-SUBSCRIPTION",
+      "P-M09-BROWSER",
+      "P-M10-SETTINGS-DEVICE",
+      "P-M11-BLOCKED-VERSION"
+    ],
+    "viewports": [
+      [
+        1440,
+        900
+      ],
+      [
+        1024,
+        768
+      ],
+      [
+        800,
+        600
+      ]
+    ],
+    "all_scenes_visual_review": false
+  },
+  "checks": [
+    {
+      "id": "AUTHORITY",
+      "passed": true,
+      "evidence": "Spec §13保留行为确认、标明r15全端视觉待复看；DS 将 G4 定位历史基线，共享 workbench-review.css 是当前提案；来源追溯首部与当前证据已更新 r15，允许输入的 manifest 源哈希已实算核对。"
+    },
+    {
+      "id": "R14-INDEPENDENT-INTERACTIONS",
+      "passed": true,
+      "evidence": "本 reviewer 在同一审查上下文已实际通过11项 r14 定向点击，解决原9项发现；r15 保留行为，对共享样式及停止协作改动另测。",
+      "cases": [
+        "paid_exit_original_object",
+        "first_visit_full_directory",
+        "stable_name_fallback_and_search",
+        "circle_open_updates_home_recent",
+        "membership_state_filter",
+        "preferences_save_discard_and_scope",
+        "global_preferences_shared_across_spaces",
+        "background_activity_original_and_stop",
+        "independent_builtin_selection_preserves_circle_version",
+        "update_failure_and_revocation",
+        "skills_narrow_return_keeps_filter"
+      ]
+    },
+    {
+      "id": "R15-FINAL-INTERACTIONS",
+      "passed": true,
+      "evidence": "当前最终四产物前后哈希一致；自执行12项断言：六页当前标签、1024技能详情、个人与企业冷入口停止回执、个人取消切换回原会话、800技能筛选返回、偏好返回助手。",
+      "record": "docs/mvp-complete-flow-hifi/evidence/r15/independent/browser-observations.json",
+      "count": 12
+    },
+    {
+      "id": "REPRESENTATIVE-VISUALS",
+      "passed": true,
+      "evidence": "本 reviewer 逐张查看12个代表页面×3视口的r15清洁页面；发现1024技能错排、圈子未选中标签后复核修复。最终版本重新保存36张截图，另目视复核受影响的1024技能/圈子与800新会话/助手偏好。原污染的新会话截图未作为当前通过依据。",
+      "directory": "docs/mvp-complete-flow-hifi/evidence/r15/independent/",
+      "final_capture_count": 36
+    },
+    {
+      "id": "NARROW-REACHABILITY",
+      "passed": true,
+      "evidence": "800文件页实际点击查看生成文件进入viewer；设备设置保存控件可滚动到并出现已保存反馈；800技能详情返回保留有更新筛选，无横向溢出；1024技能详情750px宽，更新操作可滚动到。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "R14-SEM-01",
+      "severity": "high",
+      "scenes": [
+        "P-M07-DETAIL-PAID-SUBSCRIPTION"
+      ],
+      "basis": "Spec §13.5 and original-object recovery",
+      "issue": "付费设计圈订阅页内部退出指向增长圈 LEAVE。",
+      "recommendation": "退出操作统一指向同一设计圈确认与逐来源影响。",
+      "status": "resolved",
+      "resolution": "付费圈订阅页退出实际进入同一设计圈的 LEAVE-PAID；未切换到增长圈。"
+    },
+    {
+      "id": "R14-SEM-02",
+      "severity": "high",
+      "scenes": [
+        "A-personal-preferences",
+        "A-enterprise-preferences"
+      ],
+      "basis": "Spec §13.4",
+      "issue": "助手偏好仅提示已保存，未管理按空间保存/草稿状态；切分组丢输入，无失败与未保存离开处理。",
+      "recommendation": "按作用域管理 draft/saved 并保留失败输入、未保存离开确认。",
+      "status": "resolved",
+      "resolution": "独立点击保存、取消未保存离开、放弃修改、个人/企业切换，确认 scope 内 draft/saved 和失败展示存在。"
+    },
+    {
+      "id": "R14-SEM-03",
+      "severity": "medium",
+      "scenes": [
+        "A-personal-skills",
+        "A-enterprise-skills"
+      ],
+      "basis": "Spec §13.6",
+      "issue": "技能列表行不可选择；内置技能筛选后无法直接管理自己详情中的启停。",
+      "recommendation": "选中作品显示对应详情，内置启停独立于来源技能。",
+      "status": "resolved",
+      "resolution": "内置与圈子技能可分别点击选择，内置启停不改圈子版本。"
+    },
+    {
+      "id": "R14-SEM-04",
+      "severity": "medium",
+      "scenes": [
+        "P-M03-HOME-PERSONAL",
+        "P-M03-HOME-ENT"
+      ],
+      "basis": "Spec §13.3",
+      "issue": "无使用记录与频率相等使用手工 defaultOrder，而非稳定名称回退。",
+      "recommendation": "recent/frequent 相同时按名称与稳定ID兜底。",
+      "status": "resolved",
+      "resolution": "无记录及频次相同按稳定名称回退；搜索不匹配时助手不占位。"
+    },
+    {
+      "id": "R14-SEM-05",
+      "severity": "high",
+      "scenes": [
+        "A-personal-close",
+        "A-enterprise-close",
+        "P-M04-RUNTIME-PERSONAL",
+        "P-M04-RUNTIME"
+      ],
+      "basis": "Spec §13.2",
+      "issue": "助手后台继续后运行中心列固定其他App，不能从容器运行项回该助手原会话；运行中心底页仍旧常用首页。",
+      "recommendation": "同一 scope 活动信息连接容器与助手，保留原会话，停止确认成功后才清除。",
+      "status": "resolved",
+      "resolution": "后台继续后可经原生运行中心到助手 activity，再回原会话；独立发送文本保留，停止后状态清除。"
+    },
+    {
+      "id": "R14-SEM-06",
+      "severity": "high",
+      "scenes": [
+        "P-M07-LIST",
+        "P-M07-LIST-RENEWED"
+      ],
+      "basis": "Spec §13.5",
+      "issue": "待恢复筛选用到期等文本正则，未来到期的有效订阅被误纳入；有效过滤未实现。",
+      "recommendation": "按显式资格状态筛选，不从日期文案推断失效。",
+      "status": "resolved",
+      "resolution": "有效/待恢复根据显式资格筛选；未来到期的有效付费圈保持在有效列表。"
+    },
+    {
+      "id": "R14-SEM-07",
+      "severity": "medium",
+      "scenes": [
+        "P-M10-SETTINGS-DEVICE",
+        "P-M10-SETTINGS-ENT-DEVICE"
+      ],
+      "basis": "Spec §13.4",
+      "issue": "全局设置只改保存反馈且不同空间静态表单值不共享，未体现同一设备全局范围。",
+      "recommendation": "全局值共享且有保存/失败语义；助手偏好才按空间隔离。",
+      "status": "resolved",
+      "resolution": "全局设备配置按设备共享；从个人保存后企业页显示同值，助手偏好继续分空间。"
+    },
+    {
+      "id": "R14-SEM-08",
+      "severity": "high",
+      "scenes": [
+        "P-M03-HOME-ZERO",
+        "P-M03-HOME-EMPTY-DIR",
+        "P-M03-HOME-LOAD-FAIL"
+      ],
+      "basis": "D-PC-11/12, Spec §13.3/13.7",
+      "issue": "首登旧ID仍出现最多5常用/挑常用，首登无记录/空/错态未消费新完整目录。",
+      "recommendation": "保留ID更新语义与骨架，首登有授权直接显示，空与失败区分。",
+      "status": "resolved",
+      "resolution": "首登旧场景展示完整目录，不再要求配置最多5常用；空目录与加载失败分开。"
+    },
+    {
+      "id": "R14-SEM-09",
+      "severity": "medium",
+      "scenes": [
+        "P-M03-HOME-PERSONAL",
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-DETAIL-PAID"
+      ],
+      "basis": "Spec §13.3",
+      "issue": "最近/频率只记录目录卡打开，不记录圈子等其他入口打开。",
+      "recommendation": "按稳定作品ID统一所有打开/聚焦记录，并按当前空间隔离。",
+      "status": "resolved",
+      "resolution": "从圈子打开 App 后首页最近记录实际更新。"
+    },
+    {
+      "id": "R14-SEM-10",
+      "severity": "high",
+      "scenes": [
+        "P-M02-CONFIRM-PERSONAL",
+        "P-M03-HOME-ENT",
+        "A-personal-activity"
+      ],
+      "basis": "Spec §13.2; PC-F06/C-R03",
+      "issue": "助手生成后通过原生切换流程停止全部并切换到企业，个人scope仍显示助手正在执行；确认列表仅固定其他App。",
+      "recommendation": "容器切换与助手activity共享停止回执，成功才切换，失败留原空间；确认列表包含助手任务。",
+      "status": "resolved",
+      "resolution": "原生与助手通过 peer 消息交换活动快照；冷助手入口首次切 native 重新请求状态；两向切换均匹配停止请求与 running:false ack；取消可回原会话；任务列表和计数同步。"
+    },
+    {
+      "id": "R15-SEM-11",
+      "severity": "high",
+      "scenes": [
+        "A-personal-skills",
+        "A-personal-detail",
+        "A-enterprise-skills"
+      ],
+      "basis": "Spec §13.6/13.8",
+      "issue": "1024视口三子区域套两列导致详情掉到第二行210px窄栏，操作拥挤。",
+      "recommendation": "统一响应式断点，筛选横排后列表/详情同一行。",
+      "status": "resolved",
+      "resolution": "最终1024实测筛选976px，列表210px、详情750px同排；更新操作可滚动到。800详情返回继续保留筛选。"
+    },
+    {
+      "id": "R15-SEM-12",
+      "severity": "medium",
+      "scenes": [
+        "P-M07-DETAIL-FOCUS",
+        "P-M07-DETAIL-FOCUS-UPDATES",
+        "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+        "P-M07-DETAIL-PAID",
+        "P-M07-DETAIL-PAID-UPDATES",
+        "P-M07-DETAIL-PAID-SUBSCRIPTION"
+      ],
+      "basis": "Spec §13.5/13.8",
+      "issue": "圈子详情内容/更新/订阅缺少当前标签选中态，用户不能从导航辨识位置。",
+      "recommendation": "给当前标签 selected 与 aria-current=page。",
+      "status": "resolved",
+      "resolution": "六个免费/付费圈子内容、更新、订阅页实测仅一个 selected，文字与当前页一致，并有 aria-current=page；最终订阅截图已目视确认细选中线。"
+    }
+  ],
+  "summary": {
+    "findings_total": 12,
+    "resolved": 12,
+    "open": 0
+  },
+  "additional_corrections": [
+    {
+      "issue": "助手偏好自链接没有返回含义",
+      "result": "已改为实际返回助手入口，800视口点击验证进入A-personal-new。"
+    },
+    {
+      "issue": "代表新会话截图混入先前交互",
+      "result": "本 reviewer 最终截图均新建页面，以初始场景重新打开；冷入口任务检查分别使用独立新页面。"
+    }
+  ],
+  "evidence": {
+    "independent_browser_record": "docs/mvp-complete-flow-hifi/evidence/r15/independent/browser-observations.json",
+    "screenshots": [
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-files-1024x768.png",
+        "scene": "A-personal-files",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "b9b16a625731d11cf5a6a5cb52e81b61dacf03d4311406482029e5c915474e50"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-files-1440x900.png",
+        "scene": "A-personal-files",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "5b21aba6c0475177c2444251b941174aadc3ce6803069869c6d1d97fe4eb9b7f"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-files-800x600.png",
+        "scene": "A-personal-files",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "08da74af2cc6bde1712b8b90aa46bb498bf6be3d58d99288d874cec66c2ca3a0"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-new-1024x768.png",
+        "scene": "A-personal-new",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "0cc801a3f32db4df1798c62e9d55dce075bfff5f582ffd31f6d14734c1930d75"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-new-1440x900.png",
+        "scene": "A-personal-new",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "bf76e344704d1ac1ed05baf4874f91aaf0b6fa87dbb0840fc23ee1bb860df357"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-new-800x600.png",
+        "scene": "A-personal-new",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "730ac43876a14966478e18b1405dbf2f90f5a8958d1b291290ba0599cffd2434"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-preferences-1024x768.png",
+        "scene": "A-personal-preferences",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "93de7c49c7bb700737824df402815c1c9fd63ce05e699de84812b3eab3ba731d"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-preferences-1440x900.png",
+        "scene": "A-personal-preferences",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "47bc9b8e7d3e547d9de930262cd4a915e2db810227b54f2c107df458697a98b3"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-preferences-800x600.png",
+        "scene": "A-personal-preferences",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "b155431dceb610507c5d7b5b2380c389048728f5359a75bb43c8bb009824fbfa"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-skills-1024x768.png",
+        "scene": "A-personal-skills",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "f6259e5e155cacb8bb3af69498cf158a9abda4b7e12f0839b16b6ef405890576"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-skills-1440x900.png",
+        "scene": "A-personal-skills",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "e68da12bbe12c0be799a056564400fb209b3053fb0751f30a40eaf20060b0077"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/A-personal-skills-800x600.png",
+        "scene": "A-personal-skills",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "7d745c38c952d1e66130ed03688fa04e76387fa891dc7c65dd0df26867ae2d37"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M01-LOGIN-PASSWORD-1024x768.png",
+        "scene": "P-M01-LOGIN-PASSWORD",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "fa071c1d6102882b020f09c9e087af1b95ca996deaad74af8ed5669ac898a3b6"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M01-LOGIN-PASSWORD-1440x900.png",
+        "scene": "P-M01-LOGIN-PASSWORD",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "d70c92a939e6f15a6d7e95b816fff2130367f8079201ebb3acbe618956a614fb"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M01-LOGIN-PASSWORD-800x600.png",
+        "scene": "P-M01-LOGIN-PASSWORD",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "dfd96b87aa1bc03e00a7405711df7a8defd2c6bfc4f41d867822b7b26323d460"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M02-STOP-FAILED-1024x768.png",
+        "scene": "P-M02-STOP-FAILED",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "641a8e750d8cdd006b33cdc7a68be409acf9313bec4ffcab6c08507095638e4f"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M02-STOP-FAILED-1440x900.png",
+        "scene": "P-M02-STOP-FAILED",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "b8ec20fa40dd451f3a6b48c30f250d4b1e9c781e3f2f0dd68a61467f03fa0109"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M02-STOP-FAILED-800x600.png",
+        "scene": "P-M02-STOP-FAILED",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "572c413a954a243a7ac4c91a71930864168c7a79667fa4bfd8c09a6631691c37"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M03-HOME-PERSONAL-1024x768.png",
+        "scene": "P-M03-HOME-PERSONAL",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "24e74cbe9278e4a9a21d50f072ba5a0ce304b633548c901dc00d416b700620b9"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M03-HOME-PERSONAL-1440x900.png",
+        "scene": "P-M03-HOME-PERSONAL",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "eb9f32bc69956e1e38208722e0252a705a90d69bf1506417bd46ddf22b3f3a23"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M03-HOME-PERSONAL-800x600.png",
+        "scene": "P-M03-HOME-PERSONAL",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "6a6aeff7bd42e43ed65211adede2a7db4c52de4f8ec46d855127130e03eaf358"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M04-CLOSE-ACTIVE-1024x768.png",
+        "scene": "P-M04-CLOSE-ACTIVE",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "5c6e451a4e10ca1ba464e27e6b41edfdad5d0f1fc7302cc86e6679e0345f77f6"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M04-CLOSE-ACTIVE-1440x900.png",
+        "scene": "P-M04-CLOSE-ACTIVE",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "c070da909cf2ddaf1acc69ba6c9142765108f3b900477a1dddb1142c5625d9ac"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M04-CLOSE-ACTIVE-800x600.png",
+        "scene": "P-M04-CLOSE-ACTIVE",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "31e8656119493eb44f8b09e68004e5aac8b970e0055fd9a7dc56be978d7d4cbf"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M07-DETAIL-PAID-SUBSCRIPTION-1024x768.png",
+        "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "45975e1d572650be84aacc6ebed1d24fbaa6f72354ab158efa249aa512b132c4"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M07-DETAIL-PAID-SUBSCRIPTION-1440x900.png",
+        "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "5508105ae4ab3f97c0173815a7b3385828387a4a0c9fb661f33806fca3d2f7f7"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M07-DETAIL-PAID-SUBSCRIPTION-800x600.png",
+        "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "1bcc611e2014b3033aedbdc1a0ee73593c9071437f2754fdcde52683690a208c"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M09-BROWSER-1024x768.png",
+        "scene": "P-M09-BROWSER",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "55014c0272826bc8adcd13793d2dceec3532058ef9e421d142b9b451a22a9d53"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M09-BROWSER-1440x900.png",
+        "scene": "P-M09-BROWSER",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "00c4dddb3fc1bc4a4eacc83eb35f1c30f0e8502bda1122658b2dfc753a676af8"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M09-BROWSER-800x600.png",
+        "scene": "P-M09-BROWSER",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "1cec528fc20486027e286fd89a8470a1537c6119df661631aba0ceb4c3dbb711"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M10-SETTINGS-DEVICE-1024x768.png",
+        "scene": "P-M10-SETTINGS-DEVICE",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "791907ab422697b4c46dd322d320da1b950c4d89274ab71155d469bc852df883"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M10-SETTINGS-DEVICE-1440x900.png",
+        "scene": "P-M10-SETTINGS-DEVICE",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "f8bccc402e876761a694d7159e51e8441c10e93f771a071518e051751e22476e"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M10-SETTINGS-DEVICE-800x600.png",
+        "scene": "P-M10-SETTINGS-DEVICE",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "2df6ae70739f6e49fa8e29481be659213a512f5e0ac8ce1be55443962a6c8eac"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M11-BLOCKED-VERSION-1024x768.png",
+        "scene": "P-M11-BLOCKED-VERSION",
+        "viewport": [
+          1024,
+          768
+        ],
+        "sha256": "257b88394d62099234766131e8c556d353f47007aa05ff07165c390dfd03d3f9"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M11-BLOCKED-VERSION-1440x900.png",
+        "scene": "P-M11-BLOCKED-VERSION",
+        "viewport": [
+          1440,
+          900
+        ],
+        "sha256": "d85d4ce607cc54f3b43619f2ae7674d0ee70f8c5e323dd7f2014cd699b03673f"
+      },
+      {
+        "path": "docs/mvp-complete-flow-hifi/evidence/r15/independent/P-M11-BLOCKED-VERSION-800x600.png",
+        "scene": "P-M11-BLOCKED-VERSION",
+        "viewport": [
+          800,
+          600
+        ],
+        "sha256": "9a20b31284e5e20814e92d1de591ff3155bcbbb69dcd40039fef4f347d8e127b"
+      }
+    ]
+  },
+  "limitations": [
+    "独立视觉检查为12个代表页面×3视口及受影响项复查，不是361个场景逐像素审查；不把主代理全场景自动检查数量记作本 reviewer 手工覆盖。",
+    "原9项r14行为验证在同一上下文前段执行；r15最终新增12项定向断言，未在最终字节重跑所有历史行为。实际检查范围与记录分别列明。",
+    "真实客服二维码未提供；仅检查未配置/加载失败的原型处理，没有真实扫码联系验证。",
+    "真实 API、支付、授权刷新、Electron、系统权限、技能安装、AI执行、后台费用和第三方App内部未验证。",
+    "停止请求/回执是浏览器内原型状态协议；定向检查覆盖成功与取消，未注入真实服务超时或网络故障证明运行时终止可靠性。",
+    "共享样式及布局仍待用户复看；本报告不代表用户产品批准、生产可交付、真实实现完成或正式 Acceptance。"
+  ],
+  "product_approval": false,
+  "formal_acceptance": false
+}

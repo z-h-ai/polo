@@ -33,6 +33,7 @@
     "./admin/authorization": "./src/admin/authorization-failure.ts",
     "./admin/catalog-view": "./src/admin/app-catalog-view.ts",
     "./admin/context-key": "./src/admin/context-key.ts",
+    "./admin/member-circles": "./src/admin/member-circles.ts",
     "./admin/semver": "./src/admin/semver.ts",
     "./admin/schemas": "./src/admin/schemas.ts",
     "./auth": "./src/auth/index.ts",

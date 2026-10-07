@@ -1,0 +1,1418 @@
+[
+  {
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "viewport": 1440,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64,
+        "top": 0,
+        "right": 1440,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 104,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 186,
+            "bottom": 44.5,
+            "left": 104
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 198,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 270,
+            "bottom": 49.5,
+            "left": 198
+          }
+        },
+        {
+          "text": "后台任务",
+          "rect": {
+            "x": 1157,
+            "y": 14.5,
+            "width": 80,
+            "height": 34,
+            "top": 14.5,
+            "right": 1237,
+            "bottom": 48.5,
+            "left": 1157
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 1281,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 1329,
+            "bottom": 40,
+            "left": 1281
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 1341,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 1373,
+            "bottom": 47.5,
+            "left": 1341
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 1384,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 1412,
+            "bottom": 45.5,
+            "left": 1384
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-MANAGE-HOME",
+    "viewport": 1440,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64,
+        "top": 0,
+        "right": 1440,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 104,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 186,
+            "bottom": 44.5,
+            "left": 104
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 198,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 270,
+            "bottom": 49.5,
+            "left": 198
+          }
+        },
+        {
+          "text": "后台任务",
+          "rect": {
+            "x": 1157,
+            "y": 14.5,
+            "width": 80,
+            "height": 34,
+            "top": 14.5,
+            "right": 1237,
+            "bottom": 48.5,
+            "left": 1157
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 1281,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 1329,
+            "bottom": 40,
+            "left": 1281
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 1341,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 1373,
+            "bottom": 47.5,
+            "left": 1341
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 1384,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 1412,
+            "bottom": 45.5,
+            "left": 1384
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-CONTROLS",
+    "viewport": 1440,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64,
+        "top": 0,
+        "right": 1440,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 104,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 186,
+            "bottom": 44.5,
+            "left": 104
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 198,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 270,
+            "bottom": 49.5,
+            "left": 198
+          }
+        },
+        {
+          "text": "后台任务",
+          "rect": {
+            "x": 1157,
+            "y": 14.5,
+            "width": 80,
+            "height": 34,
+            "top": 14.5,
+            "right": 1237,
+            "bottom": 48.5,
+            "left": 1157
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 1281,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 1329,
+            "bottom": 40,
+            "left": 1281
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 1341,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 1373,
+            "bottom": 47.5,
+            "left": 1341
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 1384,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 1412,
+            "bottom": 45.5,
+            "left": 1384
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "viewport": 1440,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64,
+        "top": 0,
+        "right": 1440,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 104,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 186,
+            "bottom": 44.5,
+            "left": 104
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 198,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 270,
+            "bottom": 49.5,
+            "left": 198
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 1281,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 1329,
+            "bottom": 40,
+            "left": 1281
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 1341,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 1373,
+            "bottom": 47.5,
+            "left": 1341
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 1384,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 1412,
+            "bottom": 45.5,
+            "left": 1384
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "viewport": 1440,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64,
+        "top": 0,
+        "right": 1440,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 104,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 186,
+            "bottom": 44.5,
+            "left": 104
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 198,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 270,
+            "bottom": 49.5,
+            "left": 198
+          }
+        },
+        {
+          "text": "后台任务",
+          "rect": {
+            "x": 1157,
+            "y": 14.5,
+            "width": 80,
+            "height": 34,
+            "top": 14.5,
+            "right": 1237,
+            "bottom": 48.5,
+            "left": 1157
+          }
+        },
+        {
+          "text": "晨星科技",
+          "rect": {
+            "x": 1281,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 1329,
+            "bottom": 40,
+            "left": 1281
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 1341,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 1373,
+            "bottom": 47.5,
+            "left": 1341
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 1384,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 1412,
+            "bottom": 45.5,
+            "left": 1384
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "viewport": 1024,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 64,
+        "top": 0,
+        "right": 1024,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 796,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 821,
+            "bottom": 48.5,
+            "left": 796
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 865,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 913,
+            "bottom": 40,
+            "left": 865
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 925,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 957,
+            "bottom": 47.5,
+            "left": 925
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 968,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 996,
+            "bottom": 45.5,
+            "left": 968
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-MANAGE-HOME",
+    "viewport": 1024,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 64,
+        "top": 0,
+        "right": 1024,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 796,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 821,
+            "bottom": 48.5,
+            "left": 796
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 865,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 913,
+            "bottom": 40,
+            "left": 865
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 925,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 957,
+            "bottom": 47.5,
+            "left": 925
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 968,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 996,
+            "bottom": 45.5,
+            "left": 968
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-CONTROLS",
+    "viewport": 1024,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 64,
+        "top": 0,
+        "right": 1024,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 796,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 821,
+            "bottom": 48.5,
+            "left": 796
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 865,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 913,
+            "bottom": 40,
+            "left": 865
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 925,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 957,
+            "bottom": 47.5,
+            "left": 925
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 968,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 996,
+            "bottom": 45.5,
+            "left": 968
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "viewport": 1024,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 64,
+        "top": 0,
+        "right": 1024,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 865,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 913,
+            "bottom": 40,
+            "left": 865
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 925,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 957,
+            "bottom": 47.5,
+            "left": 925
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 968,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 996,
+            "bottom": 45.5,
+            "left": 968
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "viewport": 1024,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 64,
+        "top": 0,
+        "right": 1024,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 796,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 821,
+            "bottom": 48.5,
+            "left": 796
+          }
+        },
+        {
+          "text": "晨星科技",
+          "rect": {
+            "x": 865,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 913,
+            "bottom": 40,
+            "left": 865
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 925,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 957,
+            "bottom": 47.5,
+            "left": 925
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 968,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 996,
+            "bottom": 45.5,
+            "left": 968
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M07-SOURCE-FALLBACK",
+    "viewport": 800,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 64,
+        "top": 0,
+        "right": 800,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 572,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 597,
+            "bottom": 48.5,
+            "left": 572
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 641,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 689,
+            "bottom": 40,
+            "left": 641
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 701,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 733,
+            "bottom": 47.5,
+            "left": 701
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 744,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 772,
+            "bottom": 45.5,
+            "left": 744
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-MANAGE-HOME",
+    "viewport": 800,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 64,
+        "top": 0,
+        "right": 800,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 572,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 597,
+            "bottom": 48.5,
+            "left": 572
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 641,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 689,
+            "bottom": 40,
+            "left": 641
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 701,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 733,
+            "bottom": 47.5,
+            "left": 701
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 744,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 772,
+            "bottom": 45.5,
+            "left": 744
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-CONTROLS",
+    "viewport": 800,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 64,
+        "top": 0,
+        "right": 800,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 572,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 597,
+            "bottom": 48.5,
+            "left": 572
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 641,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 689,
+            "bottom": 40,
+            "left": 641
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 701,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 733,
+            "bottom": 47.5,
+            "left": 701
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 744,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 772,
+            "bottom": 45.5,
+            "left": 744
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ZERO",
+    "viewport": 800,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 64,
+        "top": 0,
+        "right": 800,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": "我的空间",
+          "rect": {
+            "x": 641,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 689,
+            "bottom": 40,
+            "left": 641
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 701,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 733,
+            "bottom": 47.5,
+            "left": 701
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 744,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 772,
+            "bottom": 45.5,
+            "left": 744
+          }
+        }
+      ]
+    },
+    "passed": true
+  },
+  {
+    "scene": "P-M03-ALL-APPS-ENT-EMPTY",
+    "viewport": 800,
+    "geometry": {
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 64,
+        "top": 0,
+        "right": 800,
+        "bottom": 64,
+        "left": 0
+      },
+      "controls": [
+        {
+          "text": "P\nPolo",
+          "rect": {
+            "x": 100,
+            "y": 18.5,
+            "width": 82,
+            "height": 26,
+            "top": 18.5,
+            "right": 182,
+            "bottom": 44.5,
+            "left": 100
+          }
+        },
+        {
+          "text": "首页",
+          "rect": {
+            "x": 194,
+            "y": 13.5,
+            "width": 72,
+            "height": 36,
+            "top": 13.5,
+            "right": 266,
+            "bottom": 49.5,
+            "left": 194
+          }
+        },
+        {
+          "text": null,
+          "rect": {
+            "x": 572,
+            "y": 14.5,
+            "width": 25,
+            "height": 34,
+            "top": 14.5,
+            "right": 597,
+            "bottom": 48.5,
+            "left": 572
+          }
+        },
+        {
+          "text": "晨星科技",
+          "rect": {
+            "x": 641,
+            "y": 23,
+            "width": 48,
+            "height": 17,
+            "top": 23,
+            "right": 689,
+            "bottom": 40,
+            "left": 641
+          }
+        },
+        {
+          "text": "通知",
+          "rect": {
+            "x": 701,
+            "y": 15.5,
+            "width": 32,
+            "height": 32,
+            "top": 15.5,
+            "right": 733,
+            "bottom": 47.5,
+            "left": 701
+          }
+        },
+        {
+          "text": "王",
+          "rect": {
+            "x": 744,
+            "y": 17.5,
+            "width": 28,
+            "height": 28,
+            "top": 17.5,
+            "right": 772,
+            "bottom": 45.5,
+            "left": 744
+          }
+        }
+      ]
+    },
+    "passed": true
+  }
+]

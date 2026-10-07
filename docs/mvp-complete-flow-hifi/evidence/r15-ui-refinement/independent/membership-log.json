@@ -1,0 +1,62 @@
+[
+  {
+    "key": "data",
+    "viewport": 1440,
+    "cancel_preserves": true,
+    "confirm_removes_only_this_circle": true,
+    "search_does_not_restore": true,
+    "report_visibility_after_exit": false,
+    "reset_restores": true,
+    "dialog_text": "退出数据工坊圈？\n\n退出前请确认授权影响\n\n退出后，数据报表生成器将失去最后一个有效来源，不能再启动。其他圈子的应用和技能不受影响。\n\n取消\n确认退出"
+  },
+  {
+    "key": "year",
+    "viewport": 1440,
+    "cancel_preserves": true,
+    "confirm_removes_only_this_circle": true,
+    "search_does_not_restore": true,
+    "report_visibility_after_exit": true,
+    "reset_restores": true,
+    "dialog_text": "退出星河年度圈？\n\n退出前请确认授权影响\n\n退出只撤销星河年度圈提供的授权。其他圈子的有效来源不受影响；退出不代表申请退款或已退款。\n\n取消\n确认退出"
+  },
+  {
+    "key": "data",
+    "viewport": 1024,
+    "cancel_preserves": true,
+    "confirm_removes_only_this_circle": true,
+    "search_does_not_restore": true,
+    "report_visibility_after_exit": false,
+    "reset_restores": true,
+    "dialog_text": "退出数据工坊圈？\n\n退出前请确认授权影响\n\n退出后，数据报表生成器将失去最后一个有效来源，不能再启动。其他圈子的应用和技能不受影响。\n\n取消\n确认退出"
+  },
+  {
+    "key": "year",
+    "viewport": 1024,
+    "cancel_preserves": true,
+    "confirm_removes_only_this_circle": true,
+    "search_does_not_restore": true,
+    "report_visibility_after_exit": true,
+    "reset_restores": true,
+    "dialog_text": "退出星河年度圈？\n\n退出前请确认授权影响\n\n退出只撤销星河年度圈提供的授权。其他圈子的有效来源不受影响；退出不代表申请退款或已退款。\n\n取消\n确认退出"
+  },
+  {
+    "key": "data",
+    "viewport": 800,
+    "cancel_preserves": true,
+    "confirm_removes_only_this_circle": true,
+    "search_does_not_restore": true,
+    "report_visibility_after_exit": false,
+    "reset_restores": true,
+    "dialog_text": "退出数据工坊圈？\n\n退出前请确认授权影响\n\n退出后，数据报表生成器将失去最后一个有效来源，不能再启动。其他圈子的应用和技能不受影响。\n\n取消\n确认退出"
+  },
+  {
+    "key": "year",
+    "viewport": 800,
+    "cancel_preserves": true,
+    "confirm_removes_only_this_circle": true,
+    "search_does_not_restore": true,
+    "report_visibility_after_exit": true,
+    "reset_restores": true,
+    "dialog_text": "退出星河年度圈？\n\n退出前请确认授权影响\n\n退出只撤销星河年度圈提供的授权。其他圈子的有效来源不受影响；退出不代表申请退款或已退款。\n\n取消\n确认退出"
+  }
+]

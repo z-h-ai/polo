@@ -76,6 +76,7 @@ const themeContextStub = {
 mock.module('@/context/ThemeContext', () => ({
   ThemeProvider: ({ children }: { children?: unknown }) => children ?? null,
   useTheme: () => themeContextStub,
+  useOptionalTheme: () => themeContextStub,
 }))
 mock.module('@/hooks/useTheme', () => ({
   useTheme: () => ({
@@ -269,6 +270,23 @@ const electronApiExplicit: Record<string, unknown> = {
   adminAcquirePhoneAuthChallenge: async () => ({}),
   debugLog: () => {},
   unwatchSessionFiles: async () => {},
+
+  // POO-100 (C9) fixture declaration: the home branch now mounts the C2
+  // member-circle resource provider, whose trusted bridge access is
+  // `window.electronAPI.memberCircles`. This fixture does not exercise
+  // circle reads; the deterministic empty-receipt bridge keeps the
+  // fail-closed fixture complete without changing what it verifies.
+  memberCircles: {
+    list: async () => ({ success: true, circles: [] }),
+    listMemberships: async () => ({ success: true, memberships: [] }),
+    previewRenewal: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    leave: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getOrder: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getCheckoutResult: async () => ({ success: false, errorCode: 'not_found', message: 'fixture' }),
+    getUpdates: async () => ({ success: true, updates: { availability: 'upstream_pending', contractGap: 'G2' } }),
+    getProfile: async () => ({ success: true, profile: { availability: 'upstream_pending', contractGap: 'G3' } }),
+    getSupport: async () => ({ success: true, support: { availability: 'upstream_pending', contractGap: 'G4' } }),
+  },
 }
 
 // Known event subscriptions: each returns its unsubscribe function.
@@ -359,8 +377,11 @@ window.addEventListener('polo:product-space-changed', (event) => {
 let openPreviewProbePath: string | null = null
 mock.module('@/components/app-shell/TopBar', () => ({
   TopBar: () => {
-    const { useAppShellContext } = require('../context/AppShellContext') as typeof import('../context/AppShellContext')
-    const { onOpenFile } = useAppShellContext()
+    // The bar now renders from TabShell (above AppShellProvider in the tree),
+    // matching the production TopBar's OPTIONAL AppShellContext read: probes
+    // no-op until the AppShell provider mounts in the wide workbench.
+    const { useOptionalAppShellContext } = require('../context/AppShellContext') as typeof import('../context/AppShellContext')
+    const onOpenFile = useOptionalAppShellContext()?.onOpenFile
     const productSpace = useProductSpaceContext()
     return createElement(
       'div',
@@ -368,7 +389,7 @@ mock.module('@/components/app-shell/TopBar', () => ({
       createElement('button', {
         'data-testid': 'r35-topbar-probe',
         onClick: () => {
-          if (openPreviewProbePath) onOpenFile(openPreviewProbePath)
+          if (openPreviewProbePath) onOpenFile?.(openPreviewProbePath)
         },
       }),
       createElement('button', {

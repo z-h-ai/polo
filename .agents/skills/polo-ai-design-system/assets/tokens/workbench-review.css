@@ -1,0 +1,68 @@
+/* b82fa1e5 visual baseline, restored 2026-10-03.
+   MVP base styles remain byte-identical to that commit's first style block.
+   Assistant source styles remain the b82fa1e5 component foundation.
+   This file only adapts newer features and the confirmed navigation/header delta. */
+:root{--wb-line:var(--border)}
+.workbench-bar,.polo-host-bar{border-bottom-color:transparent}
+.workbench-bar[data-scrolled="true"],.polo-host-bar[data-scrolled="true"]{border-bottom-color:var(--border)}
+.polo-host-bar{background:var(--background);color:var(--foreground)}
+.polo-host-tab{background:var(--background);box-shadow:var(--shadow-minimal)}
+
+/* Newer discovery controls reuse baseline field, spacing and accent tokens. */
+.r14-home .home-hero{display:flex;justify-content:space-between;align-items:center;gap:28px;margin-bottom:32px}
+.r14-home .home-hero .eyebrow{display:none}
+.r14-toolbar{display:flex;align-items:end;flex-wrap:wrap;gap:16px;margin-bottom:24px}
+.r14-toolbar label{display:grid;gap:6px;font-size:12px;color:var(--fg-60)}
+.r14-toolbar .r14-search{flex:1;min-width:220px}
+.r14-toolbar input,.r14-toolbar select,.r14-settings-form select{min-height:38px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--foreground);font:inherit}
+.r14-app-grid{align-items:stretch}
+.assistant-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-left:auto}
+.home-circle-entry{flex-shrink:0;white-space:nowrap}
+.home-content-entry{display:flex;justify-content:flex-end;margin-bottom:16px}
+.r14-empty{padding:40px;text-align:center}
+.r14-tabs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 24px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.r14-tabs .button.selected{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+.r14-update{padding:22px 0;border-bottom:1px solid var(--border)}
+.r14-setting-note{padding:14px 18px;border-radius:var(--radius-md);background:var(--surface);line-height:1.7}
+.r14-settings-form{display:grid;gap:22px;max-width:620px}
+.r14-settings-form label{display:grid;gap:8px}
+.r14-settings-form button{justify-self:start}
+[hidden]{display:none!important}
+
+/* Existing new skill/preference layouts retain functionality with source colors. */
+.polo-skill-manager{max-width:1260px;margin:auto;padding:28px 36px 16px}
+.polo-resource-heading{padding-top:0}
+.polo-resource-tools{display:flex;align-items:flex-end;gap:12px}
+.polo-resource-tools>.mvp-action{white-space:nowrap;min-height:38px}
+.polo-skill-filters button.selected,.polo-preferences nav button.selected{background:var(--accent-soft);color:var(--accent)}
+.polo-skill-results,.polo-skill-detail{background:var(--background);border-color:var(--border);box-shadow:var(--shadow-minimal);border-radius:var(--radius-lg)}
+.polo-skill-summary.selected{background:var(--fg-2)}
+.polo-preferences{max-width:1260px;margin:auto}
+.polo-preferences label:has(input[type=checkbox]){display:flex;align-items:center;gap:10px}
+.polo-preferences input[type=checkbox]{width:16px;height:16px;flex:0 0 16px;margin:0;accent-color:var(--accent)}
+.polo-preferences-grid form>[role=status]:empty{display:none}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button:disabled{cursor:not-allowed;opacity:.5}
+@media(max-width:1050px){.polo-skill-manager{padding:24px}}
+@media(max-width:850px){.polo-skill-manager{padding:18px}.r14-home .home-hero{gap:16px}.polo-resource-tools{gap:8px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Spec 13.11: calm circle rows, shared application cards and one canvas. */
+body:not([data-theme=dark]) .mvp-root{--background:#fbfbfa;background:var(--background)}
+body:not([data-theme=dark]) .polo-assistant-body .source-content-panel{background:var(--background)}
+.circle-list .circle-card{display:grid;grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:20px;padding:24px;border-radius:20px}
+.circle-list .circle-card-copy{display:block;min-width:0}.circle-list .circle-card-title{display:block;margin:0}
+.circle-list .circle-card h2{font-size:18px;line-height:1.45;font-weight:650;margin:0 0 4px;letter-spacing:-.02em}
+.circle-list .circle-avatar{width:52px;height:52px;flex-basis:52px;border-radius:16px;font-size:20px}
+.circle-list [data-circle-kind=growth] .circle-avatar{background:color-mix(in srgb,var(--success) 10%,var(--background));color:var(--success)}
+.circle-list [data-circle-kind=data] .circle-avatar{background:var(--fg-5);color:var(--fg-60)}
+.circle-list [data-circle-kind=annual] .circle-avatar{background:color-mix(in srgb,var(--accent) 13%,var(--background));color:var(--accent)}
+.circle-list .circle-creator{font-size:12px;color:var(--fg-50);margin:0 0 10px}
+.circle-list .circle-update{font-size:13px;line-height:1.6;color:var(--fg-70);margin:8px 0 12px}
+.circle-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;font-size:12px;line-height:1.6;color:var(--fg-50)}
+.circle-term{color:var(--fg-70)}.circle-count{padding-left:16px;border-left:1px solid var(--border)}
+.circle-list .circle-open{align-self:center;white-space:nowrap;border-color:transparent;background:transparent;color:var(--accent);font-size:13px}
+.circle-list .circle-open:hover{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.circle-app-grid{margin-top:18px}.circle-app-grid .product-card{min-width:0}
+.annual-subscription{max-width:760px}.annual-subscription .state-facts{margin:20px 0}
+@media(max-width:850px){.circle-list .circle-card{grid-template-columns:44px minmax(0,1fr) auto;gap:14px;padding:20px}.circle-list .circle-avatar{width:44px;height:44px;font-size:18px;border-radius:14px}.circle-list .circle-card h2{font-size:17px}}

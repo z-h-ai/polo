@@ -1,0 +1,75 @@
+{
+  "kind": "semantic",
+  "revision": "poo70-workbench-r15-closure",
+  "passed": false,
+  "status": "failed",
+  "verdict": "revise",
+  "reviewer_context": {
+    "agent": "zcode-subagent-journey-final-r15c",
+    "perspective": "端到端用户旅程与业务义务"
+  },
+  "independence": {
+    "allowed_inputs_only": true,
+    "prior_reports_read": false,
+    "author_scripts_read": false
+  },
+  "inputs": [
+    {"path": "docs/client-journey-review/spec.md", "sha256": "44b0f01e3b710204266a85922b6615d15a4e2f233dfac921f4709fbf25c6fae6"},
+    {"path": "docs/mvp-complete-flow-hifi/sources/closure-r13-inputs.json", "sha256": "c3034f48e94a64f04a4cb7937c5aff27c1dcaa2aa884cd45aefc4fa48b30965e"},
+    {"path": "docs/mvp-complete-flow-hifi/prototype-manifest.json", "sha256": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47"}
+  ],
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47",
+    "docs/mvp-complete-flow-hifi/prototype.html": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4",
+    "docs/mvp-complete-flow-hifi/review.html": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3",
+    "design-demos/polo-client-source-baseline/prototype.html": "0ab2e73a760d4c4fa4f3d584267e58165404e36660744d63326db05e10d77eb8"
+  },
+  "input_stability": {"stable": true, "note": "start/end 哈希一致（hashes-start.txt 与 hashes-end.txt 逐字节相同）"},
+  "findings": [
+    {
+      "id": "F-01",
+      "scene": "A-enterprise-skills / A-enterprise-discover / A-enterprise-acquire / A-enterprise-enabledpending / A-enterprise-installing / A-enterprise-installfailed / A-enterprise-installed / A-enterprise-enabled / A-enterprise-detail / A-enterprise-updated / A-enterprise-updatefailed / A-enterprise-remove / A-enterprise-uninstalled / A-enterprise-denied / A-enterprise-restricted / A-enterprise-reauthorized / A-enterprise-restricted-remove / A-enterprise-restricted-uninstalled 及 A-enterprise-legacy-local|detail|remove|uninstalled-{100,110}-{0,1}-{0,1}（共 51 个助手面场景）",
+      "element": "技能详情面板（选中「销售周报」时的用途、版本更新说明与说明字段）",
+      "rule": "样本绑定/对象一致性：详情的用途、更新说明与说明必须跟随所选作品；技能详情展示所选技能自己的用途与版本更新（quality-report.md 'Sample-bound operation' probe；SoT §13.6 详情展示用途/来源/版本/更新说明；§13.13 技能右侧详情只保留一处名称和用途；§9 PC-F04 同名可辨、详情真实）",
+      "source": "docs/client-journey-review/spec.md §13.6、§13.13、§9（PC-F04/S-013 验收行）；.agents/skills/product-ui-prototype/references/quality-report.md semantic probes 表",
+      "recommendation": "为「销售周报」（晨星科技 · 企业共享）提供其自身的用途、版本更新说明与描述（例如汇总销售数据生成周报），或让详情面板按选中技能的数据字段渲染；修复范围覆盖上列全部 51 个助手面场景（含 legacy 版本变体），修复后需回验原场景及相邻的个人面「资料研究」场景以防过度修正。",
+      "status": "pending repair",
+      "resolution_evidence": []
+    }
+  ],
+  "scope": "对 poo70-workbench-r15-closure 双表面 424 场景 × 3 声明视口做全量渲染普查，并从自然起点以真实点击走完 28 条风险导向旅程链（Golden Path、首次使用、重复使用、中断恢复、失败、权限拒绝），对照 SoT 导出的 23 项业务义务（11 PC-F + 4 PC-N + 8 C-R）逐项核对。",
+  "observed": {
+    "scenes_rendered": 424,
+    "scene_viewport_observations": 1272,
+    "real_click_actions": 71,
+    "page_errors": 0,
+    "external_requests": 0
+  },
+  "checks": [
+    {"id": "PC-F01", "status": "passed", "observed": "CH-01 实点：密码登录→我的空间准备→首次首页；登录取消/准备失败/会话过期场景分别给出可重试与幂等说明，无第二个空间承诺。"},
+    {"id": "PC-F02", "status": "passed", "observed": "CH-01/02/04：首页直接打开应用、透明准备+文件访问权限（允许/不允许）、关闭三选项（后台继续/停止并关闭/取消）、终止失败保留标签可重试（P-M04-TERM-FAILED）。"},
+    {"id": "PC-F03", "status": "passed", "observed": "CH-12/13/14/27：分享网页免费加入→桌面主动核对（不重复确认）；退出单来源后同作品仍可打开、取消退出不变更资格；手动续费→浏览器→返回按原订单核对（SUB-20261002-0183，2026-11-02 至 2026-12-02 日历月顺延）；到期走续费恢复而非重新加入。"},
+    {"id": "PC-F04", "status": "finding", "observed": "授权/本人启用/设备准备三态分开（来源授权 有效 / 本人启用 未启用 / 本机准备 未安装）；提问-回答-暂不回答正确；但 51 个企业面技能场景详情把「销售周报」的名字绑定到「资料研究」的用途/更新说明/说明（F-01）。"},
+    {"id": "PC-F05", "status": "passed", "observed": "CH-21：浏览器邀请→桌面核对→主动进入企业；待审批不列为有效空间（切换器仅列我的空间+晨星科技）；错账号/刷新失败/冷启动/未安装各有如实状态与恢复入口。"},
+    {"id": "PC-F06", "status": "passed", "observed": "CH-05 实点单次确认后自动播放 停止中(0/3→3 项实际任务)→目标加载→进入个人首页，进度页无成功/失败选择按钮；CH-06 确认前取消留在原空间；CH-07 失败后取消不复活已停项、重试失败项可续跑。"},
+    {"id": "PC-F07", "status": "passed", "observed": "企业首页无「我的圈子」入口；企业空目录如实提示尚未分发并引导联系管理员；个人/企业同名实例互不覆盖（详情各自版本与来源）。"},
+    {"id": "PC-F08", "status": "passed", "observed": "运行中被移除即停企业任务且回个人（重新打开不自动执行）；目标无权不进入；作品撤下/最后来源失效/版本暂停分别给出原因与恢复入口；治理限制按 Member/Manager/Owner 分角色（Member 引导联系、Owner 到浏览器处理）。"},
+    {"id": "PC-F09", "status": "passed", "observed": "无资格菜单无企业管理/创作者工作台入口；有资格菜单含企业管理后台交接并返回刷新资格；创作者资格失效仅保留责任只读入口。"},
+    {"id": "PC-F10", "status": "passed", "observed": "离线首页全部「打开」按钮 disabled（实点被拒），仅可查看已保存内容并提示联网重验；运行中断网显示等待恢复；缓存目录不当授权。"},
+    {"id": "PC-F11", "status": "passed", "observed": "CH-24：稍后处理/下载失败均保持业务阻断，仅升级检查通过后提供进入入口（进入我的空间）。"},
+    {"id": "PC-N01", "status": "passed", "observed": "首次使用首页直接展示完整目录（助手固定第一、无常用配置）；真空目录与加载失败分别呈现（C-R02），无别空间缓存填充。"},
+    {"id": "PC-N02", "status": "passed", "observed": "重开先重验身份与空间、任务状态逐项核对；已撤权应用标「已失去授权」不可打开，仍授权应用可重开；无自动重发承诺。"},
+    {"id": "PC-N03", "status": "passed", "observed": "发送前阻断保留输入框与「去充值/已完成，查询结果」；生成中积分中断保留已生成部分且仅消息末尾提示（DOM 证实 role=status 在转写列末尾、输入框无重复提示）；手动停止显示「已停止生成」不提积分；每次点击一次查询，未到账/查询失败保持阻断；到账仅解除阻断不自动发送。"},
+    {"id": "PC-N04", "status": "passed", "observed": "提问等待：提交回答在输入前 disabled，回答一次形成一条消息在原会话续答；暂不回答显示「已暂不回答」不续答；重开恢复保留问题状态。"},
+    {"id": "C-R01", "status": "passed", "observed": "登录取消留登录入口（已取消登录，可随时重新登录）；会话过期重新登录承接且不自动执行原动作；账号受限走管理员路径。"},
+    {"id": "C-R02", "status": "passed", "observed": "加载失败（应用列表暂时无法加载+重试）、真实零条（尚未获得其他应用+加入指引）、权限受限（已失去授权）分别展示，互不混用。"},
+    {"id": "C-R03", "status": "passed", "observed": "CH-05 切换完成后目标个人首页不含任何企业内容（报价整理/合同审查/晨星科技均不出现）；确认页标注「切换只影响这台设备」「当前仍在晨星科技」。"},
+    {"id": "C-R04", "status": "passed", "observed": "关闭对话框三分支可取消；确认前/停止中/失败后取消均留原空间且不复活已停项；浏览器充值取消回到阻断页，已完成动作不被回滚。"},
+    {"id": "C-R05", "status": "passed", "observed": "重开恢复先核对任务状态再恢复对话与页面；不把崩溃/未知写成成功；无自动重发旧任务。"},
+    {"id": "C-R06", "status": "passed", "observed": "OS 权限被拒场景给出设置路径（系统设置→隐私与安全性→文件与文件夹）、不反复弹窗、用户主动「重试请求」；拒绝/稍后再说不启动依赖动作（文件类动作的 App 内效果按 D-PC-05 归 FDE/App，超出容器原型范围）。"},
+    {"id": "C-R07", "status": "passed", "observed": "CH-20 实点：导出仅允许内容（数据源连接、凭证、工具授权与隐藏上下文不导出）；导入以合法 JSON 触发预览「将导入 1 条消息，建立独立新对话；不会运行原任务或继承源空间权限」，预览内容跟随所选第二份文件；文件缺失给说明与重选。"},
+    {"id": "C-R08", "status": "passed", "observed": "圈子返回页明示「返回桌面尚未证明资格已经刷新」需主动核对；企业返回核对可进入后主动进入；充值返回仅查询一次；错账号/待审批/未安装各有交接与恢复。"},
+    {"id": "P-LEAK", "status": "passed", "observed": "1272 条可见文本扫描：0 处场景 ID/任务卡号/内部英文术语/评审壳边界文案/旧常用配置词/圈主审批词/英文 Skill 泄漏；「自动扣款」仅以「无 · 到期前需手动续费」的否定形式出现。"},
+    {"id": "P-NET", "status": "passed", "observed": "普查与旅程全程 0 次 pageerror、0 个仓库外网络请求（助手面 iframe 加载的 design-demos 基线文件为 manifest.surfaces 声明的仓库内 file:// 资源）。"}
+  ]
+}

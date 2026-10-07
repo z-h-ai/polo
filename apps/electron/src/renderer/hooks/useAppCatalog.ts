@@ -420,6 +420,10 @@ function mapProductSpaceCatalogToCacheEntry(
       // It must never be inferred from fixture-only Catalog fields.
       deliveryMode: 'resolve_launch',
       permissions: entry.permissions,
+      // POO-70 H1: this is the useAppCatalog INDEX projection (position in
+      // the authoritative Catalog entries array), NOT a server DTO field.
+      // Directory ordering must default to authoritative Catalog entry
+      // order; any other ordering may only use fields that actually exist.
       sortOrder: index,
       availability: effectiveAvailability,
       // RAW authoritative sources + availability, sealed into operation
@@ -453,6 +457,15 @@ function mapProductSpaceCatalogToCacheEntry(
     withdrawnApps,
   }
 }
+
+/**
+ * The full live surface of one `useAppCatalog` instance. POO-70 H1's
+ * MemberCatalogProvider holds EXACTLY ONE instance per ProductSpace context;
+ * this type is the injection contract for the H2 extraction transition
+ * (HomePage may inject its existing instance instead of the provider
+ * creating a second one).
+ */
+export type AppCatalogInstance = ReturnType<typeof useAppCatalog>
 
 export function useAppCatalog() {
   const productSpace = useOptionalProductSpaceContext()

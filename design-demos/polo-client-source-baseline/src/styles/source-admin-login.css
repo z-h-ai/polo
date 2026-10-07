@@ -1,0 +1,44 @@
+/* Translated from AdminLoginStep.tsx + OnboardingWizard.tsx + input.tsx.
+   The wizard page is p-4 sm:p-8, so the review viewport (>=640px) gets 30px
+   (p-8 = 2rem = 30px at the 15px root). Root font-size is 15px. */
+.source-admin-login{width:100%;height:100%;overflow-y:auto;background:var(--fg-2);color:var(--foreground)}
+.source-admin-login__titlebar{position:fixed;inset:0 0 auto;height:50px;z-index:40}
+.source-admin-login main{display:flex;min-height:100%;align-items:center;justify-content:center;padding:30px}
+/* Card: max-w-96 = 24rem = 360px, p-7 = 26.25px, rounded-[20px] is exact. */
+.source-admin-login__card{width:100%;max-width:360px;padding:26.25px;border:1px solid color-mix(in srgb,#fff 20%,transparent);border-radius:20px;background:color-mix(in srgb,var(--background) 72%,transparent);box-shadow:var(--shadow-modal-small);backdrop-filter:blur(24px)}
+.source-admin-login__identity{display:flex;flex-direction:column;align-items:center;text-align:center}
+/* Logo mark: shadow-tinted with --shadow-color: var(--accent-rgb)
+   (AdminLoginStep.tsx:70-75 + index.css .shadow-tinted). size-12 = 45px,
+   rounded-2xl = 15px, symbol size-7 = 26.25px. */
+.source-admin-login__mark{display:flex;width:45px;height:45px;align-items:center;justify-content:center;border-radius:15px;background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 58%,var(--foreground)));color:var(--background);--shadow-color:var(--accent-rgb);box-shadow:var(--shadow-tinted)}
+.source-admin-login__mark svg{width:26.25px;height:26.25px}
+/* h1: mt-5 text-xl = 18.75px/1.4 semibold; p: mt-2 text-sm. */
+.source-admin-login h1{margin:18.75px 0 0;font-size:18.75px;line-height:1.4;font-weight:600}
+.source-admin-login__identity p{margin:7.5px 0 0;color:var(--fg-50);font-size:13.125px;line-height:1.4286}
+/* Form rhythm: mt-6 space-y-4 groups (22.5px / 15px), space-y-2 inside
+   groups (7.5px). */
+.source-admin-login form{display:flex;flex-direction:column;gap:15px;margin-top:22.5px}
+.source-admin-login label{color:color-mix(in srgb,var(--foreground) 70%,transparent);font-size:11.25px;line-height:1;font-weight:500}
+.source-admin-login__field{display:grid;gap:7.5px}
+/* Input: h-11 = 41.25px px-3 py-1 rounded-[10px] exact, bg-foreground-2,
+   md:text-sm = 13.125px, ring 1px fg/30 on focus. */
+.source-admin-login input{width:100%;height:41.25px;box-sizing:border-box;padding:3.75px 11.25px;border:1px solid color-mix(in srgb,var(--foreground) 15%,transparent);border-radius:10px;background:var(--fg-2);color:var(--foreground);font-size:13.125px}
+.source-admin-login input:focus{outline:none;box-shadow:0 0 0 1px color-mix(in srgb,var(--foreground) 30%,transparent)}
+.source-admin-login input::placeholder{color:var(--fg-50)}
+/* Eye toggle: right-1.5 (5.625px) size-8 (30px) rounded-[8px] exact;
+   input pr-11 = 41.25px. */
+.source-admin-login__password{position:relative}
+.source-admin-login__password input{padding-right:41.25px}
+.source-admin-login__password button{position:absolute;top:50%;right:5.625px;display:flex;width:30px;height:30px;align-items:center;justify-content:center;transform:translateY(-50%);border:0;border-radius:8px;background:transparent;color:var(--fg-50)}
+.source-admin-login__password button:hover{background:color-mix(in srgb,var(--foreground) 5%,transparent);color:var(--foreground)}
+.source-admin-login__password button svg{width:15px;height:15px}
+/* Error alert: mt-6 px-3 py-2.5 rounded-[10px] border destructive/20 bg
+   destructive/10 text-sm with a size-4 (15px) AlertTriangle at mt-0.5
+   (AdminLoginStep.tsx:87-102). */
+.source-admin-login__error{display:flex;align-items:flex-start;gap:7.5px;margin-top:0;padding:9.375px 11.25px;border:1px solid color-mix(in srgb,var(--destructive) 20%,transparent);border-radius:10px;background:color-mix(in srgb,var(--destructive) 10%,transparent);color:var(--destructive);font-size:13.125px;line-height:1.4286;text-align:left}
+.source-admin-login__error svg{flex:none;margin-top:1.875px}
+/* Submit: h-11 rounded-[10px] bg-accent text-background with the button
+   base gap-2 and text-sm font-medium; hover accent/90. */
+.source-admin-login form>button[type=submit]{height:41.25px;margin-top:0;border:0;border-radius:10px;background:var(--accent);color:var(--background);font-size:13.125px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7.5px}
+.source-admin-login form>button[type=submit]:hover{background:color-mix(in srgb,var(--accent) 90%,transparent)}
+.source-admin-login form>button:disabled{opacity:.5}

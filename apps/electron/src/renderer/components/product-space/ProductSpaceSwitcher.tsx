@@ -1,9 +1,10 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { useClientWorkbenchStyle, clientWorkbenchMenuClassName } from '@/components/ui/client-workbench'
+import { Check, Building2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
+  DropdownMenuSub,
+  StyledDropdownMenuSubTrigger,
+  StyledDropdownMenuSubContent,
   StyledDropdownMenuItem,
 } from '@/components/ui/styled-dropdown'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
@@ -23,37 +24,25 @@ function spaceRoleKey(kind: 'personal' | 'enterprise', role: string): string {
 
 export function ProductSpaceSwitcher() {
   const { t } = useTranslation()
+  const workbenchStyle = useClientWorkbenchStyle()
   const space = useOptionalProductSpaceContext()
   if (!space) return null
 
   const active = space.activeProductSpace
   if (!active) return null
 
-  const activeRestricted = active.kind === 'enterprise' && active.accessMode === 'read_only'
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-testid="product-space-switcher"
-          aria-label={t('productSpace.switcher.label')}
-          className="titlebar-no-drag flex h-[36px] min-w-[130px] max-w-[190px] items-center gap-[8px] rounded-[9px] border border-border bg-background px-[10px] text-left hover:border-accent/40 aria-expanded:border-accent/40 focus-visible:[outline:3px_solid_color-mix(in_srgb,var(--accent)_24%,transparent)] focus-visible:[outline-offset:2px] max-md:min-w-0 max-md:max-w-[110px]"
-        >
-          <span className="size-2 shrink-0 rounded-full bg-accent" />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-            {active.name}
-          </span>
-          {activeRestricted ? (
-            <span className="shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground">
-              {t('productSpace.restricted')}
-            </span>
-          ) : null}
-          <ChevronDown className="size-[13px] shrink-0 text-muted-foreground" />
-        </button>
-      </DropdownMenuTrigger>
-      <StyledDropdownMenuContent align="start" minWidth="min-w-56">
-        <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
+    <DropdownMenuSub>
+      <StyledDropdownMenuSubTrigger data-testid="product-space-switcher">
+        <Building2 className="size-3.5" />
+        <span className="flex-1">{t('productSpace.switcher.label')}</span>
+      </StyledDropdownMenuSubTrigger>
+      <StyledDropdownMenuSubContent
+        style={workbenchStyle}
+        className={clientWorkbenchMenuClassName + " w-[min(306px,calc(100vw-24px))]"}
+        minWidth="min-w-0"
+      >
+        <div className="px-[9px] pb-[5px] pt-[8px] text-[11px] font-medium text-foreground-40">
           {t('productSpace.switcher.menuLabel')}
         </div>
         {space.productSpaces.map(item => {
@@ -65,13 +54,16 @@ export function ProductSpaceSwitcher() {
               data-testid="product-space-item"
               data-space-kind={item.kind}
               data-space-name={item.name}
-              disabled={item.id === space.activeProductSpaceId}
+              data-active={selected}
+              data-restricted={restricted}
+              className={selected ? "bg-foreground-5" : undefined}
+              disabled={selected}
               onClick={() => space.onSelectProductSpace(item.id)}
             >
               <span
                 className={cn(
-                  'flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-primary-foreground',
-                  item.kind === 'personal' ? 'bg-success' : 'bg-accent',
+                  'flex size-[26px] shrink-0 items-center justify-center rounded-[6px] text-[11px] font-semibold text-accent',
+                  'bg-[var(--accent-soft)]',
                 )}
               >
                 {spaceInitial(item.name, item.kind)}
@@ -87,11 +79,27 @@ export function ProductSpaceSwitcher() {
               <span className="text-[11px] text-muted-foreground">
                 {t(spaceRoleKey(item.kind, item.kind === 'enterprise' ? item.role : 'personal'))}
               </span>
-              {selected ? <Check className="size-3.5" /> : null}
+              {selected ? <Check className="size-3.5 text-success" /> : null}
             </StyledDropdownMenuItem>
           )
         })}
-      </StyledDropdownMenuContent>
-    </DropdownMenu>
+      </StyledDropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
+
+/** D-PC-10: the header displays identity; account-menu owns switching. */
+export function CurrentProductSpaceLabel() {
+  const { t } = useTranslation()
+  const active = useOptionalProductSpaceContext()?.activeProductSpace
+  if (!active) return null
+  return (
+    <div data-testid="product-space-current-label" className="flex h-[36px] max-w-[190px] items-center gap-[8px] px-[10px] [@media(max-width:760px)]:max-w-[110px]">
+      <span className="size-2 shrink-0 rounded-full bg-accent" />
+      <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{active.name}</span>
+      {active.kind === 'enterprise' && active.accessMode === 'read_only' ? (
+        <span className="shrink-0 rounded bg-foreground-10 px-1 text-[10px] text-muted-foreground">{t('productSpace.restricted')}</span>
+      ) : null}
+    </div>
   )
 }

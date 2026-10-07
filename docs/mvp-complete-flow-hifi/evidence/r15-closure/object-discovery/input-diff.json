@@ -1,0 +1,42 @@
+{
+  "docs/mvp-complete-flow-hifi/prototype.html": {
+    "start": "fac132a4d5d4dc5d5406e471e3b8676e459b680779a324715be012aaadf9ffb4",
+    "end": "686e7a4cd560807c4efa1e9b9f60c34434dec8db72a93d73d26e4b7f38a3b6cf"
+  },
+  "docs/mvp-complete-flow-hifi/review.html": {
+    "start": "dcc2ed425e9ed1712b29b39d539a86ebac90063831887f3350b7a2df927b6283",
+    "end": "5398e85e770e557007c014ffd1e39b89fa3d500bf1c71f6314642fe1331a5f7c"
+  },
+  "docs/mvp-complete-flow-hifi/prototype-manifest.json": {
+    "start": "3942ee914371cb4fd13af5d2cb0650434a418b22b308d686a4c4295dcfa442be",
+    "end": "d1e6d01fa2d124e5f5e316623359ee17a3e88f9284d8bb88e7fa95bb34ffce55"
+  },
+  "design-demos/polo-client-source-baseline/prototype.html": {
+    "start": "ea73e7e104fa53c749c156ae4f0cd0e246e669e5850598327f00862917bd99a4",
+    "end": "f84fccd277640a9879872d0085fe69104268cf3d67c878614308a152d40e6f8e"
+  },
+  "design-demos/polo-client-source-baseline/src/mvp/runtime.js": {
+    "start": "f46bfc258dffe0045283e65cdc79bd1c3cd81378263aa87b225df9d5d89e470b",
+    "end": "329e7cbc738184801c7d10cd6a19974354757e1c250e0db3993991355665a81c"
+  },
+  "design-demos/polo-client-source-baseline/src/mvp/scenes.mjs": {
+    "start": "479dd6dabb25f822525496d83ef662b6f5f4c3a1e31338972a29e1b26389479b",
+    "end": "f3eb402eaf0199d2be8cd78bce11c5d8b46ffdf566f6a1c54b734fc68263d4e5"
+  },
+  "design-demos/polo-client-source-baseline/src/mvp/Assistant.jsx": {
+    "start": "19a8e802c94cfb5691c16f3fe8dd70c7f67c5db12bbb0203e142a8d7c1dc7247",
+    "end": "1311fed7994d409bac7adbb0f15134763667b857ddd271a7aa9e58074d98f853"
+  },
+  ".agents/skills/polo-ai-design-system/assets/components/space-switch-progress.js": {
+    "start": "86c2fb2df4e421e951f3964ec5c200122454c37596401584c6dd0056242a28b8",
+    "end": "01b58891536e57cd01c4131379886040d74305f6b86959ddd89792b0bf658be4"
+  },
+  ".agents/skills/polo-ai-design-system/assets/components/space-switch-sequence.js": {
+    "start": "f26b08287a8961e64f7bc6aeb8fc4c91d1bab5dd53955be395b61f48d343cc47",
+    "end": "a5de1ede777f48032a3d945983bd987c28e42a6cd1f2efd5852e1f8c35a7ab73"
+  },
+  ".agents/skills/polo-ai-design-system/assets/components/circle-membership-feedback.js": {
+    "start": "e877e39e24aa5c68e72f564d9a649cd88088dfc27a818d37526818ee9d1af75a",
+    "end": "c3751064179082f915e79175fda106aeb0f539532307560879f4f6f06f9b1804"
+  }
+}

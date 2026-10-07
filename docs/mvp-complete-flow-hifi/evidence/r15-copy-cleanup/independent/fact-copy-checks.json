@@ -1,0 +1,203 @@
+[
+  {
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": "1440x900",
+    "checks": {
+      "short_section_headings": true,
+      "install_explanation_once": true,
+      "removed_duplicate_subheading": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": "1440x900",
+    "checks": {
+      "short_section_headings": true,
+      "install_explanation_once": true,
+      "removed_duplicate_subheading": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "viewport": "1440x900",
+    "checks": {
+      "free_longterm_once": true,
+      "exit_control_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "viewport": "1440x900",
+    "checks": {
+      "monthly_price_once": true,
+      "expiry_once": true,
+      "source_exit_scope_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "viewport": "1440x900",
+    "checks": {
+      "free_longterm_once": true,
+      "exit_control_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-YEAR-RESULT",
+    "viewport": "1440x900",
+    "checks": {
+      "annual_cycle_once": true,
+      "expiry_once": true,
+      "next_period_purchased": true,
+      "advance_limit_retained": true
+    }
+  },
+  {
+    "scene": "P-M10-SETTINGS",
+    "viewport": "1440x900",
+    "checks": {
+      "near_synonym_subtitles_removed": true
+    }
+  },
+  {
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "viewport": "1440x900",
+    "checks": {
+      "near_synonym_subtitles_removed": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": "1024x768",
+    "checks": {
+      "short_section_headings": true,
+      "install_explanation_once": true,
+      "removed_duplicate_subheading": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": "1024x768",
+    "checks": {
+      "short_section_headings": true,
+      "install_explanation_once": true,
+      "removed_duplicate_subheading": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "viewport": "1024x768",
+    "checks": {
+      "free_longterm_once": true,
+      "exit_control_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "viewport": "1024x768",
+    "checks": {
+      "monthly_price_once": true,
+      "expiry_once": true,
+      "source_exit_scope_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "viewport": "1024x768",
+    "checks": {
+      "free_longterm_once": true,
+      "exit_control_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-YEAR-RESULT",
+    "viewport": "1024x768",
+    "checks": {
+      "annual_cycle_once": true,
+      "expiry_once": true,
+      "next_period_purchased": true,
+      "advance_limit_retained": true
+    }
+  },
+  {
+    "scene": "P-M10-SETTINGS",
+    "viewport": "1024x768",
+    "checks": {
+      "near_synonym_subtitles_removed": true
+    }
+  },
+  {
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "viewport": "1024x768",
+    "checks": {
+      "near_synonym_subtitles_removed": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS",
+    "viewport": "800x600",
+    "checks": {
+      "short_section_headings": true,
+      "install_explanation_once": true,
+      "removed_duplicate_subheading": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID",
+    "viewport": "800x600",
+    "checks": {
+      "short_section_headings": true,
+      "install_explanation_once": true,
+      "removed_duplicate_subheading": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-FOCUS-SUBSCRIPTION",
+    "viewport": "800x600",
+    "checks": {
+      "free_longterm_once": true,
+      "exit_control_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-PAID-SUBSCRIPTION",
+    "viewport": "800x600",
+    "checks": {
+      "monthly_price_once": true,
+      "expiry_once": true,
+      "source_exit_scope_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-DETAIL-DATA-SUBSCRIPTION",
+    "viewport": "800x600",
+    "checks": {
+      "free_longterm_once": true,
+      "exit_control_retained": true
+    }
+  },
+  {
+    "scene": "P-M07-YEAR-RESULT",
+    "viewport": "800x600",
+    "checks": {
+      "annual_cycle_once": true,
+      "expiry_once": true,
+      "next_period_purchased": true,
+      "advance_limit_retained": true
+    }
+  },
+  {
+    "scene": "P-M10-SETTINGS",
+    "viewport": "800x600",
+    "checks": {
+      "near_synonym_subtitles_removed": true
+    }
+  },
+  {
+    "scene": "P-M10-SETTINGS-DEVICE",
+    "viewport": "800x600",
+    "checks": {
+      "near_synonym_subtitles_removed": true
+    }
+  }
+]

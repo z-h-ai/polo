@@ -1,0 +1,11 @@
+{
+  "run_viewports": [
+    "desktop-1024x768",
+    "desktop-800x600"
+  ],
+  "observations_this_run": 78,
+  "resumed_already_done": 770,
+  "page_errors": [],
+  "external_requests": [],
+  "request_count": 3
+}

@@ -304,6 +304,21 @@ client.onConnectionStateChanged((state) => {
   ipcRenderer.send(RPC_CHANNELS.deeplink.ACTION_RESULT, result)
 }
 
+// ── Circle web→desktop return bridge (POO-70 B1) ─────────────────────────────
+// Typed Main→preload→renderer surface for the pending circle-return
+// navigation candidate. LOCAL_ONLY: the candidate lives in the Electron Main
+// process next to the deep-link parser and the trusted account mirror, so it
+// is intentionally absent from a thin-client remote server — consumers must
+// treat a failing invoke as "no candidate" (fail closed).
+;(api as ElectronAPI).circleReturn = {
+  getPending: () => client.invoke(RPC_CHANNELS.circleReturn.GET_PENDING),
+  ack: candidateId => client.invoke(RPC_CHANNELS.circleReturn.ACK, candidateId),
+  cancel: candidateId => client.invoke(RPC_CHANNELS.circleReturn.CANCEL, candidateId),
+}
+;(api as ElectronAPI).onCircleReturnCandidate = callback => {
+  return client.on(RPC_CHANNELS.circleReturn.CANDIDATE, callback)
+}
+
 // Admin auth — explicit, testable preload surface for admin-managed deployments.
 // Plaintext loopback issuers are a build-time capability. The production
 // preload build pins this constant to false; only the local native E2E bundle

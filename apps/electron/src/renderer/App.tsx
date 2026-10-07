@@ -1,3 +1,5 @@
+import { ProductSpaceErrorScreen } from '@/components/product-space/ProductSpaceErrorScreen'
+import { ProductSpacePreparationScreen } from '@/components/product-space/ProductSpacePreparationScreen'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18n } from '@polo-ai/shared/i18n'
@@ -12,7 +14,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import type { AppShellContextType, ChatAccessIssue, ChatAccessStatus } from '@/context/AppShellContext'
+import { AppShellProvider, type AppShellContextType, type ChatAccessIssue, type ChatAccessStatus } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -23,6 +25,7 @@ import { ModalProvider } from '@/context/ModalContext'
 import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { useWindowCloseHandler } from '@/hooks/useWindowCloseHandler'
 import { useOnboarding } from '@/hooks/useOnboarding'
+import { useAdminAuthCompletion, type AdminAuthCompletionIntent } from '@/hooks/useAdminAuthCompletion'
 import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
@@ -79,6 +82,11 @@ import { toast } from 'sonner'
 import { TabShellProvider } from '@/context/TabShellContext'
 import { TabShell } from '@/components/tab-browser/TabShell'
 import {
+  ClientPageProvider,
+  clientPageScopeKey,
+} from '@/context/ClientPageContext'
+import { MemberCatalogProvider } from '@/context/MemberCatalogContext'
+import {
   ProductSpaceProvider,
   type ProductSpaceContextValue,
 } from '@/context/ProductSpaceContext'
@@ -106,6 +114,7 @@ import { onTargetProjectionFailure } from '@/lib/target-projection'
 type AppState =
   | 'loading'
   | 'onboarding'
+  | 'auth-preparing'
   | 'reauth'
   | 'contract-blocked'
   | 'space-error'
@@ -329,6 +338,7 @@ export default function App() {
 
   // App state: loading -> check auth -> onboarding or ready
   const [appState, setAppState] = useState<AppState>('loading')
+  const [startupRetryGeneration, setStartupRetryGeneration] = useState(0)
   const appStateRef = useRef<AppState>(appState)
   appStateRef.current = appState
   // Space scope mirror for callbacks that must read the active ProductSpace
@@ -413,6 +423,20 @@ export default function App() {
     currentAdminUserIdRef.current = nextAccountId
     setCurrentAdminUser(user)
   }, [])
+  /**
+   * A4 account-session epoch (P70-BOOT-03): bumped whenever the authenticated
+   * session ends or is invalidated (auth failure, logout, reset). Async flows
+   * capture it before their first await and re-check before publishing, so a
+   * late receipt computed for a superseded account can never land over newer
+   * state (same gate pattern as the A1 login session owner fence).
+   */
+  const accountSessionEpochRef = useRef(0)
+  const startupReadRecoveryRef = useRef<'idle' | 'pending' | 'failed'>('idle')
+  const invalidateAccountSession = useCallback(() => {
+    accountSessionEpochRef.current += 1
+    startupReadRecoveryRef.current = 'idle'
+  }, [])
+
   // Narrow-viewport surface boundary (Review R31/R32): the route-scoped
   // narrow guard and the Home-only narrow rendering boundary live inside the
   // ready shell (TabShell/TabContent, provider-owned hydrated route), so the
@@ -457,6 +481,9 @@ export default function App() {
   }, [llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
+  // Session selection state — declared with the other account-scoped state so
+  // the per-account reset helper below can clear it.
+  const [sessionSelection, setSession] = useSession()
   // Permission requests per session (queue to handle multiple concurrent requests)
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
   // Credential requests per session (queue to handle multiple concurrent requests)
@@ -538,6 +565,53 @@ export default function App() {
     sessionOptionsRef.current = sessionOptions
   }, [sessionOptions])
 
+  /**
+   * Clears every account-scoped renderer projection (P70-BOOT-03): session
+   * atoms, the pending permission/credential/question prompts, per-session
+   * options and drafts, the catalog-derived sources/skills projections, and
+   * the workspace/LLM connection projections read by the shell context. Old
+   * directory and circle page state must never survive an account switch
+   * into the next account's shell — all three account exits (auth failure,
+   * logout, reset) funnel through here so their teardown stays symmetric.
+   * The ProductSpace hook state keeps its own dedicated exit
+   * (clearProductSpaceAccount).
+   */
+  const resetAccountScopedClientState = useCallback(() => {
+    // A4 P3-4: initializeSessionsAtom already rewrites sessionMetaMapAtom and
+    // sessionIdsAtom (and evicts stale atom-family entries) — the redundant
+    // store.set pair that used to follow it is gone.
+    initializeSessions([])
+    store.set(sourcesAtom, [])
+    store.set(skillsAtom, [])
+    setPendingPermissions(new Map())
+    setPendingCredentials(new Map())
+    applyPendingQuestions(() => new Map())
+    setSessionOptions(new Map())
+    sessionDraftsRef.current.clear()
+    setSession({ selected: null })
+    setRuntimeChatAccessIssue(null)
+    setWorkspaces([])
+    setWindowWorkspaceId(null)
+    setLlmConnections([])
+    setLlmConnectionsLoaded(false)
+    setDefaultLlmConnectionSlug(undefined)
+    setWorkspaceDefaultLlmConnection(undefined)
+    // A stale committed-switch record of the previous account must never
+    // drive the next account's rollback window.
+    lastCommittedSwitchRef.current = null
+  }, [
+    applyPendingQuestions,
+    initializeSessions,
+    setDefaultLlmConnectionSlug,
+    setLlmConnections,
+    setLlmConnectionsLoaded,
+    setSession,
+    setWindowWorkspaceId,
+    setWorkspaces,
+    setWorkspaceDefaultLlmConnection,
+    store,
+  ])
+
   const applyPermissionModeState = useCallback((sessionId: string, state: PermissionModeState, source: 'event' | 'reconcile') => {
     setSessionOptions(prev => {
       const next = new Map(prev)
@@ -577,9 +651,13 @@ export default function App() {
     })
   }, [])
 
-  const reconcilePermissionModeState = useCallback(async (sessionId: string) => {
+  const reconcilePermissionModeState = useCallback(async (sessionId: string, isSessionCurrent?: () => boolean) => {
     try {
       const state = await window.electronAPI.getSessionPermissionModeState(sessionId)
+      // P3-1 (P70-BOOT-03): the optional session guard closes the tail after
+      // the await — a superseded account session's reconcile never writes the
+      // old session's options back into the cleared projections.
+      if (isSessionCurrent && !isSessionCurrent()) return
       if (!state) return
       applyPermissionModeState(sessionId, state, 'reconcile')
     } catch (error) {
@@ -621,6 +699,11 @@ export default function App() {
     // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the RPC is issued and
     // closes after the payload has been applied synchronously — terminal
     // markers are pinned for the whole in-flight window.
+    // A4 P3 tail (left for N1, now closed): the reconcile below is fenced to
+    // the account session that issued the refresh, so a superseded account's
+    // late permission-mode receipt never writes back into the cleared
+    // projections.
+    const capturedEpoch = accountSessionEpochRef.current
     try {
       let outcome: 'refreshed' | 'preserved_stale_messages' | 'failed' = 'refreshed'
       await applySnapshotUnderGuard(
@@ -644,7 +727,7 @@ export default function App() {
           // the snapshot — an existing entry (fresher realtime state) is never
           // downgraded by the fetch.
           applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
-          void reconcilePermissionModeState(sessionId)
+          void reconcilePermissionModeState(sessionId, () => accountSessionEpochRef.current === capturedEpoch)
           if (preservedStaleMessages) outcome = 'preserved_stale_messages'
         },
       )
@@ -656,6 +739,10 @@ export default function App() {
   }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, store])
 
   const loadSessionsFromServer = useCallback(async () => {
+    // P70-BOOT-03 epoch fence: a session-list receipt computed for an account
+    // session that has since ended (auth failure/logout/reset) is dropped —
+    // the next account's shell entry reloads its own list.
+    const capturedEpoch = accountSessionEpochRef.current
     setSessionLoadError(null)
 
     // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
@@ -668,6 +755,9 @@ export default function App() {
         pendingQuestionGuardRef.current,
         () => window.electronAPI.getSessions(),
         sessions => {
+          // Account session ended while the fetch was in flight: publish
+          // nothing for the superseded account.
+          if (accountSessionEpochRef.current !== capturedEpoch) return
           loadedSessions = sessions
           // Initialize per-session atoms and metadata map
           // NOTE: No sessionsAtom used - sessions are only in per-session atoms
@@ -687,6 +777,8 @@ export default function App() {
       )
 
       // Initialize unified sessionOptions from session data
+      // P70-BOOT-03: the superseded receipt never reaches the ready state.
+      if (accountSessionEpochRef.current !== capturedEpoch) return
       const optionsMap = new Map<string, SessionOptions>()
       for (const s of loadedSessions) {
         const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
@@ -701,9 +793,15 @@ export default function App() {
       setSessionOptions(optionsMap)
 
       await Promise.allSettled(
-        loadedSessions.map((s) => reconcilePermissionModeState(s.id))
+        loadedSessions.map((s) => reconcilePermissionModeState(
+          s.id,
+          () => accountSessionEpochRef.current === capturedEpoch,
+        ))
       )
 
+      // P3-1: the reconcile tail is fenced too — the superseded receipt never
+      // reaches the ready publication.
+      if (accountSessionEpochRef.current !== capturedEpoch) return
       setSessionsLoaded(true)
 
       if (initialSessionId && windowWorkspaceId) {
@@ -714,6 +812,9 @@ export default function App() {
       }
     } catch (err) {
       console.error('[App] Failed to load sessions:', err)
+      // A superseded account's failure receipt neither rolls back nor
+      // replaces the shell with an error screen.
+      if (accountSessionEpochRef.current !== capturedEpoch) return
       const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
       if (shouldTreatSessionLoadFailureAsTransportFallback(transportState)) {
@@ -780,6 +881,9 @@ export default function App() {
       reason = 'manual-or-authoritative',
       selectedSessionId = null,
     } = options
+    // P70-BOOT-03 epoch fence: a stale reconnect/metadata receipt of an ended
+    // account session never rewrites the session atoms.
+    const capturedEpoch = accountSessionEpochRef.current
     const beforeMetaMap = store.get(sessionMetaMapAtom)
     const beforeIds = new Set(beforeMetaMap.keys())
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
@@ -794,6 +898,7 @@ export default function App() {
         pendingQuestionGuardRef.current,
         () => window.electronAPI.getSessions(),
         fetchedSessions => {
+          if (accountSessionEpochRef.current !== capturedEpoch) return
           sessions = fetchedSessions
           const returnedIds = new Set(sessions.map(s => s.id))
           const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
@@ -842,7 +947,12 @@ export default function App() {
           })
         },
       )
-      await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
+      await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(
+        s.id,
+        () => accountSessionEpochRef.current === capturedEpoch,
+      )))
+      // P3-1: the reconcile tail is fenced too.
+      if (accountSessionEpochRef.current !== capturedEpoch) return null
 
       return nextMetaMap
     } catch (err) {
@@ -887,9 +997,14 @@ export default function App() {
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
-  const refreshAdminUser = useCallback(async () => {
+  const refreshAdminUser = useCallback(async (intent?: AdminAuthCompletionIntent) => {
+    // P3-5 (P70-BOOT-03): the status receipt is fenced to the account session
+    // that started it — when a logout/auth failure resolves first, the stale
+    // refresh returns nothing instead of re-committing the old user.
+    const capturedEpoch = accountSessionEpochRef.current
     try {
       const status = await window.electronAPI.adminGetStatus()
+      if (accountSessionEpochRef.current !== capturedEpoch || (intent && !intent.isCurrent())) return null
       const user = status.loggedIn && status.userId
         ? {
             userId: status.userId,
@@ -897,12 +1012,20 @@ export default function App() {
             displayName: status.displayName,
           }
         : null
+      // A different account receipt cannot inherit this authentication's completion.
+      if (intent && user?.userId !== intent.accountId) return null
       if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
         invalidateProductSpaceDeepLinkRefresh()
       }
+      if (accountSessionEpochRef.current !== capturedEpoch) return null
       commitCurrentAdminUser(user)
       return user
-    } catch {
+    } catch (error) {
+      if (accountSessionEpochRef.current !== capturedEpoch) return null
+      if (intent) {
+        if (!intent.isCurrent()) return null
+        throw error
+      }
       if (currentAdminUserIdRef.current !== null) {
         invalidateProductSpaceDeepLinkRefresh()
       }
@@ -918,7 +1041,9 @@ export default function App() {
   const routeThroughProductSpace = useCallback(async (
     accountId: string | null,
     workspaceId: string | null,
+    isCurrent: () => boolean = () => true,
   ) => {
+    if (!isCurrent()) return
     if (!accountId) {
       continueAfterProductSpace(workspaceId)
       return
@@ -926,7 +1051,7 @@ export default function App() {
 
     try {
       const next = await bootstrapProductSpace(accountId)
-      if (currentAdminUserIdRef.current !== accountId || next === null) return
+      if (!isCurrent() || currentAdminUserIdRef.current !== accountId || next === null) return
       if (next === 'ready') {
         continueAfterProductSpace(workspaceId)
       } else if (next === 'contract-blocked') {
@@ -935,7 +1060,7 @@ export default function App() {
         setAppState('space-error')
       }
     } catch (error) {
-      if (currentAdminUserIdRef.current !== accountId) return
+      if (!isCurrent() || currentAdminUserIdRef.current !== accountId) return
       if (isAdminAuthFailureResult(error as AdminErrorLike)) {
         invalidateProductSpaceDeepLinkRefresh()
         commitCurrentAdminUser(null)
@@ -955,15 +1080,26 @@ export default function App() {
   const handleOnboardingComplete = useCallback(async () => {
     // Completing authentication starts a fresh ProductSpace bootstrap.
     invalidateProductSpaceDeepLinkRefresh()
+    // P70-BOOT-03: the completion is fenced to the login intent that started
+    // it — an auth failure invalidating the account mid-completion drops the
+    // workspace publication and the space route instead of landing a stale
+    // account on the shell.
+    const completionEpoch = accountSessionEpochRef.current
     let targetWorkspaceId: string | null = windowWorkspaceId
     let signedInUser: Awaited<ReturnType<typeof refreshAdminUser>> = null
     try {
       signedInUser = await refreshAdminUser()
+      if (accountSessionEpochRef.current !== completionEpoch) return
       // Reload workspaces after onboarding
       const ws = await window.electronAPI.getWorkspaces()
+      if (accountSessionEpochRef.current !== completionEpoch) return
       if (ws.length > 0) {
         // Switch to workspace in-place (no window close/reopen)
         await window.electronAPI.switchWorkspace(ws[0].id)
+        // P3-2: the workspace publication honors the same fence as the space
+        // route — the Main window→workspace mapping is not switched either
+        // once the login intent was invalidated mid-completion.
+        if (accountSessionEpochRef.current !== completionEpoch) return
         setWindowWorkspaceId(ws[0].id)
         setWorkspaces(ws)
         targetWorkspaceId = ws[0].id
@@ -975,6 +1111,7 @@ export default function App() {
       console.error('[App] Failed to load workspaces after onboarding:', error)
       // The space route still runs; workspace state can recover later.
     }
+    if (accountSessionEpochRef.current !== completionEpoch) return
     await routeThroughProductSpace(signedInUser?.userId ?? null, targetWorkspaceId)
   }, [
     invalidateProductSpaceDeepLinkRefresh,
@@ -989,10 +1126,36 @@ export default function App() {
     return result.success ? result.challengeToken : null
   }, [])
 
+  const adminAuthCompletion = useAdminAuthCompletion({
+    getSessionEpoch: () => accountSessionEpochRef.current,
+    refreshUser: refreshAdminUser,
+    loadWorkspaces: () => window.electronAPI.getWorkspaces(),
+    switchWorkspace: id => window.electronAPI.switchWorkspace(id),
+    publishWorkspaces: (ws, selectedId) => {
+      setWorkspaces(ws)
+      setWindowWorkspaceId(selectedId)
+    },
+    route: routeThroughProductSpace,
+    onPreparing: () => {
+      invalidateProductSpaceDeepLinkRefresh()
+      setAppState('auth-preparing')
+    },
+    onSessionMissing: () => handleAdminAuthFailure({ errorCode: 'SESSION_EXPIRED' }),
+    onFailure: error => {
+      console.error('[App] Failed to initialize authenticated session:', error)
+      if (isAdminAuthFailureResult(error as AdminErrorLike)) {
+        handleAdminAuthFailure(error as AdminErrorLike)
+      } else {
+        setAppState('space-error')
+      }
+    },
+  })
+
   // Onboarding hook — onConfigSaved fires immediately when billing is saved,
   // ensuring connection state updates before the wizard closes.
   const onboarding = useOnboarding({
     onComplete: handleOnboardingComplete,
+    onAdminAuthenticated: adminAuthCompletion.start,
     onConfigSaved: refreshLlmConnections,
     initialSetupNeeds: setupNeeds || undefined,
     phoneAuthChallengeProvider: acquirePhoneAuthChallenge,
@@ -1024,7 +1187,12 @@ export default function App() {
 
   const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
     invalidateProductSpaceDeepLinkRefresh()
+    // P70-BOOT-03: the account session ends here — in-flight receipts are
+    // invalidated and every old-account page projection (sessions, prompts,
+    // directory/circle state) is dropped before the login surface takes over.
+    invalidateAccountSession()
     clearProductSpaceAccount(currentAdminUserIdRef.current)
+    resetAccountScopedClientState()
     commitCurrentAdminUser(null)
     if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
       enterAdminKicked()
@@ -1036,10 +1204,15 @@ export default function App() {
     commitCurrentAdminUser,
     enterAdminKicked,
     enterAdminLogin,
+    invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
+    resetAccountScopedClientState,
   ])
 
-  // Reauth login handler - placeholder (reauth is not currently used)
+  // Reauth login handler. No current code path enters the `reauth` app state
+  // (A4 P3-6: the screen below is retained for recovery semantics), but the
+  // handler stays production-real: it revalidates the session and routes
+  // through the SAME ProductSpace entry as every other login path.
   const handleReauthLogin = useCallback(async () => {
     invalidateProductSpaceDeepLinkRefresh()
     let validation = await window.electronAPI.adminValidate()
@@ -1057,16 +1230,29 @@ export default function App() {
 
     // Re-check setup needs
     const needs = await window.electronAPI.getSetupNeeds()
-    if (needs.isFullyConfigured) {
-      setAppState('ready')
-    } else {
+    if (!needs.isFullyConfigured) {
       setSetupNeeds(needs)
       setAppState('onboarding')
+      return
     }
+    // P70-BOOT-01: authentication completes through the SAME ProductSpace
+    // route as every other entry — contract validation, the unique personal
+    // space and the home shell. A direct `ready` here would open the business
+    // surface behind an unprepared space.
+    const signedInUser = await refreshAdminUser()
+    if (!signedInUser) {
+      // The validated session could not be committed: fail closed to login.
+      enterAdminLogin()
+      return
+    }
+    await routeThroughProductSpace(signedInUser.userId, windowWorkspaceId)
   }, [
     enterAdminKicked,
     enterAdminLogin,
     invalidateProductSpaceDeepLinkRefresh,
+    refreshAdminUser,
+    routeThroughProductSpace,
+    windowWorkspaceId,
   ])
 
   // Reauth reset handler - open reset confirmation dialog
@@ -1090,13 +1276,16 @@ export default function App() {
   // generation prevents a StrictMode/unmount cleanup from committing stale async work.
   useEffect(() => {
     const generation = ++startupInitializationGenerationRef.current
+    const sessionEpoch = accountSessionEpochRef.current
     let cancelled = false
     const isCurrentInitialization = () => (
       !cancelled
       && generation === startupInitializationGenerationRef.current
+      && sessionEpoch === accountSessionEpochRef.current
     )
 
     const initialize = async () => {
+      startupReadRecoveryRef.current = 'pending'
       try {
         // Get this window's workspace ID (passed via URL query param from main process)
         const wsId = await window.electronAPI.getWindowWorkspace()
@@ -1111,6 +1300,7 @@ export default function App() {
 
         if (adminStatus.adminUrl) {
           let validation = await window.electronAPI.adminValidate()
+          if (!isCurrentInitialization()) return
           if (isAdminSessionChangedResult(validation)) {
             validation = await window.electronAPI.adminValidate()
           }
@@ -1154,12 +1344,19 @@ export default function App() {
         await startupInitializationHandlersRef.current.routeThroughProductSpace(
           signedInAccountId,
           wsId,
+          isCurrentInitialization,
         )
       } catch (error) {
         if (!isCurrentInitialization()) return
         console.error('Failed to check auth state:', error)
-        // If check fails, show onboarding to be safe
-        setAppState('onboarding')
+        // A failed read cannot establish that credentials are absent. Keep
+        // the true startup transaction retryable without another auth write.
+        startupReadRecoveryRef.current = 'failed'
+        setAppState('space-error')
+      } finally {
+        if (isCurrentInitialization() && startupReadRecoveryRef.current === 'pending') {
+          startupReadRecoveryRef.current = 'idle'
+        }
       }
     }
 
@@ -1170,7 +1367,7 @@ export default function App() {
         startupInitializationGenerationRef.current += 1
       }
     }
-  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh])
+  }, [commitCurrentAdminUser, invalidateProductSpaceDeepLinkRefresh, startupRetryGeneration])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
@@ -1216,9 +1413,6 @@ export default function App() {
       cleanup()
     }
   }, [])
-
-  // Session selection state
-  const [sessionSelection, setSession] = useSession()
 
   // Notification system - shows native OS notifications and badge count
   const handleNavigateToSession = useCallback((sessionId: string) => {
@@ -1355,7 +1549,12 @@ export default function App() {
                 next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
                 return next
               })
-              void reconcilePermissionModeState(effect.sessionId)
+              // A4 P3 tail (left for N1, now closed): the reconcile fence is
+              // captured per EVENT (never per effect subscription — the
+              // subscription outlives account sessions), so a late receipt of
+              // a superseded account session is dropped after the await.
+              const reconcileEpoch = accountSessionEpochRef.current
+              void reconcilePermissionModeState(effect.sessionId, () => accountSessionEpochRef.current === reconcileEpoch)
             }
             break
           }
@@ -2408,18 +2607,17 @@ export default function App() {
       && currentAdminUserGenerationRef.current === logoutSnapshot.generation
     )
     invalidateProductSpaceDeepLinkRefresh()
+    // P70-BOOT-03: the reset ends the account session — in-flight receipts of
+    // the old account are invalidated up front (fail-closed; a failed logout
+    // simply reloads on the next entry).
+    invalidateAccountSession()
     try {
       const result = await window.electronAPI.logout()
       if (!result.success || !isCurrentLogout()) return
       invalidateProductSpaceDeepLinkRefresh()
       // Reset all state
-      // Clear session atoms - initialize with empty array clears all per-session atoms
-      initializeSessions([])
-      setWorkspaces([])
-      setWindowWorkspaceId(null)
-      setRuntimeChatAccessIssue(null)
-      setLlmConnectionsLoaded(false)
       clearProductSpaceAccount(logoutSnapshot.accountId)
+      resetAccountScopedClientState()
       commitCurrentAdminUser(null)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
@@ -2439,10 +2637,10 @@ export default function App() {
   }, [
     commitCurrentAdminUser,
     onboarding,
-    initializeSessions,
     clearProductSpaceAccount,
+    invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
-    setWindowWorkspaceId,
+    resetAccountScopedClientState,
   ])
 
   const handleAdminLogout = useCallback(async () => {
@@ -2455,10 +2653,18 @@ export default function App() {
       && currentAdminUserGenerationRef.current === logoutSnapshot.generation
     )
     invalidateProductSpaceDeepLinkRefresh()
+    // P70-BOOT-03: the logout ends the account session — old-account
+    // receipts are invalidated up front (fail-closed, same as reset).
+    invalidateAccountSession()
     // The Main fence and any prepared switch transaction must be revoked
     // BEFORE credentials are invalidated — otherwise a stale fence survives
     // the logout. A failed revoke aborts the logout (fail-closed): credential
     // cleanup never completes against a live runtime scope.
+    // N1 note: on THIS early-return path the epoch bump above has no paired
+    // commitCurrentAdminUser setState, so the ClientPageProvider keyed remount
+    // is deferred to the next re-render — the direction stays fail-closed (the
+    // shell is left as-is, nothing of a NEXT scope can be observed), and the
+    // render-phase scope seal re-seals it anyway on any later scope change.
     try {
       const revoke = await window.electronAPI.productSpaceRevokeActiveContext()
       if (!revoke?.success) {
@@ -2474,14 +2680,7 @@ export default function App() {
       if (!result.success || !isCurrentLogout()) return
       invalidateProductSpaceDeepLinkRefresh()
       clearProductSpaceAccount(logoutSnapshot.accountId)
-      initializeSessions([])
-      setWorkspaces([])
-      setWindowWorkspaceId(null)
-      setLlmConnections([])
-      setLlmConnectionsLoaded(false)
-      setDefaultLlmConnectionSlug(undefined)
-      setWorkspaceDefaultLlmConnection(undefined)
-      setRuntimeChatAccessIssue(null)
+      resetAccountScopedClientState()
       commitCurrentAdminUser(null)
       setSetupNeeds({
         needsBillingConfig: false,
@@ -2497,10 +2696,10 @@ export default function App() {
   }, [
     commitCurrentAdminUser,
     handleAdminRelogin,
-    initializeSessions,
     clearProductSpaceAccount,
+    invalidateAccountSession,
     invalidateProductSpaceDeepLinkRefresh,
-    setWindowWorkspaceId,
+    resetAccountScopedClientState,
   ])
 
   // Handle workspace selection
@@ -2852,6 +3051,23 @@ export default function App() {
     return <SplashScreen isExiting={false} />
   }
 
+  if (appState === 'auth-preparing') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ProductSpacePreparationScreen onCancel={() => {
+            adminAuthCompletion.cancel()
+            onboarding.handleAdminRelogin()
+            // If trusted logout/revocation fails, keep recovery available.
+            setAppState('space-error')
+            void handleAdminLogout()
+          }} />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Reauth state - session expired, need to re-login
   // ModalProvider + WindowCloseHandler ensures X button works on Windows
   if (appState === 'reauth') {
@@ -2930,46 +3146,26 @@ export default function App() {
       <DismissibleLayerProvider>
         <ModalProvider>
           <WindowCloseHandler />
-          <div
-            className="flex h-full items-center justify-center p-6"
-            data-testid="product-space-error-screen"
-          >
-            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
-              <h2 className="text-lg font-semibold text-foreground">
-                {t('productSpace.error.loadTitle')}
-              </h2>
-              <p className="mt-2 text-sm text-foreground/60">
-                {t('productSpace.error.loadDesc')}
-              </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  data-testid="product-space-error-logout"
-                  onClick={() => {
-                    void handleAdminLogout()
-                  }}
-                >
-                  {t('productSpace.error.logout')}
-                </Button>
-                <Button
-                  type="button"
-                  data-testid="product-space-error-retry"
-                  onClick={() => {
-                    void retryProductSpaceBootstrap().then(next => {
-                      if (next === 'ready') {
-                        continueAfterProductSpace(windowWorkspaceId)
-                      } else if (next === 'contract-blocked') {
-                        setAppState('contract-blocked')
-                      }
-                    }).catch(() => {})
-                  }}
-                >
-                  {t('productSpace.error.retry')}
-                </Button>
-              </div>
-            </div>
-          </div>
+          <ProductSpaceErrorScreen
+            onLogout={() => { void handleAdminLogout() }}
+            onRetry={() => {
+              if (startupReadRecoveryRef.current === 'pending') return
+              if (startupReadRecoveryRef.current === 'failed') {
+                startupReadRecoveryRef.current = 'pending'
+                setAppState('loading')
+                setStartupRetryGeneration(value => value + 1)
+                return
+              }
+              if (adminAuthCompletion.retry()) return
+              void retryProductSpaceBootstrap().then(next => {
+                if (next === 'ready') {
+                  continueAfterProductSpace(windowWorkspaceId)
+                } else if (next === 'contract-blocked') {
+                  setAppState('contract-blocked')
+                }
+              }).catch(() => {})
+            }}
+          />
         </ModalProvider>
       </DismissibleLayerProvider>
     )
@@ -3019,46 +3215,18 @@ export default function App() {
       <DismissibleLayerProvider>
         <ModalProvider>
           <WindowCloseHandler />
-          <div
-            className="flex h-full items-center justify-center p-6"
-            data-testid="product-space-error-screen"
-          >
-            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
-              <h2 className="text-lg font-semibold text-foreground">
-                {t('productSpace.error.loadTitle')}
-              </h2>
-              <p className="mt-2 text-sm text-foreground/60">
-                {t('productSpace.error.loadDesc')}
-              </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  data-testid="product-space-error-logout"
-                  onClick={() => {
-                    void handleAdminLogout()
-                  }}
-                >
-                  {t('productSpace.error.logout')}
-                </Button>
-                <Button
-                  type="button"
-                  data-testid="product-space-error-retry"
-                  onClick={() => {
-                    void retryProductSpaceBootstrap().then(next => {
-                      if (next === 'ready') {
-                        continueAfterProductSpace(windowWorkspaceId)
-                      } else if (next === 'contract-blocked') {
-                        setAppState('contract-blocked')
-                      }
-                    }).catch(() => {})
-                  }}
-                >
-                  {t('productSpace.error.retry')}
-                </Button>
-              </div>
-            </div>
-          </div>
+          <ProductSpaceErrorScreen
+            onLogout={() => { void handleAdminLogout() }}
+            onRetry={() => {
+              void retryProductSpaceBootstrap().then(next => {
+                if (next === 'ready') {
+                  continueAfterProductSpace(windowWorkspaceId)
+                } else if (next === 'contract-blocked') {
+                  setAppState('contract-blocked')
+                }
+              }).catch(() => {})
+            }}
+          />
         </ModalProvider>
       </DismissibleLayerProvider>
     )
@@ -3084,7 +3252,46 @@ export default function App() {
             />
           )}
 
+          {/* The workbench bar renders from TabShell (above the AppShell
+              subtree), so the SAME AppShell context value AppShell consumes
+              is provided here for the bar's account/workspace entries.
+              AppShell re-provides the identical object to its panels —
+              both layers read one memoized value. */}
+          <AppShellProvider value={appShellContextValue}>
           <MaybeProductSpaceProvider value={productSpaceContextValue}>
+            {/* N1 (P70-NAV-01/02): the client-page routing + header-hairline
+                provider sits INSIDE the ProductSpace consumption boundary and
+                OUTSIDE TabShell. Its key carries the full
+                epoch::accountId::productSpaceId scope, so an account switch, a
+                committed space switch or an A4 epoch bump destroys the whole
+                instance — no back stack or circle detail of a previous scope
+                survives into the next one (the provider also re-seals itself
+                when it observes a scope change without a remount). The
+                epoch ref is read at commit time: every epoch bump is paired
+                with a commitCurrentAdminUser state change, so the remount
+                render observes the fresh value. Home/Circles tab content
+                assembly stays with POO-100; this provider only publishes the
+                typed route and the main-scroll registration.
+                Card step 4 deviation (adjudicated, review P2-1), RESOLVED by
+                H3/POO-91: H1's MemberCatalogProvider used to stay mounted
+                INSIDE HomePage; H3 lifted it to THIS level (same layer as
+                ClientPageProvider, still OUTSIDE TabShell and inside the
+                ProductSpace consumption boundary) and switched HomePage onto
+                useMemberCatalog(), so the App-level provider now owns the
+                SINGLE useAppCatalog instance for member pages. */}
+            <MemberCatalogProvider>
+            <ClientPageProvider
+              key={clientPageScopeKey({
+                accountId: productSpaceContextValue?.accountId ?? null,
+                productSpaceId: productSpaceContextValue?.activeProductSpaceId ?? null,
+                epoch: accountSessionEpochRef.current,
+              })}
+              scope={{
+                accountId: productSpaceContextValue?.accountId ?? null,
+                productSpaceId: productSpaceContextValue?.activeProductSpaceId ?? null,
+                epoch: accountSessionEpochRef.current,
+              }}
+            >
             <TabShellProvider
               key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
               workspaceId={windowWorkspaceId}
@@ -3098,7 +3305,8 @@ export default function App() {
               }
             >
               <TabShell
-              renderPolo={() => (
+                onReauthenticateRequest={() => { enterAdminLogin() }}
+                renderPolo={() => (
                 <NavigationProvider
                   workspaceId={windowWorkspaceId}
                   workspaceSlug={windowWorkspaceSlug}
@@ -3189,8 +3397,11 @@ export default function App() {
                 </div>
               )}
             </TabShellProvider>
+            </ClientPageProvider>
+            </MemberCatalogProvider>
             <ProductSpaceSwitchDialog />
           </MaybeProductSpaceProvider>
+          </AppShellProvider>
         </TooltipProvider>
         </ModalProvider>
         </DismissibleLayerProvider>

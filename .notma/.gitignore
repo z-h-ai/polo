@@ -1,0 +1,6 @@
+user.json
+queue.json
+runs/
+server.pid
+server.log
+*.lock

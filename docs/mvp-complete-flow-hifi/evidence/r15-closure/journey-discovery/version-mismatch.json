@@ -1,0 +1,8 @@
+{
+  "changed": [
+    "docs/mvp-complete-flow-hifi/prototype.html",
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json",
+    "design-demos/polo-client-source-baseline/src/mvp/runtime.js"
+  ],
+  "same_version": false
+}

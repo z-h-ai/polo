@@ -1,0 +1,13 @@
+{
+  "command": [
+    "python3",
+    "/Users/wow/.agents/skills/product-ui-prototype/scripts/validate_prototype.py",
+    "docs/mvp-complete-flow-hifi",
+    "--root",
+    "/Users/wow/project/z-h-ai/polo-dir/POO-70/docs/client-journey-policy-interview"
+  ],
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": "ERROR: manifest: invalid fields\n",
+  "limitation": "Existing multi-surface extension is rejected by upstream single-surface schema; use repository-specific validator, do not count upstream as passed."
+}

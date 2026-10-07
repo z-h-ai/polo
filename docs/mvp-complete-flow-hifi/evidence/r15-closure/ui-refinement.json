@@ -1,0 +1,383 @@
+{
+  "revision": "poo70-workbench-r15-closure",
+  "checks": [
+    {
+      "name": "1440 home title",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 no corner labels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 one shared work card",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 no desktop join",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 consistent circle buttons",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 consistent circle structure",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 no prominent redundant entries",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 shared work exists in distributing circle",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 app cards use identical component styles",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 FOCUS exit only inside subscription",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 PAID exit only inside subscription",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 P-M07-DETAIL-DATA no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 P-M07-YEAR-RESULT no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 P-M07-DETAIL-DATA-SUBSCRIPTION no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 same home and assistant canvas",
+      "passed": true,
+      "detail": {
+        "home": "rgb(251, 251, 250)",
+        "assistant": "rgb(251, 251, 250)",
+        "panel": "rgb(251, 251, 250)"
+      }
+    },
+    {
+      "name": "1440 existing assistant scope visible only in review",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1440 skills remain review focus",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 home title",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 no corner labels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 one shared work card",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 no desktop join",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 consistent circle buttons",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 consistent circle structure",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 no prominent redundant entries",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 shared work exists in distributing circle",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 app cards use identical component styles",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 FOCUS exit only inside subscription",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 PAID exit only inside subscription",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 P-M07-DETAIL-DATA no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 P-M07-YEAR-RESULT no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 P-M07-DETAIL-DATA-SUBSCRIPTION no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 same home and assistant canvas",
+      "passed": true,
+      "detail": {
+        "home": "rgb(251, 251, 250)",
+        "assistant": "rgb(251, 251, 250)",
+        "panel": "rgb(251, 251, 250)"
+      }
+    },
+    {
+      "name": "1024 existing assistant scope visible only in review",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1024 skills remain review focus",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 home title",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 no corner labels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 one shared work card",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 no desktop join",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 consistent circle buttons",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 consistent circle structure",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 no prominent redundant entries",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 shared work exists in distributing circle",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 app cards use identical component styles",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 FOCUS exit only inside subscription",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 PAID exit only inside subscription",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 P-M07-DETAIL-DATA no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 P-M07-YEAR-RESULT no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 P-M07-DETAIL-DATA-SUBSCRIPTION no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 same home and assistant canvas",
+      "passed": true,
+      "detail": {
+        "home": "rgb(251, 251, 250)",
+        "assistant": "rgb(251, 251, 250)",
+        "panel": "rgb(251, 251, 250)"
+      }
+    },
+    {
+      "name": "800 existing assistant scope visible only in review",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "800 skills remain review focus",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "cancel exit retains membership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "confirmed exit removes data membership",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "search cannot restore exited circle",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "last data source cannot open without touching shared apps",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "search cannot restore unauthorized app",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "annual exit preserves other three circles",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "direct progress entry is held for review",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "progress has no repeated confirmation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "single confirmation automatically switches",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "cancel invalidates old callbacks",
+      "passed": true,
+      "detail": "P-M02-STOP-CANCEL"
+    },
+    {
+      "name": "reset invalidates old callbacks",
+      "passed": true,
+      "detail": "P-M03-HOME-PERSONAL"
+    },
+    {
+      "name": "browse-and-return invalidates old callbacks",
+      "passed": true,
+      "detail": "P-M02-STOPPING"
+    },
+    {
+      "name": "cross-surface invalidates old callbacks",
+      "passed": true,
+      "detail": "P-M02-STOPPING"
+    },
+    {
+      "name": "switch stops original assistant activity",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "missing acknowledgement retains original space",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M03-HOME-PERSONAL-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-LIST-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-FOCUS-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-DATA-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-YEAR-RESULT-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-DATA-SUBSCRIPTION-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/A-personal-skills-refinement-1440.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M03-HOME-PERSONAL-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-LIST-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-FOCUS-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-DATA-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-YEAR-RESULT-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-DATA-SUBSCRIPTION-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/A-personal-skills-refinement-1024.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M03-HOME-PERSONAL-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-LIST-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-FOCUS-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-DATA-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-YEAR-RESULT-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M07-DETAIL-DATA-SUBSCRIPTION-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/A-personal-skills-refinement-800.png",
+    "docs/mvp-complete-flow-hifi/evidence/r15-closure/P-M02-STOP-FAILED-refinement-800.png"
+  ],
+  "limitations": [
+    "Existing assistant screens remain behavior illustrations, not current Renderer UI or full-page visual acceptance. Only explicit deltas are implementation requirements.",
+    "System delays and membership changes are local prototype fixtures; no actual task processes, servers or payments are changed."
+  ],
+  "passed": true,
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "7b34e3bea36cc112dbaa936ce836a198f12b5edafaddf576f6faae09ebc98c47",
+    "docs/mvp-complete-flow-hifi/prototype.html": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4",
+    "docs/mvp-complete-flow-hifi/review.html": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3",
+    "design-demos/polo-client-source-baseline/prototype.html": "2677f79495c15c1da170d4c45af407b5f34023774bd801e4d433f5716e98b05d"
+  }
+}

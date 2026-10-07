@@ -1,0 +1,15 @@
+{
+  "command": [
+    "python3",
+    "/Users/wow/.agents/skills/product-ui-prototype/scripts/validate_prototype.py",
+    "docs/mvp-complete-flow-hifi",
+    "--root",
+    ".",
+    "--quality-report",
+    "docs/mvp-complete-flow-hifi/quality-report.json"
+  ],
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": "ERROR: manifest: invalid fields\n",
+  "interpretation": "Upstream single-surface validation does not accept this existing dual-surface extension; this is not a pass. Local validation is separate."
+}

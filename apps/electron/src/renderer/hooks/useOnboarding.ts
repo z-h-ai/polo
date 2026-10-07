@@ -5,9 +5,10 @@
  * Flow:
  * 1. Welcome
  * 2. Git Bash (Windows only, if not found)
- * 3. Complete
+ * 3. Complete (local configuration); admin authentication hands off to App initialization.
  */
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import type { AdminAuthCompletionIntent } from './useAdminAuthCompletion'
 import { i18n } from '@polo-ai/shared/i18n'
 import type {
   OnboardingState,
@@ -27,6 +28,8 @@ import type {
 interface UseOnboardingOptions {
   /** Called when onboarding is complete */
   onComplete: () => void
+  /** Auth success enters App initialization without the generic configuration checkpoint. */
+  onAdminAuthenticated?: (intent: AdminAuthCompletionIntent) => void
   /** Initial setup needs from auth state check */
   initialSetupNeeds?: SetupNeeds
   /** Start the wizard at a specific step (default: 'welcome') */
@@ -125,13 +128,51 @@ export function mapAdminLoginError(error: unknown): string {
   if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
     return i18n.t('onboarding.adminLogin.genericError')
   }
+  // Business-coded denials are recognized BEFORE the bare-401 fallback: the
+  // real chain reports wrong-password logins as
+  // { errorCode: 'invalid_credentials', status: 401 } (the server login route
+  // answers 401 and AdminClient.createError keeps the status), so the bare
+  // status check must never shadow a known business code.
+  //
+  // Suspended/removed memberships and unavailable organizations are access
+  // denials, not transient failures: the server refused the account itself
+  // (all three are siblings in admin/authorization-failure.ts). Mapped to the
+  // existing "account disabled" copy so the login target keeps a stable,
+  // localized message instead of a raw server string.
+  if (
+    errorLike?.errorCode === 'MEMBERSHIP_SUSPENDED'
+    || errorLike?.errorCode === 'membership_suspended'
+    || errorLike?.errorCode === 'MEMBERSHIP_REMOVED'
+    || errorLike?.errorCode === 'membership_removed'
+    || errorLike?.errorCode === 'ORGANIZATION_UNAVAILABLE'
+    || errorLike?.errorCode === 'organization_unavailable'
+  ) {
+    return i18n.t('onboarding.adminLogin.accountDisabled')
+  }
   if (errorLike?.errorCode === 'INVALID_CREDENTIALS' || errorLike?.errorCode === 'invalid_credentials') {
     return i18n.t('onboarding.adminLogin.invalidCredentials')
   }
   if (errorLike?.errorCode === 'ACCOUNT_DISABLED' || errorLike?.errorCode === 'account_disabled') {
     return i18n.t('onboarding.adminLogin.accountDisabled')
   }
-  if (errorLike?.errorCode === 'NETWORK_ERROR') {
+  // Revoked/expired/invalid sessions and bare 401s (no recognized business
+  // code reached this point): the server rejected the authentication, so no
+  // local session may be established. Stable localized copy; the server
+  // message is never surfaced.
+  if (
+    errorLike?.errorCode === 'UNAUTHORIZED'
+    || errorLike?.errorCode === 'unauthorized'
+    || errorLike?.errorCode === 'TOKEN_REVOKED'
+    || errorLike?.errorCode === 'token_revoked'
+    || errorLike?.errorCode === 'TOKEN_EXPIRED'
+    || errorLike?.errorCode === 'token_expired'
+    || errorLike?.errorCode === 'INVALID_TOKEN'
+    || errorLike?.errorCode === 'invalid_token'
+    || (typeof errorLike?.status === 'number' && errorLike.status === 401)
+  ) {
+    return i18n.t('onboarding.adminLogin.genericError')
+  }
+  if (errorLike?.errorCode === 'NETWORK_ERROR' || errorLike?.errorCode === 'TIMEOUT') {
     return i18n.t('onboarding.adminLogin.networkError')
   }
   const message = error instanceof Error ? error.message : errorLike?.message
@@ -139,7 +180,8 @@ export function mapAdminLoginError(error: unknown): string {
     return i18n.t('onboarding.adminLogin.networkError')
   }
 
-  return message || i18n.t('onboarding.adminLogin.genericError')
+  // Protocol messages remain diagnostics; customer copy follows this locale.
+  return i18n.t('onboarding.adminLogin.genericError')
 }
 
 export function mapAdminPhoneAuthError(error: unknown): string {
@@ -177,6 +219,7 @@ export function mapAdminPhoneAuthError(error: unknown): string {
     case 'phone_auth_configuration_error':
       return i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
     case 'NETWORK_ERROR':
+    case 'TIMEOUT':
       return i18n.t('onboarding.adminLogin.networkError')
   }
 
@@ -225,9 +268,38 @@ export function resolveAdminLoginSuccessState(state: OnboardingState): Onboardin
   return {
     ...state,
     loginStatus: 'success',
-    completionStatus: 'complete',
+    completionStatus: 'saving',
     errorMessage: undefined,
-    step: 'complete',
+    step: 'admin-login',
+  }
+}
+
+/**
+ * Epoch fence for the login session owner (P70-AUTH-03).
+ *
+ * One gate instance lives for the lifetime of the hook. `begin()` captures the
+ * current epoch for an in-flight auth request; `cancel()` invalidates every
+ * previously captured epoch (dismiss / relogin / kicked / reset). A late async
+ * receipt whose epoch is no longer current must be dropped — it belongs to a
+ * cancelled intent and must never overwrite newer state or a newer account.
+ */
+export interface AuthRequestGate {
+  /** Capture the current epoch for a request about to go in-flight. */
+  begin(): number
+  /** Invalidate all in-flight epochs captured so far (cancellation/supersede). */
+  cancel(): void
+  /** True when the captured epoch is still the live login intent. */
+  isCurrent(epoch: number): boolean
+}
+
+export function createAuthRequestGate(): AuthRequestGate {
+  let epoch = 0
+  return {
+    begin: () => epoch,
+    cancel: () => {
+      epoch += 1
+    },
+    isCurrent: (captured: number) => captured === epoch,
   }
 }
 
@@ -352,6 +424,7 @@ export function apiSetupMethodToConnectionSetup(
 
 export function useOnboarding({
   onComplete,
+  onAdminAuthenticated,
   initialSetupNeeds,
   initialStep = 'welcome',
   initialApiSetupMethod,
@@ -362,6 +435,37 @@ export function useOnboarding({
   phoneAuthChallengeProvider,
 }: UseOnboardingOptions): UseOnboardingReturn {
   const resolvedInitialStep = resolveInitialStep(initialSetupNeeds, initialStep)
+
+  // Login session owner fencing (P70-AUTH-03): at most one auth request in
+  // flight at a time, and every request's receipt is dropped once its epoch
+  // has been cancelled (dismiss/relogin/kicked/reset). Neither the password,
+  // the code, the raw phone number nor any token is ever logged here.
+  const authGateRef = useRef<AuthRequestGate>(createAuthRequestGate())
+  const authInFlightRef = useRef(false)
+  const authCompletedEpochRef = useRef<number | null>(null)
+
+  // Cancel/supersede any in-flight auth request: its epoch stops being
+  // current, so its late receipt can never land. Also releases the single
+  // in-flight slot so a fresh login intent can start immediately.
+  const cancelInFlightAuth = useCallback(() => {
+    authGateRef.current.cancel()
+    authInFlightRef.current = false
+    authCompletedEpochRef.current = null
+  }, [])
+  useEffect(() => cancelInFlightAuth, [cancelInFlightAuth])
+
+  const finishAdminAuthentication = useCallback((epoch: number, accountId: string) => {
+    if (!authGateRef.current.isCurrent(epoch) || authCompletedEpochRef.current === epoch) return
+    authCompletedEpochRef.current = epoch
+    setState(resolveAdminLoginSuccessState)
+    // Run outside a React state updater/effect: StrictMode replay cannot finish twice.
+    if (onAdminAuthenticated) {
+      onAdminAuthenticated({ accountId, isCurrent: () => authGateRef.current.isCurrent(epoch) })
+    } else {
+      onComplete()
+    }
+    onConfigSaved?.()
+  }, [onAdminAuthenticated, onComplete, onConfigSaved])
 
   // Main wizard state
   const [state, setState] = useState<OnboardingState>({
@@ -559,6 +663,9 @@ export function useOnboarding({
   // Go back to previous step. If at the initial step, call onDismiss instead.
   const handleBack = useCallback(() => {
     if (state.step === initialStep && onDismiss) {
+      // Leaving the login intent cancels it here too, same as the admin-login
+      // branch below: the in-flight receipt must not land after dismissal.
+      cancelInFlightAuth()
       onDismiss()
       return
     }
@@ -584,33 +691,57 @@ export function useOnboarding({
         break
       case 'admin-login':
       case 'admin-kicked':
+        // Leaving the login screen cancels the login intent: any in-flight
+        // auth receipt becomes stale and must not land afterwards.
+        cancelInFlightAuth()
         if (onDismiss) {
           onDismiss()
         }
         break
     }
-  }, [state.step, state.gitBashStatus, initialStep, onDismiss])
+  }, [state.step, state.gitBashStatus, initialStep, onDismiss, cancelInFlightAuth])
 
   const handleAdminLogin = useCallback(async (identifier: string, password: string) => {
+    // Single-flight (P70-AUTH-03): a repeated submit while one request is
+    // already waiting must not fire a second RPC.
+    if (authInFlightRef.current || authCompletedEpochRef.current === authGateRef.current.begin()) return
+    authInFlightRef.current = true
+    const epoch = authGateRef.current.begin()
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
       const result = await window.electronAPI.adminLogin(identifier, password)
+      // Stale receipt (cancelled/superseded intent): drop it — never
+      // overwrite newer state or a newer account with an old auth result.
+      if (!authGateRef.current.isCurrent(epoch)) return
       if (result.success) {
-        setState(resolveAdminLoginSuccessState)
-        onConfigSaved?.()
+        finishAdminAuthentication(epoch, result.user.id)
         return
       }
 
       setState(s => resolveAdminLoginFailureState(s, result))
     } catch (error) {
+      if (!authGateRef.current.isCurrent(epoch)) return
       setState(s => resolveAdminLoginFailureState(s, error))
+    } finally {
+      // Only this request may release the slot; if it was cancelled, a newer
+      // request already owns the slot.
+      if (authGateRef.current.isCurrent(epoch)) {
+        authInFlightRef.current = false
+      }
     }
-  }, [onConfigSaved])
+  }, [finishAdminAuthentication])
 
   const handleAdminSendPhoneCode = useCallback(async (
     phone: string,
   ): Promise<AdminSendPhoneAuthCodeResult> => {
+    // Single-flight: a repeated submit never fires a second send RPC. The
+    // existing server-safe code keeps the contract without touching the UI.
+    if (authInFlightRef.current || authCompletedEpochRef.current === authGateRef.current.begin()) {
+      return { success: false, errorCode: 'duplicate_request' }
+    }
+    authInFlightRef.current = true
+    const epoch = authGateRef.current.begin()
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
@@ -620,6 +751,9 @@ export function useOnboarding({
         (normalizedPhone, challengeToken) =>
           window.electronAPI.adminSendPhoneAuthCode(normalizedPhone, challengeToken),
       )
+      if (!authGateRef.current.isCurrent(epoch)) {
+        return { success: false, errorCode: 'duplicate_request' }
+      }
       if (result.success) {
         setState(s => ({ ...s, loginStatus: 'idle', errorMessage: undefined }))
         return result
@@ -631,23 +765,36 @@ export function useOnboarding({
       }))
       return result
     } catch (error) {
+      if (!authGateRef.current.isCurrent(epoch)) {
+        return { success: false, errorCode: 'duplicate_request' }
+      }
       setState(s => ({
         ...s,
         loginStatus: 'error',
         errorMessage: mapAdminPhoneAuthError(error),
       }))
       return { success: false, errorCode: 'NETWORK_ERROR' }
+    } finally {
+      if (authGateRef.current.isCurrent(epoch)) {
+        authInFlightRef.current = false
+      }
     }
   }, [phoneAuthChallengeProvider])
 
   const handleAdminVerifyPhoneCode = useCallback(async (phone: string, code: string): Promise<boolean> => {
+    // Single-flight: a repeated submit never fires a second verify RPC.
+    if (authInFlightRef.current || authCompletedEpochRef.current === authGateRef.current.begin()) return false
+    authInFlightRef.current = true
+    const epoch = authGateRef.current.begin()
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
       const result = await window.electronAPI.adminVerifyPhoneAuthCode(phone, code)
+      // Stale receipt from a cancelled/superseded intent: drop it — it must
+      // never establish a session for (or overwrite) a newer account.
+      if (!authGateRef.current.isCurrent(epoch)) return false
       if (result.success) {
-        setState(resolveAdminLoginSuccessState)
-        onConfigSaved?.()
+        finishAdminAuthentication(epoch, result.user.id)
         return true
       }
       setState(s => ({
@@ -657,22 +804,29 @@ export function useOnboarding({
       }))
       return false
     } catch (error) {
+      if (!authGateRef.current.isCurrent(epoch)) return false
       setState(s => ({
         ...s,
         loginStatus: 'error',
         errorMessage: mapAdminPhoneAuthError(error),
       }))
       return false
+    } finally {
+      if (authGateRef.current.isCurrent(epoch)) {
+        authInFlightRef.current = false
+      }
     }
-  }, [onConfigSaved])
+  }, [finishAdminAuthentication])
 
   const handleAdminRelogin = useCallback(() => {
+    cancelInFlightAuth()
     setState(resolveAdminReloginState)
-  }, [])
+  }, [cancelInFlightAuth])
 
   const showAdminKicked = useCallback(() => {
+    cancelInFlightAuth()
     setState(resolveAdminKickedState)
-  }, [])
+  }, [cancelInFlightAuth])
 
   // Select API setup method (legacy — kept for direct edit flows)
   const handleSelectApiSetupMethod = useCallback((method: ApiSetupMethod) => {
@@ -1092,13 +1246,15 @@ export function useOnboarding({
 
   // Finish onboarding
   const handleFinish = useCallback(() => {
+    if (authCompletedEpochRef.current === authGateRef.current.begin()) return
     onComplete()
   }, [onComplete])
 
   // Cancel onboarding
   const handleCancel = useCallback(() => {
+    cancelInFlightAuth()
     setState(s => ({ ...s, step: 'welcome' }))
-  }, [])
+  }, [cancelInFlightAuth])
 
   // Jump directly to credentials step with a pre-set method (for editing existing connections)
   const jumpToCredentials = useCallback((method: ApiSetupMethod) => {
@@ -1113,6 +1269,7 @@ export function useOnboarding({
 
   // Reset onboarding to initial state (used after logout or modal close)
   const reset = useCallback(() => {
+    cancelInFlightAuth()
     setState({
       step: resolvedInitialStep,
       loginStatus: 'idle',
@@ -1127,7 +1284,7 @@ export function useOnboarding({
     window.electronAPI.clearClaudeOAuthState().catch(() => {
       // Ignore errors - state may not exist
     })
-  }, [resolvedInitialStep, initialApiSetupMethod, initialSetupNeeds?.needsBillingConfig])
+  }, [resolvedInitialStep, initialApiSetupMethod, initialSetupNeeds?.needsBillingConfig, cancelInFlightAuth])
 
   return {
     state,

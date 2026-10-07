@@ -2,7 +2,6 @@ import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
-import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Archive,
@@ -34,7 +33,6 @@ import {
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
-import { TopBar } from "./TopBar"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { cn } from "@/lib/utils"
@@ -2217,14 +2215,12 @@ function AppShellContent({
 
   return (
     <AppShellProvider value={appShellContextValue}>
-        {/* === TOP BAR === */}
-        {/* Portaled to document.body so the global workbench bar stays visible
-            on every shell surface (Home view included) — REQ-001. Context
-            still flows through AppShellProvider. */}
-        {createPortal(
-          <TopBar />,
-          document.body,
-        )}
+      {/* === WORKBENCH BAR === */}
+      {/* The unified workbench bar (brand + tabs + space/account actions) is
+          rendered by TabShell inside the hydration gate — see
+          tab-browser/TabShell.tsx. Rendering it there keeps the bar absent
+          while a new ProductSpace scope hydrates (Review R33 fail-closed
+          boundary) and visible on every shell surface, Home included. */}
 
       {/* === OUTER LAYOUT: Unified Panel Stack | Right Sidebar === */}
       <div

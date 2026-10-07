@@ -1,0 +1,63 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "check": "step wins over mismatched scene",
+      "passed": true
+    },
+    {
+      "check": "next does not send",
+      "passed": true
+    },
+    {
+      "check": "prev keeps draft",
+      "passed": true
+    },
+    {
+      "check": "off-flow return available",
+      "passed": true
+    },
+    {
+      "check": "return to flow retains draft",
+      "passed": true
+    },
+    {
+      "check": "800x600 actual frame",
+      "passed": true
+    },
+    {
+      "check": "narrow inspector keeps flow visible",
+      "passed": true
+    },
+    {
+      "check": "narrow inspector keeps frames mounted",
+      "passed": true
+    },
+    {
+      "check": "narrow panel keeps draft",
+      "passed": true
+    },
+    {
+      "check": "narrow sidebar drawer reachable",
+      "passed": true
+    },
+    {
+      "check": "narrow sidebar closes",
+      "passed": true
+    },
+    {
+      "check": "surface roundtrip keeps form",
+      "passed": true
+    },
+    {
+      "check": "wrong session rejected",
+      "passed": true
+    }
+  ],
+  "artifacts": {
+    "docs/mvp-complete-flow-hifi/prototype-manifest.json": "9342037ca2d8bd70745b4ba6e713f0881e145799159bee2837606e5f8453df1e",
+    "docs/mvp-complete-flow-hifi/review.html": "dcf1e3c70f6a215b1f0976f53048f4b1cb9e74d3fa7fda615b6df1b423f491be",
+    "docs/mvp-complete-flow-hifi/prototype.html": "a2c75eea2658b49d6f72699c4900565a2655a14569e5e59eb79687d876fad59b",
+    "design-demos/polo-client-source-baseline/prototype.html": "d7d6308be42cb50eff4a803079a359b3bb2653916414d10163b32df094f0397a"
+  }
+}

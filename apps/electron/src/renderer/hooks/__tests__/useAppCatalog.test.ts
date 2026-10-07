@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'bun:test'
-import type { CatalogApp } from '@polo-ai/shared/admin'
+import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
+import {
+  dedupeCatalogAppsByIdentity,
+  getCatalogAppIdentityKey,
+} from '@polo-ai/shared/admin/catalog-view'
 import {
   BUSY_RUNTIME_STATUS_LIMIT,
   CATALOG_RUNTIME_STATUS_LIMIT,
   compareCatalogVersions,
   createBusyStatusPoller,
   isNewerCatalogVersion,
+  selectCreatorCircleRelations,
   selectRuntimeStatusApps,
 } from '../useAppCatalog'
 
@@ -206,5 +211,137 @@ describe('busy runtime status polling', () => {
     expect(committed).toEqual(['current'])
     expect(maxActive).toBe(1)
     poller.stop()
+  })
+})
+
+describe('creator circle relation projection (POO-70 H1 multi-circle input)', () => {
+  const rawEntry = (sources: Array<Record<string, unknown>>) => ({ kind: 'app', sources })
+
+  it('deduplicates one circle repeated across entries by circleId', () => {
+    const relations = selectCreatorCircleRelations([
+      rawEntry([{ kind: 'creator_circle', circleId: 'circle-1', name: '设计圈' }]),
+      rawEntry([
+        { kind: 'creator_circle', circleId: 'circle-1', name: '设计圈' },
+        { kind: 'creator_circle', circleId: 'circle-2', name: '研发圈' },
+      ]),
+      rawEntry([{ kind: 'polo', name: 'Polo' }]),
+    ])
+    expect(relations).toEqual([
+      { circleId: 'circle-1', name: '设计圈' },
+      { circleId: 'circle-2', name: '研发圈' },
+    ])
+  })
+
+  it('keys relations by circleId, never by display name', () => {
+    const relations = selectCreatorCircleRelations([
+      rawEntry([{ kind: 'creator_circle', circleId: 'circle-1', name: '同名圈' }]),
+      rawEntry([{ kind: 'creator_circle', circleId: 'circle-2', name: '同名圈' }]),
+    ])
+    expect(relations).toHaveLength(2)
+    expect(relations.map(relation => relation.circleId)).toEqual(['circle-1', 'circle-2'])
+  })
+
+  it('ignores entries without sources and non-object source records', () => {
+    expect(selectCreatorCircleRelations([
+      { kind: 'app' },
+      { kind: 'app', sources: 'not-an-array' },
+      { kind: 'app', sources: [null, 42, { kind: 'creator_circle' }] },
+    ])).toEqual([])
+  })
+})
+
+describe('stable catalog identity dedup (POO-70 H1 directory projection)', () => {
+  const catalog = {
+    accountId: 'account-1',
+    organizationId: 'space-personal',
+  }
+
+  const identityApp = (overrides: Partial<CatalogApp>): CatalogApp => ({
+    id: 'entry-1',
+    organizationId: 'space-personal',
+    name: '应用',
+    description: '',
+    deliveryMode: 'resolve_launch',
+    sortOrder: 0,
+    ...overrides,
+  })
+
+  it('builds a collision-free identity tuple bound to account, space, entry and artifact', () => {
+    const key = (app: CatalogApp) => getCatalogAppIdentityKey(catalog, app)
+    expect(key(identityApp({
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-1',
+    }))).not.toBe(key(identityApp({
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-2',
+    })))
+    expect(key(identityApp({
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-1',
+    }))).not.toBe(key(identityApp({
+      catalogEntryId: 'entry-2',
+      artifactInstanceId: 'artifact-1',
+    })))
+    expect(key(identityApp({
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-1',
+    }))).toBe(getCatalogAppIdentityKey(
+      { accountId: 'account-1', organizationId: 'space-personal' },
+      identityApp({ catalogEntryId: 'entry-1', artifactInstanceId: 'artifact-1' }),
+    ))
+    expect(getCatalogAppIdentityKey(
+      { accountId: 'account-1', organizationId: 'space-personal' },
+      identityApp({ catalogEntryId: 'entry-1', artifactInstanceId: 'artifact-1' }),
+    )).not.toBe(getCatalogAppIdentityKey(
+      { accountId: 'account-2', organizationId: 'space-personal' },
+      identityApp({ catalogEntryId: 'entry-1', artifactInstanceId: 'artifact-1' }),
+    ))
+  })
+
+  it('collapses a version-change tombstone into its live row and keeps Catalog order', () => {
+    const live = identityApp({
+      id: 'entry-1',
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-1',
+      catalogVersion: { versionId: 'version-2', version: '2.0.0' },
+      availability: 'available',
+    })
+    const tombstone = identityApp({
+      id: 'entry-1',
+      catalogEntryId: 'entry-1',
+      artifactInstanceId: 'artifact-1',
+      catalogVersion: { versionId: 'version-1', version: '1.0.0' },
+      availability: 'withdrawn',
+    })
+    const entry: Pick<AppCatalogCacheEntry, 'accountId' | 'organizationId' | 'apps' | 'withdrawnApps'> = {
+      ...catalog,
+      apps: [live],
+      withdrawnApps: [tombstone],
+    }
+    const { apps, duplicatesDropped } = dedupeCatalogAppsByIdentity(entry)
+    expect(duplicatesDropped).toBe(1)
+    expect(apps).toEqual([live])
+  })
+
+  it('keeps a reissued artifact under a different catalog entry distinct', () => {
+    const live = identityApp({
+      id: 'entry-new',
+      catalogEntryId: 'entry-new',
+      artifactInstanceId: 'artifact-1',
+      availability: 'available',
+    })
+    const tombstone = identityApp({
+      id: 'entry-old',
+      catalogEntryId: 'entry-old',
+      artifactInstanceId: 'artifact-1',
+      availability: 'withdrawn',
+    })
+    const { apps, duplicatesDropped } = dedupeCatalogAppsByIdentity({
+      ...catalog,
+      apps: [live],
+      withdrawnApps: [tombstone],
+    })
+    expect(duplicatesDropped).toBe(0)
+    expect(apps).toEqual([live, tombstone])
   })
 })

@@ -84,8 +84,10 @@ export function canSendPhoneAuthCode(state: PhoneAuthFormState): boolean {
   return state.consented && isValidMainlandChinaPhone(state.phone)
 }
 
+// P70-PHONE-03: verification stays gated on the agreement like sending —
+// withdrawing consent on the code scene must block submitting the code.
 export function canVerifyPhoneAuthCode(state: PhoneAuthFormState): boolean {
-  return state.mode === 'verify' && state.code.length === 6
+  return state.mode === 'verify' && state.consented && state.code.length === 6
 }
 
 export function createPhoneAuthResendDeadline(

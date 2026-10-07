@@ -5,6 +5,10 @@ import { createElement, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 
+// Bun does not execute Vite import.meta.glob in the theme loader.
+mock.module('@/context/ThemeContext', () => ({ useOptionalTheme: () => undefined }))
+
+
 GlobalRegistrator.register()
 setupI18n()
 
@@ -124,7 +128,7 @@ describe('PhoneAuthStep rendered interactions', () => {
     }))
 
     const phoneInput = screen.getByLabelText('Phone number')
-    const sendButton = screen.getByRole('button', { name: 'Send verification code' })
+    const sendButton = screen.getByRole('button', { name: 'Get verification code' })
     fireEvent.change(phoneInput, { target: { value: '+86 138 0013 8000' } })
     expect((phoneInput as HTMLInputElement).value).toBe('13800138000')
     expect((sendButton as HTMLButtonElement).disabled).toBe(true)
@@ -141,12 +145,79 @@ describe('PhoneAuthStep rendered interactions', () => {
     expect((phoneInput as HTMLInputElement).value).toBe('13800138000')
   })
 
-  it('uses the server countdown, normalizes autofill, verifies, and resets on edit', async () => {
+  it('keeps the server countdown through a rejected verification, allows explicit retry, and resets on edit', async () => {
     const onSendCode = mock(async () => ({
       success: true as const,
       accepted: true,
       expiresIn: 300,
       resendAfter: 47,
+    }))
+    const onVerify = mock(async () => false)
+    const user = userEvent.setup({ document: window.document })
+
+    function PhoneAuthHarness() {
+      const [resendDeadlines, setResendDeadlines] = useState<
+        ReadonlyMap<string, number>
+      >(() => new Map())
+
+      return createElement(PhoneAuthStep, {
+        isLoading: false,
+        onClearError: mock(() => {}),
+        resendDeadlines,
+        onSendCode,
+        onCodeSent: (phone: string, resendAfter: number) => {
+          setResendDeadlines(current => {
+            const next = new Map(current)
+            next.set(phone, Date.now() + resendAfter * 1_000)
+            return next
+          })
+        },
+        onVerify,
+        onUsePassword: mock(() => {}),
+      })
+    }
+
+    renderWithI18n(createElement(PhoneAuthHarness))
+
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
+    })
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Get verification code' }))
+
+    await waitFor(() => {
+      const resend = screen.getByRole('button', { name: 'Resend in 47s' })
+      expect((resend as HTMLButtonElement).disabled).toBe(true)
+    })
+    const codeInput = screen.getByLabelText('Verification code')
+    expect(codeInput.getAttribute('autocomplete')).toBe('one-time-code')
+    fireEvent.change(codeInput, { target: { value: '12 3a45-67' } })
+    expect((codeInput as HTMLInputElement).value).toBe('123456')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(onVerify).toHaveBeenCalledWith('13800138000', '123456')
+    expect(onVerify).toHaveBeenCalledTimes(1)
+    expect(onSendCode).toHaveBeenCalledTimes(1)
+    expect((screen.getByRole('button', { name: /Resend in \d+s/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Verification code') as HTMLInputElement).value).toBe('123456')
+    onVerify.mockImplementation(async () => true)
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(onVerify).toHaveBeenCalledTimes(2)
+    expect(onSendCode).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(
+      (screen.getByLabelText('Phone number') as HTMLInputElement).value,
+    ).toBe('13800138000')
+    expect(screen.queryByLabelText('Verification code')).toBeNull()
+  })
+
+  it('gates verification and resend on consent inside the code scene', async () => {
+    const onSendCode = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      // Zero deadline so only the consent gate can hold the resend back.
+      resendAfter: 0,
     }))
     const onVerify = mock(async () => true)
     const user = userEvent.setup({ document: window.document })
@@ -179,24 +250,98 @@ describe('PhoneAuthStep rendered interactions', () => {
       target: { value: '13800138000' },
     })
     await user.click(screen.getByRole('checkbox'))
-    await user.click(screen.getByRole('button', { name: 'Send verification code' }))
+    await user.click(screen.getByRole('button', { name: 'Get verification code' }))
+    const codeInput = await screen.findByLabelText('Verification code')
+    fireEvent.change(codeInput, { target: { value: '123456' } })
 
-    await waitFor(() => {
-      const resend = screen.getByRole('button', { name: 'Resend in 47s' })
-      expect((resend as HTMLButtonElement).disabled).toBe(true)
+    const continueButton = screen.getByRole('button', { name: 'Continue' })
+    const resendButton = screen.getByRole('button', { name: 'Resend code' })
+    expect((continueButton as HTMLButtonElement).disabled).toBe(false)
+    expect((resendButton as HTMLButtonElement).disabled).toBe(false)
+
+    // P70-PHONE-03: withdrawing the agreement inside the code scene blocks
+    // both submitting the code and resending one.
+    await user.click(screen.getByRole('checkbox'))
+    expect((continueButton as HTMLButtonElement).disabled).toBe(true)
+    expect((resendButton as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.submit(continueButton.closest('form') as HTMLFormElement)
+    expect(onVerify).not.toHaveBeenCalled()
+    expect(onSendCode).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('checkbox'))
+    expect((continueButton as HTMLButtonElement).disabled).toBe(false)
+    expect((resendButton as HTMLButtonElement).disabled).toBe(false)
+
+    await user.click(resendButton)
+    expect(onSendCode).toHaveBeenCalledTimes(2)
+  })
+
+  it('signs a first-time number straight in without any registration or password form', async () => {
+    let resolveVerify!: (accepted: boolean) => void
+    const onVerify = mock(() => new Promise<boolean>(resolve => {
+      resolveVerify = resolve
+    }))
+    const onSendCode = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 47,
+    }))
+    const user = userEvent.setup({ document: window.document })
+
+    function PhoneAuthHarness() {
+      const [resendDeadlines, setResendDeadlines] = useState<
+        ReadonlyMap<string, number>
+      >(() => new Map())
+
+      return createElement(PhoneAuthStep, {
+        isLoading: false,
+        onClearError: mock(() => {}),
+        resendDeadlines,
+        onSendCode,
+        onCodeSent: (phone: string, resendAfter: number) => {
+          setResendDeadlines(current => {
+            const next = new Map(current)
+            next.set(phone, Date.now() + resendAfter * 1_000)
+            return next
+          })
+        },
+        onVerify,
+        onUsePassword: mock(() => {}),
+      })
+    }
+
+    renderWithI18n(createElement(PhoneAuthHarness))
+
+    // P70-PHONE-01: one unified entry — the only form ever rendered is
+    // phone → code, with no separate sign-up form and no first-time
+    // password setup.
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
     })
-    const codeInput = screen.getByLabelText('Verification code')
-    expect(codeInput.getAttribute('autocomplete')).toBe('one-time-code')
-    fireEvent.change(codeInput, { target: { value: '12 3a45-67' } })
-    expect((codeInput as HTMLInputElement).value).toBe('123456')
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Get verification code' }))
+    const codeInput = await screen.findByLabelText('Verification code')
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+    expect(
+      screen.getByText(/Your personal space is created on first sign-in/),
+    ).toBeTruthy()
+
+    fireEvent.change(codeInput, { target: { value: '123456' } })
+    const continueButton = screen.getByRole('button', { name: 'Continue' })
+    await user.click(continueButton)
+    // P70-PHONE-03: duplicate submits collapse into one verification call.
+    fireEvent.click(continueButton)
+    expect(onVerify).toHaveBeenCalledTimes(1)
     expect(onVerify).toHaveBeenCalledWith('13800138000', '123456')
 
-    await user.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(
-      (screen.getByLabelText('Phone number') as HTMLInputElement).value,
-    ).toBe('13800138000')
-    expect(screen.queryByLabelText('Verification code')).toBeNull()
+    // Server-side auto-registration rides the same callback; the scene
+    // never grows a password field or an extra registration step.
+    resolveVerify(true)
+    await waitFor(() => expect((continueButton as HTMLButtonElement).disabled).toBe(false))
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+    expect(screen.queryByLabelText('Phone number or username')).toBeNull()
   })
 })
 
@@ -215,13 +360,15 @@ describe('AdminLoginStep rendered modes', () => {
     }))
 
     expect(screen.getByLabelText('Phone number')).toBeTruthy()
-    const tabs = screen.getAllByRole('tab')
-    expect(tabs).toHaveLength(2)
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+    // Prototype quiet switch: a single bordered button per mode flip — the
+    // current mode shows its own heading, so only the OTHER method renders.
+    expect(screen.getByTestId('admin-login-method-password')).toBeTruthy()
+    expect(screen.queryByTestId('admin-login-method-phone')).toBeNull()
 
-    await user.click(screen.getByRole('tab', { name: 'Password' }))
+    await user.click(screen.getByTestId('admin-login-method-password'))
     expect(screen.getByLabelText('Phone number or username')).toBeTruthy()
-    expect(screen.getAllByRole('tab')[1].getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('admin-login-method-phone')).toBeTruthy()
+    expect(screen.queryByTestId('admin-login-method-password')).toBeNull()
   })
 
   it('keeps per-phone resend deadlines across edit and login tab remounts', async () => {
@@ -244,7 +391,7 @@ describe('AdminLoginStep rendered modes', () => {
       target: { value: '13800138000' },
     })
     await user.click(screen.getByRole('checkbox'))
-    await user.click(screen.getByRole('button', { name: 'Send verification code' }))
+    await user.click(screen.getByRole('button', { name: 'Get verification code' }))
     await screen.findByLabelText('Verification code')
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))
@@ -262,8 +409,8 @@ describe('AdminLoginStep rendered modes', () => {
     })
     expect((samePhoneSend as HTMLButtonElement).disabled).toBe(true)
 
-    await user.click(screen.getByRole('tab', { name: 'Password' }))
-    await user.click(screen.getByRole('tab', { name: 'Verification code' }))
+    await user.click(screen.getByTestId('admin-login-method-password'))
+    await user.click(screen.getByTestId('admin-login-method-phone'))
     fireEvent.change(screen.getByLabelText('Phone number'), {
       target: { value: '13800138000' },
     })
@@ -289,10 +436,10 @@ describe('AdminLoginStep rendered modes', () => {
       onSubmit,
     }))
 
-    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.queryByTestId('admin-login-method-phone')).toBeNull()
     await user.type(screen.getByLabelText('Phone number or username'), ' legacy-user ')
     await user.type(screen.getByLabelText('Password'), 'password-123')
-    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onSubmit).toHaveBeenCalledWith('legacy-user', 'password-123')
   })
 })

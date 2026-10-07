@@ -1,0 +1,20 @@
+[
+  {
+    "path": "docs/mvp-complete-flow-hifi/review.html",
+    "url": "http://localhost:9901/docs/mvp-complete-flow-hifi/review.html",
+    "served_current_source": true,
+    "sha256": "21c5514a83edeebf3a720f5b4b540dba2746224f38a802134ed96d8a4a1fd6a3"
+  },
+  {
+    "path": "docs/mvp-complete-flow-hifi/prototype.html",
+    "url": "http://localhost:9901/docs/mvp-complete-flow-hifi/prototype.html",
+    "served_current_source": true,
+    "sha256": "13911b0b01d394fae7468ee01264d86c677f43b697a8a0b8c8ee82afc1f5b4c4"
+  },
+  {
+    "path": "design-demos/polo-client-source-baseline/prototype.html",
+    "url": "http://localhost:9901/design-demos/polo-client-source-baseline/prototype.html",
+    "served_current_source": true,
+    "sha256": "0ab2e73a760d4c4fa4f3d584267e58165404e36660744d63326db05e10d77eb8"
+  }
+]

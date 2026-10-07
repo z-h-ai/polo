@@ -30,6 +30,18 @@ if (typeof window === 'undefined') {
 }
 setupI18n()
 
+// Vite-hosted theme singleton (`import.meta.glob` — unavailable under the
+// plain bun runner; shared-process pattern from App.narrow-home-route). The
+// workbench bar renders inside this reduced tree and reads the theme through
+// the OPTIONAL hook, so a null stub simply hides the theme toggle.
+mock.module('@/context/ThemeContext', () => ({
+  ThemeProvider: ({ children }: { children?: unknown }) => children ?? null,
+  useTheme: () => {
+    throw new Error('useTheme must be mocked in this file')
+  },
+  useOptionalTheme: () => undefined,
+}))
+
 // Fail-fast electronAPI for the reduced TabShell tree: subscriptions and the
 // localApps members the restored Home surface touches are enumerated; any
 // other access is a fixture gap and must throw.
@@ -259,6 +271,8 @@ function WorkbenchProbe(): ReactNode {
 function buildShellTree(scope: ProviderScope): ReactNode {
   const { ProductSpaceProvider } =
     require('@/context/ProductSpaceContext') as typeof import('@/context/ProductSpaceContext')
+  const { MemberCatalogProvider } =
+    require('@/context/MemberCatalogContext') as typeof import('@/context/MemberCatalogContext')
   const { TabShellProvider } =
     require('../context/TabShellContext') as typeof import('../context/TabShellContext')
   const inner = createElement(LayoutSnapshot, {
@@ -283,12 +297,15 @@ function buildShellTree(scope: ProviderScope): ReactNode {
       children: inner,
     },
   )
+  // H3/POO-91 mount contract: the App-level MemberCatalogProvider sits
+  // OUTSIDE TabShell and owns the single catalog instance the home page
+  // consumes through useMemberCatalog.
   return createElement(
     I18nextProvider,
     { i18n },
     createElement(ProductSpaceProvider, {
       value: contextValueForScope(scope) as unknown as ProductSpaceContextValue,
-      children: shell,
+      children: createElement(MemberCatalogProvider, { children: shell }),
     }),
   )
 }

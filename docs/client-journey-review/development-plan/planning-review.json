@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "protocol": "supa-ai -> plan-first -> task-scope-splitter + independent engineering review",
+  "rounds": [
+    {
+      "round": 1,
+      "findings": [
+        "V2 circle scenes ahead of runtime mount",
+        "missing main/preload original-order candidate bridge",
+        "updates transport owner missing",
+        "artifact identity mapping unsupported",
+        "shared catalog invalidation owner missing"
+      ],
+      "resolution": "split stage scope; add B1; C1/C2 real or unsupported read chain; project sources.circleId; shared providers/invalidateAndRefresh"
+    },
+    {
+      "round": 2,
+      "findings": [
+        "H2 provider mount dependency",
+        "sortOrder is local entries index",
+        "candidate replay before subscription"
+      ],
+      "resolution": "H2 explicit injection; H3 switches provider after N1; correct sort origin; getter/store/ack/cancel"
+    },
+    {
+      "round": 3,
+      "findings": [
+        "subscribe/read race"
+      ],
+      "resolution": "subscribe first then getter, candidateId dedup; all shared writes ordered; S1 recovery separated"
+    }
+  ],
+  "verdict": "ready_to_publish_conditional_plan",
+  "remaining_execution_gates": [
+    "plan acceptance",
+    "F0 integration/policy source inheritance",
+    "F1 provider field/protocol facts",
+    "upstream re-pin",
+    "high risk technical signoff bound to plan hash"
+  ],
+  "checks": {
+    "acyclic": true,
+    "existing_paths": true,
+    "shared_writes_ordered": true,
+    "all_milestone_coverage": true,
+    "published_readback": true
+  },
+  "not_function_acceptance": true,
+  "design_rebind": {
+    "design_revision": "poo70-client-design-r2-20261004",
+    "minimum_source_commit": "ac831ea71a798030806f4e0906bdc93292bc918b",
+    "prototype_structure_checks": 256,
+    "before_after_scene_viewport_comparisons": 102,
+    "rendered_geometry_styles_unchanged": true,
+    "main_card_updated": true,
+    "batch_cards_updated": 24,
+    "legacy_client_cards_not_dispatched": [
+      "POO-44",
+      "POO-47",
+      "POO-48",
+      "POO-49",
+      "POO-52",
+      "POO-55",
+      "POO-56",
+      "POO-57",
+      "POO-58",
+      "POO-59",
+      "POO-60",
+      "POO-61",
+      "POO-62",
+      "POO-63",
+      "POO-64",
+      "POO-65",
+      "POO-66",
+      "POO-74",
+      "POO-75",
+      "POO-76"
+    ],
+    "product_acceptance": "not_run"
+  }
+}

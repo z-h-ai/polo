@@ -533,3 +533,13 @@ export function useTheme(): ThemeContextType {
   }
   return context
 }
+
+/**
+ * Optional theme read for surfaces that may mount above ThemeProvider in
+ * reduced trees (e.g. the workbench bar inside TabShell under isolated
+ * tests). Returns undefined when no provider is present; callers degrade
+ * gracefully (hide theme controls) instead of crashing.
+ */
+export function useOptionalTheme(): ThemeContextType | undefined {
+  return useContext(ThemeContext)
+}
