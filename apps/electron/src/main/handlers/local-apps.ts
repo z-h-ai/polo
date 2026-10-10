@@ -75,6 +75,7 @@ import {
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
 import type { HandlerDeps } from './handler-deps'
+import { prepareNativeAppInstall, prepareNativeAppUninstall, finishNativeAppInstallation, recoverNativeAppInstallationEvidence } from '../local-app-runtime/native-installation-evidence'
 
 /**
  * Trusted active ProductSpace gate for every renderer-reachable Local App
@@ -1062,6 +1063,7 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManager?: HandlerDeps['windowManager'] }): void {
+  void recoverNativeAppInstallationEvidence(getScopedLocalAppRuntimeRegistry()).catch(() => {})
   void server
   // The calling window's Workspace is resolved from the trusted Main-side
   // window registry — never from renderer arguments.
@@ -1198,7 +1200,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'This ProductSpace App does not use bundle installation',
         )
       }
-      return getScopedLocalAppRuntimeRegistry().install({
+      // Installation reporting is additional evidence. An unavailable older
+      // server or damaged journal keeps it unknown; the existing Catalog and
+      // native package guards still own authorization and verification.
+      const installationIntent = await prepareNativeAppInstall(app,loaded.context.kind,launch.delivery.checksum).catch(() => null)
+      await assertProductSpaceAccountCurrent(app)
+      const registry = getScopedLocalAppRuntimeRegistry()
+      const installed = await registry.install({
         scope: productSpaceBundleScope(app),
         version: launch.subject.version,
         downloadUrl: launch.delivery.downloadUrl,
@@ -1206,7 +1214,9 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         sizeBytes: launch.delivery.sizeBytes,
         platform: hostPlatform(),
         arch: hostArchitecture(),
-      }, { signal: ctx.signal })
+      }, { signal: ctx.signal, ...(installationIntent ? {nativeInstallationAdmissionId: installationIntent.admission.admissionId} : {}) })
+      await finishNativeAppInstallation(registry,installationIntent).catch(() => {})
+      return installed
     },
   )
 
@@ -1389,12 +1399,14 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // clear the fence — it can never retroactively turn the completed
       // destructive operation into NOT_AUTHORIZED (the previous trailing
       // async account recheck did exactly that and invited unsafe retries).
+      const uninstallIntent = await prepareNativeAppUninstall(app).catch(() => null)
       await runUnderSwitchMutex(async () => {
         assertProductSpaceAppOperationCurrent(app)
         const scope = productSpaceBundleScope(app)
         await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
         unregisterLocalAppExecutions(scope)
       })
+      await finishNativeAppInstallation(getScopedLocalAppRuntimeRegistry(),uninstallIntent).catch(() => {})
     },
   )
 

@@ -2,6 +2,10 @@ import { type CreatorSkillsLedgerWriteDependencies } from './ledger.ts';
 import { type CreatorSkillBackup, type CreatorSkillInstallInput, type CreatorSkillOperationProgress, type CreatorSkillOperationResult, type InstalledCreatorSkill } from './types.ts';
 export type CreatorSkillJournalState = 'preparing' | 'prepared' | 'old_backed_up' | 'new_installed' | 'ledger_committed' | 'detaching' | 'committed';
 export interface CreatorSkillInstallerDependencies {
+    nativeInstallationAdmissionId?: string;
+    /** Trusted native evidence hooks run under the existing workspace/slug locks. */
+    beforeNativeMutation?: (installed: InstalledCreatorSkill | undefined) => Promise<void>;
+    onNativeCommitted?: (result: CreatorSkillOperationResult) => Promise<void>;
     fetch?: typeof fetch;
     onProgress?: (progress: CreatorSkillOperationProgress) => void;
     assertCommitAllowed?: (input: {
@@ -28,7 +32,7 @@ export interface CreatorSkillInstallerDependencies {
     /** Receives raw filesystem/download errors for server-only diagnostics. */
     onError?: (error: unknown) => void;
 }
-export type CreatorSkillUninstallerDependencies = Pick<CreatorSkillInstallerDependencies, 'beforeCommitSnapshot' | 'onJournalPersisted' | 'syncJournalDirectory' | 'onCleanupStep' | 'onLedgerMutationLocked' | 'onLedgerMutationLockContended' | 'ledgerWriteDependencies' | 'onError'>;
+export type CreatorSkillUninstallerDependencies = Pick<CreatorSkillInstallerDependencies, 'beforeNativeMutation' | 'onNativeCommitted' | 'beforeCommitSnapshot' | 'onJournalPersisted' | 'syncJournalDirectory' | 'onCleanupStep' | 'onLedgerMutationLocked' | 'onLedgerMutationLockContended' | 'ledgerWriteDependencies' | 'onError'>;
 export type CreatorSkillMetadataUpdateDependencies = Pick<CreatorSkillInstallerDependencies, 'onLedgerMutationLocked' | 'onLedgerMutationLockContended' | 'ledgerWriteDependencies'>;
 export declare function hasPendingCreatorSkillForceDelete(workspaceRoot: string, slug: string): Promise<boolean>;
 export declare function installCreatorSkill(workspaceRoot: string, input: CreatorSkillInstallInput, dependencies?: CreatorSkillInstallerDependencies): Promise<CreatorSkillOperationResult>;

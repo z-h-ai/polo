@@ -53,6 +53,12 @@ import {
 } from './types.ts';
 import { z, type ZodType } from 'zod';
 import {
+  NativeInstallationAdmissionRequestSchema, NativeInstallationAdmissionSchema,
+  NativeInstallationReportSchema, NativeInstallationReceiptSchema,
+  type NativeInstallationAdmissionRequest, type NativeInstallationAdmission,
+  type NativeInstallationReport, type NativeInstallationReceipt,
+} from './native-installations-contract.ts';
+import {
   AdminLoginResponseSchema,
   AdminPhoneAuthResponseSchema,
   AdminRefreshResponseSchema,
@@ -1322,6 +1328,21 @@ export class AdminClient {
       void reader.cancel().catch(() => {});
       reader.releaseLock();
     }
+  }
+
+  async admitNativeInstallation(accessToken: string, input: NativeInstallationAdmissionRequest): Promise<NativeInstallationAdmission> {
+    return NativeInstallationAdmissionSchema.parse(await this.request<unknown>('/api/me/installation-admissions', {
+      method: 'POST', accessToken, body: NativeInstallationAdmissionRequestSchema.parse(input), retryingAfterRefresh: true,
+    }));
+  }
+
+  async reportNativeInstallation(accessToken: string, input: NativeInstallationReport): Promise<NativeInstallationReceipt> {
+    const checked = NativeInstallationReportSchema.parse(input);
+    // The trusted session owner supplies this immutable token snapshot. Never
+    // refresh through a mutable credential manager after an account switch.
+    return NativeInstallationReceiptSchema.parse(await this.request<unknown>(`/api/me/devices/${checked.deviceId}/installations`, {
+      method: 'POST', accessToken, body: checked, retryingAfterRefresh: true,
+    }));
   }
 
   private async request<T>(path: string, options: {

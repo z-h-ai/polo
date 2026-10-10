@@ -215,7 +215,7 @@ export class ScopedLocalAppRuntimeRegistry {
 
   async install(
     request: ScopedCatalogInstallRequest,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; nativeInstallationAdmissionId?: string } = {},
   ): Promise<LocalAppInstalledApp> {
     if (!normalizeCatalogSemVer(request.version)) {
       throw new LocalAppRuntimeError(
@@ -243,6 +243,12 @@ export class ScopedLocalAppRuntimeRegistry {
         return attachScope(installed, scope)
       },
     )
+  }
+
+  async readNativeInstallationEvidence(scope: CatalogLocalAppScope) {
+    const safeScope = validateCatalogLocalAppScope(scope)
+    const manager = await this.getManager(safeScope)
+    return manager.readNativeInstallationEvidence(createCatalogRuntimeAppId(safeScope))
   }
 
   async cancelInstall(scope: CatalogLocalAppScope): Promise<boolean> {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { type ChildProcess, type spawn as spawnProcess } from 'child_process'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { watch } from 'fs'
 import { createServer, type Server } from 'http'
@@ -182,6 +182,30 @@ function makeManager(options: Pick<
   })
   return manager
 }
+
+describe('native installation evidence commit witness', () => {
+  it('persists an original admission on a real bundle install and a cached exact-version install', async () => {
+    const appId = 'demo.native-evidence', nativeId = randomUUID()
+    const bundle = await writeBundle(appId,'1.0.0',{}, {'dist/index.html': '<h1>installed</h1>'})
+    const archive = await archiveBundle(bundle,'native-evidence'), url = await serveArchive(archive), runtime = makeManager()
+    const request = requestFor(appId,'1.0.0',url,archive)
+    await runtime.install(request,{nativeInstallationAdmissionId: nativeId})
+    expect(await runtime.readNativeInstallationEvidence(appId)).toEqual({presence: 'installed',versions: [{version: '1.0.0',checksum: request.checksum,admissionId: nativeId}]})
+    const refreshedId = randomUUID(); await runtime.install(request,{nativeInstallationAdmissionId: refreshedId})
+    expect((await runtime.readNativeInstallationEvidence(appId))?.versions[0].admissionId).toBe(refreshedId)
+    await runtime.uninstall(appId,{preserveData: true})
+    expect(await runtime.readNativeInstallationEvidence(appId)).toEqual({presence: 'absent',versions: []})
+  })
+  it('keeps legacy versions unattributed and never interprets missing/corrupt metadata as an uninstall', async () => {
+    const appId = 'demo.native-unknown', bundle = await writeBundle(appId,'1.0.0',{}, {'dist/index.html': '<h1>legacy</h1>'})
+    const archive = await archiveBundle(bundle,'native-unknown'), url = await serveArchive(archive), runtime = makeManager()
+    await runtime.install(requestFor(appId,'1.0.0',url,archive))
+    expect((await runtime.readNativeInstallationEvidence(appId))?.versions[0].admissionId).toBeNull()
+    const metadata = join(testRoot,'runtime/apps',appId,'metadata.json')
+    await writeFile(metadata,'INVALID_JSON'); expect(await runtime.readNativeInstallationEvidence(appId)).toBeNull()
+    await rm(metadata); expect(await runtime.readNativeInstallationEvidence(appId)).toBeNull()
+  })
+})
 
 interface FakeChildProcess extends ChildProcess {
   pid: number

@@ -139,6 +139,10 @@ function validForceDeleteConfirmation(
 }
 
 export interface CreatorSkillInstallerDependencies {
+  nativeInstallationAdmissionId?: string
+  /** Trusted native evidence hooks run under the existing workspace/slug locks. */
+  beforeNativeMutation?: (installed: InstalledCreatorSkill | undefined) => Promise<void>
+  onNativeCommitted?: (result: CreatorSkillOperationResult) => Promise<void>
   fetch?: typeof fetch
   onProgress?: (progress: CreatorSkillOperationProgress) => void
   assertCommitAllowed?: (input: {
@@ -170,6 +174,8 @@ export interface CreatorSkillInstallerDependencies {
 
 export type CreatorSkillUninstallerDependencies = Pick<
   CreatorSkillInstallerDependencies,
+  | 'beforeNativeMutation'
+  | 'onNativeCommitted'
   | 'beforeCommitSnapshot'
   | 'onJournalPersisted'
   | 'syncJournalDirectory'
@@ -186,6 +192,13 @@ export type CreatorSkillMetadataUpdateDependencies = Pick<
   | 'onLedgerMutationLockContended'
   | 'ledgerWriteDependencies'
 >
+
+async function notifyNativeCommit<T extends CreatorSkillOperationResult>(result: T, dependencies: Pick<CreatorSkillInstallerDependencies, 'onNativeCommitted'>): Promise<T> {
+  // A reporting failure after the native commit cannot roll back or reclassify
+  // its completed result. Its pre-mutation intent remains for healthy recovery.
+  try { await dependencies.onNativeCommitted?.(result) } catch { /* Retain the native intent. */ }
+  return result
+}
 
 function errorResult(args: {
   operationId: string
@@ -1732,6 +1745,7 @@ export async function installCreatorSkill(
         && compareStableSemver(input.grant.version, previous.version) < 0
       ) ? previous.version : undefined
       const installation: InstalledCreatorSkill = {
+        ...(dependencies.nativeInstallationAdmissionId ? { nativeInstallationAdmissionId: dependencies.nativeInstallationAdmissionId } : {}),
         artifactId: input.grant.artifactId,
         organizationId: input.grant.organizationId,
         slug: input.grant.slug,
@@ -1881,7 +1895,7 @@ export async function installCreatorSkill(
         // it can safely finalize a visible committed journal or roll back an
         // older checkpoint after a crash.
         report(dependencies, input, 'refresh', 100, false)
-        return committedResult
+        return await notifyNativeCommit(committedResult, dependencies)
       }
       const backupPath = await publishCommittedBackup(
         canonicalWorkspace,
@@ -1896,7 +1910,7 @@ export async function installCreatorSkill(
       await dependencies.onCleanupStep?.('operation_removed')
 
       report(dependencies, input, 'refresh', 100, false)
-      return committedResult
+      return await notifyNativeCommit(committedResult, dependencies)
     } catch (error) {
       dependencies.onError?.(error)
       if (journal?.state === 'committed' && committedResult) {
@@ -1904,7 +1918,7 @@ export async function installCreatorSkill(
         // cleanup to startup recovery rather than attempting an unsafe rollback
         // after the point of no return.
         report(dependencies, input, 'refresh', 100, false)
-        return committedResult
+        return await notifyNativeCommit(committedResult, dependencies)
       }
       if (commitStarted && operationPath && journal) {
         try {
@@ -2015,6 +2029,7 @@ export async function uninstallCreatorSkill(args: {
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       await dependencies.onLedgerMutationLocked?.()
       const installed = ledger.installed.find(item => item.slug === args.slug)
+      await dependencies.beforeNativeMutation?.(installed)
       const pendingCredential = installed
         ? undefined
         : await pendingForceDeleteCredential(canonicalWorkspace, args.slug)
@@ -2203,7 +2218,7 @@ export async function uninstallCreatorSkill(args: {
         operationId: args.operationId,
       }
       await dependencies.onJournalPersisted?.(journal.state)
-      if (!committedJournalDurable) return committedResult
+      if (!committedJournalDurable) return await notifyNativeCommit(committedResult, dependencies)
       if (!args.forceDeleteModified) {
         await preserveConcurrentRecreation({
           workspaceRoot: canonicalWorkspace,
@@ -2235,7 +2250,7 @@ export async function uninstallCreatorSkill(args: {
       await dependencies.onCleanupStep?.('transaction_backup_removed')
       await rm(operationPath, { recursive: true, force: true })
       await dependencies.onCleanupStep?.('operation_removed')
-      return committedResult
+      return await notifyNativeCommit(committedResult, dependencies)
     } catch (error) {
       dependencies.onError?.(error)
       const record = error && typeof error === 'object'
@@ -2275,7 +2290,7 @@ export async function uninstallCreatorSkill(args: {
             })
           }
         }
-        return committedResult
+        return await notifyNativeCommit(committedResult, dependencies)
       }
       if (journal && operationPath) {
         await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {})

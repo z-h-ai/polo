@@ -8,6 +8,7 @@ import type {
   LocalAppRuntimeStatus,
 } from '@polo-ai/shared/protocol'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import * as nativeInstallationContract from '../../../../../../packages/shared/src/admin/native-installations-contract'
 
 type Handler = (
   context: { clientId: string; signal: AbortSignal },
@@ -426,6 +427,7 @@ const scopedRegistry = {
 }
 
 mock.module('@polo-ai/shared/admin', () => ({
+  ...nativeInstallationContract,
   AdminClient: class {
     getAppReleaseDownload = getAppReleaseDownload
     listProductSpaces = listProductSpaces
@@ -447,6 +449,7 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  CONFIG_DIR: `/tmp/polo-local-app-handler-evidence-${process.pid}`,
   getAdminUrl: () => 'https://admin.example.com',
   // The trusted caller-Workspace existence check for ProductSpace starts.
   getWorkspaceByNameOrId: (id: string) =>

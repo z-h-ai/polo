@@ -26,6 +26,7 @@ import {
   resolveCreatorAppPublishingOrganization,
 } from '@polo-ai/shared/admin'
 import { z } from 'zod'
+import { setNativeInstallationTransport } from '../../runtime/native-installations'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -808,6 +809,27 @@ export function registerAdminHandlers(
     } catch {
       return null
     }
+  })
+
+  // Only this coordinator owns the token snapshot. Reports for account A
+  // remain queued during account B's session; the AdminClient methods disable
+  // mutable credential refresh and cannot transplant B's token into A's work.
+  const installationSession = async (accountId: string) => {
+    const adminUrl = requireAdminUrl(), manager = getCredentialManager()
+    const snapshot = await sessions.capture(manager)
+    if (!snapshot || snapshot.tokens.userId !== accountId || !await sessions.isCurrent(manager,snapshot)) {
+      throw new Error('Original installation account is not the current trusted session')
+    }
+    const refreshed = await ensureValidTokens(adminUrl, manager, sessions, deps, snapshot)
+    if (!refreshed.tokens || !refreshed.session || refreshed.tokens.userId !== accountId
+      || !await sessions.isCurrent(manager, refreshed.session)) {
+      throw new Error('Original installation session changed during token recovery')
+    }
+    return { client: new AdminClient(adminUrl), accessToken: refreshed.tokens.accessToken }
+  }
+  setNativeInstallationTransport({
+    admit: async (accountId,input) => { const session = await installationSession(accountId); return session.client.admitNativeInstallation(session.accessToken,input) },
+    report: async (accountId,input) => { const session = await installationSession(accountId); return session.client.reportNativeInstallation(session.accessToken,input) },
   })
 
   // The Main-side switch transaction verifies the target space against the
@@ -3227,9 +3249,11 @@ async function ensureValidTokens(
   manager: CredentialManager,
   sessions: AdminSessionCoordinator,
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>,
+  expectedSession?: AdminSessionSnapshot,
 ): Promise<TokenValidationResult> {
-  const initialSession = await sessions.capture(manager)
+  const initialSession = expectedSession ?? await sessions.capture(manager)
   if (!initialSession) return { tokens: null }
+  if (!await sessions.isCurrent(manager, initialSession)) return { tokens: null, stale: true }
   const { tokens } = initialSession
 
   if (!manager.isExpired({
