@@ -296,10 +296,17 @@ export function HomePage() {
     [directory.entries, hiddenApps, hiddenVersion],
   )
   const sourceOptions = useMemo(
-    () => collectHomeAppSourceOptions(matchableEntries),
-    [matchableEntries],
+    () => [{ key: 'builtin:polo-assistant', label: t('homeApps.home.poloSource') }, ...collectHomeAppSourceOptions(matchableEntries)],
+    [matchableEntries, t],
   )
   const normalizedQuery = query.trim().toLocaleLowerCase()
+  const assistantMatchesQuery = !normalizedQuery || [
+    t('homeApps.home.poloTitle'),
+    t('homeApps.home.poloSource'),
+    t('homeApps.home.poloDescription'),
+    t('homeApps.home.openAssistant'),
+  ].join(' ').toLocaleLowerCase().includes(normalizedQuery)
+  const assistantVisible = assistantMatchesQuery && (sourceFilter === 'all' || sourceFilter === 'builtin:polo-assistant')
   const filteredEntries = useMemo(
     () => matchableEntries.filter(entry =>
       homeAppMatchesQuery(entry, normalizedQuery)
@@ -644,9 +651,9 @@ export function HomePage() {
 
       <section>
         <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
-          {/* The fixed Polo assistant card always renders — loading, error
-          and empty states only occupy the work-App slots beside it. */}
-          <article
+          {/* The assistant stays first among matching results, including
+          when no work App matches the current query/source. */}
+          {assistantVisible && <article
             data-testid="home-quick-entry-polo"
             onClick={openPoloAssistant}
             className="flex min-h-[210px] min-[1081px]:min-h-[222px] cursor-pointer flex-col rounded-[20px] border border-border bg-surface p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
@@ -674,7 +681,7 @@ export function HomePage() {
                 {t('homeApps.home.openAssistant')}
               </button>
             </div>
-          </article>
+          </article>}
           {phase === 'loading' && !catalog.state.catalog ? (
             <div
               className="flex min-h-[210px] min-[1081px]:min-h-[222px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface"
@@ -872,7 +879,7 @@ export function HomePage() {
             )}
           </div>
         )}
-        {phase === 'ready' && matchableEntries.length > 0 && visibleEntries.length === 0 && (
+        {phase === 'ready' && matchableEntries.length > 0 && visibleEntries.length === 0 && !assistantVisible && (
           /* Prototype `[data-library-empty]`: the search/filter vacuum —
           distinct from the directory vacuum above, with the explicit clear
           action. Fully-hidden directories do NOT show this: the restore
