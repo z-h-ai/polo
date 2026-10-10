@@ -471,9 +471,9 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     const sourceSelect = screen.getByTestId('home-directory-source') as HTMLSelectElement
     const options = Array.from(sourceSelect.options).map(option => option.value)
     // Include the real built-in assistant alongside catalog-derived sources.
-    expect(options).toEqual(['all', 'builtin:polo-assistant', 'Growth App Source', 'Design Circle', 'Organization A'])
+    expect(options).toEqual(['all', 'builtin:polo-assistant', 'catalog:Growth App Source', 'catalog:Design Circle', 'catalog:Organization A'])
 
-    fireEvent.change(sourceSelect, { target: { value: 'Design Circle' } })
+    fireEvent.change(sourceSelect, { target: { value: 'catalog:Design Circle' } })
     await waitFor(() => {
       expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
     })
@@ -775,6 +775,20 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
     const workSource = Array.from(source.querySelectorAll('option')).find(option => option.value !== 'all' && option.value !== builtin.value)!
     fireEvent.change(source, { target: { value: workSource.value } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: a legitimate catalog source named like the built-in key cannot collide with the assistant filter', async () => {
+    const app = workApp('f082-collision', 'Named Source App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'builtin:polo-assistant' }] })
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const source = screen.getByTestId('home-directory-source')
+    fireEvent.change(source, { target: { value: 'builtin:polo-assistant' } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    fireEvent.change(source, { target: { value: 'catalog:builtin:polo-assistant' } })
     expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
   })

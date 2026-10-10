@@ -296,7 +296,7 @@ export function HomePage() {
     [directory.entries, hiddenApps, hiddenVersion],
   )
   const sourceOptions = useMemo(
-    () => [{ key: 'builtin:polo-assistant', label: t('homeApps.home.poloSource') }, ...collectHomeAppSourceOptions(matchableEntries)],
+    () => [{ key: 'builtin:polo-assistant', label: t('homeApps.home.poloSource') }, ...collectHomeAppSourceOptions(matchableEntries).map(option => ({ ...option, key: `catalog:${option.key}` }))],
     [matchableEntries, t],
   )
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -310,7 +310,7 @@ export function HomePage() {
   const filteredEntries = useMemo(
     () => matchableEntries.filter(entry =>
       homeAppMatchesQuery(entry, normalizedQuery)
-      && homeAppMatchesSource(entry, sourceFilter)),
+      && (sourceFilter === 'all' || (sourceFilter.startsWith('catalog:') && homeAppMatchesSource(entry, sourceFilter.slice('catalog:'.length))))),
     [matchableEntries, normalizedQuery, sourceFilter],
   )
   const visibleEntries = useMemo(
