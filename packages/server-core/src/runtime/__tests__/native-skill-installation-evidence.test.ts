@@ -42,3 +42,30 @@ test('the locked native completion persists its outbox before later token recove
   expect(sent).toBe(0);expect(await pending(f.root)).toHaveLength(1)
   await box.flush();expect(sent).toBe(1)
 })
+
+test('actual modified detach and credential-bound force delete commit the original partition states',async()=>{
+  const f=await fixture();const target=join(f.root,'skills','original-skill');await mkdir(target,{recursive:true});await writeFile(join(target,'SKILL.md'),'---\nname: original-skill\ndescription: native evidence fixture\n---\nModified native content.\n')
+  await recoverNativeSkillInstallationEvidence(f.workspaceRoot,f.outbox)
+  const {uninstallCreatorSkill}=await import('@polo-ai/shared/creator-skills')
+  const {prepareNativeSkillUninstall,finishNativeSkillInstallation}=await import('../native-skill-installation-evidence')
+  let intent: Awaited<ReturnType<typeof prepareNativeSkillUninstall>>=null
+  const hooks={beforeNativeMutation:async()=>{intent=await prepareNativeSkillUninstall(f.workspaceRoot,'original-skill',f.outbox)},onNativeCommitted:async(result: Parameters<typeof finishNativeSkillInstallation>[1])=>{await finishNativeSkillInstallation(intent,result,f.outbox)}}
+  const detached=await uninstallCreatorSkill({workspaceRoot:f.workspaceRoot,workspaceId:'workspace-test',operationId:randomUUID(),slug:'original-skill'},hooks)
+  expect(detached.success && detached.detached).toBe(true);expect(await f.outbox.retainedManagedDetach({kind:'skill',workspaceRoot:f.workspaceRoot,slug:'original-skill'})).toEqual(f.admission)
+  expect(await readFile(join(target,'SKILL.md'),'utf8')).toContain('Modified native content')
+  const removed=await uninstallCreatorSkill({workspaceRoot:f.workspaceRoot,workspaceId:'workspace-test',operationId:randomUUID(),slug:'original-skill',forceDeleteModified:true,forceDeleteCredential:detached.success?detached.forceDeleteCredential:undefined},hooks)
+  expect(removed.success).toBe(true)
+  const reports=await pending(f.root);expect(reports.map((row:{report:{state:string}})=>row.report.state)).toEqual(['installed','managed_detached','uninstalled'])
+  expect(new Set(reports.map((row:{report:{partitionId:string}})=>row.report.partitionId)).size).toBe(1)
+  expect(reports.every((row:{accountId:string})=>row.accountId===f.admission.accountId)).toBe(true)
+})
+test('actual missing-target uninstall reports its original owner rather than inventing an installed recovery',async()=>{
+  const f=await fixture();const {uninstallCreatorSkill}=await import('@polo-ai/shared/creator-skills')
+  const {prepareNativeSkillUninstall,finishNativeSkillInstallation}=await import('../native-skill-installation-evidence')
+  let intent: Awaited<ReturnType<typeof prepareNativeSkillUninstall>>=null
+  const result=await uninstallCreatorSkill({workspaceRoot:f.workspaceRoot,workspaceId:'workspace-test',operationId:randomUUID(),slug:'original-skill'}, {
+    beforeNativeMutation:async()=>{intent=await prepareNativeSkillUninstall(f.workspaceRoot,'original-skill',f.outbox)},
+    onNativeCommitted:async result=>{await finishNativeSkillInstallation(intent,result,f.outbox)},
+  })
+  expect(result.success).toBe(true);const reports=await pending(f.root);expect(reports).toHaveLength(1);expect(reports[0].report.state).toBe('uninstalled');expect(reports[0].report.admissionId).toBe(f.admission.admissionId)
+})

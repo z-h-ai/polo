@@ -787,12 +787,13 @@ describe('Creator Skill workspace installer', () => {
       ), 'utf8')).toContain('Local note.')
 
       await writeFile(skillPath, `${skillContent('2.0.0')}\nAnother local note.\n`)
+      const nativeStates: boolean[] = []
       const uninstall = await uninstallCreatorSkill({
         workspaceRoot: root,
         workspaceId: 'workspace-1',
         operationId: OP_UNINSTALL,
         slug: 'install-test',
-      })
+      }, {onNativeCommitted: async result => {nativeStates.push(result.success && result.detached === true)}})
       expect(uninstall).toMatchObject({
         success: true,
         detached: true,
@@ -812,9 +813,10 @@ describe('Creator Skill workspace installer', () => {
         slug: 'install-test',
         forceDeleteModified: true,
         forceDeleteCredential,
-      }, { onError: error => { forceError = error } })
+      }, { onError: error => { forceError = error },onNativeCommitted: async result => {nativeStates.push(result.success && result.detached === true)} })
       expect(forceError).toBeUndefined()
       expect(forced).toMatchObject({ success: true })
+      expect(nativeStates).toEqual([true,false])
       expect(await access(skillPath).then(() => true, () => false)).toBe(false)
     })
   })
@@ -2394,6 +2396,20 @@ describe('Creator Skill workspace installer', () => {
         onNativeCommitted:async result=>{committed=result.success;expect((await readCreatorSkillsLedger(root)).installed).toEqual([]);throw new Error('offline reporting')},
       })
       expect(captured).toBe(admissionId);expect(committed).toBe(true);expect(removed.success).toBe(true)
+    })
+  })
+
+  it('commits the original uninstall witness when its physical target is already missing', async () => {
+    await withWorkspace(async root => {
+      const packaged=await packageGrant(root,'1.0.0'), admissionId='135654c4-aeb5-4ed2-9684-71a1d007c65c'
+      expect((await installCreatorSkill(root,{workspaceId:'workspace-1',operationId:OP_INSTALL,grant:packaged.grant},{fetch:responseFetch(packaged.bytes),nativeInstallationAdmissionId:admissionId})).success).toBe(true)
+      await rm(join(root,'skills',packaged.grant.slug),{recursive:true})
+      let actual: string|undefined, reported=false
+      const result=await uninstallCreatorSkill({workspaceRoot:root,workspaceId:'workspace-1',operationId:OP_UNINSTALL,slug:packaged.grant.slug},{
+        beforeNativeMutation:async installed=>{actual=installed?.nativeInstallationAdmissionId},
+        onNativeCommitted:async result=>{reported=result.success;expect((await readCreatorSkillsLedger(root)).installed).toEqual([])},
+      })
+      expect(result.success).toBe(true);expect(actual).toBe(admissionId);expect(reported).toBe(true)
     })
   })
 

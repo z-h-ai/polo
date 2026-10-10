@@ -24,16 +24,16 @@ export async function prepareNativeSkillInstall(scope: { accountId: string; prod
   const binding = {kind: 'skill' as const, workspaceRoot: await realpath(workspaceRoot), slug: grant.slug}
   return getNativeInstallationOutbox().prepare(admission,binding,'install')
 }
-export async function prepareNativeSkillUninstall(workspaceRoot: string, slug: string) {
+export async function prepareNativeSkillUninstall(workspaceRoot: string, slug: string, outbox = getNativeInstallationOutbox()) {
   const root = await realpath(workspaceRoot), ledger = await healthyLedger(root)
   if (!ledger) return null
   const installed = ledger?.installed.find(row => row.slug === slug)
   const binding = {kind: 'skill' as const, workspaceRoot: root,slug}
   if (installed && !installed.nativeInstallationAdmissionId) return null
   const original = installed
-    ? (await getNativeInstallationOutbox().retained(binding)).find(row => row.admissionId === installed.nativeInstallationAdmissionId)
-    : await getNativeInstallationOutbox().retainedManagedDetach(binding)
-  return original ? getNativeInstallationOutbox().prepare(original,binding,'uninstall') : null
+    ? (await outbox.retained(binding)).find(row => row.admissionId === installed.nativeInstallationAdmissionId)
+    : await outbox.retainedManagedDetach(binding)
+  return original ? outbox.prepare(original,binding,'uninstall') : null
 }
 async function snapshot(intent: NativeInstallationIntent, outbox: NativeInstallationOutbox): Promise<NativeInstallationSnapshot|null> {
   if (intent.binding.kind !== 'skill') return null

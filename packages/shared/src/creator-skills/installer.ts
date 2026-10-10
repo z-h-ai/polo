@@ -2073,10 +2073,10 @@ export async function uninstallCreatorSkill(args: {
         if (pendingCredential) {
           await removeForceDeleteCredential(canonicalWorkspace, args.slug)
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId,
-        }
+        }, dependencies)
       }
 
       // A normal uninstall only detaches content that was already modified at
@@ -2116,12 +2116,12 @@ export async function uninstallCreatorSkill(args: {
           }
           throw error
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId,
           detached: true,
           forceDeleteCredential,
-        }
+        }, dependencies)
       }
 
       const reservedOperation = await reserveOperationPath(

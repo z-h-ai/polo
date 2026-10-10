@@ -29018,10 +29018,10 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
         if (pendingCredential) {
           await removeForceDeleteCredential(canonicalWorkspace, args.slug);
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId
-        };
+        }, dependencies);
       }
       if (!args.forceDeleteModified && (installed && isTargetLocallyModified(targetIdentity, installed) || !installed && pendingCredential)) {
         await writeCreatorSkillsLedger(
@@ -29048,12 +29048,12 @@ async function uninstallCreatorSkill(args, dependencies = {}) {
           }
           throw error48;
         }
-        return {
+        return await notifyNativeCommit({
           success: true,
           operationId: args.operationId,
           detached: true,
           forceDeleteCredential
-        };
+        }, dependencies);
       }
       const reservedOperation = await reserveOperationPath(
         canonicalWorkspace,
