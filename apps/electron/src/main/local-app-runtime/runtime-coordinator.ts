@@ -838,7 +838,7 @@ export class LocalAppRuntimeCoordinator {
           if (query.state !== 'receipt_unconfirmed' || !query.outcome) continue
           const receiptOk = await runBounded(signal =>
             admin.recordAppUsage(
-              this.receiptBody(runId, requestId, query.outcome!),
+              this.receiptBody(runtime, runId, requestId, query.outcome!),
               { signal },
             ))
           if (!receiptOk) return
@@ -880,16 +880,15 @@ export class LocalAppRuntimeCoordinator {
   ): AdminStartAppRunInput {
     return {
       runId,
-      workspaceId: runtime.workspaceId,
-      accountId: runtime.identity.accountId,
       productSpaceId: runtime.identity.productSpaceId,
+      subjectKind: 'app',
       artifactInstanceId: runtime.identity.artifactInstanceId,
-      versionId: runtime.identity.versionId,
-      version: runtime.identity.version,
+      artifactVersionId: runtime.identity.versionId,
     }
   }
 
   private receiptBody(
+    runtime: ActiveRuntime,
     runId: string,
     requestId: string,
     outcome: QueryOutcome,
@@ -904,7 +903,7 @@ export class LocalAppRuntimeCoordinator {
       : outcome.kind === 'no_output'
         ? 0
         : outcome.usage?.outputTokens ?? 0
-    return { runId, requestId, inputTokens, outputTokens }
+    return { productSpaceId: runtime.identity.productSpaceId, runId, requestId, inputTokens, outputTokens }
   }
 
   /**
@@ -1374,7 +1373,7 @@ export class LocalAppRuntimeCoordinator {
       const composed = anySignal([runtime.controller.signal])
       try {
         await this.adapters.admin.recordAppUsage(
-          this.receiptBody(runId, requestId, outcome),
+          this.receiptBody(runtime, runId, requestId, outcome),
           { signal: composed.signal },
         )
       } finally {

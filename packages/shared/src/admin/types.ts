@@ -1,3 +1,4 @@
+import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFinishInput } from './billing-runtime-contract';
 import type { LlmConnection } from '../config/llm-connections.ts';
 export type {
   CreatorArtifact,
@@ -529,36 +530,21 @@ export class AdminError extends Error {
 }
 
 /** POL-102 minimal App billing contract. Payer/price are server-derived and never appear here. */
-export interface AdminStartAppRunInput {
-  runId: string;
-  workspaceId: string;
-  accountId: string;
-  productSpaceId: string;
-  artifactInstanceId: string;
-  versionId: string;
-  version: string;
-}
+export type AdminStartAppRunInput = AppRuntimeStartInput;
 
 export interface AdminStartAppRunResponse {
   run: { runId: string; status: 'running' };
 }
 
-export interface AdminRecordAppUsageInput {
-  runId: string;
-  requestId: string;
-  inputTokens: number;
-  outputTokens: number;
-}
+export type AdminRecordAppUsageInput = BillingRuntimeUsageInput;
 
 export interface AdminRecordAppUsageResponse {
   runId: string;
   requestId: string;
-  recorded: true;
+  recorded: boolean;
 }
 
-export interface AdminFinishAppRunInput {
-  status: 'completed' | 'failed' | 'cancelled' | 'unknown';
-}
+export type AdminFinishAppRunInput = BillingRuntimeFinishInput;
 
 export interface AdminFinishAppRunResponse {
   runId: string;

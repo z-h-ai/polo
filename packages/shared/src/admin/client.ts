@@ -1130,7 +1130,7 @@ export class AdminClient {
   }
 
   /**
-   * POL-102: starts one trusted App Run. Identity/workspace fields are
+   * POL-102: starts one trusted App Run. Identity fields are
    * capability-re-derived by the caller; payer/price stay server-side.
    */
   async startAppRun(
@@ -1144,7 +1144,10 @@ export class AdminClient {
       body: input,
       signal: options?.signal,
     });
-    return this.readSuccessResponse(response, AdminStartAppRunResponseSchema);
+    const result = this.readSuccessResponse(response, AdminStartAppRunResponseSchema);
+    if (result.run.runId !== input.runId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    if (result.run.status !== 'running') throw new AdminError('This App run is already finalized', 'run_finalized');
+    return { run: { runId: result.run.runId, status: result.run.status } };
   }
 
   /** POL-102: records one idempotent (runId, requestId) usage receipt. */
@@ -1159,7 +1162,10 @@ export class AdminClient {
       body: input,
       signal: options?.signal,
     });
-    return this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+    const result = this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+    if (result.receipt === null) throw new AdminError('requestId belongs to legacy usage', 'idempotency_conflict');
+    if (result.receipt.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return { runId: input.runId, requestId: result.receipt.requestId, recorded: result.recorded };
   }
 
   /** POL-102: finishes an App Run with an idempotent terminal status. */
@@ -1173,7 +1179,9 @@ export class AdminClient {
       `/api/billing/runs/${encodeURIComponent(runId)}`,
       { method: 'PATCH', accessToken, body: input, signal: options?.signal },
     );
-    return this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+    const result = this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+    if (result.run.runId !== runId || result.run.status !== input.status) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return { runId: result.run.runId, status: result.run.status };
   }
 
   // -------------------------------------------------------------------------

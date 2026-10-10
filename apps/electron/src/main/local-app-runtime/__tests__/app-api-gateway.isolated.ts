@@ -393,14 +393,12 @@ describe('local-app-api.v1 loopback gateway and coordinator (POO-54)', () => {
     expect(ok.json).toMatchObject({ ok: true, data: { runId: body.runId, status: 'running' } })
     // The Admin start derives identity from the capability, never from the App.
     const startCall = fixture.adminCalls.find(call => call.method === 'start')
-    expect(startCall!.body).toMatchObject({
+    expect(startCall!.body).toEqual({
       runId: body.runId,
-      accountId: 'account-a',
       productSpaceId: 'space-a',
+      subjectKind: 'app',
       artifactInstanceId: 'artifact-a',
-      versionId: 'version-a',
-      version: '1.0.0',
-      workspaceId: 'ws-a',
+      artifactVersionId: 'version-a',
     })
 
     startBehavior = 'credit'
@@ -449,7 +447,8 @@ describe('local-app-api.v1 loopback gateway and coordinator (POO-54)', () => {
     })
     // The receipt was confirmed BEFORE the body was released.
     const usageCall = fixture.adminCalls.find(call => call.method === 'usage')
-    expect(usageCall!.body).toMatchObject({
+    expect(usageCall!.body).toEqual({
+      productSpaceId: IDENTITY.productSpaceId,
       runId,
       requestId: query.requestId,
       inputTokens: 12,
@@ -854,7 +853,8 @@ describe('POO-54 round-1 fix regressions (gateway/coordinator)', () => {
     expect(response.json.error.code).toBe('host_auth_failed')
     // The provider-final usage of the failed call is metered, not dropped.
     const usageCall = fixture.adminCalls.find(call => call.method === 'usage')
-    expect(usageCall!.body).toMatchObject({
+    expect(usageCall!.body).toEqual({
+      productSpaceId: IDENTITY.productSpaceId,
       runId,
       requestId: query.requestId,
       inputTokens: 21,

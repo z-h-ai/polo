@@ -1571,49 +1571,48 @@ describe('AdminClient POL-102 App billing (POO-54)', () => {
   });
 
   it('starts an App run at the frozen path with derived-identity fields only', async () => {
-    mockJsonFetch({ run: { runId: 'run-1', status: 'running' } });
+    mockJsonFetch({ run: { runId: '11111111-1111-4111-8111-111111111111', status: 'running', payerId: 'server-only', costMicrosPerToken: '1' }, idempotent: false });
     const client = new AdminClient('https://admin.example.com');
     const result = await client.startAppRun('access-token', {
-      runId: 'run-1',
-      workspaceId: 'ws-a',
-      accountId: 'account-a',
-      productSpaceId: 'space-a',
-      artifactInstanceId: 'artifact-a',
-      versionId: 'version-a',
-      version: '1.0.0',
+      runId: '11111111-1111-4111-8111-111111111111',
+      subjectKind: 'app',
+      productSpaceId: '33333333-3333-4333-8333-333333333333',
+      artifactInstanceId: '44444444-4444-4444-8444-444444444444',
+      artifactVersionId: '55555555-5555-4555-8555-555555555555',
     }, { signal: new AbortController().signal });
-    expect(result).toEqual({ run: { runId: 'run-1', status: 'running' } });
+    expect(result).toEqual({ run: { runId: '11111111-1111-4111-8111-111111111111', status: 'running' } });
     expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/runs');
     expect(fetchCalls[0]!.init.method).toBe('POST');
     expect(fetchCalls[0]!.init.headers).toMatchObject({ Authorization: 'Bearer access-token' });
   });
 
   it('records idempotent usage receipts on the frozen path', async () => {
-    mockJsonFetch({ runId: 'run-1', requestId: 'req-1', recorded: true });
+    mockJsonFetch({ receipt: { requestId: '22222222-2222-4222-8222-222222222222', payerId: 'server-only' }, recorded: true, idempotent: false });
     const client = new AdminClient('https://admin.example.com');
     const result = await client.recordAppUsage('access-token', {
-      runId: 'run-1',
-      requestId: 'req-1',
+      runId: '11111111-1111-4111-8111-111111111111',
+      requestId: '22222222-2222-4222-8222-222222222222',
+      productSpaceId: '33333333-3333-4333-8333-333333333333',
       inputTokens: 11,
       outputTokens: 0,
     });
-    expect(result).toEqual({ runId: 'run-1', requestId: 'req-1', recorded: true });
+    expect(result).toEqual({ runId: '11111111-1111-4111-8111-111111111111', requestId: '22222222-2222-4222-8222-222222222222', recorded: true });
     expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/usage');
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
-      runId: 'run-1', requestId: 'req-1', inputTokens: 11, outputTokens: 0,
+      runId: '11111111-1111-4111-8111-111111111111', requestId: '22222222-2222-4222-8222-222222222222', productSpaceId: '33333333-3333-4333-8333-333333333333', inputTokens: 11, outputTokens: 0,
     }));
   });
 
   it('finishes an App run with PATCH and rejects invalid success shapes', async () => {
-    mockJsonFetch({ runId: 'run-1', status: 'completed' });
+    mockJsonFetch({ run: { runId: '11111111-1111-4111-8111-111111111111', status: 'completed', totalCostMicros: '9' }, idempotent: false });
     const client = new AdminClient('https://admin.example.com');
-    const result = await client.finishAppRun('access-token', 'run-1', { status: 'completed' });
-    expect(result).toEqual({ runId: 'run-1', status: 'completed' });
-    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/runs/run-1');
+    const result = await client.finishAppRun('access-token', '11111111-1111-4111-8111-111111111111', { status: 'completed' });
+    expect(result).toEqual({ runId: '11111111-1111-4111-8111-111111111111', status: 'completed' });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/billing/runs/11111111-1111-4111-8111-111111111111');
     expect(fetchCalls[0]!.init.method).toBe('PATCH');
 
-    mockJsonFetch({ runId: 'run-1', status: 'unexpected' });
-    await expect(client.finishAppRun('access-token', 'run-1', { status: 'completed' }))
+    mockJsonFetch({ run: { runId: '11111111-1111-4111-8111-111111111111', status: 'unexpected' }, idempotent: true });
+    await expect(client.finishAppRun('access-token', '11111111-1111-4111-8111-111111111111', { status: 'completed' }))
       .rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
   });
 
@@ -1621,20 +1620,20 @@ describe('AdminClient POL-102 App billing (POO-54)', () => {
     const client = new AdminClient('https://admin.example.com');
     mockJsonFetch({ errorCode: 'insufficient_credit' }, 402);
     await expect(client.startAppRun('access-token', {
-      runId: 'run-1', workspaceId: 'ws', accountId: 'a', productSpaceId: 's',
-      artifactInstanceId: 'i', versionId: 'v', version: '1.0.0',
+      runId: '11111111-1111-4111-8111-111111111111', subjectKind: 'app', productSpaceId: '33333333-3333-4333-8333-333333333333',
+      artifactInstanceId: '44444444-4444-4444-8444-444444444444', artifactVersionId: '55555555-5555-4555-8555-555555555555',
     })).rejects.toMatchObject({ errorCode: 'insufficient_credit' });
     mockJsonFetch({ errorCode: 'run_finalized' }, 409);
-    await expect(client.finishAppRun('access-token', 'run-1', { status: 'completed' }))
+    await expect(client.finishAppRun('access-token', '11111111-1111-4111-8111-111111111111', { status: 'completed' }))
       .rejects.toMatchObject({ errorCode: 'run_finalized' });
     mockJsonFetch({ errorCode: 'idempotency_conflict' }, 409);
     await expect(client.recordAppUsage('access-token', {
-      runId: 'run-1', requestId: 'req-1', inputTokens: 0, outputTokens: 0,
+      productSpaceId: '33333333-3333-4333-8333-333333333333', runId: '11111111-1111-4111-8111-111111111111', requestId: '22222222-2222-4222-8222-222222222222', inputTokens: 0, outputTokens: 0,
     })).rejects.toMatchObject({ errorCode: 'idempotency_conflict' });
     // Ordinary upstream failures stay generic and never become credit errors.
     mockJsonFetch({ errorCode: 'something_else' }, 500);
     await expect(client.recordAppUsage('access-token', {
-      runId: 'run-1', requestId: 'req-1', inputTokens: 0, outputTokens: 0,
+      productSpaceId: '33333333-3333-4333-8333-333333333333', runId: '11111111-1111-4111-8111-111111111111', requestId: '22222222-2222-4222-8222-222222222222', inputTokens: 0, outputTokens: 0,
     })).rejects.toMatchObject({ errorCode: 'SERVER_ERROR' });
   });
 
@@ -1648,11 +1647,49 @@ describe('AdminClient POL-102 App billing (POO-54)', () => {
     const client = new AdminClient('https://admin.example.com');
     const controller = new AbortController();
     const pending = client.startAppRun('access-token', {
-      runId: 'run-1', workspaceId: 'ws', accountId: 'a', productSpaceId: 's',
-      artifactInstanceId: 'i', versionId: 'v', version: '1.0.0',
+      runId: '11111111-1111-4111-8111-111111111111', subjectKind: 'app', productSpaceId: '33333333-3333-4333-8333-333333333333',
+      artifactInstanceId: '44444444-4444-4444-8444-444444444444', artifactVersionId: '55555555-5555-4555-8555-555555555555',
     }, { signal: controller.signal });
     controller.abort();
     await expect(pending).rejects.toMatchObject({ errorCode: 'NETWORK_ERROR' });
     globalThis.fetch = originalFetch;
+  });
+});
+
+describe('App billing deployed acknowledgements', () => {
+  const runId = '11111111-1111-4111-8111-111111111111';
+  const requestId = '22222222-2222-4222-8222-222222222222';
+  const input = {runId, productSpaceId:'33333333-3333-4333-8333-333333333333', subjectKind:'app' as const, artifactInstanceId:'44444444-4444-4444-8444-444444444444', artifactVersionId:'55555555-5555-4555-8555-555555555555'};
+  beforeEach(() => { originalFetch = globalThis.fetch; fetchCalls = []; });
+  afterEach(() => { globalThis.fetch = originalFetch; });
+  it('retains recorded=false for an accepted exact usage retry', async () => {
+    mockJsonFetch({receipt:{requestId, payerId:'private-payer', totalCostMicros:'9'}, recorded:false, idempotent:true});
+    expect(await new AdminClient('https://admin.example.com').recordAppUsage('token',{productSpaceId:input.productSpaceId,runId,requestId,inputTokens:2,outputTokens:3})).toEqual({runId,requestId,recorded:false});
+  });
+  it('rejects terminal start replay with stable run_finalized', async () => {
+    mockJsonFetch({run:{runId,status:'completed'},idempotent:true});
+    await expect(new AdminClient('https://admin.example.com').startAppRun('token',input)).rejects.toMatchObject({errorCode:'run_finalized'});
+  });
+  it('treats a server timeout start replay as finalized', async () => {
+    mockJsonFetch({run:{runId,status:'timed_out'},idempotent:true});
+    await expect(new AdminClient('https://admin.example.com').startAppRun('token',input)).rejects.toMatchObject({errorCode:'run_finalized'});
+  });
+  it('rejects a success response belonging to another run', async () => {
+    mockJsonFetch({run:{runId:requestId,status:'running'},idempotent:false});
+    await expect(new AdminClient('https://admin.example.com').startAppRun('token',input)).rejects.toMatchObject({errorCode:'SERVER_ERROR'});
+  });
+  it('rejects another receipt and inconsistent replay acknowledgements', async () => {
+    const client=new AdminClient('https://admin.example.com');
+    const usage={productSpaceId:input.productSpaceId,runId,requestId,inputTokens:2,outputTokens:3};
+    mockJsonFetch({receipt:{requestId:runId},recorded:true,idempotent:false});
+    await expect(client.recordAppUsage('token',usage)).rejects.toMatchObject({errorCode:'SERVER_ERROR'});
+    mockJsonFetch({receipt:{requestId},recorded:false,idempotent:false});
+    await expect(client.recordAppUsage('token',usage)).rejects.toMatchObject({errorCode:'SERVER_ERROR'});
+    mockJsonFetch({receipt:null,recorded:false,idempotent:true,legacy:true});
+    await expect(client.recordAppUsage('token',usage)).rejects.toMatchObject({errorCode:'idempotency_conflict'});
+  });
+  it('does not accept a different terminal result as the requested finish', async () => {
+    mockJsonFetch({run:{runId,status:'failed'},idempotent:true});
+    await expect(new AdminClient('https://admin.example.com').finishAppRun('token',runId,{status:'completed'})).rejects.toMatchObject({errorCode:'SERVER_ERROR'});
   });
 });
