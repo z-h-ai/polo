@@ -793,6 +793,23 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
   })
 
+  it('F082: a literal source named all selects that source without activating the all-sources sentinel', async () => {
+    const app = workApp('f082-all-source', 'Literal All App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'all' }] })
+    const otherApp = workApp('f082-other-source', 'Other Source App', 1)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app, otherApp]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2))
+    const source = screen.getByTestId('home-directory-source')
+    fireEvent.change(source, { target: { value: 'catalog:all' } })
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    expect(screen.getByText('Literal All App')).toBeTruthy()
+    expect(screen.queryByText('Other Source App') === null).toBe(true)
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    fireEvent.change(source, { target: { value: 'all' } })
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+  })
+
   it('P70-HOME-01 保留本机隐藏恢复: hide moves a work to the hidden section, restore brings it back, and the preference is device-local per context', async () => {
     const appA = workApp('hide-a', 'Hideable App A', 0)
     const appB = workApp('hide-b', 'Hideable App B', 1)

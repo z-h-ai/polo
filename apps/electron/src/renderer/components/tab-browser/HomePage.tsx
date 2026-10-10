@@ -167,8 +167,9 @@ export function collectHomeAppSourceOptions(
 export function homeAppMatchesSource(
   entry: HomeAppDirectoryEntry,
   sourceKey: string,
+  options?: { literal?: boolean },
 ): boolean {
-  if (sourceKey === 'all') return true
+  if (sourceKey === 'all' && !options?.literal) return true
   return catalogSourcesOf(entry).some(source => homeAppSourceLabel(source) === sourceKey)
 }
 
@@ -310,7 +311,7 @@ export function HomePage() {
   const filteredEntries = useMemo(
     () => matchableEntries.filter(entry =>
       homeAppMatchesQuery(entry, normalizedQuery)
-      && (sourceFilter === 'all' || (sourceFilter.startsWith('catalog:') && homeAppMatchesSource(entry, sourceFilter.slice('catalog:'.length))))),
+      && (sourceFilter === 'all' || (sourceFilter.startsWith('catalog:') && homeAppMatchesSource(entry, sourceFilter.slice('catalog:'.length), { literal: true })))),
     [matchableEntries, normalizedQuery, sourceFilter],
   )
   const visibleEntries = useMemo(

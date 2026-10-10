@@ -656,7 +656,7 @@ describe('HomePage circles navigation (P70-HOME-02 × N1)', () => {
     })
     // Recompute the directory during this visit without moving the opened
     // card. The successful usage becomes visible only on the next visit.
-    fireEvent.change(screen.getByTestId('home-directory-source'), { target: { value: 'Organization A' } })
+    fireEvent.change(screen.getByTestId('home-directory-source'), { target: { value: 'catalog:Organization A' } })
     expect(screen.getAllByTestId('home-directory-app').map(card => card.querySelector('h3')?.textContent))
       .toEqual(['Alpha App', 'Usage App'])
     view.unmount()
