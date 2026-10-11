@@ -1,6 +1,7 @@
 import type { EventSink, RpcServer } from '@polo-ai/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@polo-ai/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@polo-ai/server-core/handlers'
+import { loadCallableCanonicalSkills, createCanonicalSkillTurnController } from '../runtime/canonical-skills'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
@@ -26,6 +27,7 @@ import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeFenceGeneration,
   getRuntimeActiveProductSpaceScope,
   isRuntimeOfflineReadOnly,
 } from '../runtime/product-space-executions'
@@ -5210,11 +5212,35 @@ export class SessionManager implements ISessionManager {
       // the guard by identity.
       managed.constructionCallbackGuardLease = getSessionScopedToolCallbackGuard(managed.id)
 
+      const canonicalSkillTurns = createCanonicalSkillTurnController(managed.workspace.rootPath)
       createdAgent = createBackendFromResolvedContext({
         context: backendContext,
         hostRuntime: buildBackendHostRuntimeContext(),
         coreConfig: {
         workspace: managed.workspace,
+        canonicalSkills: {
+          load: this.guardManagedCallback(managed, 'backend.canonicalSkills.load', async () => {
+            const original = this.managedTrustedScope(managed)
+            if (!original) throw new Error('Canonical Skill session scope is unavailable')
+            const generation = getRuntimeFenceGeneration()
+            const skills = await loadCallableCanonicalSkills(managed.workspace.rootPath, { ...original, fenceGeneration: generation })
+            const current = this.managedTrustedScope(managed)
+            if (!current || current.accountId !== original.accountId || current.productSpaceId !== original.productSpaceId || getRuntimeFenceGeneration() !== generation) throw new Error('Canonical Skill session scope changed')
+            return skills
+          }),
+          authorize: this.guardManagedCallback(managed, 'backend.canonicalSkills.authorize', async (paths: readonly string[], turnId: string) => {
+            const original = this.managedTrustedScope(managed)
+            if (!original) throw new Error('Canonical Skill session scope is unavailable')
+            const generation = getRuntimeFenceGeneration()
+            await canonicalSkillTurns.use({ ...original, fenceGeneration: generation }, paths, turnId)
+            const current = this.managedTrustedScope(managed)
+            if (!current || current.accountId !== original.accountId || current.productSpaceId !== original.productSpaceId || getRuntimeFenceGeneration() !== generation) throw new Error('Canonical Skill session scope changed')
+          }),
+          // Cleanup belongs to this private runtime controller even after the
+          // managed callback lease is retired. Its remote call still enforces
+          // the originally captured actor/space/fence; local pins clear finally.
+          finish: async (turnId: string) => { await canonicalSkillTurns.finish(turnId) },
+        },
         sessionStorage: this.sessionStorage,
         miniModel,
         thinkingLevel: managed.thinkingLevel,

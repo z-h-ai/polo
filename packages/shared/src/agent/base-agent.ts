@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * BaseAgent Abstract Class
  *
@@ -13,8 +14,9 @@
  * Provider-specific behavior (chat, abort, capabilities) is implemented in subclasses.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { join, dirname, basename, resolve, sep } from 'node:path';
+import { parseReadCommand } from './backend/read-patterns.ts';
 
 import type { AgentEvent } from '@polo-ai/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -907,14 +909,72 @@ ${formattedMessages}
    *   - cleanMessage: Message with mentions stripped, or default directive
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
-  protected extractSkillPaths(message: string): {
+  private canonicalSkillPaths: string[] = [];
+  private activeCanonicalSkillPaths: string[] = [];
+  private canonicalTurnId: string | null = null;
+
+  /** Runs in both SDK tool hooks, including direct Read/Bash/Skill input. */
+  protected async checkCanonicalSkillUse(toolName: string, input: Record<string, unknown>): Promise<string | null> {
+    const paths = new Set(this.activeCanonicalSkillPaths);
+    const workingDirectory = this.config.session?.workingDirectory ?? this.workingDirectory;
+    const canonicalize = (raw: string): string => {
+      let candidate = expandPath(raw, workingDirectory), suffix: string[] = [];
+      while (!existsSync(candidate) && dirname(candidate) !== candidate) {
+        suffix.unshift(basename(candidate)); candidate = dirname(candidate);
+      }
+      try { return resolve(realpathSync(candidate), ...suffix); }
+      catch { return resolve(candidate, ...suffix); }
+    };
+    const workspace = canonicalize(this.config.workspace.rootPath);
+    const protectedRoot = join(workspace, '.polo', 'canonical-skills');
+    const lexicalProtectedRoot = join(resolve(this.config.workspace.rootPath), '.polo', 'canonical-skills');
+    const candidates: string[] = [];
+    for (const key of ['file_path', 'filePath', 'path']) if (typeof input[key] === 'string') candidates.push(input[key] as string);
+    if (Array.isArray(input.paths)) for (const path of input.paths) if (typeof path === 'string') candidates.push(path);
+    if (typeof input.command === 'string') {
+      const read = parseReadCommand(input.command);
+      if (read) candidates.push(read.filePath);
+      // Literal paths are normalized too; this is not a shell sandbox or a
+      // claim to resolve arbitrary variable/command substitution programs.
+      for (const token of input.command.match(/"[^"\n]*"|'[^'\n]*'|[^\s;|&]+/g) ?? []) candidates.push(token.replace(/^['"]|['"]$/g, ''));
+    }
+    for (const candidate of candidates) {
+      const path = canonicalize(candidate);
+      const lexical = resolve(expandPath(candidate, workingDirectory));
+      const inside = (value: string) => [protectedRoot, lexicalProtectedRoot].some(root => value === root || value.startsWith(`${root}${sep}`));
+      if (!inside(path) && !inside(lexical)) continue;
+      if (/^(?:Write|Edit|MultiEdit)$/.test(toolName)) return 'Canonical Skill native instruction files are managed and cannot be edited through a model tool';
+      const exact = this.canonicalSkillPaths.find(skillPath => {
+        const skill = canonicalize(skillPath), directory = dirname(skill);
+        return path === skill || path === directory || path.startsWith(`${directory}${sep}`);
+      });
+      if (!exact) return 'Canonical Skill files have no current native authority';
+      paths.add(exact);
+    }
+    let canonicalPluginRequest = false;
+    if (toolName === 'Skill') {
+      const slug = typeof input.skill === 'string' ? input.skill : typeof input.name === 'string' ? input.name : '';
+      if (slug.includes('canonical-')) {
+        canonicalPluginRequest = true;
+        const path = this.canonicalSkillPaths.find(path => path.includes(slug.split(':').pop()!.replace(/^canonical-/, '')));
+        if (!path) return 'Canonical Skill has no current native authority';
+        paths.add(path);
+      }
+    }
+    if (paths.size === 0) return null;
+    if (!this.config.canonicalSkills || !this.canonicalTurnId) return 'Canonical Skill permission authority is unavailable outside an active turn';
+    try { await this.config.canonicalSkills.authorize([...paths], this.canonicalTurnId); return canonicalPluginRequest ? `Canonical Skills use the existing Read-before-execute path. Read ${[...paths].join(', ')} instead of the SDK plugin Skill tool.` : null; }
+    catch { return 'Canonical Skill is unavailable for this account, ProductSpace or current version'; }
+  }
+
+  protected extractSkillPaths(message: string, canonical: import('../skills/types.ts').LoadedSkill[] = []): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
   } {
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
-    const skills = loadAllSkills(workspaceRoot, projectRoot);
+    const skills = [...loadAllSkills(workspaceRoot, projectRoot), ...canonical];
     const skillSlugs = skills.map(s => s.slug);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
@@ -990,7 +1050,18 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
+    if (this.canonicalTurnId) { yield { type: 'error', message: 'An existing turn is still active' }; yield { type: 'complete' }; return; }
+    const turnId = randomUUID();
+    this.canonicalTurnId = turnId;
+    try {
+    const canonical = await this.config.canonicalSkills?.load().catch(() => []) ?? [];
+    this.canonicalSkillPaths = canonical.map(skill => join(skill.path, 'SKILL.md'));
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, canonical);
+    this.activeCanonicalSkillPaths = [...skillPaths.values()].filter(path => this.canonicalSkillPaths.includes(path));
+    if (this.activeCanonicalSkillPaths.length) {
+      const denied = await this.checkCanonicalSkillUse('Skill', {});
+      if (denied) { yield { type: 'error', message: denied }; yield { type: 'complete' }; return; }
+    }
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };
@@ -1029,6 +1100,11 @@ ${formattedMessages}
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {
       this.setCurrentTurnUserMessage(null);
+    }
+    } finally {
+      try { await this.config.canonicalSkills?.finish(turnId); }
+      catch { /* The server's bounded expiry remains authoritative after an unavailable finish. */ }
+      finally { this.canonicalTurnId = null; this.activeCanonicalSkillPaths = []; this.canonicalSkillPaths = []; }
     }
   }
 

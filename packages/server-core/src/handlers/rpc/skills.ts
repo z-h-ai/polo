@@ -12,7 +12,7 @@ import {
 import { CredentialManager } from '@polo-ai/shared/credentials'
 import type { HandlerDeps } from '../handler-deps'
 import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
-import { prepareNativeSkillInstall, prepareNativeSkillUninstall, finishNativeSkillInstallation, flushNativeSkillInstallationEvidence, recoverNativeSkillInstallationEvidence } from '../../runtime/native-skill-installation-evidence'
+import { prepareNativeCanonicalSkillInstall, prepareNativeSkillInstall, prepareNativeSkillUninstall, finishNativeSkillInstallation, flushNativeSkillInstallationEvidence, recoverNativeSkillInstallationEvidence } from '../../runtime/native-skill-installation-evidence'
 import {
   getRuntimeActiveProductSpace,
   getRuntimeFenceGeneration,
@@ -40,6 +40,9 @@ import {
   uninstallCreatorSkill,
   updateCreatorSkillInstallationMetadata,
 } from '@polo-ai/shared/creator-skills'
+import { resolveCanonicalSkill, canonicalSkillSourceFromLaunch, loadCallableCanonicalSkills } from '../../runtime/canonical-skills'
+import { readCanonicalSkillInstallations, installCanonicalSkill, canonicalSkillRoot, canonicalSkillIdentity, listCanonicalSkillRoots, recoverCanonicalSkillOperations } from '@polo-ai/shared/creator-skills'
+import { CatalogEntryIdSchema } from '@polo-ai/shared/product-spaces'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
 import { getClientActiveSession } from './client-active-session'
 import {
@@ -83,10 +86,13 @@ function registerSkillOperationExecution(input: {
   operationId: string
   slug: string
   version?: string
+  subject?: { kind: 'artifact_instance'; artifactType: 'skill'; artifactInstanceId: string; versionId: string; version: string }
+  cancelDownload?: () => void
+  executionId?: string
 }): { settle: () => void } {
   let settled = false
   let cancelRequested = false
-  const executionId = ExecutionIdSchema.parse(`skill-op:${input.operationId}`)
+  const executionId = ExecutionIdSchema.parse(input.executionId ?? `skill-op:${input.operationId}`)
   // R34 minor: the scope is validated through the shared runtime schema —
   // no double assertions, no malformed identifiers can reach the registry.
   const scope = ProductSpaceExecutionScopeSchema.parse({
@@ -95,7 +101,7 @@ function registerSkillOperationExecution(input: {
     accountId: input.accountId,
     productSpaceId: input.productSpaceId,
     workspaceId: input.workspaceId,
-    subject: {
+    subject: input.subject ?? {
       kind: 'artifact_instance',
       artifactType: 'skill',
       artifactInstanceId: input.slug,
@@ -113,6 +119,7 @@ function registerSkillOperationExecution(input: {
     getStatus: (): ExecutionStatus => (cancelRequested ? 'stopping' : 'running'),
     stop: async () => {
       cancelRequested = true
+      input.cancelDownload?.()
       try {
         await cancelCreatorSkillOperation(
           input.workspaceRoot,
@@ -168,7 +175,7 @@ export async function hasWorkspaceSkillWriteAccess(workspaceRoot: string): Promi
 
 function workspaceMutationError(
   operationId: string,
-  errorCode: 'workspace_context_mismatch' | 'workspace_read_only',
+  errorCode: 'workspace_context_mismatch' | 'workspace_read_only' | 'VALIDATION_ERROR',
 ) {
   return {
     success: false as const,
@@ -386,6 +393,10 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (existing) return existing
     const recovery = recoverCreatorSkillOperations(workspaceRoot).then(async () => {
       await recoverNativeSkillInstallationEvidence(workspaceRoot).catch(() => {})
+      await recoverCanonicalSkillOperations(workspaceRoot)
+      for (const root of await listCanonicalSkillRoots(workspaceRoot)) {
+        await recoverNativeSkillInstallationEvidence(root).catch(() => {})
+      }
       return import('@polo-ai/shared/skills').then(({ invalidateSkillsCache }) => {
         invalidateSkillsCache()
       })
@@ -415,13 +426,19 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       import('@polo-ai/shared/skills'),
       readCreatorSkillsLedger(workspaceRoot),
     ])
-    const installedBySlug = new Map(ledger.installed.map(item => [item.slug, item]))
-    return loadAllSkills(workspaceRoot, workingDirectory).map(skill => {
+    const installedBySlug = new Map(ledger.installed
+      .filter((item): item is import('@polo-ai/shared/creator-skills').LegacyInstalledCreatorSkill => typeof item.organizationId === 'string' && item.canonicalSource === undefined)
+      .map(item => [item.slug, item]))
+    const local = loadAllSkills(workspaceRoot, workingDirectory).map(skill => {
       const installation = installedBySlug.get(skill.slug)
       return installation && skill.source === 'workspace'
         ? { ...skill, creatorInstallation: installation }
         : skill
     })
+    const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
+    const canonical = await loadCallableCanonicalSkills(workspaceRoot, scope)
+    await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
+    return [...local, ...canonical]
   }
 
   const broadcastSkillsChanged = async (workspaceId: string, workspaceRoot: string) => {
@@ -436,6 +453,108 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       skills,
     )
   }
+
+  server.handle(RPC_CHANNELS.productSpace.INSTALL_SKILL, async (ctx, raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return workspaceMutationError('invalid', 'VALIDATION_ERROR')
+    const input = raw as Record<string, unknown>
+    if (typeof input.workspaceId !== 'string' || !CatalogEntryIdSchema.safeParse(input.catalogEntryId).success
+      || !CreatorSkillOperationIdSchema.safeParse(input.operationId).success
+      || (input.replaceExisting !== undefined && typeof input.replaceExisting !== 'boolean')
+      || (input.backupLocalChanges !== undefined && typeof input.backupLocalChanges !== 'boolean')
+      || Object.keys(input).some(key => !['workspaceId', 'catalogEntryId', 'operationId', 'replaceExisting', 'backupLocalChanges'].includes(key))) {
+      return workspaceMutationError('invalid', 'VALIDATION_ERROR')
+    }
+    const operationId = input.operationId as string
+    const workspace = getBoundWorkspace(ctx, input.workspaceId, deps)
+    if (!workspace || !await hasWorkspaceSkillWriteAccess(workspace.rootPath)) return workspaceMutationError(operationId, 'workspace_context_mismatch')
+    assertSkillsWritable()
+    await ensureRecovered(workspace.rootPath)
+    const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
+    const resolved = await resolveCanonicalSkill(scope, { catalogEntryId: input.catalogEntryId as string })
+    await resolved.assertCurrent()
+    const source = canonicalSkillSourceFromLaunch(scope, resolved)
+    const launch = resolved.launch
+    if (launch.subject.kind !== 'artifact_instance' || launch.delivery.kind !== 'bundle') return workspaceMutationError(operationId, 'VALIDATION_ERROR')
+    const subject = launch.subject, delivery = launch.delivery
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    ctx.signal?.addEventListener('abort', abort, { once: true })
+    if (ctx.signal?.aborted) controller.abort()
+    const root = canonicalSkillRoot(workspace.rootPath, source)
+    const execution = registerSkillOperationExecution({ ...scope, workspaceId: workspace.id, workspaceRoot: root,
+      operationOwnerId: ctx.clientId, operationId, slug: source.subjectId, version: launch.subject.version,
+      subject: { ...launch.subject, artifactType: 'skill' }, cancelDownload: abort, executionId: `skill-op:${canonicalSkillIdentity(source)}:${operationId}` })
+    let result: Awaited<ReturnType<typeof installCanonicalSkill>>
+    try {
+      result = await installCanonicalSkill(workspace.rootPath, {
+        workspaceId: workspace.id, operationId, source, version: launch.subject.version,
+        checksum: launch.delivery.checksum, sizeBytes: launch.delivery.sizeBytes, downloadUrl: launch.delivery.downloadUrl, expiresAt: launch.expiresAt,
+        replaceExisting: input.replaceExisting as boolean | undefined, backupLocalChanges: input.backupLocalChanges as boolean | undefined,
+      }, {
+        fetch: resolved.fetch, signal: controller.signal, operationOwnerId: ctx.clientId,
+        onValidated: async (isolatedRoot, slug) => {
+          await resolved.assertCurrent()
+          const intent = await prepareNativeCanonicalSkillInstall(source, isolatedRoot, slug, launch.subject.kind === 'artifact_instance' ? launch.subject.version : '', launch.delivery.kind === 'bundle' ? launch.delivery.checksum : '').catch(() => null)
+          await resolved.assertCurrent()
+          return { ...(intent ? { nativeInstallationAdmissionId: intent.admission.admissionId } : {}), onNativeCommitted: result => finishNativeSkillInstallation(intent, result) }
+        },
+        assertCommitAllowed: async () => {
+          await resolved.assertCurrent()
+          if (controller.signal.aborted) throw new Error('Canonical Skill installation cancelled')
+          // Re-resolve the current version immediately before native commit.
+          const current = await resolveCanonicalSkill(scope, { subjectId: source.subjectId })
+          const next = canonicalSkillSourceFromLaunch(scope, current)
+          if (next.versionId !== source.versionId || next.subjectKind !== source.subjectKind || current.launch.subject.kind !== 'artifact_instance'
+            || current.launch.subject.version !== subject.version || current.launch.delivery.kind !== 'bundle'
+            || current.launch.delivery.checksum.replace(/^sha256:/, '').toLowerCase() !== delivery.checksum.replace(/^sha256:/, '').toLowerCase()) throw new Error('Canonical Skill current version changed')
+          await current.assertCurrent(); await resolved.assertCurrent()
+        },
+      })
+    } finally { execution.settle(); ctx.signal?.removeEventListener('abort', abort) }
+    // Original R11 lifecycle: refresh/transport starts after native execution
+    // settlement, so session cleanup cannot wait on its own running installer.
+    if (result.success) void flushNativeSkillInstallationEvidence().catch(() => {})
+    return result
+  })
+
+  // Local removal is an exact native ownership operation, not a new grant.
+  const uninstallCanonical = async (ctx: RequestContext, raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return workspaceMutationError('invalid', 'VALIDATION_ERROR')
+    const input = raw as Record<string, unknown>
+    if (typeof input.workspaceId !== 'string' || typeof input.subjectId !== 'string'
+      || typeof input.versionId !== 'string'
+      || !['personal_artifact', 'enterprise_instance'].includes(String(input.subjectKind))
+      || !CreatorSkillOperationIdSchema.safeParse(input.operationId).success
+      || Object.keys(input).some(key => !['workspaceId', 'subjectKind', 'subjectId', 'versionId', 'operationId'].includes(key))) return workspaceMutationError('invalid', 'VALIDATION_ERROR')
+    const scope = await requireTrustedSkillsScope(), generation = getRuntimeFenceGeneration()
+    const workspace = getBoundWorkspace(ctx, input.workspaceId, deps), operationId = input.operationId as string
+    if (!workspace || !await hasWorkspaceSkillWriteAccess(workspace.rootPath)) return workspaceMutationError(operationId, 'workspace_context_mismatch')
+    assertSkillsWritable()
+    await ensureRecovered(workspace.rootPath)
+    const rows = await readCanonicalSkillInstallations(workspace.rootPath, scope, { nativeMutationFacts: true })
+    const row = rows.find(row => row.installation.canonicalSource.subjectKind === input.subjectKind && row.installation.canonicalSource.subjectId === input.subjectId && row.installation.canonicalSource.versionId === input.versionId)
+    if (!row) return workspaceMutationError(operationId, 'workspace_context_mismatch')
+    await assertOriginalNativeSkillScope(scope, generation)
+    let intent: Awaited<ReturnType<typeof prepareNativeSkillUninstall>> = null
+    const execution = registerSkillOperationExecution({ ...scope, workspaceId: workspace.id, workspaceRoot: row.root,
+      operationOwnerId: ctx.clientId, operationId, slug: row.installation.slug, version: row.installation.version,
+      executionId: `skill-op:${canonicalSkillIdentity(row.installation.canonicalSource)}:${operationId}`,
+      subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: row.installation.canonicalSource.subjectId,
+        versionId: row.installation.canonicalSource.versionId, version: row.installation.version } })
+    let result: Awaited<ReturnType<typeof uninstallCreatorSkill>>
+    try { result = await uninstallCreatorSkill({ workspaceRoot: row.root, workspaceId: workspace.id, operationId, slug: row.installation.slug }, {
+      beforeNativeMutation: async installed => {
+        await assertOriginalNativeSkillScope(scope, generation)
+        if (installed?.canonicalSource?.accountId !== scope.accountId || installed.canonicalSource.productSpaceId !== scope.productSpaceId || installed.canonicalSource.subjectId !== input.subjectId || installed.canonicalSource.subjectKind !== input.subjectKind || installed.canonicalSource.versionId !== input.versionId) throw new Error('Canonical Skill native owner changed')
+        intent = await prepareNativeSkillUninstall(row.root, row.installation.slug).catch(() => null)
+        await assertOriginalNativeSkillScope(scope, generation)
+      },
+      onNativeCommitted: result => finishNativeSkillInstallation(intent, result),
+    }) } finally { execution.settle() }
+    if (result.success) void flushNativeSkillInstallationEvidence().catch(() => {})
+    return result
+  }
+  server.handle(RPC_CHANNELS.productSpace.UNINSTALL_SKILL, uninstallCanonical)
 
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
@@ -469,7 +588,16 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
 
     const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
-    const skillDir = join(skillsDir, skillSlug)
+    let skillDir = join(skillsDir, skillSlug)
+    if (skillSlug.startsWith('canonical-')) {
+      const bound = getBoundWorkspace(_ctx, workspaceId, deps)
+      if (!bound) return []
+      const scope = { ...await requireTrustedSkillsScope(), fenceGeneration: getRuntimeFenceGeneration() }
+      const skill = (await loadCallableCanonicalSkills(bound.rootPath, scope)).find(skill => skill.slug === skillSlug)
+      await assertOriginalNativeSkillScope(scope, scope.fenceGeneration)
+      if (!skill) return []
+      skillDir = skill.path
+    }
 
     function scanDirectory(dirPath: string): SkillFile[] {
       try {
@@ -526,6 +654,15 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       throw Object.assign(new Error('Workspace is read-only'), {
         code: 'workspace_read_only',
       })
+    }
+    if (skillSlug.startsWith('canonical-')) {
+      const scope = await requireTrustedSkillsScope()
+      const original = (await readCanonicalSkillInstallations(workspace.rootPath, scope, { nativeMutationFacts: true }))
+        .find(row => `canonical-${canonicalSkillIdentity(row.installation.canonicalSource)}` === skillSlug)
+      if (!original) return false
+      const result = await uninstallCanonical(ctx, { workspaceId, subjectKind: original.installation.canonicalSource.subjectKind, subjectId: original.installation.canonicalSource.subjectId, versionId: original.installation.canonicalSource.versionId, operationId: crypto.randomUUID() })
+      // Supply only the exact native selector, never renderer account/grant.
+      return result.success
     }
     await ensureRecovered(workspace.rootPath)
 

@@ -1,7 +1,7 @@
 import { readFile, realpath, lstat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CreatorSkillsLedgerSchema } from '@polo-ai/shared/creator-skills'
-import type { CreatorSkillDownloadGrant, CreatorSkillOperationResult, CreatorSkillsLedger } from '@polo-ai/shared/creator-skills'
+import type { CanonicalSkillSource, CreatorSkillDownloadGrant, CreatorSkillOperationResult, CreatorSkillsLedger } from '@polo-ai/shared/creator-skills'
 import { admitTrustedNativeInstallation, getNativeInstallationOutbox, type NativeInstallationIntent, type NativeInstallationSnapshot, type NativeInstallationOutbox } from './native-installations'
 
 async function healthyLedger(workspaceRoot: string) {
@@ -23,6 +23,13 @@ export async function prepareNativeSkillInstall(scope: { accountId: string; prod
     subjectKind: 'creator_skill', subjectId: grant.artifactId, downloadClaimId: payload.claimId, version: grant.version, checksum: wireChecksum(grant.archiveChecksum) })
   const binding = {kind: 'skill' as const, workspaceRoot: await realpath(workspaceRoot), slug: grant.slug}
   return getNativeInstallationOutbox().prepare(admission,binding,'install')
+}
+export async function prepareNativeCanonicalSkillInstall(source: CanonicalSkillSource, workspaceRoot: string, slug: string, version: string, checksum: string, outbox = getNativeInstallationOutbox()) {
+  const admission = await admitTrustedNativeInstallation(source.accountId, {
+    contractVersion: 1, productSpaceId: source.productSpaceId, subjectKind: source.subjectKind,
+    subjectId: source.subjectId, versionId: source.versionId, version, checksum: wireChecksum(checksum),
+  })
+  return outbox.prepare(admission, { kind: 'skill', workspaceRoot: await realpath(workspaceRoot), slug }, 'install')
 }
 export async function prepareNativeSkillUninstall(workspaceRoot: string, slug: string, outbox = getNativeInstallationOutbox()) {
   const root = await realpath(workspaceRoot), ledger = await healthyLedger(root)

@@ -1,3 +1,4 @@
+import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
   AdminError,
   type AdminAuthConfig,
@@ -105,6 +106,8 @@ import {
 import {
   createResolveLaunchPath,
   createProductSpaceCatalogPath,
+  createSkillEnablementPath,
+  UpdateSkillEnablementResponseSchema,
   ListProductSpacesResponseSchema,
   parseResolveLaunchResponseForProductSpace,
   parseProductSpaceCatalogResponseForProductSpace,
@@ -117,7 +120,7 @@ import type {
   ResolveLaunchRequest,
   ResolveLaunchResponse,
 } from '../product-spaces/types.ts';
-import type { CatalogEntryId } from '../product-spaces/ids.ts';
+import type { ArtifactInstanceId, CatalogEntryId } from '../product-spaces/ids.ts';
 import type {
   TrustedProductSpaceCatalog,
   TrustedProductSpaceSummary,
@@ -535,6 +538,56 @@ export class AdminClient {
   }
 
   /**
+   * Changes the current member's opt-in, then reads the complete authoritative
+   * Catalog. A mutation revision never certifies the pre-mutation entry set.
+   * Main owns the previously trusted tuple set, including withdrawn Skills
+   * whose disable command must still converge to off.
+   */
+  async setProductSpaceSkillEnablement(
+    accessToken: string,
+    context: TrustedProductSpaceSummary,
+    catalog: TrustedProductSpaceCatalog | undefined,
+    artifactInstanceId: ArtifactInstanceId,
+    enabled: boolean,
+    trustedArtifactInstanceIds: ReadonlySet<string>,
+  ) {
+    if (!trustedArtifactInstanceIds.has(artifactInstanceId)) {
+      throw new AdminError('Skill enablement requires a previously trusted tuple', 'FORBIDDEN');
+    }
+    if (enabled) {
+      const trustedCatalog = catalog
+        ? parseProductSpaceCatalogResponseForProductSpace(catalog, context)
+        : undefined;
+      const entry = trustedCatalog?.entries.find(candidate => (
+        candidate.kind === 'skill' && candidate.artifactInstanceId === artifactInstanceId
+      ));
+      if (context.accessMode !== 'active' || !entry || entry.availability !== 'available') {
+        throw new AdminError('A current available Skill is required for enablement', 'FORBIDDEN');
+      }
+    }
+    const response = await this.request<unknown>(
+      createSkillEnablementPath(context.id, artifactInstanceId),
+      { method: 'PUT', accessToken, body: { enabled } },
+    );
+    let mutation;
+    try {
+      mutation = UpdateSkillEnablementResponseSchema.parse(response);
+      if (mutation.productSpaceId !== context.id || mutation.artifactInstanceId !== artifactInstanceId) {
+        throw new Error('Skill enablement response tuple changed');
+      }
+    } catch (error) {
+      throw new AdminError('Skill enablement response failed its scope boundary', 'SERVER_ERROR', { cause: error });
+    }
+    // A concurrent opposite write may already have won. The backend reports
+    // that fact; do not echo the requested boolean or patch cached entries.
+    const freshCatalog = await this.getProductSpaceCatalog(accessToken, context);
+    if ('notModified' in freshCatalog) {
+      throw new AdminError('A full Catalog is required after Skill enablement', 'SERVER_ERROR');
+    }
+    return { mutation, catalog: freshCatalog };
+  }
+
+  /**
    * Resolves one exact Catalog entry for launch. The response is checked
    * against both the trusted ProductSpace summary and the fresh Catalog used
    * for this request, so an old id or a cross-space response fails closed.
@@ -578,6 +631,30 @@ export class AdminClient {
         { cause: error },
       );
     }
+  }
+
+  /** Original Main-owned actor/space/turn tuple; no renderer account selector. */
+  async beginSkillTurn(accessToken: string, accountId: string, productSpaceId: string, input: SkillTurnBegin): Promise<SkillTurnReceipt> {
+    const request = SkillTurnBeginSchema.parse(input);
+    const raw = await this.request<unknown>(`/api/product-spaces/${encodeURIComponent(productSpaceId)}/skills/turns`, { method: 'POST', accessToken, body: request });
+    return this.parseSkillTurnReceipt(raw, accountId, productSpaceId, request, 'active');
+  }
+
+  async operateSkillTurn(accessToken: string, original: SkillTurnReceipt, operation: 'authorize' | 'finish'): Promise<SkillTurnReceipt> {
+    const receipt = SkillTurnReceiptSchema.parse(original);
+    const input = SkillTurnOperationSchema.parse({ contractVersion: receipt.contractVersion, turnId: receipt.turnId });
+    const raw = await this.request<unknown>(`/api/product-spaces/${encodeURIComponent(receipt.productSpaceId)}/skills/turns/${encodeURIComponent(receipt.receiptId)}/${operation}`, { method: 'POST', accessToken, body: input });
+    const result = this.parseSkillTurnReceipt(raw, receipt.accountId, receipt.productSpaceId, receipt, operation === 'finish' ? 'finished' : 'active');
+    if (result.receiptId !== receipt.receiptId || result.version !== receipt.version || result.issuedAt !== receipt.issuedAt || result.expiresAt !== receipt.expiresAt) throw new AdminError('Skill turn receipt identity changed', 'SERVER_ERROR');
+    return result;
+  }
+
+  private parseSkillTurnReceipt(raw: unknown, accountId: string, productSpaceId: string, expected: SkillTurnBegin, state: SkillTurnReceipt['state']): SkillTurnReceipt {
+    try {
+      const receipt = SkillTurnReceiptSchema.parse(raw);
+      if (receipt.accountId !== accountId || receipt.productSpaceId !== productSpaceId || receipt.turnId !== expected.turnId || receipt.subjectKind !== expected.subjectKind || receipt.subjectId !== expected.subjectId || receipt.versionId !== expected.versionId || receipt.checksum !== expected.checksum || receipt.state !== state || (state === 'active' && Date.parse(receipt.expiresAt) <= Date.now())) throw new Error('Skill turn scope or lifetime changed');
+      return receipt;
+    } catch (cause) { throw new AdminError('Skill turn response failed its immutable boundary', 'SERVER_ERROR', { cause }); }
   }
 
   async getAppCatalog(
@@ -1381,7 +1458,7 @@ export class AdminClient {
   }
 
   private async request<T>(path: string, options: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     accessToken?: string;
     body?: unknown;
     headers?: Record<string, string>;

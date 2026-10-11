@@ -184,6 +184,13 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /** Main-owned canonical Skill discovery and per-use permission; absent means unavailable. */
+  canonicalSkills?: {
+    load: () => Promise<import('../../skills/types.ts').LoadedSkill[]>;
+    authorize: (paths: readonly string[], turnId: string) => Promise<void>;
+    finish: (turnId: string) => Promise<void>;
+  };
+
   /**
    * R51/R53: notified whenever the backend re-registers or merges its
    * session-scoped callback record (e.g. PiAgent's per-turn merge) — the

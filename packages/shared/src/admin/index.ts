@@ -27,3 +27,4 @@ export {
   type AppCatalogAccessMode,
 } from './app-catalog-access.ts';
 export * from './native-installations-contract.ts';
+export * from './skill-turn-contract.ts';

@@ -7,6 +7,7 @@ import {
 import {
   access,
   cp,
+  copyFile,
   lstat,
   mkdir,
   open,
@@ -42,6 +43,7 @@ import {
   type CreatorSkillBackupOperation,
   type CreatorSkillConflictDetails,
   type CreatorSkillDownloadGrant,
+  type ManagedSkillDownloadGrant,
   type CreatorSkillInstallConflict,
   type CreatorSkillInstallInput,
   type CreatorSkillOperationProgress,
@@ -139,6 +141,8 @@ function validForceDeleteConfirmation(
 }
 
 export interface CreatorSkillInstallerDependencies {
+  /** Main-owned archive already downloaded once; full validation runs again in the transaction. */
+  preparedArchivePath?: string
   nativeInstallationAdmissionId?: string
   /** Trusted native evidence hooks run under the existing workspace/slug locks. */
   beforeNativeMutation?: (installed: InstalledCreatorSkill | undefined) => Promise<void>
@@ -1089,7 +1093,7 @@ async function acquireLedgerMutationLock(
   }
 }
 
-async function downloadArchive(args: {
+export async function downloadCreatorSkillArchive(args: {
   url: string
   outputPath: string
   maxBytes: number
@@ -1182,7 +1186,7 @@ async function inspectConflicts(
     })
   }
   if (localModified) conflicts.push('local_changes')
-  if (await exists(join(homedir(), '.agents', 'skills', slug))) {
+  if (!('canonicalSource' in input.grant) && await exists(join(homedir(), '.agents', 'skills', slug))) {
     conflicts.push('global_skill')
     existingIdentities.push({
       source: 'global',
@@ -1472,7 +1476,7 @@ async function assertPromotedTargetIdentity(
 
 async function assertDirectoryMatchesPublishedGrant(
   directory: string,
-  grant: CreatorSkillDownloadGrant,
+  grant: ManagedSkillDownloadGrant,
 ): Promise<void> {
   const scanned = await scanCreatorSkillDirectory(directory)
   const expected = grant.manifest
@@ -1689,7 +1693,9 @@ export async function installCreatorSkill(
         input.grant.validationPolicy.maxArchiveBytes,
         HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes,
       )
-      await downloadArchive({
+      if (dependencies.preparedArchivePath) {
+        await copyFile(dependencies.preparedArchivePath, archivePath, 1)
+      } else await downloadCreatorSkillArchive({
         url: input.grant.url,
         outputPath: archivePath,
         maxBytes: policyMax,
@@ -1738,6 +1744,21 @@ export async function installCreatorSkill(
       )
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       await dependencies.onLedgerMutationLocked?.()
+      if ('canonicalSource' in input.grant) {
+        // The shared native lock can have waited since the first authority
+        // check. Revalidate the original canonical scope at this boundary.
+        await dependencies.assertCommitAllowed?.({ artifactId: input.grant.artifactId, version: input.grant.version, archiveChecksum: input.grant.archiveChecksum })
+        if (controller.signal.aborted) throw Object.assign(new Error('Installation cancelled'), { code: 'creator_skill_cancelled' })
+        const source = input.grant.canonicalSource
+        // Recheck under the actual native ledger lock. Concurrent downloads
+        // cannot overwrite one immutable canonical version after the initial
+        // adapter check observed an empty directory.
+        if (ledger.installed.some(row => !row.canonicalSource ||
+          ['accountId', 'productSpaceId', 'subjectKind', 'subjectId', 'versionId'].some(key => row.canonicalSource![key as keyof typeof source] !== source[key as keyof typeof source]) ||
+          row.archiveChecksum.replace(/^sha256:/, '') !== input.grant.archiveChecksum.replace(/^sha256:/, '') || row.version !== input.grant.version)) {
+          throw new CreatorSkillArchiveError('checksum_mismatch', 'Canonical version identity cannot be replaced by different bytes')
+        }
+      }
       const previous = conflictState.existing
       const ignoredVersion = (
         previous
@@ -1747,7 +1768,9 @@ export async function installCreatorSkill(
       const installation: InstalledCreatorSkill = {
         ...(dependencies.nativeInstallationAdmissionId ? { nativeInstallationAdmissionId: dependencies.nativeInstallationAdmissionId } : {}),
         artifactId: input.grant.artifactId,
-        organizationId: input.grant.organizationId,
+        ...('canonicalSource' in input.grant
+          ? { canonicalSource: input.grant.canonicalSource }
+          : { organizationId: input.grant.organizationId }),
         slug: input.grant.slug,
         version: input.grant.version,
         archiveChecksum: input.grant.archiveChecksum,

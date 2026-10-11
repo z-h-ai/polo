@@ -240,10 +240,19 @@ export const CreatorSkillSafetyStatusBatchSchema = z.object({
   statuses: z.array(CreatorSkillSafetyStatusSchema).max(1_000),
 })
 
+export const CanonicalSkillSourceSchema = z.object({
+  accountId: entityId,
+  productSpaceId: entityId,
+  subjectKind: z.enum(['personal_artifact', 'enterprise_instance']),
+  subjectId: entityId,
+  versionId: entityId,
+}).strict()
+
 export const InstalledCreatorSkillSchema = z.object({
   nativeInstallationAdmissionId: z.string().uuid().optional(),
   artifactId: entityId,
-  organizationId: entityId,
+  organizationId: entityId.optional(),
+  canonicalSource: CanonicalSkillSourceSchema.optional(),
   slug: skillSlug,
   version: stableSemver,
   archiveChecksum: checksum,
@@ -252,6 +261,10 @@ export const InstalledCreatorSkillSchema = z.object({
   lastKnownStatus: z.enum(['active', 'revoked', 'archived']).optional(),
   lastCheckedAt: isoDate.optional(),
   ignoredVersion: stableSemver.optional(),
+}).superRefine((row, ctx) => {
+  if (row.canonicalSource ? (row.organizationId !== undefined || row.artifactId !== row.canonicalSource.subjectId) : !row.organizationId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Managed Skill provenance must be canonical or legacy, never ambiguous' })
+  }
 })
 
 export const CreatorSkillsLedgerSchema = z.object({

@@ -1552,6 +1552,8 @@ export class ClaudeAgent extends BaseAgent {
                 ? { enabled: true, path: getRtkPath(), exclude: [] }
                 : undefined;
 
+              const canonicalDenied = await this.checkCanonicalSkillUse(input.tool_name, toolInput);
+              if (canonicalDenied) return blockWithReason(canonicalDenied);
               // Run centralized PreToolUse checks
               const checkResult = runPreToolUseChecks({
                 toolName: input.tool_name,

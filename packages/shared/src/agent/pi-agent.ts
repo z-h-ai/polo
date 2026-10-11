@@ -1429,6 +1429,11 @@ export class PiAgent extends BaseAgent {
       ? { enabled: true, path: getRtkPath(), exclude: [] }
       : undefined;
 
+    const canonicalDenied = await this.checkCanonicalSkillUse(toolName, input);
+    if (canonicalDenied) {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalDenied });
+      return;
+    }
     const checkResult = runPreToolUseChecks({
       toolName,
       input,
@@ -1501,6 +1506,11 @@ export class PiAgent extends BaseAgent {
           }
         }
 
+        const canonicalAfterActivation = await this.checkCanonicalSkillUse(toolName, input);
+        if (canonicalAfterActivation) {
+          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalAfterActivation });
+          return;
+        }
         // Re-run pipeline after activation
         const postResult = runPreToolUseChecks({
           toolName,

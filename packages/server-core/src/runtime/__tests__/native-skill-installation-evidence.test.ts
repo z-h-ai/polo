@@ -69,3 +69,34 @@ test('actual missing-target uninstall reports its original owner rather than inv
   })
   expect(result.success).toBe(true);const reports=await pending(f.root);expect(reports).toHaveLength(1);expect(reports[0].report.state).toBe('uninstalled');expect(reports[0].report.admissionId).toBe(f.admission.admissionId)
 })
+
+test('actual canonical installer journals the original canonical owner and version into its outbox without legacy organization', async () => {
+  const { zipSync, strToU8 } = await import('fflate')
+  const { createHash } = await import('node:crypto')
+  const { installCanonicalSkill } = await import('@polo-ai/shared/creator-skills')
+  const { setNativeInstallationTransport } = await import('../native-installations')
+  const { prepareNativeCanonicalSkillInstall, finishNativeSkillInstallation } = await import('../native-skill-installation-evidence')
+  const f = await fixture()
+  const source = { accountId: f.admission.accountId, productSpaceId: f.admission.productSpaceId, subjectKind: 'enterprise_instance' as const, subjectId: f.admission.subjectId, versionId: f.admission.versionId }
+  const bundle = zipSync({ 'same-slug/SKILL.md': strToU8('---\nname: same-slug\ndescription: Canonical native outbox consumer.\n---\nOriginal enterprise bytes.\n') })
+  const checksum = `sha256:${createHash('sha256').update(bundle).digest('hex')}`
+  const admission = { ...f.admission, subjectKind: source.subjectKind, checksum }
+  let request: unknown
+  setNativeInstallationTransport({ admit: async (accountId, input) => { expect(accountId).toBe(source.accountId); request = input; return admission }, report: async () => { throw new Error('No remote report in this filesystem consumer test') } })
+  const box = new NativeInstallationOutbox(join(f.root, 'canonical-outbox'), () => null)
+  const result = await installCanonicalSkill(f.root, { workspaceId: 'workspace-test', operationId: randomUUID(), source, version: '1.0.0', checksum, sizeBytes: bundle.length, downloadUrl: 'https://authority.example/download', expiresAt: '2030-01-01T00:00:00.000Z' }, {
+    fetch: (async () => new Response(bundle)) as unknown as typeof fetch,
+    onValidated: async (root, slug) => {
+      const intent = await prepareNativeCanonicalSkillInstall(source, root, slug, '1.0.0', checksum, box)
+      return { nativeInstallationAdmissionId: intent.admission.admissionId, onNativeCommitted: result => finishNativeSkillInstallation(intent, result, box) }
+    },
+  })
+  expect(result.success).toBe(true)
+  expect(request).toEqual({ contractVersion: 1, productSpaceId: source.productSpaceId, subjectKind: 'enterprise_instance', subjectId: source.subjectId, versionId: source.versionId, version: '1.0.0', checksum })
+  const journal = JSON.parse(await readFile(join(f.root, 'canonical-outbox/journal.json'), 'utf8'))
+  expect(journal.pending).toHaveLength(1)
+  expect(journal.pending[0].accountId).toBe(source.accountId)
+  expect(journal.pending[0].report.installedAdmissionIds).toEqual([admission.admissionId])
+  expect(journal.records[0].admission.subjectKind).toBe('enterprise_instance')
+  expect(result.success && result.installed?.organizationId).toBeUndefined()
+})

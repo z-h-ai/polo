@@ -1,3 +1,7 @@
+import * as realSkillTurnContract from '../../../../shared/src/admin/skill-turn-contract'
+import * as realNativeInstallationContract from '../../../../shared/src/admin/native-installations-contract'
+import { resolveCanonicalSkill, beginCanonicalSkillTurn, operateCanonicalSkillTurn } from '../../runtime/canonical-skills'
+import { getRuntimeFenceGeneration } from '../../runtime/product-space-executions'
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
 import { join } from 'node:path'
@@ -127,6 +131,9 @@ const adminClientBehavior = {
   getProductSpaceCatalog: async (_accessToken: string, _context: unknown): Promise<any> => {
     throw new Error('getProductSpaceCatalog behavior not configured')
   },
+  beginSkillTurn: async (..._args: unknown[]): Promise<any> => { throw new Error('not configured') },
+  operateSkillTurn: async (..._args: unknown[]): Promise<any> => { throw new Error('not configured') },
+  setProductSpaceSkillEnablement: async (..._args: unknown[]): Promise<any> => { throw new Error('setProductSpaceSkillEnablement behavior not configured') },
   resolveProductSpaceLaunch: async (
     _accessToken: string,
     _context: unknown,
@@ -240,6 +247,20 @@ class MockAdminClient {
     return adminClientBehavior.getProductSpaceCatalog(accessToken, context)
   }
 
+  async beginSkillTurn(...args: unknown[]) {
+    adminClientCalls.push({ method: 'beginSkillTurn', args: args.slice(1), accessToken: args[0] as string })
+    return adminClientBehavior.beginSkillTurn(...args)
+  }
+  async operateSkillTurn(...args: unknown[]) {
+    adminClientCalls.push({ method: 'operateSkillTurn', args: args.slice(1), accessToken: args[0] as string })
+    return adminClientBehavior.operateSkillTurn(...args)
+  }
+
+  async setProductSpaceSkillEnablement(...args: unknown[]) {
+    adminClientCalls.push({ method: 'setProductSpaceSkillEnablement', args: args.slice(1), accessToken: args[0] as string })
+    return adminClientBehavior.setProductSpaceSkillEnablement(...args)
+  }
+
   async resolveProductSpaceLaunch(
     accessToken: string,
     context: unknown,
@@ -346,6 +367,8 @@ const mockCredentialManager = {
 mock.module('../../runtime/native-installations', () => ({ setNativeInstallationTransport: () => {} }))
 
 mock.module('@polo-ai/shared/admin', () => ({
+  ...realNativeInstallationContract,
+  ...realSkillTurnContract,
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
   analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
@@ -462,6 +485,7 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  CONFIG_DIR: join(tmpdir(), `polo-native-admin-skill-test-${process.pid}`),
   getWorkspaceByNameOrId: () => null,
   setSetupDeferred: () => {},
   getAdminUrl: () => configState.adminUrl,
@@ -633,6 +657,7 @@ function createHarness() {
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     syncAppCatalog: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_APP_CATALOG),
     productSpaceCatalog: requiredHandler(handlers, RPC_CHANNELS.productSpace.CATALOG),
+    productSpaceSetSkillEnablement: requiredHandler(handlers, RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT),
     productSpaceResolveLaunch: requiredHandler(handlers, RPC_CHANNELS.productSpace.RESOLVE_LAUNCH),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
@@ -1899,6 +1924,7 @@ describe('registerAdminHandlers', () => {
       'previewOrganizationJoin',
       'productSpaceCatalog',
       'productSpaceResolveLaunch',
+      'productSpaceSetSkillEnablement',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
@@ -5386,4 +5412,86 @@ describe('Current-space payment browser handoff', () => {
     }
     expect(await h.paymentHandoff({ clientId: 'client-1', workspaceId: null, webContentsId: null })).toMatchObject({ success: false })
   })
+})
+
+describe('Canonical member Skill Main producer uses original account and fresh scope', () => {
+  const ctx = { clientId: 'renderer', workspaceId: null, webContentsId: null, signal: new AbortController().signal }
+  const skill = { kind: 'skill', artifactInstanceId: 'skill-k', catalogEntryId: 'entry-k', enabled: true, availability: 'available' }
+  let handler: HandlerFn
+  beforeEach(async () => {
+    const harness = createHarness(); handler = harness.productSpaceSetSkillEnablement
+    await harness.login(ctx, 'admin', 'admin-password')
+    setRuntimeActiveProductSpace('space-a'); setRuntimeActiveProductSpaceAccount('user-1')
+    adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind: 'personal', accessMode: 'active' }] })
+    adminClientBehavior.getProductSpaceCatalog = async () => ({ contractVersion: 1, productSpaceId: 'space-a', catalogRevision: 'fresh', entries: [skill] })
+    adminClientBehavior.setProductSpaceSkillEnablement = async (...args) => ({ mutation: { contractVersion: 1, productSpaceId: 'space-a', artifactInstanceId: 'skill-k', enabled: false }, catalog: { contractVersion: 1, productSpaceId: 'space-a', catalogRevision: 'after-write', entries: [{ ...skill, enabled: false }] } })
+  })
+  it('personal and enterprise use member bearer and display opposite concurrent fact', async () => {
+    for (const kind of ['personal', 'enterprise']) {
+      adminClientBehavior.listProductSpaces = async () => ({ productSpaces: [{ id: 'space-a', kind, accessMode: 'active' }] })
+      const result = await handler(ctx, 'space-a', 'skill-k', true) as any
+      expect(result.success).toBe(true); expect(result.mutation.enabled).toBe(false)
+      expect(result.catalog.catalogRevision).toBe('after-write')
+      const call = adminClientCalls.filter(x => x.method === 'setProductSpaceSkillEnablement').at(-1)!
+      expect(call.accessToken).toBe('access-token'); expect((call.args[0] as any).kind).toBe(kind)
+      expect(call.args[3]).toBe(true)
+    }
+  })
+  it('wrong space is refused before any HTTP mutation and never revokes another scope', async () => {
+    const result = await handler(ctx, 'space-other', 'skill-k', true) as any
+    expect(result.success).toBe(false); expect(adminClientCalls.filter(x => x.method === 'setProductSpaceSkillEnablement')).toEqual([])
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+  })
+  it('space A→B→A during fresh catalog is not the original admission', async () => {
+    adminClientBehavior.getProductSpaceCatalog = async () => {
+      setRuntimeActiveProductSpace('space-b'); setRuntimeActiveProductSpace('space-a'); setRuntimeActiveProductSpaceAccount('user-1')
+      return { contractVersion: 1, productSpaceId: 'space-a', entries: [skill] }
+    }
+    const result = await handler(ctx, 'space-a', 'skill-k', true) as any
+    expect(result.success).toBe(false); expect(adminClientCalls.filter(x => x.method === 'setProductSpaceSkillEnablement')).toEqual([])
+  })
+  it('actual canonical resolver binds fresh Skill tuple; stale account cannot borrow new credentials', async () => {
+    adminClientBehavior.resolveProductSpaceLaunch = async () => ({ contractVersion: 1, productSpaceId: 'space-a', catalogEntryId: 'entry-k', subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'skill-k', versionId: 'version-k', version: '1.0.0' }, delivery: { kind: 'bundle', checksum: 'a'.repeat(64), sizeBytes: 10, downloadUrl: 'https://admin.example.com/download', runtime: 'static' } })
+    const scope = { accountId: 'user-1', productSpaceId: 'space-a', fenceGeneration: getRuntimeFenceGeneration() }
+    const launch = await resolveCanonicalSkill(scope, { subjectId: 'skill-k' })
+    expect(launch.launch.subject.kind).toBe('artifact_instance')
+    await createHarness().logout(ctx)
+    await expect(launch.assertCurrent()).rejects.toThrow('session changed')
+    await expect(resolveCanonicalSkill(scope, { subjectId: 'skill-k' })).rejects.toThrow()
+  })
+  it('real turn coordinator keeps original bearer and refuses actor/fence changes after awaited HTTP', async () => {
+    const scope = { accountId: 'user-1', productSpaceId: 'space-a', fenceGeneration: getRuntimeFenceGeneration() }
+    const input = { contractVersion: 1 as const, turnId: '00000000-0000-4000-8000-000000000001', subjectKind: 'personal_artifact' as const, subjectId: '00000000-0000-4000-8000-000000000002', versionId: '00000000-0000-4000-8000-000000000003', checksum: `sha256:${'a'.repeat(64)}` }
+    const receipt = { ...input, accountId:'user-1', productSpaceId:'space-a', receiptId:'00000000-0000-4000-8000-000000000004', version:'1.0.0', state:'active' as const, issuedAt:'2026-01-01T00:00:00.000Z',expiresAt:'2030-01-01T00:00:00.000Z' }
+    adminClientBehavior.beginSkillTurn = async () => receipt
+    adminClientBehavior.operateSkillTurn = async () => receipt
+    expect(await beginCanonicalSkillTurn(scope,input)).toEqual(receipt)
+    expect(await operateCanonicalSkillTurn(scope,receipt,'authorize')).toEqual(receipt)
+    expect(adminClientCalls.filter(call=>call.method==='beginSkillTurn'||call.method==='operateSkillTurn').every(call=>call.accessToken==='access-token')).toBe(true)
+    const count = adminClientCalls.filter(call=>call.method==='beginSkillTurn').length
+    await expect(beginCanonicalSkillTurn({...scope,accountId:'another-account'},input)).rejects.toThrow()
+    expect(adminClientCalls.filter(call=>call.method==='beginSkillTurn')).toHaveLength(count)
+    adminClientBehavior.operateSkillTurn = async () => { setRuntimeActiveProductSpace('space-b');setRuntimeActiveProductSpace('space-a');setRuntimeActiveProductSpaceAccount('user-1');return receipt }
+    await expect(operateCanonicalSkillTurn(scope,receipt,'authorize')).rejects.toThrow()
+    await expect(operateCanonicalSkillTurn(scope,receipt,'finish')).rejects.toThrow()
+  })
+
+  it('a subject-level turn 403 does not revoke still lawful neighboring ProductSpace rights', async () => {
+    const scope = { accountId:'user-1',productSpaceId:'space-a',fenceGeneration:getRuntimeFenceGeneration() }
+    adminClientBehavior.operateSkillTurn = async () => { throw new TestAdminError('Skill disabled','FORBIDDEN',{status:403}) }
+    await expect(operateCanonicalSkillTurn(scope, {} as any, 'authorize')).rejects.toThrow()
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+    expect(getRuntimeActiveProductSpaceAccount()).toBe('user-1')
+    expect(getRuntimeFenceGeneration()).toBe(scope.fenceGeneration)
+    expect(managerState.tokens?.userId).toBe('user-1')
+  })
+
+  it('a Skill launch opt-out 403 during discovery keeps other ProductSpace rights', async () => {
+    const scope = {accountId:'user-1',productSpaceId:'space-a',fenceGeneration:getRuntimeFenceGeneration()}
+    adminClientBehavior.resolveProductSpaceLaunch = async () => { throw new TestAdminError('Skill is off','FORBIDDEN',{status:403}) }
+    await expect(resolveCanonicalSkill(scope,{subjectId:'skill-k'})).rejects.toThrow()
+    expect(getRuntimeActiveProductSpace()).toBe('space-a');expect(getRuntimeFenceGeneration()).toBe(scope.fenceGeneration)
+    expect(managerState.tokens?.userId).toBe('user-1')
+  })
+
 })

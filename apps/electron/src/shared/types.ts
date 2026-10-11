@@ -1103,6 +1103,16 @@ export interface ElectronAPI {
       status?: number
     }
   >
+  productSpaceInstallSkill(input: { workspaceId: string; catalogEntryId: string; operationId: string; replaceExisting?: boolean; backupLocalChanges?: boolean }): Promise<import('@polo-ai/shared/creator-skills').CreatorSkillOperationResult>
+  productSpaceUninstallSkill(input: { workspaceId: string; subjectKind: 'personal_artifact' | 'enterprise_instance'; subjectId: string; versionId: string; operationId: string }): Promise<import('@polo-ai/shared/creator-skills').CreatorSkillOperationResult>
+  productSpaceSetSkillEnablement(
+    productSpaceId: string,
+    artifactInstanceId: string,
+    enabled: boolean,
+  ): Promise<
+    | { success: true; mutation: import('@polo-ai/shared/product-spaces').UpdateSkillEnablementResponse; catalog: import('@polo-ai/shared/product-spaces').ProductSpaceCatalogResponse }
+    | { success: false; errorCode: string; message: string; status?: number }
+  >
   productSpacePrepareSwitch(
     targetProductSpaceId: string,
   ): Promise<

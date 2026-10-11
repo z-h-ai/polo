@@ -57,7 +57,9 @@ export interface LoadedSkill {
   /** Where this skill was loaded from */
   source: SkillSource;
   /** Creator Space provenance and last-known safety state, when managed. */
-  creatorInstallation?: import('../creator-skills/types.ts').InstalledCreatorSkill;
+  creatorInstallation?: import('../creator-skills/types.ts').LegacyInstalledCreatorSkill;
+  /** Native canonical provenance; listing is never a grant for a subsequent call. */
+  canonicalInstallation?: import('../creator-skills/types.ts').CanonicalInstalledSkill;
   /** Renderer-only status of the most recent live safety check. */
   creatorSafetyCheckStatus?: 'checking' | 'ok' | 'failed';
 }

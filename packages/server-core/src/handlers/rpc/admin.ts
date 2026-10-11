@@ -75,6 +75,7 @@ import {
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import {
+  ArtifactInstanceIdSchema,
   CatalogEntryIdSchema,
   ProductSpaceIdSchema,
   createProductSpaceContextKey,
@@ -99,6 +100,7 @@ import {
   revokeRuntimeProductSpaceFence,
   revokeRuntimeProductSpaceFenceIfBoundLocked,
 } from '../../runtime/product-space-executions'
+import { bindCanonicalSkillResolver, bindCanonicalSkillTurnAuthority } from '../../runtime/canonical-skills'
 import { withSwitchLock } from '../../runtime/switch-lock-internal'
 import { revokeProductSpaceCatalogAuthority } from '../../runtime/product-space-catalog-authority'
 // INTERNAL commit entry: the ONLY grant-capable mutator, reachable solely
@@ -238,6 +240,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
   RPC_CHANNELS.productSpace.CATALOG,
   RPC_CHANNELS.productSpace.RESOLVE_LAUNCH,
+  RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -639,6 +642,27 @@ export function registerAdminHandlers(
   deps: HandlerDeps,
 ): AdminSessionControl {
   const log = deps.platform.logger
+  // This remembers only previously observed Skill IDs for convergence-to-off.
+  // It grants no installation or invocation permission and starts empty on
+  // process restart. Enable always requires a new complete server Catalog.
+  const seenSkillTuples = new Map<string, Set<string>>()
+  const skillTupleScopeKey = (accountId: string, productSpaceId: string) =>
+    JSON.stringify(['member-skill', accountId, productSpaceId])
+  const rememberSkillTuples = (
+    accountId: string, productSpaceId: string,
+    entries: ReadonlyArray<{ kind?: unknown; artifactInstanceId?: unknown }>,
+  ) => {
+    const key = skillTupleScopeKey(accountId, productSpaceId)
+    const ids = seenSkillTuples.get(key) ?? new Set<string>()
+    for (const entry of entries) {
+      if (entry.kind !== 'skill') continue
+      const parsed = ArtifactInstanceIdSchema.safeParse(entry.artifactInstanceId)
+      if (parsed.success) ids.add(parsed.data)
+    }
+    while (ids.size > 10_000) ids.delete(ids.values().next().value!)
+    seenSkillTuples.set(key, ids)
+    return ids
+  }
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
@@ -1015,6 +1039,7 @@ export function registerAdminHandlers(
       client: AdminClient,
       accessToken: string,
       userId: string,
+      authority: { assertCurrent: () => Promise<void>; downloadFetch: typeof fetch },
     ) => Promise<T>,
     optionsOrOnCurrentSuccess?:
       | CallOrganizationOptions<T>
@@ -1069,6 +1094,19 @@ export function registerAdminHandlers(
       }
       requestContext = { session: tokenResult.session }
       verifiedUserId = tokenResult.tokens.userId
+      const assertCurrent = async () => {
+        if (!manager || !requestContext || !await sessions.isCurrent(manager, requestContext.session)) throw new AdminSessionChangedError()
+      }
+      const downloadFetch = (async (input, init) => {
+        await assertCurrent()
+        const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url
+        if (new URL(url).origin !== new URL(adminUrl).origin) throw new AdminError('Skill download origin is invalid', 'FORBIDDEN')
+        const headers = new Headers(init?.headers)
+        headers.set('Authorization', `Bearer ${requestContext!.session.tokens.accessToken}`)
+        const response = await fetch(input, { ...init, headers, redirect: 'error' })
+        await assertCurrent()
+        return response
+      }) as typeof fetch
       const result = await callback(
         createAuthenticatedAdminClient(
           adminUrl,
@@ -1078,6 +1116,7 @@ export function registerAdminHandlers(
         ),
         tokenResult.tokens.accessToken,
         tokenResult.tokens.userId,
+        { assertCurrent, downloadFetch },
       )
       settledResult = result
       const current = onCurrentSuccess
@@ -2256,6 +2295,7 @@ export function registerAdminHandlers(
               commit.catalogRevision,
               commit.entries,
             )
+            rememberSkillTuples(commit.accountId, commit.productSpaceId, commit.entries)
             ;(result as {
               withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
             }).withdrawnEntries = withdrawnEntries.map(entry => ({
@@ -2325,6 +2365,129 @@ export function registerAdminHandlers(
         },
       )
     })
+
+  const skillTurnCall = async <T>(scope: import('../../runtime/canonical-skills').CanonicalSkillScope, label: string, operation: (client: AdminClient, accessToken: string) => Promise<T>): Promise<T> => {
+    const assertScope = () => {
+      if (getRuntimeActiveProductSpace() !== scope.productSpaceId || !isRuntimeFenceBoundToAccount(scope.accountId) || getRuntimeFenceGeneration() !== scope.fenceGeneration || isRuntimeOfflineReadOnly() || isRuntimeProductSpaceRestricted(scope.productSpaceId) || isSwitchInProgress()) throw new ProductSpaceDenialError('Original Skill turn scope changed', 'FORBIDDEN', 'local_scope_guard')
+    }
+    const result = await callOrganization(label, async (client, accessToken, accountId, authority) => {
+      assertScope()
+      if (accountId !== scope.accountId) throw new ProductSpaceDenialError('Original Skill turn account changed', 'FORBIDDEN', 'local_scope_guard')
+      const value = await operation(client, accessToken)
+      await authority.assertCurrent(); assertScope()
+      return { value }
+    }, { catalogScope: { productSpaceId: scope.productSpaceId, onDenied: async () => {
+      // A turn/subject denial (including member opt-out or terminal receipt)
+      // is not evidence that all rights in this ProductSpace were withdrawn.
+      // Auth-session failures retain the coordinator's existing cleanup path.
+    } } })
+    if (!result.success || !('value' in result)) throw new Error('Skill turn authority refused')
+    return result.value as T
+  }
+  bindCanonicalSkillTurnAuthority({
+    begin: (scope, input) => skillTurnCall(scope, 'beginSkillTurn', (client, token) => client.beginSkillTurn(token, scope.accountId, scope.productSpaceId, input)),
+    operate: (scope, receipt, operation) => skillTurnCall(scope, `skillTurn:${operation}`, (client, token) => client.operateSkillTurn(token, receipt, operation)),
+  })
+
+  bindCanonicalSkillResolver(async (scope, selector) => {
+    let requestingSpaceAuthority = true
+    const assertScope = () => {
+      if (getRuntimeActiveProductSpace() !== scope.productSpaceId || !isRuntimeFenceBoundToAccount(scope.accountId)
+        || getRuntimeFenceGeneration() !== scope.fenceGeneration || isRuntimeOfflineReadOnly()
+        || isRuntimeProductSpaceRestricted(scope.productSpaceId) || isSwitchInProgress()) {
+        throw new ProductSpaceDenialError('Original canonical Skill scope changed', 'FORBIDDEN', 'local_scope_guard')
+      }
+    }
+    const result = await callOrganization('canonicalSkillLaunch', async (client, accessToken, accountId, authority) => {
+      assertScope()
+      if (accountId !== scope.accountId) throw new ProductSpaceDenialError('Original Skill account changed', 'FORBIDDEN', 'local_scope_guard')
+      const list = await client.listProductSpaces(accessToken)
+      await authority.assertCurrent(); assertScope()
+      const context = list.productSpaces.find(space => space.id === scope.productSpaceId && space.accessMode === 'active')
+      if (!context) throw new ProductSpaceDenialError('Skill ProductSpace is unavailable', 'FORBIDDEN', 'remote_authority')
+      const catalog = await client.getProductSpaceCatalog(accessToken, context)
+      await authority.assertCurrent(); assertScope()
+      if ('notModified' in catalog) throw new AdminError('Fresh Skill Catalog is required', 'SERVER_ERROR')
+      requestingSpaceAuthority = false
+      const entry = catalog.entries.find(entry => entry.kind === 'skill' && ('subjectId' in selector
+        ? entry.artifactInstanceId === selector.subjectId : entry.catalogEntryId === selector.catalogEntryId))
+      if (!entry || entry.kind !== 'skill') throw new ProductSpaceDenialError('Skill is unavailable', 'FORBIDDEN', 'remote_authority')
+      const platform = process.platform, arch = process.arch
+      if ((platform !== 'darwin' && platform !== 'win32' && platform !== 'linux') || (arch !== 'arm64' && arch !== 'x64')) throw new AdminError('Unsupported host', 'VALIDATION_ERROR')
+      const launch = await client.resolveProductSpaceLaunch(accessToken, context, catalog, entry.catalogEntryId, { platform, arch })
+      await authority.assertCurrent(); assertScope()
+      if (launch.subject.kind !== 'artifact_instance' || launch.subject.artifactType !== 'skill' || launch.delivery.kind !== 'bundle') throw new AdminError('Expected canonical Skill bundle', 'SERVER_ERROR')
+      const assertCurrent = async () => { await authority.assertCurrent(); assertScope() }
+      const guardedFetch = (async (input, init) => { await assertCurrent(); const response = await authority.downloadFetch(input, init); await assertCurrent(); return response }) as typeof fetch
+      return { context, launch, fetch: guardedFetch, assertCurrent }
+    }, { catalogScope: { productSpaceId: scope.productSpaceId, onDenied: async (error) => {
+      if (denialOriginOf(error) === 'local_scope_guard' || !requestingSpaceAuthority) return
+      await revokeProductSpaceTrustedScope({ accountId: scope.accountId, productSpaceId: scope.productSpaceId, fenceGeneration: scope.fenceGeneration })
+    } } })
+    if (!result.success) throw new AdminError(result.message ?? 'Canonical Skill launch refused', 'FORBIDDEN')
+    return result
+  })
+
+  server.handle(
+    RPC_CHANNELS.productSpace.SET_SKILL_ENABLEMENT,
+    async (_ctx, rawProductSpaceId: unknown, rawArtifactInstanceId: unknown, enabled: unknown) => {
+      const productSpaceId = ProductSpaceIdSchema.safeParse(rawProductSpaceId)
+      const artifactInstanceId = ArtifactInstanceIdSchema.safeParse(rawArtifactInstanceId)
+      if (!productSpaceId.success || !artifactInstanceId.success || typeof enabled !== 'boolean') {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Skill enablement request is invalid' }
+      }
+      const generation = getRuntimeFenceGeneration()
+      const assertScope = (accountId: string) => {
+        if (getRuntimeActiveProductSpace() !== productSpaceId.data
+          || !isRuntimeFenceBoundToAccount(accountId)
+          || getRuntimeFenceGeneration() !== generation
+          || isRuntimeOfflineReadOnly() || isSwitchInProgress()
+          || (enabled && isRuntimeProductSpaceRestricted(productSpaceId.data))) {
+          throw new ProductSpaceDenialError('Skill enablement scope changed', 'FORBIDDEN', 'local_scope_guard')
+        }
+      }
+      const remote = async <T>(promise: Promise<T>): Promise<T> => {
+        try { return await promise }
+        catch (error) {
+          if (error instanceof AdminError && denialOriginOf(error) === null) {
+            throw new ProductSpaceDenialError(error.message, error.errorCode, 'remote_authority', { status: error.status, details: error.details })
+          }
+          throw error
+        }
+      }
+      return callOrganization('setProductSpaceSkillEnablement', async (client, accessToken, accountId) => {
+        assertScope(accountId)
+        const list = await remote(client.listProductSpaces(accessToken))
+        assertScope(accountId)
+        const context = list.productSpaces.find(space => space.id === productSpaceId.data)
+        if (!context) throw new ProductSpaceDenialError('The requested ProductSpace is unavailable', 'FORBIDDEN', 'remote_authority')
+        const catalog = await remote(client.getProductSpaceCatalog(accessToken, context))
+        assertScope(accountId)
+        if ('notModified' in catalog) throw new AdminError('A full Skill Catalog is required', 'SERVER_ERROR')
+        // These facts came from this fresh request; remembered IDs are used
+        // solely for a disable after withdrawal, never for enable/launch.
+        const trustedIds = new Set(seenSkillTuples.get(skillTupleScopeKey(accountId, context.id)))
+        for (const entry of catalog.entries) if (entry.kind === 'skill') trustedIds.add(entry.artifactInstanceId)
+        const result = await remote(client.setProductSpaceSkillEnablement(
+          accessToken, context, catalog, artifactInstanceId.data, enabled, trustedIds,
+        ))
+        assertScope(accountId)
+        return result
+      }, {
+        onCurrentSuccess: (result, session) => withSwitchLock(async () => {
+          assertScope(session.tokens.userId)
+          rememberSkillTuples(session.tokens.userId, productSpaceId.data, result.catalog.entries)
+        }, { phase: 'skill-enablement-commit', accountId: session.tokens.userId, productSpaceId: productSpaceId.data }),
+        catalogScope: {
+          productSpaceId: productSpaceId.data,
+          onDenied: async (error, scope) => {
+            if (denialOriginOf(error) !== 'remote_authority') return
+            await revokeProductSpaceTrustedScope({ accountId: scope.accountId, productSpaceId: scope.productSpaceId, fenceGeneration: generation })
+          },
+        },
+      })
+    },
+  )
 
   // Direct-open preparation for POO-47. Main derives the host tuple and
   // resolves against a fresh server-authoritative Catalog. The renderer can

@@ -573,3 +573,40 @@ describe('Creator Skill ProductSpace scope gate', () => {
     })).rejects.toMatchObject(offlineRejected)
   })
 })
+
+describe('Canonical Skill native production RPC', () => {
+  it('install→real ledger→exact native uninstall uses scoped canonical identity and one network grant', async () => {
+    const { createHash, randomUUID } = await import('node:crypto')
+    const { zipSync, strToU8 } = await import('fflate')
+    const { bindCanonicalSkillResolver } = await import('../../runtime/canonical-skills')
+    const { readCanonicalSkillInstallations } = await import('@polo-ai/shared/creator-skills')
+    const bundle = zipSync({ 'canonical-helper/SKILL.md': strToU8('---\nname: canonical-helper\ndescription: Production native RPC fixture.\n---\nOriginal bytes.\n') })
+    let reads = 0, resolves = 0
+    bindCanonicalSkillResolver(async (scope, selector) => {
+      resolves++
+      expect(scope.accountId).toBe(trustedBoundaryAccountId)
+      expect(scope.productSpaceId).toBe(skillsBoundarySpace)
+      return {
+        context: { id: skillsBoundarySpace, kind: 'personal', accessMode: 'active' } as any,
+        launch: { contractVersion: 1, productSpaceId: skillsBoundarySpace, catalogEntryId: 'canonical-entry', expiresAt: '2030-01-01T00:00:00.000Z', subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'canonical-work', versionId: 'canonical-version', version: '1.0.0' }, delivery: { kind: 'bundle', downloadUrl: 'https://authority.example/download', checksum: createHash('sha256').update(bundle).digest('hex'), sizeBytes: bundle.byteLength, runtime: 'static' } } as any,
+        fetch: (async () => { reads++; return new Response(bundle) }) as unknown as typeof fetch,
+        assertCurrent: async () => {},
+      }
+    })
+    const install = handlers.get(RPC_CHANNELS.productSpace.INSTALL_SKILL)!
+    const result = await install(ctx, { workspaceId: workspaceOne.id, catalogEntryId: 'canonical-entry', operationId: randomUUID() }) as any
+    expect(result.success).toBe(true); expect(reads).toBe(1); expect(resolves).toBe(3)
+    expect(result.installed.canonicalSource).toEqual({ accountId: trustedBoundaryAccountId, productSpaceId: skillsBoundarySpace, subjectKind: 'personal_artifact', subjectId: 'canonical-work', versionId: 'canonical-version' })
+    expect(result.installed.organizationId).toBeUndefined()
+    expect(await readCanonicalSkillInstallations(workspaceOne.rootPath, { accountId: trustedBoundaryAccountId, productSpaceId: skillsBoundarySpace })).toHaveLength(1)
+    const uninstall = handlers.get(RPC_CHANNELS.productSpace.UNINSTALL_SKILL)!
+    const removed = await uninstall(ctx, { workspaceId: workspaceOne.id, subjectKind: 'personal_artifact', subjectId: 'canonical-work', versionId: 'canonical-version', operationId: randomUUID() }) as any
+    expect(removed.success).toBe(true)
+    expect(await readCanonicalSkillInstallations(workspaceOne.rootPath, { accountId: trustedBoundaryAccountId, productSpaceId: skillsBoundarySpace })).toHaveLength(0)
+  })
+  it('renderer cannot provide organization, account, grant, native path or a foreign workspace', async () => {
+    const install = handlers.get(RPC_CHANNELS.productSpace.INSTALL_SKILL)!
+    for (const extra of [{ accountId: 'foreign' }, { organizationId: 'fake' }, { grant: installInput.grant }, { path: '/foreign' }]) expect(await install(ctx, { workspaceId: workspaceOne.id, catalogEntryId: 'entry', operationId: crypto.randomUUID(), ...extra })).toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    expect(await install(ctx, { workspaceId: workspaceTwo.id, catalogEntryId: 'entry', operationId: crypto.randomUUID() })).toMatchObject({ success: false, errorCode: 'workspace_context_mismatch' })
+  })
+})
