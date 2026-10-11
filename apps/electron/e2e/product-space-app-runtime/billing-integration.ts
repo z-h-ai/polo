@@ -8,6 +8,7 @@ import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import * as tar from 'tar'
 import { AdminClient } from '@polo-ai/shared/admin'
 import { setInvocationLlmConnections, clearInvocationLlmConnections } from '@polo-ai/shared/config'
@@ -16,10 +17,11 @@ import { createSessionlessHostLlmExecutor } from '@polo-ai/shared/agent/host-llm
 import { LocalAppRuntimeCoordinator } from '../../src/main/local-app-runtime/runtime-coordinator'
 import { LocalAppRuntimeManager } from '../../src/main/local-app-runtime/manager'
 import { AppBillingOutbox } from '../../src/main/local-app-runtime/app-billing-outbox'
+import { buildPiAgentServerBundle, bundleOutputPath } from '../../../../scripts/build/pi-agent-server-staging'
 interface FixtureConfig {
   adminUrl: string; accessToken: string; accountId: string; productSpaceId: string
   artifactInstanceId: string; artifactVersionId: string; providerBaseUrl: string
-  providerApiKey: string; model: string; version?: string
+  providerApiKey: string; model: string; version?: string; nodeRuntimePath?: string
 }
 const [configPath, evidencePath] = process.argv.slice(2)
 if (!configPath || !evidencePath) throw new Error('Private configuration and ignored evidence directory are required')
@@ -30,6 +32,14 @@ for (const name of ['adminUrl', 'accessToken', 'accountId', 'productSpaceId', 'a
 for (const url of [config.adminUrl, config.providerBaseUrl]) if (!['127.0.0.1', 'localhost', '::1'].includes(new URL(url).hostname.replace(/^\[|\]$/g, ''))) throw new Error('Controlled integration endpoints must be loopback')
 const evidence = resolve(evidencePath)
 mkdirSync(evidence, { recursive: true, mode: 0o700 })
+const nodeRuntimePath = config.nodeRuntimePath ?? Bun.which('node')
+if (!nodeRuntimePath || !nodeRuntimePath.startsWith('/') || !existsSync(nodeRuntimePath)) throw new Error('An absolute real Node runtime is required')
+const runtime = JSON.parse(execFileSync(nodeRuntimePath, ['-e', 'process.stdout.write(JSON.stringify({node:process.versions.node,bun:process.versions.bun??null}))'], { encoding: 'utf8', timeout: 5000, maxBuffer: 1024 })) as { node?: string; bun?: string | null }
+if (!runtime.node || runtime.bun || Number(runtime.node.split('.')[0]) < 22) throw new Error('Host integration requires real Node 22 or newer')
+const repoRoot = resolve(import.meta.dir, '../../../..')
+const workerLayout = { sourceEntry: join(repoRoot, 'packages/pi-agent-server/src/index.ts'), distDir: join(evidence, 'pi-agent-server') }
+await buildPiAgentServerBundle(workerLayout, repoRoot)
+const workerEntry = bundleOutputPath(workerLayout)
 const resultsPath = join(evidence, 'fixture-app-results.json')
 const bundle = join(evidence, 'bundle-source')
 mkdirSync(bundle, { recursive: true })
@@ -59,7 +69,7 @@ const coordinator = new LocalAppRuntimeCoordinator({
     finishAppRun: (runId, input, options) => client.finishAppRun(config.accessToken, runId, input, options),
   },
   createExecutor: options => {
-    const executor = createSessionlessHostLlmExecutor({ ...options, nodeRuntimePath: process.execPath, serverPath: join(import.meta.dir, '../../../../packages/pi-agent-server/src/index.ts') })
+    const executor = createSessionlessHostLlmExecutor({ ...options, nodeRuntimePath, serverPath: workerEntry })
     return { execute: async input => { originalCalls++; return executor.execute(input) }, dispose: () => executor.dispose() }
   },
   resolveWorkspaceRoot: () => evidence,
@@ -91,7 +101,7 @@ try {
   }
   const remainingPending = outbox.entries(config.accountId, config.adminUrl).length
   if (remainingPending) throw new Error('App execution completed but original financial facts remain pending')
-  writeFileSync(join(evidence, 'summary.json'), JSON.stringify({ kind: 'controlled-App-Host-Pi-Admin-SQL-integration', originalHostCalls: originalCalls, duplicatedBusinessCalls: 1, callStatuses: Object.fromEntries(Object.entries(calls).map(([label, result]) => [label, result.status])), remainingPendingJournalEntries: outbox.entries(config.accountId, config.adminUrl).length, liveCloudAcceptance: false }, null, 2))
+  writeFileSync(join(evidence, 'summary.json'), JSON.stringify({ kind: 'controlled-App-Host-Pi-Admin-SQL-integration', hostNodeVersion: runtime.node, productionBundleSha256: createHash('sha256').update(readFileSync(workerEntry)).digest('hex'), originalHostCalls: originalCalls, duplicatedBusinessCalls: 1, callStatuses: Object.fromEntries(Object.entries(calls).map(([label, result]) => [label, result.status])), remainingPendingJournalEntries: outbox.entries(config.accountId, config.adminUrl).length, liveCloudAcceptance: false }, null, 2))
   ok = true
   console.log('Candidate 21 controlled App integration PASS; supplier ledger verification belongs to the isolated backend owner.')
 } finally {
