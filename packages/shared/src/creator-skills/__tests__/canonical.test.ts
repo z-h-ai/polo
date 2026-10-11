@@ -19,6 +19,22 @@ async function install(root: string, tuple = source, content = bytes(), options:
 async function owned(run: (root: string) => Promise<void>) { const root = await mkdtemp(join(tmpdir(), 'polo-canonical-skill-unit-')); try { await run(root) } finally { await rm(root, { recursive: true, force: true }) } }
 
 describe('Canonical Skill uses real installer transactions and original tuple paths', () => {
+  it('redeems a canonical one-use bundle with one bodyless POST and preserves the original signal and redirect guard', async () => owned(async root => {
+    const content = bytes(), controller = new AbortController()
+    const requests: RequestInit[] = []
+    const result = await installCanonicalSkill(root, { workspaceId: 'workspace-a', operationId: randomUUID(), source, version: '1.0.0', downloadUrl: 'https://canonical.example/download?launch=original', expiresAt: '2030-01-01T00:00:00.000Z', checksum: createHash('sha256').update(content).digest('hex'), sizeBytes: content.length }, {
+      signal: controller.signal,
+      fetch: (async (_url, init) => {
+        requests.push(init ?? {})
+        return new Response(init?.method === 'POST' && init.body === undefined && requests.length === 1 ? content : null, { status: init?.method === 'POST' && requests.length === 1 ? 200 : 400 })
+      }) as typeof fetch,
+    })
+    expect(result.success).toBe(true)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ method: 'POST', redirect: 'error', signal: controller.signal })
+    expect(requests[0]!.body).toBeUndefined()
+    expect((await readCanonicalSkillInstallations(root, source))[0]!.installation.canonicalSource).toEqual(source)
+  }))
   it('downloads once, derives unchanged slug from verified ZIP, persists no fake organization', async () => owned(async root => {
     const { result, reads } = await install(root)
     expect(result.success).toBe(true); expect(reads).toBe(1)

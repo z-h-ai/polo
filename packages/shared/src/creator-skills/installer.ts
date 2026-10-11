@@ -1095,6 +1095,8 @@ async function acquireLedgerMutationLock(
 
 export async function downloadCreatorSkillArchive(args: {
   url: string
+  /** Canonical resolve-launch bundles use bodyless POST; legacy grants stay GET. */
+  method?: 'GET' | 'POST'
   outputPath: string
   maxBytes: number
   signal: AbortSignal
@@ -1102,7 +1104,7 @@ export async function downloadCreatorSkillArchive(args: {
   onChunk: (downloaded: number, total?: number) => void
 }): Promise<void> {
   const response = await args.fetchImpl(args.url, {
-    method: 'GET',
+    method: args.method ?? 'GET',
     redirect: 'error',
     signal: args.signal,
   })

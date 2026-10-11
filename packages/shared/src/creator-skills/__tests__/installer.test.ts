@@ -114,10 +114,15 @@ function deferred<T = void>() {
 }
 
 function responseFetch(bytes: Uint8Array): typeof fetch {
-  return (async () => new Response(bytes, {
+  return (async (_url, init) => {
+    expect(init?.method).toBe('GET')
+    expect(init?.redirect).toBe('error')
+    expect(init?.body).toBeUndefined()
+    return new Response(bytes, {
     status: 200,
     headers: { 'content-length': String(bytes.byteLength) },
-  })) as unknown as typeof fetch
+    })
+  }) as unknown as typeof fetch
 }
 
 async function withWorkspace(

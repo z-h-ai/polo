@@ -70,7 +70,7 @@ export async function installCanonicalSkill(workspaceRoot: string, input: Canoni
   await mkdir(incoming, { mode: 0o700 })
   try {
     const archive = join(incoming, 'archive.zip')
-    await downloadCreatorSkillArchive({ url: input.downloadUrl, outputPath: archive, maxBytes: input.sizeBytes,
+    await downloadCreatorSkillArchive({ url: input.downloadUrl, method: 'POST', outputPath: archive, maxBytes: input.sizeBytes,
       signal: dependencies.signal ?? new AbortController().signal, fetchImpl: dependencies.fetch ?? fetch, onChunk: () => {} })
     if ((await stat(archive)).size !== input.sizeBytes) throw new Error('Canonical Skill bundle size differs from the grant')
     const validated = await validateCreatorSkillArchive({ archivePath: archive, expectedArchiveChecksum: checksum })
