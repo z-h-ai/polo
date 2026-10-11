@@ -1235,6 +1235,7 @@ export class ClaudeAgent extends BaseAgent {
     // Extract options (ChatOptions interface from AgentBackend)
     const _isRetry = options?.isRetry ?? false;
     const originalCanonicalTurnId = this.getCanonicalTurnId();
+    const originalQueryAbortController = new AbortController();
 
     // Clear any leftover steer from a previous turn (safety net — should already be null)
     this.pendingSteerMessage = null;
@@ -1289,7 +1290,7 @@ export class ClaudeAgent extends BaseAgent {
         this.branchFromSdkSessionId &&
         !isExistingDirectory(this.branchFromSdkCwd)
       ) {
-        yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ true);
+        yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ true, originalQueryAbortController);
         return;
       }
 
@@ -1509,6 +1510,12 @@ export class ClaudeAgent extends BaseAgent {
                   if (IMAGE_READ_EXTENSIONS.has(ext)) {
                     try {
                       const stats = await stat(filePath);
+
+                      // Stat is asynchronous: do not begin a resize/read for a
+                      // query that ended or lost its original authority meanwhile.
+                      if (originalQueryAbortController.signal.aborted) return blockWithReason('The original tool query was ended or aborted');
+                      const afterStatDenied = await this.checkCanonicalSkillUse(input.tool_name, input.tool_input ?? {}, originalCanonicalTurnId);
+                      if (afterStatDenied || originalQueryAbortController.signal.aborted) return blockWithReason(afterStatDenied ?? 'The original tool query was ended or aborted');
 
                       if (stats.size > IMAGE_LIMITS.MAX_RAW_SIZE) {
                         const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
@@ -1750,7 +1757,7 @@ export class ClaudeAgent extends BaseAgent {
                   }
                 }
               }
-            })],
+            }, originalQueryAbortController.signal)],
           }],
           // NOTE: PostToolUse hook was removed because updatedMCPToolOutput is not a valid SDK output field.
           // For API tools (api_*), summarization happens in api-tools.ts.
@@ -1844,13 +1851,13 @@ export class ClaudeAgent extends BaseAgent {
       }
 
       // Create AbortController for this query - allows force-stopping via forceAbort()
-      this.currentQueryAbortController = new AbortController();
+      this.currentQueryAbortController = originalQueryAbortController;
       // The query's abort state is installed — the turn is genuinely
       // abortable from here (chat-start reservation signal).
       this.signalTurnQueryLive();
       const optionsWithAbort = {
         ...options,
-        abortController: this.currentQueryAbortController,
+        abortController: originalQueryAbortController,
       };
 
       // Known SDK slash commands that bypass context wrapping.
@@ -2124,7 +2131,7 @@ This is a branched conversation. All prior messages in this conversation are par
         if (suppressedBranchCutoffError && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> DETECTED MISSING-UUID BRANCH CUTOFF ERROR - retrying on child session without cutoff');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
-          yield* this.chatImpl(userMessage, attachments);
+          yield* this.retryOriginalQuery(originalQueryAbortController, userMessage, attachments);
           return;
         }
 
@@ -2138,7 +2145,7 @@ This is a branched conversation. All prior messages in this conversation are par
             // Branch-fork failure: route through the shared helper so all four
             // fork fields are persisted atomically (sdkSessionId + branchFromSdk*),
             // and the parent conversation summary is injected into the retry.
-            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false);
+            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false, originalQueryAbortController);
             return;
           }
           // Regular resume failure (no branch fork): clear the session and retry
@@ -2155,7 +2162,7 @@ This is a branched conversation. All prior messages in this conversation are par
           if (recoveryContext) retryMessage = recoveryContext + userMessage;
 
           yield { type: 'info', message: 'Restoring conversation context...' };
-          yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
+          yield* this.retryOriginalQuery(originalQueryAbortController, retryMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2285,7 +2292,7 @@ This is a branched conversation. All prior messages in this conversation are par
           // on the retry — it will repair the file before the next subprocess spawn
           resetClaudeConfigCheck();
           yield { type: 'info', message: 'Repairing configuration file...' };
-          yield* this.chatImpl(userMessage, attachments, { isRetry: true });
+          yield* this.retryOriginalQuery(originalQueryAbortController, userMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2327,7 +2334,7 @@ This is a branched conversation. All prior messages in this conversation are par
         if (suppressedBranchCutoffError && wasResuming && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> TAKING PATH: missing-UUID branch-cutoff fallback from catch');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
-          yield* this.chatImpl(userMessage, attachments);
+          yield* this.retryOriginalQuery(originalQueryAbortController, userMessage, attachments);
           return;
         }
 
@@ -2341,7 +2348,7 @@ This is a branched conversation. All prior messages in this conversation are par
             // Branch-fork failure: route through the shared helper so the
             // four fork fields are persisted atomically (avoids next launch
             // reloading the dead parent and re-failing).
-            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false);
+            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false, originalQueryAbortController);
             return;
           }
 
@@ -2357,7 +2364,7 @@ This is a branched conversation. All prior messages in this conversation are par
           if (recoveryContext) retryMessage = recoveryContext + userMessage;
 
           yield { type: 'info', message: 'Session expired, restoring context...' };
-          yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
+          yield* this.retryOriginalQuery(originalQueryAbortController, retryMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2395,7 +2402,7 @@ This is a branched conversation. All prior messages in this conversation are par
           // rare race where the pre-spawn guard didn't catch a cwd that
           // vanished between check and spawn).
           if (!cwdExists && !_isRetry && this.branchFromSdkSessionId) {
-            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false);
+            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false, originalQueryAbortController);
             return;
           }
 
@@ -2411,7 +2418,7 @@ This is a branched conversation. All prior messages in this conversation are par
             });
             yield { type: 'info', message: 'Reconnecting after update...' };
             await new Promise(r => setTimeout(r, 2000));
-            yield* this.chatImpl(userMessage, attachments, { isRetry: true });
+            yield* this.retryOriginalQuery(originalQueryAbortController, userMessage, attachments, { isRetry: true });
             return;
           }
 
@@ -2547,7 +2554,7 @@ This is a branched conversation. All prior messages in this conversation are par
             // Generic error during a fork attempt: route through the shared
             // helper so all four fork fields are persisted atomically and
             // the parent summary is injected into the retry.
-            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false);
+            yield* this.recoverFromStaleBranchFork(userMessage, attachments, /* isPreSpawn */ false, originalQueryAbortController);
             return;
           }
 
@@ -2567,7 +2574,7 @@ This is a branched conversation. All prior messages in this conversation are par
             : 'Request failed, retrying with context...';
 
           yield { type: 'info', message: statusMessage };
-          yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
+          yield* this.retryOriginalQuery(originalQueryAbortController, retryMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2600,6 +2607,7 @@ This is a branched conversation. All prior messages in this conversation are par
       // emit complete even on error so application knows we're done
       yield { type: 'complete' };
     } finally {
+      originalQueryAbortController.abort();
       this.currentQuery = null;
 
       // If a steer message was never delivered (no PreToolUse fired), notify the session
@@ -2611,6 +2619,18 @@ This is a branched conversation. All prior messages in this conversation are par
         yield { type: 'steer_undelivered' as const, message: undeliveredSteer };
       }
     }
+  }
+
+  /** SDK recovery retains the admitted turn, but closes the old query producer. */
+  private async *retryOriginalQuery(
+    originalController: AbortController,
+    message: string,
+    attachments?: FileAttachment[],
+    options?: ChatOptions,
+  ): AsyncGenerator<AgentEvent> {
+    if (originalController.signal.aborted) return;
+    originalController.abort();
+    yield* this.chatImpl(message, attachments, options);
   }
 
   // formatSourceState() and getAuthToolName() are now delegated to this.sourceManager
@@ -3286,6 +3306,7 @@ This is a branched conversation. All prior messages in this conversation are par
     userMessage: string,
     attachments: FileAttachment[] | undefined,
     isPreSpawn: boolean,
+    originalQueryAbortController: AbortController,
   ): AsyncGenerator<AgentEvent> {
     debug('[ClaudeAgent] Recovering from stale branch fork', {
       isPreSpawn,
@@ -3319,7 +3340,7 @@ This is a branched conversation. All prior messages in this conversation are par
       ? 'Branch source unavailable on this machine, restoring context from history...'
       : 'Branch fork failed, restoring context from history...';
     yield { type: 'info', message: statusMessage };
-    yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
+    yield* this.retryOriginalQuery(originalQueryAbortController, retryMessage, attachments, { isRetry: true });
   }
 
   /**
