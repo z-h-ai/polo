@@ -913,8 +913,13 @@ ${formattedMessages}
   private activeCanonicalSkillPaths: string[] = [];
   private canonicalTurnId: string | null = null;
 
+  /** Capture at the request producer, never after an asynchronous tool wait. */
+  protected getCanonicalTurnId(): string | null { return this.canonicalTurnId; }
+
   /** Runs in both SDK tool hooks, including direct Read/Bash/Skill input. */
-  protected async checkCanonicalSkillUse(toolName: string, input: Record<string, unknown>): Promise<string | null> {
+  protected async checkCanonicalSkillUse(toolName: string, input: Record<string, unknown>, expectedTurnId: string | null = this.canonicalTurnId): Promise<string | null> {
+    const stale = () => !!this.config.canonicalSkills && (!expectedTurnId || this.canonicalTurnId !== expectedTurnId);
+    if (stale()) return 'Canonical Skill files have no current native authority: the original tool turn is no longer active';
     const paths = new Set(this.activeCanonicalSkillPaths);
     const workingDirectory = this.config.session?.workingDirectory ?? this.workingDirectory;
     const canonicalize = (raw: string): string => {
@@ -963,7 +968,7 @@ ${formattedMessages}
     }
     if (paths.size === 0) return null;
     if (!this.config.canonicalSkills || !this.canonicalTurnId) return 'Canonical Skill permission authority is unavailable outside an active turn';
-    try { await this.config.canonicalSkills.authorize([...paths], this.canonicalTurnId); return canonicalPluginRequest ? `Canonical Skills use the existing Read-before-execute path. Read ${[...paths].join(', ')} instead of the SDK plugin Skill tool.` : null; }
+    try { await this.config.canonicalSkills.authorize([...paths], expectedTurnId!); if (stale()) return 'The original tool turn is no longer active'; return canonicalPluginRequest ? `Canonical Skills use the existing Read-before-execute path. Read ${[...paths].join(', ')} instead of the SDK plugin Skill tool.` : null; }
     catch { return 'Canonical Skill is unavailable for this account, ProductSpace or current version'; }
   }
 

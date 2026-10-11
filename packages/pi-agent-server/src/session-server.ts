@@ -18,6 +18,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { PromptTurnContexts, type PromptTurnContext } from './prompt-turn-context.ts';
 
 // Pi SDK
 import {
@@ -134,11 +135,11 @@ interface RuntimeConfigUpdateMessage {
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; id: string; canonicalTurnId: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[]; scope?: 'session' | 'pool' }
   | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
-  | { type: 'abort' }
+  | { type: 'abort'; canonicalTurnId?: string }
   | { type: 'mini_completion'; id: string; prompt: string }
   | { type: 'llm_query'; id: string; request: LLMQueryRequest }
   | { type: 'ensure_session_ready'; id: string }
@@ -173,15 +174,16 @@ type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent;
 
 /** Messages to main process (stdout) */
 interface OutboundReady { type: 'ready'; sessionId: string | null }
-interface OutboundEvent { type: 'event'; event: OutboundAgentEvent }
+interface OutboundEvent { type: 'event'; canonicalTurnId: string; event: OutboundAgentEvent }
 interface OutboundPreToolUseReq {
   type: 'pre_tool_use_request';
+  canonicalTurnId: string;
   requestId: string;
   toolName: string;
   toolCallId?: string;
   input: Record<string, unknown>;
 }
-interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
+interface OutboundToolExecReq { type: 'tool_execute_request'; canonicalTurnId: string; requestId: string; toolName: string; args: Record<string, unknown> }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
   type: 'llm_query_result';
@@ -217,7 +219,7 @@ interface OutboundRuntimeConfigUpdateResult {
   errorMessage?: string;
 }
 interface OutboundSessionIdUpdate { type: 'session_id_update'; sessionId: string }
-interface OutboundError { type: 'error'; message: string; code?: string }
+interface OutboundError { type: 'error'; canonicalTurnId?: string; message: string; code?: string }
 
 type OutboundMessage =
   | OutboundReady
@@ -250,6 +252,7 @@ let currentUserMessage = '';
 
 // Pending promises for async handshakes
 const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
+const promptTurns = new PromptTurnContexts();
 const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
 
 // Proxy tool definitions from main process — session tools are REPLACED
@@ -657,11 +660,14 @@ async function requestPreToolUseApproval(
   sdkToolName: string,
   input: Record<string, unknown>,
   toolCallId?: string,
+  originalTurn: PromptTurnContext = promptTurns.capture(),
 ): Promise<Record<string, unknown>> {
+  promptTurns.assert(originalTurn);
   const requestId = `pi-ptu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   send({
     type: 'pre_tool_use_request',
+    canonicalTurnId: originalTurn.turnId,
     requestId,
     toolName: sdkToolName,
     ...(toolCallId ? { toolCallId } : {}),
@@ -675,6 +681,8 @@ async function requestPreToolUseApproval(
   if (response.action === 'block') {
     throw new Error(response.reason || `Tool "${sdkToolName}" is not allowed`);
   }
+
+  promptTurns.assert(originalTurn);
 
   return response.action === 'modify' && response.input ? response.input : input;
 }
@@ -701,6 +709,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
     onUpdate,
     ctx,
   ) => {
+    const originalTurn = promptTurns.capture();
     const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || tool.name;
     let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
 
@@ -714,7 +723,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
     }
 
     // Send to main process for permission checking + transforms
-    inputObj = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
+    inputObj = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, originalTurn);
     inputObj = sanitizeShellToolInput(
       sdkToolName,
       inputObj,
@@ -727,6 +736,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
     inputObj = stripPoloAiMetadata(inputObj);
 
     // Execute original tool with (potentially modified) input
+    promptTurns.assert(originalTurn, signal);
     const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
 
     // --- Post-execute: large response summarization ---
@@ -805,7 +815,9 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
     execute: async (
       toolCallId: string,
       params: any,
+      signal?: AbortSignal,
     ): Promise<AgentToolResult<any>> => {
+      const originalTurn = promptTurns.capture();
       // Check speculative prefetch cache first (parallel call_llm optimization).
       // If this tool was prefetched on message_end, the request is already in-flight —
       // just await the result instead of sending a duplicate request.
@@ -814,6 +826,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         prefetchCache.delete(toolCallId);
         debugLog(`Prefetch cache hit for ${def.name} (toolCallId: ${toolCallId})`);
         const result = await prefetched;
+        promptTurns.assert(originalTurn, signal);
         return {
           content: [{ type: 'text', text: result.content }],
           details: result.isError ? { isError: true } : undefined,
@@ -823,13 +836,15 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
       const inputObj = params as Record<string, unknown>;
 
       // Permission checking via main process
-      const approvedInput = await requestPreToolUseApproval(def.name, inputObj, toolCallId);
+      const approvedInput = await requestPreToolUseApproval(def.name, inputObj, toolCallId, originalTurn);
 
       // Execute via main process
       const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+      promptTurns.assert(originalTurn, signal);
       send({
         type: 'tool_execute_request',
+        canonicalTurnId: originalTurn.turnId,
         requestId,
         toolName: def.name,
         args: approvedInput,
@@ -838,6 +853,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
       const result = await new Promise<{ content: string; isError: boolean }>((resolve) => {
         pendingToolExecutions.set(requestId, { resolve });
       });
+      promptTurns.assert(originalTurn, signal);
 
       return {
         content: [{ type: 'text', text: result.content }],
@@ -1075,7 +1091,8 @@ function extractToolExecutionMetadata(args: Record<string, unknown> | undefined)
   };
 }
 
-function handleSessionEvent(event: AgentSessionEvent): void {
+function handleSessionEvent(event: AgentSessionEvent, originalTurn: PromptTurnContext): void {
+  try { promptTurns.assert(originalTurn); } catch { return; }
   let forwardedEvent: OutboundAgentEvent = event;
 
   // Log API errors for debugging and attach provider-native turn anchor for branch cutoffs.
@@ -1112,6 +1129,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 
         const sessionManagerSnapshot = piSession.sessionManager;
         queueMicrotask(() => {
+          try { promptTurns.assert(originalTurn); } catch { return; }
           // Defensive: session may have been disposed between the message_end
           // emit and the microtask drain.
           if (!piSession || piSession.sessionManager !== sessionManagerSnapshot) {
@@ -1121,6 +1139,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
           if (!sdkTurnAnchor) return;
           send({
             type: 'event',
+            canonicalTurnId: originalTurn.turnId,
             event: {
               type: 'pi_turn_anchor',
               sdkMessageId,
@@ -1139,6 +1158,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
           (c): c is { type: string; id?: string; name: string; arguments?: unknown } =>
             c.type === 'toolCall' && !!c.name && isPrefetchableTool(c.name),
         );
+        // Missing/detached SDK event context cannot borrow another prompt.
         if (prefetchableToolCalls.length >= 2) {
           const firstToolName = prefetchableToolCalls[0]?.name ?? 'tool';
           debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${firstToolName} calls`);
@@ -1149,6 +1169,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
             });
             send({
               type: 'tool_execute_request',
+              canonicalTurnId: originalTurn.turnId,
               requestId,
               toolName: tc.name!,
               args: (tc.arguments ?? {}) as Record<string, unknown>,
@@ -1172,7 +1193,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
   }
 
   // Forward all events to main process
-  send({ type: 'event', event: forwardedEvent });
+  send({ type: 'event', canonicalTurnId: originalTurn.turnId, event: forwardedEvent });
 }
 
 // ============================================================
@@ -1232,6 +1253,16 @@ async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs =
 }
 
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
+  // The SDK followUp queue can return before a queued prompt executes. Admit
+  // FIFO here so each SDK invocation and its tools retain their own context.
+  try { await promptTurns.run(msg.canonicalTurnId, () => handleAdmittedPrompt(msg)); }
+  catch (error) {
+    send({ type: 'error', canonicalTurnId: msg.canonicalTurnId, message: error instanceof Error ? error.message : String(error), code: 'prompt_error' });
+    send({ type: 'event', canonicalTurnId: msg.canonicalTurnId, event: { type: 'agent_end', messages: [] } });
+  }
+}
+
+async function handleAdmittedPrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
   currentUserMessage = msg.message;
 
   try {
@@ -1249,6 +1280,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
 
     const session = await ensureSession();
+    promptTurns.assert(promptTurns.capture());
 
     // Force the Polo AI-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
@@ -1261,10 +1293,12 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     if (unsubscribeEvents) {
       unsubscribeEvents();
     }
-    unsubscribeEvents = session.subscribe(handleSessionEvent);
+    const originalTurn = promptTurns.capture();
+    unsubscribeEvents = session.subscribe(event => handleSessionEvent(event, originalTurn));
 
     // Wait for any in-flight auto-compaction to avoid race (polo-ai-oss#464)
     await waitForCompaction(session);
+    promptTurns.assert(originalTurn);
 
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
@@ -1285,9 +1319,9 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // reaches the UI.
 
     debugLog(`Prompt failed: ${errorMsg}`);
-    send({ type: 'error', message: errorMsg, code: 'prompt_error' });
+    send({ type: 'error', canonicalTurnId: msg.canonicalTurnId, message: errorMsg, code: 'prompt_error' });
     // Send synthetic agent_end so the main process event queue unblocks
-    send({ type: 'event', event: { type: 'agent_end', messages: [] } });
+    send({ type: 'event', canonicalTurnId: msg.canonicalTurnId, event: { type: 'agent_end', messages: [] } });
   }
 }
 
@@ -1329,23 +1363,17 @@ function handlePreToolUseResponse(msg: Extract<InboundMessage, { type: 'pre_tool
   }
 }
 
-async function handleAbort(): Promise<void> {
-  if (piSession) {
-    try {
-      await piSession.abort();
-    } catch (error) {
-      debugLog(`Abort failed: ${error instanceof Error ? error.message : String(error)}`);
+async function handleAbort(canonicalTurnId?: string): Promise<void> {
+  await promptTurns.abortAndDrain(canonicalTurnId, async () => {
+    // Unblock approval waits before awaiting the SDK's abort/drain.
+    for (const [, pending] of pendingPreToolUse) pending.resolve({ action: 'block', reason: 'Aborted' });
+    pendingPreToolUse.clear();
+    prefetchCache.clear();
+    if (piSession) {
+      try { await piSession.abort(); }
+      catch (error) { debugLog(`Abort failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
-  }
-
-  // Reject all pending pre-tool-use requests
-  for (const [, pending] of pendingPreToolUse) {
-    pending.resolve({ action: 'block', reason: 'Aborted' });
-  }
-  pendingPreToolUse.clear();
-
-  // Clear speculative prefetch cache — in-flight prefetches will resolve but never be consumed
-  prefetchCache.clear();
+  });
 }
 
 async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_completion' }>): Promise<void> {
@@ -1573,6 +1601,7 @@ async function handleSetThinkingLevel(msg: Extract<InboundMessage, { type: 'set_
 }
 
 function handleShutdown(): void {
+  promptTurns.abort();
   debugLog('Shutdown requested');
 
   // Unsubscribe events
@@ -1628,7 +1657,7 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       break;
 
     case 'abort':
-      await handleAbort();
+      await handleAbort(msg.canonicalTurnId);
       break;
 
     case 'mini_completion':

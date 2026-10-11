@@ -1129,6 +1129,7 @@ export class PiAgent extends BaseAgent {
         break;
 
       case 'event':
+        if (typeof msg.canonicalTurnId === 'string' && msg.canonicalTurnId !== this.getCanonicalTurnId()) break;
         // Pi SDK event -- forward through PiEventAdapter
         this.handleSubprocessEvent(msg.event as Record<string, unknown>);
         break;
@@ -1137,6 +1138,7 @@ export class PiAgent extends BaseAgent {
         // Subprocess needs permission check + transforms before tool execution
         this.handlePreToolUseRequest(msg as {
           requestId: string;
+          canonicalTurnId?: string;
           toolName: string;
           toolCallId?: string;
           input: Record<string, unknown>;
@@ -1147,6 +1149,7 @@ export class PiAgent extends BaseAgent {
         // Subprocess wants main process to execute a proxy tool (MCP/API/session)
         this.handleToolExecuteRequest(msg as {
           requestId: string;
+          canonicalTurnId?: string;
           toolName: string;
           args: Record<string, unknown>;
         });
@@ -1203,6 +1206,7 @@ export class PiAgent extends BaseAgent {
         break;
 
       case 'error': {
+        if (typeof msg.canonicalTurnId === 'string' && msg.canonicalTurnId !== this.getCanonicalTurnId()) break;
         const errorCode = typeof msg.code === 'string' ? msg.code : undefined;
         const rawMessage = String(msg.message || 'Unknown subprocess error');
 
@@ -1385,11 +1389,22 @@ export class PiAgent extends BaseAgent {
    */
   private async handlePreToolUseRequest(req: {
     requestId: string;
+    canonicalTurnId?: string;
     toolName: string;
     toolCallId?: string;
     input: Record<string, unknown>;
   }): Promise<void> {
     const { requestId, toolName, toolCallId, input } = req;
+    const originalTurnId = req.canonicalTurnId ?? null;
+    const respond = async (response: Record<string, unknown>) => {
+      if (response.action === 'allow' || response.action === 'modify') {
+        const denied = await this.checkCanonicalSkillUse(toolName, (response.input as Record<string, unknown> | undefined) ?? input, originalTurnId);
+        if (denied) { this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: denied }); return; }
+      }
+      this.send(response);
+    };
+    const admissionDenied = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
+    if (admissionDenied) { await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: admissionDenied }); return; }
     const debugSessionId = this.config.session?.id || this._sessionId;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId}, sessionId=${debugSessionId})`);
 
@@ -1429,9 +1444,9 @@ export class PiAgent extends BaseAgent {
       ? { enabled: true, path: getRtkPath(), exclude: [] }
       : undefined;
 
-    const canonicalDenied = await this.checkCanonicalSkillUse(toolName, input);
+    const canonicalDenied = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
     if (canonicalDenied) {
-      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalDenied });
+      await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalDenied });
       return;
     }
     const checkResult = runPreToolUseChecks({
@@ -1455,11 +1470,11 @@ export class PiAgent extends BaseAgent {
 
     switch (checkResult.type) {
       case 'allow':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'modify':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
         return;
 
       case 'block': {
@@ -1473,7 +1488,7 @@ export class PiAgent extends BaseAgent {
           changedAt: diagnostics.lastChangedAt,
           reason: checkResult.reason,
         })}`);
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
         return;
       }
 
@@ -1488,9 +1503,11 @@ export class PiAgent extends BaseAgent {
               const reason = sourceExists
                 ? `Source "${sourceSlug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
                 : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-              this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+              await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
               return;
             }
+            const originalAfterActivation = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
+            if (originalAfterActivation) { await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: originalAfterActivation }); return; }
             this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" activated successfully`);
             this.eventQueue.enqueue({
               type: 'source_activated' as const,
@@ -1501,14 +1518,14 @@ export class PiAgent extends BaseAgent {
             const reason = sourceExists
               ? `Source "${sourceSlug}" could not be activated: ${err}`
               : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+            await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
             return;
           }
         }
 
-        const canonicalAfterActivation = await this.checkCanonicalSkillUse(toolName, input);
+        const canonicalAfterActivation = await this.checkCanonicalSkillUse(toolName, input, originalTurnId);
         if (canonicalAfterActivation) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalAfterActivation });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: canonicalAfterActivation });
           return;
         }
         // Re-run pipeline after activation
@@ -1532,11 +1549,11 @@ export class PiAgent extends BaseAgent {
         });
 
         if (postResult.type === 'modify') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
         } else if (postResult.type === 'block') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         }
         return;
       }
@@ -1544,16 +1561,16 @@ export class PiAgent extends BaseAgent {
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'prompt': {
         if (!this.onPermissionRequest) {
           // No permission handler — allow
           if (checkResult.modifiedInput) {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+            await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
           } else {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+            await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
           }
           return;
         }
@@ -1588,14 +1605,14 @@ export class PiAgent extends BaseAgent {
         this.pendingPermissions.delete(permRequestId);
 
         if (!allowed) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
           return;
         }
 
         if (checkResult.modifiedInput) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          await respond({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         }
         return;
       }
@@ -1611,9 +1628,12 @@ export class PiAgent extends BaseAgent {
    */
   private async handleToolExecuteRequest(request: {
     requestId: string;
+    canonicalTurnId?: string;
     toolName: string;
     args: Record<string, unknown>;
   }): Promise<void> {
+    const denied = await this.checkCanonicalSkillUse(request.toolName, request.args, request.canonicalTurnId ?? null);
+    if (denied) { this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: denied, isError: true } }); return; }
     // Prerequisite check: block source tools until guide.md is read
     const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
     if (!prereqResult.allowed) {
@@ -2172,6 +2192,7 @@ export class PiAgent extends BaseAgent {
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
+    const originalCanonicalTurnId = this.getCanonicalTurnId();
     let message = messageParam;
     // Reset state for new turn
     this._isProcessing = true;
@@ -2341,6 +2362,7 @@ export class PiAgent extends BaseAgent {
       this.send({
         type: 'prompt',
         id: turnId,
+        canonicalTurnId: originalCanonicalTurnId,
         message: userMessage,
         systemPrompt: fullSystemPrompt,
         images: images.length > 0 ? images : undefined,
@@ -2533,7 +2555,7 @@ export class PiAgent extends BaseAgent {
     this.pendingPermissions.clear();
 
     // Send abort to subprocess
-    this.send({ type: 'abort' });
+    this.send({ type: 'abort', canonicalTurnId: this.getCanonicalTurnId() });
     this.eventQueue.complete();
 
     // Clear bridge cache for this interrupted turn.
@@ -2571,7 +2593,7 @@ export class PiAgent extends BaseAgent {
     }
 
     // For other reasons, send abort to subprocess
-    this.send({ type: 'abort' });
+    this.send({ type: 'abort', canonicalTurnId: this.getCanonicalTurnId() });
   }
 
   /**

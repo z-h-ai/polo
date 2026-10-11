@@ -61,6 +61,7 @@ import {
   SAFE_MODE_CONFIG,
 } from './mode-manager.ts';
 import { getLastApiError } from '../interceptor-common.ts';
+import { guardCanonicalToolHook } from './canonical-tool-hook.ts';
 import { extractWorkspaceSlug } from '../utils/workspace.ts';
 import {
   ConfigWatcher,
@@ -176,6 +177,8 @@ export interface ClaudeAgentConfig {
   workspace: Workspace;
   session?: Session;           // Current session (primary isolation boundary)
   sessionStorage?: BackendConfig['sessionStorage'];
+  canonicalSkills?: BackendConfig['canonicalSkills'];
+  onImageResize?: BackendConfig['onImageResize'];
   mcpToken?: string;           // Override token (for testing)
   model?: string;
   thinkingLevel?: ThinkingLevel; // Initial thinking level (defaults to 'medium')
@@ -688,6 +691,8 @@ export class ClaudeAgent extends BaseAgent {
       mcpPool: config.mcpPool,
       connectionSlug: config.connectionSlug,
       automationSystem: config.automationSystem,
+      canonicalSkills: config.canonicalSkills,
+      onImageResize: config.onImageResize,
       // R52-B: owner-verified callback ownership — the constructor's
       // session-scoped registration and every owner-verified merge carry
       // THIS runtime's immutable token; the SM rebinds its lease through
@@ -1229,6 +1234,7 @@ export class ClaudeAgent extends BaseAgent {
   ): AsyncGenerator<AgentEvent> {
     // Extract options (ChatOptions interface from AgentBackend)
     const _isRetry = options?.isRetry ?? false;
+    const originalCanonicalTurnId = this.getCanonicalTurnId();
 
     // Clear any leftover steer from a previous turn (safety net — should already be null)
     this.pendingSteerMessage = null;
@@ -1474,7 +1480,9 @@ export class ClaudeAgent extends BaseAgent {
           // Internal hooks for permission handling and logging
           const internalHooks: Record<string, SdkAutomationCallbackMatcher[]> = {
           PreToolUse: [{
-            hooks: [async (_hookInput) => {
+            hooks: [guardCanonicalToolHook(
+              (name, actualInput) => this.checkCanonicalSkillUse(name, actualInput, originalCanonicalTurnId),
+              async (_hookInput) => {
               // Only handle PreToolUse events
               if (_hookInput.hook_event_name !== 'PreToolUse') {
                 return { continue: true };
@@ -1552,8 +1560,6 @@ export class ClaudeAgent extends BaseAgent {
                 ? { enabled: true, path: getRtkPath(), exclude: [] }
                 : undefined;
 
-              const canonicalDenied = await this.checkCanonicalSkillUse(input.tool_name, toolInput);
-              if (canonicalDenied) return blockWithReason(canonicalDenied);
               // Run centralized PreToolUse checks
               const checkResult = runPreToolUseChecks({
                 toolName: input.tool_name,
@@ -1744,7 +1750,7 @@ export class ClaudeAgent extends BaseAgent {
                   }
                 }
               }
-            }],
+            })],
           }],
           // NOTE: PostToolUse hook was removed because updatedMCPToolOutput is not a valid SDK output field.
           // For API tools (api_*), summarization happens in api-tools.ts.
@@ -2118,7 +2124,7 @@ This is a branched conversation. All prior messages in this conversation are par
         if (suppressedBranchCutoffError && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> DETECTED MISSING-UUID BRANCH CUTOFF ERROR - retrying on child session without cutoff');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
-          yield* this.chat(userMessage, attachments);
+          yield* this.chatImpl(userMessage, attachments);
           return;
         }
 
@@ -2149,7 +2155,7 @@ This is a branched conversation. All prior messages in this conversation are par
           if (recoveryContext) retryMessage = recoveryContext + userMessage;
 
           yield { type: 'info', message: 'Restoring conversation context...' };
-          yield* this.chat(retryMessage, attachments, { isRetry: true });
+          yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2279,7 +2285,7 @@ This is a branched conversation. All prior messages in this conversation are par
           // on the retry — it will repair the file before the next subprocess spawn
           resetClaudeConfigCheck();
           yield { type: 'info', message: 'Repairing configuration file...' };
-          yield* this.chat(userMessage, attachments, { isRetry: true });
+          yield* this.chatImpl(userMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2321,7 +2327,7 @@ This is a branched conversation. All prior messages in this conversation are par
         if (suppressedBranchCutoffError && wasResuming && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> TAKING PATH: missing-UUID branch-cutoff fallback from catch');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
-          yield* this.chat(userMessage, attachments);
+          yield* this.chatImpl(userMessage, attachments);
           return;
         }
 
@@ -2351,7 +2357,7 @@ This is a branched conversation. All prior messages in this conversation are par
           if (recoveryContext) retryMessage = recoveryContext + userMessage;
 
           yield { type: 'info', message: 'Session expired, restoring context...' };
-          yield* this.chat(retryMessage, attachments, { isRetry: true });
+          yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -2405,7 +2411,7 @@ This is a branched conversation. All prior messages in this conversation are par
             });
             yield { type: 'info', message: 'Reconnecting after update...' };
             await new Promise(r => setTimeout(r, 2000));
-            yield* this.chat(userMessage, attachments, { isRetry: true });
+            yield* this.chatImpl(userMessage, attachments, { isRetry: true });
             return;
           }
 
@@ -2561,7 +2567,7 @@ This is a branched conversation. All prior messages in this conversation are par
             : 'Request failed, retrying with context...';
 
           yield { type: 'info', message: statusMessage };
-          yield* this.chat(retryMessage, attachments, { isRetry: true });
+          yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
           return;
         }
 
@@ -3313,7 +3319,7 @@ This is a branched conversation. All prior messages in this conversation are par
       ? 'Branch source unavailable on this machine, restoring context from history...'
       : 'Branch fork failed, restoring context from history...';
     yield { type: 'info', message: statusMessage };
-    yield* this.chat(retryMessage, attachments, { isRetry: true });
+    yield* this.chatImpl(retryMessage, attachments, { isRetry: true });
   }
 
   /**
