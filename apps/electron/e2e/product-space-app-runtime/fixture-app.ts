@@ -49,13 +49,19 @@ async function runSequence(): Promise<void> {
       resultId: uuid(),
       title: 'e2e result',
     })
-    await call('query', '/ai/query', {
+    const query = {
       runId,
       requestId: uuid(),
       prompt: 'say hi',
       maxOutputTokens: 64,
-      timeoutMs: 10_000,
-    })
+      timeoutMs: process.env.POLO_FIXTURE_BILLING_SCENARIO === '1' ? 60_000 : 10_000,
+    }
+    await call('query', '/ai/query', query)
+    if (process.env.POLO_FIXTURE_BILLING_SCENARIO === '1') {
+      await call('queryReplay', '/ai/query', query)
+      await call('querySecond', '/ai/query', { ...query, requestId: uuid(), prompt: 'candidate21:second' })
+      await call('queryNoOutput', '/ai/query', { ...query, requestId: uuid(), prompt: 'candidate21:no-output' })
+    }
     await call('finish', '/run/finish', { runId, status: 'completed' })
     // Re-starting the SAME terminal runId conflicts; report stays finalized.
     await call('startAfterFinish', '/run/start', { runId })

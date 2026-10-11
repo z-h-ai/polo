@@ -44,6 +44,9 @@ import {
   type AdminPlatformRelease,
   type AdminSignedUpload,
   type AdminPlatformReleaseInput,
+  type AdminGetAppRequestResponse,
+  type AdminAdmitAppRequestInput,
+  type AdminAdmitAppRequestResponse,
   type AdminStartAppRunInput,
   type AdminStartAppRunResponse,
   type AdminRecordAppUsageInput,
@@ -93,6 +96,8 @@ import {
   AdminPlatformAppSchema,
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
+  AdminGetAppRequestResponseSchema,
+  AdminAdmitAppRequestResponseSchema,
   AdminStartAppRunResponseSchema,
   AdminRecordAppUsageResponseSchema,
   AdminFinishAppRunResponseSchema,
@@ -1150,6 +1155,22 @@ export class AdminClient {
     return { run: { runId: result.run.runId, status: result.run.status } };
   }
 
+  /** Read an original admission without creating it or returning transport secrets. */
+  async getAppRequest(accessToken: string, runId: string, requestId: string, options?: { signal?: AbortSignal }): Promise<AdminGetAppRequestResponse> {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}/requests/${encodeURIComponent(requestId)}`, { method: 'GET', accessToken, signal: options?.signal });
+    const result = this.readSuccessResponse(response, AdminGetAppRequestResponseSchema);
+    if (result.request.requestId !== requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return result;
+  }
+
+  /** Private Host-only admission. Never forward this response to an App. */
+  async admitAppRequest(accessToken: string, runId: string, input: AdminAdmitAppRequestInput, options?: { signal?: AbortSignal }): Promise<AdminAdmitAppRequestResponse> {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}/requests`, { method: 'POST', accessToken, body: input, signal: options?.signal });
+    const result = this.readSuccessResponse(response, AdminAdmitAppRequestResponseSchema);
+    if (result.request.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return result;
+  }
+
   /** POL-102: records one idempotent (runId, requestId) usage receipt. */
   async recordAppUsage(
     accessToken: string,
@@ -1163,9 +1184,14 @@ export class AdminClient {
       signal: options?.signal,
     });
     const result = this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+    if ((input.providerObservation !== undefined || input.outputDisposition !== undefined) && result.settlement === undefined) throw new AdminError('Canonical settlement acknowledgement is missing', 'SERVER_ERROR');
+    if (result.settlement === 'pending') {
+      if (result.request?.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+      return { runId: input.runId, requestId: input.requestId, recorded: result.recorded, settlement: 'pending' };
+    }
     if (result.receipt === null) throw new AdminError('requestId belongs to legacy usage', 'idempotency_conflict');
     if (result.receipt.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
-    return { runId: input.runId, requestId: result.receipt.requestId, recorded: result.recorded };
+    return { runId: input.runId, requestId: result.receipt.requestId, recorded: result.recorded, ...(result.settlement ? { settlement: result.settlement } : {}) };
   }
 
   /** POL-102: finishes an App Run with an idempotent terminal status. */
@@ -1181,7 +1207,7 @@ export class AdminClient {
     );
     const result = this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
     if (result.run.runId !== runId || result.run.status !== input.status) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
-    return { runId: result.run.runId, status: result.run.status };
+    return { runId: result.run.runId, status: result.run.status, ...(result.settlement ? { settlement: result.settlement } : {}) };
   }
 
   // -------------------------------------------------------------------------

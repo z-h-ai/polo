@@ -1,9 +1,11 @@
+import { parseProviderCorrelation } from '../admin/provider-observation.ts'
+import { createHash } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import {
   HOST_PARENT_MARKER, AGGREGATE_BYTE_LIMIT, MAX_OUTPUT_TOKENS_MAX, TIMEOUT_MS_MAX,
   validateWorkerResult, makePublicError, type HostLlmPublicResult, type HostLlmPublicUsage,
-  type HostLlmExecuteInput, type HostLlmExecutorOptions, type SessionlessHostLlmExecutor,
+  type HostLlmExecuteInput, type HostLlmExecutorOptions, type SessionlessHostLlmExecutor, type HostLlmBeforeSendFacts, type HostLlmAdmissionDecision,
   type HostLlmErrorCode, type HostLlmErrorReason, type WireResult, HostLlmConfigurationError,
 } from './host-llm-contract.ts'
 import {
@@ -14,7 +16,7 @@ import { getLlmConnection } from '../config/storage.ts'
 import { resolveBackendRuntimePaths } from './backend/internal/runtime-resolver.ts'
 import type { BackendHostRuntimeContext } from './backend/types.ts'
 export { HOST_PARENT_MARKER, HostLlmConfigurationError }
-export type { HostLlmExecuteInput, HostLlmExecutorOptions, HostLlmPublicResult, HostLlmPublicUsage, HostLlmErrorCode, HostLlmErrorReason, SessionlessHostLlmExecutor, BackendHostRuntimeContext }
+export type { HostLlmExecuteInput, HostLlmExecutorOptions, HostLlmPublicResult, HostLlmPublicUsage, HostLlmErrorCode, HostLlmErrorReason, SessionlessHostLlmExecutor, BackendHostRuntimeContext, HostLlmBeforeSendFacts, HostLlmAdmissionDecision }
 
 const PROMPT_LIMIT = 1_048_576, SYSTEM_LIMIT = 524_288, STDOUT_LIMIT = 4 * 1024 * 1024, CLOSE_GRACE_MS = 250
 
@@ -27,8 +29,9 @@ function validateExecuteInput(input: HostLlmExecuteInput, m: string): HostLlmPub
   return null
 }
 
-function encodeRequestLine(requestId: string, model: string, input: HostLlmExecuteInput, route: HostSpawnDescriptor['wireRoute'], cred: WireCredential): { ok: true; line: string } | { ok: false } {
+function encodeRequestLine(requestId: string, model: string, input: HostLlmExecuteInput, route: HostSpawnDescriptor['wireRoute'], cred: WireCredential, providerCorrelation?: import('../admin/provider-observation.ts').ProviderCorrelationV1): { ok: true; line: string } | { ok: false } {
   const w: Record<string, unknown> = { type: 'host_completion', version: 1, parentValidation: HOST_PARENT_MARKER, requestId, model, route, prompt: input.prompt, maxOutputTokens: input.maxOutputTokens, timeoutMs: input.timeoutMs, responseFormat: input.responseFormat ?? 'text', credential: cred }
+  if (providerCorrelation) w['providerCorrelation'] = providerCorrelation
   if (input.systemPrompt) w['systemPrompt'] = input.systemPrompt
   const line = JSON.stringify(w)
   return Buffer.byteLength(line, 'utf8') > AGGREGATE_BYTE_LIMIT ? { ok: false } : { ok: true, line }
@@ -38,11 +41,11 @@ function toPublicResult(wire: WireResult, provider: string): HostLlmPublicResult
   const rid = wire.requestId, model = wire.model
   if (wire.status === 'completed' || wire.status === 'partial') {
     const u = wire.usage!
-    return { status: wire.status, text: wire.text!, usage: { inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: u.cacheReadTokens, cacheWriteTokens: u.cacheWriteTokens, totalTokens: u.totalTokens, reportedModel: u.reportedModel }, requestId: rid, model, provider }
+    return { status: wire.status, text: wire.text!, usage: { inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: u.cacheReadTokens, cacheWriteTokens: u.cacheWriteTokens, totalTokens: u.totalTokens, reportedModel: u.reportedModel, terminalReason: u.terminalReason, provenance: u.provenance }, requestId: rid, model, provider, ...(wire.providerObservation ? { providerObservation: wire.providerObservation } : {}) }
   }
   const e = wire.error!
-  const base = { status: wire.status as 'no_output' | 'timed_out' | 'failed' | 'cancelled', error: { code: e.code as HostLlmErrorCode, reason: e.reason as HostLlmErrorReason, message: e.message }, requestId: rid, model }
-  return wire.usage ? { ...base, usage: { inputTokens: wire.usage.inputTokens, outputTokens: wire.usage.outputTokens, cacheReadTokens: wire.usage.cacheReadTokens, cacheWriteTokens: wire.usage.cacheWriteTokens, totalTokens: wire.usage.totalTokens, reportedModel: wire.usage.reportedModel } } : base
+  const base = { status: wire.status as 'no_output' | 'timed_out' | 'failed' | 'cancelled', error: { code: e.code as HostLlmErrorCode, reason: e.reason as HostLlmErrorReason, message: e.message }, requestId: rid, model, ...(wire.providerObservation ? { providerObservation: wire.providerObservation } : {}) }
+  return wire.usage ? { ...base, usage: { inputTokens: wire.usage.inputTokens, outputTokens: wire.usage.outputTokens, cacheReadTokens: wire.usage.cacheReadTokens, cacheWriteTokens: wire.usage.cacheWriteTokens, totalTokens: wire.usage.totalTokens, reportedModel: wire.usage.reportedModel, terminalReason: wire.usage.terminalReason, provenance: wire.usage.provenance } } : base
 }
 
 async function cleanupChild(child: ChildProcess | null, privateHome: string | null): Promise<void> {
@@ -79,6 +82,7 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
   async function execute(input: HostLlmExecuteInput): Promise<HostLlmPublicResult> {
     const attemptedModel = input.model ?? options.model ?? defaultModel ?? ''
     if (disposed) return makePublicError('executor_closed', 'host_disposed', '', attemptedModel)
+    if (input.signal?.aborted) return makePublicError('cancelled', 'caller_aborted', '', attemptedModel)
     if (busy) return makePublicError('executor_busy', 'concurrent_execute', '', attemptedModel)
     const inputErr = validateExecuteInput(input, attemptedModel)
     if (inputErr) return inputErr
@@ -94,12 +98,44 @@ export function createSessionlessHostLlmExecutor(options: HostLlmExecutorOptions
       const credResult = await readCredentialSnapshot(liveConn, input.timeoutMs)
       if (!credResult.ok) return makePublicError('credential_unavailable', credResult.reason, '', selectedModel)
       if (disposed) return makePublicError('executor_closed', 'host_disposed', '', selectedModel)
+      if (input.signal?.aborted) return makePublicError('cancelled', 'caller_aborted', '', selectedModel)
+      const afterCredential = getLlmConnection(slug)
+      if (!afterCredential || computeFingerprint(afterCredential) !== fingerprint) return makePublicError('connection_changed', 'configuration_drift', '', selectedModel)
       if (!serverPath) return makePublicError('worker_failed', 'spawn_failed', '', selectedModel)
       const descriptor = createHostDescriptor(liveConn, policy, credResult.credential)
       if (!descriptor) return makePublicError('invalid_connection', 'unsupported_provider_auth', '', selectedModel)
       const requestId = `host-${crypto.randomUUID()}`
       pendingRequestId = requestId; pendingSelectedModel = selectedModel
-      const encoded = encodeRequestLine(requestId, selectedModel, input, descriptor.wireRoute, descriptor.wireCredential)
+      let providerCorrelation: import('../admin/provider-observation.ts').ProviderCorrelationV1 | undefined
+      if (options.beforeSend) {
+        const retire = (result: HostLlmPublicResult): HostLlmPublicResult => { try { rmSync(descriptor.privateHome, { recursive: true, force: true }) } catch {} return result }
+        if (credResult.credential.type !== 'api_key') return retire(makePublicError('invalid_connection', 'unsupported_provider_auth', requestId, selectedModel))
+        let decision: HostLlmAdmissionDecision | void
+        const transportBaseUrl = descriptor.wireRoute.kind === 'custom' ? descriptor.wireRoute.baseUrl : descriptor.wireRoute.transportBaseUrl
+        let admissionTimer: ReturnType<typeof setTimeout> | undefined
+        try {
+          decision = await Promise.race([
+            options.beforeSend({ hostRequestId: requestId, model: selectedModel.replace(/^pi:/, ''), transportBaseUrl, credentialFingerprint: createHash('sha256').update(credResult.credential.value).digest('hex') }),
+            new Promise<never>((_, reject) => { admissionTimer = setTimeout(() => reject(new Error('Admission timed out')), input.timeoutMs) }),
+          ])
+        } catch { return retire(makePublicError('provider_failed', 'provider_request_failed', requestId, selectedModel)) }
+        finally { if (admissionTimer) clearTimeout(admissionTimer) }
+        if (disposed) return retire(makePublicError('executor_closed', 'host_disposed', requestId, selectedModel))
+        if (input.signal?.aborted) return retire(makePublicError('cancelled', 'caller_aborted', requestId, selectedModel))
+        const afterAdmission = getLlmConnection(slug)
+        if (!afterAdmission || computeFingerprint(afterAdmission) !== fingerprint) return retire(makePublicError('connection_changed', 'configuration_drift', requestId, selectedModel))
+        const currentCredential = await readCredentialSnapshot(afterAdmission, input.timeoutMs)
+        if (disposed) return retire(makePublicError('executor_closed', 'host_disposed', requestId, selectedModel))
+        if (input.signal?.aborted) return retire(makePublicError('cancelled', 'caller_aborted', requestId, selectedModel))
+        const finalConnection = getLlmConnection(slug)
+        if (!finalConnection || computeFingerprint(finalConnection) !== fingerprint || !currentCredential.ok || currentCredential.credential.type !== 'api_key' || currentCredential.credential.value !== credResult.credential.value) return retire(makePublicError('connection_changed', 'configuration_drift', requestId, selectedModel))
+        if (decision?.providerCorrelation !== undefined) {
+          const checked = parseProviderCorrelation(decision.providerCorrelation)
+          if (!checked) return retire(makePublicError('invalid_connection', 'unsupported_provider_auth', requestId, selectedModel))
+          providerCorrelation = checked
+        }
+      }
+      const encoded = encodeRequestLine(requestId, selectedModel, input, descriptor.wireRoute, descriptor.wireCredential, providerCorrelation)
       if (!encoded.ok) { try { rmSync(descriptor.privateHome, { recursive: true, force: true }) } catch {} return makePublicError('invalid_request', 'wire_request_too_large', requestId, selectedModel) }
       const provider = descriptor.provider
       let child: ChildProcess

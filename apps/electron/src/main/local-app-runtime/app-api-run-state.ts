@@ -1,3 +1,5 @@
+import type { HostLlmPublicUsage } from '@polo-ai/shared/agent/host-llm-executor'
+import type { ProviderObservationV1 } from '@polo-ai/shared/admin/provider-observation'
 import type { AppApiStableErrorCode } from '@polo-ai/shared/product-spaces'
 
 export type AppRunStatus =
@@ -9,24 +11,27 @@ export type AppRunStatus =
   | 'finish_unconfirmed'
   | 'terminal'
 
-export type QueryState = 'executing' | 'receipt_unconfirmed' | 'receipt_rejected' | 'settled'
+export type QueryState = 'executing' | 'receipt_unconfirmed' | 'receipt_rejected' | 'receipt_pending' | 'settled'
 
-export type QueryOutcome =
+export type QueryOutcome = (
   | {
       kind: 'success'
       status: 'completed' | 'partial'
       text: string
-      usage: { inputTokens: number; outputTokens: number }
+      usage: Pick<HostLlmPublicUsage, 'inputTokens' | 'outputTokens'> & Partial<HostLlmPublicUsage>
     }
-  | { kind: 'no_output'; inputTokens?: number }
+  | { kind: 'no_output'; inputTokens?: number; usage?: Pick<HostLlmPublicUsage, 'inputTokens' | 'outputTokens'> & Partial<HostLlmPublicUsage> }
   | {
       kind: 'error'
       code: AppApiStableErrorCode
       /** Trusted provider-final usage attached to a terminal Host failure. */
-      usage?: { inputTokens: number; outputTokens: number }
+      usage?: Pick<HostLlmPublicUsage, 'inputTokens' | 'outputTokens'> & Partial<HostLlmPublicUsage>
     }
 
+) & { hostRequestId?: string; actualModel?: string; providerObservation?: ProviderObservationV1; outputDisposition?: 'usable' | 'no_output' | 'unknown' }
+
 export interface RunRecord {
+  settlement?: 'pending' | 'confirmed' | 'no_charge'
   status: AppRunStatus
   startFingerprint: string
   requestedFinishStatus?: 'completed' | 'failed' | 'cancelled' | 'unknown'
@@ -41,6 +46,8 @@ export interface QueryRecord {
   reservedBytes: number
   requiredReceipt: boolean
   receiptConfirmed: boolean
+  receiptAccepted?: boolean
+  settlement?: 'pending' | 'confirmed' | 'no_charge'
 }
 
 export const PER_CAPABILITY_QUERY_SLOTS = 16
@@ -201,8 +208,8 @@ export class AppApiRunState {
   /**
    * Stores the unique Host terminal outcome. Trusted provider-final usage
    * (on success, no_output, or a terminal failure), or the owner-accepted
-   * no_output sentinel, always requires a confirmed POL-102 receipt before
-   * the response may be released; the 512 KiB reservation shrinks to the
+   * no_output sentinel, requires a receipt. Canonical pending receipts preserve
+   * output and financial responsibility; the 512 KiB reservation shrinks to the
    * retained bytes (0 for error/no_output).
    */
   noteHostTerminal(
@@ -213,7 +220,7 @@ export class AppApiRunState {
   ): QueryRecord | undefined {
     const record = this.queries.get(queryKey(capabilityGeneration, runId, requestId))
     if (!record || record.state !== 'executing') return record
-    const requiresReceipt = outcome.kind === 'success'
+    const requiresReceipt = outcome.providerObservation !== undefined || outcome.hostRequestId !== undefined || outcome.kind === 'success'
       || outcome.kind === 'no_output'
       || (outcome.kind === 'error' && outcome.usage !== undefined)
     record.outcome = outcome
@@ -229,23 +236,35 @@ export class AppApiRunState {
     return this.queries.get(queryKey(capabilityGeneration, runId, requestId))
   }
 
-  noteReceiptConfirmed(capabilityGeneration: number, runId: string, requestId: string): void {
+  noteReceiptConfirmed(capabilityGeneration: number, runId: string, requestId: string, settlement: 'confirmed' | 'no_charge' = 'confirmed'): void {
     const record = this.getQuery(capabilityGeneration, runId, requestId)
-    if (record?.state === 'receipt_unconfirmed') {
+    if (record?.state === 'receipt_unconfirmed' || record?.state === 'receipt_pending') {
       record.state = 'settled'
       record.receiptConfirmed = true
+      record.settlement = settlement
+    }
+  }
+
+  noteReceiptPending(capabilityGeneration: number, runId: string, requestId: string): void {
+    const record = this.getQuery(capabilityGeneration, runId, requestId)
+    if (record?.state === 'receipt_unconfirmed' || record?.state === 'receipt_pending') {
+      record.state = 'receipt_pending'
+      record.receiptAccepted = true
+      record.receiptConfirmed = false
+      record.settlement = 'pending'
     }
   }
 
   noteReceiptRejected(capabilityGeneration: number, runId: string, requestId: string): void {
     const record = this.getQuery(capabilityGeneration, runId, requestId)
-    if (record?.state === 'receipt_unconfirmed') record.state = 'receipt_rejected'
+    if (record?.state === 'receipt_unconfirmed' || record?.state === 'receipt_pending') record.state = 'receipt_rejected'
   }
 
   /**
    * Shared predicate for App finish and lifecycle cleanup: start confirmed,
    * no executing query, no unconfirmed-or-rejected receipt, and every
-   * required receipt confirmed. Usage-less Host failures never block.
+   * required receipt confirmed or durably pending. Execution finish does not
+   * settle pending charges. Usage-less Host failures never block.
    */
   canFinishRun(capabilityGeneration: number, runId: string): boolean {
     const run = this.getRun(capabilityGeneration, runId)
@@ -254,7 +273,7 @@ export class AppApiRunState {
       if (!key.startsWith(queryKey(capabilityGeneration, runId, ''))) continue
       if (query.state === 'executing' || query.state === 'receipt_unconfirmed') return false
       if (query.state === 'receipt_rejected') return false
-      if (query.requiredReceipt && !query.receiptConfirmed) return false
+      if (query.requiredReceipt && !query.receiptConfirmed && !query.receiptAccepted) return false
     }
     return true
   }

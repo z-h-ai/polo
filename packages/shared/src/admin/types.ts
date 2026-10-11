@@ -1,4 +1,5 @@
-import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFinishInput } from './billing-runtime-contract';
+import type { z } from 'zod';
+import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFinishInput, BillingRuntimeAdmissionInput, billingRuntimeAdmissionResponseSchema, billingRuntimeRequestResponseSchema } from './billing-runtime-contract';
 import type { LlmConnection } from '../config/llm-connections.ts';
 export type {
   CreatorArtifact,
@@ -536,12 +537,17 @@ export interface AdminStartAppRunResponse {
   run: { runId: string; status: 'running' };
 }
 
+export type AdminGetAppRequestResponse = z.infer<typeof billingRuntimeRequestResponseSchema>;
+export type AdminAdmitAppRequestInput = BillingRuntimeAdmissionInput;
+export type AdminAdmitAppRequestResponse = z.infer<typeof billingRuntimeAdmissionResponseSchema>;
+
 export type AdminRecordAppUsageInput = BillingRuntimeUsageInput;
 
 export interface AdminRecordAppUsageResponse {
   runId: string;
   requestId: string;
   recorded: boolean;
+  settlement?: 'pending' | 'confirmed' | 'no_charge';
 }
 
 export type AdminFinishAppRunInput = BillingRuntimeFinishInput;
@@ -549,4 +555,5 @@ export type AdminFinishAppRunInput = BillingRuntimeFinishInput;
 export interface AdminFinishAppRunResponse {
   runId: string;
   status: AdminFinishAppRunInput['status'];
+  settlement?: 'pending' | 'confirmed' | 'no_charge';
 }
