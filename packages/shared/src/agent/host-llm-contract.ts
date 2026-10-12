@@ -1,3 +1,4 @@
+import { parseProviderObservation, type ProviderObservationV1, type ProviderCorrelationV1 } from '../admin/provider-observation.ts'
 import type { BackendHostRuntimeContext } from './backend/types.ts'
 export type { BackendHostRuntimeContext }
 
@@ -14,13 +15,17 @@ export type HostLlmErrorReason = 'missing_slug' | 'unsupported_provider_auth' | 
   | 'provider_usage_invalid' | 'json_object_required' | 'invalid_worker_message' | 'result_too_large' | 'spawn_failed' | 'worker_exited'
   | 'caller_aborted' | 'deadline_exceeded' | 'host_disposed' | 'concurrent_execute'
 
-export interface HostLlmPublicUsage { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; reportedModel: string }
+export interface HostLlmPublicUsage { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; reportedModel: string; terminalReason?: 'stop' | 'length'; provenance?: 'provider_final' }
 export interface HostLlmPublicError { code: HostLlmErrorCode; reason: HostLlmErrorReason; message: string }
-export type HostLlmPublicResult =
+export type HostLlmPublicResult = (
   | { status: 'completed' | 'partial'; text: string; usage: HostLlmPublicUsage; requestId: string; model: string; provider: string }
   | { status: 'no_output' | 'timed_out' | 'failed' | 'cancelled'; error: HostLlmPublicError; requestId: string; model: string; usage?: HostLlmPublicUsage }
+) & { providerObservation?: ProviderObservationV1 }
 export interface HostLlmExecuteInput { model?: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; signal?: AbortSignal }
-export interface HostLlmExecutorOptions { connectionSlug: string; model?: string; nodeRuntimePath?: string; serverPath?: string; hostRuntime?: BackendHostRuntimeContext }
+export interface HostLlmBeforeSendFacts { hostRequestId: string; model: string; transportBaseUrl: string; credentialFingerprint: string }
+/** Server-authenticated request correlation. It stays only in Host transport memory. */
+export interface HostLlmAdmissionDecision { providerCorrelation?: ProviderCorrelationV1 }
+export interface HostLlmExecutorOptions { beforeSend?: (facts: HostLlmBeforeSendFacts) => Promise<HostLlmAdmissionDecision | void>; connectionSlug: string; model?: string; nodeRuntimePath?: string; serverPath?: string; hostRuntime?: BackendHostRuntimeContext }
 export interface SessionlessHostLlmExecutor { execute(input: HostLlmExecuteInput): Promise<HostLlmPublicResult>; dispose(): Promise<void> }
 
 export class HostLlmConfigurationError extends Error {
@@ -29,7 +34,7 @@ export class HostLlmConfigurationError extends Error {
 }
 
 export interface WireUsage { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; reportedModel: string; terminalReason: 'stop' | 'length'; provenance: 'provider_final' }
-export interface WireResult { type: 'host_completion_result'; version: 1; requestId: string; model: string; status: 'completed' | 'partial' | 'no_output' | 'timed_out' | 'failed'; text?: string; usage?: WireUsage; error?: { code: string; reason: string; message: string } }
+export interface WireResult { providerObservation?: ProviderObservationV1; type: 'host_completion_result'; version: 1; requestId: string; model: string; status: 'completed' | 'partial' | 'no_output' | 'timed_out' | 'failed'; text?: string; usage?: WireUsage; error?: { code: string; reason: string; message: string } }
 
 export const WIRE_RESULT_ROWS: Readonly<Record<string, readonly [string, string, string, string]>> = {
   'provider_protocol_error|invalid_worker_message': ['failed', 'provider_protocol_error', 'invalid_worker_message', 'Host LLM worker protocol failed'],
@@ -73,8 +78,9 @@ export function validateWorkerResult(line: string, sentRequestId: string, sentMo
   if (r['requestId'] !== sentRequestId || r['model'] !== sentModel) return { ok: false }
   const status = r['status']
   if (status !== 'completed' && status !== 'partial' && status !== 'no_output' && status !== 'timed_out' && status !== 'failed') return { ok: false }
-  const allowed = new Set(['type', 'version', 'requestId', 'model', 'status', 'text', 'usage', 'error'])
+  const allowed = new Set(['type', 'version', 'requestId', 'model', 'status', 'text', 'usage', 'error', 'providerObservation'])
   for (const k of Object.keys(r)) { if (!allowed.has(k)) return { ok: false } }
+  if (r['providerObservation'] !== undefined && !parseProviderObservation(r['providerObservation'])) return { ok: false }
   const text = r['text'], usage = r['usage'], error = r['error']
   const needsText = status === 'completed' || status === 'partial'
   if (needsText) { if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > TEXT_LIMIT || usage === undefined) return { ok: false } }

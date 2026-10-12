@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'crypto'
 import { constants as fsConstants, createReadStream, existsSync } from 'fs'
 import {
   access,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -24,6 +25,7 @@ import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
+import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
 import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
@@ -82,6 +84,7 @@ const RUNTIME_ENV_ALLOWLIST = [
 ] as const
 
 interface InstalledVersionRecord {
+  nativeInstallationAdmissionId?: string
   manifest: PoloAppManifest
   installedAt: number
   checksum: string
@@ -315,6 +318,18 @@ export interface LocalAppRuntimeLogger {
   error(message: string, details?: unknown): void
 }
 
+/** Main-owned, per-install authority. Never serialized into renderer IPC or metadata. */
+export interface LocalAppDownloadTransport {
+  assertCurrent(): void
+  fetch(request: LocalAppInstallRequest, signal: AbortSignal): Promise<Response>
+}
+
+export interface LocalAppInstallOptions {
+  signal?: AbortSignal
+  nativeInstallationAdmissionId?: string
+  downloadTransport?: LocalAppDownloadTransport
+}
+
 export interface LocalAppRuntimeManagerOptions {
   rootDir: string
   platform?: LocalAppPlatform
@@ -521,7 +536,7 @@ export class LocalAppRuntimeManager {
 
   install(
     request: LocalAppInstallRequest,
-    options: { signal?: AbortSignal } = {},
+    options: LocalAppInstallOptions = {},
   ): Promise<LocalAppInstalledApp> {
     const validated = this.validateInstallRequest(request)
     if (this.shuttingDown) {
@@ -570,7 +585,7 @@ export class LocalAppRuntimeManager {
     )
     if (options.signal?.aborted) abortFromCaller()
     else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
-    const promise = this.performInstall(validated, controller.signal)
+    const promise = this.performInstall(validated, controller.signal, options.nativeInstallationAdmissionId, options.downloadTransport)
       .finally(() => {
         clearTimeout(timeout)
         options.signal?.removeEventListener('abort', abortFromCaller)
@@ -1393,8 +1408,12 @@ export class LocalAppRuntimeManager {
   private async performInstall(
     request: LocalAppInstallRequest,
     signal: AbortSignal,
+    nativeInstallationAdmissionId?: string,
+    downloadTransport?: LocalAppDownloadTransport,
   ): Promise<LocalAppInstalledApp> {
+    downloadTransport?.assertCurrent()
     await this.initialize()
+    downloadTransport?.assertCurrent()
     const existingMetadata = await this.readMetadata(request.appId)
     const existingVersion = existingMetadata?.versions[request.version]
     if (existingVersion && existingVersion.checksum !== request.checksum) {
@@ -1412,10 +1431,20 @@ export class LocalAppRuntimeManager {
       request.version,
       request.expectedManifestAppId,
     )) {
+      if (nativeInstallationAdmissionId) {
+        await this.enqueueLifecycle(request.appId, async () => {
+          const metadata = await this.readMetadata(request.appId)
+          const retained = metadata?.versions[request.version]
+          if (!metadata || !retained || retained.checksum !== request.checksum) throw new LocalAppRuntimeError('NOT_INSTALLED','Native installation witness changed')
+          retained.nativeInstallationAdmissionId = nativeInstallationAdmissionId
+          await this.writeMetadata(metadata)
+        })
+      }
       const installed = (await this.getInstalledApps()).find(app => app.appId === request.appId)
       if (!installed) {
         throw new LocalAppRuntimeError('NOT_INSTALLED', `Metadata for ${request.appId} is incomplete`)
       }
+      downloadTransport?.assertCurrent()
       return installed
     }
 
@@ -1424,7 +1453,8 @@ export class LocalAppRuntimeManager {
     const extractedPath = join(stagingRoot, 'bundle')
     try {
       this.setInstallProgress(request, 'downloading', 0)
-      await this.downloadBundle(request, archivePath, signal)
+      await this.downloadBundle(request, archivePath, signal, downloadTransport)
+      downloadTransport?.assertCurrent()
       this.throwIfCancelled(signal)
 
       this.setInstallProgress(request, 'verifying', request.sizeBytes)
@@ -1456,6 +1486,7 @@ export class LocalAppRuntimeManager {
 
       const nextMetadata = await this.enqueueLifecycle(request.appId, async () => {
         this.throwIfCancelled(signal)
+        downloadTransport?.assertCurrent()
         const appDir = this.getAppDir(request.appId)
         const versionsDir = join(appDir, 'versions')
         const targetDir = this.getVersionDir(request.appId, request.version)
@@ -1469,6 +1500,7 @@ export class LocalAppRuntimeManager {
         const metadata = await this.readMetadata(request.appId)
         const versions = metadata?.versions ?? {}
         versions[request.version] = {
+          ...(nativeInstallationAdmissionId ? { nativeInstallationAdmissionId } : {}),
           manifest,
           installedAt: this.now(),
           checksum: request.checksum,
@@ -1492,6 +1524,7 @@ export class LocalAppRuntimeManager {
             ? { availableRelease: metadata.availableRelease }
             : {}),
         }
+        downloadTransport?.assertCurrent()
         await this.writeMetadata(committedMetadata)
         return committedMetadata
       })
@@ -1541,13 +1574,14 @@ export class LocalAppRuntimeManager {
     request: LocalAppInstallRequest,
     destination: string,
     signal: AbortSignal,
+    downloadTransport?: LocalAppDownloadTransport,
   ): Promise<void> {
     let response: Response
     try {
-      response = await this.fetchImpl(request.downloadUrl, {
-        signal,
-        redirect: 'follow',
-      })
+      downloadTransport?.assertCurrent()
+      response = downloadTransport
+        ? await downloadTransport.fetch(request, signal)
+        : await this.fetchImpl(request.downloadUrl, { signal, redirect: 'follow' })
     } catch (error) {
       if (signal.aborted) {
         throw this.getAbortError(
@@ -1580,6 +1614,7 @@ export class LocalAppRuntimeManager {
     try {
       for await (const rawChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
         this.throwIfCancelled(signal)
+        downloadTransport?.assertCurrent()
         const chunk = Buffer.from(rawChunk)
         downloaded += chunk.length
         if (downloaded > request.sizeBytes) {
@@ -3256,6 +3291,29 @@ export class LocalAppRuntimeManager {
     }
     await this.writeMetadata(metadata)
     this.appendLog(metadata.appId, 'system', `${error.code}: ${error.message}`)
+  }
+
+  async readNativeInstallationEvidence(appId: string): Promise<{ presence: 'absent'|'installed'; versions: Array<{ version: string; checksum: string; admissionId: string|null }> }|null> {
+    const safeAppId = validateRequestIdentifier(appId,'appId')
+    let raw: AppMetadata
+    try { raw = JSON.parse(await readFile(this.getMetadataPath(safeAppId),'utf8')) as AppMetadata }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+      try { await stat(join(this.getAppDir(safeAppId),'versions')); return null }
+      catch (probe) { return (probe as NodeJS.ErrnoException).code === 'ENOENT' ? { presence: 'absent', versions: [] } : null }
+    }
+    if (raw.schemaVersion !== METADATA_SCHEMA_VERSION || raw.appId !== safeAppId || !raw.versions
+      || Array.isArray(raw.versions) || !raw.versions[raw.currentVersion]) return null
+    const versions: Array<{ version: string; checksum: string; admissionId: string|null }> = []
+    for (const [version,row] of Object.entries(raw.versions)) {
+      if (!normalizeCatalogSemVer(version) || !row || typeof row.checksum !== 'string') return null
+      let checksum: string
+      try { checksum = normalizeChecksum(row.checksum) } catch { return null }
+      if (row.nativeInstallationAdmissionId && !/^[a-f0-9-]{36}$/i.test(row.nativeInstallationAdmissionId)) return null
+      try { const directory = await lstat(this.getVersionDir(safeAppId,version)); if (!directory.isDirectory() || directory.isSymbolicLink()) return null } catch { return null }
+      versions.push({version,checksum,admissionId: row.nativeInstallationAdmissionId ?? null})
+    }
+    return {presence: 'installed',versions}
   }
 
   private async readMetadata(appId: string): Promise<AppMetadata | null> {

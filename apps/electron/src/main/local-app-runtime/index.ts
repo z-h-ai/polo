@@ -8,8 +8,10 @@ import {
 } from '@polo-ai/shared/config'
 import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { createSessionlessHostLlmExecutor } from '@polo-ai/shared/agent/host-llm-executor'
+import { createElectronAppLlmExecutor } from './host-executor'
+import { resolveProductSpaceAppConnection } from '@polo-ai/server-core/handlers/rpc/admin'
 import { mainLog } from '../logger'
+import { AppBillingOutbox } from './app-billing-outbox'
 import { LocalAppRuntimeManager } from './manager'
 import { ScopedLocalAppRuntimeRegistry } from './scoped-registry'
 import { shutdownLocalAppRuntimeOwners } from './shutdown-orchestration'
@@ -72,22 +74,40 @@ export function getScopedLocalAppRuntimeRegistry(): ScopedLocalAppRuntimeRegistr
 export function getLocalAppRuntimeCoordinator(): LocalAppRuntimeCoordinator {
   if (!coordinator) {
     const adapters: RuntimeCoordinatorAdapters = {
+      billingOutbox: new AppBillingOutbox(join(localAppsRoot(), 'billing-outbox')),
+      getAdminOrigin: () => getAdminUrl() ?? '',
+      getBillingSession: async () => {
+        const tokens = await getCredentialManager().getAdminTokens()
+        const adminOrigin = getAdminUrl()
+        return tokens && adminOrigin ? { accountId: tokens.userId, adminOrigin } : null
+      },
+      isScopeCurrent: async identity => (await getCredentialManager().getAdminTokens())?.userId === identity.accountId,
       admin: {
+        admitAppRequest: async (runId, input, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.admitAppRequest(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, input, options)
+        },
+        getAppRequest: async (runId, requestId, options) => {
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.getAppRequest(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, requestId, options)
+        },
         startAppRun: async (input, options) => {
-          const client = await createTrustedAdminClient()
-          return client.startAppRun(await trustedAccessToken(), input, options)
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.startAppRun(await trustedAccessToken(options?.accountId, options?.adminOrigin), input, options)
         },
         recordAppUsage: async (input, options) => {
-          const client = await createTrustedAdminClient()
-          return client.recordAppUsage(await trustedAccessToken(), input, options)
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.recordAppUsage(await trustedAccessToken(options?.accountId, options?.adminOrigin), input, options)
         },
         finishAppRun: async (runId, input, options) => {
-          const client = await createTrustedAdminClient()
-          return client.finishAppRun(await trustedAccessToken(), runId, input, options)
+          const client = await createTrustedAdminClient(options?.adminOrigin)
+          return client.finishAppRun(await trustedAccessToken(options?.accountId, options?.adminOrigin), runId, input, options)
         },
       },
-      createExecutor: ({ connectionSlug, model }) => createSessionlessHostLlmExecutor({
+      resolveRuntimeConnection: identity => resolveProductSpaceAppConnection(identity),
+      createExecutor: ({ connectionSlug, model, beforeSend }) => createElectronAppLlmExecutor({
         connectionSlug,
+        ...(beforeSend ? { beforeSend } : {}),
         ...(model ? { model } : {}),
       }),
       resolveWorkspaceRoot: workspaceId =>
@@ -169,15 +189,18 @@ export function teardownCoordinatorRuntimesForAccount(
   )
 }
 
-async function trustedAccessToken(): Promise<string> {
+async function trustedAccessToken(accountId?: string, adminOrigin?: string): Promise<string> {
+  if (!accountId || !adminOrigin || getAdminUrl() !== adminOrigin) throw new Error('Original billing context is unavailable')
   const tokens = await getCredentialManager().getAdminTokens()
-  if (!tokens) throw new Error('No trusted Admin session for App runtime billing')
+  if (!tokens || tokens.userId !== accountId || getAdminUrl() !== adminOrigin) throw new Error('Original billing session was withdrawn')
+  const current = await getCredentialManager().getAdminTokens()
+  if (!current || current.userId !== accountId || current.accessToken !== tokens.accessToken || getAdminUrl() !== adminOrigin) throw new Error('Original billing session changed')
   return tokens.accessToken
 }
 
-async function createTrustedAdminClient(): Promise<AdminClient> {
+async function createTrustedAdminClient(expectedOrigin?: string): Promise<AdminClient> {
   const adminUrl = getAdminUrl()
-  if (!adminUrl) throw new Error('Polo Admin is not configured')
+  if (!adminUrl || !expectedOrigin || adminUrl !== expectedOrigin) throw new Error('Original Polo Admin is not configured')
   return new AdminClient(adminUrl)
 }
 

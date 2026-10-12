@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+import type { AppRuntimeStartInput, BillingRuntimeUsageInput, BillingRuntimeFinishInput, BillingRuntimeAdmissionInput, billingRuntimeAdmissionResponseSchema, billingRuntimeRequestResponseSchema } from './billing-runtime-contract';
 import type { LlmConnection } from '../config/llm-connections.ts';
 export type {
   CreatorArtifact,
@@ -107,6 +109,8 @@ export interface AdminTransitEncryptedApiKey {
 }
 
 export interface AdminLlmConnectionsResponse {
+  /** Server-authorized space owning these dedicated compute credentials. */
+  productSpaceId?: string;
   configVersion: string;
   connections: AdminLlmConnection[];
   defaultConnection: string | null;
@@ -529,38 +533,29 @@ export class AdminError extends Error {
 }
 
 /** POL-102 minimal App billing contract. Payer/price are server-derived and never appear here. */
-export interface AdminStartAppRunInput {
-  runId: string;
-  workspaceId: string;
-  accountId: string;
-  productSpaceId: string;
-  artifactInstanceId: string;
-  versionId: string;
-  version: string;
-}
+export type AdminStartAppRunInput = AppRuntimeStartInput;
 
 export interface AdminStartAppRunResponse {
   run: { runId: string; status: 'running' };
 }
 
-export interface AdminRecordAppUsageInput {
-  runId: string;
-  requestId: string;
-  inputTokens: number;
-  outputTokens: number;
-}
+export type AdminGetAppRequestResponse = z.infer<typeof billingRuntimeRequestResponseSchema>;
+export type AdminAdmitAppRequestInput = BillingRuntimeAdmissionInput;
+export type AdminAdmitAppRequestResponse = z.infer<typeof billingRuntimeAdmissionResponseSchema>;
+
+export type AdminRecordAppUsageInput = BillingRuntimeUsageInput;
 
 export interface AdminRecordAppUsageResponse {
   runId: string;
   requestId: string;
-  recorded: true;
+  recorded: boolean;
+  settlement?: 'pending' | 'confirmed' | 'no_charge';
 }
 
-export interface AdminFinishAppRunInput {
-  status: 'completed' | 'failed' | 'cancelled' | 'unknown';
-}
+export type AdminFinishAppRunInput = BillingRuntimeFinishInput;
 
 export interface AdminFinishAppRunResponse {
   runId: string;
   status: AdminFinishAppRunInput['status'];
+  settlement?: 'pending' | 'confirmed' | 'no_charge';
 }

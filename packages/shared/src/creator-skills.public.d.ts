@@ -173,6 +173,7 @@ export interface CreatorSkillsLedger {
 }
 
 export interface InstalledCreatorSkill {
+  nativeInstallationAdmissionId?: string
   artifactId: string
   organizationId: string
   slug: string
@@ -413,6 +414,9 @@ export type CreatorSkillJournalState =
   | 'committed'
 
 export interface CreatorSkillInstallerDependencies {
+  beforeNativeMutation?: (installed: InstalledCreatorSkill | undefined) => Promise<void>
+  onNativeCommitted?: (result: CreatorSkillOperationResult) => Promise<void>
+  nativeInstallationAdmissionId?: string
   fetch?: typeof fetch
   onProgress?: (progress: CreatorSkillOperationProgress) => void
   assertCommitAllowed?: (input: {
@@ -435,6 +439,8 @@ export interface CreatorSkillInstallerDependencies {
 
 export type CreatorSkillUninstallerDependencies = Pick<
   CreatorSkillInstallerDependencies,
+  | 'beforeNativeMutation'
+  | 'onNativeCommitted'
   | 'beforeCommitSnapshot'
   | 'onJournalPersisted'
   | 'syncJournalDirectory'

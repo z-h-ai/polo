@@ -44,6 +44,7 @@ import {
 } from '../local-app-runtime'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeFenceGeneration,
   isSwitchInProgress,
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
@@ -74,7 +75,9 @@ import {
 } from '@polo-ai/server-core/runtime/product-space-catalog-authority'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { captureTrustedStartGate, isTrustedStartGateCurrent } from '@polo-ai/server-core/runtime/trusted-start-gate'
+import { createProductSpaceDownloadTransport } from '../local-app-runtime/product-space-download'
 import type { HandlerDeps } from './handler-deps'
+import { prepareNativeAppInstall, prepareNativeAppUninstall, finishNativeAppInstallation, recoverNativeAppInstallationEvidence } from '../local-app-runtime/native-installation-evidence'
 
 /**
  * Trusted active ProductSpace gate for every renderer-reachable Local App
@@ -1062,6 +1065,7 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManager?: HandlerDeps['windowManager'] }): void {
+  void recoverNativeAppInstallationEvidence(getScopedLocalAppRuntimeRegistry()).catch(() => {})
   void server
   // The calling window's Workspace is resolved from the trusted Main-side
   // window registry — never from renderer arguments.
@@ -1158,8 +1162,19 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       const rawApp = rawRequest && typeof rawRequest === 'object'
         ? (rawRequest as Partial<ProductSpaceBundleInstallRequest>).app
         : null
+      const startGate = await captureTrustedStartGate()
+      const fenceGeneration = getRuntimeFenceGeneration()
       const loaded = await loadAuthoritativeProductSpaceApps([rawApp])
       const app = loaded.apps[0]!
+      const adminUrl = getAdminUrl()
+      const assertDownloadCurrent = () => {
+        if (!startGate || startGate.accountId !== app.accountId || !isTrustedStartGateCurrent(startGate)
+          || getRuntimeFenceGeneration() !== fenceGeneration || getAdminUrl() !== adminUrl) {
+          throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'ProductSpace download context changed')
+        }
+        assertProductSpaceAppOperationCurrent(app)
+      }
+      assertDownloadCurrent()
       const entry = loaded.catalog.entries.find(
         candidate => candidate.catalogEntryId === app.catalogEntryId,
       )!
@@ -1198,7 +1213,19 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
           'This ProductSpace App does not use bundle installation',
         )
       }
-      return getScopedLocalAppRuntimeRegistry().install({
+      const downloadTransport = createProductSpaceDownloadTransport({
+        app, kind: loaded.context.kind, adminUrl: adminUrl!, downloadUrl: launch.delivery.downloadUrl,
+        assertCurrent: assertDownloadCurrent,
+        readCredentials: () => getCredentialManager().getAdminTokens(),
+      })
+      // Installation reporting is additional evidence. An unavailable older
+      // server or damaged journal keeps it unknown; the existing Catalog and
+      // native package guards still own authorization and verification.
+      const installationIntent = await prepareNativeAppInstall(app,loaded.context.kind,launch.delivery.checksum).catch(() => null)
+      await assertProductSpaceAccountCurrent(app)
+      assertDownloadCurrent()
+      const registry = getScopedLocalAppRuntimeRegistry()
+      const installed = await registry.install({
         scope: productSpaceBundleScope(app),
         version: launch.subject.version,
         downloadUrl: launch.delivery.downloadUrl,
@@ -1206,7 +1233,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
         sizeBytes: launch.delivery.sizeBytes,
         platform: hostPlatform(),
         arch: hostArchitecture(),
-      }, { signal: ctx.signal })
+      }, {
+        signal: ctx.signal,
+        downloadTransport,
+        ...(installationIntent ? { nativeInstallationAdmissionId: installationIntent.admission.admissionId } : {}),
+      })
+      await finishNativeAppInstallation(registry,installationIntent).catch(() => {})
+      return installed
     },
   )
 
@@ -1389,12 +1422,14 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       // clear the fence — it can never retroactively turn the completed
       // destructive operation into NOT_AUTHORIZED (the previous trailing
       // async account recheck did exactly that and invited unsafe retries).
+      const uninstallIntent = await prepareNativeAppUninstall(app).catch(() => null)
       await runUnderSwitchMutex(async () => {
         assertProductSpaceAppOperationCurrent(app)
         const scope = productSpaceBundleScope(app)
         await getScopedLocalAppRuntimeRegistry().uninstall(scope, options)
         unregisterLocalAppExecutions(scope)
       })
+      await finishNativeAppInstallation(getScopedLocalAppRuntimeRegistry(),uninstallIntent).catch(() => {})
     },
   )
 
@@ -1602,6 +1637,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
   const startAndRegisterLocalApp = async (
     scope: CatalogLocalAppScope,
     startRuntime: () => Promise<{
+      url?: string
       version: string
       appId?: string
       runtimeKind?: 'python' | 'js' | 'static'
@@ -1892,6 +1928,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       return rollbackStarted
     }
     let start: {
+      url?: string
       version: string
       appId?: string
       runtimeKind?: 'python' | 'js' | 'static'
@@ -2070,6 +2107,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       runtimeGeneration: start.runtimeGeneration ?? 0,
       scopeGeneration: start.scopeGeneration ?? 0,
       runtimeKind: start.runtimeKind ?? 'static',
+      uiUrl: start.url,
       platformApi: start.runtimeKind && start.runtimeKind !== 'static'
         ? { status: 'available' as const }
         : { status: 'unavailable' as const, reason: 'static_runtime_unsupported' as const },

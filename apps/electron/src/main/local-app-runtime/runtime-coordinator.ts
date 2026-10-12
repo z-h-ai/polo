@@ -11,11 +11,14 @@ import {
 } from '@polo-ai/shared/product-spaces'
 import { AdminError } from '@polo-ai/shared/admin'
 import type {
+  AdminAdmitAppRequestInput,
+  AdminAdmitAppRequestResponse,
   AdminFinishAppRunInput,
   AdminRecordAppUsageInput,
   AdminStartAppRunInput,
 } from '@polo-ai/shared/admin'
-import type { HostLlmPublicResult } from '@polo-ai/shared/agent/host-llm-executor'
+import type { HostLlmBeforeSendFacts, HostLlmAdmissionDecision, HostLlmPublicResult } from '@polo-ai/shared/agent/host-llm-executor'
+import { AppBillingOutbox, type AppBillingJournalScope } from './app-billing-outbox'
 import { getAppRuntimeCenter } from '@polo-ai/server-core/runtime'
 import { unregisterProductSpaceExecution } from '@polo-ai/server-core/runtime/product-space-executions'
 import { AppApiCapabilityRegistry, type CapabilityRecord } from './app-api-capabilities'
@@ -30,18 +33,20 @@ import {
 } from './app-api-run-state'
 
 export interface CoordinatorAdminAdapter {
+  getAppRequest?(runId: string, requestId: string, options?: { signal?: AbortSignal; accountId?: string; adminOrigin?: string }): Promise<{ request: { requestId: string; state: string }; settlement: 'pending' | 'confirmed' | 'no_charge' }>
+  admitAppRequest?(runId: string, input: AdminAdmitAppRequestInput, options?: { signal?: AbortSignal; accountId?: string; adminOrigin?: string }): Promise<AdminAdmitAppRequestResponse>
   startAppRun(
     input: AdminStartAppRunInput,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; accountId?: string; adminOrigin?: string },
   ): Promise<unknown>
   recordAppUsage(
     input: AdminRecordAppUsageInput,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; accountId?: string; adminOrigin?: string },
   ): Promise<unknown>
   finishAppRun(
     runId: string,
     input: AdminFinishAppRunInput,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; accountId?: string; adminOrigin?: string },
   ): Promise<unknown>
 }
 
@@ -58,16 +63,23 @@ export interface CoordinatorExecutor {
 }
 
 export interface RuntimeCoordinatorAdapters {
+  billingOutbox?: AppBillingOutbox
+  getAdminOrigin?(): string
+  getBillingSession?(): Promise<{ accountId: string; adminOrigin: string } | null>
+  isScopeCurrent?(identity: ProductSpaceAppRuntimeIdentity): boolean | Promise<boolean>
   admin: CoordinatorAdminAdapter
   createExecutor(options: {
     connectionSlug: string
     model?: string
+    beforeSend?: (facts: HostLlmBeforeSendFacts) => Promise<HostLlmAdmissionDecision | void>
   }): CoordinatorExecutor
   resolveWorkspaceRoot(workspaceId: string): string | null | Promise<string | null>
   loadWorkspaceConfig(rootPath: string): {
     defaults?: { defaultLlmConnection?: string; model?: string }
   } | undefined | null
   getDefaultLlmConnection(): string | null
+  /** Trusted production resolver; never fall back after scoped resolution fails. */
+  resolveRuntimeConnection?(identity: ProductSpaceAppRuntimeIdentity): Promise<{ connectionSlug: string; model?: string }>
   sinks?: {
     reportResult?(input: Record<string, unknown>): Promise<{ revision: number }>
     reportFile?(input: Record<string, unknown>): Promise<{ revision: number }>
@@ -120,6 +132,7 @@ export interface CapabilitySigning {
 }
 
 export interface ActiveRuntime {
+  billingAdminOrigin?: string
   identityKey: string
   identity: ProductSpaceAppRuntimeIdentity
   executionId: string
@@ -181,12 +194,12 @@ function hostErrorCode(result: HostLlmPublicResult): AppApiStableErrorCode | nul
 /** Trusted provider-final usage of a terminal Host result, if present. */
 function hostUsage(
   result: HostLlmPublicResult,
-): { inputTokens: number; outputTokens: number } | undefined {
+): (Pick<import('@polo-ai/shared/agent/host-llm-executor').HostLlmPublicUsage, 'inputTokens' | 'outputTokens'> & Partial<import('@polo-ai/shared/agent/host-llm-executor').HostLlmPublicUsage>) | undefined {
   if (!('usage' in result) || !result.usage) return undefined
   const { inputTokens, outputTokens } = result.usage
   if (!Number.isSafeInteger(inputTokens) || inputTokens < 0) return undefined
   if (!Number.isSafeInteger(outputTokens) || outputTokens < 0) return undefined
-  return { inputTokens, outputTokens }
+  return { ...result.usage, inputTokens, outputTokens }
 }
 
 /**
@@ -290,6 +303,9 @@ export class LocalAppRuntimeCoordinator {
   private static readonly MAX_UNSURFACED_TEARDOWN_STOP_FAILURES = 16
   private shutdownPromise?: Promise<void>
   private shuttingDown = false
+  private billingRetryTimer?: ReturnType<typeof setInterval>
+  private billingRecoveryRunning = false
+  private billingRecoveryOffset = 0
 
   constructor(private readonly adapters: RuntimeCoordinatorAdapters) {
     this.runState = new AppApiRunState(
@@ -299,12 +315,69 @@ export class LocalAppRuntimeCoordinator {
     )
   }
 
+  /** Recovery never executes AI, signs an App capability, or replaces facts. */
+  async reconcileBillingOutbox(accountId: string, adminOrigin: string): Promise<number> {
+    if (this.billingRecoveryRunning || !this.adapters.billingOutbox) return 0
+    this.billingRecoveryRunning = true
+    let reconciled = 0
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), CLEANUP_TOTAL_BUDGET_MS)
+    try {
+      const entries = this.adapters.billingOutbox.entries(accountId, adminOrigin)
+      if (!entries.length) return 0
+      const start = this.billingRecoveryOffset % entries.length
+      this.billingRecoveryOffset = (start + 32) % entries.length
+      for (let index = 0; index < Math.min(32, entries.length); index++) {
+        if (controller.signal.aborted) break
+        const entry = entries[(start + index) % entries.length]!
+        // A live Host owns this pre-admission phase until its terminal arrives.
+        if (entry.phase === 'admission' && [...this.inFlight.values()].some(query => query.runId === entry.runId && query.requestId === entry.admission.requestId)) continue
+        const options = { signal: controller.signal, accountId: entry.scope.accountId, adminOrigin: entry.scope.adminOrigin }
+        let detachAbort = () => {}
+        try {
+          const ack = await Promise.race([
+            entry.phase === 'receipt' && entry.receipt
+              ? this.adapters.admin.recordAppUsage(entry.receipt, options)
+              : this.adapters.admin.getAppRequest?.(entry.runId, entry.admission.requestId, options) ?? Promise.resolve(undefined),
+            new Promise<never>((_, reject) => {
+              const abort = () => reject(new Error('Billing recovery budget expired'))
+              if (controller.signal.aborted) abort()
+              else {
+                controller.signal.addEventListener('abort', abort, { once: true })
+                detachAbort = () => controller.signal.removeEventListener('abort', abort)
+              }
+            }),
+          ]) as { settlement?: 'pending' | 'confirmed' | 'no_charge' } | undefined
+          if (!ack?.settlement) continue
+          this.adapters.billingOutbox.applySettlement(entry.key, ack.settlement)
+          if (ack.settlement !== 'pending') reconciled++
+        } catch (error) {
+          if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') this.adapters.billingOutbox.markConflict(entry.key)
+        } finally { detachAbort() }
+      }
+      return reconciled
+    } finally { clearTimeout(timer); this.billingRecoveryRunning = false }
+  }
+
+  private armBillingRecovery(): void {
+    if (!this.adapters.billingOutbox || !this.adapters.getBillingSession || this.billingRetryTimer) return
+    const replay = async () => {
+      if (this.shuttingDown) return
+      const session = await this.adapters.getBillingSession?.().catch(() => null)
+      if (session && !this.shuttingDown) await this.reconcileBillingOutbox(session.accountId, session.adminOrigin)
+    }
+    this.billingRetryTimer = setInterval(() => { void replay().catch(() => {}) }, 30_000)
+    this.billingRetryTimer.unref?.()
+    void replay().catch(() => {})
+  }
+
   private now(): number {
     return this.adapters.now ? this.adapters.now() : Date.now()
   }
 
   /** Gateway-first: the loopback boundary must exist before any App spawn. */
   async ensureGateway(): Promise<string> {
+    this.armBillingRecovery()
     if (this.shuttingDown) {
       // Shutdown is TERMINAL for this coordinator instance: the loopback
       // platform boundary can never be reopened ("stop accepting starts").
@@ -419,6 +492,7 @@ export class LocalAppRuntimeCoordinator {
     const identityKey = createProductSpaceAppRuntimeIdentityKey(input.identity)
     const runtime: ActiveRuntime = {
       identityKey,
+      billingAdminOrigin: this.adapters.getAdminOrigin?.(),
       identity: input.identity,
       executionId: input.executionId,
       runtimeGeneration: input.runtimeGeneration,
@@ -829,30 +903,38 @@ export class LocalAppRuntimeCoordinator {
       try {
         if (record.status === 'start_unconfirmed') {
           const confirmed = await runBounded(signal =>
-            admin.startAppRun(this.adminStartBody(runtime, runId), { signal }))
+            admin.startAppRun(this.adminStartBody(runtime, runId), this.originalAdminOptions(runtime, signal)))
           if (!confirmed) return
           this.runState.setRunStatus(capabilityGeneration, runId, 'running')
           record.status = 'running'
         }
         for (const { requestId, record: query } of this.runState.queriesForRun(capabilityGeneration, runId)) {
-          if (query.state !== 'receipt_unconfirmed' || !query.outcome) continue
-          const receiptOk = await runBounded(signal =>
-            admin.recordAppUsage(
-              this.receiptBody(runId, requestId, query.outcome!),
-              { signal },
-            ))
+          if ((query.state !== 'receipt_unconfirmed' && query.state !== 'receipt_pending') || !query.outcome) continue
+          let settlement: 'pending' | 'confirmed' | 'no_charge' | undefined
+          const receiptOk = await runBounded(async signal => {
+            const ack = await admin.recordAppUsage(this.receiptBody(runtime, runId, requestId, query.outcome!), this.originalAdminOptions(runtime, signal)) as { settlement?: 'pending' | 'confirmed' | 'no_charge' }
+            settlement = ack?.settlement ?? (admin.admitAppRequest ? undefined : 'confirmed')
+            if (!settlement) throw new Error('Canonical receipt acknowledgement is unavailable')
+          })
           if (!receiptOk) return
-          this.runState.noteReceiptConfirmed(capabilityGeneration, runId, requestId)
+          if (settlement === 'pending') this.runState.noteReceiptPending(capabilityGeneration, runId, requestId)
+          else {
+            this.runState.noteReceiptConfirmed(capabilityGeneration, runId, requestId, settlement)
+            if (this.adapters.billingOutbox && admin.admitAppRequest) {
+              const key = this.adapters.billingOutbox.stageReceipt(this.journalScope(runtime), this.receiptBody(runtime, runId, requestId, query.outcome!))
+              this.adapters.billingOutbox.applySettlement(key, settlement!)
+            }
+          }
         }
         if (record.status === 'finishing' || record.status === 'finish_unconfirmed') {
           const finishOk = await runBounded(signal =>
             admin.finishAppRun(runId, {
               status: record.requestedFinishStatus ?? finalStatus,
-            }, { signal }))
+            }, this.originalAdminOptions(runtime, signal)))
           if (!finishOk) return
         } else if (this.runState.canFinishRun(capabilityGeneration, runId)) {
           const finishOk = await runBounded(signal =>
-            admin.finishAppRun(runId, { status: finalStatus } satisfies AdminFinishAppRunInput, { signal }))
+            admin.finishAppRun(runId, { status: finalStatus } satisfies AdminFinishAppRunInput, this.originalAdminOptions(runtime, signal)))
           if (!finishOk) return
         } else {
           // Not cleanly finishable: leave reconciliation to the POL-102
@@ -880,16 +962,25 @@ export class LocalAppRuntimeCoordinator {
   ): AdminStartAppRunInput {
     return {
       runId,
-      workspaceId: runtime.workspaceId,
-      accountId: runtime.identity.accountId,
       productSpaceId: runtime.identity.productSpaceId,
+      subjectKind: 'app',
       artifactInstanceId: runtime.identity.artifactInstanceId,
-      versionId: runtime.identity.versionId,
-      version: runtime.identity.version,
+      artifactVersionId: runtime.identity.versionId,
     }
   }
 
+  private journalScope(runtime: ActiveRuntime): AppBillingJournalScope {
+    const adminOrigin = runtime.billingAdminOrigin
+    if (!adminOrigin) throw new Error('Original billing origin is unavailable')
+    return { accountId: runtime.identity.accountId, adminOrigin, productSpaceId: runtime.identity.productSpaceId, artifactInstanceId: runtime.identity.artifactInstanceId, artifactVersionId: runtime.identity.versionId }
+  }
+
+  private originalAdminOptions(runtime: ActiveRuntime, signal?: AbortSignal) {
+    return { ...(signal ? { signal } : {}), accountId: runtime.identity.accountId, ...(this.adapters.getAdminOrigin ? { adminOrigin: runtime.billingAdminOrigin } : {}) }
+  }
+
   private receiptBody(
+    runtime: ActiveRuntime,
     runId: string,
     requestId: string,
     outcome: QueryOutcome,
@@ -904,7 +995,18 @@ export class LocalAppRuntimeCoordinator {
       : outcome.kind === 'no_output'
         ? 0
         : outcome.usage?.outputTokens ?? 0
-    return { runId, requestId, inputTokens, outputTokens }
+    const usage = outcome.usage
+    return { productSpaceId: runtime.identity.productSpaceId, runId, requestId, inputTokens, outputTokens,
+      ...(this.adapters.admin.admitAppRequest ? {
+        cacheReadTokens: usage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
+        ...(outcome.actualModel ? { actualModel: outcome.actualModel } : {}),
+        providerObservation: outcome.providerObservation ?? { version: 1 as const, state: 'missing' as const },
+        outputDisposition: outcome.outputDisposition ?? (outcome.kind === 'success' ? 'usable' as const : outcome.kind === 'no_output' ? 'no_output' as const : 'unknown' as const),
+        ...(usage?.terminalReason ? { terminalReason: usage.terminalReason } : {}),
+        ...(usage?.provenance ? { provenance: usage.provenance } : {}),
+      } : {}),
+    }
   }
 
   /**
@@ -915,6 +1017,7 @@ export class LocalAppRuntimeCoordinator {
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise
     this.shuttingDown = true
+    if (this.billingRetryTimer) { clearInterval(this.billingRetryTimer); this.billingRetryTimer = undefined }
     const shutdownPromise = (async (): Promise<void> => {
       for (const cancel of this.expiryTimers.values()) cancel()
       this.expiryTimers.clear()
@@ -1083,9 +1186,7 @@ export class LocalAppRuntimeCoordinator {
       try {
         const composed = anySignal([signal, runtime.controller.signal])
         try {
-          await this.adapters.admin.startAppRun(this.adminStartBody(runtime, runId), {
-            signal: composed.signal,
-          })
+          await this.adapters.admin.startAppRun(this.adminStartBody(runtime, runId), this.originalAdminOptions(runtime, composed.signal))
         } finally {
           composed.dispose()
         }
@@ -1172,7 +1273,7 @@ export class LocalAppRuntimeCoordinator {
     const run = this.runState.getRun(capGen, runId)
     if (run?.status === 'terminal') {
       return run.requestedFinishStatus === status
-        ? { data: { runId, status } }
+        ? { data: { runId, status, ...(run.settlement ? { settlement: run.settlement } : {}) } }
         : { errorCode: 'run_finalized' }
     }
     // An unconfirmed finish is replayed with the SAME frozen status before
@@ -1197,12 +1298,13 @@ export class LocalAppRuntimeCoordinator {
     signal: AbortSignal,
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode }> {
     const capGen = capabilityGenerationOf(runtime)
+    let settlement: 'pending' | 'confirmed' | 'no_charge' | undefined
     try {
       const composed = anySignal([signal, runtime.controller.signal])
       try {
-        await this.adapters.admin.finishAppRun(runId, { status }, {
-          signal: composed.signal,
-        })
+        const ack = await this.adapters.admin.finishAppRun(runId, { status }, this.originalAdminOptions(runtime, composed.signal)) as { settlement?: 'pending' | 'confirmed' | 'no_charge' }
+        settlement = ack?.settlement
+        if (this.adapters.admin.admitAppRequest && !settlement) throw new Error('Canonical finish acknowledgement is unavailable')
       } finally {
         composed.dispose()
       }
@@ -1219,9 +1321,11 @@ export class LocalAppRuntimeCoordinator {
       return { errorCode: 'metering_unconfirmed' }
     }
     if (runtime.controller.signal.aborted) return { errorCode: 'shutting_down' }
+    const record = this.runState.getRun(capGen, runId)
+    if (record) record.settlement = settlement
     this.runState.markTerminal(capGen, runId, 'app')
     this.runState.releaseRun(capGen, runId)
-    return { data: { runId, status } }
+    return { data: { runId, status, ...(settlement ? { settlement } : {}) } }
   }
 
   private async handleAiQuery(
@@ -1255,25 +1359,45 @@ export class LocalAppRuntimeCoordinator {
     try {
       rootPath = await this.adapters.resolveWorkspaceRoot(runtime.workspaceId)
       if (!rootPath) return this.failAdmittedQuery(capGen, runId, requestId, 'host_configuration_unavailable')
-      const workspaceConfig = this.adapters.loadWorkspaceConfig(rootPath)
-      connectionSlug = workspaceConfig?.defaults?.defaultLlmConnection
+      const scoped = this.adapters.resolveRuntimeConnection
+        ? await this.adapters.resolveRuntimeConnection(runtime.identity)
+        : null
+      const workspaceConfig = scoped ? null : this.adapters.loadWorkspaceConfig(rootPath)
+      connectionSlug = scoped?.connectionSlug ?? workspaceConfig?.defaults?.defaultLlmConnection
         ?? this.adapters.getDefaultLlmConnection()
       if (!connectionSlug) {
         return this.failAdmittedQuery(capGen, runId, requestId, 'host_configuration_unavailable')
       }
-      model = workspaceConfig?.defaults?.model
+      model = scoped?.model ?? workspaceConfig?.defaults?.model
     } catch {
       return this.failAdmittedQuery(capGen, runId, requestId, 'host_failed')
     }
+    if (runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) return this.failAdmittedQuery(capGen, runId, requestId, 'request_cancelled')
     const controller = new AbortController()
     const abortForward = () => controller.abort()
     if (signal.aborted) abortForward()
     else signal.addEventListener('abort', abortForward, { once: true })
-    runtime.controller.signal.addEventListener('abort', abortForward, { once: true })
+    if (runtime.controller.signal.aborted) abortForward()
+    else runtime.controller.signal.addEventListener('abort', abortForward, { once: true })
     const queryKey = `${runtime.identityKey}:${runId}:${requestId}`
     let executor: CoordinatorExecutor
+    let admitted = false
+    let journalScope: AppBillingJournalScope | undefined
+    let journalKey: string | undefined
     try {
-      executor = this.adapters.createExecutor({ connectionSlug, model })
+      executor = this.adapters.createExecutor({ connectionSlug, model,
+        ...(this.adapters.admin.admitAppRequest ? { beforeSend: async (facts: HostLlmBeforeSendFacts): Promise<HostLlmAdmissionDecision> => {
+          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
+          if (!this.adapters.billingOutbox) throw new Error('Durable App billing journal is unavailable')
+          journalScope = this.journalScope(runtime)
+          const body = { productSpaceId: runtime.identity.productSpaceId, requestId, ...facts }
+          journalKey = this.adapters.billingOutbox.stageAdmission(journalScope, runId, body)
+          const response = await this.adapters.admin.admitAppRequest!(runId, body, this.originalAdminOptions(runtime, controller.signal))
+          admitted = true
+          if (controller.signal.aborted || runtime.controller.signal.aborted || this.isGenerationTornDown(runtime) || this.adapters.isScopeCurrent && !await this.adapters.isScopeCurrent(runtime.identity)) throw new Error('Original App scope was withdrawn')
+          return { providerCorrelation: response.request.providerCorrelation }
+        } } : {}),
+      })
     } catch {
       // Construction failed before the provider ran: release the reservation
       // and answer with a stable error so a retry can be admitted cleanly.
@@ -1292,22 +1416,22 @@ export class LocalAppRuntimeCoordinator {
           timeoutMs: parsed.data.timeoutMs,
           signal: controller.signal,
         })
+        const metadata = this.adapters.admin.admitAppRequest ? { hostRequestId: result.requestId, actualModel: result.usage?.reportedModel ?? result.model.replace(/^pi:/, ''), providerObservation: result.providerObservation ?? { version: 1 as const, state: 'missing' as const }, outputDisposition: result.status === 'completed' || result.status === 'partial' ? 'usable' as const : result.status === 'no_output' ? 'no_output' as const : 'unknown' as const } : {}
         if (result.status === 'completed' || result.status === 'partial') {
           return {
             kind: 'success',
             status: result.status,
             text: result.text,
-            usage: {
-              inputTokens: result.usage.inputTokens,
-              outputTokens: result.usage.outputTokens,
-            },
+            usage: { ...result.usage },
+            ...metadata,
           }
         }
         if (result.status === 'no_output') {
-          return { kind: 'no_output', inputTokens: result.usage?.inputTokens }
+          return { kind: 'no_output', inputTokens: result.usage?.inputTokens, ...(result.usage ? { usage: { ...result.usage } } : {}), ...metadata }
         }
         return {
           kind: 'error',
+          ...metadata,
           code: hostErrorCode(result) ?? 'host_failed',
           ...(hostUsage(result) ? { usage: hostUsage(result) } : {}),
         }
@@ -1339,13 +1463,17 @@ export class LocalAppRuntimeCoordinator {
       // Admission was released (e.g. replaced/shutdown mid-flight).
       return { errorCode: outcome.kind === 'error' ? outcome.code : 'run_state_conflict' }
     }
+    if (this.adapters.admin.admitAppRequest && !admitted) {
+      this.runState.noteHostTerminal(capGen, runId, requestId, { kind: 'error', code: 'metering_unconfirmed' })
+      return { errorCode: 'metering_unconfirmed' }
+    }
     const record = this.runState.noteHostTerminal(capGen, runId, requestId, outcome)
     if (!record) return { errorCode: 'run_state_conflict' }
     if (record.requiredReceipt) {
       const receiptOutcome = await this.sendReceipt(runtime, runId, requestId, outcome)
       if (receiptOutcome) return receiptOutcome
     }
-    return this.outcomeResponse(requestId, outcome)
+    return this.outcomeResponse(requestId, outcome, this.runState.getQuery(capGen, runId, requestId)?.settlement)
   }
 
   private releaseReservation(capGen: number, runId: string, requestId: string): void {
@@ -1370,19 +1498,42 @@ export class LocalAppRuntimeCoordinator {
     outcome: QueryOutcome,
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode } | null> {
     const capGen = capabilityGenerationOf(runtime)
+    if (this.adapters.billingOutbox && this.adapters.admin.admitAppRequest) {
+      try {
+        this.adapters.billingOutbox.stageReceipt(this.journalScope(runtime), this.receiptBody(runtime, runId, requestId, outcome))
+      } catch {
+        // Keep the unique terminal outcome replayable, but do not send or
+        // release it until its recovery metadata is durable.
+        return { errorCode: 'metering_unconfirmed' }
+      }
+    }
     try {
       const composed = anySignal([runtime.controller.signal])
       try {
-        await this.adapters.admin.recordAppUsage(
-          this.receiptBody(runId, requestId, outcome),
-          { signal: composed.signal },
-        )
+        const ack = await this.adapters.admin.recordAppUsage(
+          this.receiptBody(runtime, runId, requestId, outcome),
+          this.originalAdminOptions(runtime, composed.signal),
+        ) as { settlement?: 'pending' | 'confirmed' | 'no_charge' }
+        if (this.adapters.admin.admitAppRequest && !ack?.settlement) throw new Error('Canonical receipt acknowledgement is unavailable')
+        if (ack?.settlement === 'pending') {
+          this.runState.noteReceiptPending(capGen, runId, requestId)
+          return null
+        }
+        if (this.adapters.billingOutbox && this.adapters.admin.admitAppRequest) {
+          const key = this.adapters.billingOutbox.stageReceipt(this.journalScope(runtime), this.receiptBody(runtime, runId, requestId, outcome))
+          this.adapters.billingOutbox.applySettlement(key, ack.settlement!)
+        }
+        this.runState.noteReceiptConfirmed(capGen, runId, requestId, ack?.settlement === 'no_charge' ? 'no_charge' : 'confirmed')
       } finally {
         composed.dispose()
       }
     } catch (error) {
       if (error instanceof AdminError && error.errorCode === 'idempotency_conflict') {
         this.runState.noteReceiptRejected(capGen, runId, requestId)
+        if (this.adapters.billingOutbox && this.adapters.admin.admitAppRequest) {
+          const key = this.adapters.billingOutbox.stageReceipt(this.journalScope(runtime), this.receiptBody(runtime, runId, requestId, outcome))
+          this.adapters.billingOutbox.markConflict(key)
+        }
         return { errorCode: 'idempotency_conflict' }
       }
       if (error instanceof AdminError && error.errorCode === 'run_finalized') {
@@ -1390,10 +1541,12 @@ export class LocalAppRuntimeCoordinator {
         this.runState.releaseRun(capGen, runId)
         return { errorCode: 'run_finalized' }
       }
-      // Unknown: never release the body; the same receipt is replayed only.
+      if (this.adapters.billingOutbox && this.adapters.admin.admitAppRequest && outcome.kind === 'success') {
+        this.runState.noteReceiptPending(capGen, runId, requestId)
+        return null
+      }
       return { errorCode: 'metering_unconfirmed' }
     }
-    this.runState.noteReceiptConfirmed(capGen, runId, requestId)
     return null
   }
 
@@ -1405,16 +1558,16 @@ export class LocalAppRuntimeCoordinator {
   ): Promise<{ data?: unknown; errorCode?: AppApiStableErrorCode }> {
     if (record.state === 'executing') return { errorCode: 'request_in_progress' }
     if (record.state === 'receipt_rejected') return { errorCode: 'idempotency_conflict' }
-    if (record.state === 'receipt_unconfirmed' && record.outcome) {
+    if ((record.state === 'receipt_unconfirmed' || record.state === 'receipt_pending') && record.outcome) {
       const receiptOutcome = await this.sendReceipt(runtime, runId, requestId, record.outcome)
       if (receiptOutcome) return receiptOutcome
-      return this.outcomeResponse(requestId, record.outcome)
+      return this.outcomeResponse(requestId, record.outcome, this.runState.getQuery(capabilityGenerationOf(runtime), runId, requestId)?.settlement)
     }
     if (record.state === 'settled') {
       if (record.requiredReceipt && !this.hasConfirmedReceipt(runtime, runId, requestId)) {
         return { errorCode: 'metering_unconfirmed' }
       }
-      if (record.outcome) return this.outcomeResponse(requestId, record.outcome)
+      if (record.outcome) return this.outcomeResponse(requestId, record.outcome, this.runState.getQuery(capabilityGenerationOf(runtime), runId, requestId)?.settlement)
     }
     return { errorCode: 'run_state_conflict' }
   }
@@ -1431,6 +1584,7 @@ export class LocalAppRuntimeCoordinator {
   private outcomeResponse(
     requestId: string,
     outcome: QueryOutcome,
+    settlement?: 'pending' | 'confirmed' | 'no_charge',
   ): { data?: unknown; errorCode?: AppApiStableErrorCode } {
     if (outcome.kind === 'success') {
       return {
@@ -1439,12 +1593,13 @@ export class LocalAppRuntimeCoordinator {
           status: outcome.status,
           text: outcome.text,
           usage: outcome.usage,
+          ...(this.adapters.admin.admitAppRequest ? { settlement: settlement ?? 'pending' } : {}),
         },
       }
     }
     if (outcome.kind === 'no_output') {
       return {
-        data: { requestId, status: 'no_output', error: { code: 'no_output' } },
+        data: { requestId, status: 'no_output', error: { code: 'no_output' }, ...(this.adapters.admin.admitAppRequest ? { settlement: settlement ?? 'pending' } : {}) },
       }
     }
     return { errorCode: outcome.code }

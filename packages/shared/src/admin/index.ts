@@ -26,3 +26,4 @@ export {
   setAppCatalogAccessMode,
   type AppCatalogAccessMode,
 } from './app-catalog-access.ts';
+export * from './native-installations-contract.ts';

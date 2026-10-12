@@ -470,10 +470,10 @@ describe('HomePage complete directory (POO-70 H3)', () => {
 
     const sourceSelect = screen.getByTestId('home-directory-source') as HTMLSelectElement
     const options = Array.from(sourceSelect.options).map(option => option.value)
-    // Options derive from the directory's ACTUAL sources — no fixed list.
-    expect(options).toEqual(['all', 'Growth App Source', 'Design Circle', 'Organization A'])
+    // Include the real built-in assistant alongside catalog-derived sources.
+    expect(options).toEqual(['all', 'builtin:polo-assistant', 'catalog:Growth App Source', 'catalog:Design Circle', 'catalog:Organization A'])
 
-    fireEvent.change(sourceSelect, { target: { value: 'Design Circle' } })
+    fireEvent.change(sourceSelect, { target: { value: 'catalog:Design Circle' } })
     await waitFor(() => {
       expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
     })
@@ -737,6 +737,77 @@ describe('HomePage complete directory (POO-70 H3)', () => {
     // inside the hub.
     expect(screen.getByText('Scroll App G')).toBeTruthy()
     expect(within(hub).getAllByText(/Scroll App G Source/).length).toBeGreaterThan(0)
+  })
+
+  it('F082: searching a work App hides the nonmatching assistant, while assistant-only results have no false empty state', async () => {
+    const app = workApp('f082-report', 'Report Builder', 0)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const search = screen.getByTestId('home-directory-search')
+    fireEvent.change(search, { target: { value: 'Report Builder' } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    fireEvent.change(search, { target: { value: i18n.t('homeApps.home.poloTitle') } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
+    fireEvent.change(search, { target: { value: 'no-such-application-f082' } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getByTestId('home-directory-no-match')).toBeTruthy()
+    fireEvent.change(search, { target: { value: '' } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: the built-in source selects only the assistant and keeps its original launch action', async () => {
+    const app = workApp('f082-source', 'Source-filtered App', 0)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const source = screen.getByTestId('home-directory-source')
+    const builtin = within(source).getByRole('option', { name: i18n.t('homeApps.home.poloSource') }) as HTMLOptionElement
+    fireEvent.change(source, { target: { value: builtin.value } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    expect(screen.queryByTestId('home-directory-no-match') === null).toBe(true)
+    fireEvent.click(within(screen.getByTestId('home-quick-entry-polo')).getByRole('button'))
+    expect(openApp).toHaveBeenCalledWith(POLO_APP_DEFINITION)
+    const workSource = Array.from(source.querySelectorAll('option')).find(option => option.value !== 'all' && option.value !== builtin.value)!
+    fireEvent.change(source, { target: { value: workSource.value } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: a legitimate catalog source named like the built-in key cannot collide with the assistant filter', async () => {
+    const app = workApp('f082-collision', 'Named Source App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'builtin:polo-assistant' }] })
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1))
+    const source = screen.getByTestId('home-directory-source')
+    fireEvent.change(source, { target: { value: 'builtin:polo-assistant' } })
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
+    expect(screen.queryAllByTestId('home-directory-app')).toHaveLength(0)
+    fireEvent.change(source, { target: { value: 'catalog:builtin:polo-assistant' } })
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+  })
+
+  it('F082: a literal source named all selects that source without activating the all-sources sentinel', async () => {
+    const app = workApp('f082-all-source', 'Literal All App', 0, { catalogSources: [{ kind: 'enterprise_import', name: 'all' }] })
+    const otherApp = workApp('f082-other-source', 'Other Source App', 1)
+    appCatalogHook = hookWithCatalog(enterpriseCatalogWith([app, otherApp]))
+    renderHome()
+    await waitFor(() => expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2))
+    const source = screen.getByTestId('home-directory-source')
+    fireEvent.change(source, { target: { value: 'catalog:all' } })
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(1)
+    expect(screen.getByText('Literal All App')).toBeTruthy()
+    expect(screen.queryByText('Other Source App') === null).toBe(true)
+    expect(screen.queryByTestId('home-quick-entry-polo') === null).toBe(true)
+    fireEvent.change(source, { target: { value: 'all' } })
+    expect(screen.getAllByTestId('home-directory-app')).toHaveLength(2)
+    expect(screen.getByTestId('home-quick-entry-polo')).toBeTruthy()
   })
 
   it('P70-HOME-01 保留本机隐藏恢复: hide moves a work to the hidden section, restore brings it back, and the preference is device-local per context', async () => {

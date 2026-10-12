@@ -1,6 +1,26 @@
+import { parseProviderObservation, type ProviderObservationV1 } from './generated/provider-observation.ts'
 import { stripPiPrefix, buildCustomEndpointModelDef } from './custom-endpoint-models.ts'
 import { canonicalTransportHref, failureResult, serializeHostResult, validateHostRequest, writeHostResultLine, type HostCompletionResultV1, type HostFailureKind, type HostWorkerCredential, type ValidatedHostRequest } from './host-completion-protocol.ts'
 import { classifyTransportFailure, type InstalledTransportObservation } from './host-completion-policy.ts'
+
+
+/** Only bounded facts from the original SDK response callback. */
+export function createProviderResponseObserver() {
+  let count = 0
+  let observation: ProviderObservationV1 = { version: 1, state: 'missing' }
+  return {
+    onResponse(response: { status: number; headers: Record<string, string> }): void {
+      count += 1
+      const status = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : undefined
+      const ids = Object.entries(response.headers).filter(([key]) => key.toLowerCase() === 'x-oneapi-request-id')
+      const candidate = { version: 1, state: 'observed', providerRequestId: ids[0]?.[1], ...(status !== undefined ? { responseStatus: status } : {}) }
+      if (count > 1 || ids.length > 1 || ids.length === 1 && !parseProviderObservation(candidate)) observation = { version: 1, state: 'ambiguous', ...(status !== undefined ? { responseStatus: status } : {}) }
+      else if (ids.length === 1) observation = parseProviderObservation(candidate)!
+      else observation = { version: 1, state: 'missing', ...(status !== undefined ? { responseStatus: status } : {}) }
+    },
+    snapshot(): ProviderObservationV1 { return { ...observation } },
+  }
+}
 
 const REQUEST_BYTE_LIMIT = 2_097_152
 export const JSON_OBJECT_SYSTEM_CONSTRAINT = 'Respond with exactly one JSON object and no surrounding text, Markdown, or code fences.'
@@ -81,6 +101,7 @@ export interface HostPiPhaseContext {
   shouldStop: (stage: HostPiProbeStage) => boolean
 }
 export interface HostPiStreamInputs {
+  onResponse?: (response: { status: number; headers: Record<string, string> }) => void
   systemPrompt: string
   userPrompt: string
   maxOutputTokens: number
@@ -202,6 +223,8 @@ export function startHostPiStream(runtime: HostPiRuntime, context: HostPiPhaseCo
     systemPrompt: composedSystem,
     messages: [{ role: 'user', content: context.userPrompt, timestamp: Date.now() }],
   }, {
+    ...(context.onResponse ? { onResponse: context.onResponse } : {}),
+    ...(request.providerCorrelation ? { headers: { [request.providerCorrelation.header]: request.providerCorrelation.nonce } } : {}),
     apiKey: context.apiKey, maxTokens: context.maxOutputTokens, maxRetries: 0, signal: context.signal, timeoutMs: context.timeoutRemainingMs,
     ...(request.routeKind === 'catalog' && request.provider === 'openai-codex' ? codexStreamExtras(context.maxOutputTokens) : {}),
   })
@@ -223,6 +246,7 @@ async function readRequestThroughEof(armDeadline: (line: string, firstByteAt: nu
   return { ok: true, line: buffer.slice(0, newline), firstByteAt }
 }
 export async function runHostCompletion(argvInvalid = false): Promise<void> {
+  const providerResponse = createProviderResponseObserver()
   let settled = false, activeRequestId = 'invalid', activeModel = 'invalid', timer: NodeJS.Timeout | null = null, installed: InstalledTransportObservation | null = null, deadlineAt = Number.MAX_SAFE_INTEGER
   const controller = new AbortController()
   let settlePromise = Promise.resolve(true)
@@ -232,7 +256,7 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     if (timer) clearTimeout(timer)
     controller.abort()
     process.stdin.destroy()
-    settlePromise = writeHostResultLine(serializeHostResult(result)).then((flushed) => { process.exitCode = flushed ? 0 : 1; return flushed })
+    settlePromise = writeHostResultLine(serializeHostResult({ ...result, providerObservation: providerResponse.snapshot() })).then((flushed) => { process.exitCode = flushed ? 0 : 1; return flushed })
   }
   const failWith = (kind: HostFailureKind): void => settle(failureResult(activeRequestId, activeModel, kind))
   const crash = (): void => failWith('provider_error_terminal'); process.on('uncaughtException', crash); process.on('unhandledRejection', crash)
@@ -295,7 +319,7 @@ export async function runHostCompletion(argvInvalid = false): Promise<void> {
     const expectedModel = request.provider === 'minimax-cn' ? stripPiPrefix(request.model).replace(/^MiniMax-/, '') : stripPiPrefix(request.model)
     const tracker = streamModule.createHostStreamTracker({ expectedModel, maxOutputTokens: request.maxOutputTokens, jsonOutput: request.responseFormat === 'json_object', bedrock: isBedrock, claim: (kind) => failWith(kind) })
     const started = startHostPiStream(runtime, {
-      ...phaseContext, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
+      ...phaseContext, onResponse: providerResponse.onResponse, systemPrompt: request.systemPrompt, userPrompt: request.prompt,
       maxOutputTokens: request.maxOutputTokens, apiKey, signal: controller.signal,
       timeoutRemainingMs: Math.max(1, deadlineAt - Date.now()),
     })

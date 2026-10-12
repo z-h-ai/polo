@@ -1,3 +1,4 @@
+import { parseProviderCorrelation, type ProviderCorrelationV1, type ProviderObservationV1 } from './generated/provider-observation.ts'
 import { Type } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
 export const HOST_PARENT_MARKER = 'sessionless-host-llm-executor.v1'
@@ -26,6 +27,7 @@ export const HOST_ERRORS: Readonly<Record<HostFailureKind, readonly [string, str
 }
 export type HostWorkerCredential = { type: 'api_key'; value: string } | { type: 'oauth_access'; value: string } | { type: 'iam'; accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string } | { type: 'none' }
 export interface ValidatedHostRequest {
+  providerCorrelation?: ProviderCorrelationV1
   requestId: string; model: string; prompt: string; systemPrompt: string; responseFormat: 'text' | 'json_object'
   maxOutputTokens: number; timeoutMs: number; routeKind: 'catalog' | 'custom'; provider: string; api: 'openai-completions' | 'anthropic-messages'
   transportHref: string; credential: HostWorkerCredential
@@ -36,6 +38,7 @@ export interface HostResultUsage {
   terminalReason: 'stop' | 'length'; provenance: 'provider_final'
 }
 export interface HostCompletionResultV1 {
+  providerObservation?: ProviderObservationV1
   type: 'host_completion_result'; version: 1; requestId: string; model: string; status: 'completed' | 'partial' | 'no_output' | 'timed_out' | 'failed'
   text?: string; usage?: HostResultUsage; error?: { code: string; reason: string; message: string }
 }
@@ -49,6 +52,7 @@ const routeSchema = Type.Union([
   Type.Object({ kind: Type.Literal('custom'), provider: Type.Union([Type.Literal('openai'), Type.Literal('anthropic')]), api: Type.Union([Type.Literal('openai-completions'), Type.Literal('anthropic-messages')]), baseUrl: Type.String() }, { additionalProperties: false }),
 ])
 const requestSchema = Type.Object({
+  providerCorrelation: Type.Optional(Type.Unknown()),
   type: Type.Literal('host_completion'), version: Type.Literal(1), parentValidation: Type.Literal(HOST_PARENT_MARKER),
   requestId: Type.String(), route: routeSchema, model: Type.String(), prompt: Type.String(), systemPrompt: Type.Optional(Type.String()),
   responseFormat: Type.Optional(Type.Union([Type.Literal('text'), Type.Literal('json_object')])),
@@ -60,12 +64,14 @@ export function canonicalTransportHref(value: string): string | null {
 }
 export function validateHostRequest(raw: unknown): HostRequestVerdict {
   if (!Value.Check(requestSchema, raw)) return { kind: 'invalid' }
-  const r = raw as { requestId: string; model: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; route: { kind: 'catalog'; provider: string; transportBaseUrl: string } | { kind: 'custom'; provider: 'openai' | 'anthropic'; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string }; credential: HostWorkerCredential }
+  const r = raw as { providerCorrelation?: unknown; requestId: string; model: string; prompt: string; systemPrompt?: string; responseFormat?: 'text' | 'json_object'; maxOutputTokens: number; timeoutMs: number; route: { kind: 'catalog'; provider: string; transportBaseUrl: string } | { kind: 'custom'; provider: 'openai' | 'anthropic'; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string }; credential: HostWorkerCredential }
+  const providerCorrelation = r.providerCorrelation === undefined ? undefined : parseProviderCorrelation(r.providerCorrelation)
+  if (providerCorrelation === null) return { kind: 'invalid' }
   const credential = r.credential
   const credStrings = credential.type === 'none' ? [] : credential.type === 'iam' ? [credential.accessKeyId, credential.secretAccessKey, credential.region, ...(credential.sessionToken !== undefined ? [credential.sessionToken] : [])] : [credential.value]
   if (byteOver(r.requestId, ID_LIMIT) || byteOver(r.model, ID_LIMIT) || byteOver(r.prompt, PROMPT_LIMIT) || (r.systemPrompt !== undefined && byteOver(r.systemPrompt, SYSTEM_LIMIT)) || credStrings.some((s) => byteOver(s, CRED_LIMIT))) return { kind: 'oversize' }
   if (r.requestId.length === 0 || r.model.length === 0 || credStrings.some((s) => s.length === 0)) return { kind: 'invalid' }
-  const common = { requestId: r.requestId, model: r.model, prompt: r.prompt, systemPrompt: r.systemPrompt ?? '', responseFormat: r.responseFormat ?? 'text' as const, maxOutputTokens: r.maxOutputTokens, timeoutMs: r.timeoutMs, credential }
+  const common = { ...(providerCorrelation ? { providerCorrelation } : {}), requestId: r.requestId, model: r.model, prompt: r.prompt, systemPrompt: r.systemPrompt ?? '', responseFormat: r.responseFormat ?? 'text' as const, maxOutputTokens: r.maxOutputTokens, timeoutMs: r.timeoutMs, credential }
   if (r.route.kind === 'catalog') {
     if (byteOver(r.route.provider, ID_LIMIT) || byteOver(r.route.transportBaseUrl, ID_LIMIT)) return { kind: 'oversize' }
     const href = canonicalTransportHref(r.route.transportBaseUrl)

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { type ChildProcess, type spawn as spawnProcess } from 'child_process'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { watch } from 'fs'
 import { createServer, type Server } from 'http'
@@ -182,6 +182,30 @@ function makeManager(options: Pick<
   })
   return manager
 }
+
+describe('native installation evidence commit witness', () => {
+  it('persists an original admission on a real bundle install and a cached exact-version install', async () => {
+    const appId = 'demo.native-evidence', nativeId = randomUUID()
+    const bundle = await writeBundle(appId,'1.0.0',{}, {'dist/index.html': '<h1>installed</h1>'})
+    const archive = await archiveBundle(bundle,'native-evidence'), url = await serveArchive(archive), runtime = makeManager()
+    const request = requestFor(appId,'1.0.0',url,archive)
+    await runtime.install(request,{nativeInstallationAdmissionId: nativeId})
+    expect(await runtime.readNativeInstallationEvidence(appId)).toEqual({presence: 'installed',versions: [{version: '1.0.0',checksum: request.checksum,admissionId: nativeId}]})
+    const refreshedId = randomUUID(); await runtime.install(request,{nativeInstallationAdmissionId: refreshedId})
+    expect((await runtime.readNativeInstallationEvidence(appId))?.versions[0].admissionId).toBe(refreshedId)
+    await runtime.uninstall(appId,{preserveData: true})
+    expect(await runtime.readNativeInstallationEvidence(appId)).toEqual({presence: 'absent',versions: []})
+  })
+  it('keeps legacy versions unattributed and never interprets missing/corrupt metadata as an uninstall', async () => {
+    const appId = 'demo.native-unknown', bundle = await writeBundle(appId,'1.0.0',{}, {'dist/index.html': '<h1>legacy</h1>'})
+    const archive = await archiveBundle(bundle,'native-unknown'), url = await serveArchive(archive), runtime = makeManager()
+    await runtime.install(requestFor(appId,'1.0.0',url,archive))
+    expect((await runtime.readNativeInstallationEvidence(appId))?.versions[0].admissionId).toBeNull()
+    const metadata = join(testRoot,'runtime/apps',appId,'metadata.json')
+    await writeFile(metadata,'INVALID_JSON'); expect(await runtime.readNativeInstallationEvidence(appId)).toBeNull()
+    await rm(metadata); expect(await runtime.readNativeInstallationEvidence(appId)).toBeNull()
+  })
+})
 
 interface FakeChildProcess extends ChildProcess {
   pid: number
@@ -2461,5 +2485,34 @@ describe('POO-54 R14 shutdown orchestration (coordinator AggregateError stays a 
       .toEqual(['stop-a', 'stop-b'])
     expect((reasons[1] as Error).message).toBe('manager force-stop exploded')
     expect(managerShutdownCalls).toBe(1)
+  })
+})
+
+
+describe('authenticated ProductSpace bundle byte boundary', () => {
+  it('uses the per-install bodyless POST transport instead of generic unauthenticated GET', async () => {
+    const appId = 'demo.authenticated-download'
+    const archive = await archiveBundle(await writeBundle(appId, '1.0.0', {}, { 'dist/index.html': 'ok' }), 'authenticated')
+    const url = 'https://admin.example/api/personal-entitlements/artifacts/app/versions/version/download?space=space&launch=issued-nonce-123456'
+    const calls: RequestInit[] = []
+    const bytes = async (_url: unknown, init?: RequestInit) => {
+      calls.push(init ?? {})
+      return init?.method === 'POST' && new Headers(init.headers).get('authorization') === 'Bearer business-session'
+        ? new Response(new Uint8Array(archive), { headers: { 'content-length': String(archive.length) } })
+        : new Response('Use authenticated POST', { status: 400 })
+    }
+    manager = new LocalAppRuntimeManager({ rootDir: join(testRoot, 'runtime'), fetch: bytes as typeof fetch })
+    const downloadTransport = {
+      assertCurrent() {},
+      fetch: (request: LocalAppInstallRequest, signal: AbortSignal) => bytes(request.downloadUrl, {
+        method: 'POST', headers: { Authorization: 'Bearer business-session' }, redirect: 'error', signal,
+      }),
+    }
+    const installed = await manager.install(requestFor(appId, '1.0.0', url, archive), { downloadTransport })
+    expect(installed.currentVersion).toBe('1.0.0')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.method).toBe('POST')
+    expect(calls[0]!.body).toBeUndefined()
+    expect(calls[0]!.redirect).toBe('error')
   })
 })

@@ -82,3 +82,8 @@ export function useMemberCatalog(): AppCatalogInstance {
   }
   return catalog
 }
+
+/** Optional only for shared shells mounted outside member ProductSpace routes. */
+export function useOptionalMemberCatalog(): AppCatalogInstance | null {
+  return useContext(MemberCatalogContext)
+}

@@ -315,7 +315,7 @@ function productSpaceOperationIdentityKey(identity: ProductSpaceAppIdentity): st
   ])
 }
 
-function identityForProductSpaceApp(
+export function identityForProductSpaceApp(
   catalog: AppCatalogCacheEntry,
   app: CatalogApp,
 ): ProductSpaceAppIdentity {

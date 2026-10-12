@@ -148,6 +148,8 @@ export interface CreatorSkillsLedger {
     installed: InstalledCreatorSkill[];
 }
 export interface InstalledCreatorSkill {
+    /** Trusted Main/server admission captured before this native commit. */
+    nativeInstallationAdmissionId?: string;
     artifactId: string;
     organizationId: string;
     slug: string;

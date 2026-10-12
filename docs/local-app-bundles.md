@@ -111,6 +111,20 @@ The API token is secret and ephemeral:
   stop, restart, replacement by a newer generation, capability expiry, and
   coordinator shutdown. A revoked token is rejected by the gateway.
 
+For canonical App billing, `ai/query` admits the original run and request before
+sending through Polo's configured connection and model. The supplier API key
+stays in the Host process. A private, server-issued correlation header links
+the original provider request to its receipt; the App does not receive it.
+
+Query responses and `run/finish` distinguish `pending`, `confirmed`, and
+`no_charge` settlement. A durably recorded pending request can return usable
+output and finish execution while its charge remains unresolved. Repeating
+the same business request retries its receipt without another AI call. Polo
+persists bounded billing metadata under the original account and Admin origin;
+recovery never reruns AI or stores prompts, output, keys, or private correlation
+headers. The billing wire types and provider observation parser are generated
+from Polo Admin's canonical billing sources.
+
 Static runtimes do not receive these two variables: Polo owns their listening
 socket and their static-serving boundary remains as documented below.
 

@@ -1,3 +1,4 @@
+import { paymentHandoffUrl } from './payment-handoff'
 import {
   AdminClient,
   AdminError,
@@ -26,6 +27,7 @@ import {
   resolveCreatorAppPublishingOrganization,
 } from '@polo-ai/shared/admin'
 import { z } from 'zod'
+import { setNativeInstallationTransport } from '../../runtime/native-installations'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -342,6 +344,16 @@ class AdminSessionChangedError extends Error {
     super('Admin session changed while the request was in flight')
     this.name = 'AdminSessionChangedError'
   }
+}
+
+type AppConnectionScope = { accountId: string; productSpaceId: string }
+type AppConnectionSelection = { connectionSlug: string; model?: string }
+let productSpaceAppConnectionResolver: ((scope: AppConnectionScope) => Promise<AppConnectionSelection>) | null = null
+
+/** Installed by the trusted Admin session owner, never supplied by a renderer. */
+export async function resolveProductSpaceAppConnection(scope: AppConnectionScope): Promise<AppConnectionSelection> {
+  if (!productSpaceAppConnectionResolver) throw new Error('Admin session owner is unavailable')
+  return productSpaceAppConnectionResolver(scope)
 }
 
 /**
@@ -740,6 +752,21 @@ export function registerAdminHandlers(
   const sessions = new AdminSessionCoordinator(
     closeCatalogAuthorizationForAccount,
   )
+  productSpaceAppConnectionResolver = async scope => {
+    if (!isRuntimeFenceBoundToAccount(scope.accountId)
+      || getRuntimeActiveProductSpace() !== scope.productSpaceId
+      || isSwitchInProgress() || isRuntimeOfflineReadOnly()
+      || isRuntimeProductSpaceRestricted(scope.productSpaceId)) {
+      throw new Error('Original App space is not active')
+    }
+    const synced = await syncAdminConnections({
+      adminUrl: requireAdminUrl(), manager: getCredentialManager(), sessions, deps,
+      requiredScope: scope,
+    })
+    if (!synced.defaultConnection) throw new Error('Space compute is not ready')
+    return { connectionSlug: synced.defaultConnection, model: synced.defaultModel }
+  }
+
 
   // One-shot trusted credential restore for the synchronous authenticated-
   // account mirror: reads the persisted Admin credentials once and commits
@@ -808,6 +835,27 @@ export function registerAdminHandlers(
     } catch {
       return null
     }
+  })
+
+  // Only this coordinator owns the token snapshot. Reports for account A
+  // remain queued during account B's session; the AdminClient methods disable
+  // mutable credential refresh and cannot transplant B's token into A's work.
+  const installationSession = async (accountId: string) => {
+    const adminUrl = requireAdminUrl(), manager = getCredentialManager()
+    const snapshot = await sessions.capture(manager)
+    if (!snapshot || snapshot.tokens.userId !== accountId || !await sessions.isCurrent(manager,snapshot)) {
+      throw new Error('Original installation account is not the current trusted session')
+    }
+    const refreshed = await ensureValidTokens(adminUrl, manager, sessions, deps, snapshot)
+    if (!refreshed.tokens || !refreshed.session || refreshed.tokens.userId !== accountId
+      || !await sessions.isCurrent(manager, refreshed.session)) {
+      throw new Error('Original installation session changed during token recovery')
+    }
+    return { client: new AdminClient(adminUrl), accessToken: refreshed.tokens.accessToken }
+  }
+  setNativeInstallationTransport({
+    admit: async (accountId,input) => { const session = await installationSession(accountId); return session.client.admitNativeInstallation(session.accessToken,input) },
+    report: async (accountId,input) => { const session = await installationSession(accountId); return session.client.reportNativeInstallation(session.accessToken,input) },
   })
 
   // The Main-side switch transaction verifies the target space against the
@@ -2019,6 +2067,27 @@ export function registerAdminHandlers(
     )
   })
 
+  server.handle(RPC_CHANNELS.admin.PAYMENT_HANDOFF, async () => {
+    return callOrganization('paymentHandoff', async (client, accessToken, accountId) => {
+      const productSpaceId = getRuntimeActiveProductSpace()
+      const generation = getRuntimeFenceGeneration()
+      const assertCurrent = () => {
+        if (!productSpaceId || !isRuntimeFenceBoundToAccount(accountId)
+          || getRuntimeActiveProductSpace() !== productSpaceId
+          || getRuntimeFenceGeneration() !== generation || isSwitchInProgress()
+          || isRuntimeOfflineReadOnly()) throw new AdminSessionChangedError()
+      }
+      assertCurrent()
+      const list = await client.listProductSpaces(accessToken)
+      assertCurrent()
+      const space = list.productSpaces.find(item => item.id === productSpaceId)
+      if (!space || space.kind === 'enterprise' && space.role !== 'owner') {
+        throw new AdminError('Only the current space payer may open billing', 'FORBIDDEN')
+      }
+      return { url: paymentHandoffUrl(requireAdminUrl(), space), accountId, productSpaceId: space.id }
+    })
+  })
+
   server.handle(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES, async () => {
     return callOrganization(
       'listProductSpaces',
@@ -3227,9 +3296,11 @@ async function ensureValidTokens(
   manager: CredentialManager,
   sessions: AdminSessionCoordinator,
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>,
+  expectedSession?: AdminSessionSnapshot,
 ): Promise<TokenValidationResult> {
-  const initialSession = await sessions.capture(manager)
+  const initialSession = expectedSession ?? await sessions.capture(manager)
   if (!initialSession) return { tokens: null }
+  if (!await sessions.isCurrent(manager, initialSession)) return { tokens: null, stale: true }
   const { tokens } = initialSession
 
   if (!manager.isExpired({
@@ -3338,7 +3409,9 @@ async function syncAdminConnections(args: {
   sessions: AdminSessionCoordinator
   session?: AdminSessionSnapshot
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>
+  requiredScope?: AppConnectionScope
 }): Promise<{
+  defaultModel?: string
   configVersion: string
   connectionCount: number
   defaultConnection: string | null
@@ -3362,6 +3435,20 @@ async function syncAdminConnections(args: {
     session = tokens.session
   }
   const requestContext: AdminRequestContext = { session }
+  const fenceGeneration = getRuntimeFenceGeneration()
+  const activeSpaceId = isRuntimeFenceBoundToAccount(session.tokens.userId)
+    ? getRuntimeActiveProductSpace() : null
+  const requestedSpaceId = args.requiredScope?.productSpaceId ?? activeSpaceId
+  const assertScope = () => {
+    if (getRuntimeFenceGeneration() !== fenceGeneration
+      || args.requiredScope && (session.tokens.userId !== args.requiredScope.accountId
+        || !isRuntimeFenceBoundToAccount(args.requiredScope.accountId)
+        || getRuntimeActiveProductSpace() !== args.requiredScope.productSpaceId
+        || isSwitchInProgress() || isRuntimeOfflineReadOnly() || isRuntimeProductSpaceRestricted(args.requiredScope.productSpaceId))) {
+      throw new AdminSessionChangedError()
+    }
+  }
+  assertScope()
   try {
     const client = createAuthenticatedAdminClient(
       args.adminUrl,
@@ -3371,11 +3458,25 @@ async function syncAdminConnections(args: {
     )
     const response = await client.getLlmConnections(
       requestContext.session.tokens.accessToken,
+      requestedSpaceId ?? undefined,
     )
+    assertScope()
+    const wrongRequestedScope = args.requiredScope && response.productSpaceId !== requestedSpaceId
+    const wrongScopedConnection = response.productSpaceId && (
+      (requestedSpaceId && response.productSpaceId !== requestedSpaceId)
+      || response.connections.some(connection => connection.slug !== `polo-space-${response.productSpaceId}`)
+      || (response.defaultConnection !== null && response.defaultConnection !== `polo-space-${response.productSpaceId}`)
+    )
+    if (wrongRequestedScope || wrongScopedConnection) {
+      throw new AdminError('Compute configuration belongs to another ProductSpace', 'FORBIDDEN')
+    }
     const applied = await args.sessions.mutateIfCurrent(
       args.manager,
       requestContext.session,
-      async () => {
+      // Global lock order is Admin session → ProductSpace switch, matching
+      // account replacement. Network I/O stays outside both mutation locks.
+      async () => withSwitchLock(async () => {
+        assertScope()
         const incomingSlugs = new Set(
           response.connections.map(connection => connection.slug),
         )
@@ -3406,13 +3507,14 @@ async function syncAdminConnections(args: {
           setDefaultLlmConnection(response.defaultConnection)
         }
         setAdminConfigVersion(response.configVersion)
-      },
+      }, { phase: 'compute-connection-commit', productSpaceId: requestedSpaceId }),
     )
     if (!applied.applied) throw new AdminSessionChangedError()
     return {
       configVersion: response.configVersion,
       connectionCount: response.connections.length,
       defaultConnection: response.defaultConnection,
+      ...(response.productSpaceId ? { defaultModel: response.connections.find(connection => connection.slug === response.defaultConnection)?.defaultModel } : {}),
       session: requestContext.session,
     }
   } catch (error) {
@@ -3430,10 +3532,14 @@ async function syncAdminConnections(args: {
     const cleaned = await args.sessions.mutateIfCurrent(
       args.manager,
       requestContext.session,
-      async () => {
+      // A rejected lookup still belongs to its original scope. Hold the
+      // same session → switch locks as a successful commit so an old error
+      // cannot erase credentials installed by a newer ProductSpace.
+      async () => withSwitchLock(async () => {
+        assertScope()
         setAdminConfigVersion(undefined)
         await deleteAdminManagedConnections(args.manager)
-      },
+      }, { phase: 'compute-connection-commit', productSpaceId: requestedSpaceId }),
     )
     if (!cleaned.applied) throw new AdminSessionChangedError()
     throw error

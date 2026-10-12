@@ -241,6 +241,7 @@ export const CreatorSkillSafetyStatusBatchSchema = z.object({
 })
 
 export const InstalledCreatorSkillSchema = z.object({
+  nativeInstallationAdmissionId: z.string().uuid().optional(),
   artifactId: entityId,
   organizationId: entityId,
   slug: skillSlug,

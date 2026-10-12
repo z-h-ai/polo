@@ -12,8 +12,10 @@ import {
 import { CredentialManager } from '@polo-ai/shared/credentials'
 import type { HandlerDeps } from '../handler-deps'
 import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
+import { prepareNativeSkillInstall, prepareNativeSkillUninstall, finishNativeSkillInstallation, flushNativeSkillInstallationEvidence, recoverNativeSkillInstallationEvidence } from '../../runtime/native-skill-installation-evidence'
 import {
   getRuntimeActiveProductSpace,
+  getRuntimeFenceGeneration,
   isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
   isRuntimeProductSpaceRestricted,
@@ -369,12 +371,21 @@ function assertSkillsWritable(): void {
   }
 }
 
+async function assertOriginalNativeSkillScope(scope: {accountId: string; productSpaceId: string}, generation: number) {
+  const current = await requireTrustedSkillsScope()
+  if (current.accountId !== scope.accountId || current.productSpaceId !== scope.productSpaceId || getRuntimeFenceGeneration() !== generation) {
+    throw Object.assign(new Error('Original Skill scope changed before native mutation'), {code: 'workspace_context_mismatch'})
+  }
+  assertSkillsWritable()
+}
+
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
   const recoveryByWorkspaceRoot = new Map<string, Promise<void>>()
   const ensureRecovered = (workspaceRoot: string): Promise<void> => {
     const existing = recoveryByWorkspaceRoot.get(workspaceRoot)
     if (existing) return existing
-    const recovery = recoverCreatorSkillOperations(workspaceRoot).then(() => {
+    const recovery = recoverCreatorSkillOperations(workspaceRoot).then(async () => {
+      await recoverNativeSkillInstallationEvidence(workspaceRoot).catch(() => {})
       return import('@polo-ai/shared/skills').then(({ invalidateSkillsCache }) => {
         invalidateSkillsCache()
       })
@@ -529,6 +540,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       // execution under the trusted scope. One operationId binds the
       // registration to the cancellation controller.
       const deleteScope = await requireTrustedSkillsScope()
+      const deleteGeneration = getRuntimeFenceGeneration()
       const deleteOperationId = crypto.randomUUID()
       const deleteOperation = registerSkillOperationExecution({
         accountId: deleteScope.accountId,
@@ -540,6 +552,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         slug: skillSlug,
       })
       let result: Awaited<ReturnType<typeof uninstallCreatorSkill>>
+      let installationIntent: Awaited<ReturnType<typeof prepareNativeSkillUninstall>> = null
       try {
         result = await uninstallCreatorSkill({
           workspaceRoot: workspace.rootPath,
@@ -547,6 +560,11 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
           operationId: deleteOperationId,
           slug: skillSlug,
         }, {
+          beforeNativeMutation: async () => {
+            installationIntent = await prepareNativeSkillUninstall(workspace.rootPath,skillSlug).catch(() => null)
+            await assertOriginalNativeSkillScope(deleteScope,deleteGeneration)
+          },
+          onNativeCommitted: result => finishNativeSkillInstallation(installationIntent,result),
           onError: error => deps.platform.logger?.error(
             'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
             error,
@@ -558,6 +576,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       if (!result.success) throw Object.assign(new Error(result.message), {
         code: result.errorCode,
       })
+      void flushNativeSkillInstallationEvidence().catch(() => {})
       detached = result.detached === true
       forceDeleteCredential = result.forceDeleteCredential
     } else {
@@ -629,6 +648,14 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     }
     // R33-2: the in-flight install is a cancellable ProductSpace execution.
     const skillScope = await requireTrustedSkillsScope()
+    const installationFenceGeneration = getRuntimeFenceGeneration()
+    // Legacy organization grants have no authoritative enterprise-instance
+    // identity. Such installations keep their existing native behavior and
+    // remain unknown in support inventory; never guess from the active space.
+    const installationIntent = await prepareNativeSkillInstall(skillScope,workspace.rootPath,input.data.grant).catch(() => null)
+    const installationScopeCurrent = await requireTrustedSkillsScope()
+    if (installationScopeCurrent.accountId !== skillScope.accountId || installationScopeCurrent.productSpaceId !== skillScope.productSpaceId
+      || getRuntimeFenceGeneration() !== installationFenceGeneration) return workspaceMutationError(input.data.operationId,'workspace_context_mismatch')
     const skillOperation = registerSkillOperationExecution({
       accountId: skillScope.accountId,
       productSpaceId: skillScope.productSpaceId,
@@ -645,6 +672,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         ...input.data,
         ...(workingDirectory ? { workingDirectory } : {}),
       }, {
+        ...(installationIntent ? { nativeInstallationAdmissionId: installationIntent.admission.admissionId } : {}),
+        onNativeCommitted: result => finishNativeSkillInstallation(installationIntent,result),
         operationOwnerId: ctx.clientId,
         fetch: createCreatorSkillDownloadFetch(
           deps.platform.getAdminAccessToken,
@@ -677,6 +706,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       skillOperation.settle()
     }
     if (result.success) {
+      void flushNativeSkillInstallationEvidence().catch(() => {})
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
     return result
@@ -727,6 +757,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     await ensureRecovered(workspace.rootPath)
     // R33-2: the in-flight uninstall is a cancellable ProductSpace execution.
     const skillScope = await requireTrustedSkillsScope()
+    const uninstallGeneration = getRuntimeFenceGeneration()
+    let installationIntent: Awaited<ReturnType<typeof prepareNativeSkillUninstall>> = null
     const skillOperation = registerSkillOperationExecution({
       accountId: skillScope.accountId,
       productSpaceId: skillScope.productSpaceId,
@@ -742,6 +774,11 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         workspaceRoot: workspace.rootPath,
         ...input.data,
       }, {
+        beforeNativeMutation: async () => {
+          installationIntent = await prepareNativeSkillUninstall(workspace.rootPath,input.data.slug).catch(() => null)
+          await assertOriginalNativeSkillScope(skillScope,uninstallGeneration)
+        },
+        onNativeCommitted: result => finishNativeSkillInstallation(installationIntent,result),
         onError: error => deps.platform.logger?.error(
           'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
           error,
@@ -751,6 +788,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       skillOperation.settle()
     }
     if (result.success) {
+      void flushNativeSkillInstallationEvidence().catch(() => {})
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
     return result

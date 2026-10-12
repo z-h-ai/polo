@@ -435,19 +435,13 @@ export const RemoveOrganizationMemberRpcInputSchema = z.object({
   reason: z.string().trim().min(1).max(512).optional(),
 }).strict()
 
-const billingId = nonBlankString(512)
-export const AdminStartAppRunResponseSchema = z.object({
-  run: z.object({ runId: billingId, status: z.literal('running') }).strict(),
-}).strict()
-export const AdminRecordAppUsageResponseSchema = z.object({
-  runId: billingId,
-  requestId: billingId,
-  recorded: z.literal(true),
-}).strict()
-export const AdminFinishAppRunResponseSchema = z.object({
-  runId: billingId,
-  status: z.enum(['completed', 'failed', 'cancelled', 'unknown']),
-}).strict()
+export {
+  billingRuntimeRequestResponseSchema as AdminGetAppRequestResponseSchema,
+  billingRuntimeAdmissionResponseSchema as AdminAdmitAppRequestResponseSchema,
+  billingRuntimeStartResponseSchema as AdminStartAppRunResponseSchema,
+  billingRuntimeUsageResponseSchema as AdminRecordAppUsageResponseSchema,
+  billingRuntimeFinishResponseSchema as AdminFinishAppRunResponseSchema,
+} from './billing-runtime-contract'
 export const APP_BILLING_ERROR_CODES = ['insufficient_credit', 'idempotency_conflict', 'run_finalized'] as const
 export type AppBillingErrorCode = (typeof APP_BILLING_ERROR_CODES)[number]
 export function readAppBillingErrorCode(data: unknown): AppBillingErrorCode | null {

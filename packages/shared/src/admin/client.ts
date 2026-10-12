@@ -44,6 +44,9 @@ import {
   type AdminPlatformRelease,
   type AdminSignedUpload,
   type AdminPlatformReleaseInput,
+  type AdminGetAppRequestResponse,
+  type AdminAdmitAppRequestInput,
+  type AdminAdmitAppRequestResponse,
   type AdminStartAppRunInput,
   type AdminStartAppRunResponse,
   type AdminRecordAppUsageInput,
@@ -52,6 +55,12 @@ import {
   type AdminFinishAppRunResponse,
 } from './types.ts';
 import { z, type ZodType } from 'zod';
+import {
+  NativeInstallationAdmissionRequestSchema, NativeInstallationAdmissionSchema,
+  NativeInstallationReportSchema, NativeInstallationReceiptSchema,
+  type NativeInstallationAdmissionRequest, type NativeInstallationAdmission,
+  type NativeInstallationReport, type NativeInstallationReceipt,
+} from './native-installations-contract.ts';
 import {
   AdminLoginResponseSchema,
   AdminPhoneAuthResponseSchema,
@@ -87,6 +96,8 @@ import {
   AdminPlatformAppSchema,
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
+  AdminGetAppRequestResponseSchema,
+  AdminAdmitAppRequestResponseSchema,
   AdminStartAppRunResponseSchema,
   AdminRecordAppUsageResponseSchema,
   AdminFinishAppRunResponseSchema,
@@ -432,8 +443,9 @@ export class AdminClient {
     });
   }
 
-  getLlmConnections(accessToken: string): Promise<AdminLlmConnectionsResponse> {
-    return this.request('/api/llm-connections', {
+  getLlmConnections(accessToken: string, productSpaceId?: string): Promise<AdminLlmConnectionsResponse> {
+    const suffix = productSpaceId ? `?productSpaceId=${encodeURIComponent(productSpaceId)}` : '';
+    return this.request(`/api/llm-connections${suffix}`, {
       method: 'GET',
       accessToken,
     });
@@ -1124,7 +1136,7 @@ export class AdminClient {
   }
 
   /**
-   * POL-102: starts one trusted App Run. Identity/workspace fields are
+   * POL-102: starts one trusted App Run. Identity fields are
    * capability-re-derived by the caller; payer/price stay server-side.
    */
   async startAppRun(
@@ -1138,7 +1150,26 @@ export class AdminClient {
       body: input,
       signal: options?.signal,
     });
-    return this.readSuccessResponse(response, AdminStartAppRunResponseSchema);
+    const result = this.readSuccessResponse(response, AdminStartAppRunResponseSchema);
+    if (result.run.runId !== input.runId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    if (result.run.status !== 'running') throw new AdminError('This App run is already finalized', 'run_finalized');
+    return { run: { runId: result.run.runId, status: result.run.status } };
+  }
+
+  /** Read an original admission without creating it or returning transport secrets. */
+  async getAppRequest(accessToken: string, runId: string, requestId: string, options?: { signal?: AbortSignal }): Promise<AdminGetAppRequestResponse> {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}/requests/${encodeURIComponent(requestId)}`, { method: 'GET', accessToken, signal: options?.signal });
+    const result = this.readSuccessResponse(response, AdminGetAppRequestResponseSchema);
+    if (result.request.requestId !== requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return result;
+  }
+
+  /** Private Host-only admission. Never forward this response to an App. */
+  async admitAppRequest(accessToken: string, runId: string, input: AdminAdmitAppRequestInput, options?: { signal?: AbortSignal }): Promise<AdminAdmitAppRequestResponse> {
+    const response = await this.request<unknown>(`/api/billing/runs/${encodeURIComponent(runId)}/requests`, { method: 'POST', accessToken, body: input, signal: options?.signal });
+    const result = this.readSuccessResponse(response, AdminAdmitAppRequestResponseSchema);
+    if (result.request.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return result;
   }
 
   /** POL-102: records one idempotent (runId, requestId) usage receipt. */
@@ -1153,7 +1184,15 @@ export class AdminClient {
       body: input,
       signal: options?.signal,
     });
-    return this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+    const result = this.readSuccessResponse(response, AdminRecordAppUsageResponseSchema);
+    if ((input.providerObservation !== undefined || input.outputDisposition !== undefined) && result.settlement === undefined) throw new AdminError('Canonical settlement acknowledgement is missing', 'SERVER_ERROR');
+    if (result.settlement === 'pending') {
+      if (result.request?.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+      return { runId: input.runId, requestId: input.requestId, recorded: result.recorded, settlement: 'pending' };
+    }
+    if (result.receipt === null) throw new AdminError('requestId belongs to legacy usage', 'idempotency_conflict');
+    if (result.receipt.requestId !== input.requestId) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return { runId: input.runId, requestId: result.receipt.requestId, recorded: result.recorded, ...(result.settlement ? { settlement: result.settlement } : {}) };
   }
 
   /** POL-102: finishes an App Run with an idempotent terminal status. */
@@ -1167,7 +1206,9 @@ export class AdminClient {
       `/api/billing/runs/${encodeURIComponent(runId)}`,
       { method: 'PATCH', accessToken, body: input, signal: options?.signal },
     );
-    return this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+    const result = this.readSuccessResponse(response, AdminFinishAppRunResponseSchema);
+    if (result.run.runId !== runId || result.run.status !== input.status) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return { runId: result.run.runId, status: result.run.status, ...(result.settlement ? { settlement: result.settlement } : {}) };
   }
 
   // -------------------------------------------------------------------------
@@ -1322,6 +1363,21 @@ export class AdminClient {
       void reader.cancel().catch(() => {});
       reader.releaseLock();
     }
+  }
+
+  async admitNativeInstallation(accessToken: string, input: NativeInstallationAdmissionRequest): Promise<NativeInstallationAdmission> {
+    return NativeInstallationAdmissionSchema.parse(await this.request<unknown>('/api/me/installation-admissions', {
+      method: 'POST', accessToken, body: NativeInstallationAdmissionRequestSchema.parse(input), retryingAfterRefresh: true,
+    }));
+  }
+
+  async reportNativeInstallation(accessToken: string, input: NativeInstallationReport): Promise<NativeInstallationReceipt> {
+    const checked = NativeInstallationReportSchema.parse(input);
+    // The trusted session owner supplies this immutable token snapshot. Never
+    // refresh through a mutable credential manager after an account switch.
+    return NativeInstallationReceiptSchema.parse(await this.request<unknown>(`/api/me/devices/${checked.deviceId}/installations`, {
+      method: 'POST', accessToken, body: checked, retryingAfterRefresh: true,
+    }));
   }
 
   private async request<T>(path: string, options: {

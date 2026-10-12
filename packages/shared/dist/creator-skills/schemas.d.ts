@@ -778,6 +778,7 @@ export declare const CreatorSkillSafetyStatusBatchSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export declare const InstalledCreatorSkillSchema: z.ZodObject<{
+    nativeInstallationAdmissionId: z.ZodOptional<z.ZodString>;
     artifactId: z.ZodString;
     organizationId: z.ZodString;
     slug: z.ZodString;
@@ -796,6 +797,7 @@ export declare const InstalledCreatorSkillSchema: z.ZodObject<{
 export declare const CreatorSkillsLedgerSchema: z.ZodObject<{
     schemaVersion: z.ZodLiteral<1>;
     installed: z.ZodArray<z.ZodObject<{
+        nativeInstallationAdmissionId: z.ZodOptional<z.ZodString>;
         artifactId: z.ZodString;
         organizationId: z.ZodString;
         slug: z.ZodString;

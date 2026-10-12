@@ -22,6 +22,8 @@ import {
   type AppDefinition,
   type TabInstance,
 } from '../../shared/tab-browser-types'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { ProductSpaceAppLaunchBridge } from '@/components/tab-browser/ProductSpaceAppLaunchBridge'
 import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
 export interface WebAppNavigationControls {
@@ -36,6 +38,8 @@ export interface WebAppNavigationControls {
 interface TabShellContextValue {
   installedApps: AppDefinition[]
   openTabs: TabInstance[]
+  /** Mounted App guests hidden by an explicit background choice. */
+  backgroundTabs?: TabInstance[]
   activeTab: TabInstance
   activeTabId: string
   isReady: boolean
@@ -50,6 +54,7 @@ interface TabShellContextValue {
   activateTab: (tabId: string) => void
   openApp: (app: AppDefinition) => void
   closeTab: (tabId: string) => void
+  registerProductSpaceTabClose?: (handler: ((tabId: string) => boolean) | null) => void
   reorderTabs: (draggedTabId: string, targetTabId: string) => void
   removeApp: (appId: string) => Promise<void>
   updateTabInfo: (update: { id: string } & Partial<Omit<TabInstance, 'id'>>) => void
@@ -87,6 +92,7 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
 
 export function TabShellProvider({ workspaceId, productSpaceScope, children }: TabShellProviderProps) {
   const isProductSpaceWindow = Boolean(productSpaceScope)
+  const liveProductSpace = useOptionalProductSpaceContext()
   const [installedApps, setInstalledAppsState] = useAtom(installedAppsAtom)
   const [openTabs, setOpenTabs] = useAtom(openTabsAtom)
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
@@ -100,6 +106,11 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
   const [isReady, setIsReady] = useState(false)
   const [webAppNavigation, setWebAppNavigation] = useState<Record<string, WebAppNavigationControls>>({})
   const hydratedRef = useRef(false)
+  const managedCloseRef = useRef<((tabId: string) => boolean) | null>(null)
+  const registerProductSpaceTabClose = useCallback((handler: ((tabId: string) => boolean) | null) => { managedCloseRef.current = handler }, [])
+  const closeTab = useCallback((tabId: string) => {
+    if (!managedCloseRef.current?.(tabId)) closeTabWrite(tabId)
+  }, [closeTabWrite])
   // The persistence scope: account+ProductSpace first, workspace second.
   // Storage keys (tabs) and the webview partition are both derived from this
   // scope, so a space switch can never rehydrate the other space's tab
@@ -156,7 +167,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
   useEffect(() => {
     if (!hydratedRef.current) return
     const timer = window.setTimeout(() => {
-      setLocalStorage(KEYS.tabs, openTabs, storageScope)
+      setLocalStorage(KEYS.tabs, openTabs.filter(tab => !tab.productSpaceApp), storageScope)
     }, 150)
     return () => window.clearTimeout(timer)
   }, [openTabs, storageScope])
@@ -191,23 +202,35 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     })
   }, [])
 
+  // Generation-bound runtime tabs never surface during a context transition,
+  // even before passive hydration or while a late start is settling.
+  const tabIsCurrent = (tab: TabInstance) => !tab.productSpaceApp || Boolean(liveProductSpace
+    && tab.productSpaceApp.accountId === liveProductSpace.accountId
+    && tab.productSpaceApp.productSpaceId === liveProductSpace.activeProductSpaceId
+    && tab.productSpaceApp.contextVersion === liveProductSpace.contextVersion)
+  const currentTabs = useMemo(() => openTabs.filter(tabIsCurrent), [openTabs, liveProductSpace])
+  const visibleTabs = useMemo(() => currentTabs.filter(tab => !tab.background), [currentTabs])
+  const backgroundTabs = useMemo(() => currentTabs.filter(tab => tab.background), [currentTabs])
+  const visibleActiveTab = activeTab && tabIsCurrent(activeTab) && !activeTab.background ? activeTab : null
   const activeWebAppNavigation =
-    activeTab?.type === 'webapp'
-      ? webAppNavigation[activeTab.id] ?? null
+    visibleActiveTab?.type === 'webapp'
+      ? webAppNavigation[visibleActiveTab.id] ?? null
       : null
 
   const value = useMemo<TabShellContextValue>(() => ({
     installedApps,
-    openTabs,
-    activeTab: activeTab ?? { id: HOME_TAB_ID, appId: HOME_TAB_ID, type: 'home', title: 'Home' },
-    activeTabId,
+    openTabs: visibleTabs,
+    backgroundTabs,
+    activeTab: visibleActiveTab ?? { id: HOME_TAB_ID, appId: HOME_TAB_ID, type: 'home', title: 'Home' },
+    activeTabId: visibleActiveTab ? activeTabId : HOME_TAB_ID,
     isReady,
     activeWebAppNavigation,
     webAppPartition,
     activateHome: () => activateTabWrite(HOME_TAB_ID),
     activateTab: activateTabWrite,
     openApp: openAppTab,
-    closeTab: closeTabWrite,
+    closeTab,
+    registerProductSpaceTabClose,
     reorderTabs: (draggedTabId, targetTabId) => {
       if (draggedTabId === targetTabId || targetTabId === POLO_TAB_ID) return
       const draggedIndex = openTabs.findIndex((tab) => tab.id === draggedTabId)
@@ -222,11 +245,14 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     updateTabInfo,
     registerWebAppNavigation,
   }), [
-    activeTab,
+    visibleActiveTab,
+    visibleTabs,
+    backgroundTabs,
     activeTabId,
     activeWebAppNavigation,
     activateTabWrite,
-    closeTabWrite,
+    closeTab,
+    registerProductSpaceTabClose,
     installedApps,
     isReady,
     openAppTab,
@@ -240,6 +266,7 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
 
   return (
     <TabShellContext.Provider value={value}>
+      {liveProductSpace && <ProductSpaceAppLaunchBridge />}
       {children}
     </TabShellContext.Provider>
   )

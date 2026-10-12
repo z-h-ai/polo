@@ -7,6 +7,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import * as realNativeInstallationContract from '../../../../shared/src/admin/native-installations-contract'
 import {
   analyzeCreatorAppPayload as realAnalyzeCreatorAppPayload,
   createCanonicalCreatorAppBundle as realCreateCanonicalCreatorAppBundle,
@@ -232,6 +233,12 @@ class MockAdminClient {
     return adminClientBehavior.refresh(refreshToken)
   }
 
+  async admitNativeInstallation(accessToken: string, input: any) {
+    adminClientCalls.push({method: 'admitNativeInstallation',args: [input],accessToken})
+    return {contractVersion: 1,admissionId: '399d872f-9a2b-472c-862e-7369f09e97d4',accountId: managerState.tokens!.userId,
+      productSpaceId: input.productSpaceId,subjectKind: input.subjectKind,subjectId: input.subjectId,versionId: input.versionId,version: input.version,checksum: input.checksum}
+  }
+
   async validate(accessToken: string) {
     adminClientCalls.push({ method: 'validate', args: [accessToken], accessToken })
     return adminClientBehavior.validate(accessToken)
@@ -425,6 +432,7 @@ const mockCredentialManager = {
 }
 
 mock.module('@polo-ai/shared/admin', () => ({
+  ...realNativeInstallationContract,
   AdminClient: MockAdminClient,
   // Re-exported constants must survive the mock — later test files in the same
   // bun process (e.g. manager.test.ts) import them through this module path.
@@ -492,6 +500,7 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  CONFIG_DIR: join(tmpdir(), `polo-native-admin-session-test-${process.pid}`),
   getWorkspaceByNameOrId: () => null,
   setSetupDeferred: () => {},
   getAdminUrl: () => configState.adminUrl,
@@ -2056,5 +2065,34 @@ describe('registerAdminHandlers', () => {
     })
     expect(managerState.tokens).toBeNull()
     expect(loggerWarn).toHaveBeenCalled()
+  })
+})
+
+describe('original native installation session transport', () => {
+  const accountId = '4cfc3c67-7291-4b28-a9b6-c0ebcd193b28'
+  const input = {contractVersion: 1 as const,productSpaceId: 'e28016e4-e0a9-40f9-934e-cec7c750a03e',subjectKind: 'personal_artifact' as const,
+    subjectId: '824558a4-1a14-4ba2-a58d-833dc641495d',versionId: '97367039-20b8-493c-855d-eebba7fd2a91',version: '1.0.0',checksum: `sha256:${'a'.repeat(64)}`}
+  it('refreshes an expired original session before transmitting its immutable work', async () => {
+    createHarness()
+    managerState.tokens = {userId: accountId,username: 'native-a',accessToken: 'expired-native-a',refreshToken: 'refresh-native-a',expiresAt: Date.now()-1}
+    const {admitTrustedNativeInstallation} = await import('../../runtime/native-installations')
+    expect((await admitTrustedNativeInstallation(accountId,input)).accountId).toBe(accountId)
+    expect(adminClientCalls.map(call=>call.method)).toEqual(['refresh','admitNativeInstallation'])
+    expect(adminClientCalls[1]!.accessToken).toBe('fresh-access-token')
+  })
+  it('does not transmit account A work when account B replaces A during refresh', async () => {
+    createHarness()
+    managerState.tokens = {userId: accountId,username: 'native-a',accessToken: 'expired-native-a',refreshToken: 'refresh-native-a',expiresAt: Date.now()-1}
+    let started!: () => void, release!: () => void
+    const ready = new Promise<void>(resolve=>{started=resolve}), blocked = new Promise<void>(resolve=>{release=resolve})
+    adminClientBehavior.refresh = async () => {started();await blocked;return {accessToken: 'new-a',refreshToken: 'new-refresh-a',expiresIn: 3600}}
+    const {admitTrustedNativeInstallation} = await import('../../runtime/native-installations')
+    const pending = admitTrustedNativeInstallation(accountId,input)
+    const result = pending.then(value => ({value,error: null as Error|null}),error => ({value: null,error: error as Error}))
+    await ready
+    managerState.tokens = {userId: 'fc578cce-c646-44a0-9f6c-1bca1b98b8b4',username: 'native-b',accessToken: 'b',refreshToken: 'refresh-b',expiresAt: Date.now()+3600000}
+    release();expect((await result).error?.message).toContain('Original installation session changed')
+    expect(adminClientCalls.map(call=>call.method)).toEqual(['refresh'])
+    expect(managerState.tokens.accessToken).toBe('b')
   })
 })
